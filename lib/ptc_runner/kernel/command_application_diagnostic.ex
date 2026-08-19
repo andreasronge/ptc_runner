@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaPath
   alias PtcRunner.Kernel.ValueContractDiagnostic
 
@@ -28,6 +29,18 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   # catalog literal, including a rule this boundary has no message for.
   defp message_option({:contract_schema_invalid, %{rule: rule}}) do
     case ContractSchemaDiagnostic.message(rule) do
+      {:ok, message} -> [message: message]
+      :error -> []
+    end
+  end
+
+  # The decoder already knows which limit was refused, what the manifest asked
+  # for, and the ceiling that refused it. Saying so is what tells a reader how
+  # far they overshot and which of the two documents to edit.
+  defp message_option({:manifest_path, _path, reason}), do: message_option(reason)
+
+  defp message_option({:installed_limit_exceeded, name, requested, ceiling}) do
+    case RuntimeLimitDiagnostic.installed_ceiling_message(name, requested, ceiling) do
       {:ok, message} -> [message: message]
       :error -> []
     end
@@ -85,8 +98,9 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   defp projection(_role, :invalid_logical_name), do: {:reference_missing, nil}
   defp projection(:application, :not_found), do: {:application_not_found, nil}
 
-  defp projection(:application, {:installed_limit_exceeded, requested, ceiling})
-       when is_integer(requested) and is_integer(ceiling) and requested > ceiling,
+  defp projection(:application, {:installed_limit_exceeded, name, requested, ceiling})
+       when is_binary(name) and is_integer(requested) and is_integer(ceiling) and
+              requested > ceiling,
        do: {:installed_limit_exceeded, nil}
 
   defp projection(_role, reason)

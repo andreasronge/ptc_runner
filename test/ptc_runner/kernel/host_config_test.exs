@@ -176,6 +176,26 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              HostConfig.decode_command(document, "/tmp")
   end
 
+  @tag :tmp_dir
+  test "a limits-only host document admits an empty install map", %{tmp_dir: dir} do
+    document = %{
+      "install" => %{},
+      "limits" => %{"workflow_heap_words" => 16_000_000}
+    }
+
+    assert {:ok, decoded} = HostConfig.decode(document, dir)
+    assert decoded.install == %{}
+    assert decoded.limits.workflow_heap_words == 16_000_000
+
+    assert {:ok, command} = HostConfig.decode_command(document, dir)
+    assert command.install == %{}
+    assert command.limits.workflow_heap_words == 16_000_000
+
+    assert {:ok, loaded} = dir |> write_config(document) |> HostConfig.load()
+    assert loaded.install == %{}
+    assert loaded.limits.workflow_heap_words == 16_000_000
+  end
+
   test "installation revisions use the exact portable lowercase identifier grammar" do
     for invalid <- ["Upper", "1leading", "contains/slash", "", String.duplicate("a", 129)] do
       document =

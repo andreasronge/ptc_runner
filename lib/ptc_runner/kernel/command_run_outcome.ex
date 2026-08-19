@@ -375,6 +375,26 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     end
   end
 
+  defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           reason: :memory_exceeded,
+           details: %{limit: :workflow_heap_words, limit_value: limit}
+         },
+         provider_activity
+       ) do
+    case RuntimeLimitDiagnostic.heap_words_message(limit) do
+      {:ok, message} ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
+          message: message,
+          source: CommandSource.fixed(:runtime)
+        )
+
+      :error ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
+    end
+  end
+
   defp failure_diagnostic(%Error{kind: :limit_exceeded}, provider_activity),
     do: diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
 

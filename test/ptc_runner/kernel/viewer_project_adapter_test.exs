@@ -63,6 +63,12 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
 
       untouched = by_name["subordinate_evaluations"]
       assert untouched.effective == untouched.default
+      assert is_integer(untouched.ceiling)
+      assert untouched.ceiling > untouched.default
+
+      host_only = by_name["local_preflight_timeout_ms"]
+      assert host_only.effective == host_only.default
+      assert host_only.ceiling == nil
     end
   end
 
@@ -124,6 +130,40 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
       by_name = Map.new(project.limits, &{&1.name, &1})
       assert by_name["run_duration_ms"].effective == 90_000
       assert by_name["local_preflight_timeout_ms"].effective == 9_000
+      assert by_name["local_preflight_timeout_ms"].ceiling == nil
+    end
+
+    @tag :tmp_dir
+    test "a limits-only host document displays the raised ceiling without a provider", %{
+      tmp_dir: dir
+    } do
+      manifest = Path.join(dir, "ptc.json")
+      host_config = Path.join(dir, "host.json")
+
+      File.write!(
+        manifest,
+        Jason.encode!(%{
+          "version" => 1,
+          "workflow" => %{"components" => [], "entry" => "app/run"},
+          "input" => %{"value" => %{}},
+          "limits" => %{"workflow_heap_words" => 16_000_000}
+        })
+      )
+
+      File.write!(
+        host_config,
+        Jason.encode!(%{
+          "install" => %{},
+          "limits" => %{"workflow_heap_words" => 16_000_000}
+        })
+      )
+
+      assert {:ok, project} = ViewerProjectAdapter.describe(manifest, host_config: host_config)
+      by_name = Map.new(project.limits, &{&1.name, &1})
+      assert by_name["workflow_heap_words"].effective == 16_000_000
+      assert by_name["workflow_heap_words"].ceiling == 16_000_000
+      assert by_name["workflow_heap_words"].default == 8_000_000
+      assert [%{providers: [], tools: []}] = project.environments
     end
 
     @tag :tmp_dir

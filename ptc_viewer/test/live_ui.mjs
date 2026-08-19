@@ -4,6 +4,9 @@ import {
   failurePresentation,
   launchPollDelay,
   launchStatusPresentation,
+  leadingLimitRows,
+  limitNote,
+  limitSummary,
   liveReadPath,
   liveTokenFromSearch,
   missionNames,
@@ -91,17 +94,91 @@ assert.equal(runRoute('cmd-abc/def'), '#/run/cmd-abc%2Fdef');
 assert.equal(
   failurePresentation({
     phase: 'error',
+    outcome_limit: 'parallel_timeout_ms',
     outcome_reason: 'parallel_timeout_ms limit 60000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower'
   }),
   'Limit exceeded: parallel_timeout_ms limit 60000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower'
 );
+
+// Every named ceiling reads as a limit, not only the three the old prefix list
+// happened to carry.
 assert.equal(
   failurePresentation({
     phase: 'error',
+    outcome_limit: 'max_turns',
+    outcome_reason: 'agent turn limit 4 was exceeded; raise max_turns in the agent configuration, or reduce the work per turn'
+  }),
+  'Limit exceeded: agent turn limit 4 was exceeded; raise max_turns in the agent configuration, or reduce the work per turn'
+);
+
+assert.equal(
+  failurePresentation({ phase: 'error', outcome_reason: 'explicit_failure' }),
+  'Failure reason: explicit_failure'
+);
+assert.equal(
+  failurePresentation({
+    phase: 'error',
+    outcome_limit: 'run_duration_ms',
     outcome_reason: 'run_duration_ms limit 60000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower'
   }),
   'Limit exceeded: run_duration_ms limit 60000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower'
 );
 assert.equal(failurePresentation({ phase: 'ok', outcome_reason: null }), null);
+
+const untouchedWithHeadroom = {
+  name: 'run_duration_ms',
+  effective: 30000,
+  default: 30000,
+  ceiling: 1800000,
+  unit: 'milliseconds'
+};
+const movedBelowCeiling = {
+  name: 'run_duration_ms',
+  effective: 120000,
+  default: 30000,
+  ceiling: 1800000,
+  unit: 'milliseconds'
+};
+const raisedToCeiling = {
+  name: 'run_duration_ms',
+  effective: 1800000,
+  default: 30000,
+  ceiling: 1800000,
+  unit: 'milliseconds'
+};
+const protectedAtCeiling = {
+  name: 'workflow_heap_words',
+  effective: 8000000,
+  default: 8000000,
+  ceiling: 8000000,
+  unit: 'heap_words'
+};
+
+assert.equal(limitNote(untouchedWithHeadroom), 'ceiling 1 800 000 ms');
+assert.equal(limitNote(movedBelowCeiling), 'default 30 000 ms · ceiling 1 800 000 ms');
+assert.equal(limitNote(raisedToCeiling), 'default 30 000 ms · at installed ceiling');
+assert.equal(limitNote(protectedAtCeiling), 'at installed ceiling');
+
+const catalog = [untouchedWithHeadroom, movedBelowCeiling, raisedToCeiling, protectedAtCeiling];
+assert.deepEqual(
+  leadingLimitRows(catalog).map(limit => limit.name),
+  ['run_duration_ms', 'run_duration_ms', 'workflow_heap_words']
+);
+assert.equal(limitSummary(leadingLimitRows(catalog)), '2 differ from defaults · 2 at installed ceiling');
+assert.equal(limitSummary(leadingLimitRows([untouchedWithHeadroom])), 'all at defaults');
+assert.equal(
+  limitSummary(leadingLimitRows([protectedAtCeiling])),
+  '1 at installed ceiling'
+);
+
+const hostOnlyTimeout = {
+  name: 'local_preflight_timeout_ms',
+  effective: 5000,
+  default: 5000,
+  ceiling: null,
+  unit: 'milliseconds'
+};
+assert.equal(limitNote(hostOnlyTimeout), '');
+assert.deepEqual(leadingLimitRows([hostOnlyTimeout]), []);
 
 process.stdout.write('ok');

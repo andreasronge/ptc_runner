@@ -364,7 +364,8 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        ),
        do:
          RuntimeLimitDiagnostic.subordinate_evaluations_message?(message) or
-           RuntimeLimitDiagnostic.timeout_message?(message)
+           RuntimeLimitDiagnostic.timeout_message?(message) or
+           RuntimeLimitDiagnostic.heap_words_message?(message)
 
   defp valid_message_source?(
          message,
@@ -388,6 +389,14 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          nil
        ),
        do: RuntimeLimitDiagnostic.result_limit_message?(message)
+
+  # The refused value lives in the manifest, so this one does name its document.
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :installed_limit_exceeded},
+         %CommandSource{kind: :application}
+       ),
+       do: RuntimeLimitDiagnostic.installed_ceiling_message?(message)
 
   defp valid_message_source?(
          _message,

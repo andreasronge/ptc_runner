@@ -1100,7 +1100,7 @@ defmodule PtcRunner.Kernel.Manifest do
       when is_integer(number) and number > ceiling and number <= maximum ->
         manifest_value_error(
           [{:property, "limits"}, {:property, key}],
-          {:installed_limit_exceeded, number, ceiling}
+          {:installed_limit_exceeded, key, number, ceiling}
         )
 
       _invalid ->

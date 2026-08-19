@@ -609,13 +609,55 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:error,
             {:manifest_path, [{:property, "limits"}, {:property, "evaluation_timeout_ms"}],
-             {:installed_limit_exceeded, 20_000, 500}}} = Manifest.load(path, lower_ceiling)
+             {:installed_limit_exceeded, "evaluation_timeout_ms", 20_000, 500}}} =
+             Manifest.load(path, lower_ceiling)
 
     manifest = put_in(manifest, ["limits"], %{})
     File.write!(path, Jason.encode!(manifest))
     assert {:ok, lowered_defaults} = Manifest.load(path, lower_ceiling)
+
+    # With no manifest request the effective value is the smaller of the
+    # compiled default and the installed ceiling. Only `evaluation_timeout_ms`
+    # is clamped by a ceiling installed below its default; `run_duration_ms`
+    # stays at the lower compiled default.
     assert lowered_defaults.limits.run_duration_ms == 30_000
     assert lowered_defaults.limits.evaluation_timeout_ms == 500
+  end
+
+  @tag :tmp_dir
+  test "a protected heap ceiling moves only when the host raises it and the manifest requests it",
+       %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [_] (return 1))")
+
+    requested = 16_000_000
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"workflow_heap_words" => requested}
+    }
+
+    path = Path.join(dir, "heap.json")
+    File.write!(path, Jason.encode!(manifest))
+
+    assert {:error,
+            {:manifest_path, [{:property, "limits"}, {:property, "workflow_heap_words"}],
+             {:installed_limit_exceeded, "workflow_heap_words", ^requested, 8_000_000}}} =
+             Manifest.load(path)
+
+    {:ok, raised_ceiling} = Limits.new(workflow_heap_words: requested)
+
+    File.write!(path, Jason.encode!(put_in(manifest, ["limits"], %{})))
+    assert {:ok, host_only} = Manifest.load(path, raised_ceiling)
+    assert host_only.limits.workflow_heap_words == 8_000_000
+
+    File.write!(path, Jason.encode!(manifest))
+    assert {:ok, both} = Manifest.load(path, raised_ceiling)
+    assert both.limits.workflow_heap_words == requested
   end
 
   @tag :tmp_dir

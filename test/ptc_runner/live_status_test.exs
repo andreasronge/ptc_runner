@@ -5,7 +5,9 @@ defmodule PtcRunner.LiveStatusTest do
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
@@ -88,7 +90,7 @@ defmodule PtcRunner.LiveStatusTest do
     delivery_ref = Process.monitor(delivery)
 
     started = System.monotonic_time(:millisecond)
-    assert :ok = Reporter.complete(reporter, :ok, nil)
+    assert :ok = Reporter.complete(reporter, :ok, nil, nil)
     assert System.monotonic_time(:millisecond) - started < 500
     assert :ok = Reporter.stop(reporter)
 
@@ -124,7 +126,7 @@ defmodule PtcRunner.LiveStatusTest do
         send(test_process, {:owner_reporter, reporter, run_state})
 
         receive do
-          :complete -> Reporter.complete(reporter, :ok, nil)
+          :complete -> Reporter.complete(reporter, :ok, nil, nil)
         end
       end)
 
@@ -276,6 +278,60 @@ defmodule PtcRunner.LiveStatusTest do
                    2_000
   end
 
+  # The card used to show a bare `runtime_limit_exceeded` for every ceiling that
+  # is not a timeout, and the browser decided "is this a limit?" from a
+  # three-name prefix list. The frame now names the setting itself.
+  test "a breached agent turn limit reaches the card as a named limit" do
+    parent = self()
+    {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)
+    # A program that defines something and never returns keeps the loop working,
+    # so a one-turn budget ends on the turn limit rather than on a result.
+    working = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => "(def pending 1)"}}
+      ]
+    }
+
+    {:ok, llm} = LLMCapability.new(requester: fn _request -> {:ok, working} end)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: agent_bundle(), capabilities: [llm])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "live-agent-turn-limit")
+    {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
+
+    assert {:error, _error} =
+             PtcRunner.LiveStatus.with_target(target, fn ->
+               Kernel.run(~S|(agent.core/run "Work" {"max_turns" 1})|, config)
+             end)
+
+    assert_receive {:live_frame, %{phase: "error", outcome_limit: "max_turns"} = frame}, 5_000
+
+    assert frame.outcome_reason =~ "agent turn limit 1 was exceeded"
+    assert RuntimeLimitDiagnostic.agent_turns_message?(frame.outcome_reason)
+  end
+
+  test "a workflow heap kill reaches the card as a named limit" do
+    parent = self()
+    {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(workflow_heap_words: 400_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "live-heap-kill")
+    {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
+
+    assert {:error, %{kind: :limit_exceeded, reason: :memory_exceeded}} =
+             PtcRunner.LiveStatus.with_target(target, fn ->
+               Kernel.run(~S[(return (count (vec (range 2000000))))], config)
+             end)
+
+    assert_receive {:live_frame, %{phase: "error", outcome_limit: "workflow_heap_words"} = frame},
+                   5_000
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.heap_words_message(400_000)
+    assert frame.outcome_reason == expected
+  end
+
   test "a real run deadline reports the configured run-duration ceiling" do
     parent = self()
     {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)
@@ -324,6 +380,17 @@ defmodule PtcRunner.LiveStatusTest do
       limits: limits,
       event_sink: sink
     )
+  end
+
+  # `kernel-runtime-limit-failure` is granted only to a bundle that ships
+  # `agent.core`, so the smallest way to reach the turn-limit shape is to ship it.
+  defp agent_bundle do
+    {:ok, components} =
+      Library.components(~w(agent.core agent.feedback agent.native agent.prompt agent.retry
+           kernel llm result workflow.event))
+
+    {:ok, bundle} = Kernel.compile_bundle(components)
+    bundle
   end
 
   defp park_capability do

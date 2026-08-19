@@ -98,9 +98,8 @@ mission, or immutable run capture.</p></blockquote><p>Open the workflow environm
 are useful for checking exactly what a generated program can see.</p><p>Analyze public traces through the fixed, read-only profile:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
   --profile run-analysis-v1 \
   -e '(analysis/runs {})'</code></pre><p>Every form evaluates under <code class="inline">evaluation_timeout_ms</code>, whose effective default is
-1,000 ms — far less than one model call. Raise it in the manifest before trying
-a provider from the REPL:</p><pre><code class="json language-json">{ &quot;limits&quot;: { &quot;evaluation_timeout_ms&quot;: 60000 } }</code></pre><p>A form stopped by that ceiling names it and its configured value, so the error
-says which limit to raise.</p><p>Private inspection is a separate explicit mode because it can reveal prompts,
+30,000 ms. A form stopped by that ceiling names it and its configured value.
+Raise it in the manifest if a form needs longer:</p><pre><code class="json language-json">{ &quot;limits&quot;: { &quot;evaluation_timeout_ms&quot;: 60000 } }</code></pre><p>Private inspection is a separate explicit mode because it can reveal prompts,
 responses, generated source, and tool payloads. Do not grant it merely to query
 ordinary activity.</p><p>Use the <a href="/reference/repl/">REPL reference</a> for every session mode, selector,
 profile, preview limit, script form, JSON Lines contract, private-authority

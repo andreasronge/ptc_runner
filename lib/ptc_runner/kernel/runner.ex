@@ -132,11 +132,14 @@ defmodule PtcRunner.Kernel.Runner do
           result = apply_provider_cleanup_failure(result, cleanup, usage)
           {final_result, _events} = finalized = finalize_result(result, usage, config.event_sink)
 
+          {live_reason, live_limit} = live_terminal_outcome(final_result)
+
           _ =
             PtcRunner.LiveStatus.complete(
               reporter,
               outcome(final_result),
-              live_terminal_reason(final_result)
+              live_reason,
+              live_limit
             )
 
           finalized
@@ -149,7 +152,7 @@ defmodule PtcRunner.Kernel.Runner do
       end
     catch
       kind, reason ->
-        _ = PtcRunner.LiveStatus.complete(reporter, :error, :internal_error)
+        _ = PtcRunner.LiveStatus.complete(reporter, :error, :internal_error, nil)
         :erlang.raise(kind, reason, __STACKTRACE__)
     after
       PtcRunner.LiveStatus.stop(reporter)
@@ -630,18 +633,14 @@ defmodule PtcRunner.Kernel.Runner do
   defp terminal_reason({:ok, _result}), do: nil
   defp terminal_reason({:error, %Error{reason: reason}}), do: reason
 
-  defp live_terminal_reason({:ok, _result}), do: nil
+  defp live_terminal_outcome({:ok, _result}), do: {nil, nil}
 
-  defp live_terminal_reason(
-         {:error, %Error{details: %{limit: limit, limit_ms: limit_ms, phase: phase}} = error}
-       ) do
-    case RuntimeLimitDiagnostic.live_timeout_message(limit, limit_ms, phase) do
-      {:ok, message} -> message
-      :error -> error.reason
+  defp live_terminal_outcome({:error, %Error{details: details, reason: reason}}) do
+    case RuntimeLimitDiagnostic.details_message(details) do
+      {:ok, limit, message} -> {message, limit}
+      :error -> {reason, nil}
     end
   end
-
-  defp live_terminal_reason({:error, %Error{reason: reason}}), do: reason
 
   defp maybe_put_result_hash(stopped_data, {:ok, %Result{value: value}}) do
     case ResultIdentity.hash(value) do
@@ -871,6 +870,17 @@ defmodule PtcRunner.Kernel.Runner do
         }
     end
   end
+
+  # A heap kill is already classified as a limit failure, but it carried no
+  # limit metadata, so the command and the Live card both reported it as an
+  # unnamed runtime limit. The ceiling the sandbox was armed with is
+  # `workflow_heap_words`, and it is the one to name.
+  defp workflow_error_details(%{reason: :memory_exceeded}, _timeout_ms, limits, _sink),
+    do: %{
+      message: "workflow_heap_words exceeded during execution",
+      limit: :workflow_heap_words,
+      limit_value: limits.workflow_heap_words
+    }
 
   defp workflow_error_details(
          %{reason: :llm_provider_failed, details: details} = fail,

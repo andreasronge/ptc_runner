@@ -75,6 +75,42 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     end
   end
 
+  # The Live card reads the terminal error's details, not the command envelope.
+  # Every breach the command can name has to be nameable there too, or the card
+  # falls back to a bare reason atom for a ceiling that knows its own name.
+  test "every runtime limit detail shape resolves to its setting and message" do
+    details = [
+      {%{limit: :run_duration_ms, limit_ms: 120_000, phase: :execution}, "run_duration_ms"},
+      {%{limit: :workflow_timeout_ms, limit_ms: 120_000, phase: :compilation},
+       "workflow_timeout_ms"},
+      {%{limit: :parallel_timeout_ms, limit_ms: 60_000, phase: :execution},
+       "parallel_timeout_ms"},
+      {%{limit: :evaluation_timeout_ms, limit_ms: 30_000, phase: :execution},
+       "evaluation_timeout_ms"},
+      {%{limit: :subordinate_evaluations, limit_value: 128}, "subordinate_evaluations"},
+      {%{limit: :agent_turns, limit_value: 4, limit_reason: :turn_limit_exceeded}, "max_turns"},
+      {%{limit: :max_transcript_chars, limit_value: 262_144}, "max_transcript_chars"},
+      {%{limit: :terminal_result_bytes, limit_value: 1_000_000}, "terminal_result_bytes"},
+      {%{limit: :workflow_heap_words, limit_value: 8_000_000}, "workflow_heap_words"}
+    ]
+
+    for {detail, expected_limit} <- details do
+      assert {:ok, ^expected_limit, message} = RuntimeLimitDiagnostic.details_message(detail)
+      assert message =~ expected_limit
+    end
+
+    assert :error = RuntimeLimitDiagnostic.details_message(%{})
+    assert :error = RuntimeLimitDiagnostic.details_message(%{failure_kind: "invalid-input"})
+    assert :error = RuntimeLimitDiagnostic.details_message(%{limit: :agent_turns, limit_value: 4})
+
+    assert :error =
+             RuntimeLimitDiagnostic.details_message(%{
+               limit: :run_duration_ms,
+               limit_ms: 0,
+               phase: :execution
+             })
+  end
+
   test "every catalog row with a dynamic message either names a setting or is listed as prose" do
     dynamic =
       DiagnosticCatalog.rows()
@@ -90,6 +126,46 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
       |> Enum.sort()
 
     assert dynamic == covered
+  end
+
+  # The published schema concatenates two independent integer groups and cannot
+  # express `requested > ceiling`. That is deliberate: every dynamic message is
+  # a regex superset of what the constructor will admit. Pin the asymmetry so a
+  # later edit cannot loosen the runtime validator to match the schema.
+  test "the published installed-ceiling schema accepts text the constructor refuses" do
+    assert {:ok, schema} =
+             JSV.build(CommandContract.catalog_diagnostic_schema(),
+               atoms: false,
+               warnings: :silent
+             )
+
+    assert :error = RuntimeLimitDiagnostic.installed_ceiling_message("run_duration_ms", 1, 2)
+
+    assert {:ok, producible} =
+             RuntimeLimitDiagnostic.installed_ceiling_message("run_duration_ms", 2, 1)
+
+    assert {:ok, diagnostic} =
+             CommandDiagnostic.new(:application, :installed_limit_exceeded,
+               message: producible,
+               source: CommandSource.fixed(:application),
+               provider_activity: false
+             )
+
+    inverted =
+      "run_duration_ms 1 exceeds the installed ceiling 2; lower the manifest value to at most the ceiling, or raise the ceiling in the host document"
+
+    rendered = CommandDiagnostic.to_map(diagnostic)
+    assert {:ok, _validated} = JSV.validate(rendered, schema, cast: false)
+
+    assert {:ok, _schema_superset} =
+             JSV.validate(Map.put(rendered, "message", inverted), schema, cast: false)
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:application, :installed_limit_exceeded,
+               message: inverted,
+               source: CommandSource.fixed(:application),
+               provider_activity: false
+             )
   end
 
   defp setting_rows do
@@ -164,6 +240,15 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         build: fn -> RuntimeLimitDiagnostic.transcript_chars_message(262_144) end
       },
       %{
+        phase: :execution,
+        code: :runtime_limit_exceeded,
+        source: :runtime,
+        setting: "workflow_heap_words",
+        value: "8000000",
+        remedy: "raise limits.workflow_heap_words in the manifest",
+        build: fn -> RuntimeLimitDiagnostic.heap_words_message(8_000_000) end
+      },
+      %{
         phase: :result_cleanup,
         code: :result_limit_exceeded,
         source: nil,
@@ -171,6 +256,25 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         value: "1000000",
         remedy: "raise limits.terminal_result_bytes in the manifest",
         build: fn -> RuntimeLimitDiagnostic.result_limit_message(1_000_000) end
+      },
+      # Not a breach at all: the refusal a manifest gets for asking above the
+      # installed ceiling. It belongs here because it is the one message that
+      # tells a reader how to raise a limit, so it must name the same three
+      # things.
+      %{
+        phase: :application,
+        code: :installed_limit_exceeded,
+        source: :application,
+        setting: "workflow_capability_calls_per_name",
+        value: "4096",
+        remedy: "lower the manifest value to at most the ceiling",
+        build: fn ->
+          RuntimeLimitDiagnostic.installed_ceiling_message(
+            "workflow_capability_calls_per_name",
+            4_096,
+            2_048
+          )
+        end
       }
     ]
   end

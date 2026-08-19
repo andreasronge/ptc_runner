@@ -9,6 +9,8 @@ defmodule PtcRunner.Kernel.ParallelTimeoutLimitTest do
   """
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.TestHelpers, only: [long_running_body: 1]
+
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.EventSink
@@ -79,14 +81,26 @@ defmodule PtcRunner.Kernel.ParallelTimeoutLimitTest do
            "the narrowed deadline must fire well before the old 5s floor, took #{elapsed}ms"
   end
 
+  # The worker spins rather than parking in a capability. A workflow capability
+  # is dispatched with `workflow_timeout_ms` as its own timeout, so parking here
+  # would race the 300 ms cap against a 300 ms capability deadline: whichever
+  # timer the scheduler serviced first decided whether the run failed or the
+  # `pcalls` returned a recoverable `provider_timeout` value. Only one timer can
+  # stop pure work, and it is the one under test.
   test "a cap bound by a shorter workflow_timeout_ms is attributed to it" do
+    {:ok, config} =
+      park_config(10_000,
+        workflow_timeout_ms: 300,
+        run_duration_ms: 60_000,
+        parallel_timeout_ms: 30_000
+      )
+
     started = System.monotonic_time(:millisecond)
 
     assert {:error, error} =
-             run_park_workflow(10_000,
-               workflow_timeout_ms: 300,
-               run_duration_ms: 60_000,
-               parallel_timeout_ms: 30_000
+             Kernel.run(
+               "(return (pcalls #(#{long_running_body(4)})))",
+               config
              )
 
     elapsed = System.monotonic_time(:millisecond) - started

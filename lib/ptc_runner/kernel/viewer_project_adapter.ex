@@ -76,7 +76,7 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
            entry: manifest.entry,
            input: manifest.input,
            environments: environments(manifest, host.install),
-           limits: limit_rows(manifest.limits)
+           limits: limit_rows(manifest.limits, host.limits)
          }}
 
       {:error, :not_found} ->
@@ -180,8 +180,12 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
   # --- limits -------------------------------------------------------------
 
   # Every catalog row is reported, so the panel can show the full table and
-  # still lead with the rows a manifest actually moved.
-  defp limit_rows(effective) do
+  # still lead with the rows a manifest actually moved. The installed ceiling
+  # rides along only for application-narrowable rows: that is the answer to
+  # "how much further can this manifest raise it?" Installed-only operational
+  # timeouts have no application ceiling, and attaching one would make every
+  # untouched host timeout look like an operator-gated row.
+  defp limit_rows(effective, installed) do
     defaults = Limits.defaults()
 
     Enum.map(LimitCatalog.rows(), fn row ->
@@ -189,10 +193,16 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
         name: row.name,
         unit: row.unit,
         effective: Map.fetch!(effective, row.field),
-        default: Map.fetch!(defaults, row.field)
+        default: Map.fetch!(defaults, row.field),
+        ceiling: installed_ceiling(row, installed)
       }
     end)
   end
+
+  defp installed_ceiling(%{scope: :manifest_narrowable, field: field}, installed),
+    do: Map.fetch!(installed, field)
+
+  defp installed_ceiling(_row, _installed), do: nil
 
   # --- host configuration -------------------------------------------------
 

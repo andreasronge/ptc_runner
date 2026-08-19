@@ -7,32 +7,32 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   alias PtcRunner.Kernel.Manifest
 
   @manifest_narrowable [
-    {"capability_argument_bytes", :capability_argument_bytes, 262_144, 262_144},
-    {"capability_result_bytes", :capability_result_bytes, 1_000_000, 1_000_000},
-    {"entry_source_bytes", :entry_source_bytes, 262_144, 262_144},
-    {"evaluation_admission_timeout_ms", :evaluation_admission_timeout_ms, 10_000, 120_000},
+    {"capability_argument_bytes", :capability_argument_bytes, 262_144, 4_000_000},
+    {"capability_result_bytes", :capability_result_bytes, 1_000_000, 16_000_000},
+    {"entry_source_bytes", :entry_source_bytes, 262_144, 4_000_000},
+    {"evaluation_admission_timeout_ms", :evaluation_admission_timeout_ms, 10_000, 600_000},
     {"evaluation_heap_words", :evaluation_heap_words, 1_250_000, 1_250_000},
-    {"evaluation_history_bytes", :evaluation_history_bytes, 1_000_000, 1_000_000},
-    {"evaluation_memory_bytes", :evaluation_memory_bytes, 2_000_000, 2_000_000},
-    {"evaluation_timeout_ms", :evaluation_timeout_ms, 1_000, 60_000},
-    {"event_payload_bytes", :event_payload_bytes, 262_144, 262_144},
+    {"evaluation_history_bytes", :evaluation_history_bytes, 1_000_000, 16_000_000},
+    {"evaluation_memory_bytes", :evaluation_memory_bytes, 2_000_000, 32_000_000},
+    {"evaluation_timeout_ms", :evaluation_timeout_ms, 30_000, 600_000},
+    {"event_payload_bytes", :event_payload_bytes, 262_144, 4_000_000},
     {"live_provider_tasks", :live_provider_tasks, 8, 8},
-    {"mission_capability_calls", :mission_capability_calls, 128, 128},
-    {"mission_capability_calls_per_name", :mission_capability_calls_per_name, 32, 32},
-    {"normal_event_bytes", :normal_event_bytes, 4_000_000, 4_000_000},
-    {"normal_event_count", :normal_event_count, 256, 256},
-    {"parallel_timeout_ms", :parallel_timeout_ms, 30_000, 300_000},
-    {"protocol_errors", :protocol_errors, 32, 32},
+    {"mission_capability_calls", :mission_capability_calls, 256, 4_096},
+    {"mission_capability_calls_per_name", :mission_capability_calls_per_name, 128, 2_048},
+    {"normal_event_bytes", :normal_event_bytes, 4_000_000, 64_000_000},
+    {"normal_event_count", :normal_event_count, 256, 4_096},
+    {"parallel_timeout_ms", :parallel_timeout_ms, 60_000, 600_000},
+    {"protocol_errors", :protocol_errors, 64, 512},
     {"provider_heap_words", :provider_heap_words, 5_000_000, 5_000_000},
-    {"run_duration_ms", :run_duration_ms, 30_000, 300_000},
-    {"subordinate_evaluations", :subordinate_evaluations, 16, 16},
-    {"subordinate_source_bytes", :subordinate_source_bytes, 131_072, 131_072},
-    {"subordinate_source_checks", :subordinate_source_checks, 16, 16},
-    {"terminal_result_bytes", :terminal_result_bytes, 1_000_000, 1_000_000},
-    {"workflow_capability_calls", :workflow_capability_calls, 64, 64},
-    {"workflow_capability_calls_per_name", :workflow_capability_calls_per_name, 16, 16},
+    {"run_duration_ms", :run_duration_ms, 30_000, 1_800_000},
+    {"subordinate_evaluations", :subordinate_evaluations, 128, 2_048},
+    {"subordinate_source_bytes", :subordinate_source_bytes, 131_072, 2_000_000},
+    {"subordinate_source_checks", :subordinate_source_checks, 128, 2_048},
+    {"terminal_result_bytes", :terminal_result_bytes, 1_000_000, 16_000_000},
+    {"workflow_capability_calls", :workflow_capability_calls, 256, 4_096},
+    {"workflow_capability_calls_per_name", :workflow_capability_calls_per_name, 128, 2_048},
     {"workflow_heap_words", :workflow_heap_words, 8_000_000, 8_000_000},
-    {"workflow_timeout_ms", :workflow_timeout_ms, 30_000, 120_000}
+    {"workflow_timeout_ms", :workflow_timeout_ms, 30_000, 1_800_000}
   ]
 
   @installed_only %{
@@ -90,6 +90,47 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                          })}
                       end)
                     )
+
+  # A ceiling equal to the default leaves a manifest no way to raise its own
+  # value except by writing a host document. Twenty-one rows were in that
+  # state. The four aggregate-memory rows stay there on purpose: live memory is
+  # a product, and raising it is a resource decision.
+  @aggregate_memory_names ~w(
+    evaluation_heap_words
+    live_provider_tasks
+    provider_heap_words
+    workflow_heap_words
+  )
+
+  test "every application-narrowable limit can be raised from the manifest alone" do
+    {zero_headroom, raisable} =
+      Enum.split_with(
+        LimitCatalog.rows(:manifest_narrowable),
+        &(&1.installed_default <= &1.compiled_default)
+      )
+
+    assert Enum.sort(Enum.map(zero_headroom, & &1.name)) == @aggregate_memory_names
+
+    for row <- zero_headroom do
+      assert row.installed_default == row.compiled_default,
+             "#{row.name} is exempt but its installed ceiling #{row.installed_default} is not its default #{row.compiled_default}"
+    end
+
+    for row <- raisable do
+      assert row.installed_default > row.compiled_default,
+             "#{row.name} has no headroom: default and installed ceiling are both #{row.compiled_default}"
+    end
+  end
+
+  test "a manifest may request any value up to the installed ceiling without a host document" do
+    for row <- LimitCatalog.rows(:manifest_narrowable) do
+      assert {:ok, limits} =
+               Limits.new(%{row.field => row.installed_default}),
+             "#{row.name} rejected its own installed ceiling"
+
+      assert Map.fetch!(limits, row.field) == row.installed_default
+    end
+  end
 
   test "the checked-in catalog completely and uniquely defines the Limits struct" do
     rows = LimitCatalog.rows()

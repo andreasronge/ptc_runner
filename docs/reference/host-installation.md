@@ -296,6 +296,24 @@ workflow timeout, model-call and mission-call quotas, subordinate evaluations,
 parallel timeout, and event count/byte ceilings too. Source checks have their
 own quota and do not execute code.
 
+`install` is required and may be empty. A limits-only host document raises
+ceilings for a provider-free application without fabricating a provider:
+
+```json
+{
+  "install": {},
+  "limits": {
+    "workflow_heap_words": 16000000
+  }
+}
+```
+
+The four heap and concurrency rows (`workflow_heap_words`,
+`evaluation_heap_words`, `provider_heap_words`, `live_provider_tasks`) have no
+manifest headroom: raising them is a resource decision and needs both this
+host ceiling and a matching manifest request. Every other application-narrowable
+row can be raised from the manifest alone, up to its installed ceiling.
+
 Four timeouts are host-only: `provider_cleanup_timeout_ms`,
 `local_preflight_timeout_ms`, `selection_validation_timeout_ms`, and
 `doctor_connectivity_timeout_ms`. A manifest cannot declare them.

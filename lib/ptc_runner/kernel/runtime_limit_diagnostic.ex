@@ -23,6 +23,11 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
                                        @subordinate_maximum_digits +
                                        byte_size(@subordinate_suffix)
 
+  @heap_prefix "workflow_heap_words limit "
+  @heap_suffix " words was exceeded; raise limits.workflow_heap_words" <>
+                 @manifest_remedy <> ", or hold less data in memory at once"
+  @heap_maximum_message_bytes byte_size(@heap_prefix) + 10 + byte_size(@heap_suffix)
+
   @result_limit_prefix "terminal_result_bytes limit "
   @result_limit_suffix " bytes was exceeded; raise limits.terminal_result_bytes" <>
                          @manifest_remedy <> ", or return a smaller result"
@@ -77,7 +82,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
                                       byte_size(@transcript_suffix)
 
   # `evaluation_timeout_ms` joins the family because the REPL evaluates every
-  # form under it, and a model call cannot finish inside its 1,000 ms default.
+  # form under it.
   @timeout_limits [:evaluation_timeout_ms, :parallel_timeout_ms, :workflow_timeout_ms]
   @timeout_phases [:compilation, :execution]
   @timeout_value_pattern @subordinate_limit_pattern
@@ -156,6 +161,34 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   def live_timeout_message(_limit, _limit_ms, _phase), do: :error
 
+  # A heap kill is Kernel-observed runtime evidence, like a timeout. Raising the
+  # ceiling still takes both documents: these remain `:manifest_narrowable` rows,
+  # so a host-only edit leaves the run at the compiled default.
+  @doc false
+  @spec heap_words_message(term()) :: {:ok, binary()} | :error
+  def heap_words_message(limit) do
+    with {:ok, row} <- LimitCatalog.fetch(:workflow_heap_words),
+         true <- LimitCatalog.valid_value?(row, limit) do
+      {:ok, @heap_prefix <> Integer.to_string(limit) <> @heap_suffix}
+    else
+      _invalid -> :error
+    end
+  end
+
+  @doc false
+  @spec heap_words_message?(term()) :: boolean()
+  def heap_words_message?(message) when is_binary(message) do
+    valid_exact_message?(
+      message,
+      @heap_prefix,
+      @heap_suffix,
+      @subordinate_maximum_digits,
+      &heap_words_message/1
+    )
+  end
+
+  def heap_words_message?(_message), do: false
+
   @doc false
   @spec result_limit_message(term()) :: {:ok, binary()} | :error
   def result_limit_message(limit) do
@@ -165,6 +198,100 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     else
       _invalid -> :error
     end
+  end
+
+  # One lookup from a runtime error's details to the setting it breached and the
+  # sentence describing it. The command boundary needs a diagnostic code and a
+  # source as well, so it keeps its own dispatch; the Live reporter needs only
+  # these two, and reading them from one table is what stops the card showing a
+  # bare `runtime_limit_exceeded` for a ceiling that can name itself.
+  @doc false
+  @spec details_message(term()) :: {:ok, binary(), binary()} | :error
+  def details_message(%{limit: limit, limit_ms: limit_ms, phase: phase}),
+    do: named_limit(limit, live_timeout_message(limit, limit_ms, phase))
+
+  def details_message(%{limit: :subordinate_evaluations, limit_value: value}),
+    do: named_limit(:subordinate_evaluations, subordinate_evaluations_message(value))
+
+  def details_message(%{limit: :agent_turns, limit_value: value, limit_reason: reason}),
+    do: named_limit(:max_turns, agent_turns_message(value, reason))
+
+  def details_message(%{limit: :max_transcript_chars, limit_value: value}),
+    do: named_limit(:max_transcript_chars, transcript_chars_message(value))
+
+  def details_message(%{limit: :terminal_result_bytes, limit_value: value}),
+    do: named_limit(:terminal_result_bytes, result_limit_message(value))
+
+  def details_message(%{limit: :workflow_heap_words, limit_value: value}),
+    do: named_limit(:workflow_heap_words, heap_words_message(value))
+
+  def details_message(_details), do: :error
+
+  defp named_limit(limit, {:ok, message}), do: {:ok, Atom.to_string(limit), message}
+  defp named_limit(_limit, :error), do: :error
+
+  # The refusal a manifest gets for asking above the installed ceiling. Both
+  # numbers are the Kernel's own — the request it just decoded and the ceiling
+  # the host installed — so nothing here is taken on trust. It names them
+  # because the alternative is a reader who cannot see how far they overshot,
+  # or which of the two documents to edit.
+  @installed_ceiling_middle " exceeds the installed ceiling "
+  @installed_ceiling_suffix "; lower the manifest value to at most the ceiling, or raise the ceiling in the host document"
+  @installed_ceiling_pattern ~r/^([a-z_]+) ([1-9][0-9]{0,9}) exceeds the installed ceiling ([1-9][0-9]{0,9}); lower the manifest value to at most the ceiling, or raise the ceiling in the host document$/
+
+  @doc false
+  @spec installed_ceiling_message(term(), term(), term()) :: {:ok, binary()} | :error
+  def installed_ceiling_message(name, requested, ceiling) do
+    with {:ok, %{scope: :manifest_narrowable} = row} <- LimitCatalog.fetch(name),
+         true <- LimitCatalog.valid_value?(row, requested),
+         true <- LimitCatalog.valid_value?(row, ceiling),
+         true <- requested > ceiling do
+      {:ok,
+       row.name <>
+         " " <>
+         Integer.to_string(requested) <>
+         @installed_ceiling_middle <>
+         Integer.to_string(ceiling) <> @installed_ceiling_suffix}
+    else
+      _invalid -> :error
+    end
+  end
+
+  @doc false
+  @spec installed_ceiling_message?(term()) :: boolean()
+  def installed_ceiling_message?(message) when is_binary(message) do
+    case Regex.run(@installed_ceiling_pattern, message) do
+      [_all, name, requested, ceiling] ->
+        installed_ceiling_message(
+          name,
+          String.to_integer(requested),
+          String.to_integer(ceiling)
+        ) == {:ok, message}
+
+      _no_match ->
+        false
+    end
+  end
+
+  def installed_ceiling_message?(_message), do: false
+
+  @doc false
+  @spec installed_ceiling_message_schema(binary()) :: map()
+  def installed_ceiling_message_schema(fallback) when is_binary(fallback) do
+    branches =
+      for row <- LimitCatalog.rows(:manifest_narrowable) do
+        bounded_branch(
+          byte_size(row.name) + 1 + @subordinate_maximum_digits +
+            byte_size(@installed_ceiling_middle) + @subordinate_maximum_digits +
+            byte_size(@installed_ceiling_suffix),
+          row.name <> " ",
+          @subordinate_limit_pattern <>
+            DiagnosticPattern.escape(@installed_ceiling_middle) <> @subordinate_limit_pattern,
+          @installed_ceiling_suffix
+        )
+      end
+
+    message_schema(fallback, branches)
   end
 
   defp build_timeout_message(limit, limit_ms, phase) do
@@ -187,7 +314,8 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @spec valid_message?(term()) :: boolean()
   def valid_message?(message) when is_binary(message) do
     subordinate_evaluations_message?(message) or agent_turns_message?(message) or
-      transcript_chars_message?(message) or timeout_message?(message)
+      transcript_chars_message?(message) or timeout_message?(message) or
+      heap_words_message?(message)
   end
 
   def valid_message?(_message), do: false
@@ -285,7 +413,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       fallback,
       [subordinate_message_branch()] ++
         agent_message_branches() ++
-        [transcript_message_branch()] ++ timeout_message_branches()
+        [transcript_message_branch()] ++ timeout_message_branches() ++ [heap_message_branch()]
     )
   end
 
@@ -297,7 +425,11 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @doc false
   @spec runtime_message_schema(binary()) :: map()
   def runtime_message_schema(fallback) when is_binary(fallback),
-    do: message_schema(fallback, [subordinate_message_branch() | timeout_message_branches()])
+    do:
+      message_schema(
+        fallback,
+        [subordinate_message_branch() | timeout_message_branches()] ++ [heap_message_branch()]
+      )
 
   @doc false
   @spec agent_loop_message_schema(binary()) :: map()
@@ -351,6 +483,15 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
           )
       }
     end
+  end
+
+  defp heap_message_branch do
+    bounded_branch(
+      @heap_maximum_message_bytes,
+      @heap_prefix,
+      @subordinate_limit_pattern,
+      @heap_suffix
+    )
   end
 
   defp transcript_message_branch do

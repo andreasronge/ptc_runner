@@ -699,53 +699,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   test "workflow timeout diagnostics name the binding limit and duration" do
-    usage = %{
-      remaining_ms: 60_000,
-      capability_calls: %{workflow: %{}, mission: %{}},
-      subordinate_evaluations: 0,
-      evaluations_by_mission: %{},
-      protocol_errors: 0,
-      evaluation_memory_bytes: 0,
-      evaluation_history_bytes: 0,
-      evaluation_continuation_bytes: 0,
-      events_dropped: %{}
-    }
-
-    evidence = %{
-      result:
-        {:error,
-         %Error{
-           kind: :limit_exceeded,
-           reason: :timeout,
-           details: %{
-             limit: :parallel_timeout_ms,
-             limit_ms: 60_000,
-             phase: :execution
-           },
-           usage: usage
-         }}
-    }
-
-    settlement =
-      {:error,
-       %{
-         result_class: :normal,
-         artifact_state: %{
-           "trace" => "not_requested",
-           "inspection" => "not_requested",
-           "result" => "not_requested"
-         },
-         error: nil,
-         secondary_errors: []
-       }}
-
     assert {:error, %CommandOutcome{} = outcome} =
-             CommandRunOutcome.project(
-               evidence,
-               settlement,
-               CommandRunRef.encode(@zero_entropy),
-               true
-             )
+             project_limit_exceeded(:timeout, %{
+               limit: :parallel_timeout_ms,
+               limit_ms: 60_000,
+               phase: :execution
+             })
 
     assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
 
@@ -771,6 +730,35 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
       assert_schema_invalid(put_in(outcome.envelope, ["error", "message"], invalid_message))
     end
+  end
+
+  test "workflow heap diagnostics name the limit and bind the runtime source" do
+    assert {:error, %CommandOutcome{} = outcome} =
+             project_limit_exceeded(:memory_exceeded, %{
+               limit: :workflow_heap_words,
+               limit_value: 8_000_000
+             })
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.heap_words_message(8_000_000)
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+
+    runtime_source = CommandSource.fixed(:runtime)
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: expected,
+               provider_activity: true
+             )
+
+    assert {:ok, %CommandDiagnostic{source: ^runtime_source}} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: expected,
+               source: runtime_source,
+               provider_activity: true
+             )
   end
 
   test "application-authored turn-limit fields cannot claim an agent runtime limit" do
@@ -904,6 +892,71 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
     assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a workflow heap kill names the limit, its value, and the runtime source", %{
+    tmp_dir: directory
+  } do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "hungry", "path" => "hungry.clj"}],
+        "entry" => "hungry/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"workflow_heap_words" => 400_000},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
+
+    application =
+      write_application(directory, "heap-exhausted", manifest, [
+        {"hungry.clj", "(ns hungry) (defn run [input] (return (count (vec (range 2000000)))))"}
+      ])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.heap_words_message(400_000)
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.exit_status == 6
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a limits-only host document raises a protected heap ceiling", %{tmp_dir: directory} do
+    application =
+      write_application(
+        directory,
+        "heap-raised",
+        valid_manifest(%{"limits" => %{"workflow_heap_words" => 16_000_000}})
+      )
+
+    host_path =
+      write_host_config(directory, "limits-only", %{
+        "install" => %{},
+        "limits" => %{"workflow_heap_words" => 16_000_000}
+      })
+
+    assert {:ok, %CommandOutcome{} = validated} =
+             CommandEngine.prepare(["validate", application, "--host-config", host_path])
+
+    assert validated.exit_status == 0
+    assert_schema_valid(validated.envelope)
+
+    limit =
+      assert_error(["validate", application], "application", "installed_limit_exceeded")
+
+    assert {:ok, expected} =
+             RuntimeLimitDiagnostic.installed_ceiling_message(
+               "workflow_heap_words",
+               16_000_000,
+               8_000_000
+             )
+
+    assert limit.envelope["error"]["message"] == expected
   end
 
   @tag :tmp_dir
@@ -4651,7 +4704,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       write_application(
         directory,
         "over-installed-limit",
-        valid_manifest(%{"limits" => %{"mission_capability_calls" => 512}})
+        valid_manifest(%{"limits" => %{"mission_capability_calls" => 8_192}})
       )
 
     limit =
@@ -4661,9 +4714,16 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "installed_limit_exceeded"
       )
 
-    assert limit.envelope["error"]["message"] ==
-             "an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling"
+    # The refusal is the one message that says how to raise a limit, so it names
+    # the limit, what the manifest asked for, and the ceiling that refused it.
+    assert {:ok, expected} =
+             RuntimeLimitDiagnostic.installed_ceiling_message(
+               "mission_capability_calls",
+               8_192,
+               4_096
+             )
 
+    assert limit.envelope["error"]["message"] == expected
     assert limit.envelope["error"]["path"] == "/limits/mission_capability_calls"
 
     missing_required =
@@ -7319,6 +7379,51 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "accepts_data" => ["normal"],
       "destinations" => ["workflow"]
     }
+  end
+
+  defp project_limit_exceeded(reason, details) do
+    usage = %{
+      remaining_ms: 60_000,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 0,
+      evaluations_by_mission: %{},
+      protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{}
+    }
+
+    evidence = %{
+      result:
+        {:error,
+         %Error{
+           kind: :limit_exceeded,
+           reason: reason,
+           details: details,
+           usage: usage
+         }}
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: %{
+           "trace" => "not_requested",
+           "inspection" => "not_requested",
+           "result" => "not_requested"
+         },
+         error: nil,
+         secondary_errors: []
+       }}
+
+    CommandRunOutcome.project(
+      evidence,
+      settlement,
+      CommandRunRef.encode(@zero_entropy),
+      true
+    )
   end
 
   defp usage_fixture do

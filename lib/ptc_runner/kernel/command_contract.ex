@@ -1225,6 +1225,12 @@ defmodule PtcRunner.Kernel.CommandContract do
        ),
        do: %{"const" => row.message}
 
+  defp diagnostic_message_schema(
+         %{phase: :application, code: :installed_limit_exceeded} = row,
+         %{"properties" => %{"kind" => %{"const" => "application"}}}
+       ),
+       do: RuntimeLimitDiagnostic.installed_ceiling_message_schema(row.message)
+
   # Only a contract source carries a rule-derived message. The application
   # source reports the same code for a malformed `contracts` section, which has
   # no schema document to locate a rule in, so it keeps the catalog literal.

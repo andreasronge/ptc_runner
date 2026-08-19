@@ -12,13 +12,15 @@ Every limit is a positive enforced ceiling; there is no disabled or infinite for
 { "limits": { "run_duration_ms": 120000, "workflow_timeout_ms": 120000 } }
 ```
 
-Only when the application needs a value above the installed ceiling — here, above the 300,000 ms `run_duration_ms` default — does the host document, `ptc-host.json`, need a matching edit, alongside the same request in the manifest:
+Only when the application needs a value above the installed ceiling — here, above the 1,800,000 ms `run_duration_ms` ceiling — does the host document, `ptc-host.json`, need a matching edit, alongside the same request in the manifest:
 
 ```json
-{ "limits": { "run_duration_ms": 600000 } }
+{ "install": {}, "limits": { "run_duration_ms": 3600000 } }
 ```
 
-A breached ceiling names itself, its configured value, and the manifest key that raises it, so the error at the point of failure carries this rule too.
+The four heap and concurrency rows are the exception: their installed default equals their effective default because live memory is `live_provider_tasks` multiplied by a heap ceiling. Raising them is a resource decision, so it requires both a host ceiling above the compiled default and a matching manifest request. A limits-only host document — `{"install": {}, "limits": {...}}` — is enough; it does not need a fabricated provider.
+
+A breached ceiling names itself, its configured value, and the manifest key that raises it, so the error at the point of failure carries this rule too. A request above the ceiling is refused by name, with both numbers.
 
 Time values are milliseconds. Heap values are BEAM process heap words, not bytes. The catalog range is the accepted structural range; practical installations should choose ceilings appropriate to their resources and trust boundary.
 
@@ -26,32 +28,32 @@ Time values are milliseconds. Heap values are BEAM process heap words, not bytes
 
 | Name | Meaning | Unit | Effective default | Installed default | Inclusive range |
 | --- | --- | --- | ---: | ---: | ---: |
-| `capability_argument_bytes` | Encoded arguments crossing a capability boundary. | bytes | 262,144 | 262,144 | 1–2,592,000,000 |
-| `capability_result_bytes` | Encoded result crossing a capability boundary. | bytes | 1,000,000 | 1,000,000 | 1–2,592,000,000 |
-| `entry_source_bytes` | Workflow entry source accepted at the application boundary. | bytes | 262,144 | 262,144 | 1–2,592,000,000 |
-| `evaluation_admission_timeout_ms` | Wait for the single subordinate-evaluation lease before execution begins. | milliseconds | 10,000 | 120,000 | 1–2,592,000,000 |
+| `capability_argument_bytes` | Encoded arguments crossing a capability boundary. | bytes | 262,144 | 4,000,000 | 1–2,592,000,000 |
+| `capability_result_bytes` | Encoded result crossing a capability boundary. | bytes | 1,000,000 | 16,000,000 | 1–2,592,000,000 |
+| `entry_source_bytes` | Workflow entry source accepted at the application boundary. | bytes | 262,144 | 4,000,000 | 1–2,592,000,000 |
+| `evaluation_admission_timeout_ms` | Wait for the single subordinate-evaluation lease before execution begins. | milliseconds | 10,000 | 600,000 | 1–2,592,000,000 |
 | `evaluation_heap_words` | Heap of each subordinate evaluator process. | BEAM heap words | 1,250,000 | 1,250,000 | 1–2,592,000,000 |
-| `evaluation_history_bytes` | Each value and the aggregate exact three-value continuation history. | bytes | 1,000,000 | 1,000,000 | 1–2,592,000,000 |
-| `evaluation_memory_bytes` | Retained mission definitions across successful turns. | bytes | 2,000,000 | 2,000,000 | 1–2,592,000,000 |
-| `evaluation_timeout_ms` | One subordinate mission evaluation, and one interactive REPL form. | milliseconds | 1,000 | 60,000 | 1–2,592,000,000 |
-| `event_payload_bytes` | One canonical event payload. | bytes | 262,144 | 262,144 | 1–2,592,000,000 |
+| `evaluation_history_bytes` | Each value and the aggregate exact three-value continuation history. | bytes | 1,000,000 | 16,000,000 | 1–2,592,000,000 |
+| `evaluation_memory_bytes` | Retained mission definitions across successful turns. | bytes | 2,000,000 | 32,000,000 | 1–2,592,000,000 |
+| `evaluation_timeout_ms` | One subordinate mission evaluation, and one interactive REPL form. | milliseconds | 30,000 | 600,000 | 1–2,592,000,000 |
+| `event_payload_bytes` | One canonical event payload. | bytes | 262,144 | 4,000,000 | 1–2,592,000,000 |
 | `live_provider_tasks` | Concurrent provider callback processes and Kernel-owned parallel Lisp workers. | count | 8 | 8 | 1–2,592,000,000 |
-| `mission_capability_calls` | Total mission capability calls in one run. | count | 128 | 128 | 1–2,592,000,000 |
-| `mission_capability_calls_per_name` | Mission capability calls to any one public name in one run. | count | 32 | 32 | 1–2,592,000,000 |
-| `normal_event_bytes` | Aggregate encoded canonical events retained under the normal policy. | bytes | 4,000,000 | 4,000,000 | 1–2,592,000,000 |
-| `normal_event_count` | Canonical events retained under the normal policy. | count | 256 | 256 | 1–2,592,000,000 |
-| `parallel_timeout_ms` | One pmap or pcalls operation, clamped by the run deadline. | milliseconds | 30,000 | 300,000 | 1–2,592,000,000 |
-| `protocol_errors` | Recoverable agent protocol errors in one run. | count | 32 | 32 | 1–2,592,000,000 |
+| `mission_capability_calls` | Total mission capability calls in one run. | count | 256 | 4,096 | 1–2,592,000,000 |
+| `mission_capability_calls_per_name` | Mission capability calls to any one public name in one run. | count | 128 | 2,048 | 1–2,592,000,000 |
+| `normal_event_bytes` | Aggregate encoded canonical events retained under the normal policy. | bytes | 4,000,000 | 64,000,000 | 1–2,592,000,000 |
+| `normal_event_count` | Canonical events retained under the normal policy. | count | 256 | 4,096 | 1–2,592,000,000 |
+| `parallel_timeout_ms` | One pmap or pcalls operation, clamped by the run deadline. | milliseconds | 60,000 | 600,000 | 1–2,592,000,000 |
+| `protocol_errors` | Recoverable agent protocol errors in one run. | count | 64 | 512 | 1–2,592,000,000 |
 | `provider_heap_words` | Heap of each provider callback process. | BEAM heap words | 5,000,000 | 5,000,000 | 1–2,592,000,000 |
-| `run_duration_ms` | Complete ordinary run after optional provider application admission, including active preflight and Kernel execution. | milliseconds | 30,000 | 300,000 | 1–2,592,000,000 |
-| `subordinate_evaluations` | Subordinate mission evaluations in one run. | count | 16 | 16 | 1–2,592,000,000 |
-| `subordinate_source_bytes` | Source accepted by one subordinate check or evaluation. | bytes | 131,072 | 131,072 | 1–2,592,000,000 |
-| `subordinate_source_checks` | Advisory subordinate source checks in one run. | count | 16 | 16 | 1–2,592,000,000 |
-| `terminal_result_bytes` | Encoded terminal workflow or mission-session result. | bytes | 1,000,000 | 1,000,000 | 1–2,592,000,000 |
-| `workflow_capability_calls` | Total workflow capability calls in one run. | count | 64 | 64 | 1–2,592,000,000 |
-| `workflow_capability_calls_per_name` | Workflow capability calls to any one public name in one run. | count | 16 | 16 | 1–2,592,000,000 |
+| `run_duration_ms` | Complete ordinary run after optional provider application admission, including active preflight and Kernel execution. | milliseconds | 30,000 | 1,800,000 | 1–2,592,000,000 |
+| `subordinate_evaluations` | Subordinate mission evaluations in one run. | count | 128 | 2,048 | 1–2,592,000,000 |
+| `subordinate_source_bytes` | Source accepted by one subordinate check or evaluation. | bytes | 131,072 | 2,000,000 | 1–2,592,000,000 |
+| `subordinate_source_checks` | Advisory subordinate source checks in one run. | count | 128 | 2,048 | 1–2,592,000,000 |
+| `terminal_result_bytes` | Encoded terminal workflow or mission-session result. | bytes | 1,000,000 | 16,000,000 | 1–2,592,000,000 |
+| `workflow_capability_calls` | Total workflow capability calls in one run. | count | 256 | 4,096 | 1–2,592,000,000 |
+| `workflow_capability_calls_per_name` | Workflow capability calls to any one public name in one run. | count | 128 | 2,048 | 1–2,592,000,000 |
 | `workflow_heap_words` | Heap of the workflow evaluator process. | BEAM heap words | 8,000,000 | 8,000,000 | 1–2,592,000,000 |
-| `workflow_timeout_ms` | One workflow evaluation. | milliseconds | 30,000 | 120,000 | 1–2,592,000,000 |
+| `workflow_timeout_ms` | One workflow evaluation. | milliseconds | 30,000 | 1,800,000 | 1–2,592,000,000 |
 
 ## Installed-only limits
 
