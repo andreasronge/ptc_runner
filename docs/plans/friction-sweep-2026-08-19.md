@@ -34,12 +34,17 @@ over-deferred.
 
 | Commit | Theme | Issues |
 | --- | --- | --- |
-| 1 | Behaviour and packaging — the run is wrong, not just the message | #1496, #1497, #1498 |
-| 2 | The agent-config diagnostic, and the docs that point at a dead command | #1456, #1502 (docs half) |
+| 1 | Behaviour and packaging — the run is wrong, not just the message | #1496 (history half), #1497, #1498 |
+| 2 | Trusted diagnostics, the loop's own counter, and the docs that point at a dead command | #1456, #1496 (counter half), #1502 (docs half) |
 | 3 | Live spend | #1488 |
 
-Commits 1 and 3 are independent of each other and of commit 2. Delete this file
-before the final PR.
+**#1496 spans commits 1 and 2 and cannot be closed until both land.** Round 2
+established that its counter half needs the private-trusted-tool machinery
+commit 2 builds, so the conversation-history fix ships first and the counter
+follows. No commit *depends* on another to compile or pass — commit 1 is
+shippable alone — but do not close #1496 on commit 1.
+
+Delete this file before the final PR.
 
 ---
 
@@ -286,8 +291,13 @@ the missing `server.js`.
 
 ## Commit 2 — `fix(agent,docs): name the rejected agent option, count the loop's protocol errors, and point the docs at a command that works`
 
-Re-scoped. The schema-diagnostic, envelope-publication, REPL-limit, and
-introspection items that were here are blocked — see Deferred.
+Re-scoped after round 1. The schema-diagnostic, envelope-publication,
+REPL-limit and introspection items that were here left the commit — two are
+blocked on a decision and two are merely out of this sweep; see Deferred.
+
+Both tools below are the *same* mechanism, which is why they ship together:
+a private, `agent.core`-restricted trusted tool registered in two places, whose
+result the Kernel authors. Build the first, then the second is a second arm.
 
 ### 2.1 #1456 — the out-of-range rejection names nothing
 
@@ -331,14 +341,6 @@ attested `agent.core` origin and the caller's declared `tool_refs`
    constant and the dynamic text could never validate. Regenerate
    `priv/schemas/ptc-command-envelope-v2.schema.json` with it.
 
-**Second tool in this commit — `agent_protocol_errors`.** Same shape,
-`kernel-agent-protocol-error`: private, `prelude_namespaces: ["agent.core"]`,
-registered in `@reserved` *and* `implicit_capabilities/2`, incrementing a new
-**non-limiting** `RunState` counter that never closes the run. Surface it
-through `RunState.usage/1` and `usage_projection/2`, and extend the usage
-contract and generated schema. See commit 1.1 for why it cannot be derived from
-annotations.
-
 **Expected file surface** (round 2 — check nothing here is missing before
 starting):
 
@@ -381,7 +383,28 @@ a computed config would pass while claiming to have been checked.
 Add the row to its sweep, plus an `AgentLibraryTest` case asserting the envelope
 carries option and range and that no provider request was made.
 
-### 2.2 #1502 — the docs half
+### 2.2 #1496 (counter half) — `agent_protocol_errors`
+
+Second arm of the same mechanism: `kernel-agent-protocol-error`, private,
+`prelude_namespaces: ["agent.core"]`, registered in `@reserved` **and**
+`implicit_capabilities/2`, incrementing a new **non-limiting** `RunState`
+counter that never closes the run and never consumes a limit. Surface it
+through `RunState.usage/1` (`run_state.ex:1639`) and
+`CommandRunOutcome.usage_projection/2` (`command_run_outcome.ex:630`), and
+extend the usage contract plus the generated schema.
+
+Commit 1.1 records why this cannot be derived from the `"agent-action"`
+annotations the loop already emits: they carry `provenance: :workflow` and any
+workflow can emit them, so a usage field read from them would let application
+code write the Kernel-attested `usage` block.
+
+**Test.** Assert the envelope's `agent_protocol_errors` matches the count of
+`protocol-error` annotations in the canonical trace for the same run — the two
+numbers disagreeing is the original bug, so the test is the bug's inverse. Add
+a case proving the counter does **not** consume `protocol_errors` budget and
+does not close the run at any count.
+
+### 2.3 #1502 — the docs half
 
 The two agent-guide command lines (`docs/guides/agent-cli-usage.md:17` and
 `:51`, whose inline comment *"search built-ins and prelude exports"* is false as
