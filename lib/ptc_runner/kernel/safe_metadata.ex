@@ -72,6 +72,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :inspection_sink_error,
     :internal,
     :invalid_arguments,
+    :invalid_agent_config_failure,
+    :invalid_agent_protocol_error,
     :invalid_capability_description_request,
     :invalid_capability_list_request,
     :invalid_kernel_check_source_request,

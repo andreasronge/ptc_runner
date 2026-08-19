@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
@@ -169,7 +170,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   end
 
   defp setting_rows do
-    limit_rows() ++ agent_turn_rows()
+    limit_rows() ++ agent_turn_rows() ++ agent_config_rows()
   end
 
   # Every ceiling a run can breach, with the setting it must name, the
@@ -305,6 +306,50 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         build: fn -> RuntimeLimitDiagnostic.agent_turns_message(4, reason) end
       }
     end
+  end
+
+  defp agent_config_rows do
+    integer_rows =
+      for {option, minimum, maximum} <- AgentConfigDiagnostic.options() do
+        value = maximum + 1
+
+        %{
+          phase: :execution,
+          code: :invalid_agent_config,
+          source: nil,
+          setting: option,
+          value: "#{value}",
+          remedy: "lower it",
+          build: fn ->
+            AgentConfigDiagnostic.integer_message(option, minimum, maximum, value)
+          end
+        }
+      end
+
+    type_rows =
+      for {option, minimum, maximum} <- AgentConfigDiagnostic.options(),
+          type <- AgentConfigDiagnostic.types() do
+        phrase =
+          case type do
+            nil -> "nil"
+            :other -> "unsupported"
+            _other -> Atom.to_string(type)
+          end
+
+        %{
+          phase: :execution,
+          code: :invalid_agent_config,
+          source: nil,
+          setting: option,
+          value: phrase,
+          remedy: "must be an integer",
+          build: fn ->
+            AgentConfigDiagnostic.type_message(option, minimum, maximum, type)
+          end
+        }
+      end
+
+    integer_rows ++ type_rows
   end
 
   defp diagnostic_opts(row, message) do

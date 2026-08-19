@@ -1525,6 +1525,9 @@ defmodule PtcRunner.Lisp do
   defp error_details({:runtime_limit_exceeded, _message, details}) when is_map(details),
     do: details
 
+  defp error_details({:invalid_agent_config, _message, details}) when is_map(details),
+    do: details
+
   defp error_details({:result_contract_failed, _message, details}) when is_map(details),
     do: details
 

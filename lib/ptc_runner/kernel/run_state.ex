@@ -359,6 +359,16 @@ defmodule PtcRunner.Kernel.RunState do
   def protocol_error(state, environment, lease),
     do: safe_call(state, {:protocol_error, environment, lease}, :ok)
 
+  @doc """
+  Records one agent-loop protocol error without consuming a limit or closing the run.
+
+  This is not `protocol_error/1`: that counter is the Kernel's recoverable
+  capability-protocol budget and closes the run at its ceiling. The loop's
+  count is attested through a private trusted tool and is observational.
+  """
+  @spec record_agent_protocol_error(t()) :: :ok | {:error, :closed}
+  def record_agent_protocol_error(state), do: safe_call(state, :agent_protocol_error, :ok)
+
   # There is no failure left to record once the owner is gone. As above, the
   # declared :ok never covered the mismatched-token reply.
   @spec fail(t(), atom(), atom()) :: :ok | {:error, :closed}
@@ -486,6 +496,7 @@ defmodule PtcRunner.Kernel.RunState do
        evaluations_by_mission: %{},
        source_checks: 0,
        protocol_errors: 0,
+       agent_protocol_errors: 0,
        replay_misses: MapSet.new(),
        llm_provider_failures: MapSet.new(),
        terminal_failure: nil,
@@ -889,6 +900,10 @@ defmodule PtcRunner.Kernel.RunState do
       end
 
     {:reply, reply, state}
+  end
+
+  def handle_call({token, :agent_protocol_error}, _from, %{token: token} = state) do
+    {:reply, :ok, %{state | agent_protocol_errors: state.agent_protocol_errors + 1}}
   end
 
   def handle_call({token, {:fail, kind, reason}}, _from, %{token: token} = state)
@@ -1645,6 +1660,7 @@ defmodule PtcRunner.Kernel.RunState do
       evaluations_by_mission: state.evaluations_by_mission |> Enum.sort() |> Map.new(),
       subordinate_source_checks: state.source_checks,
       protocol_errors: state.protocol_errors,
+      agent_protocol_errors: state.agent_protocol_errors,
       evaluation_memory_bytes:
         continuations_total(state.continuations, :memory, state.limits.evaluation_memory_bytes),
       evaluation_history_bytes:

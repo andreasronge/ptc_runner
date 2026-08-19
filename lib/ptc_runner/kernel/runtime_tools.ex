@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   capability start/stop events.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Evaluation
@@ -314,6 +315,114 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
+  @doc false
+  @spec maybe_put_agent_loop_tools(map(), RunState.t(), term(), term()) :: map()
+  def maybe_put_agent_loop_tools(tools, state, event_sink, bundle) when is_map(tools) do
+    if Library.shipped_component?(bundle, "agent.core") do
+      tools
+      |> Map.put(
+        "kernel-agent-config-failure",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-agent-config-failure",
+          agent_config_failure()
+        )
+      )
+      |> Map.put(
+        "kernel-agent-protocol-error",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-agent-protocol-error",
+          agent_protocol_error(state)
+        )
+      )
+    else
+      tools
+    end
+  end
+
+  @doc false
+  @spec agent_config_failure() :: (map() -> term())
+  def agent_config_failure do
+    fn arguments ->
+      case agent_config_failure_details(arguments) do
+        {:ok, details, message} ->
+          %TrustedError{
+            reason: :invalid_agent_config,
+            message: message,
+            details: details
+          }
+
+        :error ->
+          invalid_agent_config_failure()
+      end
+    end
+  end
+
+  defp agent_config_failure_details(
+         %{"option" => option, "min" => min, "max" => max, "value" => value} = arguments
+       )
+       when map_size(arguments) == 4 do
+    details = %{option: option, min: min, max: max, value: value}
+
+    case AgentConfigDiagnostic.integer_message(option, min, max, value) do
+      {:ok, message} -> {:ok, details, message}
+      :error -> :error
+    end
+  end
+
+  defp agent_config_failure_details(
+         %{"option" => option, "min" => min, "max" => max, "type" => type} = arguments
+       )
+       when map_size(arguments) == 4 do
+    with {:ok, type} <- AgentConfigDiagnostic.type_tag(type),
+         details <- %{option: option, min: min, max: max, type: type},
+         {:ok, message} <- AgentConfigDiagnostic.type_message(option, min, max, type) do
+      {:ok, details, message}
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp agent_config_failure_details(_arguments), do: :error
+
+  defp invalid_agent_config_failure do
+    %{
+      status: :error,
+      kind: :protocol_error,
+      reason: :invalid_agent_config_failure
+    }
+  end
+
+  @doc false
+  @spec agent_protocol_error(RunState.t()) :: (map() -> term())
+  def agent_protocol_error(state) do
+    fn arguments ->
+      case arguments do
+        map when is_map(map) and map_size(map) == 0 ->
+          case RunState.record_agent_protocol_error(state) do
+            :ok -> true
+            _failure -> invalid_agent_protocol_error()
+          end
+
+        _invalid ->
+          invalid_agent_protocol_error()
+      end
+    end
+  end
+
+  defp invalid_agent_protocol_error do
+    %{
+      status: :error,
+      kind: :protocol_error,
+      reason: :invalid_agent_protocol_error
+    }
+  end
+
   # The branches below enumerate the closed kernel-eval envelope variants; the
   # repetition keeps every accepted map shape exact and rejects extra fields.
   # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
@@ -531,6 +640,22 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          }}
 
       {"kernel-runtime-limit-failure" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
+         }}
+
+      {"kernel-agent-config-failure" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
+         }}
+
+      {"kernel-agent-protocol-error" = name, callback} ->
         {name,
          %TrustedTool{
            function: callback,

@@ -14,7 +14,7 @@ so both always describe the version you actually invoke.
 | Which commands and switches exist? | `ptc help`, then `ptc help COMMAND` |
 | Which documentation ships here? | `ptc docs` |
 | How does the language or a contract work? | `ptc docs PAGE` |
-| What does one function do? | `ptc repl -e '(doc "name")'` |
+| What does one function do? | `ptc repl --project PROJECT.json -e '(doc "name")'` |
 
 Help output is generated from the same declarations as the strict parser, and
 `ptc docs` prints pages embedded at build time. Neither can drift from the
@@ -48,14 +48,14 @@ discovery functions work in every input context — not only at a terminal, so a
 detached agent gets the same answers:
 
 ```console
-ptc repl -e '(apropos "json")'            # search built-ins and prelude exports
-ptc repl -e '(doc "reduce")'              # print one function's documentation
-ptc repl -e '(dir)'                       # list the attached prelude API
+ptc repl --project PROJECT.json -e '(apropos "json")'   # search attached exports
+ptc repl --project PROJECT.json -e '(doc "reduce")'     # print one function's documentation
+ptc repl --project PROJECT.json -e '(dir)'              # list the attached prelude API
 ```
 
-Repeat `-e` to build up a session in order. Add `--project PROJECT.json` to
-evaluate against the real workflow environment, capabilities, and model routes
-instead of a bare scratchpad. This answers "does this expression work" without
+Repeat `-e` to build up a session in order. `--project PROJECT.json` evaluates
+against the real workflow environment, capabilities, and model routes instead
+of a bare scratchpad. This answers "does this expression work" without
 editing a component, revalidating, or spending a provider call.
 
 ## Read outcomes as data

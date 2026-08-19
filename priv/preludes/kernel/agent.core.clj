@@ -26,17 +26,34 @@
 ;; An explicitly out-of-range option is a caller mistake, not an omission:
 ;; silently substituting the default would make an invalid value
 ;; indistinguishable from leaving the option out and could spend more work
-;; than the caller requested.
+;; than the caller requested. The Kernel authors the command diagnostic from
+;; a closed payload: an int64, or a type tag — never the original non-integer.
+(defn- int64? [value]
+  (and (integer? value)
+       (>= value -9223372036854775808)
+       (<= value 9223372036854775807)))
+
+(defn- option-type [value]
+  (cond
+    (string? value) "string"
+    (float? value) "float"
+    (boolean? value) "bool"
+    (map? value) "map"
+    (vector? value) "vector"
+    (nil? value) "nil"
+    :else "other"))
+
 (defn- bounded-option [cfg option default maximum]
   (let [value (get cfg option)]
     (if (nil? value)
       default
       (if (and (integer? value) (pos? value) (<= value maximum))
         value
-        (fail (assoc (result/error :invalid-agent-config :option-out-of-range)
-                     :option option
-                     :min 1
-                     :max maximum))))))
+        (if (int64? value)
+          (tool/kernel-agent-config-failure
+            {"option" option "min" 1 "max" maximum "value" value})
+          (tool/kernel-agent-config-failure
+            {"option" option "min" 1 "max" maximum "type" (option-type value)}))))))
 
 (defn- completed-event [type turn max-turns]
   {:type type
@@ -567,7 +584,8 @@
                                             (get source-check :outcome)))))))
 
               :protocol-error
-              (let [next-state
+              (let [_counted (tool/kernel-agent-protocol-error {})
+                    next-state
                     (continuation-state
                       phases phase-index turn messages action
                       (agent.feedback/protocol-error action)
@@ -592,7 +610,7 @@
 (defn run-outcome
   "Runs the agent loop and distinguishes model-authored completion from a
   bounded subject-attributable failure."
-  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
   (run-outcome* task cfg false))
 
@@ -603,7 +621,7 @@
 
   Subject failures retain the historical fail behavior. Evaluators that need
   to record those attempts use `run-outcome`."
-  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome task cfg)]
     (if (= :returned (get outcome :status))
@@ -613,7 +631,7 @@
 (defn run-result-value
   "Runs the agent loop and validates model-authored completion against the
   manifest result contract before returning it to the calling workflow."
-  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome* task cfg true)]
     (if (= :returned (get outcome :status))
@@ -629,7 +647,7 @@
   the agent with a contract-valid result. A terminal-only phase rejects any
   parsed program whose single top-level form is not return or fail before
   mission evaluation, and only the final phase may declare terminal_only."
-  {:signature "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?, terminal_only :bool?}], max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?, terminal_only :bool?}], max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
   (let [outcome (run-outcome* task cfg true)]
     (if (= :returned (get outcome :status))
@@ -642,7 +660,7 @@
   The default result is a success envelope. Set `result_envelope` to false for
   a raw application value. Use `run-value` when the caller must continue after
   the model-authored value returns."
-  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?, result_envelope :bool?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, result_envelope :bool?}) -> :any"}
   [task cfg]
   (let [value (run-value task cfg)]
     (if (false? (get cfg "result_envelope"))

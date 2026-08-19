@@ -160,11 +160,12 @@ it does not add task-specific prompt policy.
 | `result_envelope` | `true` | boolean | Changes only `agent.core/run`; `false` returns the raw value. |
 
 For the four `max_*` options, an omitted or `nil` value selects the documented
-default, and an out-of-range integer fails with
-`invalid-agent-config/option-out-of-range` before any provider request or
-mission evaluation; the failure value names the option and its accepted
-inclusive range. Signature validation rejects wrong value types before the
-loop starts. `consolidate_at_turns_remaining` fails the same way with
+default. An out-of-range integer or a non-integer fails with
+`invalid_agent_config` before any provider request or mission evaluation. The
+command diagnostic names the option and its inclusive range, and either the
+rejected integer or the received type — never the original non-integer
+content. Signature validation still rejects unknown configuration keys.
+`consolidate_at_turns_remaining` fails the same way with
 `invalid-agent-config/invalid-consolidation-threshold` when set outside `1` to
 the effective `max_turns`.
 

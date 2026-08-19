@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   lower-level reasons never add a public code.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.LLMReplayDiagnostic
@@ -208,6 +209,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:provider_acquisition, :capability_requirement_missing, 4, false,
      "a component requires a capability that the selected providers did not supply"},
     {:execution, :workflow_failed, 5, false, "the workflow failed"},
+    {:execution, :invalid_agent_config, 5, false,
+     "an agent configuration option is outside its supported range"},
     {:execution, :llm_authentication_failed, 5, false,
      "the LLM provider rejected authentication; check the installed credential"},
     {:execution, :llm_payment_required, 5, false,
@@ -334,6 +337,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :replay_fixture_missing, message: fallback}),
     do: LLMReplayDiagnostic.message_schema(fallback)
 
+  def message_schema(%{phase: :execution, code: :invalid_agent_config, message: fallback}),
+    do: AgentConfigDiagnostic.message_schema(fallback)
+
   def message_schema(%{phase: :result_cleanup, code: :result_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.result_limit_message_schema(fallback)
 
@@ -372,6 +378,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:execution, :replay_fixture_missing, message),
     do: LLMReplayDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:execution, :invalid_agent_config, message),
+    do: AgentConfigDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:result_cleanup, :result_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.result_limit_message?(message)

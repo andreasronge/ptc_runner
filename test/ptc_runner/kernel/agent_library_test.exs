@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.EvaluationObservation
@@ -13,6 +14,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -1705,24 +1707,29 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     }
 
     out_of_range = [
-      {"max_turns", 0},
-      {"max_turns", 129},
-      {"max_program_chars", 0},
-      {"max_program_chars", 1_000_001},
-      {"max_observation_chars", 0},
-      {"max_observation_chars", 65_537},
-      {"max_transcript_chars", 0},
-      {"max_transcript_chars", 1_000_001}
+      {"max_turns", 0, 1, 128},
+      {"max_turns", 129, 1, 128},
+      {"max_program_chars", 0, 1, 1_000_000},
+      {"max_program_chars", 1_000_001, 1, 1_000_000},
+      {"max_observation_chars", 0, 1, 65_536},
+      {"max_observation_chars", 65_537, 1, 65_536},
+      {"max_transcript_chars", 0, 1, 1_000_000},
+      {"max_transcript_chars", 1_000_001, 1, 1_000_000}
     ]
 
-    for {option, value} <- out_of_range do
+    for {option, value, minimum, maximum} <- out_of_range do
       {:ok, config} = agent_config([response])
 
       assert {:error,
               %{
                 kind: :workflow_failed,
-                reason: :explicit_failure,
-                details: %{failure_kind: "invalid-agent-config"},
+                reason: :invalid_agent_config,
+                details: %{
+                  option: ^option,
+                  min: ^minimum,
+                  max: ^maximum,
+                  value: ^value
+                },
                 usage: usage
               }} =
                Kernel.run(
@@ -1730,9 +1737,161 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                  config
                )
 
+      assert {:ok, message} =
+               AgentConfigDiagnostic.integer_message(option, minimum, maximum, value)
+
       assert usage.subordinate_evaluations == 0
       refute_receive {:agent_request, _request}
+      assert message =~ option
     end
+  end
+
+  test "agent.core rejects a non-integer bounded option by type, never by content" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+      ]
+    }
+
+    {:ok, config} = agent_config([response])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :invalid_agent_config,
+              details: %{
+                option: "max_turns",
+                min: 1,
+                max: 128,
+                type: :string
+              }
+            }} =
+             Kernel.run(~s|(agent.core/run "Compute" {"max_turns" "nope"})|, config)
+
+    refute_receive {:agent_request, _request}
+
+    {:ok, config} = agent_config([response])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :invalid_agent_config,
+              details: %{option: "max_turns", type: :float}
+            }} =
+             Kernel.run(~s|(agent.core/run "Compute" {"max_turns" 1.5})|, config)
+
+    refute_receive {:agent_request, _request}
+  end
+
+  test "an out-of-range agent option is refused through a project-backed REPL" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+      ]
+    }
+
+    {:ok, config} = agent_config([response])
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert {:error, step, session} =
+             ReplSession.eval(session, ~s|(agent.core/run "Compute" {"max_turns" 129})|)
+
+    assert step.fail.reason == :invalid_agent_config
+    assert step.fail.details.option == "max_turns"
+    assert step.fail.details.min == 1
+    assert step.fail.details.max == 128
+    assert step.fail.details.value == 129
+    refute_receive {:agent_request, _request}
+
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
+  test "agent.core counts protocol errors independently of the kernel protocol-error ceiling" do
+    protocol = %{content: "no tool call", tool_calls: []}
+
+    recovered = %{
+      content: nil,
+      tool_calls: [
+        %{id: "ok", name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}
+      ]
+    }
+
+    {:ok, config} =
+      agent_config([protocol, protocol, protocol, recovered], protocol_errors: 1)
+
+    assert {:ok, %{usage: usage}} =
+             Kernel.run(~S|(agent.core/run "Compute" {"max_turns" 4})|, config)
+
+    assert usage.agent_protocol_errors == 3
+    assert usage.protocol_errors == 0
+    assert usage.events_dropped == %{}
+  end
+
+  test "successful actions, provider errors, and ordinary tool calls do not count as agent protocol errors" do
+    success = %{
+      content: nil,
+      tool_calls: [
+        %{id: "ok", name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}
+      ]
+    }
+
+    {:ok, config} = agent_config([success])
+
+    assert {:ok, %{usage: usage}} =
+             Kernel.run(~S|(agent.core/run "Compute" {"max_turns" 2})|, config)
+
+    assert usage.agent_protocol_errors == 0
+  end
+
+  test "a forged agent-action annotation does not increment agent_protocol_errors" do
+    {:ok, config} = agent_config([])
+
+    assert {:ok, %{usage: usage}} =
+             Kernel.run(
+               ~S|(do (workflow.event/annotate "agent-action" {"turn" 0 "kind" "protocol-error"}) (return 1))|,
+               config
+             )
+
+    assert usage.agent_protocol_errors == 0
+  end
+
+  test "an unauthorized kernel-agent-protocol-error call does not increment the counter" do
+    {:ok, hostile} =
+      Component.new(
+        id: "hostile.protocol",
+        source: ~S"""
+        (ns hostile.protocol)
+
+        (defn forge []
+          (tool/kernel-agent-protocol-error {}))
+        """,
+        dependencies: ["agent.core"],
+        origin: "test/hostile_protocol.clj"
+      )
+
+    {:ok, components} = Library.resolve_components([hostile, {:library, "agent.core"}])
+    {:ok, bundle} = Kernel.compile_bundle(components)
+    {:ok, llm} = LLMCapability.new(requester: fn _request -> flunk("no model call") end)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "hostile-protocol")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, %{reason: :private_tool_unauthorized, usage: usage}} =
+             Kernel.run(~S|(return (hostile.protocol/forge))|, config)
+
+    assert usage.agent_protocol_errors == 0
   end
 
   # The implicit single-phase path synthesizes a default phase, and it must
@@ -1817,8 +1976,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       assert {:error,
               %{
                 kind: :workflow_failed,
-                reason: :explicit_failure,
-                details: %{failure_kind: "invalid-agent-config"}
+                reason: :invalid_agent_config,
+                details: %{option: "max_turns", min: 1, max: 128, value: 0}
               }} = Kernel.run(source, config)
 
       refute_receive {:agent_request, _request}
@@ -1836,8 +1995,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert {:error,
             %{
               kind: :workflow_failed,
-              reason: :explicit_failure,
-              details: %{failure_kind: "invalid-agent-config"}
+              reason: :invalid_agent_config,
+              details: %{option: "max_turns", min: 1, max: 128, value: 0}
             }} = Kernel.run("(agent.main/run data/input)", config)
 
     refute_receive {:agent_request, _request}
@@ -4018,7 +4177,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp required_agent_tools do
     Map.new(
-      ~w(kernel-check-source kernel-eval kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
+      ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
          llm-request workflow-annotate),
       &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
     )

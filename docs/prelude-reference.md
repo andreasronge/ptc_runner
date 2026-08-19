@@ -113,8 +113,8 @@ describes that value rather than agent.core's default success envelope.
 - **Kind:** `function`
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
-- **Contract:** `(input {task :string, agent {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}}) -> :any`
-- **Backing requirements:** `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Contract:** `(input {task :string, agent {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}}) -> :any`
+- **Backing requirements:** `tool:kernel-agent-config-failure`, `tool:kernel-agent-protocol-error`, `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ### `agent.core`
 
@@ -146,8 +146,8 @@ the model-authored value returns.
 - **Kind:** `function`
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
-- **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?, result_envelope :bool?}) -> :any`
-- **Backing requirements:** `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, result_envelope :bool?}) -> :any`
+- **Backing requirements:** `tool:kernel-agent-config-failure`, `tool:kernel-agent-protocol-error`, `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ##### `agent.core/run-outcome`
 
@@ -161,8 +161,8 @@ bounded subject-attributable failure.
 - **Kind:** `function`
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
-- **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any`
-- **Backing requirements:** `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any`
+- **Backing requirements:** `tool:kernel-agent-config-failure`, `tool:kernel-agent-protocol-error`, `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ##### `agent.core/run-phased-result-value`
 
@@ -182,8 +182,8 @@ mission evaluation, and only the final phase may declare terminal_only.
 - **Kind:** `function`
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
-- **Contract:** `(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?, terminal_only :bool?}], max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any`
-- **Backing requirements:** `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Contract:** `(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?, terminal_only :bool?}], max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any`
+- **Backing requirements:** `tool:kernel-agent-config-failure`, `tool:kernel-agent-protocol-error`, `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ##### `agent.core/run-result-value`
 
@@ -197,8 +197,8 @@ manifest result contract before returning it to the calling workflow.
 - **Kind:** `function`
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
-- **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any`
-- **Backing requirements:** `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any`
+- **Backing requirements:** `tool:kernel-agent-config-failure`, `tool:kernel-agent-protocol-error`, `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ##### `agent.core/run-value`
 
@@ -216,8 +216,8 @@ to record those attempts use `run-outcome`.
 - **Kind:** `function`
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
-- **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :int?, max_program_chars :int?, max_observation_chars :int?, max_transcript_chars :int?, consolidate_at_turns_remaining :int?}) -> :any`
-- **Backing requirements:** `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any`
+- **Backing requirements:** `tool:kernel-agent-config-failure`, `tool:kernel-agent-protocol-error`, `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ## Agent loop policy
 

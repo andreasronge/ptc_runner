@@ -53,6 +53,7 @@ defmodule PtcRunner.StandaloneCLI do
     end
   end
 
+  @spec halt_closed_pipe_or_reraise(Exception.t(), list()) :: no_return()
   defp halt_closed_pipe_or_reraise(%ErlangError{original: reason}, _stacktrace)
        when reason in [:terminated, :epipe] do
     System.halt(141)
