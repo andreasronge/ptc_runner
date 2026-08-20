@@ -37,6 +37,16 @@ defmodule PtcRunner.Kernel.SupportTriageE2ETest do
     assert Enum.sort(ids) == ["T-1001", "T-1004"]
   end
 
+  test "the domain-api step returns the breached tickets in policy order", %{
+    registry: registry
+  } do
+    assert {:ok, result} = run("02-domain-api", registry)
+    assert %{"ok" => true, "value" => ranked} = result.value
+
+    assert Enum.map(ranked, &{&1["id"], &1["priority"]}) ==
+             [{"T-1004", 81}, {"T-1001", 75}, {"T-1006", 58}, {"T-1005", 52}]
+  end
+
   test "the specialist step escalates every breached ticket with policy scores", %{
     registry: registry
   } do

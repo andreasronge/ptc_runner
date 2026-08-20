@@ -80,9 +80,11 @@ runtime, never reconstructed by regexes. The contract profile is defined in
 Keep writes in the last possible stage, behind an explicitly allowed effect
 tool, and never automatically retry an indeterminate write — a timeout may
 mean the effect happened. Reconcile the unknown outcome first, then continue.
-Read-side tools can be granted freely by comparison, which is why the earlier
-shapes stay read-only as long as possible. [Connect an MCP
-tool](connecting-tools-with-mcp.md) covers effect metadata and `allow` lists.
+Read tools are retry-safe by comparison, which is why the earlier shapes stay
+read-only as long as possible — but they still deserve least privilege: every
+readable source is data the model can observe, leak into later stages, or
+spend budget on. [Connect an MCP tool](connecting-tools-with-mcp.md) covers
+effect metadata and `allow` lists.
 
 ## Going further
 

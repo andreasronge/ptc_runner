@@ -138,30 +138,44 @@ result forward, and validates the final report against the manifest's
 The `quarantined` helper marks the handoff: ticket subjects and bodies are
 customer-authored, so the workflow wraps them in an `<untrusted_tickets>`
 block (stripping any smuggled closing marker) and the task names the block as
-data, not instructions. A stage boundary is also a trust boundary — the agent
-loop marks its own tool observations as untrusted automatically, but text a
-workflow splices into a task string is the workflow's responsibility.
+data, not instructions. The marking is prompt hygiene, not enforcement — a
+model can still be misled by text inside the block. What makes the handoff
+safe to get wrong is the mission grant: the escalation mission holds no
+tickets and no tools, so injected text can at worst skew a classification,
+never reach a capability. The agent loop marks its own tool observations as
+untrusted automatically; text a workflow splices into a task string is the
+workflow's responsibility.
 
 ```console
 ptc run support-triage/03-specialists.ptc-project.json
 ```
 
-A run returns a contract-valid report — every escalation names a schema-listed
-team, and an invalid candidate would have received bounded correction feedback
-instead of reaching you:
+A run returns a contract-valid report; an invalid candidate would have
+received bounded correction feedback instead of reaching you. This run
+escalated all four breached tickets:
 
 ```json
-{"escalations":[{"first_action":"send the refund-policy summary","id":"T-1004",
-"priority":81,"team":"payments"},{"first_action":"page the on-call engineer",
-"id":"T-1005","priority":52,"team":"sre"}],"summary":"..."}
+{"escalations":[
+  {"id":"T-1004","priority":81,"team":"payments",
+   "first_action":"send the refund-policy summary"},
+  {"id":"T-1001","priority":75,"team":"payments",
+   "first_action":"verify the charge with finance before replying"},
+  {"id":"T-1006","priority":58,"team":"support",
+   "first_action":"reply with the account-recovery checklist"},
+  {"id":"T-1005","priority":52,"team":"sre",
+   "first_action":"page the on-call engineer"}],
+ "summary":"Four breached tickets were classified and escalated."}
 ```
 
 Two design rules carry this step. Specialists are missions, not prompts: the
 escalation model cannot read the ticket pool, because its mission was never
 granted it — the workflow decides exactly what crosses the boundary. And
 downstream consumers get contracts, not parsing: the schema is enforced by the
-runtime, so the report's shape is a property of the run, not a hope about the
-model. The correction loop is described in the
+runtime, so the report's *shape* — allowed keys, the team enumeration, the
+bounds — is a property of the run, not a hope about the model. The contract
+does not judge content: whether every breached ticket appears with its policy
+score is checked by this example's scheduled live test, not the schema. The
+correction loop is described in the
 [agent library reference](../agent-library-reference.md).
 
 ## Where to go next

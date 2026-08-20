@@ -144,9 +144,11 @@ runtime, never reconstructed by regexes. The contract profile is defined in
 <a href="/reference/application-manifest/#validate-inputs-and-results">Configure an application</a>.</p><h2 id="effects-at-the-edge">Effects at the edge</h2><p>Keep writes in the last possible stage, behind an explicitly allowed effect
 tool, and never automatically retry an indeterminate write — a timeout may
 mean the effect happened. Reconcile the unknown outcome first, then continue.
-Read-side tools can be granted freely by comparison, which is why the earlier
-shapes stay read-only as long as possible. <a href="/guides/connecting-tools-with-mcp/">Connect an MCP
-tool</a> covers effect metadata and <code class="inline">allow</code> lists.</p><h2 id="going-further">Going further</h2><p>The <a href="/guides/designing-agent-workflows/">Design an agent workflow</a> tutorial walks
+Read tools are retry-safe by comparison, which is why the earlier shapes stay
+read-only as long as possible — but they still deserve least privilege: every
+readable source is data the model can observe, leak into later stages, or
+spend budget on. <a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a> covers
+effect metadata and <code class="inline">allow</code> lists.</p><h2 id="going-further">Going further</h2><p>The <a href="/guides/designing-agent-workflows/">Design an agent workflow</a> tutorial walks
 the first three shapes on one scenario. For a chapter-by-chapter course that
 grows a multi-specialist agent — including parallel specialists, plan/act
 phases, and effect handling — see the
