@@ -150,6 +150,30 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
+  test "a permissive pre-existing artifact root names the directory and owner-only rule", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    root = Path.join(target, ".ptc")
+    File.mkdir!(root)
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", project],
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+      )
+
+    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
+    assert presentation.stderr =~ "envelope/publication_failed"
+    assert presentation.stderr =~ root
+    assert presentation.stderr =~ "owner-only (0700)"
+    assert presentation.stderr =~ "chmod 700"
+  end
+
+  @tag :tmp_dir
   test "project-backed repl preserves the manifest grammar", %{tmp_dir: directory} do
     target = Path.join(directory, "demo")
     assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])

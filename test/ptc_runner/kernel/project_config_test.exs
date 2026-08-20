@@ -148,7 +148,7 @@ defmodule PtcRunner.Kernel.ProjectConfigTest do
     File.mkdir!(root)
     File.chmod!(root, 0o700)
 
-    assert {:error, :project_artifact_root_invalid} = ProjectArtifactRoot.ensure(root)
+    assert {:error, {:project_artifact_root_incomplete, ^root}} = ProjectArtifactRoot.ensure(root)
     assert File.ls!(root) == []
   end
 end

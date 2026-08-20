@@ -101,12 +101,12 @@ defmodule PtcRunner.Kernel.CommandFrontend do
       :ok ->
         rendered_presentation(outcome, path, rejection)
 
-      {:error, _reason} ->
+      {:error, reason} ->
         presentation(
           outcome,
           nil,
           "",
-          CommandRenderer.envelope_failure(entry.run_ref),
+          CommandRenderer.envelope_failure(entry.run_ref, reason),
           @envelope_failure_exit_status
         )
     end

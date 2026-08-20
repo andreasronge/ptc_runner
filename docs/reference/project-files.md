@@ -111,7 +111,9 @@ For `run`, enabled project artifacts derive from the command run reference:
 
 The root and its fixed child directories are owner-only. The first project run
 creates the complete layout atomically; an existing incomplete, permissive, or
-symlinked layout is refused. Artifact files retain the normal no-replace and
+symlinked layout is refused. When a pre-existing directory fails the owner-only
+(0700) check, the command names the path and the `chmod 700` remedy rather than
+a bare publication failure. Artifact files retain the normal no-replace and
 privacy rules.
 
 ## Overrides and lazy environment loading

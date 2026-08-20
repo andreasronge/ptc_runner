@@ -9,13 +9,20 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
   alias PtcRunner.Kernel.ProjectContext
   alias PtcRunner.Kernel.PublicationHandle
 
-  @spec publish(CommandOutcome.t(), binary()) :: :ok | {:error, :envelope_publication_failed}
+  @spec publish(CommandOutcome.t(), binary()) ::
+          :ok
+          | {:error, :envelope_publication_failed}
+          | {:error, {:envelope_destination_parent_unavailable, binary()}}
   def publish(%CommandOutcome{} = outcome, path) when is_binary(path) do
     with {:ok, encoded} <- DeterministicJSON.encode(CommandOutcome.to_map(outcome)),
-         {:ok, handle} <- PublicationHandle.reserve(path, :result, 0o600) do
+         {:ok, handle} <- reserve(path) do
       publish_handle(handle, encoded)
     else
-      _failure -> {:error, :envelope_publication_failed}
+      {:error, :destination_directory_missing} ->
+        {:error, {:envelope_destination_parent_unavailable, path}}
+
+      _failure ->
+        {:error, :envelope_publication_failed}
     end
   rescue
     _exception -> {:error, :envelope_publication_failed}
@@ -27,7 +34,9 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
 
   @doc false
   @spec publish_all(CommandOutcome.t(), [binary()]) ::
-          :ok | {:error, :envelope_publication_failed}
+          :ok
+          | {:error, :envelope_publication_failed}
+          | {:error, {:envelope_destination_parent_unavailable, binary()}}
   def publish_all(%CommandOutcome{} = outcome, paths) when is_list(paths) do
     paths
     |> Enum.reject(&is_nil/1)
@@ -38,6 +47,13 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
         {:error, _reason} = error -> {:halt, error}
       end
     end)
+  end
+
+  defp reserve(path) do
+    case PublicationHandle.reserve(path, :result, 0o600) do
+      {:ok, handle} -> {:ok, handle}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc false
