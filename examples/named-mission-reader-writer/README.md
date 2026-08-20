@@ -23,6 +23,7 @@ installation (transport paths resolve relative to that host file):
 
 ```console
 mix ptc run examples/named-mission-reader-writer/ptc-project.json
+mix ptc viewer examples/named-mission-reader-writer/ptc-project.json
 ```
 
 The reader returns the exact contents of `reader-state/brief.txt`. The workflow

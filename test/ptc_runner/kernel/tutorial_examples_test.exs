@@ -111,6 +111,24 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     assert project.application == Path.join(@replay_example, "ptc.json")
     assert project.host == Path.join(@replay_example, "ptc-host.json")
     assert project.env_file == nil
+    assert project.artifacts.inspection
+    assert project.viewer.private
+  end
+
+  test "every shipped example project records inspection and grants it to the Viewer" do
+    examples = Path.expand("../../../examples", __DIR__)
+
+    projects =
+      Path.wildcard(Path.join(examples, "**/*ptc-project.json"))
+      |> Enum.sort()
+
+    assert projects != []
+
+    for path <- projects do
+      assert {:ok, project} = ProjectConfig.load(path), path
+      assert project.artifacts.inspection, path
+      assert project.viewer.private, path
+    end
   end
 
   @tag :tmp_dir

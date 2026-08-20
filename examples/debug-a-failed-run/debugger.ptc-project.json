@@ -11,7 +11,7 @@
   "artifacts": {
     "root": "debugger/.ptc",
     "trace": true,
-    "inspection": false,
+    "inspection": true,
     "result": true,
     "envelope": true
   },

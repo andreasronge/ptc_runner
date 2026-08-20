@@ -102,7 +102,7 @@ against fixed model responses before an explicit promotion decision.</p></blockq
 responses fixed so a difference between a baseline and candidate run can be
 attributed to the candidate component rather than another model sample.</p><p>Replay changes neither the manifest grammar nor the application's model alias.
 The operator swaps the installed provider behind that alias.</p><h2 id="run-the-network-free-example">Run the network-free example</h2><p>The checked-in example needs no credential or network access:</p><pre><code class="console language-console">ptc init llm-replay --example llm-replay
-ptc run llm-replay/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;content&quot;:&quot;Frozen answer&quot;}</code></pre><h2 id="install-a-replay-model">Install a replay model</h2><p>The host document names a JSON Lines fixture:</p><pre><code class="json language-json">&quot;frozen-model&quot;: {
+ptc run llm-replay/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;content&quot;:&quot;Frozen answer&quot;}</code></pre><p>The project records private inspection and grants it to the Viewer:</p><pre><code class="console language-console">ptc viewer llm-replay/ptc-project.json</code></pre><h2 id="install-a-replay-model">Install a replay model</h2><p>The host document names a JSON Lines fixture:</p><pre><code class="json language-json">&quot;frozen-model&quot;: {
   &quot;source&quot;: &quot;llm_replay&quot;,
   &quot;installation_revision&quot;: &quot;frozen-model-v1&quot;,
   &quot;fixtures&quot;: &quot;evaluation/replay.jsonl&quot;

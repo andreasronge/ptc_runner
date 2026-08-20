@@ -11,7 +11,7 @@
   "artifacts": {
     "root": ".ptc",
     "trace": true,
-    "inspection": false,
+    "inspection": true,
     "result": false,
     "envelope": true
   },
@@ -19,6 +19,6 @@
     "port": 4123,
     "open": true,
     "repl": true,
-    "private": false
+    "private": true
   }
 }

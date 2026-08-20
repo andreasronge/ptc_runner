@@ -20,6 +20,11 @@ The result is:
 {"content":"Frozen answer"}
 ```
 
+The project records private inspection and grants it to the Viewer, so
+`ptc viewer llm-replay/ptc-project.json` shows the prelude sources the run
+loaded and the private model exchange. This example has no agent loop, so
+there is no generated program.
+
 Change the request in `workflow.clj` so the fixture no longer matches. The
 call returns a provider-error envelope (`:status :error`, `kind`
 `provider_error`, `reason` `not_found`, with the new `request_hash` in

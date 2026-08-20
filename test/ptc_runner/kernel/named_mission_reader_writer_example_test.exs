@@ -12,6 +12,8 @@ defmodule PtcRunner.Kernel.NamedMissionReaderWriterExampleTest do
     assert project.application == Path.join(@example, "ptc.json")
     assert project.host == @host
     assert project.env_file == nil
+    assert project.artifacts.inspection
+    assert project.viewer.private
   end
 
   test "the example splits read and write across two installations of one server" do

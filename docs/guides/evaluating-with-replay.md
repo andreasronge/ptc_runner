@@ -23,6 +23,12 @@ ptc run llm-replay/ptc-project.json
 {"content":"Frozen answer"}
 ```
 
+The project records private inspection and grants it to the Viewer:
+
+```console
+ptc viewer llm-replay/ptc-project.json
+```
+
 ## Install a replay model
 
 The host document names a JSON Lines fixture:
