@@ -46,5 +46,5 @@ contract is documented in the repository's maintainer guide on embedding.
 Use the [debug-navigation reference](../reference/debug-navigation.md) for the
 complete evidence graph, typed links, collections, resources, pagination,
 private-authority rules, and model-assisted navigation contract. The
-[TraceLog and run-analysis reference](../reference/trace-log-contract.md) owns
+[TraceLog and run-analysis reference](../maintainers/trace-log-contract.md) owns
 the canonical event schema.

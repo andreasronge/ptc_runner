@@ -1,19 +1,22 @@
 # TraceLog and run-analysis reference
 
-> **Audience:** people and agents reading run evidence through `analysis/*`
-> capabilities, the CLI, or the Viewer.
+> **Audience:** people building against PtcRunner run evidence — reading it
+> through `analysis/*` capabilities, the CLI, or the Viewer, or changing how it
+> is produced.
 
 **Status:** implemented retained product contract, including the local private
 inspection artifact.
 
 This page defines what a canonical trace and a private inspection artifact
-contain, and how each may be queried. Owner-process lifecycle, immutable
-capture, publication mechanics, and the contract-test inventory are
+contain, and how each may be queried. It is a repository document rather than
+part of the user documentation set; the executable carries it as
+`ptc docs traces` for navigating a run's evidence. Owner-process lifecycle,
+immutable capture, publication mechanics, and the contract-test inventory are
 implementation concerns and live in the Kernel maintainer guide
 (`docs/maintainers/kernel.md`) and beside the code in the
-`PtcRunner.Kernel.TraceLog`, `PtcRunner.Kernel.EventSink`,
-`PtcRunner.Kernel.InspectionSink`, and `PtcRunner.Kernel.InspectionArtifact`
-module documentation.
+`PtcRunner.Kernel.TraceLog`,
+`PtcRunner.Kernel.EventSink`, `PtcRunner.Kernel.InspectionSink`, and
+`PtcRunner.Kernel.InspectionArtifact` module documentation.
 
 ## Purpose and boundary
 

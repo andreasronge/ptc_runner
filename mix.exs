@@ -455,13 +455,13 @@ defmodule PtcRunner.MixProject do
           "docs/reference/cli.md",
           "docs/reference/repl.md",
           "docs/reference/debug-navigation.md",
-          "docs/reference/trace-log-contract.md",
           "docs/maintainers/embedding.md",
           "docs/maintainers/coding-agent-review.md",
           "docs/maintainers/duplication-gate.md",
           "docs/maintainers/documentation.md",
           "docs/maintainers/signature-integration.md",
-          "docs/maintainers/kernel.md"
+          "docs/maintainers/kernel.md",
+          "docs/maintainers/trace-log-contract.md"
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
         Start: [
@@ -494,7 +494,7 @@ defmodule PtcRunner.MixProject do
           ~r/docs\/(?:reference\/.+|(?:agent-library|ptc-lisp|clojure|function-reference|java-|kernel-limits|prelude-|signature-).+)\.md/,
         Conformance: ~r/docs\/conformance\/.+\.md/,
         Maintainers:
-          ~r/docs\/maintainers\/(coding-agent-review|documentation|duplication-gate|embedding|kernel|signature-integration)\.md/
+          ~r/docs\/maintainers\/(coding-agent-review|documentation|duplication-gate|embedding|kernel|signature-integration|trace-log-contract)\.md/
       ]
     ]
   end

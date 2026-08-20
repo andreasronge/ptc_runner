@@ -13,7 +13,7 @@ This guide is an architectural map. Exact fields, return values, limits, state
 transitions, and error atoms belong in the owning `PtcRunner.Kernel.*` or
 `PtcRunner.Lisp.*` module documentation. Language semantics live in the
 [PTC-Lisp specification](../ptc-lisp-specification.md), trace semantics in the
-[TraceLog and run-analysis reference](../reference/trace-log-contract.md), and
+[TraceLog and run-analysis reference](trace-log-contract.md), and
 admitted Java behavior in the generated
 [Java interop reference](../java-interop.md).
 
@@ -328,7 +328,7 @@ a product trace source.
 ## Trace storage and analysis sessions
 
 What a trace contains and how it may be queried is the
-[TraceLog and run-analysis reference](../reference/trace-log-contract.md).
+[TraceLog and run-analysis reference](trace-log-contract.md).
 This section owns the parts that are implementation rather than contract.
 
 ### Canonical persistence

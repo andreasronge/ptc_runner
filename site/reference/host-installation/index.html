@@ -84,7 +84,6 @@ outer l…">
 <li><a href="/reference/cli/">Command-line reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
-<li><a href="/reference/trace-log-contract/">TraceLog and run-analysis reference</a></li>
 </ul>
 
   </nav>
@@ -239,7 +238,8 @@ exactly one of those trace sources so it can validate every private artifact
 against the captured canonical evidence.</p><p>Set a trace selection's manifest config to <code class="inline">{&quot;expose&quot;: false}</code> when it exists
 only as the inspection source's dependency. It still supplies the frozen trace
 capture without creating a second analysis namespace. The
-<a href="/reference/trace-log-contract/#query-contract">TraceLog and run-analysis reference</a> defines query
+<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md#query-contract">TraceLog and run-analysis reference</a>
+defines query
 shapes and bounds; <a href="/reference/repl/">Kernel REPL</a> shows them in use.</p><h2 id="keep-data-classes-compatible">Keep data classes compatible</h2><p><code class="inline">data_class</code> says what an installation contributes; <code class="inline">accepts_data</code> says which
 effective classes it may run beside. Both default to <code class="inline">normal</code> and
 <code class="inline">[&quot;normal&quot;]</code>:</p><pre><code class="json language-json">&quot;data_class&quot;: &quot;normal&quot;,

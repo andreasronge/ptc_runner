@@ -93,10 +93,10 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
 
   describe "published workflow annotation vocabulary" do
     @source Path.expand("../../../lib/ptc_runner/kernel/safe_metadata.ex", __DIR__)
-    @contract Path.expand("../../../docs/reference/trace-log-contract.md", __DIR__)
+    @contract Path.expand("../../../docs/maintainers/trace-log-contract.md", __DIR__)
 
     # Clause order of every accepting SafeMetadata.annotation?/2 head. A new
-    # type or key set must land in docs/reference/trace-log-contract.md in the same
+    # type or key set must land in docs/maintainers/trace-log-contract.md in the same
     # change, or this test fails.
     @published [
       {"progress", ["stage"]},
@@ -108,7 +108,7 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
       assert accepting_annotation_clauses(@source) == @published
     end
 
-    test "docs/reference/trace-log-contract.md publishes those types, keys, and enumerations" do
+    test "docs/maintainers/trace-log-contract.md publishes those types, keys, and enumerations" do
       source = File.read!(@source)
       section = workflow_annotation_section(File.read!(@contract))
       [progress_row, agent_row] = published_table_rows(section)
@@ -289,7 +289,7 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
 
       _missing ->
         flunk(
-          "docs/reference/trace-log-contract.md has no workflow-annotation vocabulary section"
+          "docs/maintainers/trace-log-contract.md has no workflow-annotation vocabulary section"
         )
     end
   end

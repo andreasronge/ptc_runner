@@ -61,7 +61,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     {"limits", "docs/kernel-limits-reference.md"},
     {"repl", "docs/reference/repl.md"},
     {"debug", "docs/reference/debug-navigation.md"},
-    {"traces", "docs/reference/trace-log-contract.md"},
+    {"traces", "docs/maintainers/trace-log-contract.md"},
     {"install", "docs/installation/standalone.md"},
     {"install-docker", "docs/installation/docker.md"},
     {"install-source", "docs/installation/source.md"},

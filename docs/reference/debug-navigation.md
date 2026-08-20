@@ -471,7 +471,8 @@ defects, are not established.
 
 - [Kernel REPL](repl.md) covers `private-run-analysis-v1` for
   interactive or unattended investigation of the same capture.
-- [TraceLog and run-analysis reference](trace-log-contract.md) defines every collection,
+- [TraceLog and run-analysis reference](../maintainers/trace-log-contract.md) defines
+  every collection,
   filter, relationship, and completeness field.
 - [Running and debugging](cli.md) documents artifacts,
   diagnostics, and the transcript command.
