@@ -156,7 +156,13 @@ the model-authored value returns.
 ```
 
 Runs the agent loop and distinguishes model-authored completion from a
-bounded subject-attributable failure.
+bounded subject-attributable failure or a bounded provider failure.
+
+Provider failures return `{:status :provider-failure :error error :model alias}`
+with the complete bounded LLM envelope. The closed `kind` and `reason` are
+facts for workflow policy; this entry does not choose retry, failover, or
+abort. Restarting with another alias starts another loop and does not resume
+the previous transcript.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`
@@ -210,8 +216,8 @@ Runs the agent loop and returns its model-authored value to the calling
 PTC-Lisp function. Unlike `run`, this does not terminate the outer program,
 so an application can validate or score the answer before returning.
 
-Subject failures retain the historical fail behavior. Evaluators that need
-to record those attempts use `run-outcome`.
+Subject failures and provider failures retain the historical fail behavior.
+Evaluators that need to record those attempts use `run-outcome`.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`

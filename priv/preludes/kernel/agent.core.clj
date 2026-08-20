@@ -290,6 +290,72 @@
        "reason" (turn-limit-reason-name (get (get outcome :error) :reason))})
     (fail (get outcome :error))))
 
+(defn- named-token [value]
+  (cond
+    (keyword? value) (name value)
+    (string? value) value
+    :else nil))
+
+(defn- recoverable-llm-error? [error]
+  (and (map? error)
+       (let [kind (named-token (get error :kind))
+             reason (named-token (get error :reason))]
+         (or (and (or (= kind "provider-error") (= kind "provider_error"))
+                  (or (= reason "denied")
+                      (= reason "not-found") (= reason "not_found")
+                      (= reason "unavailable")
+                      (= reason "invalid-request") (= reason "invalid_request")
+                      (= reason "internal")
+                      (= reason "domain-error") (= reason "domain_error")
+                      (= reason "invalid-result") (= reason "invalid_result")
+                      (= reason "authentication-failed") (= reason "authentication_failed")
+                      (= reason "payment-required") (= reason "payment_required")
+                      (= reason "rate-limited") (= reason "rate_limited")
+                      (= reason "tool-calling-unsupported") (= reason "tool_calling_unsupported")
+                      (= reason "timeout")
+                      (= reason "transport-error") (= reason "transport_error")))
+             (and (or (= kind "protocol-error") (= kind "protocol_error"))
+                  (or (= reason "unknown-model-alias") (= reason "unknown_model_alias")
+                      (= reason "invalid-model-alias") (= reason "invalid_model_alias")
+                      (= reason "model-alias-required") (= reason "model_alias_required")))
+             (and (= kind "timeout")
+                  (or (= reason "provider-timeout") (= reason "provider_timeout")))))))
+
+(defn- resolved-model [action cfg]
+  (let [error (get action :error)
+        from-error (when (map? error) (get error :model))
+        from-quota
+        (when (map? error)
+          (let [details (get error :details)]
+            (when (map? details) (get details :alias))))
+        from-cfg (get cfg "model")]
+    (or (when (nonblank-string? from-error) from-error)
+        (when (nonblank-string? from-quota) from-quota)
+        (when (nonblank-string? from-cfg) from-cfg))))
+
+(defn- provider-failure [error model]
+  (let [outcome {:status :provider-failure :error error}]
+    (if (nonblank-string? model)
+      (assoc outcome :model model)
+      outcome)))
+
+(defn- propagate-provider-failure [error]
+  ;; Named quota refusals authenticate through `fail` of the exact envelope.
+  ;; Typed provider failures consume the Kernel's provider-failure evidence.
+  ;; An unauthenticated envelope returns from the Kernel tool instead of
+  ;; aborting, so fail-fast entries still abort that diagnostic.
+  (if (= :max-calls (get (agent.native/normalize error 64000) :kind))
+    (fail error)
+    (fail
+      (tool/kernel-llm-provider-failure
+        (result/error :llm-provider-error error)))))
+
+(defn- propagate-outcome [outcome]
+  (case (get outcome :status)
+    :returned (get outcome :value)
+    :provider-failure (propagate-provider-failure (get outcome :error))
+    (propagate-subject-failure outcome)))
+
 (defn- result-contract-failure [value max-turns]
   (tool/kernel-result-contract-failure
     {"value" value "agent_turns" max-turns}))
@@ -321,14 +387,14 @@
     {:outcome :valid}))
 
 (defn- run-outcome*
-  "Runs the agent loop and distinguishes model-authored completion from a
-  bounded subject-attributable failure.
+  "Runs the agent loop and distinguishes model-authored completion, a bounded
+  subject-attributable failure, and a bounded provider failure.
 
-  Provider, prompt, transcript, quota, and other host/infrastructure failures
-  still fail the outer workflow. This function is for evaluators that must
-  score a model program failure, exhausted correction loop, or non-retryable
-  generated-program error without misclassifying provider failure as subject
-  behavior."
+  Prompt, transcript, evaluation-admission, provider-callback crashes, and
+  other host/infrastructure failures still fail the outer workflow. Typed LLM
+  envelopes, named quota refusals, and alias-resolution protocol errors return
+  as `:provider-failure` so a workflow that called this entry can inspect
+  `kind` and `reason`. Fail-fast entries still abort those envelopes."
   [task cfg validate-result?]
   (let [default-max-turns (bounded-option cfg "max_turns" 4 128)
         phases (configured-phases cfg default-max-turns)
@@ -602,17 +668,30 @@
                   (turn-limit-failure :protocol-error total-max-turns)))
 
               :max-calls
-              (fail (get action :error))
+              (provider-failure
+                (get action :error)
+                (resolved-model action current-effective-cfg))
 
               :provider-error
-              (tool/kernel-llm-provider-failure
-                (result/error :llm-provider-error (get action :error)))
+              (if (recoverable-llm-error? (get action :error))
+                (provider-failure
+                  (get action :error)
+                  (resolved-model action current-effective-cfg))
+                (fail
+                  (tool/kernel-llm-provider-failure
+                    (result/error :llm-provider-error (get action :error)))))
 
               (fail (result/error :unknown-action (get action :kind)))))))))))
 
 (defn run-outcome
   "Runs the agent loop and distinguishes model-authored completion from a
-  bounded subject-attributable failure."
+  bounded subject-attributable failure or a bounded provider failure.
+
+  Provider failures return `{:status :provider-failure :error error :model alias}`
+  with the complete bounded LLM envelope. The closed `kind` and `reason` are
+  facts for workflow policy; this entry does not choose retry, failover, or
+  abort. Restarting with another alias starts another loop and does not resume
+  the previous transcript."
   {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
   (run-outcome* task cfg false))
@@ -622,24 +701,18 @@
   PTC-Lisp function. Unlike `run`, this does not terminate the outer program,
   so an application can validate or score the answer before returning.
 
-  Subject failures retain the historical fail behavior. Evaluators that need
-  to record those attempts use `run-outcome`."
+  Subject failures and provider failures retain the historical fail behavior.
+  Evaluators that need to record those attempts use `run-outcome`."
   {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
-  (let [outcome (run-outcome task cfg)]
-    (if (= :returned (get outcome :status))
-      (get outcome :value)
-      (propagate-subject-failure outcome))))
+  (propagate-outcome (run-outcome task cfg)))
 
 (defn run-result-value
   "Runs the agent loop and validates model-authored completion against the
   manifest result contract before returning it to the calling workflow."
   {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
-  (let [outcome (run-outcome* task cfg true)]
-    (if (= :returned (get outcome :status))
-      (get outcome :value)
-      (propagate-subject-failure outcome))))
+  (propagate-outcome (run-outcome* task cfg true)))
 
 (defn run-phased-result-value
   "Runs a sequence of bounded mission phases while retaining the exact
@@ -652,10 +725,7 @@
   mission evaluation, and only the final phase may declare terminal_only."
   {:signature "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?, terminal_only :bool?}], max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
-  (let [outcome (run-outcome* task cfg true)]
-    (if (= :returned (get outcome :status))
-      (get outcome :value)
-      (propagate-subject-failure outcome))))
+  (propagate-outcome (run-outcome* task cfg true)))
 
 (defn run
   "Runs the agent loop as a terminal workflow entry.
