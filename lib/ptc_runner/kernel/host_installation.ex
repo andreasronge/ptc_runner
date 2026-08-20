@@ -28,6 +28,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
   of ambient locale and `inherit_environment`, so locale-sensitive servers
   encode protocol frames as UTF-8.
 
+  An LLM or replay install may set `ceilings.max_calls`; the application may
+  narrow it with `config.max_calls`. The Kernel counts those calls per alias
+  behind the public `llm-request` capability.
+
   Every public provider snapshot separates the safe declaration projection
   from bounded runtime-captured acquisition facts. `acquisition_identity_hash`
   covers the latter and bare-hex `snapshot_hash` covers both. An LLM adapter may
@@ -501,6 +505,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
           minimum: 1,
           maximum: installation.ceilings.max_response_bytes
         },
+        "max_calls" => %{
+          type: :integer,
+          input: true,
+          default: installation.ceilings.max_calls,
+          minimum: 1,
+          maximum: installation.ceilings.max_calls
+        },
         "default" => %{
           type: :boolean,
           input: true,
@@ -509,7 +520,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
       },
       cross_rules: [
         {:ceiling_of_context_limit, "max_request_bytes", :capability_argument_bytes},
-        {:ceiling_of_context_limit, "max_response_bytes", :capability_result_bytes}
+        {:ceiling_of_context_limit, "max_response_bytes", :capability_result_bytes},
+        {:ceiling_of_context_limit, "max_calls", :workflow_capability_calls_per_name}
       ],
       named_sets: %{}
     )
@@ -536,10 +548,18 @@ defmodule PtcRunner.Kernel.HostInstallation do
           type: :boolean,
           input: true,
           default: false
+        },
+        "max_calls" => %{
+          type: :integer,
+          input: true,
+          default: installation.ceilings.max_calls,
+          minimum: 1,
+          maximum: installation.ceilings.max_calls
         }
       },
       cross_rules: [
-        {:ceiling_of_context_limit, "max_result_bytes", :capability_result_bytes}
+        {:ceiling_of_context_limit, "max_result_bytes", :capability_result_bytes},
+        {:ceiling_of_context_limit, "max_calls", :workflow_capability_calls_per_name}
       ],
       named_sets: %{}
     )
@@ -687,7 +707,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
     %{
       source: Atom.to_string(installation.source),
       installation_revision: installation.installation_revision,
-      default: selected.default
+      default: selected.default,
+      max_calls: selected.max_calls
     }
   end
 

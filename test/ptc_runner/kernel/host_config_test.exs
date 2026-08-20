@@ -90,10 +90,51 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              cache: false,
              params: %{temperature: 0.2, seed: 42, max_tokens: 4_096},
              installation_revision: "model-policy-v2",
-             ceilings: %{max_request_bytes: 200_000, max_response_bytes: 300_000},
+             ceilings: %{
+               max_request_bytes: 200_000,
+               max_response_bytes: 300_000,
+               max_calls: 2_048
+             },
              data_class: :normal,
              accepts_data: [:normal, :private_inspection]
            }
+  end
+
+  @tag :tmp_dir
+  test "loads an explicit live LLM max_calls ceiling", %{tmp_dir: dir} do
+    config = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+          "credential" => "openrouter_key",
+          "installation_revision" => "model-policy-v2",
+          "ceilings" => %{"max_calls" => 4}
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+    assert host.install["deepseek"].ceilings.max_calls == 4
+  end
+
+  @tag :tmp_dir
+  test "refuses a max_calls ceiling that could never bind", %{tmp_dir: dir} do
+    config = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+          "credential" => "openrouter_key",
+          "installation_revision" => "model-policy-v2",
+          "ceilings" => %{"max_calls" => 2_049}
+        }
+      }
+    }
+
+    assert {:error, :invalid_host_config} = dir |> write_config(config) |> HostConfig.load()
   end
 
   test "command decoding rejects explicit nulls that semantic defaults would otherwise accept" do

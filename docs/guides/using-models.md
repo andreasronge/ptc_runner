@@ -5,7 +5,9 @@
 
 The operator installs a model under a stable alias in the host document. The
 application selects that alias for its trusted workflow. Generated mission code
-does not receive the model route.
+does not receive the model route. Two aliases share the public `llm-request`
+call budget; `config.max_calls` additionally caps an alias only when it is
+stricter than that shared budget.
 
 Bind credentials outside the application, preferably through a named environment
 variable or another operator-owned credential source. Then inspect the public

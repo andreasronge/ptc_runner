@@ -762,6 +762,36 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              )
   end
 
+  test "max_calls diagnostics name the alias and bind the runtime source" do
+    assert {:error, %CommandOutcome{} = outcome} =
+             project_limit_exceeded(:capability_quota, %{
+               limit: :max_calls,
+               alias: "deepseek",
+               limit_value: 4
+             })
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.max_calls_message("deepseek", 4)
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+
+    runtime_source = CommandSource.fixed(:runtime)
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: expected,
+               provider_activity: true
+             )
+
+    assert {:ok, %CommandDiagnostic{source: ^runtime_source}} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: expected,
+               source: runtime_source,
+               provider_activity: true
+             )
+  end
+
   test "application-authored turn-limit fields cannot claim an agent runtime limit" do
     usage = %{
       remaining_ms: 0,

@@ -75,9 +75,10 @@ Represents model-attributable completion or failure as data:
 ```
 
 Subject failures include model-program failure, exhausted turns, and a
-non-retryable generated-program error. Provider, prompt, transcript, quota,
-evaluation-admission, and other host failures still fail the outer workflow.
-This prevents an evaluator from scoring a provider outage against the subject.
+non-retryable generated-program error. Provider, prompt, transcript, quota
+(including a spent per-alias `max_calls`), evaluation-admission, and other host
+failures still fail the outer workflow. This prevents an evaluator from scoring
+a provider outage against the subject.
 
 ### `agent.core/run-result-value`
 

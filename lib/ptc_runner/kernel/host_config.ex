@@ -174,7 +174,8 @@ defmodule PtcRunner.Kernel.HostConfig do
               installation_revision: binary(),
               ceilings: %{
                 max_request_bytes: pos_integer(),
-                max_response_bytes: pos_integer()
+                max_response_bytes: pos_integer(),
+                max_calls: pos_integer()
               },
               data_class: :normal | :private_inspection,
               accepts_data: [:normal | :private_inspection]
@@ -183,7 +184,11 @@ defmodule PtcRunner.Kernel.HostConfig do
               source: :llm_replay,
               fixtures: binary(),
               installation_revision: binary(),
-              ceilings: %{max_entries: pos_integer(), max_result_bytes: pos_integer()},
+              ceilings: %{
+                max_entries: pos_integer(),
+                max_result_bytes: pos_integer(),
+                max_calls: pos_integer()
+              },
               data_class: :normal | :private_inspection,
               accepts_data: [:normal | :private_inspection]
             }
@@ -907,14 +912,15 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp llm_replay_ceilings(value) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(max_entries max_result_bytes), []),
+    with :ok <- exact_keys(value, ~w(max_entries max_result_bytes max_calls), []),
          max_entries when is_integer(max_entries) and max_entries > 0 <-
            Map.get(value, "max_entries", @max_replay_entries),
          true <- max_entries <= @max_replay_entries,
          max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
            Map.get(value, "max_result_bytes", @max_result_bytes),
-         true <- max_result_bytes <= @max_result_bytes do
-      {:ok, %{max_entries: max_entries, max_result_bytes: max_result_bytes}}
+         true <- max_result_bytes <= @max_result_bytes,
+         {:ok, max_calls} <- optional_max_calls(value) do
+      {:ok, %{max_entries: max_entries, max_result_bytes: max_result_bytes, max_calls: max_calls}}
     else
       _reason -> {:error, :invalid_ceilings}
     end
@@ -1229,17 +1235,19 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp ceilings(_value), do: {:error, :invalid_ceilings}
 
   defp llm_ceilings(value) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(max_request_bytes max_response_bytes), []),
+    with :ok <- exact_keys(value, ~w(max_request_bytes max_response_bytes max_calls), []),
          max_request_bytes
          when is_integer(max_request_bytes) and max_request_bytes in 1..@max_result_bytes <-
            Map.get(value, "max_request_bytes", 1_000_000),
          max_response_bytes
          when is_integer(max_response_bytes) and max_response_bytes in 1..@max_result_bytes <-
-           Map.get(value, "max_response_bytes", 1_000_000) do
+           Map.get(value, "max_response_bytes", 1_000_000),
+         {:ok, max_calls} <- optional_max_calls(value) do
       {:ok,
        %{
          max_request_bytes: max_request_bytes,
-         max_response_bytes: max_response_bytes
+         max_response_bytes: max_response_bytes,
+         max_calls: max_calls
        }}
     else
       _reason -> {:error, :invalid_ceilings}
@@ -1247,6 +1255,23 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp llm_ceilings(_value), do: {:error, :invalid_ceilings}
+
+  # A ceiling above the per-name installed ceiling can never bind, because the
+  # alias cap applies only when stricter than the run's per-name quota. Refuse
+  # the unreachable value at load instead of installing a silent no-op.
+  defp optional_max_calls(value) do
+    {:ok, row} = LimitCatalog.fetch(:workflow_capability_calls_per_name)
+
+    case Map.get(value, "max_calls", row.installed_default) do
+      max_calls
+      when is_integer(max_calls) and max_calls >= row.minimum and
+             max_calls <= row.installed_default ->
+        {:ok, max_calls}
+
+      _invalid ->
+        :error
+    end
+  end
 
   # Every enumerated string this decoder accepts maps to an atom through an
   # explicit clause, so the atom is a literal in this module and exists as soon
@@ -1525,7 +1550,8 @@ defmodule PtcRunner.Kernel.HostConfig do
               "minimum" => 1,
               "maximum" => @max_result_bytes,
               "default" => @max_result_bytes
-            }
+            },
+            "max_calls" => llm_max_calls_schema()
           }),
         "data_class" => data_class_schema(),
         "accepts_data" => accepts_data_schema()
@@ -1860,8 +1886,14 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp llm_ceilings_schema do
     closed_object(%{
       "max_request_bytes" => integer_schema(1, @max_result_bytes, 1_000_000),
-      "max_response_bytes" => integer_schema(1, @max_result_bytes, 1_000_000)
+      "max_response_bytes" => integer_schema(1, @max_result_bytes, 1_000_000),
+      "max_calls" => llm_max_calls_schema()
     })
+  end
+
+  defp llm_max_calls_schema do
+    {:ok, row} = LimitCatalog.fetch(:workflow_capability_calls_per_name)
+    integer_schema(row.minimum, row.installed_default, row.installed_default)
   end
 
   defp required_object(properties, required) do

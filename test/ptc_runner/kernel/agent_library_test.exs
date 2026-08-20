@@ -82,7 +82,18 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       {%{"tool_calls" => valid["tool_calls"] ++ valid["tool_calls"]}, "protocol-error",
        "multiple-or-missing-tool-calls"},
       {%{"tool_calls" => [%{"name" => "wrong", "args" => %{"program" => "x"}}]}, "protocol-error",
-       "wrong-tool-name"}
+       "wrong-tool-name"},
+      {%{
+         "status" => "error",
+         "kind" => "limit-exceeded",
+         "reason" => "capability-quota",
+         "details" => %{
+           "limit" => "max-calls",
+           "alias" => "expensive",
+           "limit_value" => 1
+         },
+         "retryable?" => false
+       }, "max-calls", nil}
     ]
 
     for {{response, expected_kind, expected_reason}, index} <- Enum.with_index(cases) do
@@ -690,14 +701,16 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                  source: "llm_replay",
                  installation_revision: "chosen-v1",
                  default?: false,
-                 capability: chosen
+                 capability: chosen,
+                 max_calls: nil
                },
                %{
                  alias: "other",
                  source: "llm_replay",
                  installation_revision: "other-v1",
                  default?: false,
-                 capability: other
+                 capability: other,
+                 max_calls: nil
                }
              ])
 

@@ -166,7 +166,14 @@ the process lifetime, and an existing process value wins. Embedded hosts load
 no dotenv file implicitly.</p><h2 id="choose-a-provider-source">Choose a provider source</h2><p>The source set and placement are closed:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;"><code class="inline">source</code></th><th style="text-align: left;">Purpose</th><th style="text-align: left;">Environment</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">llm</code></td><td style="text-align: left;">Live language model</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">llm_replay</code></td><td style="text-align: left;">Frozen model responses</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">mcp</code></td><td style="text-align: left;">External tool server</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_trace_snapshot</code></td><td style="text-align: left;">Public canonical trace queries</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_private_trace_snapshot</code></td><td style="text-align: left;">Private-authorized canonical trace queries</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_inspection_snapshot</code></td><td style="text-align: left;">Private inspection queries</td><td style="text-align: left;">Mission</td></tr></tbody></table></div><p>Selecting an alias into the wrong environment fails with
 <code class="inline">provider_destination_denied</code>. This keeps model authority out of
 model-authored mission code.</p><h3 id="live-models">Live models</h3><p>A live installation fixes the full model selector, credential, cache policy,
-optional request parameters, and request/response ceilings:</p><pre><code class="json language-json">&quot;deepseek&quot;: {
+optional request parameters, and request/response ceilings. <code class="inline">ceilings.max_calls</code>
+optionally caps how many times that alias may be invoked. Omitted, it defaults
+to the catalog installed default for <code class="inline">workflow_capability_calls_per_name</code>
+(2048), independent of the host <code class="inline">limits</code> block; a larger value could never
+bind and is refused at load. The application may narrow it
+with <code class="inline">config.max_calls</code>; asking above the host ceiling is refused rather than
+clamped. When that selected cap is at or above the run's per-name
+<code class="inline">llm-request</code> budget, the public per-name quota still binds first.</p><pre><code class="json language-json">&quot;deepseek&quot;: {
   &quot;source&quot;: &quot;llm&quot;,
   &quot;installation_revision&quot;: &quot;deepseek-policy-v1&quot;,
   &quot;model&quot;: &quot;openrouter:deepseek/deepseek-v4-flash&quot;,

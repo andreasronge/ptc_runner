@@ -313,7 +313,8 @@ defmodule PtcRunner.LiveStatusTest do
           source: "llm",
           installation_revision: "stable-v1",
           default?: true,
-          capability: leaf
+          capability: leaf,
+          max_calls: nil
         }
       ])
 

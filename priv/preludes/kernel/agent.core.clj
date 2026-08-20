@@ -601,6 +601,9 @@
                          (get next-state :closing?))
                   (turn-limit-failure :protocol-error total-max-turns)))
 
+              :max-calls
+              (fail (get action :error))
+
               :provider-error
               (tool/kernel-llm-provider-failure
                 (result/error :llm-provider-error (get action :error)))

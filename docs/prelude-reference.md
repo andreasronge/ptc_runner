@@ -457,7 +457,7 @@ Strict run_ptc_lisp model-action protocol.
 (agent.native/normalize response max-program-chars)
 ```
 
-Normalizes one provider response into a tool call, provider error, or protocol error.
+Normalizes one provider response into a tool call, provider error, max-calls refusal, or protocol error.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`

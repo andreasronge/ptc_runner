@@ -543,7 +543,8 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     retained = LLMReplayDiagnostic.retain_parallel_failure_metadata(taxonomy)
 
     case retained do
-      retained when map_size(retained) in 1..4 ->
+      # Taxonomy, provider-failure pair, replay hash, and max_calls triple.
+      retained when map_size(retained) in 1..7 ->
         message = "fail called inside #{if(reason == :pmap_error, do: "pmap", else: "pcalls")}"
 
         case reason do
