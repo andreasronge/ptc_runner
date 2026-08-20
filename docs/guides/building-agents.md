@@ -77,6 +77,9 @@ retain prompts, responses, generated source, and tool payloads. Use replay to
 hold model responses fixed while comparing a prompt or prelude candidate, then
 promote a change only after evaluating its evidence.
 
+The short [core-prompt replacement tutorial](components-and-preludes.md#trial-a-different-core-prompt)
+shows how to materialize and run an `agent.prompt` candidate.
+
 Use the [agent library reference](../agent-library-reference.md) for exact entry
 functions, options, outcomes, turn protocol, feedback, retry behavior, and
 concurrency limits. See [Customize agent components](components-and-preludes.md)

@@ -183,8 +183,10 @@ component without installing it. A trusted build step creates the owner-only
 candidate and descriptor from model-authored source. The
 <a href="/guides/evaluating-with-replay/">replay evaluation guide</a> owns the complete workflow
 for holding model responses fixed, gating effect changes, and comparing a
-baseline with that candidate. Candidate creation is not currently a standalone
-command; the source-checkout tool belongs to the maintainer documentation.</p><h2 id="read-results-and-failures">Read results and failures</h2><p>A successful normal run prints the compact JSON result value. A private run
+baseline with that candidate, and its descriptor reference defines every
+field. Candidate creation is not currently a standalone command; a source
+checkout provides <code class="inline">mix ptc.materialize</code> as documented in the
+<a href="/guides/components-and-preludes/#trial-a-different-core-prompt">core-prompt replacement tutorial</a>.</p><h2 id="read-results-and-failures">Read results and failures</h2><p>A successful normal run prints the compact JSON result value. A private run
 does not print its value. The V2 envelope records the result class, artifact
 states, bounded usage, retained-memory counts, and the closed diagnostic when
 one exists.</p><p>Capability failures normally enter PTC-Lisp as recoverable envelopes so the
