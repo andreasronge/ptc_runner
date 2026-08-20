@@ -83,6 +83,28 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output == expected <> "\n"
   end
 
+  test "direct eval renders a type_error kind only once" do
+    output =
+      capture_io(:stderr, fn ->
+        error =
+          assert_raise Mix.Error, fn ->
+            run_repl(["-e", ~S|(str/split "a-VERDICT-b" "VERDICT")|])
+          end
+
+        assert String.starts_with?(
+                 error.message,
+                 "error: repl/command_failed: Error (type_error): split: " <>
+                   "delimiter must be a regex pattern"
+               )
+
+        refute error.message =~ "type_error: type_error"
+      end)
+
+    assert output ==
+             "Error (type_error): split: delimiter must be a regex pattern, " <>
+               "got plain string \"VERDICT\"\n"
+  end
+
   test "interactive mode prints output and exits on EOF" do
     output = capture_io("(println 42)\n", fn -> run_repl([]) end)
     assert output =~ "42\nnil"
