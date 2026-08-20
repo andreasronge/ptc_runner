@@ -8,15 +8,60 @@
 inspection artifact.
 
 This page defines what a canonical trace and a private inspection artifact
-contain, and how each may be queried. It is a repository document rather than
-part of the user documentation set; the executable carries it as
-`ptc docs traces` for navigating a run's evidence. Owner-process lifecycle,
-immutable capture, publication mechanics, and the contract-test inventory are
-implementation concerns and live in the Kernel maintainer guide
-(`docs/maintainers/kernel.md`) and beside the code in the
-`PtcRunner.Kernel.TraceLog`,
-`PtcRunner.Kernel.EventSink`, `PtcRunner.Kernel.InspectionSink`, and
-`PtcRunner.Kernel.InspectionArtifact` module documentation.
+contain, and how each may be queried. It is the field guide to the record
+vocabulary, not a walkthrough: for the evidence graph and the debugging path
+through it, read the
+[debug-navigation reference](../reference/debug-navigation.md) first.
+Owner-process lifecycle, immutable capture, publication mechanics, and the
+contract-test inventory are implementation concerns and live in the Kernel
+maintainer guide (`docs/maintainers/kernel.md`) and beside the code in the
+`PtcRunner.Kernel.TraceLog`, `PtcRunner.Kernel.EventSink`,
+`PtcRunner.Kernel.InspectionSink`, and `PtcRunner.Kernel.InspectionArtifact`
+module documentation.
+
+## Producing and opening a capture
+
+Nothing here is queryable until a run writes a trace. A canonical trace alone
+answers the public `activity` collection; every other collection additionally
+needs the private inspection artifact, which a run only writes when asked.
+
+Both destinations must already exist: `--trace-dir` names an existing
+directory, and `--inspect` names a file inside one.
+
+```bash
+mkdir -p traces traces-private
+
+# Canonical trace only — supports analysis/runs, analysis/open, and activity.
+ptc run PROJECT.json --trace-dir traces/
+
+# Trace plus private inspection — additionally supports every private
+# collection: turns, model_exchanges, generated_sources, and the rest.
+ptc run PROJECT.json --trace-dir traces/ \
+  --inspect traces-private/run.inspection.jsonl
+```
+
+A project document can capture both instead of the two switches; see
+[project configuration](../reference/project-files.md).
+
+Two code-owned profiles read those artifacts. `run-analysis-v1` takes the
+canonical trace and grants the three `analysis-*` capabilities.
+`private-run-analysis-v1` additionally takes the inspection artifact, and
+requires an authorized private sink because the records it returns carry exact
+prompts, generated source, and capability payloads.
+
+```bash
+# Public: canonical evidence only.
+ptc repl --profile run-analysis-v1 --resource traces=traces/
+
+# Private: adds every private collection. --resource takes the DIRECTORY
+# holding the artifact, not the .inspection.jsonl path --inspect was given.
+ptc repl --profile private-run-analysis-v1 --private-terminal \
+  --resource traces=traces/ --resource inspection=traces-private/
+```
+
+Use `--private-unattended` in place of `--private-terminal` when no terminal is
+attached, and `--load QUERY.clj` to run forms non-interactively. `ptc repl
+--describe-profile NAME` prints either profile's static contract.
 
 ## Purpose and boundary
 
@@ -216,9 +261,13 @@ The shipped analysis prelude exposes a small navigation namespace:
 Examples:
 
 ```clojure
+;; Either profile.
 (analysis/runs {"status" "error" "tags" {"stage" "failed"} "limit" 20})
 (analysis/open "run-id")
 (analysis/read "run-id" {"collection" "activity" "limit" 100})
+
+;; private-run-analysis-v1 only: every collection but `activity` is private
+;; authority, and returns an :invalid_request envelope under the public profile.
 (analysis/read "run-id" {"collection" "turns" "limit" 20})
 (analysis/read "run-id" {"collection" "generated_sources"
                          "prelude_call" "workspace/read"})
