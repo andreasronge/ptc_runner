@@ -142,19 +142,19 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   test "post-resolution LLM failures carry the resolved installation alias" do
     timeout = ProviderError.new(:timeout, "provider timed out", retryable?: true)
 
-    {:ok, chosen} =
+    {:ok, failing} =
       LLMCapability.new(requester: fn _request -> {:error, timeout} end)
 
-    {:ok, other} =
+    {:ok, unused} =
       LLMCapability.new(requester: fn _request -> flunk("wrong model alias invoked") end)
 
-    assert {:ok, router} =
+    assert {:ok, explicit_router} =
              LLMRouter.new([
-               route("chosen", "llm_replay", "chosen-v1", true, chosen),
-               route("other", "llm_replay", "other-v1", false, other)
+               route("chosen", "llm_replay", "chosen-v1", true, unused),
+               route("other", "llm_replay", "other-v1", false, failing)
              ])
 
-    assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [router])
+    assert {:ok, explicit_workflow} = WorkflowEnvironment.new(capabilities: [explicit_router])
     assert {:ok, limits} = Limits.new()
     assert {:ok, state} = RunState.start(limits)
     context = TestHelpers.dispatch_context(state, :workflow, 1_000)
@@ -164,18 +164,26 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              kind: :provider_error,
              reason: :timeout,
              retryable?: true,
-             model: "chosen"
+             model: "other"
            } =
              Dispatcher.dispatch(
                state,
                :workflow,
-               workflow,
+               explicit_workflow,
                "llm-request",
-               %{"model" => "chosen", "messages" => []},
+               %{"model" => "other", "messages" => []},
                context,
                nil,
                nil
              )
+
+    assert {:ok, default_router} =
+             LLMRouter.new([
+               route("chosen", "llm_replay", "chosen-v1", true, failing),
+               route("other", "llm_replay", "other-v1", false, unused)
+             ])
+
+    assert {:ok, default_workflow} = WorkflowEnvironment.new(capabilities: [default_router])
 
     assert %{
              status: :error,
@@ -187,7 +195,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              Dispatcher.dispatch(
                state,
                :workflow,
-               workflow,
+               default_workflow,
                "llm-request",
                %{"messages" => []},
                context,

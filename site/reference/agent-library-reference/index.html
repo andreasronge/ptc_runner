@@ -124,7 +124,8 @@ entry when the caller should continue only after a successful agent result.</p><
  :error bounded-llm-envelope
  :model resolved-alias}</code></pre><p>Subject failures include model-program failure, exhausted turns, and a
 non-retryable generated-program error. Prompt, transcript,
-evaluation-admission, and other host failures still fail the outer workflow.
+evaluation-admission, provider-callback crashes, and other host
+failures still fail the outer workflow.
 Typed LLM provider envelopes, named capability-quota refusals, and
 alias-resolution protocol errors return as <code class="inline">:provider-failure</code> so the caller
 can inspect the closed <code class="inline">kind</code> and <code class="inline">reason</code>. <code class="inline">:model</code> is the resolved

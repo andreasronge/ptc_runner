@@ -80,7 +80,8 @@ Represents model-attributable completion or failure as data:
 
 Subject failures include model-program failure, exhausted turns, and a
 non-retryable generated-program error. Prompt, transcript,
-evaluation-admission, and other host failures still fail the outer workflow.
+evaluation-admission, provider-callback crashes, and other host
+failures still fail the outer workflow.
 Typed LLM provider envelopes, named capability-quota refusals, and
 alias-resolution protocol errors return as `:provider-failure` so the caller
 can inspect the closed `kind` and `reason`. `:model` is the resolved

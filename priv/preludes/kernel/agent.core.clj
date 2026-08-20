@@ -290,6 +290,37 @@
        "reason" (turn-limit-reason-name (get (get outcome :error) :reason))})
     (fail (get outcome :error))))
 
+(defn- named-token [value]
+  (cond
+    (keyword? value) (name value)
+    (string? value) value
+    :else nil))
+
+(defn- recoverable-llm-error? [error]
+  (and (map? error)
+       (let [kind (named-token (get error :kind))
+             reason (named-token (get error :reason))]
+         (or (and (or (= kind "provider-error") (= kind "provider_error"))
+                  (or (= reason "denied")
+                      (= reason "not-found") (= reason "not_found")
+                      (= reason "unavailable")
+                      (= reason "invalid-request") (= reason "invalid_request")
+                      (= reason "internal")
+                      (= reason "domain-error") (= reason "domain_error")
+                      (= reason "invalid-result") (= reason "invalid_result")
+                      (= reason "authentication-failed") (= reason "authentication_failed")
+                      (= reason "payment-required") (= reason "payment_required")
+                      (= reason "rate-limited") (= reason "rate_limited")
+                      (= reason "tool-calling-unsupported") (= reason "tool_calling_unsupported")
+                      (= reason "timeout")
+                      (= reason "transport-error") (= reason "transport_error")))
+             (and (or (= kind "protocol-error") (= kind "protocol_error"))
+                  (or (= reason "unknown-model-alias") (= reason "unknown_model_alias")
+                      (= reason "invalid-model-alias") (= reason "invalid_model_alias")
+                      (= reason "model-alias-required") (= reason "model_alias_required")))
+             (and (= kind "timeout")
+                  (or (= reason "provider-timeout") (= reason "provider_timeout")))))))
+
 (defn- resolved-model [action cfg]
   (let [error (get action :error)
         from-error (when (map? error) (get error :model))
@@ -359,11 +390,11 @@
   "Runs the agent loop and distinguishes model-authored completion, a bounded
   subject-attributable failure, and a bounded provider failure.
 
-  Prompt, transcript, evaluation-admission, and other host/infrastructure
-  failures still fail the outer workflow. Typed LLM envelopes, named quota
-  refusals, and alias-resolution protocol errors return as `:provider-failure`
-  so a workflow that called this entry can inspect `kind` and `reason`.
-  Fail-fast entries still abort those envelopes."
+  Prompt, transcript, evaluation-admission, provider-callback crashes, and
+  other host/infrastructure failures still fail the outer workflow. Typed LLM
+  envelopes, named quota refusals, and alias-resolution protocol errors return
+  as `:provider-failure` so a workflow that called this entry can inspect
+  `kind` and `reason`. Fail-fast entries still abort those envelopes."
   [task cfg validate-result?]
   (let [default-max-turns (bounded-option cfg "max_turns" 4 128)
         phases (configured-phases cfg default-max-turns)
@@ -642,9 +673,13 @@
                 (resolved-model action current-effective-cfg))
 
               :provider-error
-              (provider-failure
-                (get action :error)
-                (resolved-model action current-effective-cfg))
+              (if (recoverable-llm-error? (get action :error))
+                (provider-failure
+                  (get action :error)
+                  (resolved-model action current-effective-cfg))
+                (fail
+                  (tool/kernel-llm-provider-failure
+                    (result/error :llm-provider-error (get action :error)))))
 
               (fail (result/error :unknown-action (get action :kind)))))))))))
 

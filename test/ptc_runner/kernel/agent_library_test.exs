@@ -4040,51 +4040,35 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   test "agent.core run-outcome returns typed provider failures with the resolved alias" do
     timeout = ProviderError.new(:timeout, "provider timed out", retryable?: true)
-    {:ok, chosen} = LLMCapability.new(requester: fn _ -> {:error, timeout} end)
-    {:ok, other} = LLMCapability.new(requester: fn _ -> flunk("wrong model alias invoked") end)
+    {:ok, failing} = LLMCapability.new(requester: fn _ -> {:error, timeout} end)
+    {:ok, unused} = LLMCapability.new(requester: fn _ -> flunk("wrong model alias invoked") end)
 
-    assert {:ok, router} =
-             LLMRouter.new([
-               %{
-                 alias: "chosen",
-                 source: "llm_replay",
-                 installation_revision: "chosen-v1",
-                 default?: true,
-                 capability: chosen,
-                 max_calls: nil
-               },
-               %{
-                 alias: "other",
-                 source: "llm_replay",
-                 installation_revision: "other-v1",
-                 default?: false,
-                 capability: other,
-                 max_calls: nil
-               }
-             ])
+    assert {:ok, explicit_router} = replay_alias_router(unused, failing)
 
-    {:ok, explicit_config} = agent_router_config(router)
+    {:ok, explicit_config} = agent_router_config(explicit_router)
 
     assert {:ok,
             %{
               value: %{
                 "status" => "provider-failure",
-                "model" => "chosen",
+                "model" => "other",
                 "error" => %{
                   "status" => "error",
                   "kind" => "provider_error",
                   "reason" => "timeout",
                   "retryable?" => true,
-                  "model" => "chosen"
+                  "model" => "other"
                 }
               }
             }} =
              Kernel.run(
-               ~S|(return (agent.core/run-outcome "Retry later" {"model" "chosen" "max_turns" 1}))|,
+               ~S|(return (agent.core/run-outcome "Retry later" {"model" "other" "max_turns" 1}))|,
                explicit_config
              )
 
-    {:ok, default_config} = agent_router_config(router)
+    assert {:ok, default_router} = replay_alias_router(failing, unused)
+
+    {:ok, default_config} = agent_router_config(default_router)
 
     assert {:ok,
             %{
@@ -4280,6 +4264,16 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              Kernel.run(~S|(agent.core/run "Spend the alias" {"max_turns" 2})|, quota_config)
   end
 
+  test "agent.core run-outcome still fails host callback exceptions" do
+    {:ok, config} = agent_config_with_requester(fn _request -> raise "boom" end)
+
+    assert {:error, %{kind: :workflow_failed}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Host crash" {"max_turns" 1}))|,
+               config
+             )
+  end
+
   defp agent_config(responses, limit_overrides \\ [], opts \\ []) do
     parent = self()
     {:ok, queue} = Agent.start_link(fn -> responses end)
@@ -4354,6 +4348,24 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       limits: limits,
       event_sink: sink
     )
+  end
+
+  defp replay_alias_router(chosen_capability, other_capability) do
+    LLMRouter.new([
+      replay_alias_route("chosen", true, chosen_capability),
+      replay_alias_route("other", false, other_capability)
+    ])
+  end
+
+  defp replay_alias_route(alias_name, default?, capability) do
+    %{
+      alias: alias_name,
+      source: "llm_replay",
+      installation_revision: alias_name <> "-v1",
+      default?: default?,
+      capability: capability,
+      max_calls: nil
+    }
   end
 
   defp agent_router_config(router) do
