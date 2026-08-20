@@ -2961,6 +2961,32 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert workflow_stopped.data.environment == :workflow
   end
 
+  test "runner-added kernel-eval errors are not counted as capability refusals" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "kernel-eval-unknown-mission")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: value, usage: usage}} =
+             Kernel.run(
+               ~S|(return (tool/kernel-eval {:mission "missing" :kind :source :source "(return 1)"}))|,
+               config
+             )
+
+    assert value["status"] == "error"
+    assert value["reason"] == "unknown_mission"
+    assert usage.capability_refusals == %{}
+  end
+
   test "workflow kernel-eval restores quoted-symbol identity inside the parent evaluator" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
