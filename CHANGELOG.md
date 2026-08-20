@@ -122,11 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Replaced eager `cap/collect-pages` with resumable `cap/fold-pages`, which
   reduces pages into bounded caller state, preserves the next cursor at a page
-  bound, and rejects changed snapshots or cursor cycles. The bundled filesystem
-  MCP sample now uses the same signed, query-bound cursor envelope for listing,
-  path search, streaming text search, and exact UTF-8 file chunks. Its 0.2.0
-  disk-backed snapshot can traverse files above the former 1 MiB ceiling without
-  retaining file contents in the Node or BEAM heap.
+  bound, and rejects changed snapshots or cursor cycles.
 
 - Analysis and trace snapshot pagination now treats the caller's item limit as
   an upper bound and returns the largest prefix whose complete encoded and

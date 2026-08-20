@@ -88,9 +88,17 @@ while IFS= read -r path || [ -n "$path" ]; do
       viewer=true
       ;;
 
-    test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs|\
+    test/support/ptc_fs_mcp.ex|\
+      test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs|\
       test/ptc_runner/kernel/named_missions_authority_e2e_test.exs|\
       test/ptc_runner/kernel/ptc_fs_mcp_stdio_test.exs)
+      mcp_filesystem=true
+      ;;
+
+    examples/named-mission-reader-writer/ptc-host.json|\
+      examples/viewer-demo/ptc-host.json|\
+      examples/kernel-inspection-lab/support/lab.exs)
+      core=true
       mcp_filesystem=true
       ;;
 
