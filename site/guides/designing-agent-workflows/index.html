@@ -159,12 +159,15 @@ result forward, and validates the final report against the manifest's
 customer-authored, so the workflow wraps them in an <code class="inline">&lt;untrusted_tickets&gt;</code>
 block (stripping any smuggled closing marker) and the task names the block as
 data, not instructions. The marking is prompt hygiene, not enforcement — a
-model can still be misled by text inside the block. What makes the handoff
-safe to get wrong is the mission grant: the escalation mission holds no
-tickets and no tools, so injected text can at worst skew a classification,
-never reach a capability. The agent loop marks its own tool observations as
-untrusted automatically; text a workflow splices into a task string is the
-workflow's responsibility.</p><pre><code class="console language-console">ptc run support-triage/03-specialists.ptc-project.json</code></pre><p>A run returns a contract-valid report; an invalid candidate would have
+model can still be misled by text inside the block. What the mission grant
+enforces is narrower and absolute: the escalation mission holds no tickets
+and no tools, so injected text can never reach a capability or the wider
+ticket pool. It can still corrupt this one report — wrong teams, wrong
+priorities, a misleading summary — or waste the run, which is why report
+content needs its own downstream check: the schema bounds the shape, and
+this example's scheduled live test checks the claims. The agent loop marks
+its own tool observations as untrusted automatically; text a workflow
+splices into a task string is the workflow's responsibility.</p><pre><code class="console language-console">ptc run support-triage/03-specialists.ptc-project.json</code></pre><p>A run returns a contract-valid report; an invalid candidate would have
 received bounded correction feedback instead of reaching you. This run
 escalated all four breached tickets:</p><pre><code class="json language-json">{&quot;escalations&quot;:[
   {&quot;id&quot;:&quot;T-1004&quot;,&quot;priority&quot;:81,&quot;team&quot;:&quot;payments&quot;,

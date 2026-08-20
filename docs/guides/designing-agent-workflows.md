@@ -139,12 +139,15 @@ The `quarantined` helper marks the handoff: ticket subjects and bodies are
 customer-authored, so the workflow wraps them in an `<untrusted_tickets>`
 block (stripping any smuggled closing marker) and the task names the block as
 data, not instructions. The marking is prompt hygiene, not enforcement — a
-model can still be misled by text inside the block. What makes the handoff
-safe to get wrong is the mission grant: the escalation mission holds no
-tickets and no tools, so injected text can at worst skew a classification,
-never reach a capability. The agent loop marks its own tool observations as
-untrusted automatically; text a workflow splices into a task string is the
-workflow's responsibility.
+model can still be misled by text inside the block. What the mission grant
+enforces is narrower and absolute: the escalation mission holds no tickets
+and no tools, so injected text can never reach a capability or the wider
+ticket pool. It can still corrupt this one report — wrong teams, wrong
+priorities, a misleading summary — or waste the run, which is why report
+content needs its own downstream check: the schema bounds the shape, and
+this example's scheduled live test checks the claims. The agent loop marks
+its own tool observations as untrusted automatically; text a workflow
+splices into a task string is the workflow's responsibility.
 
 ```console
 ptc run support-triage/03-specialists.ptc-project.json
