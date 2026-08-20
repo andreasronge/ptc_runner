@@ -158,6 +158,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
     project = Path.join(target, "ptc-project.json")
     root = Path.join(target, ".ptc")
     File.mkdir!(root)
+    File.chmod!(root, 0o755)
 
     presentation =
       CommandFrontend.execute(

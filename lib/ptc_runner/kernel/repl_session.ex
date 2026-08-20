@@ -769,11 +769,6 @@ defmodule PtcRunner.Kernel.ReplSession do
     end
   end
 
-  defp subordinate_mission_message(_session) do
-    "this workflow REPL session holds the evaluation lease and cannot run " <>
-      "subordinate evaluations; pass --mission NAME to open a mission session instead"
-  end
-
   defp tools(session, validation_deadline_ms) do
     timeout_ms = session.config.limits.evaluation_timeout_ms
 
