@@ -240,7 +240,13 @@ defmodule PtcViewer.ReplStoreTest do
     else
       ref = make_ref()
       Process.send_after(self(), {:eventual_retry, ref}, 10)
-      assert_receive {:eventual_retry, ^ref}, 100
+
+      receive do
+        {:eventual_retry, ^ref} -> :ok
+      after
+        1_000 -> flunk("eventual retry timer did not fire")
+      end
+
       assert_eventually(predicate, attempts - 1)
     end
   end
