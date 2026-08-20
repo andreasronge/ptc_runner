@@ -37,6 +37,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.Formatter
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.Lisp.Prelude.Description
   alias PtcRunner.Lisp.Prelude.ErrorSpan
   alias PtcRunner.Lisp.Prelude.Export
   alias PtcRunner.Lisp.Prelude.Spec
@@ -92,17 +93,54 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     do: compile_source(source, opts)
 
   defp compile_source(source, opts) do
+    with {:ok, description} <- describe_unlocated(source),
+         do: compile_description(description, opts)
+  end
+
+  @doc false
+  @spec describe_unlocated(String.t()) ::
+          {:ok, Description.t()} | {:error, ValidationError.t()}
+  def describe_unlocated(source) when is_binary(source) do
     with {:ok, {:program, forms}} <- parse(source),
          {:ok, specs, ns_meta} <- collect_specs(forms),
-         :ok <- validate_spec_effects(specs),
+         :ok <- validate_spec_effects(specs) do
+      {:ok,
+       %Description{
+         source: source,
+         specs: specs,
+         namespace_metadata: ns_meta,
+         namespaces: ns_meta |> Map.keys() |> Enum.sort()
+       }}
+    end
+  catch
+    {:unrecognized_prelude_node, tag} -> unrecognized_node_error(tag)
+  end
+
+  @doc false
+  @spec compile_description(Description.t(), keyword()) ::
+          {:ok, Prelude.t()} | {:error, ValidationError.t()}
+  def compile_description(%Description{} = description, opts \\ []) when is_list(opts) do
+    compile_description_unchecked(description, opts)
+  catch
+    {:unrecognized_prelude_node, tag} -> unrecognized_node_error(tag)
+  end
+
+  defp compile_description_unchecked(
+         %Description{
+           source: source,
+           specs: specs,
+           namespace_metadata: ns_meta,
+           namespaces: namespaces
+         },
+         opts
+       ) do
+    with :ok <- validate_spec_effects(specs),
          {:ok, dep_ctx} <- build_dep_context(ns_meta, opts),
          :ok <- reject_dep_refs_in_defs(specs, dep_ctx),
          form_graph = build_form_graph(specs, dep_ctx),
          {:ok, exports} <- build_exports(specs, ns_meta, form_graph, dep_ctx),
          {:ok, private_env} <- build_runtime(specs, exports, dep_ctx),
          :ok <- validate_constant_contracts(exports, private_env) do
-      namespaces = ns_meta |> Map.keys() |> Enum.sort()
-
       {:ok,
        %Prelude{
          namespaces: namespaces,
@@ -114,17 +152,76 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          metadata: %{namespaces: ns_meta}
        }}
     end
-  catch
-    # The raw-AST walkers fail CLOSED on an unrecognized node (see
-    # `leaf_or_reject/2`). Convert that throw into the prelude's normal error
-    # channel — the contract is "compile failures are RETURNED, never raised".
-    {:unrecognized_prelude_node, tag} ->
-      {:error,
-       ValidationError.new(
-         :unrecognized_node,
-         "prelude body contains an unrecognized syntax node `#{inspect(tag)}`; refusing to " <>
-           "compile because its tool requirements cannot be safely determined (fail-closed)"
-       )}
+  end
+
+  # The raw-AST walkers fail CLOSED on an unrecognized node (see
+  # `leaf_or_reject/2`). Convert that throw into the prelude's normal error
+  # channel — the contract is "compile failures are RETURNED, never raised".
+  defp unrecognized_node_error(tag) do
+    {:error,
+     ValidationError.new(
+       :unrecognized_node,
+       "prelude body contains an unrecognized syntax node `#{inspect(tag)}`; refusing to " <>
+         "compile because its tool requirements cannot be safely determined (fail-closed)"
+     )}
+  end
+
+  @doc false
+  @spec compose([Prelude.t()], String.t(), [map()]) ::
+          {:ok, Prelude.t()} | {:error, ValidationError.t()}
+  def compose(preludes, aggregate_source, components)
+      when is_list(preludes) and is_binary(aggregate_source) and is_list(components) do
+    with :ok <- unique_composed_namespaces(preludes) do
+      {:ok,
+       %Prelude{
+         namespaces: preludes |> Enum.flat_map(& &1.namespaces) |> Enum.sort(),
+         exports: Enum.flat_map(preludes, & &1.exports),
+         private_env: merge_prelude_map(preludes, :private_env),
+         source_hash: source_hash(aggregate_source),
+         form_graph: merge_prelude_map(preludes, :form_graph),
+         metadata: %{
+           namespaces: merge_namespace_metadata(preludes),
+           components: components
+         }
+       }}
+    end
+  end
+
+  defp unique_composed_namespaces(preludes) do
+    preludes
+    |> Enum.reduce_while(MapSet.new(), fn
+      %Prelude{namespaces: namespaces}, seen ->
+        case Enum.find(namespaces, &MapSet.member?(seen, &1)) do
+          nil ->
+            {:cont, Enum.reduce(namespaces, seen, &MapSet.put(&2, &1))}
+
+          namespace ->
+            {:halt,
+             {:error,
+              ValidationError.new(
+                :invalid_namespace,
+                "namespace `#{namespace}` is declared by more than one component",
+                namespace: namespace
+              )}}
+        end
+
+      _invalid, _seen ->
+        {:halt, {:error, ValidationError.new(:compile_error, "invalid compiled prelude")}}
+    end)
+    |> case do
+      %MapSet{} -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp merge_prelude_map(preludes, field) do
+    Enum.reduce(preludes, %{}, &Map.merge(&2, Map.fetch!(&1, field)))
+  end
+
+  defp merge_namespace_metadata(preludes) do
+    Enum.reduce(preludes, %{}, fn prelude, metadata ->
+      Map.merge(metadata, Map.get(prelude.metadata, :namespaces, %{}))
+    end)
   end
 
   # ============================================================

@@ -187,6 +187,21 @@ forms through ordinary `Evaluation` rather than the workflow evaluator.
 graph into a `FrozenBundle`. Compilation records public exports and transitive
 `tool:*` requirements but grants no capability.
 
+Each source is parsed once into a compiler description, then compiled in
+dependency order against only its declared namespace scope. The bundle
+compiler rejects namespace collisions explicitly and composes those validated
+Core artifacts into the aggregate prelude; it does not recompile concatenated
+source. `FrozenBundle.components` retains only each component's ID, direct
+dependencies, origin, source hash, and namespaces. Callable per-component
+preludes exist only during bounded compilation, so bundle attestation does not
+serialize a duplicate callable graph.
+
+Within one `RunCoordinator.prepare/2` or direct provider-bearing build,
+byte-identical normalized workflow and mission component sets reuse the same
+sealed bundle. This reuse is local to that preparation: there is no process,
+ETS table, `persistent_term`, or cross-preparation cache, and a cache hit grants
+no authority.
+
 Compiler-rendered strings do not cross the command boundary. Prelude analysis
 represents an unknown namespace as bounded structured detail: the rejected
 namespace plus the canonical sorted list owned by the Lisp namespace diagnostic

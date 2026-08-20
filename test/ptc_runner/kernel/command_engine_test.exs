@@ -5811,6 +5811,47 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "preparation reuses a byte-identical workflow bundle for missions", %{tmp_dir: directory} do
+    source = """
+    (ns app)
+    (defn run [input]
+      (return (case (:mode input) :first 1 0)))
+    """
+
+    application =
+      write_application(
+        directory,
+        "prepared-bundle-reuse",
+        valid_manifest(%{
+          "missions" => %{
+            "first" => %{
+              "components" => [%{"id" => "app", "path" => "main.clj"}],
+              "data" => %{}
+            },
+            "second" => %{
+              "components" => [%{"id" => "app", "path" => "main.clj"}],
+              "data" => %{}
+            }
+          }
+        }),
+        %{"main.clj" => source}
+      )
+
+    assert {:ok, request} =
+             ApplicationPackage.request_directory(application, result_projection: :json)
+
+    assert {:ok, registry} = ProviderRegistry.new()
+    assert {:ok, prepared} = RunCoordinator.prepare(request, catalog_for(registry))
+
+    assert prepared.mission_bundles == %{
+             "first" => prepared.workflow_bundle,
+             "second" => prepared.workflow_bundle
+           }
+
+    assert :ok = PreparedRun.close(prepared)
+  end
+
+  @tag :tmp_dir
   test "a prepared run cannot bypass provider declaration preparation", %{tmp_dir: directory} do
     application =
       write_application(

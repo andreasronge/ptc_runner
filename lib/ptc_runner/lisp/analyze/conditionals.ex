@@ -668,6 +668,10 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
 
   defp gensym(prefix) do
     n = :erlang.unique_integer([:positive])
-    {:var, :"__#{prefix}_#{n}"}
+
+    # The leading NUL cannot be authored as a PTC-Lisp identifier, so an
+    # internal temporary cannot shadow or be shadowed by source even though
+    # Core variable names intentionally support binaries.
+    {:var, IO.iodata_to_binary([<<0>>, "__ptc_", prefix, "_", Integer.to_string(n)])}
   end
 end

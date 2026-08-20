@@ -12,6 +12,7 @@ many concurrent multi-turn sessions).
 |---|---|---|
 | `mix bench.check` | Deterministic nightly/release gate for sandbox child eval reductions vs committed baseline; also prints the heap table informationally | custom Mix task |
 | `mix bench.heap` / `heap_baseline.exs` | Heap cost of every embedding unit vs `baselines/heap.json`: idle floor without Mix, `Lisp.run`, `compile_bundle`, `Kernel.run`, concurrency 1..128 | custom Mix task |
+| `prelude_bundle.exs` | Bundle preparation phases, composition vs aggregate recompilation, retained artifacts, 1..128-component scaling, identical/distinct preparations, and a shipped `agent.core` execution-overhead proxy | custom script |
 | `lisp_throughput.exs` | Per-program latency: parse / analyze / full run; per-archetype; latency under `parallel:` load | Benchee |
 | `lisp_profile.exs` | Function-level call_time + call_count, aggregated across the per-run sandbox processes | OTP `:tprof` |
 | `lisp_concurrency.exs` | Aggregate throughput vs concurrency; scheduler microstate; GC pressure | `:msacc` + `:erlang.statistics` |
@@ -23,6 +24,7 @@ mix bench.check                             # gates reductions, reports heap
 mix bench.check --write-baseline --reason "accepted cause"
 mix bench.heap                              # gates heap
 mix run bench/heap_baseline.exs             # reports heap; --write re-records
+mix run bench/prelude_bundle.exs            # PTC_PRELUDE_BENCH_SAMPLES defaults to 7
 mix run bench/lisp_throughput.exs
 mix run bench/lisp_profile.exs              # PROFILE_ITERS env var (default 3000)
 mix run bench/lisp_concurrency.exs

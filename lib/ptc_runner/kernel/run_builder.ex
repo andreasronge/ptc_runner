@@ -766,7 +766,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
            mission_bundles(
              request.package.missions,
              deadline,
-             :erlang.external_size(workflow_bundle)
+             :erlang.external_size(workflow_bundle),
+             request.package.workflow_components,
+             workflow_bundle
            ),
          :ok <- RunCoordinator.validate_entry(workflow_bundle, request.package.entry),
          :ok <-
@@ -862,8 +864,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end)
   end
 
-  defp mission_bundles(missions, deadline, initial_bytes) do
-    case BundleCompiler.compile_named(missions, deadline, initial_bytes, 4_000_000) do
+  defp mission_bundles(missions, deadline, initial_bytes, workflow_components, workflow_bundle) do
+    case BundleCompiler.compile_named(
+           missions,
+           deadline,
+           initial_bytes,
+           4_000_000,
+           [{workflow_components, workflow_bundle}]
+         ) do
       {:ok, bundles} -> {:ok, bundles}
       {:error, {_failure, _components}} -> {:error, :invalid_mission_bundle}
     end
