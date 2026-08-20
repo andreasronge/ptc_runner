@@ -174,6 +174,59 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
+  test "a permissive artifact child names that directory and the owner-only rule", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    root = Path.join(target, ".ptc")
+    File.mkdir!(root)
+    File.chmod!(root, 0o700)
+
+    for child <- ~w(envelopes inspection results traces) do
+      path = Path.join(root, child)
+      File.mkdir!(path)
+      File.chmod!(path, 0o755)
+    end
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", project],
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+      )
+
+    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
+    assert presentation.stderr =~ "envelope/publication_failed"
+    assert presentation.stderr =~ Path.join(root, "envelopes")
+    assert presentation.stderr =~ "owner-only (0700)"
+    assert presentation.stderr =~ "chmod 700"
+  end
+
+  @tag :tmp_dir
+  test "--envelope into a missing parent names destination_parent_unavailable", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+    missing_parent = Path.join(directory, "missing")
+    copy = Path.join(missing_parent, "out.json")
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", project, "--envelope", copy],
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+      )
+
+    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
+    assert presentation.stderr =~ "envelope/destination_parent_unavailable"
+    assert presentation.stderr =~ missing_parent
+  end
+
+  @tag :tmp_dir
   test "project-backed repl preserves the manifest grammar", %{tmp_dir: directory} do
     target = Path.join(directory, "demo")
     assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
