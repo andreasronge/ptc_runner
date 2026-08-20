@@ -132,3 +132,6 @@ footer {
   margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--border);
   color: var(--muted); font-size: .85rem;
 }
+footer .build-stamp {
+  display: block; margin-top: .4rem; font-variant-numeric: tabular-nums;
+}

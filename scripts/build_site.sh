@@ -88,6 +88,70 @@ mkdir -p "$output_dir/schemas"
 
 cp -R "$project_root/site/." "$output_dir/"
 
+# Build provenance, stamped into the assembled copy only. The tokens live in
+# the checked-in pages so that nothing rewrites `site/` -- a stamped source
+# file would land in every diff and turn each deploy into a commit.
+#
+# The stamp describes the build, not the tip of `main`: the Pages workflow
+# publishes on site and schema changes, so the commit named below is the last
+# one that could have altered what is being served.
+version="$(sed -n 's/^[[:space:]]*version: "\([^"]*\)".*/\1/p' "$project_root/mix.exs" | head -1)"
+[ -n "$version" ] || {
+  echo 'could not read the project version from mix.exs' >&2
+  exit 65
+}
+
+commit="$(git -C "$project_root" rev-parse HEAD)" || {
+  echo 'could not resolve the commit being published' >&2
+  exit 65
+}
+
+built_at="$(date -u '+%Y-%m-%d %H:%M UTC')"
+
+# Substitution is verified, not assumed. A page that renames or drops a token
+# would otherwise publish a footer missing the half nobody looked at, so the
+# build fails when no page was stamped and when any token survives.
+python3 - "$output_dir" "$version" "$commit" "$built_at" <<'STAMP' || exit 65
+import pathlib
+import re
+import sys
+
+output_dir = pathlib.Path(sys.argv[1])
+version, commit, built_at = sys.argv[2:5]
+
+replacements = {
+    "@BUILD_VERSION@": version,
+    "@BUILD_COMMIT@": commit,
+    "@BUILD_COMMIT_SHORT@": commit[:7],
+    "@BUILD_TIMESTAMP@": built_at,
+}
+
+stamped = 0
+leftover = []
+
+for page in sorted(output_dir.rglob("*.html")):
+    text = page.read_text(encoding="utf-8")
+    replaced = text
+
+    for token, value in replacements.items():
+        replaced = replaced.replace(token, value)
+
+    if replaced != text:
+        page.write_text(replaced, encoding="utf-8")
+        stamped += 1
+
+    for token in re.findall(r"@BUILD_[A-Z_]*@", replaced):
+        leftover.append("%s: unresolved %s" % (page.name, token))
+
+if not stamped:
+    sys.stderr.write("no page carries a @BUILD_*@ token; the footer stamp is gone\n")
+    sys.exit(65)
+
+if leftover:
+    sys.stderr.write("\n".join(leftover) + "\n")
+    sys.exit(65)
+STAMP
+
 # Without `nullglob` an unmatched pattern survives as a literal filename, and
 # the loop below would report a missing schema as a JSON decode failure instead
 # of reaching the count check.

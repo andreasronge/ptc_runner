@@ -85,6 +85,25 @@ target page's actual ids. A typo therefore fails `mix ptc.gen_docs --check`
 instead of shipping as a dead link, and `scripts/build_site.sh` re-validates
 the root-relative references in the assembled artifact.
 
+## The build stamp
+
+The front page footer names the version from `mix.exs`, the commit being
+published, and the UTC build time. The values are not checked in: `site/`
+carries `@BUILD_VERSION@`, `@BUILD_COMMIT@`, `@BUILD_COMMIT_SHORT@`, and
+`@BUILD_TIMESTAMP@`, and `scripts/build_site.sh` resolves them in the assembled
+copy. Stamping the source instead would put a rewritten `index.html` in every
+diff and make each deploy a commit.
+
+Read the stamp as *when the site was built*, not as *the tip of `main`*. Pages
+deploys on changes to `site/`, the published schemas, the build script, and its
+own workflow, so a commit that touches neither leaves the stamp where it was —
+correctly, because nothing being served changed.
+
+The substitution is verified rather than assumed. The build fails when no page
+carried a token, which is what a renamed or deleted placeholder looks like, and
+when any `@BUILD_*@` token survives into the artifact. Without those two checks
+a page could publish a footer that quietly lost half its stamp.
+
 ## The diagrams
 
 Both are image-model output, not hand-drawn assets, so the prompts below are
