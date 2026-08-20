@@ -128,6 +128,9 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
         assert progress_row =~ stage
       end
 
+      unescaped_progress = String.replace(progress_row, "\\", "")
+      assert unescaped_progress =~ Enum.join(stages, " | ")
+
       assert agent_row =~ ~s("agent-action")
       refute agent_row =~ "progress"
       assert agent_row =~ "exactly two keys or exactly five"
@@ -147,7 +150,10 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
         assert two_key =~ kind
       end
 
-      assert section =~ "up to #{bounds.mission_max} letters"
+      unescaped_kinds = String.replace(two_key, "\\", "")
+      assert unescaped_kinds =~ Enum.join(kinds, " | ")
+
+      assert section =~ "a lowercase letter, then up to #{bounds.mission_max} letters, digits"
       assert source =~ ~s|~r/\\A[a-z][a-z0-9._-]{0,#{bounds.mission_max}}\\z/|
     end
   end

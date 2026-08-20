@@ -5,9 +5,11 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   Safe metadata is intentionally less expressive than general JSON. Every
   caller-supplied name/model/provider label is reduced to a one-way SHA-256
   fingerprint before it reaches a canonical event. Tags and workflow
-  annotations use finite semantic vocabularies with no caller-defined keys or
-  values. Prompts, credentials, generated source, and arbitrary application
-  data therefore require private inspection.
+  annotations use finite semantic vocabularies: types and keys are closed,
+  and enumerated values are closed. A phased workflow annotation may also
+  carry `mission`, a bounded identifier rather than a free string. Prompts,
+  credentials, generated source, and arbitrary application data therefore
+  require private inspection.
   """
 
   @label_keys ~w(name model provider tags)
