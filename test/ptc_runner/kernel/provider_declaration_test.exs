@@ -30,6 +30,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.TypedCanonicalJSON
   alias PtcRunner.Test.MCPOAuthRecordingStore
   alias PtcRunner.TestSupport.HostBoundFixture
+  alias PtcRunner.TestSupport.TestHelpers
 
   @moduletag :tmp_dir
   @dense_services ~w(
@@ -1750,17 +1751,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
            }
   end
 
-  defp manifest do
-    %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "main.clj"}],
-        "entry" => "app/run"
-      },
-      "input" => %{"value" => %{}},
-      "providers" => %{"workflow" => [], "mission" => []}
-    }
-  end
+  defp manifest, do: TestHelpers.valid_manifest()
 
   defp documents(manifest) do
     %{

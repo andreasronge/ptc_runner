@@ -10,7 +10,7 @@ versioned `CHANGELOG.md` section. Run:
 
 ```bash
 mix precommit
-mix prepush
+FORCE_FULL_PRE_PUSH=1 .githooks/pre-push
 MIX_ENV=prod mix hex.build
 ```
 
@@ -60,7 +60,8 @@ without explicit user confirmation.
 The optional launcher companion has an independent version in
 `ptc_runner_launcher/release_config.exs` and uses
 `ptc_runner_launcher-vX.Y.Z` tags. From a clean commit on `main`, run the root
-`mix precommit` and `mix prepush` gates. After release approval is explicit,
+`mix precommit` quality gate and `FORCE_FULL_PRE_PUSH=1 .githooks/pre-push`.
+After release approval is explicit,
 create and push the matching companion tag.
 
 The launcher tag workflow first proves that the tagged commit is on `main` and

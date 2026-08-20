@@ -95,6 +95,10 @@ mix precommit
 MIX_ENV=dev mix docs --warnings-as-errors  # when documentation changed
 ```
 
+`mix precommit` is quality only. The suite, Dialyzer, ExDoc HTML, Viewer,
+launcher, and release run on `git push`. Do not follow `mix precommit` with
+`git push --no-verify`.
+
 Return source or generated-artifact repairs to the same session when they stay
 within its scope. Start fresh only if a repair materially expands the slice.
 Correct tool-invocation mistakes and rerun the authoritative command in the

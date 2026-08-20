@@ -141,10 +141,17 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     refute launcher_release =~ "run: bash scripts/verify_precompiled.sh"
     refute hook =~ "mix test --exclude clojure"
     refute hook =~ "mix prepush"
-    assert mix_project =~ ~s("cmd scripts/ci/core-tests.sh")
+    refute mix_project =~ ~s("cmd scripts/ci/core-tests.sh")
+    refute mix_project =~ ~s("cmd scripts/ci/viewer.sh")
+    refute mix_project =~ ~s("cmd scripts/ci/launcher-package.sh")
+    refute mix_project =~ ~s("cmd scripts/ci/core-release.sh")
+    assert mix_project =~ ~s("cmd scripts/ci/core-quality.sh")
     assert mix_project =~ ~s("cmd scripts/ci/core-static.sh")
     assert mix_project =~ ~s("cmd scripts/ci/core-dialyzer.sh")
-    assert mix_project =~ ~r/precommit: \[\n\s*"cmd scripts\/ci\/preflight\.sh",/
+
+    assert mix_project =~
+             ~r/precommit: \[\n\s*"cmd scripts\/ci\/preflight\.sh",\n\s*"cmd scripts\/ci\/core-quality\.sh"\n\s*\]/
+
     assert launcher =~ ~s(bash ptc_runner_launcher/scripts/verify_precompiled.sh)
   end
 

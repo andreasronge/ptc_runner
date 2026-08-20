@@ -151,8 +151,8 @@ run_project_gates() {
   #
   # `--exclude slow` below is load-bearing, not decoration: this hook is the
   # only consumer of the `:slow` tag. Those ten tests (25 s) deliberately still
-  # run in `precommit`, pre-push, and CI, so deleting the flag would slow this
-  # fast path down rather than tighten any gate. `--exclude clojure` beside it
+  # run in pre-push and CI, so deleting the flag would slow this fast path down
+  # rather than tighten any gate. `--exclude clojure` beside it
   # *is* redundant with `test/test_helper.exs`, and is kept only for symmetry.
   #
   # `:nightly` needs no flag here: `test/test_helper.exs` excludes it globally.

@@ -7,10 +7,11 @@ source "$script_dir/_common.sh"
 # Fail-fast admission for the local gate.
 #
 # Every gate already fetches the project it compiles, so this changes no
-# outcome -- only when you learn it. `mix precommit` runs the root suite for
-# minutes before it reaches the Viewer and the launcher, and a worktree that
-# never fetched them, or a branch whose nested lockfile diverged from its
-# `mix.exs`, should cost seconds to discover rather than a finished suite.
+# outcome -- only when you learn it. `mix precommit` is quality-only; git
+# push still reaches the Viewer and the launcher after the suite. A worktree
+# that never fetched them, or a branch whose nested lockfile diverged from
+# its `mix.exs`, should cost seconds at the start of `mix precommit` rather
+# than a failed Viewer or launcher gate after minutes of tests.
 #
 # The root project is deliberately absent: the gate that runs next opens with
 # `mix compile`, which reports the root's own dependency state before anything
