@@ -8,24 +8,72 @@ defmodule PtcViewer.LiveStoreTest do
     %{store: store}
   end
 
-  test "stores the latest frame per run and snapshots oldest-first", %{store: store} do
-    assert :ok = LiveStore.put_frame(store, "run-a", %{"seq" => 0, "phase" => "running"})
-    assert :ok = LiveStore.put_frame(store, "run-b", %{"seq" => 0, "phase" => "running"})
-    assert :ok = LiveStore.put_frame(store, "run-a", %{"seq" => 1, "phase" => "ok"})
+  test "stores the latest frame per run and snapshots newest-first", %{store: store} do
+    assert :ok =
+             LiveStore.put_frame(store, "run-a", %{
+               "seq" => 0,
+               "phase" => "ok",
+               "limits" => %{"run_duration_ms" => 30_000}
+             })
 
-    assert [%{"run_id" => "run-a", "seq" => 1, "phase" => "ok"}, %{"run_id" => "run-b"}] =
-             LiveStore.snapshot(store)
+    assert :ok =
+             LiveStore.put_frame(store, "run-b", %{
+               "seq" => 0,
+               "phase" => "ok",
+               "limits" => %{"run_duration_ms" => 1}
+             })
+
+    assert :ok =
+             LiveStore.put_frame(store, "run-a", %{
+               "seq" => 1,
+               "phase" => "ok",
+               "limits" => %{"run_duration_ms" => 30_000}
+             })
+
+    assert [
+             %{
+               "run_id" => "run-b",
+               "limits" => %{"run_duration_ms" => 1},
+               "first_seen_at" => newer_seen
+             },
+             %{
+               "run_id" => "run-a",
+               "seq" => 1,
+               "limits" => %{"run_duration_ms" => 30_000},
+               "first_seen_at" => older_seen
+             }
+           ] = LiveStore.snapshot(store)
+
+    assert {:ok, _newer, 0} = DateTime.from_iso8601(newer_seen)
+    assert {:ok, _older, 0} = DateTime.from_iso8601(older_seen)
+  end
+
+  test "first_seen_at is owned by the store and survives later frames", %{store: store} do
+    assert :ok =
+             LiveStore.put_frame(store, "run-a", %{
+               "seq" => 0,
+               "first_seen_at" => "1999-01-01T00:00:00Z"
+             })
+
+    assert [%{"first_seen_at" => stamped}] = LiveStore.snapshot(store)
+    refute stamped == "1999-01-01T00:00:00Z"
+
+    assert :ok = LiveStore.put_frame(store, "run-a", %{"seq" => 1, "phase" => "ok"})
+    assert [%{"seq" => 1, "first_seen_at" => ^stamped}] = LiveStore.snapshot(store)
   end
 
   test "subscribe returns the encoded snapshot and then delivers live frames", %{store: store} do
     :ok = LiveStore.put_frame(store, "run-a", %{"seq" => 0})
+    :ok = LiveStore.put_frame(store, "run-b", %{"seq" => 0})
 
-    {:ok, [snapshot_json]} = LiveStore.subscribe(store, self())
-    assert %{"run_id" => "run-a", "seq" => 0} = Jason.decode!(snapshot_json)
+    {:ok, [newer_json, older_json]} = LiveStore.subscribe(store, self())
+    assert %{"run_id" => "run-b", "seq" => 0} = Jason.decode!(newer_json)
+    assert %{"run_id" => "run-a", "seq" => 0, "first_seen_at" => seen} = Jason.decode!(older_json)
+    assert {:ok, _at, 0} = DateTime.from_iso8601(seen)
 
     :ok = LiveStore.put_frame(store, "run-a", %{"seq" => 1})
     assert_receive {:live_frame, live_json}
-    assert %{"run_id" => "run-a", "seq" => 1} = Jason.decode!(live_json)
+    assert %{"run_id" => "run-a", "seq" => 1, "first_seen_at" => ^seen} = Jason.decode!(live_json)
   end
 
   test "a dead subscriber is dropped without affecting frame acceptance", %{store: store} do

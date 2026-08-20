@@ -369,7 +369,9 @@ fixed launch target from that same project document. The browser may edit
 workflow input or choose one declared mission, but it cannot choose a project,
 manifest, working directory, or command:</p><pre><code class="console language-console">ptc viewer ptc-project.json --env-file .env</code></pre><p>Viewer-launched workflow cards use the manifest label and workflow entry as
 their human-facing title, while retaining the <code class="inline">cmd-...</code> value as the stable run
-identifier.</p><p>The command is already a long-running PtcRunner host, so Viewer-started work
+identifier. The Live tab and <code class="inline">GET /api/live/runs</code> list newest first, and each
+card shows when the Viewer first saw that run, so an edited ceiling cannot be
+read off an older card as a stale enforcement.</p><p>The command is already a long-running PtcRunner host, so Viewer-started work
 runs inside that BEAM instance under the ordinary execution-session owner. A
 host-injected adapter receives a semantic workflow or mission request and a
 direct live-frame sink; no <code class="inline">mix</code> or <code class="inline">ptc</code> child process is started. The adapter

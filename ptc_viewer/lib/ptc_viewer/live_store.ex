@@ -42,7 +42,13 @@ defmodule PtcViewer.LiveStore do
 
   def put_frame(_store, _run_id, _frame), do: {:error, :invalid_frame}
 
-  @doc "Latest decoded frame per known run, oldest run first."
+  @doc """
+  Latest decoded frame per known run, newest run first.
+
+  Each frame carries a store-owned `first_seen_at` stamp (UTC ISO-8601). It is
+  assigned on the first accepted frame for that run and kept on later updates,
+  so two cards with different ceilings are visibly from different launches.
+  """
   @spec snapshot(pid()) :: [map()]
   def snapshot(store), do: GenServer.call(store, :snapshot)
 
@@ -92,17 +98,23 @@ defmodule PtcViewer.LiveStore do
 
   @impl GenServer
   def handle_call({:put, run_id, frame}, _from, state) do
-    frame = Map.put(frame, "run_id", run_id)
     existing = Map.get(state.runs, run_id)
     first_seen = if existing, do: existing.first_seen, else: state.next_sequence
+    first_seen_at = if existing, do: existing.first_seen_at, else: DateTime.utc_now()
     next_sequence = if existing, do: state.next_sequence, else: state.next_sequence + 1
+
+    frame =
+      frame
+      |> Map.put("run_id", run_id)
+      |> Map.put("first_seen_at", DateTime.to_iso8601(first_seen_at))
 
     case Jason.encode(frame) do
       {:ok, json} ->
         entry = %{
           frame: frame,
           json: json,
-          first_seen: first_seen
+          first_seen: first_seen,
+          first_seen_at: first_seen_at
         }
 
         runs = state.runs |> Map.put(run_id, entry) |> evict(run_id)
@@ -187,7 +199,7 @@ defmodule PtcViewer.LiveStore do
   defp ordered(runs) do
     runs
     |> Map.values()
-    |> Enum.sort_by(& &1.first_seen)
+    |> Enum.sort_by(& &1.first_seen, :desc)
   end
 
   defp evict(runs, protected_run_id) do

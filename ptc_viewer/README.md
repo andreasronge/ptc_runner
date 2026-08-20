@@ -188,7 +188,7 @@ live ingestion and controls, not the trace browser as a whole.
 | `POST /api/repl/reset` | Persist the current session and capture a replacement |
 | `DELETE /api/repl` | Close and persist the current analysis session |
 | `POST /api/live/runs/:run_id` | Accept a correlated self-contained live frame |
-| `GET /api/live/runs` | Snapshot retained live runs |
+| `GET /api/live/runs` | Snapshot retained live runs, newest first, each stamped with `first_seen_at` |
 | `GET /api/live/stream` | Stream frames as server-sent events |
 | `DELETE /api/live/runs/:run_id` | Forget one retained run |
 | `POST /api/live/runs/:run_id/inspect` | Refresh the pinned host snapshot for a completed run |
