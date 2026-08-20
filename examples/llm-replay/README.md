@@ -7,15 +7,23 @@ Run it from the repository root:
 
 ```console
 ptc init llm-replay --example llm-replay
-ptc run llm-replay/ptc.json \
-  --host-config llm-replay/ptc-host.json
+ptc run llm-replay/ptc-project.json
 ```
+
+The project document remembers the host installation. `ptc run llm-replay/ptc.json`
+alone does not: `frozen-model` is selected by the manifest and installed by
+`ptc-host.json`. `replay.jsonl` is the fixture, not a runnable document.
 
 The result is:
 
 ```json
 {"content":"Frozen answer"}
 ```
+
+The project records private inspection and grants it to the Viewer, so
+`ptc viewer llm-replay/ptc-project.json` shows the prelude sources the run
+loaded and the private model exchange. This example has no agent loop, so
+there is no generated program.
 
 Change the request in `workflow.clj` so the fixture no longer matches. The
 call returns a provider-error envelope (`:status :error`, `kind`

@@ -3,20 +3,20 @@
   "kind": "ptc-project",
   "version": 1,
   "application": {
-    "path": "debugger/ptc.json"
+    "path": "ptc.json"
   },
   "host": {
     "path": "ptc-host.json"
   },
   "artifacts": {
-    "root": "debugger/.ptc",
+    "root": ".ptc",
     "trace": true,
     "inspection": true,
-    "result": true,
+    "result": false,
     "envelope": true
   },
   "viewer": {
-    "port": 4124,
+    "port": 4123,
     "open": true,
     "repl": true,
     "private": true
