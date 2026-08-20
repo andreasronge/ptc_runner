@@ -4,14 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Choose a workflow shape · PtcRunner</title>
-<meta name="description" content="Most agent applications are built from a small set of recurring shapes. This
-page names each shape, says when to reach for it, and points to a runnable
-project…">
+<meta name="description" content="Most agent applications combine a few recurring shapes; this page names each
+one, says when to reach for it, and points at a runnable demonstration.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/agent-workflow-patterns/">
 <meta property="og:title" content="Choose a workflow shape · PtcRunner">
-<meta property="og:description" content="Most agent applications are built from a small set of recurring shapes. This
-page names each shape, says when to reach for it, and points to a runnable
-project…">
+<meta property="og:description" content="Most agent applications combine a few recurring shapes; this page names each
+one, says when to reach for it, and points at a runnable demonstration.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/agent-workflow-patterns/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -99,10 +97,8 @@ project…">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
 <h1 id="choose-a-workflow-shape">Choose a workflow shape</h1><blockquote><p><strong>Audience:</strong> application authors deciding how to split a task between
-missions, agent loops, and trusted workflow code.</p></blockquote><p>Most agent applications are built from a small set of recurring shapes. This
-page names each shape, says when to reach for it, and points to a runnable
-project that demonstrates it. The shapes compose: a real design usually
-combines two or three.</p><h2 id="one-bounded-question">One bounded question</h2><p>Grant the data, ask the question, read the answer. One mission, one
+missions, agent loops, and trusted workflow code.</p></blockquote><p>Most agent applications combine a few recurring shapes; this page names each
+one, says when to reach for it, and points at a runnable demonstration.</p><p>The shapes compose — a real design usually combines two or three of them.</p><h2 id="one-bounded-question">One bounded question</h2><p>Grant the data, ask the question, read the answer. One mission, one
 <code class="inline">agent.core/run</code>, no tools. Reach for this first: if a task is a single
 read-only question over data you already hold, connecting tools or adding
 stages only adds surface. The

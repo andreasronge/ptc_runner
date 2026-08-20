@@ -4,14 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Design an agent workflow · PtcRunner</title>
-<meta name="description" content="This tutorial designs a small agent for a recurring real-world job — working
-through a support-ticket inbox — in three runnable steps. Each step answers one
-de…">
+<meta name="description" content="Design a small support-inbox agent in three runnable steps: grant the data,
+move the rules into code, then split the work between specialists.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/designing-agent-workflows/">
 <meta property="og:title" content="Design an agent workflow · PtcRunner">
-<meta property="og:description" content="This tutorial designs a small agent for a recurring real-world job — working
-through a support-ticket inbox — in three runnable steps. Each step answers one
-de…">
+<meta property="og:description" content="Design a small support-inbox agent in three runnable steps: grant the data,
+move the rules into code, then split the work between specialists.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/designing-agent-workflows/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -99,11 +97,11 @@ de…">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
 <h1 id="design-an-agent-workflow">Design an agent workflow</h1><blockquote><p><strong>Audience:</strong> application authors turning a real task into their first
-multi-stage agent design.</p></blockquote><p>This tutorial designs a small agent for a recurring real-world job — working
-through a support-ticket inbox — in three runnable steps. Each step answers one
-design question: where does the data live, where do the business rules live,
-and how is work split between agents. The configuration guides explain each
-surface exhaustively; this page shows why a design uses them.</p><p>Materialize the three projects and supply an
+multi-stage agent design.</p></blockquote><p>Design a small support-inbox agent in three runnable steps: grant the data,
+move the rules into code, then split the work between specialists.</p><p>Each step answers one design question — where does the data live, where do
+the business rules live, and how is work divided between agents. The
+configuration guides explain each surface exhaustively; this page shows why a
+design uses them.</p><p>Materialize the three projects and supply an
 <a href="https://openrouter.ai/keys">OpenRouter</a> key:</p><pre><code class="console language-console">ptc init support-triage --example support-triage</code></pre><p>Set <code class="inline">OPENROUTER_API_KEY</code> in the generated <code class="inline">support-triage/.env</code>. Each project
 costs well under a cent to run with the tutorial's <code class="inline">deepseek</code> alias.</p><h2 id="step-1-ask-one-bounded-question">Step 1: ask one bounded question</h2><p>The smallest agent shape is a single bounded run: grant the data, ask the
 question, read the answer. The first manifest declares no tools at all — the

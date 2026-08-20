@@ -3,11 +3,13 @@
 > **Audience:** application authors turning a real task into their first
 > multi-stage agent design.
 
-This tutorial designs a small agent for a recurring real-world job — working
-through a support-ticket inbox — in three runnable steps. Each step answers one
-design question: where does the data live, where do the business rules live,
-and how is work split between agents. The configuration guides explain each
-surface exhaustively; this page shows why a design uses them.
+Design a small support-inbox agent in three runnable steps: grant the data,
+move the rules into code, then split the work between specialists.
+
+Each step answers one design question — where does the data live, where do
+the business rules live, and how is work divided between agents. The
+configuration guides explain each surface exhaustively; this page shows why a
+design uses them.
 
 Materialize the three projects and supply an
 [OpenRouter](https://openrouter.ai/keys) key:

@@ -3,10 +3,10 @@
 > **Audience:** application authors deciding how to split a task between
 > missions, agent loops, and trusted workflow code.
 
-Most agent applications are built from a small set of recurring shapes. This
-page names each shape, says when to reach for it, and points to a runnable
-project that demonstrates it. The shapes compose: a real design usually
-combines two or three.
+Most agent applications combine a few recurring shapes; this page names each
+one, says when to reach for it, and points at a runnable demonstration.
+
+The shapes compose — a real design usually combines two or three of them.
 
 ## One bounded question
 

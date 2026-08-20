@@ -5,12 +5,14 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
   @host Path.join(@examples, "ptc-host.json")
   @viewer_examples Path.expand("../../../examples/viewer-demo", __DIR__)
   @named_missions Path.expand("../../../examples/named-mission-reader-writer", __DIR__)
+  @support_triage Path.expand("../../../examples/support-triage", __DIR__)
 
   test "models in shipped runnable examples belong to ReqLLM's catalog" do
     installations = [
       {@host, "deepseek"},
       {Path.join(@viewer_examples, "ptc-host.json"), "deepseek"},
-      {Path.join(@named_missions, "ptc-host.json"), "agent_model"}
+      {Path.join(@named_missions, "ptc-host.json"), "agent_model"},
+      {Path.join(@support_triage, "ptc-host.json"), "deepseek"}
     ]
 
     for {host, alias_name} <- installations do
@@ -24,6 +26,19 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
 
     for example <- ~w(02-deepseek-extract 03-file-agent 04-multi-turn-agent) do
       manifest = decode!(Path.join([@examples, example, "ptc.json"]))
+      assert manifest["labels"]["model"] == model
+    end
+  end
+
+  test "support-triage labels report the model installed by the host" do
+    model =
+      @support_triage
+      |> Path.join("ptc-host.json")
+      |> decode!()
+      |> get_in(["install", "deepseek", "model"])
+
+    for step <- ~w(01-one-question 02-domain-api 03-specialists) do
+      manifest = decode!(Path.join([@support_triage, step, "ptc.json"]))
       assert manifest["labels"]["model"] == model
     end
   end
