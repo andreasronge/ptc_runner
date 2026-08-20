@@ -220,6 +220,40 @@ defmodule PtcRunner.Kernel.SafeMetadata do
 
   def rejection_class(_result), do: %{}
 
+  @doc """
+  Builds the public `usage.capability_refusals` key for one error envelope.
+
+  The key is `"<environment>/<kind>/<reason>"`. A known atom stays readable, an
+  unrecognized atom is the same one-way fingerprint `rejection_class/1` uses,
+  and a missing or non-atom field is `unknown`. Distinct keys are capped by
+  `capability_refusal_map_limit/0`; further classes increment `$overflow`.
+  """
+  @spec capability_refusal_key(:workflow | :mission, map()) :: binary()
+  def capability_refusal_key(environment, result)
+      when environment in [:workflow, :mission] and is_map(result) and not is_struct(result) do
+    class = rejection_class(result)
+
+    Enum.join(
+      [
+        Atom.to_string(environment),
+        refusal_key_segment(class, :kind, :kind_fingerprint),
+        refusal_key_segment(class, :reason, :reason_fingerprint)
+      ],
+      "/"
+    )
+  end
+
+  @doc """
+  Maximum distinct closed-class keys retained in `usage.capability_refusals`.
+
+  Terminal usage admission reserves this many fingerprint-length keys plus
+  `$overflow`. Two named classes is the largest such map that still admits an
+  empty environment at the 7_000-byte `event_payload_bytes` floor used by
+  terminal preflight. Further classes increment `$overflow`.
+  """
+  @spec capability_refusal_map_limit() :: 2
+  def capability_refusal_map_limit, do: 2
+
   @doc "Projects an agent LLM failure to one closed, payload-free provider class."
   @spec llm_provider_failure(term()) :: map()
   def llm_provider_failure(value) when is_map(value) and not is_struct(value) do
@@ -429,6 +463,14 @@ defmodule PtcRunner.Kernel.SafeMetadata do
 
   defp fingerprint_key(:kind), do: :kind_fingerprint
   defp fingerprint_key(:reason), do: :reason_fingerprint
+
+  defp refusal_key_segment(class, atom_key, fingerprint_key) do
+    case class do
+      %{^atom_key => value} when is_atom(value) -> Atom.to_string(value)
+      %{^fingerprint_key => fingerprint} when is_binary(fingerprint) -> fingerprint
+      _missing -> "unknown"
+    end
+  end
 
   defp fetch_failure_kind(value) do
     Enum.find_value(value, fn {key, kind} ->

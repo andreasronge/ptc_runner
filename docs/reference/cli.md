@@ -285,8 +285,11 @@ A recoverable capability error does not change the exit status. Exhausting
 `workflow_capability_calls_per_name` returns
 `{"status":"error","kind":"limit_exceeded","reason":"capability_quota","details":{"limit":"workflow_capability_calls_per_name","name":"llm-request","limit_value":2}}` as a
 value into PTC-Lisp; a workflow that reads past it can still `return` and the
-command exits `0`. Assert on the result value, or have the workflow `fail`,
-when a quota must end the run.
+command exits `0`. `execution.usage.capability_refusals` counts every such
+error by closed class (`workflow/limit_exceeded/capability_quota`). At most 2
+distinct classes are named; further classes increment `$overflow`. Assert
+`capability_refusals` is `{}` when a CI job requires that every capability call
+succeeded, or have the workflow `fail`, when a quota must end the run.
 
 The tables below are generated from the diagnostic catalog the command
 dispatches on, so they list every status a command can exit with and every

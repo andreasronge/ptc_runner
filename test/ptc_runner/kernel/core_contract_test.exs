@@ -80,6 +80,25 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, :limit_exceeded} = RunState.reserve_capability(state, :workflow, "other")
   end
 
+  test "capability refusals fold extra classes into overflow" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    limit = SafeMetadata.capability_refusal_map_limit()
+
+    for index <- 1..limit do
+      assert :ok =
+               RunState.record_capability_refusal(state, "workflow/limit_exceeded/k#{index}")
+    end
+
+    assert :ok = RunState.record_capability_refusal(state, "workflow/limit_exceeded/k1")
+    assert :ok = RunState.record_capability_refusal(state, "workflow/provider_error/extra")
+
+    refusals = RunState.usage(state).capability_refusals
+    assert refusals["workflow/limit_exceeded/k1"] == 2
+    assert refusals["$overflow"] == 1
+    refute Map.has_key?(refusals, "workflow/provider_error/extra")
+    assert map_size(refusals) == limit + 1
+  end
+
   test "run state preserves a supplied absolute deadline instead of resetting it" do
     limits = Limits.defaults()
 

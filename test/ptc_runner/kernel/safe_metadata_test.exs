@@ -212,6 +212,38 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
     end
   end
 
+  describe "capability refusal key" do
+    test "joins environment with known kind and reason" do
+      assert SafeMetadata.capability_refusal_key(:workflow, %{
+               status: :error,
+               kind: :limit_exceeded,
+               reason: :capability_quota
+             }) == "workflow/limit_exceeded/capability_quota"
+    end
+
+    test "uses fingerprints and unknown for the remaining class fields" do
+      kind_fingerprint = SafeMetadata.fingerprint("capability-kind:secret_rejection_kind")
+      reason_fingerprint = SafeMetadata.fingerprint("capability-reason:secret_rejection_reason")
+
+      assert SafeMetadata.capability_refusal_key(:mission, %{
+               status: :error,
+               kind: :secret_rejection_kind,
+               reason: :secret_rejection_reason
+             }) == "mission/#{kind_fingerprint}/#{reason_fingerprint}"
+
+      assert SafeMetadata.capability_refusal_key(:workflow, %{
+               status: :error,
+               kind: :event_sink_error
+             }) == "workflow/event_sink_error/unknown"
+
+      assert SafeMetadata.capability_refusal_key(:workflow, %{
+               status: :error,
+               kind: "PRIVATE_KIND",
+               reason: "PRIVATE_REASON"
+             }) == "workflow/unknown/unknown"
+    end
+  end
+
   describe "LLM provider failure taxonomy" do
     test "retains only a closed class from the nested provider envelope" do
       failure = %{

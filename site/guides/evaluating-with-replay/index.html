@@ -127,7 +127,8 @@ is a provider error (<code class="inline">kind</code> <code class="inline">provi
 not fail the evaluation. The shipped <code class="inline">llm-replay</code> example calls <code class="inline">cap/unwrap!</code>
 on the raw <code class="inline">tool/llm-request</code> envelope so a miss exits non-zero. The run
 envelope also reports the miss in usage: that alias's <code class="inline">successful_calls</code> stays
-0 while <code class="inline">calls</code> increments.</p><p>An ordered <code class="inline">responses</code> sequence supports workflows that make the same request
+0 while <code class="inline">calls</code> increments, and <code class="inline">capability_refusals</code> records
+<code class="inline">workflow/provider_error/not_found</code>.</p><p>An ordered <code class="inline">responses</code> sequence supports workflows that make the same request
 more than once.</p><h2 id="evaluate-the-candidate-without-installing-it">Evaluate the candidate without installing it</h2><p><code class="inline">--component-override-descriptor</code> replaces one component already selected by
 the manifest:</p><pre><code class="json language-json">{
   &quot;target&quot;: {&quot;environment&quot;: &quot;workflow&quot;},

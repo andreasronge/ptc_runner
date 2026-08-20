@@ -93,7 +93,8 @@ is a provider error (`kind` `provider_error`, `reason` `not_found`).
 not fail the evaluation. The shipped `llm-replay` example calls `cap/unwrap!`
 on the raw `tool/llm-request` envelope so a miss exits non-zero. The run
 envelope also reports the miss in usage: that alias's `successful_calls` stays
-0 while `calls` increments.
+0 while `calls` increments, and `capability_refusals` records
+`workflow/provider_error/not_found`.
 
 An ordered `responses` sequence supports workflows that make the same request
 more than once.

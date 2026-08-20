@@ -666,7 +666,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     tools = mappings_with_effect("fail", :write)
     registry = stdio_registry(dir, marker, "stderr-warn", tools: tools)
 
-    assert {:ok, %PtcRunner.Kernel.Result{value: result_value}} =
+    assert {:ok, %PtcRunner.Kernel.Result{value: result_value, usage: usage}} =
              dir
              |> manifest(["remote.fail"],
                program: single_call_program("remote.fail", "x"),
@@ -686,6 +686,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
              "details" => "mcp_domain_error",
              "retryable?" => false
            } = failure
+
+    assert usage.capability_refusals == %{"mission/provider_error/domain_error" => 1}
 
     refute Map.has_key?(failure, "mutation_state")
 

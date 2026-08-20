@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.SafeMetadata
 
   @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json"
   @envelope_root_key {__MODULE__, :envelope_root}
@@ -37,8 +38,10 @@ defmodule PtcRunner.Kernel.CommandContract do
   @hash "^[0-9a-f]{64}$(?![\\s\\S])"
   @digest "^sha256:[0-9a-f]{64}$(?![\\s\\S])"
   @alias "^[a-z][a-z0-9._-]{0,127}$(?![\\s\\S])"
-  @installation_revision ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @capability_name "^(?:workflow|mission)/[a-z][a-z0-9._/-]{0,127}$(?![\\s\\S])"
+  @capability_refusal_class "(?:[a-z][a-z0-9_]{0,63}|unknown|sha256:[0-9a-f]{64})"
+  @capability_refusal_key "^(?:workflow|mission)/#{@capability_refusal_class}/#{@capability_refusal_class}$(?![\\s\\S])"
+  @installation_revision ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @event_type "^[a-z][a-z0-9-]{0,127}$(?![\\s\\S])"
   @json_pointer "^(?:/(?:[^~/]|~[01])*)*$(?![\\s\\S])"
   @doctor_provider_name ~r/\Aprovider\/(?<alias>[a-z][a-z0-9._-]{0,127})\/(?<operation>local|selection|credentials|authorization|connectivity)\z/
@@ -1406,8 +1409,15 @@ defmodule PtcRunner.Kernel.CommandContract do
     capability_counts = count_map(@capability_name)
     event_counts = count_map(@event_type, ["$overflow"])
 
+    refusal_counts =
+      count_map(
+        @capability_refusal_key,
+        ["$overflow"],
+        SafeMetadata.capability_refusal_map_limit() + 1
+      )
+
     required =
-      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors agent_protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
+      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors agent_protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped capability_refusals llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
 
     common = %{
       "remaining_ms" => nonnegative_integer(),
@@ -1419,7 +1429,8 @@ defmodule PtcRunner.Kernel.CommandContract do
       "evaluation_memory_bytes" => nonnegative_integer(),
       "evaluation_history_bytes" => nonnegative_integer(),
       "evaluation_continuation_bytes" => nonnegative_integer(),
-      "events_dropped" => event_counts
+      "events_dropped" => event_counts,
+      "capability_refusals" => refusal_counts
     }
 
     %{
@@ -1498,7 +1509,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     )
   end
 
-  defp count_map(name_pattern, exceptions \\ []) do
+  defp count_map(name_pattern, exceptions \\ [], max_properties \\ 512) do
     property_names =
       case exceptions do
         [] ->
@@ -1517,7 +1528,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       "type" => "object",
       "propertyNames" => property_names,
       "additionalProperties" => nonnegative_integer(),
-      "maxProperties" => 512
+      "maxProperties" => max_properties
     }
   end
 

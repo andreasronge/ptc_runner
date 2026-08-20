@@ -401,6 +401,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert get_in(success_outcome.envelope, ["execution", "usage", "evaluations_by_mission"]) ==
              %{"reader" => 1}
 
+    assert get_in(success_outcome.envelope, ["execution", "usage", "capability_refusals"]) == %{}
+
     failed = write_application(directory, "mission-usage-error", manifest)
 
     File.write!(
@@ -415,6 +417,101 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert_schema_valid(success_outcome.envelope)
     assert_schema_valid(failed_outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "usage counts quota refusals and replay misses without failing the run", %{
+    tmp_dir: directory
+  } do
+    File.write!(
+      Path.join(directory, "replay.jsonl"),
+      Jason.encode!(%{
+        "schema_version" => 1,
+        "request_hash" => "sha256:" <> String.duplicate("0", 64),
+        "response" => %{"content" => "frozen"}
+      }) <> "\n"
+    )
+
+    host_path =
+      write_host_config(directory, "quota-replay", %{
+        "install" => %{
+          "frozen-model" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "quota-replay-v1",
+            "fixtures" => "replay.jsonl"
+          }
+        }
+      })
+
+    application =
+      write_application(
+        directory,
+        "quota-replay",
+        valid_manifest(%{
+          "providers" => %{"workflow" => [%{"name" => "frozen-model"}]},
+          "limits" => %{"workflow_capability_calls_per_name" => 2}
+        }),
+        %{
+          "main.clj" => """
+          (ns app)
+          (defn ask [i]
+            (tool/llm-request {"messages" [{"role" "user" "content" (str "n" i)}]}))
+          (defn run [_input]
+            (return {"answers" (mapv ask (range 1 6))}))
+          """
+        }
+      )
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["status"] == "ok"
+    assert outcome.envelope["execution"]["diagnostic"] == nil
+
+    assert get_in(outcome.envelope, ["execution", "usage", "capability_refusals"]) == %{
+             "workflow/provider_error/not_found" => 2,
+             "workflow/limit_exceeded/capability_quota" => 3
+           }
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "usage counts a refused workflow annotation without failing the run", %{
+    tmp_dir: directory
+  } do
+    application =
+      write_application(
+        directory,
+        "refused-annotation",
+        valid_manifest(%{
+          "workflow" => %{
+            "components" => [
+              %{"library" => "workflow.event"},
+              %{"id" => "app", "path" => "main.clj", "dependencies" => ["workflow.event"]}
+            ],
+            "entry" => "app/run"
+          }
+        }),
+        %{
+          "main.clj" => """
+          (ns app)
+          (defn run [_input]
+            (do
+              (workflow.event/annotate "my_custom_type" {"n" 1})
+              (return {"ok" true})))
+          """
+        }
+      )
+
+    assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["run", application])
+    assert outcome.envelope["status"] == "ok"
+
+    assert get_in(outcome.envelope, ["execution", "usage", "capability_refusals"]) == %{
+             "workflow/invalid_annotation/invalid_workflow_annotation" => 1
+           }
+
+    assert_schema_valid(outcome.envelope)
   end
 
   @tag :tmp_dir
