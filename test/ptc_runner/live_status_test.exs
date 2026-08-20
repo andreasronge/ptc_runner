@@ -222,9 +222,15 @@ defmodule PtcRunner.LiveStatusTest do
                "total_cost" => 0.25
              })
 
+    gate = make_ref()
+
     late =
       Task.async(fn ->
-        Process.sleep(30)
+        receive do
+          ^gate -> :ok
+        after
+          2_000 -> flunk("late telemetry was never released")
+        end
 
         Reporter.handle_telemetry(
           [:ptc_runner, :capability, :stop],
@@ -250,6 +256,7 @@ defmodule PtcRunner.LiveStatusTest do
              "total_cost" => 0.25
            }
 
+    send(late.pid, gate)
     _ = Task.await(late)
     assert :ok = Reporter.stop(reporter)
     assert :ok = RunState.stop(run_state)

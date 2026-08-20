@@ -37,8 +37,23 @@ defmodule PtcRunner.Kernel.AgentConfigDiagnostic do
   @int64_min -9_223_372_036_854_775_808
   @int64_max 9_223_372_036_854_775_807
   @int64_max_digits 20
-  @int64_pattern "(?:0|-?[1-9][0-9]{0,18})"
+  # Canonical signed int64, including INT64_MIN. 19-digit overflow such as
+  # 9223372036854775808 is excluded so the published pattern matches
+  # `integer_message/4`.
+  @int64_abs_max_pattern "(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[01][0-9]{17}|92[01][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[01][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7])"
+  @int64_pattern "(?:0|-9223372036854775808|-?" <> @int64_abs_max_pattern <> ")"
   @range_separator "–"
+  @accepted_range_patterns %{
+    {1, 128} => "(?:[1-9]|[1-9][0-9]|1[01][0-9]|12[0-8])",
+    {1, 65_536} =>
+      "(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-6])",
+    {1, 1_000_000} => "(?:[1-9][0-9]{0,5}|1000000)"
+  }
+
+  if MapSet.new(Enum.map(@options, fn {_option, minimum, maximum} -> {minimum, maximum} end)) !=
+       MapSet.new(Map.keys(@accepted_range_patterns)) do
+    raise "agent config option ranges and schema range patterns describe different sets"
+  end
 
   @doc false
   @spec options() :: [{binary(), pos_integer(), pos_integer()}]
@@ -192,15 +207,18 @@ defmodule PtcRunner.Kernel.AgentConfigDiagnostic do
   defp integer_branch({option, minimum, maximum}) do
     prefix = "#{option} "
     suffix = integer_suffix(minimum, maximum)
-
-    escaped =
-      DiagnosticPattern.escape(prefix) <> @int64_pattern <> DiagnosticPattern.escape(suffix)
+    escaped_prefix = DiagnosticPattern.escape(prefix)
+    escaped_suffix = DiagnosticPattern.escape(suffix)
+    range_pattern = Map.fetch!(@accepted_range_patterns, {minimum, maximum})
 
     %{
       "type" => "string",
       "minLength" => 1,
       "maxLength" => byte_size(prefix) + @int64_max_digits + byte_size(suffix),
-      "pattern" => DiagnosticPattern.exact(escaped)
+      "pattern" => DiagnosticPattern.exact(escaped_prefix <> @int64_pattern <> escaped_suffix),
+      "not" => %{
+        "pattern" => DiagnosticPattern.exact(escaped_prefix <> range_pattern <> escaped_suffix)
+      }
     }
   end
 
@@ -217,34 +235,19 @@ defmodule PtcRunner.Kernel.AgentConfigDiagnostic do
     Enum.any?(@options, fn {option, minimum, maximum} ->
       prefix = "#{option} "
       suffix = integer_suffix(minimum, maximum)
-      prefix_len = String.length(prefix)
-      suffix_len = String.length(suffix)
 
-      case String.split_at(message, prefix_len) do
-        {^prefix, rest} ->
-          case String.split_at(rest, String.length(rest) - suffix_len) do
-            {digits, ^suffix} -> int64_digits?(digits)
-            _other -> false
-          end
-
-        _other ->
-          false
+      with true <- String.starts_with?(message, prefix),
+           true <- String.ends_with?(message, suffix),
+           digits_bytes <- byte_size(message) - byte_size(prefix) - byte_size(suffix),
+           true <- digits_bytes in 1..@int64_max_digits,
+           digits <- binary_part(message, byte_size(prefix), digits_bytes),
+           {value, ""} <- Integer.parse(digits),
+           true <- Integer.to_string(value) == digits,
+           {:ok, expected} <- integer_message(option, minimum, maximum, value) do
+        message == expected
+      else
+        _invalid -> false
       end
     end)
   end
-
-  defp int64_digits?("0"), do: true
-
-  defp int64_digits?("-9223372036854775808"), do: true
-
-  defp int64_digits?("-" <> digits), do: int64_digits?(digits) and digits != "0"
-
-  defp int64_digits?(digits) when is_binary(digits) and byte_size(digits) in 1..19 do
-    case Integer.parse(digits) do
-      {value, ""} when value > 0 -> value <= @int64_max
-      _other -> false
-    end
-  end
-
-  defp int64_digits?(_digits), do: false
 end
