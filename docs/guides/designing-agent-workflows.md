@@ -145,7 +145,9 @@ and no tools, so injected text can never reach a capability or the wider
 ticket pool. It can still corrupt this one report — wrong teams, wrong
 priorities, a misleading summary — or waste the run, which is why report
 content needs its own downstream check: the schema bounds the shape, and
-this example's scheduled live test checks the claims. The agent loop marks
+this example's scheduled live test checks each escalation's id, score, team,
+and first action against the policy; only the summary's prose goes
+unchecked. The agent loop marks
 its own tool observations as untrusted automatically; text a workflow
 splices into a task string is the workflow's responsibility.
 

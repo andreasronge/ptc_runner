@@ -12,10 +12,18 @@ defmodule PtcRunner.Kernel.SupportTriageE2ETest do
 
   @examples Path.expand("../../../examples/support-triage", __DIR__)
 
-  # The scores the deterministic triage policy computes for the four breached
-  # tickets; the model composes the policy, so a run that disagrees either
-  # broke the example or stopped using the mission API.
+  # What the deterministic policies compute for the four breached tickets:
+  # priority from triage.rules, and team plus first action from
+  # escalation.policy once each ticket's (unambiguous) category is read from
+  # its text. A run that disagrees broke the example or stopped using the
+  # mission APIs.
   @policy_scores %{"T-1001" => 75, "T-1004" => 81, "T-1005" => 52, "T-1006" => 58}
+  @policy_escalations %{
+    "T-1001" => {75, "payments", "verify the charge with finance before replying"},
+    "T-1004" => {81, "payments", "send the refund-policy summary"},
+    "T-1005" => {52, "sre", "page the on-call engineer"},
+    "T-1006" => {58, "support", "reply with the account-recovery checklist"}
+  }
 
   setup_all do
     :ok = LLMSupport.load_dotenv()
@@ -54,8 +62,10 @@ defmodule PtcRunner.Kernel.SupportTriageE2ETest do
     assert %{"escalations" => escalations, "summary" => summary} = result.value
     assert is_binary(summary)
 
-    scores = Map.new(escalations, &{&1["id"], &1["priority"]})
-    assert scores == @policy_scores
+    reported =
+      Map.new(escalations, &{&1["id"], {&1["priority"], &1["team"], &1["first_action"]}})
+
+    assert reported == @policy_escalations
 
     priorities = Enum.map(escalations, & &1["priority"])
     assert priorities == Enum.sort(priorities, :desc)
