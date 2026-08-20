@@ -197,6 +197,44 @@ must be generic and not overlap existing domains unless asked.
   test is as simple as the code it tests, delete it.
 - No `Process.sleep` — use monitors or async helpers.
 
+## Cursor Cloud specific instructions
+
+Durable, non-obvious notes for Cloud Agents. The toolchain, hooks, and standard
+commands are already documented in `docs/maintainers/development-setup.md` and
+the `## Commands` section above — read those first; this section only records
+what is specific to running in the Cloud VM.
+
+- **Toolchain lives under `mise`.** Erlang/Elixir/Java are pinned in `mise.toml`
+  and managed by `mise` (installed at `~/.local/bin/mise`). Interactive shells
+  activate it automatically via `~/.bashrc`, so `mix`/`elixir` are on `PATH`. In
+  a non-interactive script that is *not* sourced from `~/.bashrc`, prefix
+  commands with `~/.local/bin/mise exec -- …` (for example
+  `~/.local/bin/mise exec -- mix test`) so the pinned tools resolve.
+- **Reinstalling deps does not rebuild.** The startup update script only runs
+  `mix deps.get`; run `mix compile` yourself after pulling changes or editing
+  `mix.exs`/`mix.lock`/prelude sources. The bundled native launcher's C binary
+  is (re)built by `mix compile` via `elixir_make` (needs a C compiler, already
+  present).
+- **Smoke test the runtime offline.** `mix ptc run <project.json>` needs no
+  network for the deterministic examples:
+  `examples/kernel-tutorial/01-orders.ptc-project.json` and
+  `examples/llm-replay/ptc-project.json`. Model-backed examples/tests need
+  `OPENROUTER_API_KEY` (see the `## Commands` section).
+- **The Viewer is a web app you must start explicitly.** `mix ptc viewer
+  <project.json>` boots a Plug/Bandit HTTP server (not Phoenix) *inside the same
+  BEAM*; by default it binds `127.0.0.1` on an OS-chosen free port and tries to
+  open a browser. In the headless VM, pass `--port <PORT> --listen 127.0.0.1`
+  and open the printed URL yourself. It only shows runs that already produced a
+  trace, so run a project once before launching it.
+- **`mix test` is the default gate (~3 min, 6800+ tests).** It excludes
+  `:e2e`, `:scheduled_e2e`, `:nightly`, `:soak`, and `:clojure` by default;
+  those need extra prerequisites (API key, Babashka/JVM, MCP servers) per
+  `docs/maintainers/development-setup.md`.
+- **latin1 locale warning is harmless.** A tmux/login shell that does not export
+  a UTF-8 `LANG` makes the BEAM print a "native name encoding of latin1"
+  warning. Export `LANG=C.UTF-8` (or `ELIXIR_ERL_OPTIONS="+fnu"`) for that
+  shell; it does not affect correctness.
+
 <!-- usage-rules-start -->
 <!-- usage_rules-start -->
 ## usage_rules usage
