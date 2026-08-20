@@ -62,7 +62,7 @@ defmodule PtcRunner.Kernel.CommandInitializer do
       "envelope": true
     },
     "viewer": {
-      "port": 4123,
+      "port": 0,
       "open": true,
       "repl": true,
       "private": false

@@ -124,7 +124,7 @@ file. Project choices do not become part of application content identity.</p><h2
     &quot;envelope&quot;: true
   },
   &quot;viewer&quot;: {
-    &quot;port&quot;: 4123,
+    &quot;port&quot;: 0,
     &quot;open&quot;: true,
     &quot;repl&quot;: true,
     &quot;private&quot;: false
@@ -172,7 +172,13 @@ browser-opening preference, REPL setting, and private-data authorization. Trace
 and correlated inspection directories are captured before the listener starts;
 HTTP requests select only a run ID and never a filesystem path. Browser opening
 is a bounded convenience, and additionally requires an attached terminal:
-missing or failing platform openers do not stop Viewer.</p><p>The REPL and private-data settings are orthogonal. Enabling both presents the
+missing or failing platform openers do not stop Viewer.</p><p>The Viewer port defaults to <code class="inline">0</code>, which asks the operating system for a free
+port; startup prints the selected address before opening a browser. Set a fixed
+port only when another process needs a stable address. If that port is occupied,
+the command probes loopback and names the project when another PTC Viewer owns
+it. The Live project header and <code class="inline">/api/live/project</code> expose the exact project
+document path, so a working page cannot silently look like the project whose
+startup just failed.</p><p>The REPL and private-data settings are orthogonal. Enabling both presents the
 public-trace REPL alongside the private evidence panels without adding private
 inspection authority to the evaluation session.</p><p>Because <code class="inline">artifacts.inspection</code> and <code class="inline">viewer.private</code> must both hold, the private
 routes distinguish which one is missing: <code class="inline">inspection_not_configured</code> for a

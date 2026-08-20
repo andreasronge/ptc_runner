@@ -24,7 +24,7 @@ defmodule PtcViewer.Server do
   def init(opts) do
     Process.flag(:trap_exit, true)
 
-    port = Keyword.get(opts, :port, 4123)
+    port = Keyword.get(opts, :port, 0)
     ip = Keyword.get(opts, :ip, @loopback)
     trace_dir = opts |> Keyword.get(:trace_dir, "traces") |> Path.expand()
     kernel_adapter = Keyword.get(opts, :kernel_trace_adapter)

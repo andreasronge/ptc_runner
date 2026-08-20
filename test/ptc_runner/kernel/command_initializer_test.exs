@@ -57,6 +57,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
              ProjectConfig.load(Path.join(target, "ptc-project.json"))
 
     assert project.application == Path.join(target, "ptc.json")
+    assert project.viewer.port == 0
 
     assert Enum.sort(File.ls!(target)) == [
              ".gitignore",

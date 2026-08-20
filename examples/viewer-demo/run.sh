@@ -30,7 +30,7 @@ cat > "$out/ptc-project.json" <<'PROJECT'
   "version": 1,
   "application": {"path": "ptc.json"},
   "artifacts": {"root": "artifacts", "trace": true, "inspection": true},
-  "viewer": {"port": 4123, "open": false, "repl": false, "private": true}
+  "viewer": {"port": 0, "open": false, "repl": false, "private": true}
 }
 PROJECT
 
