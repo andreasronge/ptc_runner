@@ -103,6 +103,23 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
   end
 
   @tag :tmp_dir
+  test "init materializes the replay example as a one-argument project run", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "llm-replay")
+
+    assert {:ok, %CommandOutcome{}} =
+             CommandEngine.dispatch(["init", target, "--example", "llm-replay"])
+
+    assert File.exists?(Path.join(target, "ptc-project.json"))
+
+    assert {:ok, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["run", Path.join(target, "ptc-project.json")])
+
+    assert envelope["result"]["value"] == %{"content" => "Frozen answer"}
+  end
+
+  @tag :tmp_dir
   test "an unknown example is refused before any target work, with the names", %{
     tmp_dir: directory
   } do
