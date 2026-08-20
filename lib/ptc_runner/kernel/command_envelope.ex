@@ -3,8 +3,8 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
 
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandOutcome
-  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.DestinationIdentity
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.ProjectContext
   alias PtcRunner.Kernel.PublicationHandle
@@ -49,12 +49,7 @@ defmodule PtcRunner.Kernel.CommandEnvelope do
     end)
   end
 
-  defp reserve(path) do
-    case PublicationHandle.reserve(path, :result, 0o600) do
-      {:ok, handle} -> {:ok, handle}
-      {:error, reason} -> {:error, reason}
-    end
-  end
+  defp reserve(path), do: PublicationHandle.reserve(path, :result, 0o600)
 
   @doc false
   @spec destinations(CommandArguments.t() | nil, binary() | nil, binary()) :: [binary()]
