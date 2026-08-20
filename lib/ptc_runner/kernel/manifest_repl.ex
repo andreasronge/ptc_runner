@@ -8,6 +8,16 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   terminal authority is decided before the opening owner starts. A successful
   opening returns a process-affine `PtcRunner.Kernel.ReplSession` whose owner
   retains one provider session for every evaluation and owns terminal cleanup.
+
+  A private manifest requires `private_terminal: true` and an attached stdin
+  and stdout before provider activity, and admits only interactive input. That
+  attached-terminal check is an **accident guard, not access control** — the
+  same `isatty` limits documented on
+  `PtcRunner.Kernel.AnalysisSessionBuilder`. Unlike private analysis profiles,
+  there is deliberately no unattended private destination here: a private
+  manifest can carry caller-supplied private *input*, not only captured runtime
+  telemetry, so the gate stays interactive-only by design rather than offering
+  a `--private-unattended` equivalent.
   """
 
   alias PtcRunner.Kernel.AnalysisTerminal

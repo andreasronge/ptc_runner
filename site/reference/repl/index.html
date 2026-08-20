@@ -166,8 +166,12 @@ reference</a> for the full language surface.</p><p>Persist canonical session eve
 ptc repl --manifest ptc.json --trace trace.jsonl</code></pre><p>A private manifest requires an attached terminal and
 <code class="inline">--private-terminal</code> before provider activity. It rejects scripts, stdin,
 <code class="inline">--eval</code>, <code class="inline">--load</code>, JSON Lines, and detached execution; private values and
-prints may reach only that authorized terminal. Private traces use the reserved
-<code class="inline">.private.jsonl</code> suffix and owner-only permissions.</p><p>The session owner retains the continuation, event sink, and provider resources.
+prints may reach only that authorized terminal. Unlike private analysis
+profiles, there is no <code class="inline">--private-unattended</code> path: a private manifest can
+carry caller-supplied private input, not only runtime telemetry, so the gate
+stays interactive-only by design. The terminal check remains an accident
+guard, not access control. Private traces use the reserved <code class="inline">.private.jsonl</code>
+suffix and owner-only permissions.</p><p>The session owner retains the continuation, event sink, and provider resources.
 Normal close, abort, caller death, worker failure, and deadline failure converge
 on bounded cleanup before final trace persistence.</p><h2 id="query-public-traces">Query public traces</h2><p>Select the fixed public profile and its required resource:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
   --profile run-analysis-v1 \

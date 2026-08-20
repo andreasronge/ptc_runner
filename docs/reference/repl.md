@@ -160,8 +160,12 @@ ptc repl --manifest ptc.json --trace trace.jsonl
 A private manifest requires an attached terminal and
 `--private-terminal` before provider activity. It rejects scripts, stdin,
 `--eval`, `--load`, JSON Lines, and detached execution; private values and
-prints may reach only that authorized terminal. Private traces use the reserved
-`.private.jsonl` suffix and owner-only permissions.
+prints may reach only that authorized terminal. Unlike private analysis
+profiles, there is no `--private-unattended` path: a private manifest can
+carry caller-supplied private input, not only runtime telemetry, so the gate
+stays interactive-only by design. The terminal check remains an accident
+guard, not access control. Private traces use the reserved `.private.jsonl`
+suffix and owner-only permissions.
 
 The session owner retains the continuation, event sink, and provider resources.
 Normal close, abort, caller death, worker failure, and deadline failure converge
