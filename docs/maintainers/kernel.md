@@ -438,6 +438,14 @@ span them:
   triggering evaluation reply, so it outranks the generic unexpected-owner
   reason. Every evaluation admission rechecks the same authoritative deadline,
   so expiry publishes the same outcome regardless of timer-message ordering.
+- Orderly close, reset, and deadline expiry each finalize and publish the
+  batch; explicit `return` and `fail` are evaluation facts, not session
+  lifecycle commands. Session death before the builder releases its
+  construction guard cleans partial owners without publishing a run, and every
+  post-start handoff failure explicitly stops the partial session even when the
+  trace owner has already died. `SessionTrace` and `AnalysisSession` own the
+  rest — unexpected-owner best-effort publication, retry authority, and
+  idempotent close — in their module docs.
 - Ordering invariants the two owners must preserve: recorder readiness and
   continuation commit are one owner callback, so combined-runtime or trace-owner
   death cannot leave a committed result without event authority; orderly close
@@ -581,6 +589,10 @@ suites must keep proving, concretely:
 - canonical JSONL appends and reloads deterministically; a deleted index
   rebuilds identical results from canonical events; malformed events,
   unsupported versions, path traversal, and symlink escape all fail closed;
+- the bounded in-memory sink stays bounded;
+- normal and private canonical turn queries never contain inspection payloads,
+  and evaluation source hashes and byte counts match the executed bounded
+  source;
 - directory loading is sorted and capped, cursors are stable, and a changed
   source invalidates them;
 - truncation is deterministic and never allocates an unbounded intermediate;
@@ -615,7 +627,9 @@ suites must keep proving, concretely:
   aggregate ceilings fail closed without partial persistence;
 - the capture path adds no connector credentials, transport headers, session
   IDs, or endpoints, normal discovery omits `.inspection.jsonl`, and querying a
-  trace source never grants or reconstructs an inspection record.
+  trace source never grants or reconstructs an inspection record;
+- the local Viewer accepts only the exact host-configured inspection artifact
+  and rejects symlinks, changed files, wrong run IDs, and oversized input.
 
 Run focused tests while editing, then `mix precommit` for quality. When
 documentation changed, also run `MIX_ENV=dev mix docs --warnings-as-errors`.
