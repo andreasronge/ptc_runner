@@ -250,18 +250,25 @@ defmodule PtcRunner.Kernel.ProjectResolver do
         {argv, derived}
       end
 
-    maybe_add_artifact(
-      argv,
-      rest,
-      project.artifacts.envelope,
-      "--envelope",
-      :envelope,
-      Path.join([root, "envelopes", run_ref <> ".json"]),
-      derived
-    )
+    # The project envelope is a ledger: keep deriving it even when the caller
+    # also asked for `--envelope FILE`, so the convenience copy never suppresses
+    # `.ptc/envelopes/<run_ref>.json`. Inject the switch only when absent.
+    add_envelope_artifact(argv, rest, project.artifacts.envelope, root, run_ref, derived)
   end
 
   defp add_artifacts(_command, argv, _rest, _project, _run_ref, derived), do: {argv, derived}
+
+  defp add_envelope_artifact(argv, _rest, false, _root, _run_ref, derived),
+    do: {argv, derived}
+
+  defp add_envelope_artifact(argv, rest, true, root, run_ref, derived) do
+    derived = put_derived(derived, :envelope)
+    ledger = Path.join([root, "envelopes", run_ref <> ".json"])
+
+    if switch?(rest, "--envelope"),
+      do: {argv, derived},
+      else: {argv ++ ["--envelope", ledger], derived}
+  end
 
   defp add_profile_resources(
          argv,

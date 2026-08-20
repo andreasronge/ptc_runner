@@ -116,7 +116,8 @@ privacy rules.
 
 ## Overrides and lazy environment loading
 
-An explicit command value wins over the corresponding project default:
+An explicit command value wins over the corresponding project default for host,
+environment, and trace/inspection/result destinations:
 
 ```console
 ptc run ptc-project.json --host-config deployment/staging-host.json
@@ -125,6 +126,11 @@ ptc repl --project ptc-project.json --env-file deployment/staging.env
 ptc repl --project ptc-project.json --mission review
 ptc viewer ptc-project.json --env-file deployment/staging.env
 ```
+
+`--envelope FILE` is different: it adds a convenience copy for the invocation
+and does **not** suppress the project ledger under `.ptc/envelopes/` when
+`artifacts.envelope` is enabled. Trace, inspection, and result overrides still
+replace their project defaults.
 
 Mission selection, input, and component-override switches remain
 invocation-only. Mission names stay in the application manifest rather than

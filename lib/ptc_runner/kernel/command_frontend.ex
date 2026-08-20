@@ -91,9 +91,11 @@ defmodule PtcRunner.Kernel.CommandFrontend do
          rejection
        )
        when is_binary(path) do
+    paths = CommandEnvelope.destinations(entry.arguments, path, entry.run_ref)
+
     result =
       with :ok <- ProjectArtifactRoot.ensure_for(entry.arguments),
-           do: CommandEnvelope.publish(outcome, path)
+           do: CommandEnvelope.publish_all(outcome, paths)
 
     case result do
       :ok ->
