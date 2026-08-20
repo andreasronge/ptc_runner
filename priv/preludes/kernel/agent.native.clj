@@ -58,16 +58,16 @@
         (and (= expected "max-calls") (= token "max_calls")))))
 
 (defn- max-calls-refusal? [response]
-  (let [details (get response :details)]
-    (and (map? response)
-         (hyphenated? (get response :status) "error")
-         (hyphenated? (get response :kind) "limit-exceeded")
-         (hyphenated? (get response :reason) "capability-quota")
-         (map? details)
-         (hyphenated? (get details :limit) "max-calls")
-         (string? (get details :alias))
-         (integer? (get details :limit_value))
-         (pos? (get details :limit_value)))))
+  (and (map? response)
+       (let [details (get response :details)]
+         (and (hyphenated? (get response :status) "error")
+              (hyphenated? (get response :kind) "limit-exceeded")
+              (hyphenated? (get response :reason) "capability-quota")
+              (map? details)
+              (hyphenated? (get details :limit) "max-calls")
+              (string? (get details :alias))
+              (integer? (get details :limit_value))
+              (pos? (get details :limit_value))))))
 
 (defn normalize
   "Normalizes one provider response into a tool call, provider error, max-calls refusal, or protocol error."
