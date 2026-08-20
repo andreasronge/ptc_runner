@@ -102,11 +102,13 @@ installation, mapping, effect, authentication, and lifecycle contract.</p></bloc
 operator fixes the server, transport, credentials, public names, and read/write
 effects in the host document. The application manifest may select and narrow
 that installation but cannot invent or widen it.</p><p>Start with <a href="/guides/building-agents/">Building agents</a> if you have not yet run the
-shipped agent loop. This guide adds one file-reading tool to that working path.</p><p>Two small servers are ready to copy:</p><ul><li><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/filesystem"><code class="inline">examples/mcp/filesystem</code></a> is a
-paginated, read-only file grant with a committed JavaScript bundle.</li><li><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/writer"><code class="inline">examples/mcp/writer</code></a> is a confined
-report writer with an explicit write effect and retry guidance.</li></ul><p>They are source examples, not release payloads. A separately cloned project
-should vendor the chosen bundle or install an equivalent server at a stable
-location; the PtcRunner release does not add Node.js or copy these examples.</p><h2 id="protocol-compatibility">Protocol compatibility</h2><p>PtcRunner implements the final MCP <code class="inline">2026-07-28</code> profile. Acquisition starts
+shipped agent loop. This guide adds one file-reading tool to that working path.</p><p>The published <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a>
+package (MIT, <a href="https://github.com/andreasronge/ptc-fs-mcp">source</a>) is a
+confined read/write filesystem server over live bytes. Pin it from a host
+document with <code class="inline">npx</code>; a hermetic spawn that does not inherit <code class="inline">PATH</code> must run
+absolute <code class="inline">node</code> against the installed <code class="inline">dist/cli.js</code>.</p><p>It is a demo server, not a release payload. A separately cloned project should
+install that package at a pinned version; the PtcRunner release does not add
+Node.js.</p><h2 id="protocol-compatibility">Protocol compatibility</h2><p>PtcRunner implements the final MCP <code class="inline">2026-07-28</code> profile. Acquisition starts
 with <code class="inline">server/discover</code>; it does not retry the legacy <code class="inline">initialize</code> handshake or
 downgrade to an older protocol revision. A server must advertise <code class="inline">2026-07-28</code>
 in <code class="inline">supportedVersions</code> and implement the tools surface from that profile.</p><p>An incompatible but responsive endpoint fails with
@@ -117,9 +119,9 @@ Upgrade or replace the MCP server rather than adding a fallback handshake.</p><p
 <code class="inline">@modelcontextprotocol/server-filesystem@2026.7.10</code> package negotiates
 <code class="inline">2025-11-25</code> through <code class="inline">initialize</code> and answers <code class="inline">server/discover</code> with JSON-RPC
 <code class="inline">-32601 Method not found</code>. It is therefore not compatible with this PtcRunner
-profile, despite starting and serving legacy clients normally. The checked-in
-filesystem example listed above implements the required profile and is the
-deterministic baseline for this reference.</p><p>A cold <code class="inline">npx</code> launch can spend more than the default budget before that protocol
+profile, despite starting and serving legacy clients normally.
+<a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a> implements the
+required profile and is the deterministic baseline for this reference.</p><p>A cold <code class="inline">npx</code> launch can spend more than the default budget before that protocol
 response arrives. Acquisition derives one per-operation budget and then applies
 it to each step separately: once to starting the transport, which for stdio
 covers launcher staging and the child spawn, and again to each discovery request,
@@ -139,11 +141,9 @@ that the clock ran out: the step that expired may have been the spawn or the
 discovery answer, so PtcRunner cannot say the server was reached, only that it
 never received the response needed to prove a protocol mismatch. Raise the
 budgets and run it again. A first launch on a cold npm cache, or any launch on a
-loaded machine, is the usual cause.</p><h2 id="run-the-checked-in-file-agent">Run the checked-in file agent</h2><p>The tutorial server is a committed JavaScript bundle. It requires Node.js 22 or
-newer but no npm install or build. The MCP server this step launches is the repository's
-<code class="inline">examples/mcp/filesystem</code> bundle, which is too large to embed. Copy that
-directory to <code class="inline">mcp/filesystem</code> beside the materialized tutorial, or run this
-step from a checkout.</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
+loaded machine, is the usual cause.</p><h2 id="run-the-checked-in-file-agent">Run the checked-in file agent</h2><p>The tutorial launches <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a>
+through <code class="inline">npx</code>. It requires Node.js 22 or newer; the first run may download that
+package.</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
 ptc doctor kernel-tutorial/03-file-agent.ptc-project.json</code></pre><p>Passive doctor validates the application, resolves <code class="inline">node</code>, and checks the
 selected installation without loading the model credential or starting the
 server. After completing the <a href="/guides/quickstart/#run-a-model-authored-program">model-authored Quickstart</a>,
@@ -181,10 +181,12 @@ transport-failed write is never retried automatically and may report
 <code class="inline">mutation_state: &quot;indeterminate&quot;</code>; the external mutation may already have
 happened. A complete decoded refusal (<code class="inline">isError: true</code>) or JSON-RPC error is
 not indeterminate: the server answered, so the caller can treat that outcome
-as known.</p><p>The checked-in <a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/writer">writer sample</a> shows the
-complete installation, mandatory <code class="inline">allow</code> list, basename confinement, and the
-rule that the caller must reconcile an indeterminate result rather than repeat
-the mutation blindly.</p><p>A prompt-visible PTC-Lisp wrapper can present a smaller domain API than the raw
+as known.</p><p>The
+<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer"><code class="inline">named-mission-reader-writer</code></a>
+example shows the complete installation: two occurrences of <code class="inline">ptc-fs-mcp@0.1.0</code>
+with different roots, a mandatory <code class="inline">allow</code> list on the write mapping, basename
+confinement, and the rule that the caller must reconcile an indeterminate
+result rather than repeat the mutation blindly.</p><p>A prompt-visible PTC-Lisp wrapper can present a smaller domain API than the raw
 tool:</p><pre><code class="clojure language-clojure">(ns my.files &quot;Mission access to the granted file root.&quot; {:visibility :prompt})
 
 (defn read-page
@@ -207,9 +209,9 @@ literal environment values:</p><pre><code class="json language-json">&quot;trans
   &quot;inherit_environment&quot;: true,
   &quot;env&quot;: {&quot;VENDOR_TOKEN&quot;: {&quot;binding&quot;: &quot;vendor_token&quot;}}
 }</code></pre><p>Relative entries in <code class="inline">args</code> are interpreted by the child under that resolved
-<code class="inline">cwd</code>. If the host document lives outside this checkout, a path into
-<code class="inline">examples/mcp/...</code> must therefore be copied into the project or expressed as a
-deliberate cross-repository/absolute path.</p><p>Plain doctor resolves the executable without launching it. Missing commands
+<code class="inline">cwd</code>. Pin a published package with <code class="inline">npx</code> when the host document lives outside
+this checkout; a relative path into another repository is a deliberate
+cross-tree choice, not a default.</p><p>Plain doctor resolves the executable without launching it. Missing commands
 fail their local provider check as <code class="inline">command_not_found</code>. The optional
 <a href="https://github.com/andreasronge/ptc_runner/tree/main/ptc_runner_launcher">launcher companion</a>
 adds executable identity and stronger stdio containment.</p><p>Streamable HTTP names a remote endpoint and optional static authentication:</p><pre><code class="json language-json">&quot;transport&quot;: {
@@ -373,9 +375,9 @@ request may have performed a write. Dynamic Client Registration, DPoP, and
 signed authorization metadata are unsupported.</p><h2 id="publish-immutable-content-identity">Publish immutable content identity</h2><p>For immutable content, <code class="inline">snapshot_identity</code> may name an installed read tool and
 a result field containing a lowercase <code class="inline">sha256:</code> digest:</p><pre><code class="json language-json">&quot;snapshot_identity&quot;: {&quot;tool&quot;: &quot;snapshot_info&quot;, &quot;field&quot;: &quot;snapshot_hash&quot;}</code></pre><p>PtcRunner calls that tool once during assembly and publishes the digest as
 <code class="inline">content_snapshot_hash</code>. It validates the shape, not the server's immutability
-claim. The
-<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/filesystem#publishing-the-content-identity">filesystem sample</a>
-shows the complete contract.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/application-manifest/">Manifests and capabilities</a> covers mission
+claim. Install the field when the server actually publishes a whole-corpus
+digest; <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp</code></a> does not,
+because it serves live bytes and reports a per-call <code class="inline">content_hash</code> instead.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/application-manifest/">Manifests and capabilities</a> covers mission
 selection, narrowing, and prompt-visible facades.</li><li><a href="/reference/host-installation/">Host configuration</a> covers credentials, provider
 aliases, data classes, and installed policy shared by every source type.</li><li><a href="/guides/building-agents/">Building agents</a>
 explains effect-aware correction and retry behavior.</li></ul>

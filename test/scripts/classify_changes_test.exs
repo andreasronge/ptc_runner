@@ -75,7 +75,7 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
           {".dockerignore", core},
           {"rel/overlays/bin/ptc", core},
           {"examples/kernel-tutorial/03-file-agent/agent.clj", core},
-          {"examples/mcp/filesystem/src/index.ts", only(["mcp_filesystem"])},
+          {"test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs", only(["mcp_filesystem"])},
           {".claude/skills/precommit/SKILL.md", all_false()},
           {".github/workflows/nightly.yml", all_false()},
           {".github/workflows/soak.yml", all_false()},

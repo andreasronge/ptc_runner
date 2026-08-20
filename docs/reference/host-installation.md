@@ -46,7 +46,7 @@ actions happen later during preflight and acquisition.
     },
     "workspace": {
       "source": "mcp",
-      "installation_revision": "filesystem-sample-0.2.0",
+      "installation_revision": "workspace-v1",
       "transport": {
         "type": "stdio",
         "command": "node",

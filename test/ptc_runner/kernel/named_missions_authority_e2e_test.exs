@@ -8,9 +8,9 @@ defmodule PtcRunner.Kernel.NamedMissionsAuthorityE2ETest do
   all — the grant is absent from its environment, so the program does not even
   compile there.
 
-  The same sample server backs both installations. `effect` is host-owned, so
-  declaring one mapping `write` is a host statement about authority, not a
-  claim about what the server does.
+  Two installations of the same published server back the grants. `effect` is
+  host-owned, so declaring one mapping `write` is a host statement about
+  authority, not a claim about what the server does.
   """
   use ExUnit.Case, async: false
 
@@ -20,19 +20,19 @@ defmodule PtcRunner.Kernel.NamedMissionsAuthorityE2ETest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.TestSupport.PtcFsMCP
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.TestHelpers
 
-  if reason = TestHelpers.executable_skip_reason(["node"]) do
+  if reason = TestHelpers.executable_skip_reason(["node", "npm"]) do
     @moduletag skip: reason
   end
-
-  @server Path.expand("../../../examples/mcp/filesystem/dist/server.js", __DIR__)
 
   @tag :tmp_dir
   test "a named mission cannot reach a provider it was not granted", %{tmp_dir: dir} do
     node = System.find_executable("node") || flunk("Node.js is required for this E2E")
-    paths = write_application(dir, node)
+    cli = PtcFsMCP.install!(dir)
+    paths = write_application(dir, node, cli)
 
     assert {:ok, host} = HostConfig.load(paths.host)
     assert {:ok, catalog} = HostInstallation.catalog(host)
@@ -60,14 +60,18 @@ defmodule PtcRunner.Kernel.NamedMissionsAuthorityE2ETest do
     assert attempt["details"]["message"] =~ "notes.read"
     refute attempt["details"]["capability_activity?"]
 
-    # And the read grant the review space does hold still works.
+    # And the read grant the review space does hold still works against the
+    # bytes the writing space just committed.
     assert get_in(values, ["reviewed", "outcome"]) == "returned"
     assert get_in(values, ["reviewed", "value", "status"]) == "ok"
+
+    assert get_in(values, ["reviewed", "value", "value", "items"]) == [
+             %{"byte_offset" => 0, "text" => "committed\n"}
+           ]
   end
 
-  defp write_application(dir, node) do
-    File.mkdir_p!(Path.join(dir, "lib"))
-    File.write!(Path.join(dir, "lib/note.txt"), "alpha\nbravo\n")
+  defp write_application(dir, node, cli) do
+    File.write!(Path.join(dir, "seed.txt"), "untouched\n")
 
     File.write!(
       Path.join(dir, "workflow.clj"),
@@ -76,11 +80,11 @@ defmodule PtcRunner.Kernel.NamedMissionsAuthorityE2ETest do
 
       (defn run [_input]
         (let [wrote (kernel/eval-source "writing"
-                      "(return (tool/notes.commit {\\"path\\" \\"lib/note.txt\\"}))")
+                      "(return (tool/notes.commit {\\"path\\" \\"note.txt\\" \\"content\\" \\"committed\\\\n\\"}))")
               review-write (kernel/eval-source "review"
-                             "(return (tool/notes.commit {\\"path\\" \\"lib/note.txt\\"}))")
+                             "(return (tool/notes.commit {\\"path\\" \\"note.txt\\" \\"content\\" \\"nope\\\\n\\"}))")
               reviewed (kernel/eval-source "review"
-                         "(return (tool/notes.read {\\"path\\" \\"lib/note.txt\\"}))")]
+                         "(return (tool/notes.read {\\"path\\" \\"note.txt\\"}))")]
           (return
             {"wrote" wrote
              "review_write_attempt" review-write
@@ -116,7 +120,7 @@ defmodule PtcRunner.Kernel.NamedMissionsAuthorityE2ETest do
         "type" => "stdio",
         "command" => node,
         "cwd" => dir,
-        "args" => [@server, "--root", dir, "--include", "lib/**"],
+        "args" => [cli, "--root", dir, "--include", "**"],
         "inherit_environment" => false,
         "env" => %{},
         "start_timeout_ms" => 15_000
@@ -127,14 +131,11 @@ defmodule PtcRunner.Kernel.NamedMissionsAuthorityE2ETest do
 
     host = %{
       "install" => %{
-        # Host-declared write authority. The server is read-only; `effect` is a
-        # host statement about what the runtime must assume, and a server
-        # cannot change it.
         "notes_write" => %{
           "source" => "mcp",
           "transport" => transport.(),
           "tools" => %{
-            "read_text_file" => %{"as" => "notes.commit", "effect" => "write"}
+            "write_text_file" => %{"as" => "notes.commit", "effect" => "write"}
           },
           "installation_revision" => "notes-write-0.1.0",
           "ceilings" => ceilings

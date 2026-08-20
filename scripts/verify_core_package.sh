@@ -53,8 +53,6 @@ test -f "$package_tmp_dir/source/priv/schemas/ptc-application-manifest.schema.js
 test -f "$package_tmp_dir/source/priv/schemas/ptc-project-config.schema.json"
 test -f "$package_tmp_dir/source/docs/kernel-limits-reference.md"
 test -f "$package_tmp_dir/source/docs/prelude-reference.md"
-test -f "$package_tmp_dir/source/examples/mcp/filesystem/dist/server.js"
-test -f "$package_tmp_dir/source/examples/mcp/filesystem/NOTICE"
 test ! -e "$package_tmp_dir/source/dev"
 
 for mix_env in dev test; do

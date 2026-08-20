@@ -177,11 +177,11 @@ jobs:
               mix test test/ptc_runner/kernel/mcp_oauth_remote_e2e_test.exs \
                 --include e2e --trace --warnings-as-errors
 
-  mcp-filesystem-sample:
+  mcp-filesystem-e2e:
     needs: changes
     if: needs.changes.outputs.mcp_filesystem == 'true'
     runs-on: ubuntu-latest
-    name: MCP filesystem sample server
+    name: MCP filesystem e2e
 
     steps:
       - name: Checkout repository
@@ -197,41 +197,12 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '22.22.2'
-          cache: npm
-          cache-dependency-path: examples/mcp/filesystem/package-lock.json
-
-      # `npm ci` installs the lockfile exactly and fails when package.json and
-      # the lockfile disagree, so a hand-edited dependency cannot reach CI.
-      - name: Install pinned dependencies
-        working-directory: examples/mcp/filesystem
-        run: npm ci --no-audit --no-fund
-
-      - name: Typecheck
-        working-directory: examples/mcp/filesystem
-        run: npm run typecheck
-
-      # The bundle is committed so a clean checkout can run the server without
-      # installing anything. Regenerate it and fail on any difference, so the
-      # artifact can never drift from the source that supposedly produced it.
-      - name: Rebuild the committed bundle
-        working-directory: examples/mcp/filesystem
-        run: npm run build
-
-      - name: Fail if the committed bundle is stale
-        working-directory: examples/mcp/filesystem
-        run: |
-          if ! git diff --exit-code -- dist/server.js; then
-            echo "::error::dist/server.js does not match a rebuild from src/. Run 'npm run build' in examples/mcp/filesystem and commit the result." >&2
-            exit 1
-          fi
-
-      - name: Run server conformance tests
-        working-directory: examples/mcp/filesystem
-        run: npm test
 
       - name: Verify host JSON, manifest, stdio, and PTC-Lisp integration
         run: |
           mix test test/ptc_runner/kernel/filesystem_mcp_e2e_test.exs \
+            test/ptc_runner/kernel/named_missions_authority_e2e_test.exs \
+            test/ptc_runner/kernel/ptc_fs_mcp_stdio_test.exs \
             --include e2e --trace --warnings-as-errors
 
   # `Core validation` used to be one job running tests, Dialyzer, release
@@ -502,7 +473,7 @@ jobs:
       - mcp-stdio-launcher
       - mcp-stdio-launcher-package
       - mcp-http-interop
-      - mcp-filesystem-sample
+      - mcp-filesystem-e2e
       - java-interop-conformance
     runs-on: ubuntu-latest
     name: Required CI result

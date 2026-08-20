@@ -11,16 +11,15 @@ that installation but cannot invent or widen it.
 Start with [Building agents](../guides/building-agents.md) if you have not yet run the
 shipped agent loop. This guide adds one file-reading tool to that working path.
 
-Two small servers are ready to copy:
+The published [`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp)
+package (MIT, [source](https://github.com/andreasronge/ptc-fs-mcp)) is a
+confined read/write filesystem server over live bytes. Pin it from a host
+document with `npx`; a hermetic spawn that does not inherit `PATH` must run
+absolute `node` against the installed `dist/cli.js`.
 
-- [`examples/mcp/filesystem`](https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/filesystem) is a
-  paginated, read-only file grant with a committed JavaScript bundle.
-- [`examples/mcp/writer`](https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/writer) is a confined
-  report writer with an explicit write effect and retry guidance.
-
-They are source examples, not release payloads. A separately cloned project
-should vendor the chosen bundle or install an equivalent server at a stable
-location; the PtcRunner release does not add Node.js or copy these examples.
+It is a demo server, not a release payload. A separately cloned project should
+install that package at a pinned version; the PtcRunner release does not add
+Node.js.
 
 ## Protocol compatibility
 
@@ -39,9 +38,9 @@ As of 2026-08-17, the official
 `@modelcontextprotocol/server-filesystem@2026.7.10` package negotiates
 `2025-11-25` through `initialize` and answers `server/discover` with JSON-RPC
 `-32601 Method not found`. It is therefore not compatible with this PtcRunner
-profile, despite starting and serving legacy clients normally. The checked-in
-filesystem example listed above implements the required profile and is the
-deterministic baseline for this reference.
+profile, despite starting and serving legacy clients normally.
+[`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp) implements the
+required profile and is the deterministic baseline for this reference.
 
 A cold `npx` launch can spend more than the default budget before that protocol
 response arrives. Acquisition derives one per-operation budget and then applies
@@ -93,12 +92,9 @@ loaded machine, is the usual cause.
 
 ## Run the checked-in file agent
 
-The tutorial server is a committed JavaScript bundle. It requires Node.js 22 or
-newer but no npm install or build. The MCP server this step launches is the repository's
-`examples/mcp/filesystem` bundle, which is too large to embed. Copy that
-directory to `mcp/filesystem` beside the materialized tutorial, or run this
-step from a checkout.
-
+The tutorial launches [`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp)
+through `npx`. It requires Node.js 22 or newer; the first run may download that
+package.
 
 ```console
 ptc init kernel-tutorial --example kernel-tutorial
@@ -172,10 +168,12 @@ happened. A complete decoded refusal (`isError: true`) or JSON-RPC error is
 not indeterminate: the server answered, so the caller can treat that outcome
 as known.
 
-The checked-in [writer sample](https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/writer) shows the
-complete installation, mandatory `allow` list, basename confinement, and the
-rule that the caller must reconcile an indeterminate result rather than repeat
-the mutation blindly.
+The
+[`named-mission-reader-writer`](https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer)
+example shows the complete installation: two occurrences of `ptc-fs-mcp@0.1.0`
+with different roots, a mandatory `allow` list on the write mapping, basename
+confinement, and the rule that the caller must reconcile an indeterminate
+result rather than repeat the mutation blindly.
 
 A prompt-visible PTC-Lisp wrapper can present a smaller domain API than the raw
 tool:
@@ -216,9 +214,9 @@ literal environment values:
 ```
 
 Relative entries in `args` are interpreted by the child under that resolved
-`cwd`. If the host document lives outside this checkout, a path into
-`examples/mcp/...` must therefore be copied into the project or expressed as a
-deliberate cross-repository/absolute path.
+`cwd`. Pin a published package with `npx` when the host document lives outside
+this checkout; a relative path into another repository is a deliberate
+cross-tree choice, not a default.
 
 Plain doctor resolves the executable without launching it. Missing commands
 fail their local provider check as `command_not_found`. The optional
@@ -499,9 +497,9 @@ a result field containing a lowercase `sha256:` digest:
 
 PtcRunner calls that tool once during assembly and publishes the digest as
 `content_snapshot_hash`. It validates the shape, not the server's immutability
-claim. The
-[filesystem sample](https://github.com/andreasronge/ptc_runner/tree/main/examples/mcp/filesystem#publishing-the-content-identity)
-shows the complete contract.
+claim. Install the field when the server actually publishes a whole-corpus
+digest; [`ptc-fs-mcp`](https://www.npmjs.com/package/ptc-fs-mcp) does not,
+because it serves live bytes and reports a per-call `content_hash` instead.
 
 ## Next steps
 

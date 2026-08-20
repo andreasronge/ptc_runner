@@ -55,6 +55,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a published port can reach, and `docker run -p 127.0.0.1:PORT:PORT` is what
   keeps host exposure on loopback. `--port` overrides the project's port.
 
+### Changed
+
+- Host examples, tutorials, and MCP e2e tests now pin the published
+  [`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp) package instead
+  of the two in-repo sample servers. Reads and writes share live bytes, so a
+  write is visible to the next read. Operator hosts launch it with `npx`;
+  hermetic tests spawn absolute `node` against the installed `dist/cli.js`.
+
+### Removed
+
+- `examples/mcp/filesystem` and `examples/mcp/writer`, their committed Node
+  bundle and `NOTICE`, and the CI job that rebuilt that bundle on every sample
+  change.
+
 ### Fixed
 
 - MCP stdio now retains bounded child stderr in the private inspection

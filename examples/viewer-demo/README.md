@@ -17,13 +17,13 @@ examples/viewer-demo/run.sh            # outputs to tmp/viewer-demo
 examples/viewer-demo/run.sh /path/out  # or an explicit directory
 ```
 
-The script regenerates the granted `files/` root, launches the committed
-filesystem MCP sample through `ptc-host.json`, runs each journey with
+The script regenerates the granted `files/` root, launches
+`ptc-fs-mcp@0.1.0` through `ptc-host.json`, runs each journey with
 `--trace-dir` and `--inspect` into one owner-only project artifact root, writes
 the project document beside it, and prints the `mix ptc viewer` command that
-opens it. Node.js is required, but the committed bundle needs no package
-installation. That project grants the Viewer the private inspection artifacts,
-so treat the browser tab as a private sink.
+opens it. Node.js is required; the first run may download that package. That
+project grants the Viewer the private inspection artifacts, so treat the
+browser tab as a private sink.
 
 ## Journeys
 

@@ -161,8 +161,8 @@ beneath the canonical manifest directory. Absolute paths, traversal, devices,
 non-regular files, and symlink escape are rejected. These rules cover files
 the host loads. The manifest path itself is selected by the caller and its
 basename does not have to use the logical-name grammar. Model-visible files
-require a separately installed and selected provider such as the
-<a href="/reference/mcp/#run-the-checked-in-file-agent">filesystem sample</a>.</p><h2 id="validate-inputs-and-results">Validate inputs and results</h2><p>Use bounded manifest-relative JSON Schema contracts:</p><pre><code class="json language-json">&quot;contracts&quot;: {
+require a separately installed and selected provider such as
+<a href="/reference/mcp/#run-the-checked-in-file-agent">ptc-fs-mcp</a>.</p><h2 id="validate-inputs-and-results">Validate inputs and results</h2><p>Use bounded manifest-relative JSON Schema contracts:</p><pre><code class="json language-json">&quot;contracts&quot;: {
   &quot;input_schema&quot;: {&quot;path&quot;: &quot;task.schema.json&quot;},
   &quot;result_schema&quot;: {&quot;path&quot;: &quot;candidate.schema.json&quot;}
 }</code></pre><p>The input contract covers manifest input and command-line input overrides. It
