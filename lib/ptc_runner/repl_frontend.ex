@@ -1546,8 +1546,17 @@ defmodule PtcRunner.ReplFrontend do
     info(preview.text)
   end
 
+  defp format_error(%{fail: %{reason: reason, message: message}} = step, session, render)
+       when is_atom(reason) and is_binary(message) do
+    # Lisp.format_error/1 already renders "#{reason}: …". Strip that once so the
+    # REPL wrapper is the only kind spelling on the line.
+    body = String.replace_prefix(message, "#{reason}: ", "")
+
+    "Error (#{reason}): " <> mission_hint(step, session, render) <> body
+  end
+
   defp format_error(%{fail: %{reason: reason, message: message}} = step, session, render),
-    do: "Error (#{reason}): " <> mission_hint(step, session, render) <> message
+    do: "Error (#{reason}): " <> mission_hint(step, session, render) <> to_string(message)
 
   # The analyzer answers an unknown namespace with the language's own list,
   # thirty-odd entries that name no mission, because a workflow session cannot

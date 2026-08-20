@@ -64,7 +64,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
   test "direct eval retains canonical unknown-namespace guidance" do
     expected =
-      "Error (invalid_form): invalid_form: " <> NamespaceDiagnostic.message("kernel")
+      "Error (invalid_form): " <> NamespaceDiagnostic.message("kernel")
 
     output =
       capture_io(:stderr, fn ->
@@ -75,7 +75,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
         assert String.starts_with?(
                  error.message,
-                 "error: repl/command_failed: Error (invalid_form): invalid_form: " <>
+                 "error: repl/command_failed: Error (invalid_form): " <>
                    "unknown namespace kernel/"
                )
       end)
