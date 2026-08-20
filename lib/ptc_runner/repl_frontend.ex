@@ -1455,7 +1455,7 @@ defmodule PtcRunner.ReplFrontend do
   defp terminal_hint(false), do: ""
 
   defp introspection_hint do
-    ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir) and (export-meta "ns/name").|
+    ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir), (export-meta "ns/name"), and (source ns/name).|
   end
 
   defp loop(session, render) do

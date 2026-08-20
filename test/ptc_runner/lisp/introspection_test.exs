@@ -71,6 +71,11 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                ["alpha/greet", "alpha/limit", "alpha/shout"]
     end
 
+    test "accepts unquoted and quoted namespace symbols", %{prelude: prelude} do
+      assert eval!("(dir alpha)", prelude).return == eval!(~S|(dir "alpha")|, prelude).return
+      assert eval!("(dir 'alpha)", prelude).return == eval!(~S|(dir "alpha")|, prelude).return
+    end
+
     test "omits private helpers from a namespace listing", %{prelude: prelude} do
       refute "alpha/helper" in eval!(~S|(dir "alpha")|, prelude).return
     end
@@ -83,6 +88,13 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
   describe "apropos" do
     test "matches on ref", %{prelude: prelude} do
       assert "beta/hidden" in eval!(~S|(apropos "hidden")|, prelude).return
+    end
+
+    test "accepts a quoted symbol query (Piece-1 normalization)", %{prelude: prelude} do
+      # `apropos` stays an ordinary function: bare symbols evaluate. Quoted
+      # symbols become `{:symbol_ref, _}` and normalize like strings.
+      assert eval!("(apropos 'hidden)", prelude).return ==
+               eval!(~S|(apropos "hidden")|, prelude).return
     end
 
     test "matches on docstring", %{prelude: prelude} do
@@ -137,6 +149,14 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                effect: :read,
                signature: "(name :string) -> :string"
              }
+    end
+
+    test "accepts unquoted and quoted refs", %{prelude: prelude} do
+      assert eval!("(export-meta alpha/greet)", prelude).return ==
+               eval!(~S|(export-meta "alpha/greet")|, prelude).return
+
+      assert eval!("(export-meta 'alpha/greet)", prelude).return ==
+               eval!(~S|(export-meta "alpha/greet")|, prelude).return
     end
 
     test "omits the signature key entirely when unsigned", %{prelude: prelude} do
@@ -225,6 +245,42 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                  Greets a name.\
                """
              ]
+    end
+
+    test "accepts unquoted, quoted, and string refs identically (issue #1094)", %{
+      prelude: prelude
+    } do
+      string = eval!(~S|(doc "alpha/greet")|, prelude)
+      quoted = eval!("(doc 'alpha/greet)", prelude)
+      unquoted = eval!("(doc alpha/greet)", prelude)
+
+      assert string.prints == quoted.prints
+      assert string.prints == unquoted.prints
+      assert string.return == nil
+    end
+
+    test "accepts an unquoted builtin name", %{prelude: prelude} do
+      assert eval!("(doc str)", prelude).prints == eval!(~S|(doc "str")|, prelude).prints
+    end
+
+    test "a missing namespaced ref is a clean miss, not an analysis fault", %{prelude: prelude} do
+      result = eval!("(doc missing/ns)", prelude)
+      assert result.return == nil
+      assert Enum.join(result.prints, "\n") =~ ~s(No documentation found for "missing/ns")
+    end
+
+    test "computed refs still evaluate", %{prelude: prelude} do
+      assert eval!(~S|(doc (str "alpha/" "greet"))|, prelude).prints ==
+               eval!(~S|(doc "alpha/greet")|, prelude).prints
+    end
+
+    test "short-fn params keep evaluating (not auto-quoted)", %{prelude: prelude} do
+      # `#(doc %)` desugars to `(fn [p1] (doc p1))`. The local must evaluate so
+      # mapping over string refs still works.
+      result = eval!(~S|(mapv #(doc %) ["alpha/greet" "str"])|, prelude)
+      assert result.return == [nil, nil]
+      assert Enum.join(result.prints, "\n") =~ "alpha/greet"
+      assert Enum.join(result.prints, "\n") =~ "str"
     end
 
     test "renders a constant with its type and bare ref", %{prelude: prelude} do
@@ -375,10 +431,14 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
     end
 
     test "are recognized as functions", %{prelude: prelude} do
-      assert eval!(~S|[(fn? dir) (fn? apropos) (fn? doc) (fn? export-meta)]|, prelude).return ==
-               [true, true, true, true]
+      assert eval!(
+               ~S|[(fn? dir) (fn? apropos) (fn? doc) (fn? export-meta) (fn? source)]|,
+               prelude
+             ).return == [true, true, true, true, true]
 
-      assert eval!(~S|[(ifn? dir) (ifn? export-meta)]|, prelude).return == [true, true]
+      assert eval!(~S|[(ifn? dir) (ifn? export-meta) (ifn? source)]|, prelude).return ==
+               [true, true, true]
+
       assert eval!(~S|(get (describe doc) :type)|, prelude).return == "function"
     end
 
@@ -390,12 +450,160 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
     end
   end
 
+  describe "binding-aware discovery refs" do
+    test "defn params are not auto-quoted", %{prelude: prelude} do
+      assert eval!(
+               ~S|(do (defn show [r] (doc r)) (show "alpha/greet"))|,
+               prelude
+             ).prints == eval!(~S|(doc "alpha/greet")|, prelude).prints
+    end
+
+    test "if-let bindings are not auto-quoted", %{prelude: prelude} do
+      assert eval!(
+               ~S|(if-let [r "alpha/greet"] (doc r) nil)|,
+               prelude
+             ).prints == eval!(~S|(doc "alpha/greet")|, prelude).prints
+    end
+
+    test "as-> bindings are not auto-quoted", %{prelude: prelude} do
+      assert eval!(
+               ~S|(as-> "alpha/greet" r (doc r))|,
+               prelude
+             ).prints == eval!(~S|(doc "alpha/greet")|, prelude).prints
+    end
+
+    test "a rebound doc evaluates args instead of auto-quoting", %{prelude: prelude} do
+      # Bare `shout` is a variable reference again (not a discovery ref), so it
+      # must be bound — the same fault a plain local fn would raise.
+      assert match?(
+               {:error, _},
+               Lisp.run(~S|(let [doc (fn [x] (str "local:" x))] (doc shout))|, prelude: prelude)
+             )
+
+      assert eval!(~S|(let [doc (fn [x] (str "local:" x))] (doc "shout"))|, prelude).return ==
+               "local:shout"
+    end
+  end
+
+  describe "source visibility" do
+    test "an export mask hides source the same way as doc", %{prelude: prelude} do
+      mask = [prelude_export_mask: %{"alpha" => MapSet.new(["alpha/greet"])}]
+
+      assert Enum.join(eval!(~S|(doc "alpha/shout")|, prelude, mask).prints, "\n") =~
+               "No documentation found"
+
+      assert Enum.join(eval!(~S|(source "alpha/shout")|, prelude, mask).prints, "\n") =~
+               ~s(No source available for "alpha/shout")
+
+      assert Enum.join(eval!(~S|(source "alpha/greet")|, prelude, mask).prints, "\n") =~
+               "(defn greet"
+    end
+  end
+
+  describe "source" do
+    test "prints the defining form with an effective header and returns nil", %{prelude: prelude} do
+      result = eval!("(source alpha/greet)", prelude)
+
+      assert result.return == nil
+      text = Enum.join(result.prints, "\n")
+      assert text =~ ";; alpha/greet"
+      assert text =~ "visibility: prompt"
+      assert text =~ "(effective)"
+      assert text =~ "(defn greet"
+      assert text =~ ~s("Greets a name.")
+      assert text =~ "[name]"
+    end
+
+    test "quoted, unquoted, and string refs are identical", %{prelude: prelude} do
+      quoted = eval!("(source 'alpha/greet)", prelude)
+      unquoted = eval!("(source alpha/greet)", prelude)
+      string = eval!(~S|(source "alpha/greet")|, prelude)
+
+      assert quoted.prints == unquoted.prints
+      assert quoted.prints == string.prints
+    end
+
+    test "renders author metadata distinct from the effective header" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns crm "CRM." {:visibility :prompt})
+
+        (defn list-users
+          "List users."
+          {:visibility :discoverable}
+          []
+          [])
+        """)
+
+      text = Enum.join(eval!("(source crm/list-users)", prelude).prints, "\n")
+      assert text =~ "{:visibility :discoverable}"
+      assert text =~ "(defn list-users"
+    end
+
+    test "a reachable private helper is source-addressable but stays out of doc" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns crm "CRM." {:visibility :prompt})
+
+        (defn- normalize-id "Normalize." [id] (str id))
+
+        (defn get-user "Return a user." [id] (normalize-id id))
+        """)
+
+      text = Enum.join(eval!("(source crm/normalize-id)", prelude).prints, "\n")
+      assert text =~ "(defn- normalize-id"
+      assert text =~ "visibility: private"
+
+      doc = Enum.join(eval!("(doc crm/normalize-id)", prelude).prints, "\n")
+      assert doc =~ "No documentation found"
+      refute "crm/normalize-id" in eval!(~S|(dir "crm")|, prelude).return
+    end
+
+    test "an unreferenced private helper is not source-addressable" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns crm "CRM." {:visibility :prompt})
+
+        (defn- live-helper [x] (str x))
+        (defn- dead-helper [x] (str x))
+        (defn get-user [id] (live-helper id))
+        """)
+
+      assert Enum.join(eval!("(source crm/live-helper)", prelude).prints, "\n") =~
+               "(defn- live-helper"
+
+      assert Enum.join(eval!("(source crm/dead-helper)", prelude).prints, "\n") =~
+               ~s(No source available for "crm/dead-helper")
+    end
+
+    test "renders constants", %{prelude: prelude} do
+      text = Enum.join(eval!("(source alpha/limit)", prelude).prints, "\n")
+      assert text =~ ~s[(def limit "Default page size." {:type ":int"} 10)]
+    end
+
+    test "unknown refs and builtins print a miss notice without raising", %{prelude: prelude} do
+      assert Enum.join(eval!("(source map)", prelude).prints, "\n") =~
+               ~s(No source available for "map")
+
+      assert Enum.join(eval!("(source missing/ns)", prelude).prints, "\n") =~
+               ~s(No source available for "missing/ns")
+    end
+
+    test "unavailable when no prelude is attached" do
+      {:ok, result} = Lisp.run("(source alpha/greet)")
+      assert result.return == nil
+      assert Enum.join(result.prints, "\n") =~ ~s(No source available for "alpha/greet")
+    end
+  end
+
   describe "argument faults" do
     test "wrong arity", %{prelude: prelude} do
       assert fail(~S|(dir "a" "b")|, prelude).reason == :arity_error
       assert fail(~S|(doc)|, prelude).reason == :arity_error
       assert fail(~S|(apropos)|, prelude).reason == :arity_error
       assert fail(~S|(export-meta "a" "b")|, prelude).reason == :arity_error
+      assert fail(~S|(source)|, prelude).reason == :arity_error
+      assert fail(~S|(source "a" "b")|, prelude).reason == :arity_error
     end
 
     test "arity message names the accepted counts", %{prelude: prelude} do
@@ -403,7 +611,13 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
     end
 
     test "non-string references", %{prelude: prelude} do
-      for source <- [~S|(dir 5)|, ~S|(apropos :kw)|, ~S|(doc nil)|, ~S|(export-meta [])|] do
+      for source <- [
+            ~S|(dir 5)|,
+            ~S|(apropos :kw)|,
+            ~S|(doc nil)|,
+            ~S|(export-meta [])|,
+            ~S|(source 5)|
+          ] do
         assert fail(source, prelude).reason == :type_error
       end
     end
@@ -468,6 +682,9 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
       assert eval!(~S|(doc "alpha/shout")|, prelude, mask).prints ==
                [~s(No documentation found for "alpha/shout".)]
+
+      assert eval!(~S|(source "alpha/shout")|, prelude, mask).prints ==
+               [~s(No source available for "alpha/shout".)]
     end
 
     test "a hidden qualified alias does not suppress a callable registry name", %{prelude: _} do

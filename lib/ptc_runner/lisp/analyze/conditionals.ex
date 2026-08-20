@@ -113,14 +113,18 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
         [{:vector, [name_ast, cond_ast]}, then_ast, else_ast],
         tail?,
         analyze_fn,
-        _wrap_body_fn
+        _wrap_body_fn,
+        with_binding_fn
       ) do
-    with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
-         {:ok, c} <- analyze_fn.(cond_ast, false),
-         {:ok, t} <- analyze_fn.(then_ast, tail?),
-         {:ok, e} <- analyze_fn.(else_ast, tail?) do
-      binding = {:binding, name, c}
-      {:ok, {:let, [binding], {:if, name, t, e}}}
+    with {:ok, {:var, var_name} = name} <- analyze_simple_binding(name_ast),
+         {:ok, c} <- analyze_fn.(cond_ast, false) do
+      with_binding_fn.([var_name], fn ->
+        with {:ok, t} <- analyze_fn.(then_ast, tail?),
+             {:ok, e} <- analyze_fn.(else_ast, tail?) do
+          binding = {:binding, name, c}
+          {:ok, {:let, [binding], {:if, name, t, e}}}
+        end
+      end)
     end
   end
 
@@ -128,13 +132,14 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
         [{:vector, bindings}, _then_ast, _else_ast],
         _tail?,
         _analyze_fn,
-        _wrap_body_fn
+        _wrap_body_fn,
+        _with_binding_fn
       )
       when length(bindings) != 2 do
     {:error, {:invalid_form, "if-let requires exactly one binding pair [name expr]"}}
   end
 
-  def analyze_if_let(_, _tail?, _analyze_fn, _wrap_body_fn) do
+  def analyze_if_let(_, _tail?, _analyze_fn, _wrap_body_fn, _with_binding_fn) do
     {:error, {:invalid_arity, :"if-let", "expected (if-let [name expr] then else)"}}
   end
 
@@ -150,22 +155,32 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
         [{:vector, [name_ast, cond_ast]} | body_asts],
         tail?,
         analyze_fn,
-        wrap_body_fn
+        wrap_body_fn,
+        with_binding_fn
       ) do
-    with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
-         {:ok, c} <- analyze_fn.(cond_ast, false),
-         {:ok, b} <- wrap_body_fn.(body_asts, tail?) do
-      binding = {:binding, name, c}
-      {:ok, {:let, [binding], {:if, name, b, nil}}}
+    with {:ok, {:var, var_name} = name} <- analyze_simple_binding(name_ast),
+         {:ok, c} <- analyze_fn.(cond_ast, false) do
+      with_binding_fn.([var_name], fn ->
+        with {:ok, b} <- wrap_body_fn.(body_asts, tail?) do
+          binding = {:binding, name, c}
+          {:ok, {:let, [binding], {:if, name, b, nil}}}
+        end
+      end)
     end
   end
 
-  def analyze_when_let([{:vector, bindings} | _body_asts], _tail?, _analyze_fn, _wrap_body_fn)
+  def analyze_when_let(
+        [{:vector, bindings} | _body_asts],
+        _tail?,
+        _analyze_fn,
+        _wrap_body_fn,
+        _with_binding_fn
+      )
       when length(bindings) != 2 do
     {:error, {:invalid_form, "when-let requires exactly one binding pair [name expr]"}}
   end
 
-  def analyze_when_let(_, _tail?, _analyze_fn, _wrap_body_fn) do
+  def analyze_when_let(_, _tail?, _analyze_fn, _wrap_body_fn, _with_binding_fn) do
     {:error, {:invalid_arity, :"when-let", "expected (when-let [name expr] body ...)"}}
   end
 
@@ -183,18 +198,21 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
         tail?,
         analyze_fn,
         _wrap_body_fn,
-        mark_shadow_fn
+        mark_shadow_fn,
+        with_binding_fn
       ) do
-    with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
+    with {:ok, {:var, var_name} = name} <- analyze_simple_binding(name_ast),
          {:ok, c} <- analyze_fn.(cond_ast, false) do
       [then_ast, else_ast] = mark_shadow_fn.(name, [then_ast, else_ast])
 
-      with {:ok, t} <- analyze_fn.(then_ast, tail?),
-           {:ok, e} <- analyze_fn.(else_ast, tail?) do
-        binding = {:binding, name, c}
-        nil_check = {:call, {:var, :nil?}, [name]}
-        {:ok, {:let, [binding], {:if, nil_check, e, t}}}
-      end
+      with_binding_fn.([var_name], fn ->
+        with {:ok, t} <- analyze_fn.(then_ast, tail?),
+             {:ok, e} <- analyze_fn.(else_ast, tail?) do
+          binding = {:binding, name, c}
+          nil_check = {:call, {:var, :nil?}, [name]}
+          {:ok, {:let, [binding], {:if, nil_check, e, t}}}
+        end
+      end)
     end
   end
 
@@ -203,7 +221,8 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
         _tail?,
         _analyze_fn,
         _wrap_body_fn,
-        _mark_shadow_fn
+        _mark_shadow_fn,
+        _with_binding_fn
       ) do
     {:error, {:invalid_arity, :"if-some", "expected (if-some [name expr] then else)"}}
   end
@@ -213,13 +232,14 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
         _tail?,
         _analyze_fn,
         _wrap_body_fn,
-        _mark_shadow_fn
+        _mark_shadow_fn,
+        _with_binding_fn
       )
       when length(bindings) != 2 do
     {:error, {:invalid_form, "if-some requires exactly one binding pair [name expr]"}}
   end
 
-  def analyze_if_some(_, _tail?, _analyze_fn, _wrap_body_fn, _mark_shadow_fn) do
+  def analyze_if_some(_, _tail?, _analyze_fn, _wrap_body_fn, _mark_shadow_fn, _with_binding_fn) do
     {:error, {:invalid_arity, :"if-some", "expected (if-some [name expr] then else)"}}
   end
 
@@ -237,17 +257,20 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
         tail?,
         analyze_fn,
         wrap_body_fn,
-        mark_shadow_fn
+        mark_shadow_fn,
+        with_binding_fn
       ) do
-    with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
+    with {:ok, {:var, var_name} = name} <- analyze_simple_binding(name_ast),
          {:ok, c} <- analyze_fn.(cond_ast, false) do
       body_asts = mark_shadow_fn.(name, body_asts)
 
-      with {:ok, b} <- wrap_body_fn.(body_asts, tail?) do
-        binding = {:binding, name, c}
-        nil_check = {:call, {:var, :nil?}, [name]}
-        {:ok, {:let, [binding], {:if, nil_check, nil, b}}}
-      end
+      with_binding_fn.([var_name], fn ->
+        with {:ok, b} <- wrap_body_fn.(body_asts, tail?) do
+          binding = {:binding, name, c}
+          nil_check = {:call, {:var, :nil?}, [name]}
+          {:ok, {:let, [binding], {:if, nil_check, nil, b}}}
+        end
+      end)
     end
   end
 
@@ -256,13 +279,21 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
         _tail?,
         _analyze_fn,
         _wrap_body_fn,
-        _mark_shadow_fn
+        _mark_shadow_fn,
+        _with_binding_fn
       )
       when length(bindings) != 2 do
     {:error, {:invalid_form, "when-some requires exactly one binding pair [name expr]"}}
   end
 
-  def analyze_when_some(_, _tail?, _analyze_fn, _wrap_body_fn, _mark_shadow_fn) do
+  def analyze_when_some(
+        _,
+        _tail?,
+        _analyze_fn,
+        _wrap_body_fn,
+        _mark_shadow_fn,
+        _with_binding_fn
+      ) do
     {:error, {:invalid_arity, :"when-some", "expected (when-some [name expr] body ...)"}}
   end
 
@@ -288,21 +319,24 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
         tail?,
         analyze_fn,
         wrap_body_fn,
-        mark_shadow_fn
+        mark_shadow_fn,
+        with_binding_fn
       ) do
-    with {:ok, {:var, _} = name} <- analyze_simple_binding(name_ast),
+    with {:ok, {:var, var_name} = name} <- analyze_simple_binding(name_ast),
          {:ok, coll} <- analyze_fn.(coll_ast, false) do
       body_asts = mark_shadow_fn.(name, body_asts)
 
-      with {:ok, b} <- wrap_body_fn.(body_asts, tail?) do
-        temp = {:var, :__wf}
-        seq_call = {:call, {:var, :seq}, [coll]}
-        first_call = {:call, {:var, :first}, [temp]}
-        nil_check = {:call, {:var, :nil?}, [temp]}
-        inner_let = {:let, [{:binding, name, first_call}], b}
-        outer_let = {:let, [{:binding, temp, seq_call}], {:if, nil_check, nil, inner_let}}
-        {:ok, outer_let}
-      end
+      with_binding_fn.([var_name], fn ->
+        with {:ok, b} <- wrap_body_fn.(body_asts, tail?) do
+          temp = {:var, :__wf}
+          seq_call = {:call, {:var, :seq}, [coll]}
+          first_call = {:call, {:var, :first}, [temp]}
+          nil_check = {:call, {:var, :nil?}, [temp]}
+          inner_let = {:let, [{:binding, name, first_call}], b}
+          outer_let = {:let, [{:binding, temp, seq_call}], {:if, nil_check, nil, inner_let}}
+          {:ok, outer_let}
+        end
+      end)
     end
   end
 
@@ -311,13 +345,21 @@ defmodule PtcRunner.Lisp.Analyze.Conditionals do
         _tail?,
         _analyze_fn,
         _wrap_body_fn,
-        _mark_shadow_fn
+        _mark_shadow_fn,
+        _with_binding_fn
       )
       when length(bindings) != 2 do
     {:error, {:invalid_form, "when-first requires exactly one binding pair [name expr]"}}
   end
 
-  def analyze_when_first(_, _tail?, _analyze_fn, _wrap_body_fn, _mark_shadow_fn) do
+  def analyze_when_first(
+        _,
+        _tail?,
+        _analyze_fn,
+        _wrap_body_fn,
+        _mark_shadow_fn,
+        _with_binding_fn
+      ) do
     {:error, {:invalid_arity, :"when-first", "expected (when-first [name expr] body ...)"}}
   end
 

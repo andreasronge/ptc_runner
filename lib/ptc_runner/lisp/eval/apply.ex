@@ -39,6 +39,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.ValuePreview
 
   @hof_callback_error :__ptc_hof_callback_error__
+  @introspection_specials SpecialBuiltin.names(:introspection)
   @parallel_specials SpecialBuiltin.names(:parallel)
   alias PtcRunner.Lisp.TypeVocabulary
 
@@ -297,7 +298,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # `Introspection.invoke/3` owns validation and answers for this path and for
   # `Runtime.Callable`'s higher-order path alike, so the two cannot drift.
   defp do_apply_fun({:special, op}, args, eval_ctx, _do_eval_fn)
-       when op in [:dir, :apropos, :doc, :export_meta] do
+       when op in @introspection_specials do
     case Introspection.invoke(op, args, eval_ctx) do
       {:ok, value} -> {:ok, value, eval_ctx}
       {:print, text} -> {:ok, nil, EvalContext.append_print(eval_ctx, text)}

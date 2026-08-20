@@ -23,6 +23,12 @@ defmodule PtcRunner.Lisp.Prelude do
       symbol. The CALLABLE values are what evaluator threading depends on.
     * `source_hash` — sha256 hex digest of the prelude source, for
       traceability.
+    * `source_index` — precomputed `%{full-ref => rendered-source}` map for
+      `(source ns/name)`. Keyed by full ref for public exports plus private
+      helpers transitively reachable from a public export; values are a
+      labeled effective-metadata header plus the Formatter-rendered defining
+      form (no closures or raw AST). Reveals implementation, not just
+      contract — keep secrets out of prelude bodies.
     * `form_graph` — `%{namespace => %{symbol => entry}}`, the compiled
       per-namespace sibling call graph. Each entry carries `visibility`
       (`:public`/`:private`, this
@@ -84,6 +90,7 @@ defmodule PtcRunner.Lisp.Prelude do
           exports: [Export.t()],
           private_env: %{String.t() => %{String.t() => term()}},
           source_hash: String.t(),
+          source_index: %{String.t() => String.t()},
           form_graph: form_graph(),
           metadata: map()
         }
@@ -93,6 +100,7 @@ defmodule PtcRunner.Lisp.Prelude do
             exports: [],
             private_env: %{},
             source_hash: nil,
+            source_index: %{},
             form_graph: %{},
             metadata: %{}
 

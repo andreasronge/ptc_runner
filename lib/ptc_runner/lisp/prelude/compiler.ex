@@ -34,6 +34,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Eval
+  alias PtcRunner.Lisp.Formatter
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.ErrorSpan
@@ -108,6 +109,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          exports: exports,
          private_env: private_env,
          source_hash: source_hash(source),
+         source_index: build_source_index(specs, exports),
          form_graph: form_graph,
          metadata: %{namespaces: ns_meta}
        }}
@@ -1082,18 +1084,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # contract precisely follows what it itself reaches — it does NOT absorb a
   # sibling export's unrelated requirements or effects.
   defp namespace_form_graph(ns_specs, dep_set) do
-    ns_symbols = Enum.map(ns_specs, & &1.symbol)
-
-    calls =
-      Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
-        refs =
-          body
-          |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
-          |> Enum.uniq()
-          |> Enum.filter(&(&1 in ns_symbols))
-
-        {sym, refs}
-      end)
+    calls = sibling_calls(ns_specs)
 
     direct_tools =
       Map.new(ns_specs, fn %Spec{symbol: sym, body_form: body} ->
@@ -1655,6 +1646,137 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
            "prelude body references undefined variable(s): #{Enum.join(vars, ", ")}",
            details: %{unbound_names: vars}
          )}
+    end
+  end
+
+  defp build_source_index(specs, exports) do
+    export_by_ref = Map.new(exports, &{&1.ref, &1})
+    reachable = reachable_private_symbols(specs)
+
+    specs
+    |> Enum.filter(fn %Spec{} = spec ->
+      not spec.private? or MapSet.member?(reachable, {spec.namespace, spec.symbol})
+    end)
+    |> Map.new(fn %Spec{} = spec ->
+      ref = ref(spec.namespace, spec.symbol)
+      header = source_header(ref, spec, Map.get(export_by_ref, ref))
+      body = Formatter.format(spec_to_source_form(spec))
+      {ref, header <> "\n" <> body}
+    end)
+  end
+
+  # A single labeled effective-metadata provenance line ahead of the rendered
+  # form (plan D3b). The FORM stays verbatim author metadata (often none); this
+  # HEADER carries the RESOLVED visibility/effect/arity so visibility surfaces
+  # even in the common ns-inherited case where the defn carries no metadata. The
+  # `(effective)` label keeps it from masquerading as author-written source.
+  #
+  # Public ref → resolved `%Export{}`. Private ref → no `%Export{}`, so
+  # `visibility: private` + arity from the `%Spec{}`, effect omitted (effect
+  # resolution lives in the export pipeline; it is not computed for privates).
+  defp source_header(ref, %Spec{}, %Export{} = export) do
+    # Effect is intentionally omitted: only Introspection's bounded projection
+    # is safe to report, and `export-meta` / `doc` already own that answer.
+    parts =
+      ["visibility: #{export.visibility}"] ++
+        arity_part(export)
+
+    ";; #{ref} — #{Enum.join(parts, ", ")} (effective)"
+  end
+
+  defp source_header(ref, %Spec{} = spec, nil) do
+    ";; #{ref} — visibility: private, arity: #{arity_label(spec.arity)} (effective)"
+  end
+
+  defp arity_part(%Export{kind: :constant}), do: []
+  defp arity_part(%Export{arity: arity}), do: ["arity: #{arity_label(arity)}"]
+
+  defp arity_label(:variadic), do: "variadic"
+  defp arity_label(n) when is_integer(n), do: Integer.to_string(n)
+
+  # Reconstructs a Formatter-renderable defining form that PRESERVES what
+  # `spec_to_defn_form/1` deliberately drops for closure construction: the
+  # `defn-`/`defn` head (visibility-for-privates), the docstring, and the raw
+  # author metadata map (`metadata_form`, original key order intact — the
+  # normalized `metadata` map is lossy). Author *structure* is preserved (macros
+  # un-expanded); comments and original whitespace are NOT (the reader discards
+  # them) — see the fidelity disclaimer in the spec.
+
+  # A (def ...) constant: optional docstring and author metadata map.
+  defp spec_to_source_form(%Spec{params_form: nil, body_form: [value_ast]} = spec) do
+    doc_part = if is_binary(spec.doc), do: [{:string, spec.doc}], else: []
+    meta_part = if spec.metadata_form, do: [spec.metadata_form], else: []
+
+    {:list, [{:symbol, :def}, {:symbol, spec.symbol}] ++ doc_part ++ meta_part ++ [value_ast]}
+  end
+
+  # A (defn ...) / (defn- ...) function.
+  defp spec_to_source_form(%Spec{} = spec) do
+    head = if spec.private?, do: :"defn-", else: :defn
+    doc_part = if is_binary(spec.doc), do: [{:string, spec.doc}], else: []
+    meta_part = if spec.metadata_form, do: [spec.metadata_form], else: []
+
+    {:list,
+     [{:symbol, head}, {:symbol, spec.symbol}] ++
+       doc_part ++ meta_part ++ [spec.params_form | spec.body_form]}
+  end
+
+  # `MapSet` of `{namespace, symbol}` for private helpers transitively reachable
+  # from SOME public export (plan D4). Restricting to reachable-only keeps the
+  # property that every indexed private is named in some public chain — a private
+  # is discoverable only by reading a body that mentions it — instead of turning
+  # `(source ns/guessed)` into an existence oracle over all private names.
+  #
+  # Reuses the same same-namespace call graph `transitive_backing/1` builds
+  # internally (`collect_refs` over each body filtered to sibling symbols) but
+  # accumulates reachable SYMBOLS, which `transitive_backing/1` discards. Scoped
+  # PER NAMESPACE and keyed by `{namespace, symbol}` so distinct namespaces can
+  # reuse a helper name without colliding.
+  defp reachable_private_symbols(specs) do
+    specs
+    |> Enum.group_by(& &1.namespace)
+    |> Enum.flat_map(fn {ns, ns_specs} ->
+      calls = sibling_calls(ns_specs)
+
+      private_syms =
+        ns_specs |> Enum.filter(& &1.private?) |> Enum.map(& &1.symbol) |> MapSet.new()
+
+      ns_specs
+      |> Enum.reject(& &1.private?)
+      |> Enum.flat_map(&reachable_symbols(&1.symbol, calls, []))
+      |> Enum.filter(&MapSet.member?(private_syms, &1))
+      |> Enum.map(fn sym -> {ns, sym} end)
+    end)
+    |> MapSet.new()
+  end
+
+  # Direct same-namespace reference edges for one namespace's specs.
+  defp sibling_calls(ns_specs) do
+    ns_symbols = Enum.map(ns_specs, & &1.symbol)
+
+    Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
+      refs =
+        body
+        |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
+        |> Enum.uniq()
+        |> Enum.filter(&(&1 in ns_symbols))
+
+      {sym, refs}
+    end)
+  end
+
+  # Same-namespace symbols transitively called from `sym` (EXCLUDING `sym`
+  # itself). `visited` guards mutual-recursion cycles, mirroring `reachable_ids`.
+  defp reachable_symbols(sym, calls, visited) do
+    if sym in visited do
+      []
+    else
+      visited = [sym | visited]
+      callees = Map.get(calls, sym, [])
+
+      Enum.reduce(callees, callees, fn callee, acc ->
+        acc ++ reachable_symbols(callee, calls, visited)
+      end)
     end
   end
 

@@ -1602,6 +1602,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert system =~
              "Use (apropos \"term\") to search visible mission prelude exports plus fixed built-ins"
 
+    assert system =~ "(source ns/name)"
     assert system =~ "None enumerate data references or direct tool capabilities"
   end
 
