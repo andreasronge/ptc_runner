@@ -78,6 +78,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Private analysis sessions now admit bounded pre-execution diagnostics
+  (`:parse_error`, `:invalid_arity`, `:invalid_form`, symbol/compile limits,
+  and tool-resolution faults) when no capability has run in that evaluation.
+  An arity mistake such as `(defn foo)` reports the analyzer's fixed message
+  instead of the private-result redaction, while post-capability faults of the
+  same kind remain withheld.
+
 - MCP stdio now retains bounded child stderr in the private inspection
   artifact, so operator diagnostics that a well-behaved server can only put on
   stderr are no longer dropped after the launcher captures them. Overflow from

@@ -6,22 +6,47 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
   text: that text can quote a captured record, and a host may route diagnostics
   somewhere the result itself never goes. It may still tell the operator what
   went wrong, because the fault often describes nothing but the operator's own
-  submitted source.
+  submitted source — or, for a narrower class, nothing that evaluation could
+  yet have captured.
 
-  Such a message is therefore **rebuilt, never forwarded**. A message is
-  produced only for a fault kind that carries structured, source-derived
-  detail, and every name in it must appear verbatim in the submitted source.
-  Every other byte is a literal in this module. Anything outside that
-  allowlist — and any detail whose shape is not exactly what the allowlist
-  expects — collapses to `redacted_message/0`.
+  Two admission rules apply, both **rebuild-or-bound, never raw forward** of
+  untrusted evaluator prose outside their footing:
+
+  1. **Source-derived structured detail** (today `:unbound_var`). A message is
+     rebuilt only when every name appears verbatim in the submitted source.
+     Every other byte is a literal in this module.
+
+  2. **Pre-execution kinds.** Parse, analyze, symbol-limit, compile-budget, and
+     tool-resolution faults are produced before the first capability call, so
+     no captured record has entered the evaluation. Their evaluator message is
+     admitted only when `details.capability_activity?` is not `true`, and only
+     after a byte/UTF-8 bound at this boundary. The kind allowlist is the
+     durable contract; the activity flag is the enforcement that keeps the
+     footing true if a kind later gains a post-capability producer.
 
   `details` is evaluator output and is treated as untrusted: it selects among
-  fixed shapes, it never carries provenance.
+  fixed shapes, it never carries provenance. Anything outside those rules
+  collapses to `redacted_message/0`.
   """
 
   @redacted "private evaluation failed; diagnostic withheld by the private result policy"
   @max_names 32
   @max_name_bytes 128
+  @max_pre_execution_message_bytes 4_096
+
+  # Kinds whose constructors run in parse/analyze/compile or the pre-execution
+  # tool guard. Runtime cousins such as `:arity_error` stay outside this set.
+  @pre_execution_kinds [
+    :parse_error,
+    :invalid_arity,
+    :invalid_form,
+    :symbol_limit_exceeded,
+    :compile_timeout,
+    :compile_memory_exceeded,
+    :unknown_tool,
+    :private_tool_unauthorized,
+    :unknown_namespace
+  ]
 
   alias PtcRunner.Lisp.Eval.Helpers
 
@@ -42,6 +67,15 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
     case admitted_names(names, source) do
       {[], _dropped?} -> {@redacted, true}
       {admitted, dropped?} -> {unbound_var_message(admitted, dropped?), dropped?}
+    end
+  end
+
+  def project(kind, details, _source)
+      when kind in @pre_execution_kinds and is_map(details) do
+    if capability_idle?(details) do
+      admit_pre_execution_message(details)
+    else
+      {@redacted, true}
     end
   end
 
@@ -89,5 +123,40 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
       nil -> ""
       hint -> ". Hint: #{hint}"
     end
+  end
+
+  # Explicit `true` means a capability ran in this evaluation: the pre-execution
+  # footing no longer holds, even if the kind is still on the allowlist. Absent
+  # or `false` keeps the admit path open for compile-time Steps that never set
+  # the flag and for `release_failure/5`, which always records it.
+  defp capability_idle?(%{capability_activity?: true}), do: false
+  defp capability_idle?(_details), do: true
+
+  defp admit_pre_execution_message(details) do
+    case Map.get(details, :message) do
+      message when is_binary(message) and message != "" ->
+        if String.valid?(message) do
+          {clip_utf8(message, @max_pre_execution_message_bytes), false}
+        else
+          {@redacted, true}
+        end
+
+      _other ->
+        {@redacted, true}
+    end
+  end
+
+  defp clip_utf8(value, max_bytes) when byte_size(value) <= max_bytes, do: value
+
+  defp clip_utf8(value, max_bytes) do
+    value
+    |> binary_part(0, max_bytes)
+    |> trim_invalid_suffix()
+  end
+
+  defp trim_invalid_suffix(value) do
+    if String.valid?(value),
+      do: value,
+      else: trim_invalid_suffix(binary_part(value, 0, byte_size(value) - 1))
   end
 end
