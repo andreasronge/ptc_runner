@@ -458,6 +458,22 @@ The generic Kernel emits lifecycle, subordinate-evaluation, capability,
 resource, annotation, and terminal facts. Providers may attach safe typed
 metadata without making Kernel understand provider-specific transcripts.
 
+A successful `run-stopped` event includes `data.result_hash`: `sha256:` plus
+the lowercase SHA-256 digest of the successful result value's deterministic
+canonical JSON bytes. `ResultArtifact` writes those same bytes, so a trusted
+host can bind an artifact to the run that produced it without exposing the
+result in the public trace. Failed runs omit the field.
+
+A shipped `agent.core` loop whose caller propagates exhaustion records
+`failure_kind: "turn-limit"`, `limit: "agent_turns"`, the validated
+`limit_value` from 1 through 128, and `limit_reason` on the failed
+`run-stopped` event. `limit_reason` is one of `turn_limit_exceeded`,
+`intermediate_result`, `evaluation_error`, or `protocol_error`, naming what the
+final turn produced: a model still working, a program that failed, or no usable
+tool call at all. A reason outside that set is dropped rather than recorded.
+Other recognized explicit failures retain only their bounded failure taxonomy;
+these fields never admit caller-supplied prose.
+
 A `capability-stopped` event with `status: "error"` carries the closed Lisp
 envelope `kind` and, when present, `reason` — the same payload-free class
 `execution_errors` already expose. An unrecognized envelope atom is retained
@@ -607,9 +623,11 @@ effective source of every frozen workflow and mission component, one record
 per component in frozen order, emitted by the manifest-backed builder before
 execution begins. `execution-prints` is emitted for the top-level workflow
 evaluation whenever it produces `println` output, whether the evaluation
-succeeds or fails: `prints` is the run's bounded `println` output (at most 128
-entries and 65,536 encoded bytes, matching `PtcRunner.Kernel.AnalysisSession`'s
-result projection). `execution-error` is emitted only when the top-level
+succeeds or fails: `prints` is the run's bounded `println` output. Public
+evaluation prints are projected in one pass under both a 128-entry ceiling and
+a 65,536-byte encoded JSON-array ceiling, and the truncation flag is
+authoritative even when the omitted entries are empty strings; this record uses
+the same projection. `execution-error` is emitted only when the top-level
 workflow evaluation fails with a non-empty `details` map, where `details` is
 the Kernel `Error.details` map computed for that failure. Their `environment`
 is always `"workflow"`, and their `evaluation_id` must match a canonical

@@ -317,8 +317,13 @@ exception class but never attaches the raw reason, stacktrace, source,
 arguments, or result. Canonical events are not implemented by forwarding Logger
 or Telemetry callbacks, and are not mirrored wholesale back into them: neither
 plane supplies the retention, sequencing, bounds, source grants, or fail-closed
-policy the trace contract requires. Erlang VM tracing (`:erlang.trace`, `:dbg`,
-`:sys.trace`) is an operator debugging facility, not a product trace source.
+policy the trace contract requires. All planes may share run, evaluation, and
+capability correlation IDs, subject to their own cardinality rules. Owner
+processes that retain private inspection or evaluation values, or connector
+endpoint and session state, use closed callback fallbacks and a constant
+redacted OTP status, including in abnormal-exit reports. Erlang VM tracing
+(`:erlang.trace`, `:dbg`, `:sys.trace`) is an operator debugging facility, not
+a product trace source.
 
 ## Trace storage and analysis sessions
 
@@ -375,19 +380,24 @@ selects both ordinary and `.private.jsonl` traces, records `sanitized` or
 `private` provenance per run, and still rejects inspection artifacts. A run
 cannot be split across the two trace classes.
 
-Capture enumerates under a fixed heap and time bound and rejects directories
-above the entry and selected-file ceilings before sorting, stating, opening, or
-verifying anything. Hosts may lower the construction limits but cannot raise
-them, and browser or Lisp input cannot select them. The owner retains only
-validated events, their digest, fixed query limits, safe capture metadata, and
-an owner monitor. Its tokenized handle carries only a PID and an unforgeable
-reference; neither owner state, status output, capability closures, safe
-metadata, nor errors retain or expose the directory path. All four snapshot
-queries execute the same `TraceLog` filtering, metadata, ordering, pagination,
-cursor, and result-limit code as ordinary sources, and cursors bind to the
-captured digest so they stay stable when the directory changes later. Owner
-death cancels an in-progress capture worker as well as stopping an installed
-snapshot; cleanup is idempotent.
+The default aggregate encoded-source ceiling is 8,000,000 bytes. Snapshot
+retention independently limits the decoded representation to 32,000,000
+retained bytes, and query results keep the 1,000,000-byte default. Capture
+enumerates under a fixed heap and time bound and rejects directories above
+4,096 total entries or 1,024 selected trace files before sorting, stating,
+opening, or verifying any selected file. Hosts may lower the construction
+limits but cannot raise them, and browser or Lisp input cannot select them.
+The owner retains only validated events, their digest, fixed query limits,
+safe capture metadata, and an owner monitor. Its tokenized handle carries only
+a PID and an unforgeable reference; neither owner state, status output,
+capability closures, safe metadata, nor errors retain or expose the directory
+path. Safe capture metadata is the capture digest, UTC capture time, visible
+run count, raw encoded source bytes, and retained decoded bytes. All four
+snapshot queries execute the same `TraceLog` filtering,
+metadata, ordering, pagination, cursor, and result-limit code as ordinary
+sources, and cursors bind to the captured digest so they stay stable when the
+directory changes later. Owner death cancels an in-progress capture worker as
+well as stopping an installed snapshot; cleanup is idempotent.
 
 ### Local analysis sessions
 
@@ -427,6 +437,21 @@ span them:
   triggering evaluation reply, so it outranks the generic unexpected-owner
   reason. Every evaluation admission rechecks the same authoritative deadline,
   so expiry publishes the same outcome regardless of timer-message ordering.
+- Ordering invariants the two owners must preserve: recorder readiness and
+  continuation commit are one owner callback, so combined-runtime or trace-owner
+  death cannot leave a committed result without event authority; orderly close
+  synchronously stops and observes the combined runtime and snapshot before
+  relinquishing their handles or starting persistence; the deadline message is
+  privately correlated and cannot be forged from the session PID alone; session
+  information requests serialize behind an accepted evaluation rather than
+  mistaking that bounded wait for owner death; assembly validation rechecks the
+  runtime binding, and the sole session attaches before `run-started` so a
+  rejected assembly replay is side-effect free. A combined runtime that died
+  before orderly `RunState.close/1` was accepted turns an otherwise open
+  recorder into `backend_failed` before its monitor is flushed, so cleanup
+  cannot erase the failure signal. Failure before terminal-batch handoff makes
+  finalization fail without inventing a retry batch; failure after the batch is
+  frozen preserves its terminal reason, events, and persistence state.
 - The builder's caller remains the stable lifecycle owner once the construction
   guard is marked complete, and its monitor is intentionally retained. A host
   must therefore call the builder from a long-lived connected backend owner, not
@@ -562,7 +587,15 @@ suites must keep proving, concretely:
   credentials and private source out of it;
 - a private source is denied without its own explicit grant, and mission-only
   confinement plus missing-`requires` rejection hold;
-- library, capability prelude, and Viewer share one query semantics;
+- library, capability prelude, and Viewer share one query semantics, and the
+  semantic overview, internal canonical filters, ordering, and pagination all
+  hold;
+- snapshot-backed trace capability closures retain only the opaque token and
+  return the same four canonical query projections as `TraceLog`;
+- the fixed run-analysis profile keeps its positive and negative authority
+  inventory, direct `Evaluation` parity, exact continuation behavior, bounded
+  result and accounting projection, terminal-budget lifecycle, and path and
+  source redaction;
 - an immutable capture verifies pre/post inventory and content, redacts the
   path from ownership and errors, and cleans up idempotently under owner death;
 - saturating event count and byte capacity still retains one dropped summary

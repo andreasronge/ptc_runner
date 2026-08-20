@@ -338,7 +338,19 @@ as ordinary empty data.</p><p>Preludes may change ergonomics, projections, defau
 cannot expand the source grant, bypass bounds/sanitization, or acquire private
 trace access.</p><h2 id="events-and-private-data">Events and private data</h2><p>The generic Kernel emits lifecycle, subordinate-evaluation, capability,
 resource, annotation, and terminal facts. Providers may attach safe typed
-metadata without making Kernel understand provider-specific transcripts.</p><p>A <code class="inline">capability-stopped</code> event with <code class="inline">status: &quot;error&quot;</code> carries the closed Lisp
+metadata without making Kernel understand provider-specific transcripts.</p><p>A successful <code class="inline">run-stopped</code> event includes <code class="inline">data.result_hash</code>: <code class="inline">sha256:</code> plus
+the lowercase SHA-256 digest of the successful result value's deterministic
+canonical JSON bytes. <code class="inline">ResultArtifact</code> writes those same bytes, so a trusted
+host can bind an artifact to the run that produced it without exposing the
+result in the public trace. Failed runs omit the field.</p><p>A shipped <code class="inline">agent.core</code> loop whose caller propagates exhaustion records
+<code class="inline">failure_kind: &quot;turn-limit&quot;</code>, <code class="inline">limit: &quot;agent_turns&quot;</code>, the validated
+<code class="inline">limit_value</code> from 1 through 128, and <code class="inline">limit_reason</code> on the failed
+<code class="inline">run-stopped</code> event. <code class="inline">limit_reason</code> is one of <code class="inline">turn_limit_exceeded</code>,
+<code class="inline">intermediate_result</code>, <code class="inline">evaluation_error</code>, or <code class="inline">protocol_error</code>, naming what the
+final turn produced: a model still working, a program that failed, or no usable
+tool call at all. A reason outside that set is dropped rather than recorded.
+Other recognized explicit failures retain only their bounded failure taxonomy;
+these fields never admit caller-supplied prose.</p><p>A <code class="inline">capability-stopped</code> event with <code class="inline">status: &quot;error&quot;</code> carries the closed Lisp
 envelope <code class="inline">kind</code> and, when present, <code class="inline">reason</code> — the same payload-free class
 <code class="inline">execution_errors</code> already expose. An unrecognized envelope atom is retained
 only as a one-way fingerprint (<code class="inline">kind_fingerprint</code> / <code class="inline">reason_fingerprint</code>).
@@ -436,9 +448,11 @@ effective source of every frozen workflow and mission component, one record
 per component in frozen order, emitted by the manifest-backed builder before
 execution begins. <code class="inline">execution-prints</code> is emitted for the top-level workflow
 evaluation whenever it produces <code class="inline">println</code> output, whether the evaluation
-succeeds or fails: <code class="inline">prints</code> is the run's bounded <code class="inline">println</code> output (at most 128
-entries and 65,536 encoded bytes, matching <code class="inline">PtcRunner.Kernel.AnalysisSession</code>'s
-result projection). <code class="inline">execution-error</code> is emitted only when the top-level
+succeeds or fails: <code class="inline">prints</code> is the run's bounded <code class="inline">println</code> output. Public
+evaluation prints are projected in one pass under both a 128-entry ceiling and
+a 65,536-byte encoded JSON-array ceiling, and the truncation flag is
+authoritative even when the omitted entries are empty strings; this record uses
+the same projection. <code class="inline">execution-error</code> is emitted only when the top-level
 workflow evaluation fails with a non-empty <code class="inline">details</code> map, where <code class="inline">details</code> is
 the Kernel <code class="inline">Error.details</code> map computed for that failure. Their <code class="inline">environment</code>
 is always <code class="inline">&quot;workflow&quot;</code>, and their <code class="inline">evaluation_id</code> must match a canonical
