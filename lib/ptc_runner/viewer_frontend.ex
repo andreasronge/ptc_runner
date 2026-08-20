@@ -55,6 +55,8 @@ defmodule PtcRunner.ViewerFrontend do
   # deliberate rather than laziness -- removing them reintroduces the warning
   # and breaks the packaged-source build.
   @viewer PtcViewer
+  @type start_error :: atom() | {:viewer_port_in_use, 1..65_535, binary() | nil}
+
   @spec run(CommandArguments.t(), CommandRuntime.t()) :: :ok | {:error, atom(), binary()}
   def run(arguments, runtime), do: run(arguments, runtime, [])
 
@@ -95,7 +97,7 @@ defmodule PtcRunner.ViewerFrontend do
 
   @doc false
   @spec start(binary(), map(), keyword()) ::
-          {:ok, pid(), ViewerBinding.address(), non_neg_integer()} | {:error, atom()}
+          {:ok, pid(), ViewerBinding.address(), non_neg_integer()} | {:error, start_error()}
   def start(project_path, overrides \\ %{}, opts \\ [])
 
   def start(project_path, overrides, opts)
