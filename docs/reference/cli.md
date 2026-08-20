@@ -580,7 +580,8 @@ The public profile derives `traces`; the private profile derives both `traces`
 and `inspection` when those artifact classes are enabled. An explicit
 `--resource NAME=DIR` overrides only that derived resource.
 
-The [TraceLog contract](../trace-log-contract.md) defines event schemas,
+The [TraceLog and run-analysis reference](../maintainers/trace-log-contract.md) defines
+event schemas,
 sanitization, filtering, pagination, and source classes. The
 [Kernel REPL guide](repl.md) covers longer investigations.
 

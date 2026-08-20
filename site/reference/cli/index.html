@@ -84,11 +84,6 @@ Run ptc help COMMAND for the exact switches accepted by an installed version.">
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
 </ul>
 
-<h2>Contracts</h2>
-<ul>
-<li><a href="/reference/trace-log-contract/">TraceLog and Run Analysis — V2 Contract</a></li>
-</ul>
-
   </nav>
 </aside>
 
@@ -301,7 +296,8 @@ repeating resource paths:</p><pre><code class="console language-console">ptc rep
   --profile run-analysis-v1 \
   -e '(analysis/runs {})'</code></pre><p>The public profile derives <code class="inline">traces</code>; the private profile derives both <code class="inline">traces</code>
 and <code class="inline">inspection</code> when those artifact classes are enabled. An explicit
-<code class="inline">--resource NAME=DIR</code> overrides only that derived resource.</p><p>The <a href="/reference/trace-log-contract/">TraceLog contract</a> defines event schemas,
+<code class="inline">--resource NAME=DIR</code> overrides only that derived resource.</p><p>The <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md">TraceLog and run-analysis reference</a> defines
+event schemas,
 sanitization, filtering, pagination, and source classes. The
 <a href="/reference/repl/">Kernel REPL guide</a> covers longer investigations.</p><h2 id="inspect-a-private-model-conversation">Inspect a private model conversation</h2><p>Capture canonical and inspection artifacts in separate trusted locations. The
 credential-free

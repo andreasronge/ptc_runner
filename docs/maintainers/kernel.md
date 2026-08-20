@@ -13,8 +13,9 @@ This guide is an architectural map. Exact fields, return values, limits, state
 transitions, and error atoms belong in the owning `PtcRunner.Kernel.*` or
 `PtcRunner.Lisp.*` module documentation. Language semantics live in the
 [PTC-Lisp specification](../ptc-lisp-specification.md), trace semantics in the
-[TraceLog contract](../trace-log-contract.md), and admitted Java behavior in
-the generated [Java interop reference](../java-interop.md).
+[TraceLog and run-analysis reference](trace-log-contract.md), and
+admitted Java behavior in the generated
+[Java interop reference](../java-interop.md).
 
 ## Architecture and invariants
 
@@ -308,6 +309,171 @@ finalization. `TraceLog` owns canonical persistence and queries.
 `RunAnalysis` and the Viewer consume those snapshots rather than define another
 event model.
 
+The Lisp execution Telemetry prefix is `[:ptc_runner, :lisp, :execute]`. Its
+closed `caller` values are `:direct`, `:kernel`, and `:repl`. Stop metadata
+carries the semantic `outcome` while measurements carry duration, program and
+result byte counts, and print count. Exception telemetry may identify the
+exception class but never attaches the raw reason, stacktrace, source,
+arguments, or result. Canonical events are not implemented by forwarding Logger
+or Telemetry callbacks, and are not mirrored wholesale back into them: neither
+plane supplies the retention, sequencing, bounds, source grants, or fail-closed
+policy the trace contract requires. All planes may share run, evaluation, and
+capability correlation IDs, subject to their own cardinality rules. Owner
+processes that retain private inspection or evaluation values, or connector
+endpoint and session state, use closed callback fallbacks and a constant
+redacted OTP status, including in abnormal-exit reports. Erlang VM tracing
+(`:erlang.trace`, `:dbg`, `:sys.trace`) is an operator debugging facility, not
+a product trace source.
+
+## Trace storage and analysis sessions
+
+What a trace contains and how it may be queried is the
+[TraceLog and run-analysis reference](trace-log-contract.md).
+This section owns the parts that are implementation rather than contract.
+
+### Canonical persistence
+
+Ordinary host-selected append takes an OS-released advisory lease before it
+validates the existing prefix and writes a batch. Existing files are keyed by
+device and inode, so hard-link aliases share the lease across BEAM processes and
+separate local runtimes. An unlocked lease file may remain after exit but cannot
+wedge later appenders. Two appenders therefore cannot both approve the same
+prefix and then race the byte or sequence checks.
+
+Complete analysis-session batches use atomic no-clobber publication rather than
+append. `TraceLog` validates and deterministically encodes the whole batch,
+writes and syncs an exclusive same-directory temporary sibling whose name is not
+a discoverable trace, installs the final name with a hard link, and syncs the
+containing directory before reporting success. Removing the temporary link is
+followed by another directory sync. An existing byte-identical complete
+destination is a successful retry only after the directory is synced; a
+different or partial destination is a collision and is never replaced or
+appended. The open temporary descriptor, the temporary pathname before linking,
+and the published pathname after linking must retain the same device/inode
+identity; pathname replacement is a collision and is never acknowledged as
+successful. Observed failure paths remove the temporary sibling. Hard-link
+creation rather than `File.rename/2` is what makes this no-clobber: a rename can
+replace an existing destination, a link create fails when one exists. The same
+shape is used for inspection artifacts. This publication contract is for
+host-selected destinations only and grants no Lisp write authority.
+
+### Immutable directory captures
+
+`TraceSnapshot` pins one host-selected canonical trace directory for a bounded
+analysis session. It is deliberately not another public `TraceLog.source()`
+variant and cannot capture a file or an inspection artifact. The constructor
+fixes whether the directory is ordinary normal-only input or private-authorized
+canonical input; a caller cannot widen an existing handle or relabel it for
+another profile.
+
+Ordinary capture enumerates supported normal `.jsonl` names in canonical sorted
+order, records a pre-read directory and file inventory, opens only regular
+files, compares path and descriptor identity, retains the baseline bytes, and
+performs a second byte-for-byte verification around a final inventory check,
+followed by one last content verification after that inventory. Any name,
+identity, metadata, type, or content change between baseline and final
+verification returns `:source_changed`; a mixed capture is never installed. The
+decoded event set is normalized and validated exactly once before the owner
+becomes queryable. Private `.private.jsonl` and `.inspection.jsonl` artifacts
+stay excluded by normal discovery. The private-authorized capture instead
+selects both ordinary and `.private.jsonl` traces, records `sanitized` or
+`private` provenance per run, and still rejects inspection artifacts. A run
+cannot be split across the two trace classes.
+
+The default aggregate encoded-source ceiling is 8,000,000 bytes. Snapshot
+retention independently limits the decoded representation to 32,000,000
+retained bytes, and query results keep the 1,000,000-byte default. Capture
+enumerates under a fixed heap and time bound and rejects directories above
+4,096 total entries or 1,024 selected trace files before sorting, stating,
+opening, or verifying any selected file. Hosts may lower the construction
+limits but cannot raise them, and browser or Lisp input cannot select them.
+The owner retains only validated events, their digest, fixed query limits,
+safe capture metadata, and an owner monitor. Its tokenized handle carries only
+a PID and an unforgeable reference; neither owner state, status output,
+capability closures, safe metadata, nor errors retain or expose the directory
+path. Safe capture metadata is the capture digest, UTC capture time, visible
+run count, raw encoded source bytes, and retained decoded bytes. All four
+snapshot queries execute the same `TraceLog` filtering,
+metadata, ordering, pagination, cursor, and result-limit code as ordinary
+sources, and cursors bind to the captured digest so they stay stable when the
+directory changes later. Owner death cancels an in-progress capture worker as
+well as stopping an installed snapshot; cleanup is idempotent.
+
+### Local analysis sessions
+
+`AnalysisSession`, `AnalysisSessionBuilder`, and `SessionTrace` own their own
+lifecycle contracts; read those module docs before changing one. The facts that
+span them:
+
+- The server-owned `run-analysis-v1` profile is shared by the Viewer and
+  ordinary terminal REPL frontends. Its mission bundle contains `cap` and
+  `analysis`, its explicit authority the three `analysis-*` capabilities.
+  Ordinary implicit mission introspection remains available. Filesystem,
+  network, LLM, agent, workflow, MCP, private-inspection, and nested
+  `kernel-eval` authority are absent. `private-run-analysis-v1` uses the
+  private-authorized capture, adds the validated private-inspection source, and
+  requires a private terminal gate; its own session trace is still a sanitized
+  normal artifact.
+- Each session queries one immutable snapshot and records its own canonical
+  events under a separate token, in the same owner that holds its continuation
+  and quotas. The active mutating session trace is never queryable from that
+  session, because the query would mutate the digest-bound source it is paging.
+- The Viewer publishes into its host-configured input directory, so a later
+  refreshed Viewer session captures the directory again and can query its
+  predecessor. A terminal `ptc repl` session publishes into a physically
+  separate host-selected or private temporary directory and never mutates its
+  captured input tree. The builder binds the accepted output directory's
+  filesystem identity into `SessionTrace`, and publication verifies that
+  identity before it receives trace bytes, so replacing or retargeting the
+  pathname cannot redirect the write.
+- The session relies on the measured terminal reserve every normal `EventSink`
+  carries by default — two measured terminal envelopes; private sinks reserve
+  nothing. Ordinary events stop before the count and byte ceilings would consume
+  capacity for one bounded `events-dropped` summary and exactly one
+  `run-stopped`. Atomic finalization returns the frozen terminal batch in that
+  same owner call without exceeding either hard ceiling.
+- Exhausting a terminal session budget persists an error run with that
+  authoritative limit reason even when abort or deadline expiry performs the
+  eventual close. The reason is transferred to the trace owner before the
+  triggering evaluation reply, so it outranks the generic unexpected-owner
+  reason. Every evaluation admission rechecks the same authoritative deadline,
+  so expiry publishes the same outcome regardless of timer-message ordering.
+- The trace owner is constructed only when every part of its contract agrees:
+  the limits, the combined runtime and sink, a normal fail-closed sink policy,
+  the exact two-event measured terminal reserve, an empty unbegun recorder, an
+  open `RunState` whose limits are identical, matching sink run and trace
+  identity, and a `<run-id>.jsonl` destination basename. Assembly validation
+  rechecks the runtime binding, and the sole session attaches before
+  `run-started`, so a rejected assembly replay is side-effect free.
+- Orderly close, reset, and deadline expiry each finalize and publish the
+  batch; explicit `return` and `fail` are evaluation facts, not session
+  lifecycle commands. Session death before the builder releases its
+  construction guard cleans partial owners without publishing a run, and every
+  post-start handoff failure explicitly stops the partial session even when the
+  trace owner has already died. `SessionTrace` and `AnalysisSession` own the
+  rest — unexpected-owner best-effort publication, retry authority, and
+  idempotent close — in their module docs.
+- Ordering invariants the two owners must preserve: recorder readiness and
+  continuation commit are one owner callback, so combined-runtime or trace-owner
+  death cannot leave a committed result without event authority; orderly close
+  synchronously stops and observes the combined runtime and snapshot before
+  relinquishing their handles or starting persistence; the deadline message is
+  privately correlated and cannot be forged from the session PID alone; session
+  information requests serialize behind an accepted evaluation rather than
+  mistaking that bounded wait for owner death; assembly validation rechecks the
+  runtime binding, and the sole session attaches before `run-started` so a
+  rejected assembly replay is side-effect free. A combined runtime that died
+  before orderly `RunState.close/1` was accepted turns an otherwise open
+  recorder into `backend_failed` before its monitor is flushed, so cleanup
+  cannot erase the failure signal. Failure before terminal-batch handoff makes
+  finalization fail without inventing a retry batch; failure after the batch is
+  frozen preserves its terminal reason, events, and persistence state.
+- The builder's caller remains the stable lifecycle owner once the construction
+  guard is marked complete, and its monitor is intentionally retained. A host
+  must therefore call the builder from a long-lived connected backend owner, not
+  a disposable request or callback task, and must explicitly stop the session
+  after its final close or abort attempt.
+
 ## Providers
 
 The catalog has no implicit providers. CLI commands receive aliases from the
@@ -423,6 +589,56 @@ Prefer contract-level integration tests over tests that mirror implementation:
 - event, trace, inspection, and Viewer tests for evidence boundaries;
 - agent library tests for shipped workflow policy; and
 - Java oracle/conformance tests for admitted Java behavior.
+
+"Evidence boundaries" is the largest of those, so what the trace and inspection
+suites must keep proving, concretely:
+
+- canonical JSONL appends and reloads deterministically; a deleted index
+  rebuilds identical results from canonical events; malformed events,
+  unsupported versions, path traversal, and symlink escape all fail closed;
+- the bounded in-memory sink stays bounded;
+- normal and private canonical turn queries never contain inspection payloads,
+  and evaluation source hashes and byte counts match the executed bounded
+  source;
+- directory loading is sorted and capped, cursors are stable, and a changed
+  source invalidates them;
+- truncation is deterministic and never allocates an unbounded intermediate;
+- run discovery returns every required metadata field, and sanitization keeps
+  credentials and private source out of it;
+- a private source is denied without its own explicit grant, and mission-only
+  confinement plus missing-`requires` rejection hold;
+- library, capability prelude, and Viewer share one query semantics, and the
+  semantic overview, internal canonical filters, ordering, and pagination all
+  hold;
+- snapshot-backed trace capability closures retain only the opaque token and
+  return the same four canonical query projections as `TraceLog`;
+- the fixed run-analysis profile keeps its positive and negative authority
+  inventory, direct `Evaluation` parity, exact continuation behavior, bounded
+  result and accounting projection, terminal-budget lifecycle, and path and
+  source redaction;
+- an immutable capture verifies pre/post inventory and content, enforces its
+  encoded and retained ceilings independently, redacts the path from ownership
+  and errors, keeps snapshot cursors stable after the original directory
+  mutates, and cleans up idempotently under owner death;
+- saturating event count and byte capacity still retains one dropped summary
+  plus exactly one terminal event through a reloadable persisted batch;
+- atomic publication faulted before, during, and after write and at cleanup
+  yields one complete file or a stable collision — never a partial
+  discoverable trace or duplicate sequences;
+- the inspection loader rejects unknown or duplicate envelope and payload keys,
+  invalid record types, non-monotonic sequences, and correlation IDs absent from
+  the selected canonical run;
+- required capability-input and evaluation-source records are accepted before
+  their callback or evaluation can run, and outputs hold the exact normalized
+  Dispatcher envelope;
+- inspection capture cannot be enabled by manifest or Lisp input, the
+  destination is restricted before its first record, and per-record and
+  aggregate ceilings fail closed without partial persistence;
+- the capture path adds no connector credentials, transport headers, session
+  IDs, or endpoints, normal discovery omits `.inspection.jsonl`, and querying a
+  trace source never grants or reconstructs an inspection record;
+- the local Viewer accepts only the exact host-configured inspection artifact
+  and rejects symlinks, changed files, wrong run IDs, and oversized input.
 
 Run focused tests while editing, then `mix precommit` for quality. When
 documentation changed, also run `MIX_ENV=dev mix docs --warnings-as-errors`.

@@ -41,8 +41,7 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
     "Build" => "guides",
     "Run and debug" => "guides",
     "Installation" => "installation",
-    "Reference" => "reference",
-    "Contracts" => "reference"
+    "Reference" => "reference"
   }
 
   @landing_page "site/index.html"
