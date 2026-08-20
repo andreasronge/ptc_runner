@@ -5,6 +5,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   # valid fixture responses to be reported intermittently as `:mcp_timeout`.
   use ExUnit.Case, async: false
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
@@ -906,7 +908,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert File.read!(marker) =~ "server/discover"
     refute File.read!(marker) =~ "tools/list"
-    assert File.read!(marker) =~ "session-closed"
+    assert_eventually(fn -> File.read!(marker) =~ "session-closed" end)
   end
 
   @tag :tmp_dir
