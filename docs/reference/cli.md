@@ -630,9 +630,12 @@ The project document supplies the trace root and optional inspection root, plus
 the port, browser-opening preference, REPL setting, and private-data grant. The
 Viewer pins the selected data and can open a bounded analysis REPL over an
 immutable capture. `--port` overrides the project's port; `0` asks the
-operating system for a free one. The command runs in the foreground until
-`Ctrl+C`, and opens a browser only when the project asks for it *and* a
-terminal is attached.
+operating system for a free one and is the project default. Startup prints the
+selected address. If an explicitly selected port is occupied, the command
+probes loopback: another PTC Viewer is reported with its exact project document
+path, while any other listener is reported as an occupied service. The command
+runs in the foreground until `Ctrl+C`, and opens a browser only when the project
+asks for it *and* a terminal is attached.
 
 The Viewer does not search the invocation directory or its parents for a
 `.env` file. Environment-backed provider credentials come from the inherited

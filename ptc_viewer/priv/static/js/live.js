@@ -57,6 +57,10 @@ export function isNewestEndedStamp(existingStamps, stamp) {
   return existingStamps.every(existing => value >= (existing || ''));
 }
 
+export function projectDisplayPath(project) {
+  return project?.project || project?.manifest || '';
+}
+
 export function createLiveController({ onInspectRun, onLiveCount, onProject, mutationNonce, liveToken } = {}) {
   const runsEl = document.getElementById('live-runs');
   const runsHeadEl = document.getElementById('live-runs-head');
@@ -517,7 +521,7 @@ function initProject(root, project) {
   for (const node of root.querySelectorAll('[data-role]')) f[node.dataset.role] = node;
 
   f.name.textContent = project.name || '(unnamed project)';
-  f.manifest.textContent = project.manifest || '';
+  f.manifest.textContent = projectDisplayPath(project);
   f.entry.textContent = project.entry || '';
 
   const environments = Array.isArray(project.environments) ? project.environments : [];

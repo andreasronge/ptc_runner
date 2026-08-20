@@ -15,6 +15,7 @@ import {
   missionNames,
   newerFirstInsertIndex,
   plural,
+  projectDisplayPath,
   runRoute,
   uniqueComponents
 } from '../priv/static/js/live.js';
@@ -32,6 +33,11 @@ assert.equal(fmtLimit(undefined, undefined), '–');
 assert.equal(plural(0, 'component'), '0 components');
 assert.equal(plural(1, 'component'), '1 component');
 assert.equal(plural(2, 'provider'), '2 providers');
+assert.equal(
+  projectDisplayPath({ project: '/work/demo/ptc-project.json', manifest: '/work/demo/ptc.json' }),
+  '/work/demo/ptc-project.json'
+);
+assert.equal(projectDisplayPath({ manifest: '/work/demo/ptc.json' }), '/work/demo/ptc.json');
 
 // A shipped prelude compiled by several environments is one entry, keeping
 // the "components & preludes" list a set rather than a tally.

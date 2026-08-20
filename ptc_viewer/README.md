@@ -134,7 +134,6 @@ The host supplies a module or three-argument function implementing
 ```elixir
 {:ok, pid} =
   PtcViewer.start(
-    port: 4123,
     trace_dir: "traces",
     kernel_trace_adapter: PtcRunner.Kernel.ViewerAdapter,
     inspection_file: "traces/run.inspection.jsonl",
@@ -144,6 +143,10 @@ The host supplies a module or three-argument function implementing
 
 PtcViewer.stop(pid)
 ```
+
+The omitted port defaults to `0`, so the operating system chooses a free port;
+call `PtcViewer.listener_info/1` to obtain it. Supply a fixed port only when an
+external process requires a stable address.
 
 Configuration is scoped to the individual server instance; starting another
 viewer does not mutate application-global adapter or trace-directory state.

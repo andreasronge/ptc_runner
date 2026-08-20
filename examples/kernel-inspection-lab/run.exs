@@ -44,7 +44,7 @@ Enum.each(journeys, fn journey ->
     },
     # `private` grants this instance the journey's inspection artifacts, which
     # carry complete model requests, generated source, and capability payloads.
-    "viewer" => %{"port" => 4123, "open" => false, "repl" => false, "private" => true}
+    "viewer" => %{"port" => 0, "open" => false, "repl" => false, "private" => true}
   }
 
   File.write!(
