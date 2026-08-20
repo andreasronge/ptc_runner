@@ -315,7 +315,7 @@ defmodule PtcRunner.Lisp.Introspection do
         prelude
         |> visible_exports(visible)
         |> Enum.filter(&(&1.namespace == ns))
-        |> Enum.any?(fn export -> form_reaches?(graph, export.symbol, sym, MapSet.new()) end)
+        |> Enum.any?(fn export -> form_reaches?(graph, export.symbol, sym, %{}) end)
 
       _ ->
         false
@@ -324,13 +324,11 @@ defmodule PtcRunner.Lisp.Introspection do
 
   defp form_reaches?(_graph, from, target, _visited) when from == target, do: true
 
+  defp form_reaches?(graph, from, target, visited) when is_map_key(visited, from), do: false
+
   defp form_reaches?(graph, from, target, visited) do
-    if MapSet.member?(visited, from) do
-      false
-    else
-      callees = get_in(graph, [from, :calls]) || []
-      Enum.any?(callees, &form_reaches?(graph, &1, target, MapSet.put(visited, from)))
-    end
+    callees = get_in(graph, [from, :calls]) || []
+    Enum.any?(callees, &form_reaches?(graph, &1, target, Map.put(visited, from, true)))
   end
 
   # ============================================================
