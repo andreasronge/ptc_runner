@@ -263,7 +263,7 @@ against the captured canonical evidence.
 Set a trace selection's manifest config to `{"expose": false}` when it exists
 only as the inspection source's dependency. It still supplies the frozen trace
 capture without creating a second analysis namespace. The
-[TraceLog contract](../trace-log-contract.md#query-contract) defines query
+[TraceLog and run-analysis reference](trace-log-contract.md#query-contract) defines query
 shapes and bounds; [Kernel REPL](repl.md) shows them in use.
 
 ## Keep data classes compatible

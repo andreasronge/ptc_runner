@@ -15,8 +15,7 @@ defmodule PtcRunner.DocumentationGuidelinesTest do
         "README.md",
         "docs/signature-syntax.md",
         "docs/ptc-lisp-specification.md",
-        "docs/clojure-conformance-gaps.md",
-        "docs/trace-log-contract.md"
+        "docs/clojure-conformance-gaps.md"
       ] ++ Path.wildcard("docs/{guides,reference}/*.md")
 
     for path <- paths do

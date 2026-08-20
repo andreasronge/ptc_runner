@@ -1,9 +1,19 @@
-# TraceLog and Run Analysis — V2 Contract
+# TraceLog and run-analysis reference
 
-**Status:** implemented retained product contract, including the local 0.x
-inspection increment. Complements `PtcRunner.Kernel.TraceLog` module
-documentation and the Kernel maintainer guide, `docs/maintainers/kernel.md`,
-which is a repository document rather than a page the executable carries.
+> **Audience:** people and agents reading run evidence through `analysis/*`
+> capabilities, the CLI, or the Viewer.
+
+**Status:** implemented retained product contract, including the local private
+inspection artifact.
+
+This page defines what a canonical trace and a private inspection artifact
+contain, and how each may be queried. Owner-process lifecycle, immutable
+capture, publication mechanics, and the contract-test inventory are
+implementation concerns and live in the Kernel maintainer guide
+(`docs/maintainers/kernel.md`) and beside the code in the
+`PtcRunner.Kernel.TraceLog`, `PtcRunner.Kernel.EventSink`,
+`PtcRunner.Kernel.InspectionSink`, and `PtcRunner.Kernel.InspectionArtifact`
+module documentation.
 
 ## Purpose and boundary
 
@@ -24,43 +34,13 @@ Consumers
 Kernel does not know how traces are stored or queried. TraceLog does not control
 workflow execution. Consumers do not invent competing event representations.
 
-## Observability planes
-
-PtcRunner keeps four observability concerns separate:
-
-- the host logger, reports sparse operational
-  diagnostics such as unexpected host failures and degraded optional services.
-- `:telemetry` reports low-cardinality measurements for embedders and host
-  monitoring. It is not an event store or an authorization boundary.
-- `Kernel.EventSink` and `Kernel.TraceLog` own the canonical bounded run event
-  journal consumed by `ptc_viewer`, CLI diagnostics, and `analysis/*`
-  capabilities.
-- the opt-in `Kernel.InspectionSink` owns exact sensitive development
-  payloads under the separate controls below.
-
-These are different planes, not interchangeable logging implementations.
-Canonical events are not implemented by forwarding Logger messages or
-Telemetry callbacks: neither supplies the retention, sequencing, bounds,
-source grants, or fail-closed policy required by this contract. Conversely,
-canonical events are not mirrored wholesale into Logger or Telemetry.
-
-All planes may share run, evaluation, and capability correlation IDs, subject
-to their own cardinality rules. Logger and Telemetry never add prompts,
-generated source, capability arguments/results, credentials, transport
-headers, session IDs, or endpoints. Exact application payloads appear only in
-an explicitly enabled inspection artifact. Owner processes that retain private
-inspection/evaluation values or connector endpoint/session state use closed
-callback fallbacks and constant redacted OTP status, including abnormal-exit
-reports. Erlang VM tracing (`:erlang.trace`, `:dbg`, or `:sys.trace`) is an
-operator debugging facility, not a product trace source.
-
-The Lisp execution Telemetry prefix is `[:ptc_runner, :lisp, :execute]`. Its
-closed `caller` values are `:direct`, `:kernel`, and `:repl`. Stop metadata
-carries the semantic `outcome` (`:ok` or `:error`) while measurements carry
-duration, program/result byte counts, and print count. Exception telemetry may
-identify the exception class but does not attach the raw reason, stacktrace,
-source, arguments, or result. These events are metrics for embedders, not the
-source used to reconstruct a run.
+Canonical events are the only plane that reconstructs a run. The host logger
+and `:telemetry` carry sparse operational diagnostics and low-cardinality
+measurements; neither is an event store or an authorization boundary, and
+neither ever carries prompts, generated source, capability arguments or
+results, credentials, transport headers, session IDs, or endpoints. Exact
+application payloads appear only in an explicitly enabled private inspection
+artifact. The Kernel maintainer guide owns the full plane taxonomy.
 
 The Viewer has one canonical event model. The inspection loader is not a
 replacement trace schema; it joins private records to canonical IDs.
@@ -111,174 +91,6 @@ vocabulary rather than capturing exact payloads or source.
 Malformed or unsupported canonical events fail closed by default. A debugging
 mode may report bounded per-file errors, but it never silently reinterprets
 malformed data as valid runs.
-
-Ordinary host-selected append uses an OS-released advisory lease before it
-validates the existing prefix and writes a batch. Existing files are keyed by
-device and inode, so hard-link aliases share the lease across BEAM processes
-and separate local runtimes. An unlocked lease file may remain after exit, but
-cannot wedge later appenders. Two appenders therefore cannot both approve the
-same prefix and then race the byte or sequence checks.
-
-Complete analysis-session batches use atomic no-clobber publication rather than
-append. TraceLog validates and deterministically encodes the whole batch, writes
-and syncs an exclusive same-directory temporary sibling whose name is not a
-discoverable trace, installs the final name with a hard link, and syncs the
-containing directory before reporting success. Removing the temporary link is
-followed by another directory sync. An existing byte-identical complete
-destination is a successful retry only after the directory is synced; a
-different or partial destination is a collision and is never replaced or
-appended. The open temporary descriptor, temporary pathname before linking, and
-published pathname after linking must retain the same device/inode identity;
-pathname replacement is a collision and is never acknowledged as successful.
-Observed failure paths remove the temporary sibling. This publication contract
-is for host-selected destinations only and does not grant Lisp write authority.
-
-### Immutable canonical-directory captures
-
-An internal trace-snapshot owner can pin one host-selected canonical trace
-directory for a bounded analysis session. It is not an additional public
-`PtcRunner.Kernel.TraceLog.source()` form and cannot capture a file or
-inspection artifact. The constructor fixes whether that directory is ordinary
-normal-only input or private-authorized canonical input; a caller cannot widen
-an existing snapshot handle or relabel it for another analysis profile.
-
-Ordinary capture enumerates supported normal `.jsonl` names in canonical sorted order,
-records a pre-read directory/file inventory, opens only regular files, compares
-path and descriptor identity, retains the baseline bytes, and performs a second
-byte-for-byte verification around a final inventory check, followed by one last
-content verification after that inventory. A name, identity, metadata, type, or
-content change between the baseline and final verification returns
-`:source_changed`; it never installs a mixed capture. The complete
-decoded event set is normalized and validated exactly once before the owner
-becomes queryable. Private `.private.jsonl` and `.inspection.jsonl` artifacts
-remain excluded by the ordinary normal-directory discovery rules. The internal
-private-authorized capture instead selects both ordinary and
-`.private.jsonl` traces, records `sanitized` or `private` provenance per run,
-and still rejects inspection artifacts. A run cannot be split across the two
-trace classes.
-
-The default aggregate encoded-source ceiling remains 8,000,000 bytes. Capture
-enumerates under a fixed heap and time bound, and rejects directories above
-4,096 total entries or 1,024 selected trace files before sorting,
-stating, opening, or verifying selected files. Snapshot retention independently
-limits the decoded representation to 32,000,000 retained bytes, and query
-results retain the existing 1,000,000-byte default. These values are hard
-ceilings: hosts may lower the internal construction limits but cannot raise
-them, and browser or Lisp input cannot select them.
-
-The owner retains only validated events, their digest, fixed query limits, safe
-capture metadata, and an owner monitor. Its tokenized handle contains only a PID
-and unforgeable reference; neither owner state, status output, capability
-closures, safe metadata, nor errors retain or expose the directory path. Safe
-metadata contains the capture digest, UTC capture time, visible run count, raw
-encoded source bytes, and retained decoded bytes. Owner death cancels an
-in-progress capture worker as well as stopping an installed snapshot.
-
-All four snapshot queries execute the same TraceLog filtering, metadata,
-ordering, pagination, cursor, and result-limit code as ordinary sources. Cursors
-bind to the captured digest and therefore remain stable when the original
-directory changes later. The snapshot exits with its owning analysis session;
-cleanup is idempotent. This immutable boundary also prevents an analysis run's
-new canonical events from mutating the source it is paging.
-
-### Local analysis sessions
-
-The server-owned `run-analysis-v1` profile is shared by the Viewer and ordinary
-terminal REPL frontends. Its mission bundle contains `cap` and `analysis`; its
-explicit authority contains the three `analysis-*` capabilities; and ordinary implicit
-mission introspection remains available. Filesystem, network, LLM, agent,
-workflow, MCP, private-inspection, and nested `kernel-eval` authority are
-absent. The separate `private-run-analysis-v1` profile uses the
-private-authorized canonical capture, adds the validated private-inspection
-source while retaining the same analysis component, and requires a private terminal gate.
-Its own session trace remains a sanitized normal analysis artifact.
-
-Each session queries one immutable snapshot and records its own canonical events
-in the same owner process that holds its continuation and quotas, under a
-separate token. The active mutating session trace is never queryable from that
-session. The Viewer publishes into its host-configured input directory, so a
-later refreshed Viewer session captures the directory again and can query its
-predecessor. A terminal `ptc repl` session instead publishes into a
-physically separate host-selected or private temporary directory and never
-mutates its captured input tree. The builder binds the accepted output
-directory's filesystem identity into `SessionTrace`; atomic publication
-uses a directory-bound helper whose working-directory identity is verified
-before it receives trace bytes. Replacing or retargeting the pathname therefore
-cannot redirect the write.
-Orderly close, reset, and deadline expiry finalize and publish the batch.
-Explicit return and fail are evaluation facts rather
-than session lifecycle commands. Exhausting a terminal session budget persists
-an error run with that authoritative limit reason, even when abort or deadline
-expiry performs the eventual close. Recorder readiness and continuation commit
-are one owner callback, so combined-runtime or trace-owner death cannot leave a
-committed result without event authority and releases the snapshot. During
-orderly close, `SessionTrace` synchronously stops and observes the combined
-runtime and snapshot before relinquishing their handles or starting
-persistence. The deadline message is privately correlated and cannot be forged
-from the session PID alone. Every evaluation admission also checks the same
-authoritative deadline before running; expiry therefore closes and publishes
-with the same outcome regardless of timer-message ordering. Before the builder
-releases its construction guard,
-session death cleans partial owners without publishing a run; every post-start
-handoff failure explicitly stops the partial session even when the trace owner
-has already died. Session information requests serialize behind an accepted
-evaluation and do not mistake that bounded wait for owner death.
-The trace owner is constructed only when its limits, combined runtime/sink,
-normal fail-closed policy, exact two-event measured-envelope terminal reserve, empty unfinalized
-recorder, open RunState, sink run/trace identity, and `<run-id>.jsonl`
-destination agree. Assembly validation rechecks the runtime binding. The sole
-session attaches before `run-started`, so rejected assembly replay is side-effect
-free.
-Unexpected session-owner death receives one independent best-effort aborted
-publication attempt before `SessionTrace` stops. Retryable batch retention is
-available only through a still-live session's explicit close path; failed
-unexpected-death publication does not leave an unreachable retry owner.
-An authoritative terminal-budget reason is transferred to the trace owner
-before the triggering evaluation reply and takes precedence over the generic
-unexpected-owner reason if death occurs before explicit close.
-If resource handoff encounters a combined runtime that died before orderly
-`RunState.close/1` was accepted, an otherwise open recorder becomes
-`backend_failed` before its monitor is flushed; cleanup cannot erase the
-failure signal.
-Failure before terminal-batch handoff makes finalization fail without inventing
-a retry batch. Failure after the batch is frozen preserves its terminal reason,
-events, and persistence state.
-
-The process calling the builder remains the stable lifecycle owner after the
-construction guard is marked complete. Its monitor is intentionally retained:
-death during the final reply window cannot orphan a completed session, and
-later owner death aborts and best-effort persists it. A host must therefore call
-the builder from its long-lived connected backend owner rather than a disposable
-request or callback task. Close and abort preserve the live session owner for
-idempotent persistence retry; the frontend explicitly stops it after its final
-close or abort attempt.
-
-Public evaluation prints are projected in one pass under both a 128-entry
-ceiling and a 65,536-byte encoded JSON-array ceiling. The truncation flag is
-authoritative even when omitted entries are empty strings.
-
-The session EventSink opts into a measured terminal reserve. Ordinary events stop before
-the count and byte ceilings would consume capacity for one bounded
-`events-dropped` summary and exactly one `run-stopped`; atomic finalization also
-returns the frozen terminal batch in that same owner call, without exceeding
-either hard ceiling. Existing normal and private sinks retain their original
-behavior unless explicitly constructed with the reserve.
-
-A successful `run-stopped` event includes `data.result_hash`: `sha256:` plus
-the lowercase SHA-256 digest of the successful result value's deterministic
-canonical JSON bytes. `ResultArtifact` writes those same bytes, so a trusted
-host can bind an artifact to the run that produced it without exposing the
-result in the public trace. Failed runs omit the field.
-
-A shipped `agent.core` loop whose caller propagates exhaustion records
-`failure_kind: "turn-limit"`, `limit: "agent_turns"`, the validated
-`limit_value` from 1 through 128, and `limit_reason` on the failed
-`run-stopped` event. `limit_reason` is one of `turn_limit_exceeded`,
-`intermediate_result`, `evaluation_error`, or `protocol_error`, naming what the
-final turn produced: a model still working, a program that failed, or no usable
-tool call at all. A reason outside that set is dropped rather than recorded.
-Other recognized explicit failures retain only their bounded failure taxonomy;
-these fields never admit caller-supplied prose.
 
 ## Source grants and authority
 
@@ -858,27 +670,23 @@ marker flags the paired inspection artifact as partial. Missing proof,
 insufficient counts, duplicate canonical IDs, or an existing event whose
 correlation fields disagree all fail closed.
 
-The host enables capture independently of manifest event policy and selects a
-fixed exact destination. The destination is restricted to `0600` before content
-is written. Per-record and aggregate byte ceilings apply before persistence.
-Inspection capture is either disabled or required/fail-closed; the inspection
-sink never silently drops its own records. A trace-budget loss is different:
-the canonical trace marks it explicitly, and a fully retained inspection stream
-may be persisted as the trace-marked partial correlation overlay described
-above. Retention belongs to the host in 0.x.
+The host enables inspection capture independently of manifest event policy and
+selects a fixed exact destination; a manifest or PTC-Lisp program cannot enable
+it or choose where it goes. The destination is restricted to owner read/write
+before content is written. Capture is either disabled or required and
+fail-closed: the inspection sink never silently drops its own records. A
+trace-budget loss is different — the canonical trace marks it explicitly, and
+a fully retained inspection stream may still be persisted as the trace-marked
+partial correlation overlay described above. Retention belongs to the host in
+0.x.
 
 Installed defaults are 2,000,000 encoded bytes per record and 16,000,000
 encoded bytes for the artifact; a host may lower them but a manifest cannot
-raise or select them. Retained-size prechecks run before JSON encoding, followed
-by an encoded-byte check. Post-run persistence writes an exclusive `0600`
-temporary sibling and installs it with an atomic hard-link create only after
-the complete artifact validates, so a failed write is not mistaken for a
-complete capture. This is the smallest coherent no-clobber behavior:
-`File.rename/2` can replace an existing destination, while hard-link creation
-fails when the destination already exists. The temporary link is then removed.
-The first increment deliberately does not append or merge inspection runs.
+raise or select them. Persistence is atomic and no-clobber, so a failed write
+is never mistaken for a complete capture, and this increment deliberately does
+not append or merge inspection runs.
 
-The first increment captures the normalized LLM request and response, exact
+This increment captures the normalized LLM request and response, exact
 generated subordinate PTC-Lisp, exact effective prelude component source, and
 connector capability arguments and normalized results/errors needed to
 inspect a development run. It does not add transport headers, connector
@@ -930,14 +738,19 @@ share the same loader, metadata derivation, filtering, ordering, pagination,
 and bounded `RunAnalysis` navigation where practical.
 
 The viewer may render richer presentations, but it is not a second canonical
-query implementation or authority source. An explicit loopback-only development
-mode may additionally read one exact host-selected inspection artifact through
-a separate bounded loader. The browser cannot select a server-side path, and
-that loader does not become a `TraceLog` operation or model capability.
+query implementation or authority source. A development mode may additionally
+read one exact host-selected inspection artifact through a separate bounded
+loader. The browser cannot select a server-side path, and that loader does not
+become a `TraceLog` operation or model capability.
 
-Authenticated remote Viewer access and shared host authorization remain
-deferred until a real host product exists. Local private inspection does not
-wait for that broader work and does not change `Kernel.TraceLog` ownership.
+The trace browser itself is unauthenticated. It binds loopback by default, and
+a host that binds the wildcard address publishes whatever trace and inspection
+data that instance was granted to every host that can reach the port. Live
+browser controls additionally require a local page authority, and a non-loopback
+reporter requires the separately configured live token. Broader shared host
+authorization remains deferred until a real host product exists. Local private
+inspection does not wait for that work and does not change
+`Kernel.TraceLog` ownership.
 
 ## Failure algebra
 
@@ -974,53 +787,3 @@ as workflow failure.
 - benchmark/oracle/report semantics;
 - provider-specific query APIs.
 
-## Contract tests
-
-- Append and reload canonical JSONL deterministically.
-- Enforce bounded memory-sink behavior.
-- Load sorted directory files under one aggregate byte cap.
-- Reject path traversal and symlink escape.
-- Discover runs with every required metadata field.
-- Verify semantic overview/activity, internal canonical filters, ordering, and pagination.
-- Verify stable cursors and source-change invalidation.
-- Delete an index and rebuild identical results from canonical events.
-- Reject malformed events and unsupported versions.
-- Prove sanitization and absence of credentials/private source.
-- Deny private sources without a distinct explicit grant.
-- Share query semantics across library, capability prelude, and viewer API.
-- Truncate deterministically without unbounded intermediate allocation.
-- Prove mission-only trace confinement and missing-`requires` rejection.
-- Capture a normal directory immutably with pre/post inventory and content
-  verification, independent encoded/retained ceilings, path-redacted ownership,
-  stable cursors after source mutation, and owner-driven idempotent cleanup.
-- Prove snapshot-backed trace capability closures retain only the opaque token
-  and return the same four canonical query projections as TraceLog.
-- Prove the fixed run-analysis profile's positive and negative authority
-  inventory, direct Evaluation parity, exact continuation behavior, bounded
-  result/accounting projection, terminal-budget lifecycle, and path/source
-  redaction.
-- Saturate ordinary event count and byte capacity and retain one dropped summary
-  plus exactly one terminal event through a reloadable persisted batch.
-- Fault atomic publication before/during write, after sync/publication, and at
-  cleanup; retries produce one complete file or a stable collision without
-  partial discoverable traces or duplicate sequences.
-
-The developer-inspection increment additionally has tests that:
-
-- normal and private canonical turn queries never contain inspection payloads;
-- evaluation source hashes and byte counts match the executed bounded source;
-- the inspection loader rejects unknown/duplicate envelope or payload keys,
-  invalid record types, non-monotonic sequences, and correlation IDs absent
-  from the selected canonical run;
-- required capability input and evaluation-source records are accepted before
-  their callback/evaluation can execute, and output records contain the exact
-  normalized Dispatcher envelope;
-- inspection capture cannot be enabled by manifest or Lisp input;
-- the private destination is restricted before its first record;
-- per-record and aggregate ceilings fail closed without partial persistence;
-- connector credentials, transport headers, session IDs, and endpoints are not
-  added by the capture path;
-- normal directory discovery omits `.inspection.jsonl` artifacts;
-- the local Viewer accepts only the exact host-configured artifact and rejects
-  symlinks, changed files, wrong run IDs, and oversized input; and
-- querying a trace source never grants or reconstructs an inspection record.

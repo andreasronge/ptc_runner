@@ -167,7 +167,7 @@ demonstrated demand and is tracked in the
 - [Building agents](../../guides/building-agents.md) — current agent and model
   composition guidance.
 - [Getting started](../../guides/getting-started.md) — runnable examples.
-- [TraceLog contract](../../trace-log-contract.md) — canonical event and source
+- [TraceLog and run-analysis reference](../../reference/trace-log-contract.md) — canonical event and source
   contract.
 - [PTC-Lisp conformance](../../conformance/index.md) — audited language
   coverage and known gaps.

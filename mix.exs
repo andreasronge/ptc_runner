@@ -428,7 +428,6 @@ defmodule PtcRunner.MixProject do
           "docs/kernel-limits-reference.md",
           "docs/prelude-reference.md",
           "docs/signature-syntax.md",
-          "docs/trace-log-contract.md",
           "docs/conformance/index.md",
           "docs/guides/quickstart.md",
           "docs/guides/getting-started.md",
@@ -456,6 +455,7 @@ defmodule PtcRunner.MixProject do
           "docs/reference/cli.md",
           "docs/reference/repl.md",
           "docs/reference/debug-navigation.md",
+          "docs/reference/trace-log-contract.md",
           "docs/maintainers/embedding.md",
           "docs/maintainers/coding-agent-review.md",
           "docs/maintainers/duplication-gate.md",
@@ -492,7 +492,6 @@ defmodule PtcRunner.MixProject do
         Installation: ~r/docs\/installation\/.+\.md/,
         Reference:
           ~r/docs\/(?:reference\/.+|(?:agent-library|ptc-lisp|clojure|function-reference|java-|kernel-limits|prelude-|signature-).+)\.md/,
-        Contracts: ~r/docs\/trace-log-contract\.md/,
         Conformance: ~r/docs\/conformance\/.+\.md/,
         Maintainers:
           ~r/docs\/maintainers\/(coding-agent-review|documentation|duplication-gate|embedding|kernel|signature-integration)\.md/
