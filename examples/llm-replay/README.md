@@ -17,5 +17,9 @@ The result is:
 {"content":"Frozen answer"}
 ```
 
-Change the request in `workflow.clj` to see the replay-miss error and its new
-`request_hash`. Copy that hash into `replay.jsonl` to match the changed request.
+Change the request in `workflow.clj` so the fixture no longer matches. The
+call returns a provider-error envelope (`:status :error`, `kind`
+`provider_error`, `reason` `not_found`, with the new `request_hash` in
+`details`). The example passes that envelope through `cap/unwrap!`, so the
+evaluation fails instead of printing the error map as a successful result.
+Copy the reported hash into `replay.jsonl` to match the changed request.

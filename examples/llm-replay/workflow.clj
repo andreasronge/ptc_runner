@@ -2,6 +2,7 @@
 
 (defn run [_input]
   (return
-    (llm/request
-      {"system" "Reply with the frozen answer."
-       "messages" [{"role" "user" "content" "What value is frozen?"}]})))
+    (cap/unwrap!
+      (tool/llm-request
+        {"system" "Reply with the frozen answer."
+         "messages" [{"role" "user" "content" "What value is frozen?"}]}))))

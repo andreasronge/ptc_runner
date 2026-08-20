@@ -920,8 +920,27 @@ adds events to the same sink, while pagination cursors are source-digest-bound;
 the query would mutate the source it is paging. Same-run correction retains the
 bounded prior program directly in provider-valid assistant/tool/result history.
 
-Workflow annotations are host stamped, use a finite semantic vocabulary with
-no caller-defined keys or string values, and cannot forge canonical events.
+Workflow annotations are host stamped and cannot forge canonical events.
+They use a finite semantic vocabulary: types and keys are closed, and
+enumerated values (`stage`, `kind`) are closed. A phased `agent-action`
+may also carry `mission`, a bounded identifier rather than a free string.
+`workflow.event/annotate` accepts exactly these rows. A string type that
+is not in the table, or a listed type with the wrong keys or values,
+returns
+`{"status":"error","kind":"invalid_annotation","reason":"invalid_workflow_annotation"}`
+to the caller and does not fail the evaluation:
+
+| `annotation_type` | accepted `data` |
+| --- | --- |
+| `"progress"` | `{"stage": started \| planning \| executing \| validating \| completed \| failed}` — that key and no other |
+| `"agent-action"` | `{"turn": 0..127, "kind": tool-call \| protocol-error \| provider-error \| max-calls}`, or that plus `{"phase": 0..7, "phase_turn": 0..127, "mission": <name>}` — exactly two keys or exactly five |
+
+Keyword types and keys normalize (`:phase-turn` → `"phase_turn"`). A phased
+`agent-action` takes all three extra keys or none. `mission` is the phase's
+mission name: a lowercase letter, then up to 127 letters, digits, `.`, `_`, or
+`-`. The vocabulary never carries detailed reasons, generated source, or model
+content. A non-string annotation type is a malformed call, not this
+vocabulary rejection.
 
 ## Viewer and CLI sharing
 

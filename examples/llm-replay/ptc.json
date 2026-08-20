@@ -2,8 +2,8 @@
   "version": 1,
   "workflow": {
     "components": [
-      {"library": "llm"},
-      {"id": "example.replay", "path": "workflow.clj", "dependencies": ["llm"]}
+      {"library": "cap"},
+      {"id": "example.replay", "path": "workflow.clj", "dependencies": ["cap"]}
     ],
     "entry": "example.replay/run"
   },
