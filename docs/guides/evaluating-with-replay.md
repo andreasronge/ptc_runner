@@ -16,8 +16,7 @@ The checked-in example needs no credential or network access:
 
 ```console
 ptc init llm-replay --example llm-replay
-ptc run llm-replay/ptc.json \
-  --host-config llm-replay/ptc-host.json
+ptc run llm-replay/ptc-project.json
 ```
 
 ```json
@@ -48,8 +47,7 @@ Plain doctor parses the selected fixture under installed ceilings without
 starting the provider:
 
 ```console
-ptc doctor llm-replay/ptc.json \
-  --host-config llm-replay/ptc-host.json
+ptc doctor llm-replay/ptc-project.json
 ```
 
 A missing, empty, malformed, duplicate, or oversized fixture set fails its

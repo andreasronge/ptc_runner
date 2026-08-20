@@ -206,10 +206,9 @@ mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
 {"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}
 ```
 
-<!-- ptc-guide-e2e: id=replay-frozen-answer -->
+<!-- ptc-guide-e2e: id=replay-frozen-answer project=examples/llm-replay/ptc-project.json -->
 ```console
-mix ptc run examples/llm-replay/ptc.json \
-  --host-config examples/llm-replay/ptc-host.json
+mix ptc run examples/llm-replay/ptc-project.json
 ```
 ```json
 {"content":"Frozen answer"}

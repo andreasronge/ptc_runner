@@ -106,6 +106,13 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     assert {:ok, %{value: %{"content" => "Frozen answer"}}} = run_replay(@replay_example)
   end
 
+  test "the replay example project remembers the host installation" do
+    assert {:ok, project} = ProjectConfig.load(Path.join(@replay_example, "ptc-project.json"))
+    assert project.application == Path.join(@replay_example, "ptc.json")
+    assert project.host == Path.join(@replay_example, "ptc-host.json")
+    assert project.env_file == nil
+  end
+
   @tag :tmp_dir
   test "a replay miss fails the shipped example instead of returning the error as the value", %{
     tmp_dir: directory
