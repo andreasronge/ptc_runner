@@ -28,6 +28,7 @@ Then navigate that capture:
 
 ```console
 ptc run debug-a-failed-run/debugger.ptc-project.json
+ptc viewer debug-a-failed-run/debugger.ptc-project.json
 ```
 
 The debugger is a private run, so its value goes to

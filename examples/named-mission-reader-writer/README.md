@@ -18,12 +18,12 @@ and `npx` are required. Export an OpenRouter key:
 export OPENROUTER_API_KEY=...
 ```
 
-Run from the repository root (host transport paths are resolved relative to
-the host configuration):
+Run from the repository root. The project document remembers the host
+installation (transport paths resolve relative to that host file):
 
 ```console
-mix ptc run examples/named-mission-reader-writer/ptc.json \
-  --host-config examples/named-mission-reader-writer/ptc-host.json
+mix ptc run examples/named-mission-reader-writer/ptc-project.json
+mix ptc viewer examples/named-mission-reader-writer/ptc-project.json
 ```
 
 The reader returns the exact contents of `reader-state/brief.txt`. The workflow
