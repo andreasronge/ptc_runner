@@ -162,7 +162,17 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
                nil
              )
 
-    assert %{kind: :limit_exceeded, reason: :capability_quota} =
+    name = capability.name
+
+    assert %{
+             kind: :limit_exceeded,
+             reason: :capability_quota,
+             details: %{
+               limit: :mission_capability_calls_per_name,
+               name: ^name,
+               limit_value: 1
+             }
+           } =
              Dispatcher.dispatch(
                state,
                :mission,
@@ -174,7 +184,15 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
                nil
              )
 
-    assert %{data: %{reason: :capability_quota, mission_name: "reader"}} =
+    assert %{
+             data: %{
+               reason: :capability_quota,
+               mission_name: "reader",
+               limit: :mission_capability_calls_per_name,
+               name: _,
+               limit_value: 1
+             }
+           } =
              EventSink.events(sink) |> Enum.find(&(&1.type == "limit-exceeded"))
   end
 

@@ -93,6 +93,17 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
            "limit_value" => 1
          },
          "retryable?" => false
+       }, "max-calls", nil},
+      {%{
+         "status" => "error",
+         "kind" => "limit-exceeded",
+         "reason" => "capability-quota",
+         "details" => %{
+           "limit" => "workflow-capability-calls-per-name",
+           "name" => "llm-request",
+           "limit_value" => 2
+         },
+         "retryable?" => false
        }, "max-calls", nil}
     ]
 
@@ -2627,7 +2638,17 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         provider_closers: [close_counter(self(), :llm_quota)]
       )
 
-    assert {:error, %{kind: :workflow_failed, usage: llm_usage}} =
+    assert {:error,
+            %{
+              kind: :limit_exceeded,
+              reason: :capability_quota,
+              details: %{
+                limit: :workflow_capability_calls,
+                name: "llm-request",
+                limit_value: 1
+              },
+              usage: llm_usage
+            }} =
              Kernel.run(~S|(agent.core/run "Quota" {"max_turns" 4})|, llm_limited)
 
     assert llm_usage.subordinate_evaluations == 1
@@ -3906,7 +3927,16 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     mixed = %{"content" => "prose", "tool_calls" => []}
     {:ok, quota_config} = agent_config([mixed, explicit], workflow_capability_calls: 1)
 
-    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+    assert {:error,
+            %{
+              kind: :limit_exceeded,
+              reason: :capability_quota,
+              details: %{
+                limit: :workflow_capability_calls,
+                name: "llm-request",
+                limit_value: 1
+              }
+            }} =
              Kernel.run(~S|(agent.core/run "Quota" {"max_turns" 2})|, quota_config)
   end
 

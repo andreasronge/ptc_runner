@@ -681,6 +681,41 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              )
   end
 
+  test "public quota diagnostics name the capability and bind the runtime source" do
+    assert {:error, %CommandOutcome{} = outcome} =
+             project_limit_exceeded(:capability_quota, %{
+               limit: :workflow_capability_calls_per_name,
+               name: "llm-request",
+               limit_value: 2
+             })
+
+    assert {:ok, expected} =
+             RuntimeLimitDiagnostic.capability_quota_message(
+               :workflow_capability_calls_per_name,
+               "llm-request",
+               2
+             )
+
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  test "protocol_errors diagnostics name the limit and bind the runtime source" do
+    assert {:error, %CommandOutcome{} = outcome} =
+             project_limit_exceeded(:protocol_errors, %{
+               limit: :protocol_errors,
+               limit_value: 3
+             })
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.protocol_errors_message(3)
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+  end
+
   test "application-authored turn-limit fields cannot claim an agent runtime limit" do
     usage = %{
       remaining_ms: 0,

@@ -368,7 +368,9 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          RuntimeLimitDiagnostic.subordinate_evaluations_message?(message) or
            RuntimeLimitDiagnostic.timeout_message?(message) or
            RuntimeLimitDiagnostic.heap_words_message?(message) or
-           RuntimeLimitDiagnostic.max_calls_message?(message)
+           RuntimeLimitDiagnostic.max_calls_message?(message) or
+           RuntimeLimitDiagnostic.capability_quota_message?(message) or
+           RuntimeLimitDiagnostic.protocol_errors_message?(message)
 
   defp valid_message_source?(
          message,

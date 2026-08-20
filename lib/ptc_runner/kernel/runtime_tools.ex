@@ -68,7 +68,9 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     view = Environment.capability_view(environment)
 
     @mission_routes
-    |> Map.new(fn {name, route} -> {name, route_callback(route, state, view, kind, lease)} end)
+    |> Map.new(fn {name, route} ->
+      {name, route_callback(route, state, view, event_sink, kind, lease)}
+    end)
     |> maybe_put_annotation(state, event_sink, kind)
     |> Map.new(fn {name, callback} ->
       attributes =
@@ -99,21 +101,35 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc "Builds the workflow-only frozen mission-inventory callback."
-  def mission_inventory(state, rendered_by_mission) when is_map(rendered_by_mission),
-    do: frozen_by_mission(state, rendered_by_mission, :invalid_mission_inventory_request)
+  def mission_inventory(state, rendered_by_mission, event_sink)
+      when is_map(rendered_by_mission),
+      do:
+        frozen_by_mission(
+          state,
+          rendered_by_mission,
+          event_sink,
+          :invalid_mission_inventory_request
+        )
 
   @doc "Builds the workflow-only frozen compact mission-model-context callback."
-  def mission_model_context(state, rendered_by_mission) when is_map(rendered_by_mission),
-    do: frozen_by_mission(state, rendered_by_mission, :invalid_mission_model_context_request)
+  def mission_model_context(state, rendered_by_mission, event_sink)
+      when is_map(rendered_by_mission),
+      do:
+        frozen_by_mission(
+          state,
+          rendered_by_mission,
+          event_sink,
+          :invalid_mission_model_context_request
+        )
 
-  defp frozen_by_mission(state, rendered_by_mission, invalid_reason) do
+  defp frozen_by_mission(state, rendered_by_mission, event_sink, invalid_reason) do
     fn arguments ->
       with {:ok, mission_name} <- requested_mission(arguments),
            {:ok, rendered} <- Map.fetch(rendered_by_mission, mission_name) do
         %{status: :ok, value: rendered}
       else
-        :error -> protocol_error(state, :unknown_mission)
-        {:error, :invalid_request} -> protocol_error(state, invalid_reason)
+        :error -> protocol_error(state, event_sink, :unknown_mission)
+        {:error, :invalid_request} -> protocol_error(state, event_sink, invalid_reason)
       end
     end
   end
@@ -149,10 +165,10 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           )
 
         :error ->
-          protocol_error(state, :unknown_mission)
+          protocol_error(state, event_sink, :unknown_mission)
 
         {:error, :invalid_request} ->
-          invalid_kernel_eval_request(state)
+          invalid_kernel_eval_request(state, event_sink)
       end
     end
   end
@@ -449,7 +465,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             evaluation_opts
           )
         else
-          invalid_kernel_eval_request(state)
+          invalid_kernel_eval_request(state, event_sink)
         end
 
       %{
@@ -470,7 +486,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             observation_chars
           )
         else
-          invalid_kernel_eval_request(state)
+          invalid_kernel_eval_request(state, event_sink)
         end
 
       %{"kind" => kind, "source" => source, "params" => params} = arguments
@@ -487,7 +503,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             evaluation_opts
           )
         else
-          invalid_kernel_eval_request(state)
+          invalid_kernel_eval_request(state, event_sink)
         end
 
       %{"kind" => kind, "program" => %Program{source: source}} = arguments
@@ -503,7 +519,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             evaluation_opts
           )
         else
-          invalid_kernel_eval_request(state)
+          invalid_kernel_eval_request(state, event_sink)
         end
 
       %{"kind" => kind, "program" => %Program{source: source}, "params" => params} = arguments
@@ -520,11 +536,11 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             evaluation_opts
           )
         else
-          invalid_kernel_eval_request(state)
+          invalid_kernel_eval_request(state, event_sink)
         end
 
       _rest ->
-        invalid_kernel_eval_request(state)
+        invalid_kernel_eval_request(state, event_sink)
     end
   end
 
@@ -538,8 +554,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           value: SourceCheck.check(state, mission_name, mission, source, limits, event_sink, opts)
         }
       else
-        :error -> protocol_error(state, :unknown_mission)
-        _ -> invalid_kernel_check_source_request(state)
+        :error -> protocol_error(state, event_sink, :unknown_mission)
+        _ -> invalid_kernel_check_source_request(state, event_sink)
       end
     end
   end
@@ -730,7 +746,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         }
 
       {:error, _reason} ->
-        invalid_kernel_eval_request(state)
+        invalid_kernel_eval_request(state, event_sink)
     end
   end
 
@@ -1133,21 +1149,25 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp capability_description(state, _environment, _arguments, scope),
     do: scoped_protocol_error(state, :invalid_capability_description_request, scope)
 
-  defp route_callback(:usage, state, _environment, kind, lease),
-    do: fn arguments -> usage(state, arguments, {kind, lease}) end
+  defp route_callback(:usage, state, _environment, event_sink, kind, lease),
+    do: fn arguments -> usage(state, arguments, {kind, lease, event_sink}) end
 
-  defp route_callback(:remaining, state, _environment, kind, lease),
-    do: fn arguments -> remaining(state, arguments, {kind, lease}) end
+  defp route_callback(:remaining, state, _environment, event_sink, kind, lease),
+    do: fn arguments -> remaining(state, arguments, {kind, lease, event_sink}) end
 
-  defp route_callback(:capability_list, state, environment, kind, lease),
-    do: fn arguments -> capability_list(state, environment, arguments, {kind, lease}) end
+  defp route_callback(:capability_list, state, environment, event_sink, kind, lease),
+    do: fn arguments ->
+      capability_list(state, environment, arguments, {kind, lease, event_sink})
+    end
 
-  defp route_callback(:capability_description, state, environment, kind, lease),
-    do: fn arguments -> capability_description(state, environment, arguments, {kind, lease}) end
+  defp route_callback(:capability_description, state, environment, event_sink, kind, lease),
+    do: fn arguments ->
+      capability_description(state, environment, arguments, {kind, lease, event_sink})
+    end
 
   # Malformed-call accounting for a mission route authenticates the lease in
   # the same owner operation that records the error.
-  defp scoped_protocol_error(state, reason, {kind, lease}) do
+  defp scoped_protocol_error(state, reason, {kind, lease, event_sink}) do
     case RunState.protocol_error(state, kind, lease) do
       :ok ->
         %{status: :error, kind: :protocol_error, reason: reason}
@@ -1156,7 +1176,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         %{status: :error, kind: :capability_denied, reason: :stale_evaluation, retryable?: false}
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors}
+        protocol_error_limit_envelope(state, event_sink)
     end
   end
 
@@ -1188,20 +1208,20 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
-  defp annotate(state, _event_sink, _arguments),
-    do: protocol_error(state, :invalid_workflow_annotation)
+  defp annotate(state, event_sink, _arguments),
+    do: protocol_error(state, event_sink, :invalid_workflow_annotation)
 
-  defp protocol_error(state, reason) do
+  defp protocol_error(state, event_sink, reason) do
     case RunState.protocol_error(state) do
       :ok ->
         %{status: :error, kind: :protocol_error, reason: reason}
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors}
+        protocol_error_limit_envelope(state, event_sink)
     end
   end
 
-  defp invalid_kernel_eval_request(state) do
+  defp invalid_kernel_eval_request(state, event_sink) do
     case RunState.protocol_error(state) do
       :ok ->
         %{
@@ -1212,11 +1232,11 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         }
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors, retryable?: false}
+        protocol_error_limit_envelope(state, event_sink, %{retryable?: false})
     end
   end
 
-  defp invalid_kernel_check_source_request(state) do
+  defp invalid_kernel_check_source_request(state, event_sink) do
     case RunState.protocol_error(state) do
       :ok ->
         %{
@@ -1227,8 +1247,30 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         }
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors, retryable?: false}
+        protocol_error_limit_envelope(state, event_sink, %{retryable?: false})
     end
+  end
+
+  defp protocol_error_limit_envelope(state, event_sink, extra \\ %{}) do
+    details = RunState.protocol_errors_details(state)
+
+    _ =
+      Events.emit(
+        state,
+        event_sink,
+        "limit-exceeded",
+        Map.merge(%{reason: :protocol_errors}, details)
+      )
+
+    Map.merge(
+      %{
+        status: :error,
+        kind: :limit_exceeded,
+        reason: :protocol_errors,
+        details: details
+      },
+      extra
+    )
   end
 
   defp keyword_name(%LispKeyword{name: name}), do: name

@@ -283,7 +283,7 @@ branch needs to know which failure it was.
 
 A recoverable capability error does not change the exit status. Exhausting
 `workflow_capability_calls_per_name` returns
-`{"status":"error","kind":"limit_exceeded","reason":"capability_quota"}` as a
+`{"status":"error","kind":"limit_exceeded","reason":"capability_quota","details":{"limit":"workflow_capability_calls_per_name","name":"llm-request","limit_value":2}}` as a
 value into PTC-Lisp; a workflow that reads past it can still `return` and the
 command exits `0`. Assert on the result value, or have the workflow `fail`,
 when a quota must end the run.

@@ -565,7 +565,11 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-mission-inventory",
-        RuntimeTools.mission_inventory(state, mission_renderings(config, :rendered))
+        RuntimeTools.mission_inventory(
+          state,
+          mission_renderings(config, :rendered),
+          config.event_sink
+        )
       )
     )
     |> Map.put(
@@ -575,7 +579,11 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-mission-model-context",
-        RuntimeTools.mission_model_context(state, mission_renderings(config, :model_rendered))
+        RuntimeTools.mission_model_context(
+          state,
+          mission_renderings(config, :model_rendered),
+          config.event_sink
+        )
       )
     )
     |> Map.put(
@@ -734,9 +742,9 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   defp explicit_failure_error(value, state) do
-    case SafeMetadata.max_calls_refusal(value) do
+    case SafeMetadata.named_quota_refusal(value) do
       {:ok, details} ->
-        if RunState.max_calls_refusal?(state, details) do
+        if RunState.named_quota_refusal?(state, details) do
           %Error{
             kind: :limit_exceeded,
             reason: :capability_quota,
@@ -774,13 +782,13 @@ defmodule PtcRunner.Kernel.Runner do
          state
        )
        when reason in [:pmap_error, :pcalls_error] and is_map(details) do
-    case SafeMetadata.retain_max_calls_refusal_fields(details) do
-      %{limit: :max_calls} = max_calls ->
-        if RunState.max_calls_refusal?(state, max_calls) do
+    case SafeMetadata.retain_named_quota_refusal_fields(details) do
+      %{limit: _limit} = quota ->
+        if RunState.named_quota_refusal?(state, quota) do
           %Error{
             kind: :limit_exceeded,
             reason: :capability_quota,
-            details: max_calls,
+            details: quota,
             usage: usage
           }
         else
@@ -844,12 +852,18 @@ defmodule PtcRunner.Kernel.Runner do
       %{kind: :event_sink_error} ->
         event_sink_error(RunState.usage(state))
 
-      %{kind: kind, reason: reason} ->
+      %{kind: kind, reason: reason} = failure ->
+        details =
+          case failure do
+            %{details: details} when is_map(details) -> details
+            _missing -> %{}
+          end
+
         {:error,
          %Error{
            kind: kind,
            reason: reason,
-           details: %{},
+           details: details,
            usage: RunState.usage(state)
          }}
     end
@@ -858,8 +872,22 @@ defmodule PtcRunner.Kernel.Runner do
   defp maybe_emit_workflow_limit(
          _state,
          _sink,
-         {:error, %Error{kind: :limit_exceeded, details: %{limit: :max_calls}}}
-       ),
+         {:error, %Error{kind: :limit_exceeded, details: %{limit: limit}}}
+       )
+       when limit in [:max_calls, :protocol_errors],
+       do: :ok
+
+  defp maybe_emit_workflow_limit(
+         _state,
+         _sink,
+         {:error, %Error{kind: :limit_exceeded, details: %{limit: limit, name: _name}}}
+       )
+       when limit in [
+              :workflow_capability_calls,
+              :workflow_capability_calls_per_name,
+              :mission_capability_calls,
+              :mission_capability_calls_per_name
+            ],
        do: :ok
 
   defp maybe_emit_workflow_limit(
@@ -872,7 +900,10 @@ defmodule PtcRunner.Kernel.Runner do
            state,
            sink,
            "limit-exceeded",
-           Map.merge(%{reason: reason}, Map.take(details, [:limit, :limit_ms, :phase]))
+           Map.merge(
+             %{reason: reason},
+             Map.take(details, [:limit, :limit_ms, :limit_value, :phase])
+           )
          )
 
   defp maybe_emit_workflow_limit(_state, _sink, _result), do: :ok

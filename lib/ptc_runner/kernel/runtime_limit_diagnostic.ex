@@ -41,6 +41,33 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
                                      @max_calls_maximum_alias_bytes +
                                      byte_size(@max_calls_suffix)
 
+  @quota_limits [
+    :workflow_capability_calls,
+    :workflow_capability_calls_per_name,
+    :mission_capability_calls,
+    :mission_capability_calls_per_name
+  ]
+  @capability_name ~r|\A[a-z][a-z0-9._/-]{0,127}\z|
+  @capability_name_schema_pattern "[a-z][a-z0-9._/-]{0,127}"
+  @quota_middle " was exceeded for "
+  @quota_maximum_name_bytes 128
+  @quota_maximum_message_bytes (for limit <- @quota_limits do
+                                  name = Atom.to_string(limit)
+
+                                  byte_size(name <> " limit ") +
+                                    @subordinate_maximum_digits +
+                                    byte_size(@quota_middle) +
+                                    @quota_maximum_name_bytes +
+                                    byte_size("; raise limits." <> name <> @manifest_remedy)
+                                end)
+                               |> Enum.max()
+
+  @protocol_errors_prefix "protocol_errors limit "
+  @protocol_errors_suffix " was exceeded; raise limits.protocol_errors" <> @manifest_remedy
+  @protocol_errors_maximum_message_bytes byte_size(@protocol_errors_prefix) +
+                                           @subordinate_maximum_digits +
+                                           byte_size(@protocol_errors_suffix)
+
   @result_limit_prefix "terminal_result_bytes limit "
   @result_limit_suffix " bytes was exceeded; raise limits.terminal_result_bytes" <>
                          @manifest_remedy <> ", or return a smaller result"
@@ -254,6 +281,108 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   end
 
   @doc false
+  @spec capability_quota_message(term(), term(), term()) :: {:ok, binary()} | :error
+  def capability_quota_message(limit, name, value)
+      when limit in @quota_limits and is_binary(name) and is_integer(value) do
+    with true <- name =~ @capability_name,
+         {:ok, row} <- LimitCatalog.fetch(limit),
+         true <- LimitCatalog.valid_value?(row, value) do
+      {:ok,
+       Atom.to_string(limit) <>
+         " limit " <>
+         Integer.to_string(value) <>
+         @quota_middle <>
+         name <>
+         "; raise limits." <> Atom.to_string(limit) <> @manifest_remedy}
+    else
+      _invalid -> :error
+    end
+  end
+
+  def capability_quota_message(_limit, _name, _value), do: :error
+
+  @doc false
+  @spec capability_quota_message?(term()) :: boolean()
+  def capability_quota_message?(message) when is_binary(message) do
+    Enum.any?(@quota_limits, fn limit ->
+      prefix = Atom.to_string(limit) <> " limit "
+      suffix = "; raise limits." <> Atom.to_string(limit) <> @manifest_remedy
+
+      with true <- String.starts_with?(message, prefix),
+           true <- String.ends_with?(message, suffix),
+           rest_bytes <- byte_size(message) - byte_size(prefix) - byte_size(suffix),
+           true <- rest_bytes > 0,
+           rest <- binary_part(message, byte_size(prefix), rest_bytes),
+           [digits, name] <- String.split(rest, @quota_middle, parts: 2),
+           {value, ""} <- Integer.parse(digits),
+           true <- Integer.to_string(value) == digits,
+           {:ok, expected} <- capability_quota_message(limit, name, value) do
+        message == expected
+      else
+        _invalid -> false
+      end
+    end)
+  end
+
+  def capability_quota_message?(_message), do: false
+
+  @doc false
+  @spec protocol_errors_message(term()) :: {:ok, binary()} | :error
+  def protocol_errors_message(limit) do
+    with {:ok, row} <- LimitCatalog.fetch(:protocol_errors),
+         true <- LimitCatalog.valid_value?(row, limit) do
+      {:ok, @protocol_errors_prefix <> Integer.to_string(limit) <> @protocol_errors_suffix}
+    else
+      _invalid -> :error
+    end
+  end
+
+  @doc false
+  @spec protocol_errors_message?(term()) :: boolean()
+  def protocol_errors_message?(message) when is_binary(message) do
+    valid_exact_message?(
+      message,
+      @protocol_errors_prefix,
+      @protocol_errors_suffix,
+      @subordinate_maximum_digits,
+      &protocol_errors_message/1
+    )
+  end
+
+  def protocol_errors_message?(_message), do: false
+
+  defp capability_quota_message_branches do
+    for limit <- @quota_limits do
+      name = Atom.to_string(limit)
+      prefix = name <> " limit "
+      suffix = "; raise limits." <> name <> @manifest_remedy
+
+      %{
+        "type" => "string",
+        "minLength" => 1,
+        "maxLength" => @quota_maximum_message_bytes,
+        "pattern" =>
+          DiagnosticPattern.exact(
+            DiagnosticPattern.escape(prefix) <>
+              @subordinate_limit_pattern <>
+              DiagnosticPattern.escape(@quota_middle) <>
+              @capability_name_schema_pattern <>
+              DiagnosticPattern.escape(suffix)
+          )
+      }
+    end
+  end
+
+  defp protocol_errors_message_branch do
+    bounded_branch(
+      @protocol_errors_maximum_message_bytes,
+      @protocol_errors_prefix,
+      @subordinate_limit_pattern,
+      @protocol_errors_suffix
+    )
+  end
+
+  @doc false
   @spec result_limit_message(term()) :: {:ok, binary()} | :error
   def result_limit_message(limit) do
     with {:ok, row} <- LimitCatalog.fetch(:terminal_result_bytes),
@@ -291,6 +420,13 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   def details_message(%{limit: :max_calls, alias: alias_name, limit_value: value}),
     do: named_limit(:max_calls, max_calls_message(alias_name, value))
+
+  def details_message(%{limit: limit, name: name, limit_value: value})
+      when limit in @quota_limits,
+      do: named_limit(limit, capability_quota_message(limit, name, value))
+
+  def details_message(%{limit: :protocol_errors, limit_value: value}),
+    do: named_limit(:protocol_errors, protocol_errors_message(value))
 
   def details_message(_details), do: :error
 
@@ -382,7 +518,8 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   def valid_message?(message) when is_binary(message) do
     subordinate_evaluations_message?(message) or agent_turns_message?(message) or
       transcript_chars_message?(message) or timeout_message?(message) or
-      heap_words_message?(message) or max_calls_message?(message)
+      heap_words_message?(message) or max_calls_message?(message) or
+      capability_quota_message?(message) or protocol_errors_message?(message)
   end
 
   def valid_message?(_message), do: false
@@ -481,7 +618,9 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       [subordinate_message_branch()] ++
         agent_message_branches() ++
         [transcript_message_branch()] ++
-        timeout_message_branches() ++ [heap_message_branch(), max_calls_message_branch()]
+        timeout_message_branches() ++
+        [heap_message_branch(), max_calls_message_branch()] ++
+        capability_quota_message_branches() ++ [protocol_errors_message_branch()]
     )
   end
 
@@ -497,7 +636,8 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       message_schema(
         fallback,
         [subordinate_message_branch() | timeout_message_branches()] ++
-          [heap_message_branch(), max_calls_message_branch()]
+          [heap_message_branch(), max_calls_message_branch()] ++
+          capability_quota_message_branches() ++ [protocol_errors_message_branch()]
       )
 
   @doc false
