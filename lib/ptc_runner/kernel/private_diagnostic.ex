@@ -52,8 +52,8 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
     :unknown_namespace
   ]
 
-  alias PtcRunner.Kernel.BoundedUTF8
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Utf8
 
   @doc "The fixed message used whenever no source-derived message can be rebuilt."
   @spec redacted_message() :: binary()
@@ -156,14 +156,11 @@ defmodule PtcRunner.Kernel.PrivateDiagnostic do
   end
 
   defp bound_pre_execution_message(message) do
-    case BoundedUTF8.clip(message, @max_pre_execution_message_bytes) do
-      {kept, false} ->
-        {kept, false}
-
-      {_kept, true} ->
-        body_budget = max(@max_pre_execution_message_bytes - byte_size(@truncation_suffix), 1)
-        {body, _clipped?} = BoundedUTF8.clip(message, body_budget)
-        {body <> @truncation_suffix, true}
+    if byte_size(message) <= @max_pre_execution_message_bytes do
+      {message, false}
+    else
+      body_budget = max(@max_pre_execution_message_bytes - byte_size(@truncation_suffix), 1)
+      {Utf8.truncate(message, body_budget) <> @truncation_suffix, true}
     end
   end
 end

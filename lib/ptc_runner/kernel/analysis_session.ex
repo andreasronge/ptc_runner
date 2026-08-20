@@ -24,7 +24,6 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   alias PtcRunner.Kernel.AnalysisProfileRegistry
   alias PtcRunner.Kernel.AnalysisResources
   alias PtcRunner.Kernel.BoundedPrints
-  alias PtcRunner.Kernel.BoundedUTF8
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
@@ -33,6 +32,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SessionTrace
   alias PtcRunner.Lisp.ValuePreview
+  alias PtcRunner.Utf8
 
   @formatted_chars 2_048
   @formatted_bytes 8_192
@@ -483,8 +483,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
       reason: Map.get(result, :reason),
       message: message,
       message_redacted?: redacted?,
-      capability_activity?:
-        Map.get(result, :capability_activity?, Map.get(details, :capability_activity?)),
+      capability_activity?: Map.get(details, :capability_activity?),
       capability_failure?: Map.get(result, :capability_failure?),
       retryable?: Map.get(result, :retryable?)
     }
@@ -524,9 +523,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   defp error_message(_kind, details, _state, _source),
     do: {bounded_message(Map.get(details, :message)), false}
 
-  defp bounded_message(message) when is_binary(message),
-    do: elem(BoundedUTF8.clip(message, 4_096), 0)
-
+  defp bounded_message(message) when is_binary(message), do: Utf8.truncate(message, 4_096)
   defp bounded_message(_message), do: nil
 
   defp enforce_result_limit(projection, limit, profile_id) do
