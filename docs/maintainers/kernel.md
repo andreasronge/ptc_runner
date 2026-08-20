@@ -438,6 +438,13 @@ span them:
   triggering evaluation reply, so it outranks the generic unexpected-owner
   reason. Every evaluation admission rechecks the same authoritative deadline,
   so expiry publishes the same outcome regardless of timer-message ordering.
+- The trace owner is constructed only when every part of its contract agrees:
+  the limits, the combined runtime and sink, a normal fail-closed sink policy,
+  the exact two-event measured terminal reserve, an empty unbegun recorder, an
+  open `RunState` whose limits are identical, matching sink run and trace
+  identity, and a `<run-id>.jsonl` destination basename. Assembly validation
+  rechecks the runtime binding, and the sole session attaches before
+  `run-started`, so a rejected assembly replay is side-effect free.
 - Orderly close, reset, and deadline expiry each finalize and publish the
   batch; explicit `return` and `fail` are evaluation facts, not session
   lifecycle commands. Session death before the builder releases its
@@ -609,8 +616,10 @@ suites must keep proving, concretely:
   inventory, direct `Evaluation` parity, exact continuation behavior, bounded
   result and accounting projection, terminal-budget lifecycle, and path and
   source redaction;
-- an immutable capture verifies pre/post inventory and content, redacts the
-  path from ownership and errors, and cleans up idempotently under owner death;
+- an immutable capture verifies pre/post inventory and content, enforces its
+  encoded and retained ceilings independently, redacts the path from ownership
+  and errors, keeps snapshot cursors stable after the original directory
+  mutates, and cleans up idempotently under owner death;
 - saturating event count and byte capacity still retains one dropped summary
   plus exactly one terminal event through a reloadable persisted batch;
 - atomic publication faulted before, during, and after write and at cleanup
