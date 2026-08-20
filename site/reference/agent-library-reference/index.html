@@ -113,16 +113,29 @@ manifest must select the shipped library:</p><pre><code class="json language-jso
 <code class="inline">agent.retry</code>, <code class="inline">kernel</code>, <code class="inline">llm</code>, <code class="inline">result</code>, and <code class="inline">workflow.event</code>.</p><p>Select <code class="inline">{&quot;library&quot;: &quot;agent.main&quot;}</code> when the manifest entry is
 <code class="inline">agent.main/run</code>; its dependency closure includes <code class="inline">agent.core</code>.</p><h2 id="entry-functions">Entry functions</h2><p>All <code class="inline">agent.core</code> entries take a task string and configuration map.</p><h3 id="agent-core-run"><code class="inline">agent.core/run</code></h3><pre><code class="clojure language-clojure">(agent.core/run task config)</code></pre><p>Runs the loop as a terminal workflow entry. By default it completes the outer
 program with:</p><pre><code class="clojure language-clojure">{:ok true :value application-value}</code></pre><p>Set <code class="inline">&quot;result_envelope&quot;</code> to <code class="inline">false</code> to complete with the raw application value.</p><h3 id="agent-core-run-value"><code class="inline">agent.core/run-value</code></h3><pre><code class="clojure language-clojure">(agent.core/run-value task config)</code></pre><p>Returns the application value to its PTC-Lisp caller without completing the
-outer workflow. A subject failure calls <code class="inline">fail</code>, so use this entry when the
-caller should continue only after a successful agent result.</p><h3 id="agent-core-run-outcome"><code class="inline">agent.core/run-outcome</code></h3><pre><code class="clojure language-clojure">(agent.core/run-outcome task config)</code></pre><p>Represents model-attributable completion or failure as data:</p><pre><code class="clojure language-clojure">{:status :returned :value application-value}
+outer workflow. A subject failure or provider failure calls <code class="inline">fail</code>, so use this
+entry when the caller should continue only after a successful agent result.</p><h3 id="agent-core-run-outcome"><code class="inline">agent.core/run-outcome</code></h3><pre><code class="clojure language-clojure">(agent.core/run-outcome task config)</code></pre><p>Represents model-attributable completion or failure as data:</p><pre><code class="clojure language-clojure">{:status :returned :value application-value}
 
 {:status :subject-failure
  :kind failure-kind
- :error bounded-error}</code></pre><p>Subject failures include model-program failure, exhausted turns, and a
-non-retryable generated-program error. Provider, prompt, transcript, quota
-(including a spent per-alias <code class="inline">max_calls</code>), evaluation-admission, and other host
-failures still fail the outer workflow. This prevents an evaluator from scoring
-a provider outage against the subject.</p><h3 id="agent-core-run-result-value"><code class="inline">agent.core/run-result-value</code></h3><pre><code class="clojure language-clojure">(agent.core/run-result-value task config)</code></pre><p>Runs the same loop, validates every model-authored terminal candidate against
+ :error bounded-error}
+
+{:status :provider-failure
+ :error bounded-llm-envelope
+ :model resolved-alias}</code></pre><p>Subject failures include model-program failure, exhausted turns, and a
+non-retryable generated-program error. Prompt, transcript,
+evaluation-admission, and other host failures still fail the outer workflow.
+Typed LLM provider envelopes, named capability-quota refusals, and
+alias-resolution protocol errors return as <code class="inline">:provider-failure</code> so the caller
+can inspect the closed <code class="inline">kind</code> and <code class="inline">reason</code>. <code class="inline">:model</code> is the resolved
+installation alias after routing, including when the caller omitted <code class="inline">model</code>
+and a manifest default selected it. It is omitted only when no alias was
+resolved and none was requested.</p><p><code class="inline">kind</code> and <code class="inline">reason</code> are facts. This entry does not add a runtime
+<code class="inline">recovery: retry | choose-alternate | abort</code> axis; the workflow chooses a
+disposition. Restarting with another alias starts another agent loop. It does
+not resume the previous transcript.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Observation</th><th style="text-align: left;">Envelope <code class="inline">kind</code></th><th style="text-align: left;">Envelope <code class="inline">reason</code></th><th style="text-align: left;">Typical policy</th></tr></thead><tbody><tr><td style="text-align: left;">Transient transport or provider failure</td><td style="text-align: left;"><code class="inline">provider-error</code></td><td style="text-align: left;"><code class="inline">timeout</code>, <code class="inline">unavailable</code>, <code class="inline">rate-limited</code>, or <code class="inline">transport-error</code> with <code class="inline">retryable?</code> true</td><td style="text-align: left;">retry the same alias</td></tr><tr><td style="text-align: left;">Permanent per-alias provider refusal</td><td style="text-align: left;"><code class="inline">provider-error</code></td><td style="text-align: left;"><code class="inline">authentication-failed</code>, <code class="inline">payment-required</code>, <code class="inline">denied</code>, <code class="inline">not-found</code>, <code class="inline">invalid-request</code>, <code class="inline">tool-calling-unsupported</code>, and other non-retryable provider reasons</td><td style="text-align: left;">try another alias or abort</td></tr><tr><td style="text-align: left;">Per-alias <code class="inline">max_calls</code> exhaustion</td><td style="text-align: left;"><code class="inline">limit-exceeded</code></td><td style="text-align: left;"><code class="inline">capability-quota</code> with <code class="inline">details.limit</code> <code class="inline">max-calls</code></td><td style="text-align: left;">another alias may still run</td></tr><tr><td style="text-align: left;">Global LLM capability quota</td><td style="text-align: left;"><code class="inline">limit-exceeded</code></td><td style="text-align: left;"><code class="inline">capability-quota</code> with a workflow or mission capability-call limit</td><td style="text-align: left;">no selected alias can run</td></tr><tr><td style="text-align: left;">Invalid or unknown alias</td><td style="text-align: left;"><code class="inline">protocol-error</code></td><td style="text-align: left;"><code class="inline">unknown-model-alias</code>, <code class="inline">invalid-model-alias</code>, or <code class="inline">model-alias-required</code></td><td style="text-align: left;">correct the request; no provider attempt occurred</td></tr></tbody></table></div><p>A spent per-alias <code class="inline">max_calls</code> is a named quota refusal, not a subject failure
+and not a transport error. <code class="inline">run-value</code>, <code class="inline">run-result-value</code>, <code class="inline">run-phased-result-value</code>,
+<code class="inline">agent.core/run</code>, and <code class="inline">agent.main</code> still fail-fast on every <code class="inline">:provider-failure</code>.</p><h3 id="agent-core-run-result-value"><code class="inline">agent.core/run-result-value</code></h3><pre><code class="clojure language-clojure">(agent.core/run-result-value task config)</code></pre><p>Runs the same loop, validates every model-authored terminal candidate against
 the manifest result contract, and returns the contract-valid value to its
 PTC-Lisp caller. Invalid candidates receive bounded correction feedback while
 a turn remains. If correction is exhausted, the Kernel reports an authenticated
@@ -290,9 +303,15 @@ arguments may include a bounded <code class="inline">args_error</code> classific
 include <code class="inline">input</code>, <code class="inline">output</code>, <code class="inline">cache_creation</code>, <code class="inline">cache_read</code>, and <code class="inline">total_cost</code>.
 When provider pricing is unavailable, <code class="inline">total_cost</code> is absent; a present zero is
 a measured zero-cost response.</p><p>Provider failures remain bounded capability error envelopes so workflow policy
-can decide whether to fail or recover. Credentials, endpoints, sampling,
+can decide whether to fail or recover. After alias resolution, those envelopes
+include the public <code class="inline">model</code> installation alias. Credentials, endpoints, sampling,
 timeouts, and byte ceilings remain host-owned and are never supplied through
-the PTC-Lisp configuration map.</p><h2 id="concurrency-and-admission">Concurrency and admission</h2><p>A run has one subordinate-evaluation lease. Agent loops under <code class="inline">pcalls</code> can
+the PTC-Lisp configuration map.</p><p>Built-in adapters classify expected HTTP and transport failures into the closed
+<code class="inline">ProviderError</code> reasons: retryable <code class="inline">timeout</code>, <code class="inline">unavailable</code>, <code class="inline">rate-limited</code>, and
+<code class="inline">transport-error</code>; permanent <code class="inline">authentication-failed</code>, <code class="inline">payment-required</code>,
+<code class="inline">denied</code>, <code class="inline">not-found</code>, <code class="inline">invalid-request</code>, and <code class="inline">tool-calling-unsupported</code>.
+Unclassified requester failures become retryable <code class="inline">unavailable</code>. The Dispatcher
+preserves that classification in the Lisp envelope.</p><h2 id="concurrency-and-admission">Concurrency and admission</h2><p>A run has one subordinate-evaluation lease. Agent loops under <code class="inline">pcalls</code> can
 overlap provider calls, then their evaluations queue in FIFO order. The wait is
 bounded by <code class="inline">evaluation_admission_timeout_ms</code> and the run deadline. Exhausted
 <code class="inline">subordinate_evaluations</code> or an expired admission wait fails the workflow

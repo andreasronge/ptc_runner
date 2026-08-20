@@ -156,13 +156,19 @@ the model-authored value returns.
 ```
 
 Runs the agent loop and distinguishes model-authored completion from a
-bounded subject-attributable failure.
+bounded subject-attributable failure or a bounded provider failure.
+
+Provider failures return `{:status :provider-failure :error error :model alias}`
+with the complete bounded LLM envelope. The closed `kind` and `reason` are
+facts for workflow policy; this entry does not choose retry, failover, or
+abort. Restarting with another alias starts another loop and does not resume
+the previous transcript.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
 - **Contract:** `(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any`
-- **Backing requirements:** `tool:kernel-agent-config-failure`, `tool:kernel-agent-protocol-error`, `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
+- **Backing requirements:** `tool:kernel-agent-config-failure`, `tool:kernel-agent-protocol-error`, `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-mission-model-context`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ##### `agent.core/run-phased-result-value`
 
@@ -210,8 +216,8 @@ Runs the agent loop and returns its model-authored value to the calling
 PTC-Lisp function. Unlike `run`, this does not terminate the outer program,
 so an application can validate or score the answer before returning.
 
-Subject failures retain the historical fail behavior. Evaluators that need
-to record those attempts use `run-outcome`.
+Subject failures and provider failures retain the historical fail behavior.
+Evaluators that need to record those attempts use `run-outcome`.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`

@@ -38,7 +38,9 @@ named mission and let one trusted workflow drive a loop per stage. A mission
 boundary is an authority decision, not a prompt decision: a specialist can
 only see what its mission was granted, and the workflow chooses what crosses
 between stages. Use `agent.core/run-outcome` when the workflow must handle a
-specialist's failure as data. Runnable forms:
+specialist's subject or provider failure as data. A provider failure is
+inspectable `kind` and `reason`; choosing another alias starts a new loop
+rather than resuming the previous transcript. Runnable forms:
 [`support-triage/03-specialists`](https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage)
 (different data per specialist) and
 [`named-mission-reader-writer`](https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer)

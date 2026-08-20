@@ -8,6 +8,12 @@ defmodule PtcRunner.Kernel.LLMCapability do
   become retryable `:unavailable` errors. Invalid or oversized responses do not
   cross back into Lisp.
 
+  Dispatcher and adapter boundaries use the same closed public `kind` and
+  `reason` vocabulary. HTTP and transport failures become `ProviderError`
+  values (`:timeout`, `:unavailable`, `:rate_limited`, `:transport_error`, and
+  the permanent request classes). Routed `llm-request` failures that occur
+  after alias resolution also carry the public `:model` installation alias.
+
   This adapter provides model access, not agent policy. Message construction,
   tool protocols, feedback, retries, and completion remain PTC-Lisp workflow
   concerns.

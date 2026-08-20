@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RoutedCapability
@@ -111,6 +112,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              status: :error,
              kind: :limit_exceeded,
              reason: :capability_quota,
+             model: "expensive",
              details: %{limit: :max_calls, alias: "expensive", limit_value: 1}
            } =
              Dispatcher.dispatch(
@@ -134,6 +136,65 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
            } = Enum.find(EventSink.events(sink), &(&1.type == "limit-exceeded"))
 
     :ok = EventSink.stop(sink)
+    :ok = RunState.stop(state)
+  end
+
+  test "post-resolution LLM failures carry the resolved installation alias" do
+    timeout = ProviderError.new(:timeout, "provider timed out", retryable?: true)
+
+    {:ok, chosen} =
+      LLMCapability.new(requester: fn _request -> {:error, timeout} end)
+
+    {:ok, other} =
+      LLMCapability.new(requester: fn _request -> flunk("wrong model alias invoked") end)
+
+    assert {:ok, router} =
+             LLMRouter.new([
+               route("chosen", "llm_replay", "chosen-v1", true, chosen),
+               route("other", "llm_replay", "other-v1", false, other)
+             ])
+
+    assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [router])
+    assert {:ok, limits} = Limits.new()
+    assert {:ok, state} = RunState.start(limits)
+    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+
+    assert %{
+             status: :error,
+             kind: :provider_error,
+             reason: :timeout,
+             retryable?: true,
+             model: "chosen"
+           } =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               %{"model" => "chosen", "messages" => []},
+               context,
+               nil,
+               nil
+             )
+
+    assert %{
+             status: :error,
+             kind: :provider_error,
+             reason: :timeout,
+             retryable?: true,
+             model: "chosen"
+           } =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               %{"messages" => []},
+               context,
+               nil,
+               nil
+             )
+
     :ok = RunState.stop(state)
   end
 

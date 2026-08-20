@@ -3982,7 +3982,18 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     {:ok, provider_config} = agent_config([{:error, :transport_down}])
 
-    assert {:error, %{kind: :workflow_failed}} =
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "provider-failure",
+                "error" => %{
+                  "status" => "error",
+                  "kind" => "provider_error",
+                  "reason" => "unavailable",
+                  "retryable?" => true
+                }
+              }
+            }} =
              Kernel.run(
                ~S|(return (agent.core/run-outcome "Provider" {"max_turns" 1}))|,
                provider_config
@@ -4025,6 +4036,248 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                ~S|(return (agent.core/run-outcome "Read once" {"max_turns" 3}))|,
                non_retryable_config
              )
+  end
+
+  test "agent.core run-outcome returns typed provider failures with the resolved alias" do
+    timeout = ProviderError.new(:timeout, "provider timed out", retryable?: true)
+    {:ok, chosen} = LLMCapability.new(requester: fn _ -> {:error, timeout} end)
+    {:ok, other} = LLMCapability.new(requester: fn _ -> flunk("wrong model alias invoked") end)
+
+    assert {:ok, router} =
+             LLMRouter.new([
+               %{
+                 alias: "chosen",
+                 source: "llm_replay",
+                 installation_revision: "chosen-v1",
+                 default?: true,
+                 capability: chosen,
+                 max_calls: nil
+               },
+               %{
+                 alias: "other",
+                 source: "llm_replay",
+                 installation_revision: "other-v1",
+                 default?: false,
+                 capability: other,
+                 max_calls: nil
+               }
+             ])
+
+    {:ok, explicit_config} = agent_router_config(router)
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "provider-failure",
+                "model" => "chosen",
+                "error" => %{
+                  "status" => "error",
+                  "kind" => "provider_error",
+                  "reason" => "timeout",
+                  "retryable?" => true,
+                  "model" => "chosen"
+                }
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Retry later" {"model" "chosen" "max_turns" 1}))|,
+               explicit_config
+             )
+
+    {:ok, default_config} = agent_router_config(router)
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "provider-failure",
+                "model" => "chosen",
+                "error" => %{
+                  "kind" => "provider_error",
+                  "reason" => "timeout",
+                  "retryable?" => true,
+                  "model" => "chosen"
+                }
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Retry later" {"max_turns" 1}))|,
+               default_config
+             )
+  end
+
+  test "agent.core run-outcome returns named quota and unknown-alias envelopes as provider failures" do
+    continue = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
+      ]
+    }
+
+    {:ok, leaf} = LLMCapability.new(requester: fn _ -> {:ok, continue} end)
+
+    assert {:ok, router} =
+             LLMRouter.new([
+               %{
+                 alias: "expensive",
+                 source: "llm",
+                 installation_revision: "expensive-v1",
+                 default?: true,
+                 capability: leaf,
+                 max_calls: 1
+               },
+               %{
+                 alias: "cheap",
+                 source: "llm",
+                 installation_revision: "cheap-v1",
+                 default?: false,
+                 capability: leaf,
+                 max_calls: nil
+               }
+             ])
+
+    {:ok, quota_config} = agent_router_config(router)
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "provider-failure",
+                "model" => "expensive",
+                "error" => %{
+                  "status" => "error",
+                  "kind" => "limit_exceeded",
+                  "reason" => "capability_quota",
+                  "details" => %{
+                    "limit" => "max_calls",
+                    "alias" => "expensive",
+                    "limit_value" => 1
+                  },
+                  "model" => "expensive"
+                }
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Spend the alias" {"max_turns" 2}))|,
+               quota_config
+             )
+
+    {:ok, unknown_config} = agent_router_config(router)
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "provider-failure",
+                "model" => "missing",
+                "error" => %{
+                  "status" => "error",
+                  "kind" => "protocol_error",
+                  "reason" => "unknown_model_alias"
+                }
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Unknown alias" {"model" "missing" "max_turns" 1}))|,
+               unknown_config
+             )
+
+    mixed = %{"content" => "prose", "tool_calls" => []}
+    {:ok, global_config} = agent_config([mixed], workflow_capability_calls: 1)
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "provider-failure",
+                "error" => %{
+                  "status" => "error",
+                  "kind" => "limit_exceeded",
+                  "reason" => "capability_quota",
+                  "details" => %{
+                    "limit" => "workflow_capability_calls",
+                    "name" => "llm-request",
+                    "limit_value" => 1
+                  }
+                }
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Global quota" {"max_turns" 2}))|,
+               global_config
+             )
+  end
+
+  test "run-value, run-result-value, and agent.main remain fail-fast on provider failures" do
+    {:ok, provider_config} =
+      agent_config([
+        {:error, ProviderError.new(:authentication_failed, "PRIVATE PROVIDER MESSAGE")}
+      ])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :llm_provider_failed,
+              details: %{
+                failure_kind: "llm-provider-error",
+                llm_provider_failure: :authentication_failed
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-value "Try once" {"max_turns" 1}))|,
+               provider_config
+             )
+
+    {:ok, result_config} =
+      agent_config([
+        {:error, ProviderError.new(:authentication_failed, "PRIVATE PROVIDER MESSAGE")}
+      ])
+
+    assert {:error, %{reason: :llm_provider_failed}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-result-value "Try once" {"max_turns" 1}))|,
+               result_config
+             )
+
+    input = %{
+      "input" => %{
+        "task" => "Try once",
+        "agent" => %{"max_turns" => 1}
+      }
+    }
+
+    {:ok, main_config} =
+      agent_config(
+        [{:error, ProviderError.new(:authentication_failed, "PRIVATE PROVIDER MESSAGE")}],
+        [],
+        agent_main: true,
+        input: input
+      )
+
+    assert {:error, %{reason: :llm_provider_failed}} =
+             Kernel.run("(agent.main/run data/input)", main_config)
+
+    continue = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
+      ]
+    }
+
+    {:ok, leaf} = LLMCapability.new(requester: fn _ -> {:ok, continue} end)
+
+    assert {:ok, router} =
+             LLMRouter.new([
+               %{
+                 alias: "expensive",
+                 source: "llm",
+                 installation_revision: "expensive-v1",
+                 default?: true,
+                 capability: leaf,
+                 max_calls: 1
+               }
+             ])
+
+    {:ok, quota_config} = agent_router_config(router)
+
+    assert {:error, %{kind: :limit_exceeded, reason: :capability_quota}} =
+             Kernel.run(~S|(agent.core/run "Spend the alias" {"max_turns" 2})|, quota_config)
   end
 
   defp agent_config(responses, limit_overrides \\ [], opts \\ []) do
@@ -4093,6 +4346,22 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "semantic-prompt")
+
+    RunConfig.new(
+      workflow_environment: workflow,
+      missions: %{"default" => mission},
+      input: %{},
+      limits: limits,
+      event_sink: sink
+    )
+  end
+
+  defp agent_router_config(router) do
+    {:ok, bundle} = agent_bundle([])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [router])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "agent-router")
 
     RunConfig.new(
       workflow_environment: workflow,

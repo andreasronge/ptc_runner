@@ -187,23 +187,31 @@ defmodule PtcRunner.Kernel.Dispatcher do
           )
 
         {:error, :route_call_limit} ->
-          limit_error(
-            state,
-            event_sink,
-            :capability_quota,
-            environment,
-            mission_name,
-            max_calls_details(invocation)
+          maybe_merge_error_attributes(
+            limit_error(
+              state,
+              event_sink,
+              :capability_quota,
+              environment,
+              mission_name,
+              max_calls_details(invocation)
+            ),
+            %{status: :error},
+            invocation.error_attributes
           )
 
         {:error, :limit_exceeded} ->
-          limit_error(
-            state,
-            event_sink,
-            :capability_quota,
-            environment,
-            mission_name,
-            RunState.capability_quota_details(state, environment, name)
+          maybe_merge_error_attributes(
+            limit_error(
+              state,
+              event_sink,
+              :capability_quota,
+              environment,
+              mission_name,
+              RunState.capability_quota_details(state, environment, name)
+            ),
+            %{status: :error},
+            invocation.error_attributes
           )
 
         {:error, :live_task_limit} ->
@@ -477,7 +485,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
         _ = Events.emit(state, event_sink, "capability-stopped", stopped_data)
 
-        result
+        maybe_merge_error_attributes(result, result, invocation.error_attributes)
 
       {:error, :event_sink_error} ->
         RunState.release_provider_slot(state)

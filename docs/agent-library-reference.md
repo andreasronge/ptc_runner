@@ -55,8 +55,8 @@ Set `"result_envelope"` to `false` to complete with the raw application value.
 ```
 
 Returns the application value to its PTC-Lisp caller without completing the
-outer workflow. A subject failure calls `fail`, so use this entry when the
-caller should continue only after a successful agent result.
+outer workflow. A subject failure or provider failure calls `fail`, so use this
+entry when the caller should continue only after a successful agent result.
 
 ### `agent.core/run-outcome`
 
@@ -72,13 +72,38 @@ Represents model-attributable completion or failure as data:
 {:status :subject-failure
  :kind failure-kind
  :error bounded-error}
+
+{:status :provider-failure
+ :error bounded-llm-envelope
+ :model resolved-alias}
 ```
 
 Subject failures include model-program failure, exhausted turns, and a
-non-retryable generated-program error. Provider, prompt, transcript, quota
-(including a spent per-alias `max_calls`), evaluation-admission, and other host
-failures still fail the outer workflow. This prevents an evaluator from scoring
-a provider outage against the subject.
+non-retryable generated-program error. Prompt, transcript,
+evaluation-admission, and other host failures still fail the outer workflow.
+Typed LLM provider envelopes, named capability-quota refusals, and
+alias-resolution protocol errors return as `:provider-failure` so the caller
+can inspect the closed `kind` and `reason`. `:model` is the resolved
+installation alias after routing, including when the caller omitted `model`
+and a manifest default selected it. It is omitted only when no alias was
+resolved and none was requested.
+
+`kind` and `reason` are facts. This entry does not add a runtime
+`recovery: retry | choose-alternate | abort` axis; the workflow chooses a
+disposition. Restarting with another alias starts another agent loop. It does
+not resume the previous transcript.
+
+| Observation | Envelope `kind` | Envelope `reason` | Typical policy |
+| --- | --- | --- | --- |
+| Transient transport or provider failure | `provider-error` | `timeout`, `unavailable`, `rate-limited`, or `transport-error` with `retryable?` true | retry the same alias |
+| Permanent per-alias provider refusal | `provider-error` | `authentication-failed`, `payment-required`, `denied`, `not-found`, `invalid-request`, `tool-calling-unsupported`, and other non-retryable provider reasons | try another alias or abort |
+| Per-alias `max_calls` exhaustion | `limit-exceeded` | `capability-quota` with `details.limit` `max-calls` | another alias may still run |
+| Global LLM capability quota | `limit-exceeded` | `capability-quota` with a workflow or mission capability-call limit | no selected alias can run |
+| Invalid or unknown alias | `protocol-error` | `unknown-model-alias`, `invalid-model-alias`, or `model-alias-required` | correct the request; no provider attempt occurred |
+
+A spent per-alias `max_calls` is a named quota refusal, not a subject failure
+and not a transport error. `run-value`, `run-result-value`, `run-phased-result-value`,
+`agent.core/run`, and `agent.main` still fail-fast on every `:provider-failure`.
 
 ### `agent.core/run-result-value`
 
@@ -422,9 +447,17 @@ When provider pricing is unavailable, `total_cost` is absent; a present zero is
 a measured zero-cost response.
 
 Provider failures remain bounded capability error envelopes so workflow policy
-can decide whether to fail or recover. Credentials, endpoints, sampling,
+can decide whether to fail or recover. After alias resolution, those envelopes
+include the public `model` installation alias. Credentials, endpoints, sampling,
 timeouts, and byte ceilings remain host-owned and are never supplied through
 the PTC-Lisp configuration map.
+
+Built-in adapters classify expected HTTP and transport failures into the closed
+`ProviderError` reasons: retryable `timeout`, `unavailable`, `rate-limited`, and
+`transport-error`; permanent `authentication-failed`, `payment-required`,
+`denied`, `not-found`, `invalid-request`, and `tool-calling-unsupported`.
+Unclassified requester failures become retryable `unavailable`. The Dispatcher
+preserves that classification in the Lisp envelope.
 
 ## Concurrency and admission
 
