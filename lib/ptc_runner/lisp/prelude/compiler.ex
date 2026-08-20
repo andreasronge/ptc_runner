@@ -1675,10 +1675,11 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # `visibility: private` + arity from the `%Spec{}`, effect omitted (effect
   # resolution lives in the export pipeline; it is not computed for privates).
   defp source_header(ref, %Spec{}, %Export{} = export) do
+    # Effect is intentionally omitted: only Introspection's bounded projection
+    # is safe to report, and `export-meta` / `doc` already own that answer.
     parts =
       ["visibility: #{export.visibility}"] ++
-        effect_part(export.effect) ++
-        ["arity: #{arity_label(export.arity)}"]
+        arity_part(export)
 
     ";; #{ref} — #{Enum.join(parts, ", ")} (effective)"
   end
@@ -1687,10 +1688,8 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     ";; #{ref} — visibility: private, arity: #{arity_label(spec.arity)} (effective)"
   end
 
-  # `:unknown` effect carries no usable signal (mirrors the prompt inventory's
-  # `effect_hint` omission) — drop it rather than over/under-warn.
-  defp effect_part(:unknown), do: []
-  defp effect_part(effect), do: ["effect: #{effect}"]
+  defp arity_part(%Export{kind: :constant}), do: []
+  defp arity_part(%Export{arity: arity}), do: ["arity: #{arity_label(arity)}"]
 
   defp arity_label(:variadic), do: "variadic"
   defp arity_label(n) when is_integer(n), do: Integer.to_string(n)

@@ -274,7 +274,7 @@
                  "- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n"
                  "- Value references are values; call only function references.\n"
                  "- The Available API section below is complete for mission data, prompt-visible mission functions, and granted tools.\n"
-                 "- Use (apropos \"term\") to search visible mission prelude exports plus fixed built-ins and the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, and (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. None enumerate data references or direct tool capabilities.\n"
+                 "- Use (apropos \"term\") to search visible mission prelude exports plus fixed built-ins and the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. None enumerate data references or direct tool capabilities.\n"
                  "- Call granted capabilities only with the exact tool/... forms shown below.\n"
                  "- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n"
                  "- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\n"

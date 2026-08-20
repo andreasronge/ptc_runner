@@ -433,13 +433,13 @@ defmodule PtcRunner.Lisp.Analyze do
      {:invalid_arity, :quote, "(quote symbol) requires exactly 1 symbol, got #{length(args)}"}}
   end
 
-  # Discovery forms (`doc`/`dir`/`apropos`/`export-meta`/`source`) are ordinary env
+  # Discovery forms (`doc`/`dir`/`export-meta`/`source`) are ordinary env
   # specials, but their *ref* argument is macro-like (clojure.repl/doc style,
   # issue #1094): a bare or namespaced symbol is auto-quoted to a
   # `{:symbol_ref, _}` instead of being evaluated to a closure/builtin first.
   # `dir` with no args stays an ordinary zero-arity call.
   defp dispatch_list_form({:symbol, head}, args, _list, tail?)
-       when head in [:doc, :apropos, :"export-meta", :source] do
+       when head in [:doc, :"export-meta", :source] do
     analyze_discovery_call(head, args, tail?)
   end
 
@@ -604,10 +604,10 @@ defmodule PtcRunner.Lisp.Analyze do
     do: Conditionals.analyze_when_not(args, tail?, &do_analyze/2, &wrap_body/2)
 
   defp analyze_if_let(args, tail?),
-    do: Conditionals.analyze_if_let(args, tail?, &do_analyze/2, &wrap_body/2)
+    do: Conditionals.analyze_if_let(args, tail?, &do_analyze/2, &wrap_body/2, &with_bindings/2)
 
   defp analyze_when_let(args, tail?),
-    do: Conditionals.analyze_when_let(args, tail?, &do_analyze/2, &wrap_body/2)
+    do: Conditionals.analyze_when_let(args, tail?, &do_analyze/2, &wrap_body/2, &with_bindings/2)
 
   defp analyze_if_some(args, tail?),
     do:
@@ -616,7 +616,8 @@ defmodule PtcRunner.Lisp.Analyze do
         tail?,
         &do_analyze/2,
         &wrap_body/2,
-        &mark_shadow_for_binding/2
+        &mark_shadow_for_binding/2,
+        &with_bindings/2
       )
 
   defp analyze_when_some(args, tail?),
@@ -626,7 +627,8 @@ defmodule PtcRunner.Lisp.Analyze do
         tail?,
         &do_analyze/2,
         &wrap_body/2,
-        &mark_shadow_for_binding/2
+        &mark_shadow_for_binding/2,
+        &with_bindings/2
       )
 
   defp analyze_when_first(args, tail?),
@@ -636,7 +638,8 @@ defmodule PtcRunner.Lisp.Analyze do
         tail?,
         &do_analyze/2,
         &wrap_body/2,
-        &mark_shadow_for_binding/2
+        &mark_shadow_for_binding/2,
+        &with_bindings/2
       )
 
   defp analyze_cond(args, tail?),
@@ -1129,7 +1132,10 @@ defmodule PtcRunner.Lisp.Analyze do
     Definitions.analyze_defn(args, &analyze_fn_params/1, fn body_asts, tail?, params ->
       shadowed = compute_shadowed_names(params)
       body_asts = mark_shadowed_asts(body_asts, shadowed)
-      wrap_body(body_asts, tail?)
+
+      with_bindings(param_names(params), fn ->
+        wrap_body(body_asts, tail?)
+      end)
     end)
   end
 

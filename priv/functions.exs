@@ -2937,7 +2937,7 @@
           "helpers transitively reachable from a public export. Reveals implementation, not " <>
           "just contract. Macro-like over the ref: unquoted symbol, quoted symbol, or string.",
       see_also: ["apropos", "dir", "doc", "export-meta"],
-      clojure_var: "source",
+      clojure_var: nil,
       divergences: nil
     },
     %{

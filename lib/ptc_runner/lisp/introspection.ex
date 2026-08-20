@@ -21,8 +21,9 @@ defmodule PtcRunner.Lisp.Introspection do
   Only public export records (`%PtcRunner.Lisp.Prelude.Export{}`), which cover
   both `:prompt` and `:discoverable` visibility. Private `defn-` helpers have no
   export record and are unreachable by qualified call, so they are absent from
-  every answer here; `Prelude.form_graph` does carry them and is deliberately
-  not the backing store.
+  `dir`/`apropos`/`doc`/`export-meta`. `source` is the exception: it can reveal
+  a private helper that is transitively reachable from a *visible* public
+  export, via `Prelude.source_index` (not `form_graph` callables).
 
   Namespaces are derived from the visible export set rather than from
   `Prelude.namespaces/1`, so a namespace holding only private helpers does not
@@ -103,10 +104,7 @@ defmodule PtcRunner.Lisp.Introspection do
   @spec invoke(operation(), [term()], EvalContext.t()) ::
           {:ok, term()} | {:print, String.t()} | {:error, term()}
   def invoke(op, args, %EvalContext{} = context) when op in @operations do
-    case normalize_args(args) do
-      {:ok, normalized} -> invoke_normalized(op, normalized, context)
-      {:error, _reason} = error -> error
-    end
+    invoke_normalized(op, normalize_args(args), context)
   end
 
   defp invoke_normalized(:dir, [], %EvalContext{} = context),
@@ -125,7 +123,7 @@ defmodule PtcRunner.Lisp.Introspection do
     do: {:print, render_doc(context.prelude, ref, filter(context))}
 
   defp invoke_normalized(:source, [ref], %EvalContext{} = context) when is_binary(ref),
-    do: {:print, render_source(context.prelude, ref)}
+    do: {:print, render_source(context.prelude, ref, filter(context))}
 
   defp invoke_normalized(op, args, %EvalContext{}) when op in @operations do
     name = Map.fetch!(@names, op)
@@ -144,12 +142,9 @@ defmodule PtcRunner.Lisp.Introspection do
   # Discovery forms accept that runtime value the same way they accept a string,
   # so `(doc 'str)` and the analyzer's bare-symbol rewrite both land here.
   defp normalize_args(args) do
-    Enum.reduce_while(args, {:ok, []}, fn
-      {:symbol_ref, ref}, {:ok, acc} when is_binary(ref) ->
-        {:cont, {:ok, acc ++ [ref]}}
-
-      other, {:ok, acc} ->
-        {:cont, {:ok, acc ++ [other]}}
+    Enum.map(args, fn
+      {:symbol_ref, ref} when is_binary(ref) -> ref
+      other -> other
     end)
   end
 
@@ -280,18 +275,63 @@ defmodule PtcRunner.Lisp.Introspection do
   Rendered defining form for one attached prelude ref, or a miss notice.
 
   Resolves only against `Prelude.source_index` — public exports and private
-  helpers transitively reachable from a public export. There is no registry or
-  filesystem fallthrough. Callers print this rather than returning it.
+  helpers transitively reachable from a visible public export. There is no
+  registry or filesystem fallthrough. Visibility matches the other discovery
+  forms: a masked or unauthorized public ref is a miss, and a private helper
+  is visible only when at least one public export that reaches it is visible.
+  Callers print this rather than returning it.
   """
-  @spec render_source(Prelude.t() | nil, String.t()) :: String.t()
-  def render_source(%Prelude{source_index: index}, ref) when is_binary(ref) and is_map(index) do
+  @spec render_source(Prelude.t() | nil, String.t(), visible()) :: String.t()
+  def render_source(%Prelude{source_index: index} = prelude, ref, visible)
+      when is_binary(ref) and is_map(index) and is_function(visible, 1) do
     case Map.fetch(index, ref) do
-      {:ok, source} -> source
-      :error -> missing_source(ref)
+      {:ok, source} ->
+        if source_visible?(prelude, ref, visible), do: source, else: missing_source(ref)
+
+      :error ->
+        missing_source(ref)
     end
   end
 
-  def render_source(_prelude, ref) when is_binary(ref), do: missing_source(ref)
+  def render_source(_prelude, ref, _visible) when is_binary(ref), do: missing_source(ref)
+
+  defp source_visible?(prelude, ref, visible) do
+    case fetch_attached(prelude, ref) do
+      %Export{} = export ->
+        visible.(export)
+
+      nil ->
+        private_source_visible?(prelude, ref, visible)
+    end
+  end
+
+  # A private helper is source-visible only when some visible public export in
+  # its namespace transitively reaches it through the form graph.
+  defp private_source_visible?(%Prelude{} = prelude, ref, visible) do
+    case String.split(ref, "/", parts: 2) do
+      [ns, sym] ->
+        graph = Map.get(prelude.form_graph, ns, %{})
+
+        prelude
+        |> visible_exports(visible)
+        |> Enum.filter(&(&1.namespace == ns))
+        |> Enum.any?(fn export -> form_reaches?(graph, export.symbol, sym, MapSet.new()) end)
+
+      _ ->
+        false
+    end
+  end
+
+  defp form_reaches?(_graph, from, target, _visited) when from == target, do: true
+
+  defp form_reaches?(graph, from, target, visited) do
+    if MapSet.member?(visited, from) do
+      false
+    else
+      callees = get_in(graph, [from, :calls]) || []
+      Enum.any?(callees, &form_reaches?(graph, &1, target, MapSet.put(visited, from)))
+    end
+  end
 
   # ============================================================
   # Internals
@@ -321,7 +361,7 @@ defmodule PtcRunner.Lisp.Introspection do
   defp hidden_registry_names(_prelude, _visible), do: MapSet.new()
 
   defp missing_doc(ref), do: ~s(No documentation found for "#{ref}".)
-  defp missing_source(ref), do: "no source available for #{ref}"
+  defp missing_source(ref), do: ~s(No source available for "#{ref}".)
 
   defp render_registry_entry(entry) do
     details =

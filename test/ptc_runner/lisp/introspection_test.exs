@@ -90,10 +90,9 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert "beta/hidden" in eval!(~S|(apropos "hidden")|, prelude).return
     end
 
-    test "accepts a quoted or unquoted symbol query", %{prelude: prelude} do
-      assert eval!("(apropos hidden)", prelude).return ==
-               eval!(~S|(apropos "hidden")|, prelude).return
-
+    test "accepts a quoted symbol query (Piece-1 normalization)", %{prelude: prelude} do
+      # `apropos` stays an ordinary function: bare symbols evaluate. Quoted
+      # symbols become `{:symbol_ref, _}` and normalize like strings.
       assert eval!("(apropos 'hidden)", prelude).return ==
                eval!(~S|(apropos "hidden")|, prelude).return
     end
@@ -451,6 +450,37 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
     end
   end
 
+  describe "binding-aware discovery refs" do
+    test "defn params are not auto-quoted", %{prelude: prelude} do
+      assert eval!(
+               ~S|(do (defn show [r] (doc r)) (show "alpha/greet"))|,
+               prelude
+             ).prints == eval!(~S|(doc "alpha/greet")|, prelude).prints
+    end
+
+    test "if-let bindings are not auto-quoted", %{prelude: prelude} do
+      assert eval!(
+               ~S|(if-let [r "alpha/greet"] (doc r) nil)|,
+               prelude
+             ).prints == eval!(~S|(doc "alpha/greet")|, prelude).prints
+    end
+  end
+
+  describe "source visibility" do
+    test "an export mask hides source the same way as doc", %{prelude: prelude} do
+      mask = [prelude_export_mask: %{"alpha" => MapSet.new(["alpha/greet"])}]
+
+      assert Enum.join(eval!(~S|(doc "alpha/shout")|, prelude, mask).prints, "\n") =~
+               "No documentation found"
+
+      assert Enum.join(eval!(~S|(source "alpha/shout")|, prelude, mask).prints, "\n") =~
+               ~s(No source available for "alpha/shout")
+
+      assert Enum.join(eval!(~S|(source "alpha/greet")|, prelude, mask).prints, "\n") =~
+               "(defn greet"
+    end
+  end
+
   describe "source" do
     test "prints the defining form with an effective header and returns nil", %{prelude: prelude} do
       result = eval!("(source alpha/greet)", prelude)
@@ -524,7 +554,7 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                "(defn- live-helper"
 
       assert Enum.join(eval!("(source crm/dead-helper)", prelude).prints, "\n") =~
-               "no source available for crm/dead-helper"
+               ~s(No source available for "crm/dead-helper")
     end
 
     test "renders constants", %{prelude: prelude} do
@@ -534,16 +564,16 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
     test "unknown refs and builtins print a miss notice without raising", %{prelude: prelude} do
       assert Enum.join(eval!("(source map)", prelude).prints, "\n") =~
-               "no source available for map"
+               ~s(No source available for "map")
 
       assert Enum.join(eval!("(source missing/ns)", prelude).prints, "\n") =~
-               "no source available for missing/ns"
+               ~s(No source available for "missing/ns")
     end
 
     test "unavailable when no prelude is attached" do
       {:ok, result} = Lisp.run("(source alpha/greet)")
       assert result.return == nil
-      assert Enum.join(result.prints, "\n") =~ "no source available for alpha/greet"
+      assert Enum.join(result.prints, "\n") =~ ~s(No source available for "alpha/greet")
     end
   end
 
@@ -633,6 +663,9 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
       assert eval!(~S|(doc "alpha/shout")|, prelude, mask).prints ==
                [~s(No documentation found for "alpha/shout".)]
+
+      assert eval!(~S|(source "alpha/shout")|, prelude, mask).prints ==
+               [~s(No source available for "alpha/shout".)]
     end
 
     test "a hidden qualified alias does not suppress a callable registry name", %{prelude: _} do
