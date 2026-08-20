@@ -2,11 +2,17 @@ defmodule PtcRunner.Kernel.NamedMissionReaderWriterExampleTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.ProjectConfig
 
-  @host Path.expand(
-          "../../../examples/named-mission-reader-writer/ptc-host.json",
-          __DIR__
-        )
+  @example Path.expand("../../../examples/named-mission-reader-writer", __DIR__)
+  @host Path.join(@example, "ptc-host.json")
+
+  test "the example project remembers the host installation" do
+    assert {:ok, project} = ProjectConfig.load(Path.join(@example, "ptc-project.json"))
+    assert project.application == Path.join(@example, "ptc.json")
+    assert project.host == @host
+    assert project.env_file == nil
+  end
 
   test "the example splits read and write across two installations of one server" do
     assert {:ok, host} = HostConfig.load(@host)
