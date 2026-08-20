@@ -52,7 +52,7 @@ defmodule PtcRunner.Kernel.SupportTriageE2ETest do
     assert %{"ok" => true, "value" => ranked} = result.value
 
     assert Enum.map(ranked, &{&1["id"], &1["priority"]}) ==
-             [{"T-1004", 81}, {"T-1001", 75}, {"T-1006", 58}, {"T-1005", 52}]
+             Enum.sort_by(@policy_scores, fn {_id, priority} -> -priority end)
   end
 
   test "the specialist step escalates every breached ticket with policy scores", %{
