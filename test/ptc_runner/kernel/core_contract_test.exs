@@ -3852,6 +3852,56 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{closed?: true, protocol_errors: 2} = RunState.usage(state)
   end
 
+  test "exhausting protocol_errors through a capability call emits one named limit-exceeded event" do
+    {:ok, capability} =
+      Capability.new(
+        name: "checked",
+        input_schema: @input_schema,
+        callback: fn _ -> {:ok, nil} end,
+        validate: fn _ -> {:error, :invalid} end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(protocol_errors: 1)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "dispatcher-protocol-errors")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error,
+            %{
+              kind: :limit_exceeded,
+              reason: :protocol_errors,
+              details: %{limit: :protocol_errors, limit_value: 1}
+            }} =
+             Kernel.run(
+               """
+               (do
+                 (tool/checked {})
+                 (tool/checked {})
+                 (return true))
+               """,
+               config
+             )
+
+    assert [
+             %{
+               data: %{
+                 reason: :protocol_errors,
+                 limit: :protocol_errors,
+                 limit_value: 1
+               }
+             }
+           ] = Enum.filter(EventSink.events(sink), &(&1.type == "limit-exceeded"))
+  end
+
   test "provider completion atomically releases its slot and rejects a closed run" do
     {:ok, limits} = Limits.new(live_provider_tasks: 1)
     {:ok, state} = RunState.start(limits)

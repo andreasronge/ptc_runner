@@ -785,7 +785,8 @@ defmodule PtcRunner.Kernel.ReplSession do
           session.state,
           Map.new(session.config.missions, fn {name, mission} ->
             {name, mission.inventory.rendered}
-          end)
+          end),
+          session.config.event_sink
         )
       )
     )
@@ -800,7 +801,8 @@ defmodule PtcRunner.Kernel.ReplSession do
           session.state,
           Map.new(session.config.missions, fn {name, mission} ->
             {name, mission.inventory.model_rendered}
-          end)
+          end),
+          session.config.event_sink
         )
       )
     )

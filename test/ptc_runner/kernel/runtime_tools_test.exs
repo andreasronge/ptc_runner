@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.TrustedError
 
   setup do
@@ -167,6 +168,34 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
              callback.(%{"option" => "not_an_option", "min" => 1, "max" => 128, "value" => 129})
 
     assert {:ok, _} = AgentConfigDiagnostic.integer_message("max_turns", 1, 128, 129)
+  end
+
+  test "exhausting protocol_errors on a malformed annotation emits one named limit-exceeded event" do
+    {:ok, limits} = Limits.new(protocol_errors: 1)
+    {:ok, state} = RunState.start(limits)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "runtime-tools-protocol-limit")
+    {:ok, environment} = WorkflowEnvironment.new([])
+    annotate = RuntimeTools.tools(state, environment, sink, :workflow)["workflow-annotate"]
+
+    assert %{status: :error, kind: :protocol_error, reason: :invalid_workflow_annotation} =
+             annotate.(%{"type" => 1, "data" => %{}})
+
+    assert %{
+             status: :error,
+             kind: :limit_exceeded,
+             reason: :protocol_errors,
+             details: %{limit: :protocol_errors, limit_value: 1}
+           } = annotate.(%{"type" => 2, "data" => %{}})
+
+    assert [
+             %{
+               data: %{
+                 reason: :protocol_errors,
+                 limit: :protocol_errors,
+                 limit_value: 1
+               }
+             }
+           ] = Enum.filter(EventSink.events(sink), &(&1.type == "limit-exceeded"))
   end
 
   test "kernel-agent-protocol-error increments a non-limiting counter" do

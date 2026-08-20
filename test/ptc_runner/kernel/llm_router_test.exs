@@ -690,12 +690,22 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
       (return true))
     """
 
-    assert {:error, command_outcome, _counters, _events} =
+    assert {:error, command_outcome, _counters, events} =
              project_run(source, config, run_id, run_ref)
 
     assert {:ok, expected} = RuntimeLimitDiagnostic.protocol_errors_message(1)
     assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
     assert command_outcome.envelope["error"]["message"] == expected
+
+    assert [
+             %{
+               data: %{
+                 reason: :protocol_errors,
+                 limit: :protocol_errors,
+                 limit_value: 1
+               }
+             }
+           ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
   end
 
   test "parallel callers contend for a max_calls of one" do

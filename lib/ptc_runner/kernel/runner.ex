@@ -565,7 +565,11 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-mission-inventory",
-        RuntimeTools.mission_inventory(state, mission_renderings(config, :rendered))
+        RuntimeTools.mission_inventory(
+          state,
+          mission_renderings(config, :rendered),
+          config.event_sink
+        )
       )
     )
     |> Map.put(
@@ -575,7 +579,11 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-mission-model-context",
-        RuntimeTools.mission_model_context(state, mission_renderings(config, :model_rendered))
+        RuntimeTools.mission_model_context(
+          state,
+          mission_renderings(config, :model_rendered),
+          config.event_sink
+        )
       )
     )
     |> Map.put(
@@ -864,8 +872,9 @@ defmodule PtcRunner.Kernel.Runner do
   defp maybe_emit_workflow_limit(
          _state,
          _sink,
-         {:error, %Error{kind: :limit_exceeded, details: %{limit: :max_calls}}}
-       ),
+         {:error, %Error{kind: :limit_exceeded, details: %{limit: limit}}}
+       )
+       when limit in [:max_calls, :protocol_errors],
        do: :ok
 
   defp maybe_emit_workflow_limit(
@@ -891,7 +900,10 @@ defmodule PtcRunner.Kernel.Runner do
            state,
            sink,
            "limit-exceeded",
-           Map.merge(%{reason: reason}, Map.take(details, [:limit, :limit_ms, :phase]))
+           Map.merge(
+             %{reason: reason},
+             Map.take(details, [:limit, :limit_ms, :limit_value, :phase])
+           )
          )
 
   defp maybe_emit_workflow_limit(_state, _sink, _result), do: :ok
