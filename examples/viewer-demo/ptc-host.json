@@ -14,17 +14,19 @@
       "source": "mcp",
       "transport": {
         "type": "stdio",
-        "command": "node",
+        "command": "npx",
         "cwd": ".",
         "args": [
-          "../mcp/filesystem/dist/server.js",
+          "-y",
+          "ptc-fs-mcp@0.1.0",
           "--root",
           "files",
           "--include",
           "**"
         ],
         "inherit_environment": true,
-        "env": {}
+        "env": {},
+        "start_timeout_ms": 60000
       },
       "tools": {
         "read_text_file": {
@@ -32,7 +34,7 @@
           "effect": "read"
         }
       },
-      "installation_revision": "filesystem-sample-0.2.0",
+      "installation_revision": "ptc-fs-mcp-0.1.0",
       "ceilings": {
         "timeout_ms": 15000,
         "max_catalog_tools": 8,

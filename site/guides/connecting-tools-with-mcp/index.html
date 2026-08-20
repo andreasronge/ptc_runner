@@ -106,9 +106,9 @@ ptc doctor kernel-tutorial/03-file-agent.ptc-project.json --connect
 ptc run kernel-tutorial/03-file-agent.ptc-project.json</code></pre><p>That example maps one server operation to <code class="inline">workspace.read</code> and exposes only a
 bounded wrapper to the mission. Its server has its own runtime prerequisite;
 the first provider-free PtcRunner project does not. The server it launches is
-the repository's <code class="inline">examples/mcp/filesystem</code> bundle, which is too large to embed:
-copy that directory to <code class="inline">mcp/filesystem</code> beside the materialized tutorial, or run
-this step from a checkout.</p><p>PtcRunner requires the MCP <code class="inline">2026-07-28</code> profile and <code class="inline">server/discover</code>. An
+the published <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a>
+package, via <code class="inline">npx</code>. The first run may download that package. Node.js and <code class="inline">npx</code>
+are required.</p><p>PtcRunner requires the MCP <code class="inline">2026-07-28</code> profile and <code class="inline">server/discover</code>. An
 incompatible endpoint fails closed instead of falling back to a legacy
 handshake; check the <a href="/reference/mcp/#protocol-compatibility">protocol compatibility reference</a>
 before choosing a server.</p><p>When adding a real tool:</p><ol><li>install the MCP source in the operator-owned host document;</li><li>map only the upstream operations the mission needs;</li><li>give every public mapping an explicit <code class="inline">read</code> or <code class="inline">write</code> effect;</li><li>select the alias in the intended mission;</li><li>explicitly allow selected write-bearing tools; and</li><li>run plain <code class="inline">doctor</code> before the active <code class="inline">--connect</code> probe.</li></ol><p>Treat an indeterminate write as an unknown outcome, not as a safe automatic

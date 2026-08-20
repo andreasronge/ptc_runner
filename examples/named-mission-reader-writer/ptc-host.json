@@ -12,30 +12,50 @@
     },
     "reader_workspace": {
       "source": "mcp",
-      "installation_revision": "filesystem-reader-v2",
+      "installation_revision": "ptc-fs-mcp-reader-0.1.0",
       "transport": {
         "type": "stdio",
-        "command": "node",
+        "command": "npx",
         "cwd": ".",
-        "args": ["../mcp/filesystem/dist/server.js", "--root", "reader-state", "--include", "**"],
+        "args": [
+          "-y",
+          "ptc-fs-mcp@0.1.0",
+          "--root",
+          "reader-state",
+          "--include",
+          "**"
+        ],
         "inherit_environment": true,
-        "env": {}
+        "env": {},
+        "start_timeout_ms": 60000
       },
       "tools": {
         "read_text_file": {"as": "workspace.read", "effect": "read"}
+      },
+      "ceilings": {
+        "timeout_ms": 15000,
+        "max_catalog_tools": 8,
+        "max_result_bytes": 262144
       }
     },
     "writer_workspace": {
       "source": "mcp",
-      "installation_revision": "named-mission-writer-v1",
+      "installation_revision": "ptc-fs-mcp-writer-0.1.0",
       "transport": {
         "type": "stdio",
-        "command": "elixir",
+        "command": "npx",
         "cwd": ".",
-        "args": ["--erl", "+S 1:1", "../mcp/writer/server.exs", "writer-state"],
-        "start_timeout_ms": 15000,
+        "args": [
+          "-y",
+          "ptc-fs-mcp@0.1.0",
+          "--root",
+          "writer-state",
+          "--include",
+          "**"
+        ],
         "inherit_environment": true,
-        "env": {}
+        "env": {},
+        "start_timeout_ms": 60000
       },
       "tools": {
         "write_text_file": {

@@ -12,6 +12,11 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.ViewerAdapter
   alias PtcRunner.MixCommandAdapter
+  alias PtcRunner.TestSupport.TestHelpers
+
+  if reason = TestHelpers.executable_skip_reason(["node", "npm"]) do
+    @moduletag skip: reason
+  end
 
   # One scripted example walk (~4.2 s serial): file, native, and MCP journeys
   # through Viewer. In-process inspection and Viewer tests cover the Kernel

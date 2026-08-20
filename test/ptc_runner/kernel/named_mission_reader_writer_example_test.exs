@@ -1,43 +1,38 @@
 defmodule PtcRunner.Kernel.NamedMissionReaderWriterExampleTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.HostConfig
-  alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.InstallationCatalog
-  alias PtcRunner.Kernel.Limits
-  alias PtcRunner.Kernel.ProviderRegistry
 
   @host Path.expand(
           "../../../examples/named-mission-reader-writer/ptc-host.json",
           __DIR__
         )
 
-  test "the example writer provider advertises an acquirable tool catalog" do
+  test "the example splits read and write across two installations of one server" do
     assert {:ok, host} = HostConfig.load(@host)
-    assert {:ok, catalog} = HostInstallation.catalog(host)
-    on_exit(fn -> InstallationCatalog.close(catalog) end)
 
-    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
-    assert {:ok, limits} = Limits.new(evaluation_timeout_ms: 15_000)
+    reader = Map.fetch!(host.install, "reader_workspace")
+    writer = Map.fetch!(host.install, "writer_workspace")
 
-    context = %{
-      application_content_digest: String.duplicate("0", 64),
-      destination: :mission,
-      owner: self(),
-      limits: limits,
-      installed_limits: limits
-    }
+    assert reader.source == :mcp
+    assert writer.source == :mcp
+    assert reader.transport.command == "npx"
+    assert writer.transport.command == "npx"
+    assert "ptc-fs-mcp@0.1.0" in reader.transport.args
+    assert "ptc-fs-mcp@0.1.0" in writer.transport.args
+    assert "reader-state" in reader.transport.args
+    assert "writer-state" in writer.transport.args
 
-    assert {:ok, %{capabilities: [capability], close: close}} =
-             ProviderRegistry.build(
-               registry,
-               "writer_workspace",
-               %{"allow" => ["workspace.write"]},
-               context
-             )
+    assert %{
+             "read_text_file" => %{as: "workspace.read", effect: :read}
+           } = reader.tools
 
-    on_exit(fn -> close.() end)
-    assert capability.name == "workspace.write"
-    assert capability.effect == :write
+    assert %{
+             "write_text_file" => %{
+               as: "workspace.write",
+               effect: :write,
+               model_visible: true
+             }
+           } = writer.tools
   end
 end

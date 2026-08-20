@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.PtcFsMCPStdioTest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.TestSupport.PtcFsMCP
   alias PtcRunner.TestSupport.RunLifecycle
   alias PtcRunner.TestSupport.TestHelpers
 
@@ -25,7 +26,7 @@ defmodule PtcRunner.Kernel.PtcFsMCPStdioTest do
     tmp_dir: dir
   } do
     node = System.find_executable("node") || flunk("Node.js is required for this E2E")
-    cli = install_ptc_fs_mcp!(dir)
+    cli = PtcFsMCP.install!(dir)
     paths = write_application(dir, node, cli)
     inspection_path = Path.join(dir, "run.inspection.jsonl")
 
@@ -64,24 +65,6 @@ defmodule PtcRunner.Kernel.PtcFsMCPStdioTest do
              record["payload"]["transport"] == "stdio" and
                record["payload"]["text"] =~ "write_text_file will refuse every call"
            end)
-  end
-
-  defp install_ptc_fs_mcp!(dir) do
-    {output, 0} =
-      System.cmd("npm", ["install", "--no-save", "ptc-fs-mcp@0.1.0"],
-        cd: dir,
-        stderr_to_stdout: true
-      )
-
-    {resolved, 0} =
-      System.cmd("node", ["-p", "require.resolve('ptc-fs-mcp/package.json')"],
-        cd: dir,
-        stderr_to_stdout: true
-      )
-
-    cli = resolved |> String.trim() |> Path.dirname() |> Path.join("dist/cli.js")
-    assert File.exists?(cli), output
-    cli
   end
 
   defp write_application(dir, node, cli) do

@@ -59,21 +59,3 @@ SPDX-License-Identifier = "MIT"
 path = ["**/*.hrl", "**/*.app.src", "**/rebar.config", "**/rebar.lock", "**/*.dag"]
 SPDX-FileCopyrightText = "2025 Andreas Ronge"
 SPDX-License-Identifier = "MIT"
-
-[[annotations]]
-path = ["examples/mcp/filesystem/src/**", "examples/mcp/filesystem/test/**", "examples/mcp/filesystem/tsconfig.json"]
-SPDX-FileCopyrightText = "2025 Andreas Ronge"
-SPDX-License-Identifier = "MIT"
-
-# The committed bundle is a combined work: esbuild inlines the MCP SDK and its
-# dependencies into this artifact, so it carries their licenses alongside the
-# sample's own. NOTICE reproduces the full upstream texts.
-[[annotations]]
-path = ["examples/mcp/filesystem/dist/server.js"]
-SPDX-FileCopyrightText = "2025 Andreas Ronge and the bundled dependency authors listed in examples/mcp/filesystem/NOTICE"
-SPDX-License-Identifier = "MIT AND Apache-2.0"
-
-[[annotations]]
-path = ["examples/mcp/filesystem/NOTICE"]
-SPDX-FileCopyrightText = "2025 Andreas Ronge and the bundled dependency authors named within"
-SPDX-License-Identifier = "MIT AND Apache-2.0"

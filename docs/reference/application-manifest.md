@@ -124,8 +124,8 @@ beneath the canonical manifest directory. Absolute paths, traversal, devices,
 non-regular files, and symlink escape are rejected. These rules cover files
 the host loads. The manifest path itself is selected by the caller and its
 basename does not have to use the logical-name grammar. Model-visible files
-require a separately installed and selected provider such as the
-[filesystem sample](mcp.md#run-the-checked-in-file-agent).
+require a separately installed and selected provider such as
+[ptc-fs-mcp](mcp.md#run-the-checked-in-file-agent).
 
 ## Validate inputs and results
 

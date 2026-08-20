@@ -12,7 +12,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   alias PtcRunner.Kernel.RunBuilder
 
   @task "Use every available read-only fixture and return their results in one map."
-  @filesystem_server Path.expand("../../mcp/filesystem/dist/server.js", __DIR__)
+  @ptc_fs_mcp_package "ptc-fs-mcp@0.1.0"
 
   @direct_program ~S|(let [file (tool/filesystem.read {"path" "value.txt"}) native (tool/native-echo {"value" "fixture"}) structured (tool/remote.structured {"query" "fixture"}) text (tool/remote.text {"query" "fixture"}) failed (tool/remote.fail {"query" "fixture"})] (return {"file" file "native" native "structured" structured "text" text "failed" failed}))|
   @wrapper_program ~S|(return {"file" (lab.tools/read-file) "native" (lab.tools/echo) "structured" (lab.tools/remote-structured) "text" (lab.tools/remote-text) "failed" (lab.tools/remote-failure)})|
@@ -20,13 +20,14 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   def run(output_dir) when is_binary(output_dir) do
     output_dir = Path.expand(output_dir)
     :ok = File.mkdir_p(output_dir)
+    cli = install_ptc_fs_mcp!(output_dir)
     fixture = MCPFixture.start(&mcp_response/1)
 
     try do
       with {:ok, direct} <-
-             run_journey(output_dir, fixture.endpoint, "direct", @direct_program, false),
+             run_journey(output_dir, fixture.endpoint, "direct", @direct_program, false, cli),
            {:ok, wrapper} <-
-             run_journey(output_dir, fixture.endpoint, "wrapper", @wrapper_program, true) do
+             run_journey(output_dir, fixture.endpoint, "wrapper", @wrapper_program, true, cli) do
         {:ok, [direct, wrapper]}
       end
     after
@@ -34,7 +35,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     end
   end
 
-  defp run_journey(output_dir, endpoint, name, program, wrapper?) do
+  defp run_journey(output_dir, endpoint, name, program, wrapper?, cli) do
     directory = Path.join(output_dir, name)
     :ok = File.mkdir(directory)
     # The conventional project artifact root: exactly these four children, each
@@ -71,7 +72,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     trace_path = Path.join(traces, "run.jsonl")
     inspection_path = Path.join(inspection, "run.inspection.jsonl")
     :ok = File.write(manifest_path, Jason.encode!(manifest))
-    registry = registry(endpoint, program, wrapper?, directory)
+    registry = registry(endpoint, program, wrapper?, directory, cli)
 
     with {:ok, request} <-
            ApplicationPackage.request_directory(manifest_path,
@@ -141,7 +142,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   defp prefer_cleanup_error(_result, {:error, _reason} = cleanup), do: cleanup
   defp prefer_cleanup_error(result, :ok), do: result
 
-  defp registry(endpoint, program, wrapper?, directory) do
+  defp registry(endpoint, program, wrapper?, directory, cli) do
     turn = :atomics.new(1, signed: false)
 
     scripted =
@@ -210,7 +211,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
            executable: node,
            executable_sha256: :crypto.hash(:sha256, executable),
            cwd: directory,
-           args: [@filesystem_server, "--root", "files", "--include", "**"],
+           args: [cli, "--root", "files", "--include", "**"],
            env: %{},
            start_timeout_ms: 15_000},
         tools: %{
@@ -222,7 +223,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
         },
         timeout_ms: 15_000,
         max_result_bytes: 64_000,
-        installation_revision: "filesystem-sample-0.2.0"
+        installation_revision: "ptc-fs-mcp-0.1.0"
       )
 
     {:ok, registry} =
@@ -403,5 +404,25 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   defp json(id, result, headers \\ []) do
     body = Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
     {200, headers ++ [{"content-type", "application/json"}], body}
+  end
+
+  defp install_ptc_fs_mcp!(dir) do
+    System.find_executable("npm") || raise "npm is required for the inspection lab"
+
+    {output, 0} =
+      System.cmd("npm", ["install", "--no-save", @ptc_fs_mcp_package],
+        cd: dir,
+        stderr_to_stdout: true
+      )
+
+    {resolved, 0} =
+      System.cmd("node", ["-p", "require.resolve('ptc-fs-mcp/package.json')"],
+        cd: dir,
+        stderr_to_stdout: true
+      )
+
+    cli = resolved |> String.trim() |> Path.dirname() |> Path.join("dist/cli.js")
+    File.exists?(cli) || raise "ptc-fs-mcp CLI missing after install: #{output}"
+    cli
   end
 end
