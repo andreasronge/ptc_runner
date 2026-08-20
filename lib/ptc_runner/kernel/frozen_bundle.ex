@@ -2,10 +2,13 @@ defmodule PtcRunner.Kernel.FrozenBundle do
   @moduledoc """
   An immutable, deterministically ordered component compilation result.
 
-  Bundles contain compiled component metadata, ordered component IDs, an
-  aggregate graph hash, and the compiled PTC-Lisp prelude. The graph hash is
-  bare lowercase SHA-256 over the canonical `ptc.frozen-bundle.v2` framing of
-  every component ID, source hash, and sorted unique direct dependency list.
+  Bundles contain bounded component provenance (`id`, direct dependencies,
+  origin, source hash, and namespaces), ordered component IDs, an aggregate
+  graph hash, and one composed compiled PTC-Lisp prelude. Per-component
+  callable preludes are transient compiler inputs and are not retained. The
+  graph hash is bare lowercase SHA-256 over the canonical
+  `ptc.frozen-bundle.v2` framing of every component ID, source hash, and sorted
+  unique direct dependency list.
   It therefore changes when code or dependency edges change and does not
   depend on Erlang external-term encoding.
 

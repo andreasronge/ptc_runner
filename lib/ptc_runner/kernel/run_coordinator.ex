@@ -56,7 +56,9 @@ defmodule PtcRunner.Kernel.RunCoordinator do
            compile_named_missions(
              request.package.missions,
              compile_deadline,
-             external_size(workflow_bundle)
+             external_size(workflow_bundle),
+             request.package.workflow_components,
+             workflow_bundle
            ),
          :ok <- validate_entry(workflow_bundle, request.package.entry),
          :ok <-
@@ -364,12 +366,19 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     end
   end
 
-  defp compile_named_missions(missions, deadline_ms, initial_bytes) do
+  defp compile_named_missions(
+         missions,
+         deadline_ms,
+         initial_bytes,
+         workflow_components,
+         workflow_bundle
+       ) do
     case BundleCompiler.compile_named(
            missions,
            deadline_ms,
            initial_bytes,
-           @mission_bundles_bytes
+           @mission_bundles_bytes,
+           [{workflow_components, workflow_bundle}]
          ) do
       {:ok, bundles} -> {:ok, bundles}
       {:error, {failure, components}} -> {:error, bundle_diagnostic(failure, components)}

@@ -1539,11 +1539,24 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert first_component.id == "first"
     assert second_component.id == "second"
 
+    assert first_component |> Map.keys() |> Enum.sort() ==
+             [:dependencies, :id, :namespaces, :origin, :source_hash]
+
+    refute Map.has_key?(first_component, :prelude)
+    refute Map.has_key?(second_component, :prelude)
+
     assert {:error, %{reason: :missing_component_dependency}} =
              Kernel.compile_bundle([%{first | dependencies: ["missing"]}])
 
     assert {:error, %{reason: :component_cycle}} =
              Kernel.compile_bundle([%{first | dependencies: ["second"]}, second])
+  end
+
+  test "component bundles reject duplicate namespaces before artifact composition" do
+    {:ok, first} = Component.new(id: "first", source: "(ns shared) (defn first [] 1)")
+    {:ok, second} = Component.new(id: "second", source: "(ns shared) (defn second [] 2)")
+
+    assert {:error, %{reason: :bundle_compile_error}} = Kernel.compile_bundle([first, second])
   end
 
   test "bundle compilation confines large artifacts with independent heap and artifact limits" do
