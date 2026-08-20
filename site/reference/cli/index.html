@@ -158,8 +158,8 @@ completed reservation can contain private prompts, responses, source, or a
 result, ignore both patterns as well as the configured artifact root. New
 projects created by <code class="inline">ptc init</code> include all three patterns in <code class="inline">.gitignore</code>.</p><p><code class="inline">ptc init DIRECTORY --example NAME</code> publishes one of the walkthrough projects
 this executable embeds instead of the scaffold, under the same no-replace
-commit. Run <code class="inline">ptc init --help</code> for the names, or an unknown one to have them
-listed. The trees are byte-identical to the repository's, so the commands the
+commit. Run <code class="inline">ptc init</code> with an unknown example name to have the embedded
+names listed. The trees are byte-identical to the repository's, so the commands the
 guides print work from wherever the copy was created rather than from one
 checkout directory.</p><p>For runs that produce a validated terminal event batch, <code class="inline">execution.usage</code>
 includes <code class="inline">llm_usage</code> grouped by alias and installation revision,

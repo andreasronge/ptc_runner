@@ -87,9 +87,12 @@ ptc run support-triage/02-domain-api.ptc-project.json
 {"id":"T-1006","priority":58},{"id":"T-1005","priority":52}]}
 ```
 
-The model now composes `triage.rules/breached?` and `triage.rules/priority`
-with the granted data in a single program — filter, score, sort, return — and
-the scores are exactly what the deterministic policy computes. The model
+Mission component exports are advertised to the model by default; the
+component's `{:visibility :prompt}` metadata only makes that default
+explicit. The model now composes `triage.rules/breached?` and
+`triage.rules/priority` with the granted data in a single program — filter,
+score, sort, return — and the scores are exactly what the deterministic
+policy computes. The model
 decides *how to use* the rules; it cannot *reinterpret* them. That split is
 the core of code-mode design: judgment in the model, policy in reviewable
 code. [Customize agent components](components-and-preludes.md) covers the
@@ -126,9 +129,16 @@ result forward, and validates the final report against the manifest's
                  "triage")]
     (return
       (agent.core/run-result-value
-        (str (get input "escalation_task") "\n\n" (pr-str ranked))
+        (str (get input "escalation_task") "\n\n" (quarantined (pr-str ranked)))
         {"mission" "escalation" "max_turns" 4}))))
 ```
+
+The `quarantined` helper marks the handoff: ticket subjects and bodies are
+customer-authored, so the workflow wraps them in an `<untrusted_tickets>`
+block (stripping any smuggled closing marker) and the task names the block as
+data, not instructions. A stage boundary is also a trust boundary — the agent
+loop marks its own tool observations as untrusted automatically, but text a
+workflow splices into a task string is the workflow's responsibility.
 
 ```console
 ptc run support-triage/03-specialists.ptc-project.json

@@ -127,9 +127,12 @@ ships them as a prompt-visible mission component, <code class="inline">triage.cl
   {:signature &quot;(ticket :map) -&gt; :int&quot;}
   [ticket]
   ...)</code></pre><pre><code class="console language-console">ptc run support-triage/02-domain-api.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;ok&quot;:true,&quot;value&quot;:[{&quot;id&quot;:&quot;T-1004&quot;,&quot;priority&quot;:81},{&quot;id&quot;:&quot;T-1001&quot;,&quot;priority&quot;:75},
-{&quot;id&quot;:&quot;T-1006&quot;,&quot;priority&quot;:58},{&quot;id&quot;:&quot;T-1005&quot;,&quot;priority&quot;:52}]}</code></pre><p>The model now composes <code class="inline">triage.rules/breached?</code> and <code class="inline">triage.rules/priority</code>
-with the granted data in a single program — filter, score, sort, return — and
-the scores are exactly what the deterministic policy computes. The model
+{&quot;id&quot;:&quot;T-1006&quot;,&quot;priority&quot;:58},{&quot;id&quot;:&quot;T-1005&quot;,&quot;priority&quot;:52}]}</code></pre><p>Mission component exports are advertised to the model by default; the
+component's <code class="inline">{:visibility :prompt}</code> metadata only makes that default
+explicit. The model now composes <code class="inline">triage.rules/breached?</code> and
+<code class="inline">triage.rules/priority</code> with the granted data in a single program — filter,
+score, sort, return — and the scores are exactly what the deterministic
+policy computes. The model
 decides <em>how to use</em> the rules; it cannot <em>reinterpret</em> them. That split is
 the core of code-mode design: judgment in the model, policy in reviewable
 code. <a href="/guides/components-and-preludes/">Customize agent components</a> covers the
@@ -153,8 +156,13 @@ result forward, and validates the final report against the manifest's
                  &quot;triage&quot;)]
     (return
       (agent.core/run-result-value
-        (str (get input &quot;escalation_task&quot;) &quot;\n\n&quot; (pr-str ranked))
-        {&quot;mission&quot; &quot;escalation&quot; &quot;max_turns&quot; 4}))))</code></pre><pre><code class="console language-console">ptc run support-triage/03-specialists.ptc-project.json</code></pre><p>A run returns a contract-valid report — every escalation names a schema-listed
+        (str (get input &quot;escalation_task&quot;) &quot;\n\n&quot; (quarantined (pr-str ranked)))
+        {&quot;mission&quot; &quot;escalation&quot; &quot;max_turns&quot; 4}))))</code></pre><p>The <code class="inline">quarantined</code> helper marks the handoff: ticket subjects and bodies are
+customer-authored, so the workflow wraps them in an <code class="inline">&lt;untrusted_tickets&gt;</code>
+block (stripping any smuggled closing marker) and the task names the block as
+data, not instructions. A stage boundary is also a trust boundary — the agent
+loop marks its own tool observations as untrusted automatically, but text a
+workflow splices into a task string is the workflow's responsibility.</p><pre><code class="console language-console">ptc run support-triage/03-specialists.ptc-project.json</code></pre><p>A run returns a contract-valid report — every escalation names a schema-listed
 team, and an invalid candidate would have received bounded correction feedback
 instead of reaching you:</p><pre><code class="json language-json">{&quot;escalations&quot;:[{&quot;first_action&quot;:&quot;send the refund-policy summary&quot;,&quot;id&quot;:&quot;T-1004&quot;,
 &quot;priority&quot;:81,&quot;team&quot;:&quot;payments&quot;},{&quot;first_action&quot;:&quot;page the on-call engineer&quot;,
