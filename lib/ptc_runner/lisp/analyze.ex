@@ -503,20 +503,7 @@ defmodule PtcRunner.Lisp.Analyze do
     else
       elems
       |> Enum.chunk_every(2)
-      |> Enum.reduce_while({:ok, [], MapSet.new(), []}, fn [pattern_ast, value_ast],
-                                                           {:ok, acc, shadowed, bound} ->
-        marked_value = mark_shadowed_calls(value_ast, shadowed)
-
-        with {:ok, pattern} <- analyze_pattern(pattern_ast),
-             {:ok, value} <-
-               with_bindings(bound, fn -> do_analyze(marked_value, false) end) do
-          new_shadows = MapSet.union(shadowed, compute_shadowed_names(pattern))
-          new_bound = bound ++ pattern_names(pattern)
-          {:cont, {:ok, [{:binding, pattern, value} | acc], new_shadows, new_bound}}
-        else
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
+      |> Enum.reduce_while({:ok, [], MapSet.new(), []}, &analyze_binding_pair/2)
       |> case do
         {:ok, rev, shadows, _bound} -> {:ok, Enum.reverse(rev), shadows}
         {:error, _} = err -> err
@@ -526,6 +513,26 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_bindings(_) do
     {:error, {:invalid_form, "let bindings must be a vector"}}
+  end
+
+  defp analyze_binding_pair([pattern_ast, value_ast], {:ok, acc, shadowed, bound}) do
+    marked_value = mark_shadowed_calls(value_ast, shadowed)
+
+    case analyze_pattern(pattern_ast) do
+      {:ok, pattern} ->
+        case with_bindings(bound, fn -> do_analyze(marked_value, false) end) do
+          {:ok, value} ->
+            new_shadows = MapSet.union(shadowed, compute_shadowed_names(pattern))
+            new_bound = bound ++ pattern_names(pattern)
+            {:cont, {:ok, [{:binding, pattern, value} | acc], new_shadows, new_bound}}
+
+          {:error, reason} ->
+            {:halt, {:error, reason}}
+        end
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
+    end
   end
 
   # ============================================================

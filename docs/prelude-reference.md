@@ -49,7 +49,7 @@ Pure exports show no backing requirements. Requirements validate authority; they
 
 Effects below use the same conservative, environment-independent projection as `(doc ...)` and `(export-meta ...)`: an export that reaches a capability is `unknown` unless its chain declares `write`. The authoritative model-visible effect belongs to the assembled mission inventory, where installed capability effects may resolve that value to `read` or `write`.
 
-`:prompt` exports appear in model inventory. `:discoverable` exports stay out of that prompt inventory but remain callable and can be found with `(dir)`, `(dir "namespace")`, `(apropos "term")`, `(doc "namespace/name")`, and `(export-meta "namespace/name")`. `apropos` and `doc` additionally cover fixed built-ins and the bounded Java surface; `dir` and `export-meta` remain attached-prelude views. Hiding an export from the prompt does not narrow authority.
+`:prompt` exports appear in model inventory. `:discoverable` exports stay out of that prompt inventory but remain callable and can be found with `(dir)`, `(dir "namespace")`, `(apropos "term")`, `(doc "namespace/name")`, `(export-meta "namespace/name")`, and `(source namespace/name)`. `apropos` and `doc` additionally cover fixed built-ins and the bounded Java surface; `dir`, `export-meta`, and `source` remain attached-prelude views. Hiding an export from the prompt does not narrow authority.
 
 ## Customize or replace a component
 

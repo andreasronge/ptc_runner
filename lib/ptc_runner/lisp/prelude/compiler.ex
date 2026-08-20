@@ -1084,18 +1084,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # contract precisely follows what it itself reaches — it does NOT absorb a
   # sibling export's unrelated requirements or effects.
   defp namespace_form_graph(ns_specs, dep_set) do
-    ns_symbols = Enum.map(ns_specs, & &1.symbol)
-
-    calls =
-      Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
-        refs =
-          body
-          |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
-          |> Enum.uniq()
-          |> Enum.filter(&(&1 in ns_symbols))
-
-        {sym, refs}
-      end)
+    calls = sibling_calls(ns_specs)
 
     direct_tools =
       Map.new(ns_specs, fn %Spec{symbol: sym, body_form: body} ->
@@ -1751,18 +1740,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     specs
     |> Enum.group_by(& &1.namespace)
     |> Enum.flat_map(fn {ns, ns_specs} ->
-      ns_symbols = Enum.map(ns_specs, & &1.symbol)
-
-      calls =
-        Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
-          refs =
-            body
-            |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
-            |> Enum.uniq()
-            |> Enum.filter(&(&1 in ns_symbols))
-
-          {sym, refs}
-        end)
+      calls = sibling_calls(ns_specs)
 
       private_syms =
         ns_specs |> Enum.filter(& &1.private?) |> Enum.map(& &1.symbol) |> MapSet.new()
@@ -1774,6 +1752,21 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       |> Enum.map(fn sym -> {ns, sym} end)
     end)
     |> MapSet.new()
+  end
+
+  # Direct same-namespace reference edges for one namespace's specs.
+  defp sibling_calls(ns_specs) do
+    ns_symbols = Enum.map(ns_specs, & &1.symbol)
+
+    Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
+      refs =
+        body
+        |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
+        |> Enum.uniq()
+        |> Enum.filter(&(&1 in ns_symbols))
+
+      {sym, refs}
+    end)
   end
 
   # Same-namespace symbols transitively called from `sym` (EXCLUDING `sym`
