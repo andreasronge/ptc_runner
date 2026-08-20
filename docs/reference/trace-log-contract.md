@@ -537,13 +537,15 @@ JSON object with this exact envelope:
 ```
 
 Keys are exact. `sequence` is positive and strictly increasing within the
-artifact. The timestamp is UTC ISO 8601. Except for `run-result`,
-`correlation` contains exactly one of `capability_id`, `evaluation_id`, or
-`component_id`. Capability and evaluation values must occur in the canonical
-trace for the same run unless that trace explicitly proves the corresponding
-start events were dropped. A component value must occur in the canonical
-`run-started` prelude component IDs for the record's environment. The current record
-types and payloads are:
+artifact. The timestamp is UTC ISO 8601. `run-result` correlates to nothing
+and carries an empty map. Every other record carries exactly one of
+`capability_id`, `evaluation_id`, or `component_id`, and the three MCP record
+types pair their `capability_id` with the positive integer `request_id` that
+identifies the exchange. Capability and evaluation values must occur in the
+canonical trace for the same run unless that trace explicitly proves the
+corresponding start events were dropped. A component value must occur in the
+canonical `run-started` prelude component IDs for the record's environment.
+The current record types and payloads are:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
@@ -700,7 +702,9 @@ partial correlation overlay described above. Retention belongs to the host in
 
 Installed defaults are 2,000,000 encoded bytes per record and 16,000,000
 encoded bytes for the artifact; a host may lower them but a manifest cannot
-raise or select them. Persistence is atomic and no-clobber, so a failed write
+raise or select them. Retained-size validation runs before JSON encoding and an
+encoded-byte check follows it, so an oversized record is rejected without first
+being encoded. Persistence is atomic and no-clobber, so a failed write
 is never mistaken for a complete capture, and this increment deliberately does
 not append or merge inspection runs.
 

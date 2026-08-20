@@ -408,8 +408,9 @@ span them:
 - The server-owned `run-analysis-v1` profile is shared by the Viewer and
   ordinary terminal REPL frontends. Its mission bundle contains `cap` and
   `analysis`, its explicit authority the three `analysis-*` capabilities.
-  Filesystem, network, LLM, agent, workflow, MCP, private-inspection, and
-  nested `kernel-eval` authority are absent. `private-run-analysis-v1` uses the
+  Ordinary implicit mission introspection remains available. Filesystem,
+  network, LLM, agent, workflow, MCP, private-inspection, and nested
+  `kernel-eval` authority are absent. `private-run-analysis-v1` uses the
   private-authorized capture, adds the validated private-inspection source, and
   requires a private terminal gate; its own session trace is still a sanitized
   normal artifact.
@@ -425,12 +426,12 @@ span them:
   filesystem identity into `SessionTrace`, and publication verifies that
   identity before it receives trace bytes, so replacing or retargeting the
   pathname cannot redirect the write.
-- The session `EventSink` opts into a measured terminal reserve: ordinary events
-  stop before the count and byte ceilings would consume capacity for one bounded
-  `events-dropped` summary and exactly one `run-stopped`. Atomic finalization
-  returns the frozen terminal batch in that same owner call without exceeding
-  either hard ceiling. Existing normal and private sinks keep their original
-  behavior unless explicitly constructed with the reserve.
+- The session relies on the measured terminal reserve every normal `EventSink`
+  carries by default — two measured terminal envelopes; private sinks reserve
+  nothing. Ordinary events stop before the count and byte ceilings would consume
+  capacity for one bounded `events-dropped` summary and exactly one
+  `run-stopped`. Atomic finalization returns the frozen terminal batch in that
+  same owner call without exceeding either hard ceiling.
 - Exhausting a terminal session budget persists an error run with that
   authoritative limit reason even when abort or deadline expiry performs the
   eventual close. The reason is transferred to the trace owner before the
