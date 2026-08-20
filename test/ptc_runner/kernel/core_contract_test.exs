@@ -3833,7 +3833,11 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                nil
              )
 
-    assert %{kind: :limit_exceeded, reason: :protocol_errors} =
+    assert %{
+             kind: :limit_exceeded,
+             reason: :protocol_errors,
+             details: %{limit: :protocol_errors, limit_value: 1}
+           } =
              Dispatcher.dispatch(
                state,
                :workflow,

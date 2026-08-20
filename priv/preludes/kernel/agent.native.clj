@@ -55,19 +55,35 @@
     (or (= token expected)
         (and (= expected "limit-exceeded") (= token "limit_exceeded"))
         (and (= expected "capability-quota") (= token "capability_quota"))
-        (and (= expected "max-calls") (= token "max_calls")))))
+        (and (= expected "max-calls") (= token "max_calls"))
+        (and (= expected "workflow-capability-calls") (= token "workflow_capability_calls"))
+        (and (= expected "workflow-capability-calls-per-name")
+             (= token "workflow_capability_calls_per_name"))
+        (and (= expected "mission-capability-calls") (= token "mission_capability_calls"))
+        (and (= expected "mission-capability-calls-per-name")
+             (= token "mission_capability_calls_per_name")))))
+
+(defn- named-quota-limit? [value]
+  (or (hyphenated? value "max-calls")
+      (hyphenated? value "workflow-capability-calls")
+      (hyphenated? value "workflow-capability-calls-per-name")
+      (hyphenated? value "mission-capability-calls")
+      (hyphenated? value "mission-capability-calls-per-name")))
 
 (defn- max-calls-refusal? [response]
   (and (map? response)
-       (let [details (get response :details)]
+       (let [details (get response :details)
+             limit (when (map? details) (get details :limit))]
          (and (hyphenated? (get response :status) "error")
               (hyphenated? (get response :kind) "limit-exceeded")
               (hyphenated? (get response :reason) "capability-quota")
               (map? details)
-              (hyphenated? (get details :limit) "max-calls")
-              (string? (get details :alias))
+              (named-quota-limit? limit)
               (integer? (get details :limit_value))
-              (pos? (get details :limit_value))))))
+              (pos? (get details :limit_value))
+              (if (hyphenated? limit "max-calls")
+                (string? (get details :alias))
+                (string? (get details :name)))))))
 
 (defn normalize
   "Normalizes one provider response into a tool call, provider error, max-calls refusal, or protocol error."

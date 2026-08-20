@@ -93,7 +93,10 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
       {%{limit: :max_transcript_chars, limit_value: 262_144}, "max_transcript_chars"},
       {%{limit: :terminal_result_bytes, limit_value: 1_000_000}, "terminal_result_bytes"},
       {%{limit: :workflow_heap_words, limit_value: 8_000_000}, "workflow_heap_words"},
-      {%{limit: :max_calls, alias: "deepseek", limit_value: 4}, "max_calls"}
+      {%{limit: :max_calls, alias: "deepseek", limit_value: 4}, "max_calls"},
+      {%{limit: :workflow_capability_calls_per_name, name: "llm-request", limit_value: 2},
+       "workflow_capability_calls_per_name"},
+      {%{limit: :protocol_errors, limit_value: 64}, "protocol_errors"}
     ]
 
     for {detail, expected_limit} <- details do
@@ -334,6 +337,30 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         value: "4",
         remedy: "raise config.max_calls for this model alias",
         build: fn -> RuntimeLimitDiagnostic.max_calls_message("deepseek", 4) end
+      },
+      %{
+        phase: :execution,
+        code: :runtime_limit_exceeded,
+        source: :runtime,
+        setting: "workflow_capability_calls_per_name",
+        value: "2",
+        remedy: "raise limits.workflow_capability_calls_per_name in the manifest",
+        build: fn ->
+          RuntimeLimitDiagnostic.capability_quota_message(
+            :workflow_capability_calls_per_name,
+            "llm-request",
+            2
+          )
+        end
+      },
+      %{
+        phase: :execution,
+        code: :runtime_limit_exceeded,
+        source: :runtime,
+        setting: "protocol_errors",
+        value: "64",
+        remedy: "raise limits.protocol_errors in the manifest",
+        build: fn -> RuntimeLimitDiagnostic.protocol_errors_message(64) end
       },
       %{
         phase: :result_cleanup,

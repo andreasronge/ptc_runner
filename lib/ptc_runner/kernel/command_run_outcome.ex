@@ -416,6 +416,46 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     end
   end
 
+  defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           reason: :capability_quota,
+           details: %{limit: limit, name: name, limit_value: value}
+         },
+         provider_activity
+       ) do
+    case RuntimeLimitDiagnostic.capability_quota_message(limit, name, value) do
+      {:ok, message} ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
+          message: message,
+          source: CommandSource.fixed(:runtime)
+        )
+
+      :error ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           reason: :protocol_errors,
+           details: %{limit: :protocol_errors, limit_value: limit}
+         },
+         provider_activity
+       ) do
+    case RuntimeLimitDiagnostic.protocol_errors_message(limit) do
+      {:ok, message} ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
+          message: message,
+          source: CommandSource.fixed(:runtime)
+        )
+
+      :error ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
+    end
+  end
+
   defp failure_diagnostic(%Error{kind: :limit_exceeded}, provider_activity),
     do: diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
 

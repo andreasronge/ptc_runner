@@ -340,7 +340,7 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
           value
           |> SafeMetadata.failure_taxonomy()
           |> Map.merge(SafeMetadata.llm_provider_failure(value))
-          |> Map.merge(SafeMetadata.max_calls_refusal_fields(value))
+          |> Map.merge(SafeMetadata.named_quota_refusal_fields(value))
           |> Map.merge(LLMReplayDiagnostic.failure_metadata(value))}
 
   defp captured_failure(

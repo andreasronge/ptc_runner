@@ -102,7 +102,7 @@ defmodule PtcRunner.Kernel.LLMReplayDiagnostic do
     |> SafeMetadata.retain_failure_taxonomy_fields()
     |> Map.merge(retain_candidate_metadata(metadata))
     |> Map.merge(SafeMetadata.retain_llm_provider_failure_fields(metadata))
-    |> Map.merge(SafeMetadata.retain_max_calls_refusal_fields(metadata))
+    |> Map.merge(SafeMetadata.retain_named_quota_refusal_fields(metadata))
   end
 
   def retain_parallel_failure_metadata(_metadata), do: %{}

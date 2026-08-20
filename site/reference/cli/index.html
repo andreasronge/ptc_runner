@@ -241,7 +241,7 @@ not in this process-contract reference.</p><h3 id="branch-on-the-exit-status">Br
 to decide whether to retry, and read <code class="inline">error.code</code> from the envelope when the
 branch needs to know which failure it was.</p><p>A recoverable capability error does not change the exit status. Exhausting
 <code class="inline">workflow_capability_calls_per_name</code> returns
-<code class="inline">{&quot;status&quot;:&quot;error&quot;,&quot;kind&quot;:&quot;limit_exceeded&quot;,&quot;reason&quot;:&quot;capability_quota&quot;}</code> as a
+<code class="inline">{&quot;status&quot;:&quot;error&quot;,&quot;kind&quot;:&quot;limit_exceeded&quot;,&quot;reason&quot;:&quot;capability_quota&quot;,&quot;details&quot;:{&quot;limit&quot;:&quot;workflow_capability_calls_per_name&quot;,&quot;name&quot;:&quot;llm-request&quot;,&quot;limit_value&quot;:2}}</code> as a
 value into PTC-Lisp; a workflow that reads past it can still <code class="inline">return</code> and the
 command exits <code class="inline">0</code>. Assert on the result value, or have the workflow <code class="inline">fail</code>,
 when a quota must end the run.</p><p>The tables below are generated from the diagnostic catalog the command

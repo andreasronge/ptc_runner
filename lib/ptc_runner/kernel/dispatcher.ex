@@ -197,7 +197,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
           )
 
         {:error, :limit_exceeded} ->
-          limit_error(state, event_sink, :capability_quota, environment, mission_name)
+          limit_error(
+            state,
+            event_sink,
+            :capability_quota,
+            environment,
+            mission_name,
+            RunState.capability_quota_details(state, environment, name)
+          )
 
         {:error, :live_task_limit} ->
           limit_error(state, event_sink, :live_provider_tasks, environment, mission_name)
@@ -1195,7 +1202,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
         stale_evaluation_error()
 
       {:error, :protocol_error_limit} ->
-        limit_error(state, event_sink, :protocol_errors, environment, mission_name)
+        limit_error(
+          state,
+          event_sink,
+          :protocol_errors,
+          environment,
+          mission_name,
+          RunState.protocol_errors_details(state)
+        )
     end
   end
 

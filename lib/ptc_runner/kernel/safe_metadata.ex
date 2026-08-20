@@ -242,11 +242,24 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   def llm_provider_failure(_value), do: %{}
 
   @alias ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+  @capability_name ~r|\A[a-z][a-z0-9._/-]{0,127}\z|
+  @public_quota_limits [
+    :workflow_capability_calls,
+    :workflow_capability_calls_per_name,
+    :mission_capability_calls,
+    :mission_capability_calls_per_name
+  ]
+  @quota_limit_names %{
+    "max-calls" => :max_calls,
+    "workflow-capability-calls" => :workflow_capability_calls,
+    "workflow-capability-calls-per-name" => :workflow_capability_calls_per_name,
+    "mission-capability-calls" => :mission_capability_calls,
+    "mission-capability-calls-per-name" => :mission_capability_calls_per_name
+  }
 
   @doc false
-  @spec max_calls_refusal(term()) ::
-          {:ok, %{limit: :max_calls, alias: binary(), limit_value: pos_integer()}} | :error
-  def max_calls_refusal(value) when is_map(value) and not is_struct(value) do
+  @spec named_quota_refusal(term()) :: {:ok, map()} | :error
+  def named_quota_refusal(value) when is_map(value) and not is_struct(value) do
     with {:ok, status} <- fetch_named(value, "status"),
          true <- status in [:error, "error"],
          {:ok, kind} <- fetch_named(value, "kind"),
@@ -256,23 +269,36 @@ defmodule PtcRunner.Kernel.SafeMetadata do
          {:ok, details} when is_map(details) and not is_struct(details) <-
            fetch_named(value, "details"),
          {:ok, limit} <- fetch_named(details, "limit"),
-         "max-calls" <- normalize_name(limit),
-         {:ok, alias_name} when is_binary(alias_name) <- fetch_named(details, "alias"),
-         true <- alias_name =~ @alias,
+         {:ok, limit_atom} <- quota_limit_atom(normalize_name(limit)),
          {:ok, limit_value} when is_integer(limit_value) and limit_value > 0 <-
-           fetch_named(details, "limit_value") do
-      {:ok, %{limit: :max_calls, alias: alias_name, limit_value: limit_value}}
+           fetch_named(details, "limit_value"),
+         {:ok, identity} <- quota_identity_fields(limit_atom, details) do
+      {:ok, Map.merge(%{limit: limit_atom, limit_value: limit_value}, identity)}
     else
-      _not_a_max_calls_refusal -> :error
+      _not_a_named_quota_refusal -> :error
     end
   end
 
-  def max_calls_refusal(_value), do: :error
+  def named_quota_refusal(_value), do: :error
+
+  @doc false
+  @spec max_calls_refusal(term()) ::
+          {:ok, %{limit: :max_calls, alias: binary(), limit_value: pos_integer()}} | :error
+  def max_calls_refusal(value) do
+    case named_quota_refusal(value) do
+      {:ok, %{limit: :max_calls} = details} -> {:ok, details}
+      _not_max_calls -> :error
+    end
+  end
 
   @doc false
   @spec max_calls_refusal_fields(term()) :: map()
-  def max_calls_refusal_fields(value) do
-    case max_calls_refusal(value) do
+  def max_calls_refusal_fields(value), do: named_quota_refusal_fields(value)
+
+  @doc false
+  @spec named_quota_refusal_fields(term()) :: map()
+  def named_quota_refusal_fields(value) do
+    case named_quota_refusal(value) do
       {:ok, details} -> details
       :error -> %{}
     end
@@ -280,7 +306,11 @@ defmodule PtcRunner.Kernel.SafeMetadata do
 
   @doc false
   @spec retain_max_calls_refusal_fields(term()) :: map()
-  def retain_max_calls_refusal_fields(%{
+  def retain_max_calls_refusal_fields(metadata), do: retain_named_quota_refusal_fields(metadata)
+
+  @doc false
+  @spec retain_named_quota_refusal_fields(term()) :: map()
+  def retain_named_quota_refusal_fields(%{
         limit: :max_calls,
         alias: alias_name,
         limit_value: limit
@@ -291,7 +321,39 @@ defmodule PtcRunner.Kernel.SafeMetadata do
       else: %{}
   end
 
-  def retain_max_calls_refusal_fields(_metadata), do: %{}
+  def retain_named_quota_refusal_fields(%{
+        limit: limit,
+        name: name,
+        limit_value: value
+      })
+      when limit in @public_quota_limits and is_binary(name) and is_integer(value) and value > 0 do
+    if name =~ @capability_name,
+      do: %{limit: limit, name: name, limit_value: value},
+      else: %{}
+  end
+
+  def retain_named_quota_refusal_fields(_metadata), do: %{}
+
+  defp quota_limit_atom(name) when is_binary(name), do: Map.fetch(@quota_limit_names, name)
+  defp quota_limit_atom(_name), do: :error
+
+  defp quota_identity_fields(:max_calls, details) do
+    with {:ok, alias_name} when is_binary(alias_name) <- fetch_named(details, "alias"),
+         true <- alias_name =~ @alias do
+      {:ok, %{alias: alias_name}}
+    else
+      _invalid_alias -> :error
+    end
+  end
+
+  defp quota_identity_fields(limit, details) when limit in @public_quota_limits do
+    with {:ok, name} when is_binary(name) <- fetch_named(details, "name"),
+         true <- name =~ @capability_name do
+      {:ok, %{name: name}}
+    else
+      _invalid_name -> :error
+    end
+  end
 
   @doc false
   @spec retain_llm_provider_failure_fields(term()) :: map()

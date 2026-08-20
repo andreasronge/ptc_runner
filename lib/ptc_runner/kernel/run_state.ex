@@ -158,8 +158,10 @@ defmodule PtcRunner.Kernel.RunState do
   per-name quota, the owner refuses that alias once it has spent `n` calls
   (`{:error, :route_call_limit}`) after the public total and per-name quotas.
   An alias cap at or above the per-name budget is ignored so omitted defaults
-  keep today's public quota. A named `max_calls` diagnostic is authenticated
-  only after this owner has actually refused that alias.
+  keep today's public quota.   A named `max_calls` diagnostic is authenticated
+  only after this owner has actually refused that alias. Public total and
+  per-name quota refusals are authenticated the same way, keyed by the limit,
+  capability name, and configured value that this owner actually refused.
   """
   @spec reserve_capability(t(), environment(), binary(), reference() | nil, map() | nil) ::
           :ok | {:error, atom()}
@@ -188,6 +190,13 @@ defmodule PtcRunner.Kernel.RunState do
   def mission_lease_current?(state, lease),
     do: safe_call(state, {:mission_lease_current?, lease}, false)
 
+  @public_quota_limits [
+    :workflow_capability_calls,
+    :workflow_capability_calls_per_name,
+    :mission_capability_calls,
+    :mission_capability_calls_per_name
+  ]
+
   @spec max_calls_refusal?(t(), map()) :: boolean()
   @doc false
   def max_calls_refusal?(state, %{limit: :max_calls, alias: alias_name, limit_value: limit})
@@ -195,6 +204,30 @@ defmodule PtcRunner.Kernel.RunState do
       do: safe_call(state, {:max_calls_refusal?, alias_name, limit}, false)
 
   def max_calls_refusal?(_state, _details), do: false
+
+  @spec named_quota_refusal?(t(), map()) :: boolean()
+  @doc false
+  def named_quota_refusal?(state, %{limit: :max_calls} = details),
+    do: max_calls_refusal?(state, details)
+
+  def named_quota_refusal?(state, %{limit: limit, name: name, limit_value: value})
+      when limit in @public_quota_limits and is_binary(name) and is_integer(value) and
+             value > 0,
+      do: safe_call(state, {:quota_refusal?, limit, name, value}, false)
+
+  def named_quota_refusal?(_state, _details), do: false
+
+  @spec capability_quota_details(t(), environment(), binary()) :: map()
+  @doc false
+  def capability_quota_details(state, environment, name)
+      when environment in [:workflow, :mission] and is_binary(name),
+      do: safe_call(state, {:capability_quota_details, environment, name}, %{})
+
+  @spec protocol_errors_details(t()) :: %{limit: :protocol_errors, limit_value: pos_integer()}
+  @doc false
+  def protocol_errors_details(state) do
+    %{limit: :protocol_errors, limit_value: limits(state).protocol_errors}
+  end
 
   @spec attach_provider(t(), pid()) :: :ok | {:error, :closed | :provider_down}
   @doc "Attaches the caller's live provider process to its capability reservation."
@@ -406,7 +439,8 @@ defmodule PtcRunner.Kernel.RunState do
   @doc "Records the first terminal failure and closes the run."
   def fail(state, kind, reason), do: safe_call(state, {:fail, kind, reason}, :ok)
 
-  @spec terminal_failure(t()) :: nil | %{kind: atom(), reason: atom()}
+  @spec terminal_failure(t()) ::
+          nil | %{kind: atom(), reason: atom(), details: map()} | %{kind: atom(), reason: atom()}
   @doc "Returns the first terminal failure, if any."
   def terminal_failure(state), do: call(state, :terminal_failure)
 
@@ -524,6 +558,7 @@ defmodule PtcRunner.Kernel.RunState do
        calls: %{workflow: %{}, mission: %{}},
        route_calls: %{workflow: %{}, mission: %{}},
        route_refusals: MapSet.new(),
+       quota_refusals: MapSet.new(),
        totals: %{workflow: 0, mission: 0},
        evaluations: 0,
        evaluations_by_mission: %{},
@@ -592,6 +627,25 @@ defmodule PtcRunner.Kernel.RunState do
       )
       when is_binary(alias_name) and is_integer(limit) and limit > 0 do
     {:reply, matching_route_refusal?(state, alias_name, limit), state}
+  end
+
+  def handle_call(
+        {token, {:quota_refusal?, limit, name, value}},
+        _from,
+        %{token: token} = state
+      )
+      when limit in @public_quota_limits and is_binary(name) and is_integer(value) and
+             value > 0 do
+    {:reply, matching_quota_refusal?(state, limit, name, value), state}
+  end
+
+  def handle_call(
+        {token, {:capability_quota_details, environment, name}},
+        _from,
+        %{token: token} = state
+      )
+      when environment in [:workflow, :mission] and is_binary(name) do
+    {:reply, quota_details_map(state, environment, name) || %{}, state}
   end
 
   def handle_call({token, {:attach_provider, provider}}, {caller, _tag}, %{token: token} = state) do
@@ -938,7 +992,14 @@ defmodule PtcRunner.Kernel.RunState do
           state
           | protocol_errors: next,
             closed?: true,
-            terminal_failure: %{kind: :limit_exceeded, reason: :protocol_errors}
+            terminal_failure: %{
+              kind: :limit_exceeded,
+              reason: :protocol_errors,
+              details: %{
+                limit: :protocol_errors,
+                limit_value: state.limits.protocol_errors
+              }
+            }
         })
       end
 
@@ -1208,7 +1269,7 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   defp reserve_capability_state(state, environment, name, caller, lease, route) do
-    {limit_total, limit_name} = capability_limits(state.limits, environment)
+    {_limit_total, limit_name} = capability_limits(state.limits, environment)
     count = get_in(state.calls, [environment, name]) || 0
     route_reservation = route_reservation(name, route, limit_name)
 
@@ -1227,8 +1288,8 @@ defmodule PtcRunner.Kernel.RunState do
       state.provider_tasks >= state.limits.live_provider_tasks ->
         {:error, :live_task_limit, state}
 
-      Map.fetch!(state.totals, environment) >= limit_total or count >= limit_name ->
-        {:error, :limit_exceeded, state}
+      is_map(quota_details = quota_details_map(state, environment, name)) ->
+        {:error, :limit_exceeded, record_quota_refusal(state, quota_details)}
 
       route_spent?(state, environment, route_reservation) ->
         {:error, :route_call_limit, record_route_refusal(state, route_reservation)}
@@ -1288,9 +1349,46 @@ defmodule PtcRunner.Kernel.RunState do
     MapSet.member?(state.route_refusals, {alias_name, limit})
   end
 
+  defp matching_quota_refusal?(state, limit, name, value) do
+    MapSet.member?(state.quota_refusals, {limit, name, value})
+  end
+
   defp record_route_refusal(state, %{key: {_name, alias_name}, max_calls: max_calls}) do
     %{state | route_refusals: MapSet.put(state.route_refusals, {alias_name, max_calls})}
   end
+
+  defp record_quota_refusal(state, %{limit: limit, name: name, limit_value: value}) do
+    %{state | quota_refusals: MapSet.put(state.quota_refusals, {limit, name, value})}
+  end
+
+  defp quota_details_map(state, environment, name) do
+    {limit_total, limit_name} = capability_limits(state.limits, environment)
+    count = get_in(state.calls, [environment, name]) || 0
+
+    cond do
+      count >= limit_name ->
+        %{
+          limit: quota_limit_field(environment, :per_name),
+          name: name,
+          limit_value: limit_name
+        }
+
+      Map.fetch!(state.totals, environment) >= limit_total ->
+        %{
+          limit: quota_limit_field(environment, :total),
+          name: name,
+          limit_value: limit_total
+        }
+
+      true ->
+        nil
+    end
+  end
+
+  defp quota_limit_field(:workflow, :total), do: :workflow_capability_calls
+  defp quota_limit_field(:workflow, :per_name), do: :workflow_capability_calls_per_name
+  defp quota_limit_field(:mission, :total), do: :mission_capability_calls
+  defp quota_limit_field(:mission, :per_name), do: :mission_capability_calls_per_name
 
   # Drops the caller's reservation only after its provider is known to be down.
   defp release_reservation(state, caller) do

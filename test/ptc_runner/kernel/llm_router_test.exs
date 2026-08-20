@@ -376,6 +376,15 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              )
 
     refute match?(%{details: %{limit: :max_calls}}, fourth)
+
+    assert %{
+             details: %{
+               limit: :workflow_capability_calls_per_name,
+               name: "llm-request",
+               limit_value: 3
+             }
+           } = fourth
+
     :ok = RunState.stop(state)
   end
 
@@ -431,6 +440,15 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              )
 
     refute match?(%{details: %{limit: :max_calls}}, third)
+
+    assert %{
+             details: %{
+               limit: :workflow_capability_calls_per_name,
+               name: "llm-request",
+               limit_value: 2
+             }
+           } = third
+
     :ok = RunState.stop(state)
   end
 
@@ -486,7 +504,198 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              )
 
     refute match?(%{details: %{limit: :max_calls}}, third)
+
+    assert %{
+             details: %{
+               limit: :workflow_capability_calls_per_name,
+               name: "llm-request",
+               limit_value: 2
+             }
+           } = third
+
     :ok = RunState.stop(state)
+  end
+
+  test "exhausting the public total quota names that limit" do
+    leaf = capability(self(), :total_quota, %{content: "ok", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("shared", "llm", "shared-v1", true, leaf)])
+
+    assert {:ok, limits} =
+             Limits.new(workflow_capability_calls: 1, workflow_capability_calls_per_name: 8)
+
+    assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [router])
+    assert {:ok, state} = RunState.start(limits)
+    context = TestHelpers.dispatch_context(state, :workflow, 1_000)
+    arguments = %{"messages" => []}
+
+    assert %{status: :ok} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               arguments,
+               context,
+               nil,
+               nil
+             )
+
+    assert %{
+             status: :error,
+             kind: :limit_exceeded,
+             reason: :capability_quota,
+             details: %{
+               limit: :workflow_capability_calls,
+               name: "llm-request",
+               limit_value: 1
+             }
+           } =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               workflow,
+               "llm-request",
+               arguments,
+               context,
+               nil,
+               nil
+             )
+
+    :ok = RunState.stop(state)
+  end
+
+  test "failing a public quota envelope names the limit on the command diagnostic" do
+    run_id = "per-name-quota-fail"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :quota_fail, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("shared", "llm", "shared-v1", true, leaf)])
+
+    {:ok, limits} = Limits.new(workflow_capability_calls_per_name: 1)
+    assert {:ok, config} = config(router, run_id, limits: limits)
+
+    source =
+      ~S|(do (llm/request {"messages" []}) (fail (llm/request {"messages" []})))|
+
+    assert {:error, command_outcome, _counters, events} =
+             project_run(source, config, run_id, run_ref)
+
+    assert {:ok, expected} =
+             RuntimeLimitDiagnostic.capability_quota_message(
+               :workflow_capability_calls_per_name,
+               "llm-request",
+               1
+             )
+
+    assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert command_outcome.envelope["error"]["message"] == expected
+
+    assert [
+             %{
+               type: "limit-exceeded",
+               data: %{
+                 reason: :capability_quota,
+                 limit: :workflow_capability_calls_per_name,
+                 name: "llm-request",
+                 limit_value: 1
+               }
+             }
+           ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
+  end
+
+  test "an application-authored public quota lookalike cannot claim the runtime diagnostic" do
+    run_id = "per-name-quota-forged"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :unused_quota_forged, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("shared", "llm", "shared-v1", true, leaf)])
+
+    assert {:ok, config} = config(router, run_id)
+
+    source =
+      ~S|(fail {:status :error :kind :limit-exceeded :reason :capability-quota :details {:limit :workflow-capability-calls-per-name :name "llm-request" :limit_value 1}})|
+
+    assert {:error, command_outcome, _counters, _events} =
+             project_run(source, config, run_id, run_ref)
+
+    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+  end
+
+  test "agent.core exhausts a public per-name quota as the named runtime diagnostic" do
+    run_id = "per-name-quota-agent"
+    run_ref = "cmd-00000000000000000000000000"
+
+    continue = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
+      ]
+    }
+
+    leaf = capability(self(), :agent_quota, continue)
+
+    assert {:ok, router} =
+             LLMRouter.new([route("shared", "llm", "shared-v1", true, leaf)])
+
+    {:ok, limits} = Limits.new(workflow_capability_calls_per_name: 1)
+
+    {:ok, components} =
+      Library.components(
+        ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      )
+
+    assert {:ok, config} = run_config(router, run_id, components, limits: limits)
+
+    assert {:error, command_outcome, _counters, events} =
+             project_run(~S|(agent.core/run "Task" {"max_turns" 2})|, config, run_id, run_ref)
+
+    assert {:ok, expected} =
+             RuntimeLimitDiagnostic.capability_quota_message(
+               :workflow_capability_calls_per_name,
+               "llm-request",
+               1
+             )
+
+    assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert command_outcome.envelope["error"]["message"] == expected
+
+    assert Enum.any?(events, fn event ->
+             event.type == "limit-exceeded" and
+               event.data[:limit] == :workflow_capability_calls_per_name and
+               event.data[:name] == "llm-request"
+           end)
+  end
+
+  test "exhausting protocol_errors names the limit on the command diagnostic" do
+    run_id = "protocol-errors-named"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :unused_protocol, %{content: "unused", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("shared", "llm", "shared-v1", true, leaf)])
+
+    {:ok, limits} = Limits.new(protocol_errors: 1)
+
+    {:ok, components} = Library.components(~w(llm cap workflow.event))
+    assert {:ok, config} = run_config(router, run_id, components, limits: limits)
+
+    source = """
+    (do
+      (workflow.event/annotate 1 {"n" 1})
+      (workflow.event/annotate 2 {"n" 1})
+      (return true))
+    """
+
+    assert {:error, command_outcome, _counters, _events} =
+             project_run(source, config, run_id, run_ref)
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.protocol_errors_message(1)
+    assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert command_outcome.envelope["error"]["message"] == expected
   end
 
   test "parallel callers contend for a max_calls of one" do

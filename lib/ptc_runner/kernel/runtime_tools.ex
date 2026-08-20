@@ -1156,7 +1156,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         %{status: :error, kind: :capability_denied, reason: :stale_evaluation, retryable?: false}
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors}
+        protocol_error_limit_envelope(state)
     end
   end
 
@@ -1197,7 +1197,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         %{status: :error, kind: :protocol_error, reason: reason}
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors}
+        protocol_error_limit_envelope(state)
     end
   end
 
@@ -1212,7 +1212,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         }
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors, retryable?: false}
+        protocol_error_limit_envelope(state, %{retryable?: false})
     end
   end
 
@@ -1227,8 +1227,20 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         }
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors, retryable?: false}
+        protocol_error_limit_envelope(state, %{retryable?: false})
     end
+  end
+
+  defp protocol_error_limit_envelope(state, extra \\ %{}) do
+    Map.merge(
+      %{
+        status: :error,
+        kind: :limit_exceeded,
+        reason: :protocol_errors,
+        details: RunState.protocol_errors_details(state)
+      },
+      extra
+    )
   end
 
   defp keyword_name(%LispKeyword{name: name}), do: name
