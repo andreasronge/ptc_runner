@@ -616,7 +616,11 @@ defmodule PtcRunner.Kernel.ReplSession do
              environment: :workflow
            }) do
         :ok ->
-          result = run_lisp(session, memory, history, source)
+          result =
+            session
+            |> run_lisp(memory, history, source)
+            |> rewrite_workflow_subordinate_busy(session)
+
           finish_evaluation(session, result, history, lease, evaluation_id, started_ms)
 
         {:error, :event_sink_error} ->
@@ -725,6 +729,50 @@ defmodule PtcRunner.Kernel.ReplSession do
     do: String.ends_with?(message, Helpers.parallel_timeout_message())
 
   defp parallel_timeout?(_message), do: false
+
+  # A workflow REPL expression already holds the single evaluation lease.
+  # Nested kernel/eval-source and check-source therefore fail-fast as :busy —
+  # which reads as a transient state worth retrying. Rewrite that self-deadlock
+  # into the same class of actionable refusal the unknown-namespace path uses.
+  defp rewrite_workflow_subordinate_busy({:ok, %{return: value} = step}, session)
+       when is_map(value) do
+    if workflow_subordinate_busy?(value) do
+      {:error,
+       Native.error(
+         :mission_session_required,
+         subordinate_mission_message(session),
+         Map.get(step, :memory, %{}),
+         %{}
+       )}
+    else
+      {:ok, step}
+    end
+  end
+
+  defp rewrite_workflow_subordinate_busy(result, _session), do: result
+
+  defp workflow_subordinate_busy?(%{outcome: :busy, reason: :evaluation_in_progress}), do: true
+  defp workflow_subordinate_busy?(_value), do: false
+
+  defp subordinate_mission_message(%{config: %{missions: missions}}) when is_map(missions) do
+    declared = missions |> Map.keys() |> Enum.sort()
+
+    case declared do
+      [] ->
+        "this workflow REPL session holds the evaluation lease and cannot run " <>
+          "subordinate evaluations; pass --mission NAME to open a mission session instead"
+
+      names ->
+        "this workflow REPL session holds the evaluation lease and cannot run " <>
+          "subordinate evaluations; pass --mission NAME to open a mission session instead " <>
+          "(declared: #{Enum.join(names, ", ")})"
+    end
+  end
+
+  defp subordinate_mission_message(_session) do
+    "this workflow REPL session holds the evaluation lease and cannot run " <>
+      "subordinate evaluations; pass --mission NAME to open a mission session instead"
+  end
 
   defp tools(session, validation_deadline_ms) do
     timeout_ms = session.config.limits.evaluation_timeout_ms

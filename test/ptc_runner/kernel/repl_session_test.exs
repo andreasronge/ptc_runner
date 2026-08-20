@@ -150,7 +150,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     refute inspect(arguments) =~ "secret-evidence"
   end
 
-  test "manifest REPL source checks report busy without charging their quota" do
+  test "manifest REPL source checks refuse nested busy with a --mission remedy" do
     {:ok, component} = Library.component("kernel")
     {:ok, bundle} = Kernel.compile_bundle([component])
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
@@ -169,15 +169,11 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
     {:ok, session} = ReplSession.new(config: config)
 
-    assert {:ok,
-            %{
-              return: %{outcome: :busy, reason: :evaluation_in_progress},
-              tool_calls: [%{name: "kernel-check-source", args: arguments}]
-            }, session} =
+    assert {:error, %{fail: %{reason: :mission_session_required, message: message}}, _session} =
              ReplSession.eval(session, ~S|(kernel/check-source "default" "(return 42)")|)
 
-    assert %{"source" => %{"bytes" => 11, "sha256" => "sha256:" <> _}} = arguments
-    refute inspect(arguments) =~ "(return 42)"
+    assert message =~ "--mission NAME"
+    assert message =~ "declared: default"
     assert %{subordinate_source_checks: 0} = ReplSession.usage(session)
   end
 

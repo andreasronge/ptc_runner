@@ -311,6 +311,45 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "kernel/eval-source from a workflow session names --mission instead of :busy", %{
+    tmp_dir: directory
+  } do
+    manifest_path = Path.join(directory, "ptc.json")
+    File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [x] (return x))")
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [
+            %{"id" => "app", "path" => "main.clj", "dependencies" => ["kernel"]},
+            %{"library" => "kernel"}
+          ],
+          "entry" => "app/run"
+        },
+        "missions" => %{"writing" => %{}, "review" => %{}},
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl([
+          "--manifest",
+          manifest_path,
+          "-e",
+          ~S|(kernel/eval-source "review" "(return 1)")|
+        ])
+      end
+
+    assert error.message =~ "Error (mission_session_required):"
+    assert error.message =~ "--mission NAME"
+    assert error.message =~ "declared: review, writing"
+    refute error.message =~ "evaluation_in_progress"
+  end
+
+  @tag :tmp_dir
   test "a direct session with no declared mission adds no switch it cannot honour", %{
     tmp_dir: _directory
   } do
