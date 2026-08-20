@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design an agent workflow · PtcRunner</title>
+<meta name="description" content="This tutorial designs a small agent for a recurring real-world job — working
+through a support-ticket inbox — in three runnable steps. Each step answers one
+de…">
+<link rel="canonical" href="https://ptc-runner.dev/guides/designing-agent-workflows/">
+<meta property="og:title" content="Design an agent workflow · PtcRunner">
+<meta property="og:description" content="This tutorial designs a small agent for a recurring real-world job — working
+through a support-ticket inbox — in three runnable steps. Each step answers one
+de…">
+<meta property="og:url" content="https://ptc-runner.dev/guides/designing-agent-workflows/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/" class="current" aria-current="page">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="design-an-agent-workflow">Design an agent workflow</h1><blockquote><p><strong>Audience:</strong> application authors turning a real task into their first
+multi-stage agent design.</p></blockquote><p>This tutorial designs a small agent for a recurring real-world job — working
+through a support-ticket inbox — in three runnable steps. Each step answers one
+design question: where does the data live, where do the business rules live,
+and how is work split between agents. The configuration guides explain each
+surface exhaustively; this page shows why a design uses them.</p><p>Materialize the three projects and supply an
+<a href="https://openrouter.ai/keys">OpenRouter</a> key:</p><pre><code class="console language-console">ptc init support-triage --example support-triage</code></pre><p>Set <code class="inline">OPENROUTER_API_KEY</code> in the generated <code class="inline">support-triage/.env</code>. Each project
+costs well under a cent to run with the tutorial's <code class="inline">deepseek</code> alias.</p><h2 id="step-1-ask-one-bounded-question">Step 1: ask one bounded question</h2><p>The smallest agent shape is a single bounded run: grant the data, ask the
+question, read the answer. The first manifest declares no tools at all — the
+tickets are granted as mission <code class="inline">data</code>:</p><pre><code class="json language-json">&quot;missions&quot;: {
+  &quot;default&quot;: {
+    &quot;components&quot;: [],
+    &quot;data&quot;: {&quot;tickets&quot;: [{&quot;id&quot;: &quot;T-1001&quot;, &quot;...&quot;: &quot;...&quot;}]}
+  }
+}</code></pre><p>and the entire trusted workflow delegates to the shipped loop:</p><pre><code class="clojure language-clojure">(defn run [input]
+  (agent.core/run (get input &quot;task&quot;) {&quot;max_turns&quot; 3}))</code></pre><pre><code class="console language-console">ptc run support-triage/01-one-question.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;ok&quot;:true,&quot;value&quot;:[&quot;T-1001&quot;,&quot;T-1004&quot;]}</code></pre><p>The model reads the advertised <code class="inline">data/tickets</code>, writes one PTC-Lisp program
+that filters it, and returns the ids. Open the Viewer to read that program:</p><pre><code class="console language-console">ptc viewer support-triage/01-one-question.ptc-project.json</code></pre><p>The design decision here is what the mission does <strong>not</strong> contain. There is no
+filesystem, no working directory, and no tool the model could wander into: the
+mission holds exactly the six tickets and nothing else. When a question can be
+answered from data you already have, granting the data is simpler and safer
+than connecting a tool that reaches it.</p><h2 id="step-2-move-the-rules-into-mission-code">Step 2: move the rules into mission code</h2><p>The second question the inbox scenario forces: where do the SLA thresholds and
+priority rules live? Putting them in the task prompt makes them suggestions the
+model may drift from. Exposing them as one-call-per-rule tools makes the model
+relay intermediate results through its context. The second project instead
+ships them as a prompt-visible mission component, <code class="inline">triage.clj</code>:</p><pre><code class="clojure language-clojure">(defn priority
+  &quot;Priority score from 0 to 100: SLA breach, wait time, and refund risk.&quot;
+  {:signature &quot;(ticket :map) -&gt; :int&quot;}
+  [ticket]
+  ...)</code></pre><pre><code class="console language-console">ptc run support-triage/02-domain-api.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;ok&quot;:true,&quot;value&quot;:[{&quot;id&quot;:&quot;T-1004&quot;,&quot;priority&quot;:81},{&quot;id&quot;:&quot;T-1001&quot;,&quot;priority&quot;:75},
+{&quot;id&quot;:&quot;T-1006&quot;,&quot;priority&quot;:58},{&quot;id&quot;:&quot;T-1005&quot;,&quot;priority&quot;:52}]}</code></pre><p>The model now composes <code class="inline">triage.rules/breached?</code> and <code class="inline">triage.rules/priority</code>
+with the granted data in a single program — filter, score, sort, return — and
+the scores are exactly what the deterministic policy computes. The model
+decides <em>how to use</em> the rules; it cannot <em>reinterpret</em> them. That split is
+the core of code-mode design: judgment in the model, policy in reviewable
+code. <a href="/guides/components-and-preludes/">Customize agent components</a> covers the
+component and signature rules this step relies on.</p><h2 id="step-3-split-authority-between-specialists">Step 3: split authority between specialists</h2><p>The final step routes each breached ticket to a team. Classification is
+model judgment, but routing is policy — and the routing stage needs none of
+the raw ticket pool. So the third manifest declares two named missions with
+different grants:</p><pre><code class="json language-json">&quot;missions&quot;: {
+  &quot;triage&quot;: {
+    &quot;components&quot;: [{&quot;id&quot;: &quot;triage.rules&quot;, &quot;path&quot;: &quot;triage.clj&quot;}],
+    &quot;data&quot;: {&quot;tickets&quot;: [&quot;...&quot;]}
+  },
+  &quot;escalation&quot;: {
+    &quot;components&quot;: [{&quot;id&quot;: &quot;escalation.policy&quot;, &quot;path&quot;: &quot;escalation.clj&quot;}]
+  }
+}</code></pre><p>The trusted workflow runs one loop in each mission, passing only the triage
+result forward, and validates the final report against the manifest's
+<code class="inline">result_schema</code> contract:</p><pre><code class="clojure language-clojure">(defn run [input]
+  (let [ranked (returned-value
+                 (agent.core/run-outcome (get input &quot;triage_task&quot;)
+                                         {&quot;mission&quot; &quot;triage&quot; &quot;max_turns&quot; 4})
+                 &quot;triage&quot;)]
+    (return
+      (agent.core/run-result-value
+        (str (get input &quot;escalation_task&quot;) &quot;\n\n&quot; (pr-str ranked))
+        {&quot;mission&quot; &quot;escalation&quot; &quot;max_turns&quot; 4}))))</code></pre><pre><code class="console language-console">ptc run support-triage/03-specialists.ptc-project.json</code></pre><p>A run returns a contract-valid report — every escalation names a schema-listed
+team, and an invalid candidate would have received bounded correction feedback
+instead of reaching you:</p><pre><code class="json language-json">{&quot;escalations&quot;:[{&quot;first_action&quot;:&quot;send the refund-policy summary&quot;,&quot;id&quot;:&quot;T-1004&quot;,
+&quot;priority&quot;:81,&quot;team&quot;:&quot;payments&quot;},{&quot;first_action&quot;:&quot;page the on-call engineer&quot;,
+&quot;id&quot;:&quot;T-1005&quot;,&quot;priority&quot;:52,&quot;team&quot;:&quot;sre&quot;}],&quot;summary&quot;:&quot;...&quot;}</code></pre><p>Two design rules carry this step. Specialists are missions, not prompts: the
+escalation model cannot read the ticket pool, because its mission was never
+granted it — the workflow decides exactly what crosses the boundary. And
+downstream consumers get contracts, not parsing: the schema is enforced by the
+runtime, so the report's shape is a property of the run, not a hope about the
+model. The correction loop is described in the
+<a href="/reference/agent-library-reference/">agent library reference</a>.</p><h2 id="where-to-go-next">Where to go next</h2><p><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a> names the recurring
+shapes these steps used — and the ones they didn't, such as parallel fan-out
+and plan/act phases. <a href="/guides/building-agents/">Customize an agent</a> covers replacing
+the loop's prompts and policy. For a longer course that builds a
+multi-specialist agent scenario chapter by chapter, see the
+<a href="https://github.com/andreasronge/ptc_runner_tutorial">PtcRunner tutorial series</a>.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/components-and-preludes/">&larr; Customize agent components</a><a class="pager-next" href="/guides/agent-workflow-patterns/">Choose a workflow shape &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/designing-agent-workflows.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

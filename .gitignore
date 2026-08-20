@@ -44,6 +44,7 @@ ptc_runner-*.tar
 # Local artifacts produced by the runnable tutorial project files.
 examples/kernel-tutorial/*/.ptc/
 examples/debug-a-failed-run/*/.ptc/
+examples/support-triage/*/.ptc/
 
 # Temporary commit message files from tooling.
 .commit_msg.txt

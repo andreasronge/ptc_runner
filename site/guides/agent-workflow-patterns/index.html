@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Choose a workflow shape · PtcRunner</title>
+<meta name="description" content="Most agent applications are built from a small set of recurring shapes. This
+page names each shape, says when to reach for it, and points to a runnable
+project…">
+<link rel="canonical" href="https://ptc-runner.dev/guides/agent-workflow-patterns/">
+<meta property="og:title" content="Choose a workflow shape · PtcRunner">
+<meta property="og:description" content="Most agent applications are built from a small set of recurring shapes. This
+page names each shape, says when to reach for it, and points to a runnable
+project…">
+<meta property="og:url" content="https://ptc-runner.dev/guides/agent-workflow-patterns/">
+<meta property="og:type" content="article">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/" class="current" aria-current="page">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="choose-a-workflow-shape">Choose a workflow shape</h1><blockquote><p><strong>Audience:</strong> application authors deciding how to split a task between
+missions, agent loops, and trusted workflow code.</p></blockquote><p>Most agent applications are built from a small set of recurring shapes. This
+page names each shape, says when to reach for it, and points to a runnable
+project that demonstrates it. The shapes compose: a real design usually
+combines two or three.</p><h2 id="one-bounded-question">One bounded question</h2><p>Grant the data, ask the question, read the answer. One mission, one
+<code class="inline">agent.core/run</code>, no tools. Reach for this first: if a task is a single
+read-only question over data you already hold, connecting tools or adding
+stages only adds surface. The
+<a href="/guides/designing-agent-workflows/">Design an agent workflow</a> tutorial starts with
+exactly this shape, and the shipped
+<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage"><code class="inline">support-triage</code></a>
+example is its runnable form.</p><h2 id="domain-rules-as-mission-code">Domain rules as mission code</h2><p>When the task has deterministic policy — thresholds, scoring, routing tables,
+formulas — ship it as a prompt-visible mission component instead of prompt
+text or one-call-per-rule tools. The model composes the functions in one
+program; the rules stay in code you can review and test. Prompt-stated rules
+drift; tool-relayed rules drag every intermediate value through the model's
+context. See step 2 of the
+<a href="/guides/designing-agent-workflows/#step-2-move-the-rules-into-mission-code">tutorial</a>,
+and <a href="/guides/components-and-preludes/">Customize agent components</a> for the
+component contract.</p><h2 id="specialists-as-missions">Specialists as missions</h2><p>When stages of a task need different data, tools, or rules, give each stage a
+named mission and let one trusted workflow drive a loop per stage. A mission
+boundary is an authority decision, not a prompt decision: a specialist can
+only see what its mission was granted, and the workflow chooses what crosses
+between stages. Use <code class="inline">agent.core/run-outcome</code> when the workflow must handle a
+specialist's failure as data. Runnable forms:
+<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage"><code class="inline">support-triage/03-specialists</code></a>
+(different data per specialist) and
+<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer"><code class="inline">named-mission-reader-writer</code></a>
+(different tool grants per specialist).</p><h2 id="plan-then-act">Plan, then act</h2><p>When a task ends in an effect, split deciding from doing:
+<code class="inline">agent.core/run-phased-result-value</code> runs ordered phases in different
+missions while keeping one transcript. The planning phase's mission simply
+has no write tool — the plan cannot execute early because the authority to
+act does not exist yet — and the acting phase carries the plan forward. The
+phase contract, including <code class="inline">terminal_only</code> for decision-only final phases, is
+specified in the <a href="/reference/agent-library-reference/">agent library reference</a>.</p><h2 id="parallel-fan-out">Parallel fan-out</h2><p>When items are independent — one specialist call per document, per ticket,
+per case — fan out with <code class="inline">pmap</code> or <code class="inline">pcalls</code> from the trusted workflow instead
+of looping turn by turn. Bounded parallelism is a limits decision: size the
+shared provider and evaluation limits for the whole fan-out, since every
+branch draws from the same admission queue. See the
+<a href="/reference/kernel-limits-reference/">kernel limits reference</a> for the concurrency
+rows, and use sequential stages instead whenever one stage's output feeds the
+next.</p><h2 id="contracts-instead-of-parsing">Contracts instead of parsing</h2><p>When anything downstream consumes an agent's answer, declare the shape as a
+manifest <code class="inline">result_schema</code> contract and produce the final value with
+<code class="inline">agent.core/run-result-value</code>. Invalid model candidates receive bounded
+correction feedback while turns remain, and the run fails honestly rather
+than shipping a malformed report — so the result's shape is enforced by the
+runtime, never reconstructed by regexes. The contract profile is defined in
+<a href="/reference/application-manifest/#validate-inputs-and-results">Configure an application</a>.</p><h2 id="effects-at-the-edge">Effects at the edge</h2><p>Keep writes in the last possible stage, behind an explicitly allowed effect
+tool, and never automatically retry an indeterminate write — a timeout may
+mean the effect happened. Reconcile the unknown outcome first, then continue.
+Read-side tools can be granted freely by comparison, which is why the earlier
+shapes stay read-only as long as possible. <a href="/guides/connecting-tools-with-mcp/">Connect an MCP
+tool</a> covers effect metadata and <code class="inline">allow</code> lists.</p><h2 id="going-further">Going further</h2><p>The <a href="/guides/designing-agent-workflows/">Design an agent workflow</a> tutorial walks
+the first three shapes on one scenario. For a chapter-by-chapter course that
+grows a multi-specialist agent — including parallel specialists, plan/act
+phases, and effect handling — see the
+<a href="https://github.com/andreasronge/ptc_runner_tutorial">PtcRunner tutorial series</a>,
+which rebuilds the scenarios of the Claude Agent SDK cookbook on PtcRunner.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/designing-agent-workflows/">&larr; Design an agent workflow</a><a class="pager-next" href="/guides/running-and-debugging/">Run and inspect a project &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/agent-workflow-patterns.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

@@ -152,8 +152,8 @@ projects created by `ptc init` include all three patterns in `.gitignore`.
 
 `ptc init DIRECTORY --example NAME` publishes one of the walkthrough projects
 this executable embeds instead of the scaffold, under the same no-replace
-commit. Run `ptc init --help` for the names, or an unknown one to have them
-listed. The trees are byte-identical to the repository's, so the commands the
+commit. Run `ptc init` with an unknown example name to have the embedded
+names listed. The trees are byte-identical to the repository's, so the commands the
 guides print work from wherever the copy was created rather than from one
 checkout directory.
 
