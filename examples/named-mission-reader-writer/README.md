@@ -11,8 +11,8 @@ provider occurrences.
 Both missions install the published
 [`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp) package: one
 installation maps only `read_text_file`, the other only `write_text_file`, each
-with its own confined root. The first run may download that package. Node.js is
-required. Export an OpenRouter key:
+with its own confined root. The first run may download that package. Node.js
+and `npx` are required. Export an OpenRouter key:
 
 ```console
 export OPENROUTER_API_KEY=...

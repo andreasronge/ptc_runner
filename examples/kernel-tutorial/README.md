@@ -29,7 +29,7 @@ ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 They require `OPENROUTER_API_KEY` in that `.env` and use the trusted `deepseek`
 model alias. Follow `ptc docs quickstart` once before running them. Example 03
 launches `ptc-fs-mcp@0.1.0` through `npx`; the first run may download that
-package. Node.js is required.
+package. Node.js and `npx` are required.
 
 Direct manifest invocation with explicit `--env-file` and `--host-config`
 switches remains available as the low-level automation form.

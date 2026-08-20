@@ -21,7 +21,8 @@ The script regenerates the granted `files/` root, launches
 `ptc-fs-mcp@0.1.0` through `ptc-host.json`, runs each journey with
 `--trace-dir` and `--inspect` into one owner-only project artifact root, writes
 the project document beside it, and prints the `mix ptc viewer` command that
-opens it. Node.js is required; the first run may download that package. That
+opens it. Node.js and `npx` are required; the first run may download that
+package. That
 project grants the Viewer the private inspection artifacts, so treat the
 browser tab as a private sink.
 

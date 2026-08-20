@@ -142,9 +142,9 @@ discovery answer, so PtcRunner cannot say the server was reached, only that it
 never received the response needed to prove a protocol mismatch. Raise the
 budgets and run it again. A first launch on a cold npm cache, or any launch on a
 loaded machine, is the usual cause.</p><h2 id="run-the-checked-in-file-agent">Run the checked-in file agent</h2><p>The tutorial launches <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a>
-through <code class="inline">npx</code>. It requires Node.js 22 or newer; the first run may download that
-package.</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
-ptc doctor kernel-tutorial/03-file-agent.ptc-project.json</code></pre><p>Passive doctor validates the application, resolves <code class="inline">node</code>, and checks the
+through <code class="inline">npx</code>. It requires Node.js 22 or newer and <code class="inline">npx</code>; the first run may
+download that package.</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
+ptc doctor kernel-tutorial/03-file-agent.ptc-project.json</code></pre><p>Passive doctor validates the application, resolves <code class="inline">npx</code>, and checks the
 selected installation without loading the model credential or starting the
 server. After completing the <a href="/guides/quickstart/#run-a-model-authored-program">model-authored Quickstart</a>,
 run the agent:</p><pre><code class="console language-console">ptc run kernel-tutorial/03-file-agent.ptc-project.json</code></pre><p>The model sees one prompt-visible <code class="inline">tutorial.files/read-page</code> function. It does

@@ -93,15 +93,15 @@ loaded machine, is the usual cause.
 ## Run the checked-in file agent
 
 The tutorial launches [`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp)
-through `npx`. It requires Node.js 22 or newer; the first run may download that
-package.
+through `npx`. It requires Node.js 22 or newer and `npx`; the first run may
+download that package.
 
 ```console
 ptc init kernel-tutorial --example kernel-tutorial
 ptc doctor kernel-tutorial/03-file-agent.ptc-project.json
 ```
 
-Passive doctor validates the application, resolves `node`, and checks the
+Passive doctor validates the application, resolves `npx`, and checks the
 selected installation without loading the model credential or starting the
 server. After completing the [model-authored Quickstart](../guides/quickstart.md#run-a-model-authored-program),
 run the agent:

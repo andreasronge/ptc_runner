@@ -79,6 +79,8 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
           {"test/support/ptc_fs_mcp.ex", only(["mcp_filesystem"])},
           {"examples/named-mission-reader-writer/ptc-host.json",
            all_false() |> Map.put("core", "true") |> Map.put("mcp_filesystem", "true")},
+          {"examples/kernel-tutorial/ptc-host.json",
+           all_false() |> Map.put("core", "true") |> Map.put("mcp_filesystem", "true")},
           {".claude/skills/precommit/SKILL.md", all_false()},
           {".github/workflows/nightly.yml", all_false()},
           {".github/workflows/soak.yml", all_false()},

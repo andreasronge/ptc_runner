@@ -20,8 +20,8 @@ That example maps one server operation to `workspace.read` and exposes only a
 bounded wrapper to the mission. Its server has its own runtime prerequisite;
 the first provider-free PtcRunner project does not. The server it launches is
 the published [`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp)
-package, via `npx`. The first run may download that package. Node.js is
-required.
+package, via `npx`. The first run may download that package. Node.js and `npx`
+are required.
 
 PtcRunner requires the MCP `2026-07-28` profile and `server/discover`. An
 incompatible endpoint fails closed instead of falling back to a legacy
