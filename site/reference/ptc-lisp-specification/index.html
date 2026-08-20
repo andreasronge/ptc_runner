@@ -1409,11 +1409,11 @@ result validation remains governed by the host capability's JSON Schema.
 Capability input-property names must be stable under the tool boundary's
 hyphen-to-underscore normalization, as must object keys nested in input
 <code class="inline">const</code>/<code class="inline">enum</code> values; the host rejects incompatible schemas rather than
-publishing an exact call that runtime validation cannot accept.</p><h3 id="9-9-introspection">9.9 Introspection</h3><p>Four builtins provide one language-level discovery interface. They answer
+publishing an exact call that runtime validation cannot accept.</p><h3 id="9-9-introspection">9.9 Introspection</h3><p>Five builtins provide one language-level discovery interface. They answer
 identically in the REPL, in generated workflow or mission source, and inside a
-prelude export reading another prelude's documentation. <code class="inline">dir</code> and
-<code class="inline">export-meta</code> describe the attached prelude API; <code class="inline">apropos</code> and <code class="inline">doc</code> also cover
-fixed built-ins and the bounded Java surface.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Form</th><th style="text-align: left;">Result</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">(dir)</code></td><td style="text-align: left;">Sorted vector of namespace names holding public exports</td></tr><tr><td style="text-align: left;"><code class="inline">(dir &quot;ns&quot;)</code></td><td style="text-align: left;">Sorted vector of export refs in <code class="inline">ns</code></td></tr><tr><td style="text-align: left;"><code class="inline">(apropos &quot;term&quot;)</code></td><td style="text-align: left;">Sorted vector of matching prelude refs and canonical fixed-function names</td></tr><tr><td style="text-align: left;"><code class="inline">(doc &quot;name&quot;)</code></td><td style="text-align: left;">Prints prelude or fixed-function documentation, returns <code class="inline">nil</code></td></tr><tr><td style="text-align: left;"><code class="inline">(export-meta &quot;ns/name&quot;)</code></td><td style="text-align: left;">Metadata map, or <code class="inline">nil</code> when unknown</td></tr></tbody></table></div><p>References accept a string, a quoted symbol, or an unquoted symbol (the
+prelude export reading another prelude's documentation. <code class="inline">dir</code>, <code class="inline">export-meta</code>,
+and <code class="inline">source</code> describe the attached prelude API; <code class="inline">apropos</code> and <code class="inline">doc</code> also cover
+fixed built-ins and the bounded Java surface.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Form</th><th style="text-align: left;">Result</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">(dir)</code></td><td style="text-align: left;">Sorted vector of namespace names holding public exports</td></tr><tr><td style="text-align: left;"><code class="inline">(dir &quot;ns&quot;)</code></td><td style="text-align: left;">Sorted vector of export refs in <code class="inline">ns</code></td></tr><tr><td style="text-align: left;"><code class="inline">(apropos &quot;term&quot;)</code></td><td style="text-align: left;">Sorted vector of matching prelude refs and canonical fixed-function names</td></tr><tr><td style="text-align: left;"><code class="inline">(doc &quot;name&quot;)</code></td><td style="text-align: left;">Prints prelude or fixed-function documentation, returns <code class="inline">nil</code></td></tr><tr><td style="text-align: left;"><code class="inline">(export-meta &quot;ns/name&quot;)</code></td><td style="text-align: left;">Metadata map, or <code class="inline">nil</code> when unknown</td></tr><tr><td style="text-align: left;"><code class="inline">(source &quot;ns/name&quot;)</code></td><td style="text-align: left;">Prints the attached prelude defining form, or a miss notice; returns <code class="inline">nil</code></td></tr></tbody></table></div><p>References accept a string, a quoted symbol, or an unquoted symbol (the
 analyzer auto-quotes bare and namespaced symbols in these call positions,
 matching <code class="inline">clojure.repl/doc</code>). Computed arguments still evaluate normally, so
 <code class="inline">(doc (str &quot;ns/&quot; &quot;name&quot;))</code> and <code class="inline">#(doc %)</code> over string refs keep working.
@@ -1449,15 +1449,19 @@ attached export cannot reveal registry documentation through the same
 spelling. <code class="inline">apropos</code> similarly suppresses a colliding registry name when its
 attached export is hidden. This preserves the invariant that attached API
 discovery never advertises something the running program cannot call.</p><p>None of the forms enumerate <code class="inline">data/...</code> values or <code class="inline">tool/...</code> capabilities;
-those appear in the mission inventory. <code class="inline">dir</code> and <code class="inline">export-meta</code> remain attached
-prelude-only because their namespace and structured export records have no
-lossless equivalent for fixed registry entries.</p><p>Both <code class="inline">:prompt</code> and <code class="inline">:discoverable</code> exports are visible, which is how a
-<code class="inline">:discoverable</code> export is found at all. Private <code class="inline">defn-</code> helpers have no export
-record and never appear, and a namespace holding only private helpers is absent
-from <code class="inline">(dir)</code>.</p><p>Attached prelude results are filtered to what the running program may actually
-call. A miss is not a failure: <code class="inline">export-meta</code> returns <code class="inline">nil</code>, <code class="inline">doc</code> prints a
-not-found line, and <code class="inline">dir</code> returns <code class="inline">[]</code>. A blank <code class="inline">apropos</code> query returns <code class="inline">[]</code>
-rather than every fixed and attached function.</p><p><code class="inline">export-meta</code> is not <code class="inline">clojure.core/meta</code>, which takes an object rather than a
+those appear in the mission inventory. <code class="inline">dir</code>, <code class="inline">export-meta</code>, and <code class="inline">source</code>
+remain attached prelude-only: namespace/export records and defining forms have
+no lossless equivalent for fixed registry entries. <code class="inline">source</code> has no registry
+fallthrough at all.</p><p>Both <code class="inline">:prompt</code> and <code class="inline">:discoverable</code> exports are visible to <code class="inline">dir</code>/<code class="inline">doc</code>/
+<code class="inline">export-meta</code>/<code class="inline">apropos</code>, which is how a <code class="inline">:discoverable</code> export is found at
+all. Private <code class="inline">defn-</code> helpers have no export record and never appear there, and
+a namespace holding only private helpers is absent from <code class="inline">(dir)</code>. <code class="inline">source</code> is
+the exception for implementation inspection: it also reveals private helpers
+that are transitively reachable from a public export.</p><p>Attached prelude results for <code class="inline">dir</code>/<code class="inline">doc</code>/<code class="inline">apropos</code>/<code class="inline">export-meta</code> are filtered
+to what the running program may actually call. A miss is not a failure:
+<code class="inline">export-meta</code> returns <code class="inline">nil</code>, <code class="inline">doc</code> and <code class="inline">source</code> print a not-found line, and
+<code class="inline">dir</code> returns <code class="inline">[]</code>. A blank <code class="inline">apropos</code> query returns <code class="inline">[]</code> rather than every
+fixed and attached function.</p><p><code class="inline">export-meta</code> is not <code class="inline">clojure.core/meta</code>, which takes an object rather than a
 reference string and is not implemented.</p><h2 id="10-complete-examples">10. Complete Examples</h2><h3 id="10-1-filter-and-sum-pure-query">10.1 Filter and Sum (Pure Query)</h3><p>Filter expenses by category and sum amounts:</p><pre><code class="clojure language-clojure">(-&gt;&gt; data/expenses
      (filter (fn [e] (= (:category e) &quot;travel&quot;)))
      (sum-by :amount))</code></pre><p>Returns a number. No memory is updated because the program contains no <code class="inline">def</code>;

@@ -143,7 +143,8 @@ context, not only at a terminal: `(apropos "term")` / `(apropos term)` searches
 attached prelude exports, fixed built-ins, and the bounded Java surface, while
 `(doc "name")` / `(doc name)` prints documentation. `(dir)` and
 `(export-meta "ns/name")` / `(export-meta ns/name)` inspect the attached
-prelude API specifically. Unquoted and quoted symbols are accepted the same
+prelude API specifically, and `(source ns/name)` prints an attached prelude
+defining form when available. Unquoted and quoted symbols are accepted the same
 way as strings. An attached interactive terminal prints
 this guidance in its startup banner, and `:help` repeats it. Detached input,
 scripts, repeated `--eval`, stdin mode, and JSONL output do not print the

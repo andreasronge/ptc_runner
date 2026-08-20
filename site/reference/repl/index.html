@@ -159,7 +159,8 @@ context, not only at a terminal: <code class="inline">(apropos &quot;term&quot;)
 attached prelude exports, fixed built-ins, and the bounded Java surface, while
 <code class="inline">(doc &quot;name&quot;)</code> / <code class="inline">(doc name)</code> prints documentation. <code class="inline">(dir)</code> and
 <code class="inline">(export-meta &quot;ns/name&quot;)</code> / <code class="inline">(export-meta ns/name)</code> inspect the attached
-prelude API specifically. Unquoted and quoted symbols are accepted the same
+prelude API specifically, and <code class="inline">(source ns/name)</code> prints an attached prelude
+defining form when available. Unquoted and quoted symbols are accepted the same
 way as strings. An attached interactive terminal prints
 this guidance in its startup banner, and <code class="inline">:help</code> repeats it. Detached input,
 scripts, repeated <code class="inline">--eval</code>, stdin mode, and JSONL output do not print the

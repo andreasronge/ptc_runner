@@ -3540,10 +3540,10 @@ publishing an exact call that runtime validation cannot accept.
 
 ### 9.9 Introspection
 
-Four builtins provide one language-level discovery interface. They answer
+Five builtins provide one language-level discovery interface. They answer
 identically in the REPL, in generated workflow or mission source, and inside a
-prelude export reading another prelude's documentation. `dir` and
-`export-meta` describe the attached prelude API; `apropos` and `doc` also cover
+prelude export reading another prelude's documentation. `dir`, `export-meta`,
+and `source` describe the attached prelude API; `apropos` and `doc` also cover
 fixed built-ins and the bounded Java surface.
 
 | Form | Result |
@@ -3553,6 +3553,7 @@ fixed built-ins and the bounded Java surface.
 | `(apropos "term")` | Sorted vector of matching prelude refs and canonical fixed-function names |
 | `(doc "name")` | Prints prelude or fixed-function documentation, returns `nil` |
 | `(export-meta "ns/name")` | Metadata map, or `nil` when unknown |
+| `(source "ns/name")` | Prints the attached prelude defining form, or a miss notice; returns `nil` |
 
 References accept a string, a quoted symbol, or an unquoted symbol (the
 analyzer auto-quotes bare and namespaced symbols in these call positions,
@@ -3610,19 +3611,23 @@ attached export is hidden. This preserves the invariant that attached API
 discovery never advertises something the running program cannot call.
 
 None of the forms enumerate `data/...` values or `tool/...` capabilities;
-those appear in the mission inventory. `dir` and `export-meta` remain attached
-prelude-only because their namespace and structured export records have no
-lossless equivalent for fixed registry entries.
+those appear in the mission inventory. `dir`, `export-meta`, and `source`
+remain attached prelude-only: namespace/export records and defining forms have
+no lossless equivalent for fixed registry entries. `source` has no registry
+fallthrough at all.
 
-Both `:prompt` and `:discoverable` exports are visible, which is how a
-`:discoverable` export is found at all. Private `defn-` helpers have no export
-record and never appear, and a namespace holding only private helpers is absent
-from `(dir)`.
+Both `:prompt` and `:discoverable` exports are visible to `dir`/`doc`/
+`export-meta`/`apropos`, which is how a `:discoverable` export is found at
+all. Private `defn-` helpers have no export record and never appear there, and
+a namespace holding only private helpers is absent from `(dir)`. `source` is
+the exception for implementation inspection: it also reveals private helpers
+that are transitively reachable from a public export.
 
-Attached prelude results are filtered to what the running program may actually
-call. A miss is not a failure: `export-meta` returns `nil`, `doc` prints a
-not-found line, and `dir` returns `[]`. A blank `apropos` query returns `[]`
-rather than every fixed and attached function.
+Attached prelude results for `dir`/`doc`/`apropos`/`export-meta` are filtered
+to what the running program may actually call. A miss is not a failure:
+`export-meta` returns `nil`, `doc` and `source` print a not-found line, and
+`dir` returns `[]`. A blank `apropos` query returns `[]` rather than every
+fixed and attached function.
 
 `export-meta` is not `clojure.core/meta`, which takes an object rather than a
 reference string and is not implemented.

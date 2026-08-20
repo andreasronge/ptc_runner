@@ -101,7 +101,7 @@ defmodule PtcRunner.ReplFrontendTest do
     output = capture_io(":help\n:quit\n", fn -> run_repl([], terminal_attached: true) end)
 
     assert output =~
-             ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir) and (export-meta "ns/name").|
+             ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir), (export-meta "ns/name"), and (source ns/name).|
 
     assert output =~ "Commands:\n  :help"
 
@@ -1008,7 +1008,7 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output =~ "Analysis trace:"
 
     assert output =~
-             ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir) and (export-meta "ns/name").|
+             ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir), (export-meta "ns/name"), and (source ns/name).|
   end
 
   @tag :tmp_dir

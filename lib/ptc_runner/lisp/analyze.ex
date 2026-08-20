@@ -433,13 +433,13 @@ defmodule PtcRunner.Lisp.Analyze do
      {:invalid_arity, :quote, "(quote symbol) requires exactly 1 symbol, got #{length(args)}"}}
   end
 
-  # Discovery forms (`doc`/`dir`/`apropos`/`export-meta`) are ordinary env
+  # Discovery forms (`doc`/`dir`/`apropos`/`export-meta`/`source`) are ordinary env
   # specials, but their *ref* argument is macro-like (clojure.repl/doc style,
   # issue #1094): a bare or namespaced symbol is auto-quoted to a
   # `{:symbol_ref, _}` instead of being evaluated to a closure/builtin first.
   # `dir` with no args stays an ordinary zero-arity call.
   defp dispatch_list_form({:symbol, head}, args, _list, tail?)
-       when head in [:doc, :apropos, :"export-meta"] do
+       when head in [:doc, :apropos, :"export-meta", :source] do
     analyze_discovery_call(head, args, tail?)
   end
 

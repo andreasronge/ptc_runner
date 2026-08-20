@@ -135,7 +135,7 @@ Features marked ✅ in the audit but whose behavior diverges from Clojure.
 
 Functions listed as `🔲 candidate` in the audit that showed up in conformance testing.
 
-### Note: `dir`, `doc`, `apropos`, and `export-meta` are PTC extensions
+### Note: `dir`, `doc`, `apropos`, `export-meta`, and `source` are PTC extensions
 
 PTC-Lisp binds these names to language introspection (see *Introspection* in
 the specification). They are not implementations of
@@ -143,11 +143,12 @@ the specification). They are not implementations of
 `clojure.core/meta`, and they carry no `clojure_var` in `priv/functions.exs`:
 they take a reference (string, quoted symbol, or unquoted symbol via the same
 macro-like rewrite as `clojure.repl/doc`) rather than a Clojure var or object.
-`dir` and `export-meta` read attached public prelude exports; `apropos` and
-`doc` also cover PTC-Lisp's fixed registry and bounded Java surface. The
-corresponding Clojure vars remain unimplemented — PTC-Lisp has no var
-namespace to reflect over, and `clojure.core/meta` has no metadata-carrying
-object model to return (and stays a normal function, not a discovery form).
+`dir`, `export-meta`, and `source` read attached prelude exports (`source`
+also covers reachable private helpers); `apropos` and `doc` also cover
+PTC-Lisp's fixed registry and bounded Java surface. The corresponding Clojure
+vars remain unimplemented — PTC-Lisp has no var namespace to reflect over, and
+`clojure.core/meta` has no metadata-carrying object model to return (and stays
+a normal function, not a discovery form).
 
 ### GAP-C01: `int?` predicate not implemented
 

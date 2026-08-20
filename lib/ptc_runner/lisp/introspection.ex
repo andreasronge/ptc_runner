@@ -2,18 +2,19 @@ defmodule PtcRunner.Lisp.Introspection do
   @moduledoc """
   Read-only introspection over the callable PTC-Lisp surface.
 
-  Backs the `dir`, `apropos`, `doc`, and `export-meta` builtins. `dir` and
-  `export-meta` describe the attached prelude. `apropos` and `doc` additionally
-  expose fixed built-ins and the bounded Java surface from
-  `PtcRunner.Lisp.Registry`. The same
-  answers are produced in the REPL, in workflow and mission source, and inside
-  a prelude export reading another prelude's documentation — there is no
-  REPL-only path.
+  Backs the `dir`, `apropos`, `doc`, `export-meta`, and `source` builtins.
+  `dir`, `export-meta`, and `source` describe the attached prelude. `apropos`
+  and `doc` additionally expose fixed built-ins and the bounded Java surface
+  from `PtcRunner.Lisp.Registry`. The same answers are produced in the REPL, in
+  workflow and mission source, and inside a prelude export reading another
+  prelude's documentation — there is no REPL-only path.
 
   Ref arguments accept a string or a `{:symbol_ref, name}` runtime value (from
   a quoted symbol, or from the analyzer's bare-symbol rewrite on these forms).
   `meta` is intentionally not included: in Clojure it is an ordinary function
-  over values, not a discovery form.
+  over values, not a discovery form. `source` resolves only against the
+  attached prelude's compile-time `source_index` — there is no registry
+  fallthrough.
 
   ## Attached prelude visibility
 
@@ -75,11 +76,17 @@ defmodule PtcRunner.Lisp.Introspection do
   alias PtcRunner.Lisp.Registry
 
   @type visible :: (Export.t() -> boolean())
-  @type operation :: :dir | :apropos | :doc | :export_meta
+  @type operation :: :dir | :apropos | :doc | :export_meta | :source
 
-  @operations [:dir, :apropos, :doc, :export_meta]
-  @arities %{dir: [0, 1], apropos: [1], doc: [1], export_meta: [1]}
-  @names %{dir: "dir", apropos: "apropos", doc: "doc", export_meta: "export-meta"}
+  @operations [:dir, :apropos, :doc, :export_meta, :source]
+  @arities %{dir: [0, 1], apropos: [1], doc: [1], export_meta: [1], source: [1]}
+  @names %{
+    dir: "dir",
+    apropos: "apropos",
+    doc: "doc",
+    export_meta: "export-meta",
+    source: "source"
+  }
 
   @doc "The introspection operations bound as `{:special, op}` builtins."
   @spec operations() :: [operation()]
@@ -116,6 +123,9 @@ defmodule PtcRunner.Lisp.Introspection do
 
   defp invoke_normalized(:doc, [ref], %EvalContext{} = context) when is_binary(ref),
     do: {:print, render_doc(context.prelude, ref, filter(context))}
+
+  defp invoke_normalized(:source, [ref], %EvalContext{} = context) when is_binary(ref),
+    do: {:print, render_source(context.prelude, ref)}
 
   defp invoke_normalized(op, args, %EvalContext{}) when op in @operations do
     name = Map.fetch!(@names, op)
@@ -266,6 +276,23 @@ defmodule PtcRunner.Lisp.Introspection do
     end
   end
 
+  @doc """
+  Rendered defining form for one attached prelude ref, or a miss notice.
+
+  Resolves only against `Prelude.source_index` — public exports and private
+  helpers transitively reachable from a public export. There is no registry or
+  filesystem fallthrough. Callers print this rather than returning it.
+  """
+  @spec render_source(Prelude.t() | nil, String.t()) :: String.t()
+  def render_source(%Prelude{source_index: index}, ref) when is_binary(ref) and is_map(index) do
+    case Map.fetch(index, ref) do
+      {:ok, source} -> source
+      :error -> missing_source(ref)
+    end
+  end
+
+  def render_source(_prelude, ref) when is_binary(ref), do: missing_source(ref)
+
   # ============================================================
   # Internals
   # ============================================================
@@ -294,6 +321,7 @@ defmodule PtcRunner.Lisp.Introspection do
   defp hidden_registry_names(_prelude, _visible), do: MapSet.new()
 
   defp missing_doc(ref), do: ~s(No documentation found for "#{ref}".)
+  defp missing_source(ref), do: "no source available for #{ref}"
 
   defp render_registry_entry(entry) do
     details =

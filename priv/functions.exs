@@ -2843,7 +2843,7 @@
         "Only namespaces holding at least one visible public export are listed; a namespace of " <>
           "private `defn-` helpers does not appear. An unknown namespace returns an empty vector. " <>
           "The one-argument form is macro-like over its namespace ref: unquoted, quoted, or string.",
-      see_also: ["apropos", "doc", "export-meta"],
+      see_also: ["apropos", "doc", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil
     },
@@ -2865,7 +2865,7 @@
           "Qualified Java aliases in signatures are searchable; fixed results use canonical " <>
           "names. Results are sorted and deduplicated. A blank query returns an empty vector. " <>
           "Macro-like over the query: accepts an unquoted symbol, a quoted symbol, or a string.",
-      see_also: ["dir", "doc", "export-meta"],
+      see_also: ["dir", "doc", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil
     },
@@ -2888,7 +2888,7 @@
           "Macro-like over the ref: accepts an unquoted symbol (`str`, `ns/name`), a quoted " <>
           "symbol (`'ns/name`), or a string. Use `export-meta` for attached export information " <>
           "as data. A miss prints a not-found line and still returns `nil`.",
-      see_also: ["apropos", "dir", "export-meta"],
+      see_also: ["apropos", "dir", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil
     },
@@ -2913,8 +2913,31 @@
           "over the ref: accepts an unquoted symbol, a quoted symbol, or a string. This is " <>
           "not `clojure.core/meta`, which takes an object rather than a reference and is not " <>
           "implemented.",
-      see_also: ["apropos", "dir", "doc"],
+      see_also: ["apropos", "dir", "doc", "source"],
       clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "source",
+      description:
+        "Prints the defining form of an attached prelude ref and returns `nil`.",
+      binding: :special,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(source ref)"],
+      since: nil,
+      section: "Introspection",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "Like `clojure.repl/source`, prints the rendered defining form and returns nil so " <>
+          "source flows through the print budget. Resolves ONLY against the attached prelude " <>
+          "`source_index` — no registry or filesystem fallthrough; an unknown ref prints " <>
+          "\"no source available\" and still returns nil. Covers public exports plus private " <>
+          "helpers transitively reachable from a public export. Reveals implementation, not " <>
+          "just contract. Macro-like over the ref: unquoted symbol, quoted symbol, or string.",
+      see_also: ["apropos", "dir", "doc", "export-meta"],
+      clojure_var: "source",
       divergences: nil
     },
     %{
