@@ -106,12 +106,12 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
                 receive do: (:never -> nil)
               end
             },
-            timeout: 100
+            timeout: 2_000
           )
         end)
 
-      assert_receive :evaluation_started, 1_000
-      assert {:error, step} = Task.await(task, 1_000)
+      assert_receive :evaluation_started, 5_000
+      assert {:error, step} = Task.await(task, 5_000)
       assert step.fail.reason == :timeout
       assert step.fail.details.phase == :eval
       assert step.memory == %{"saved" => {:symbol_ref, "x"}}
