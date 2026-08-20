@@ -465,8 +465,25 @@ defmodule PtcRunner.Kernel.RunConfig do
         limits.evaluation_memory_bytes + limits.evaluation_history_bytes,
       evaluation_busy?: true,
       evaluation_missions: Map.keys(missions) |> Enum.sort(),
-      errors: @maximum_repl_errors
+      errors: @maximum_repl_errors,
+      capability_refusals: maximum_capability_refusals()
     }
+  end
+
+  # Closed class keys cannot be grown from caller input, but a trusted resolver
+  # may still mint unrecognized atoms. Distinct keys are capped at the same
+  # limit RunState enforces, plus `$overflow`, and reserved at fingerprint
+  # length so a named class cannot enlarge run-stopped past event_payload_bytes.
+  defp maximum_capability_refusals do
+    fingerprint = "sha256:" <> String.duplicate("f", 64)
+    count = 4_294_967_295
+    limit = SafeMetadata.capability_refusal_map_limit()
+
+    1..limit
+    |> Map.new(fn index ->
+      {"workflow/#{fingerprint}/#{fingerprint}-#{index}", count}
+    end)
+    |> Map.put("$overflow", count)
   end
 
   defp maximum_call_map(capabilities, total_limit, per_name_limit) do

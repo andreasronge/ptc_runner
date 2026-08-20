@@ -710,6 +710,8 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
          {:ok, evaluations_by_mission} <-
            count_map(Map.get(usage, :evaluations_by_mission, %{})),
          {:ok, events_dropped} <- count_map(Map.get(usage, :events_dropped, %{})),
+         {:ok, capability_refusals} <-
+           count_map(Map.get(usage, :capability_refusals, %{}), 192),
          values <-
            %{
              "remaining_ms" => Map.get(usage, :remaining_ms),
@@ -721,7 +723,8 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
              "evaluation_memory_bytes" => Map.get(usage, :evaluation_memory_bytes),
              "evaluation_history_bytes" => Map.get(usage, :evaluation_history_bytes),
              "evaluation_continuation_bytes" => Map.get(usage, :evaluation_continuation_bytes),
-             "events_dropped" => events_dropped
+             "events_dropped" => events_dropped,
+             "capability_refusals" => capability_refusals
            }
            |> Map.merge(llm_usage_projection(terminal_batch)),
          true <-
@@ -791,9 +794,12 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
 
   defp capability_calls(_calls), do: {:error, :invalid_usage}
 
-  defp count_map(counts) when is_map(counts) do
+  defp count_map(counts, max_key_bytes \\ 128)
+
+  defp count_map(counts, max_key_bytes)
+       when is_map(counts) and is_integer(max_key_bytes) and max_key_bytes > 0 do
     if Enum.all?(counts, fn {name, count} ->
-         is_binary(name) and byte_size(name) in 1..128 and nonnegative?(count)
+         is_binary(name) and byte_size(name) in 1..max_key_bytes and nonnegative?(count)
        end) do
       {:ok, counts}
     else
@@ -801,7 +807,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     end
   end
 
-  defp count_map(_counts), do: {:error, :invalid_usage}
+  defp count_map(_counts, _max_key_bytes), do: {:error, :invalid_usage}
 
   defp evaluation_memory_projection(memory) when is_map(memory) do
     values =

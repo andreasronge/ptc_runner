@@ -80,6 +80,25 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert {:error, :limit_exceeded} = RunState.reserve_capability(state, :workflow, "other")
   end
 
+  test "capability refusals fold extra classes into overflow" do
+    {:ok, state} = RunState.start(Limits.defaults())
+    limit = SafeMetadata.capability_refusal_map_limit()
+
+    for index <- 1..limit do
+      assert :ok =
+               RunState.record_capability_refusal(state, "workflow/limit_exceeded/k#{index}")
+    end
+
+    assert :ok = RunState.record_capability_refusal(state, "workflow/limit_exceeded/k1")
+    assert :ok = RunState.record_capability_refusal(state, "workflow/provider_error/extra")
+
+    refusals = RunState.usage(state).capability_refusals
+    assert refusals["workflow/limit_exceeded/k1"] == 2
+    assert refusals["$overflow"] == 1
+    refute Map.has_key?(refusals, "workflow/provider_error/extra")
+    assert map_size(refusals) == limit + 1
+  end
+
   test "run state preserves a supplied absolute deadline instead of resetting it" do
     limits = Limits.defaults()
 
@@ -2940,6 +2959,32 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert mission_started.data.environment == :mission
     assert mission_stopped.data.environment == :mission
     assert workflow_stopped.data.environment == :workflow
+  end
+
+  test "runner-added kernel-eval errors are not counted as capability refusals" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "kernel-eval-unknown-mission")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: value, usage: usage}} =
+             Kernel.run(
+               ~S|(return (tool/kernel-eval {:mission "missing" :kind :source :source "(return 1)"}))|,
+               config
+             )
+
+    assert value["status"] == "error"
+    assert value["reason"] == "unknown_mission"
+    assert usage.capability_refusals == %{}
   end
 
   test "workflow kernel-eval restores quoted-symbol identity inside the parent evaluator" do

@@ -367,8 +367,14 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
     canonical = File.read!(path)
     refute canonical =~ enum_literal
     refute canonical =~ submitted
-    refute canonical =~ "invalid_arguments"
     refute canonical =~ ~s|"details":|
+
+    # The closed class is public on usage; argument values and schema details are not.
+    [stopped] = Enum.filter(events, &(&1.type == "run-stopped"))
+
+    assert stopped.data.usage.capability_refusals == %{
+             "workflow/protocol_error/invalid_arguments" => 1
+           }
   end
 
   defp dispatch(schema, arguments, semantic_validator \\ nil) do

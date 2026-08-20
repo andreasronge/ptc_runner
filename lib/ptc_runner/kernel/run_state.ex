@@ -4,7 +4,8 @@ defmodule PtcRunner.Kernel.RunState do
 
   One GenServer owns the deadline, open/closed status, workflow and mission
   capability counters, optional per-route call counters keyed by
-  `{public name, route key}`, live provider-task count, protocol errors, subordinate
+  `{public name, route key}`, live provider-task count, protocol errors,
+  payload-free capability-refusal counts, subordinate
   evaluation and source-check counts, terminal failure,
   evaluation-continuation lease and revision, and committed native evaluation
   memory/history.
@@ -61,6 +62,7 @@ defmodule PtcRunner.Kernel.RunState do
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.RetainedSize
 
@@ -426,6 +428,20 @@ defmodule PtcRunner.Kernel.RunState do
   @spec record_agent_protocol_error(t()) :: :ok | {:error, :closed}
   def record_agent_protocol_error(state), do: safe_call(state, :agent_protocol_error, :ok)
 
+  @doc """
+  Records one capability-callback error under its closed rejection class.
+
+  The count is observational: it does not consume a budget or close the run.
+  Keys are produced by `SafeMetadata.capability_refusal_key/2`. Distinct class
+  keys are capped at `SafeMetadata.capability_refusal_map_limit/0`; further
+  classes increment `$overflow`. Recording after the run has closed is
+  intentional — `run_closed` refusals happen then.
+  """
+  @spec record_capability_refusal(t(), binary()) :: :ok
+  def record_capability_refusal(state, key)
+      when is_binary(key) and byte_size(key) in 1..192,
+      do: safe_call(state, {:record_capability_refusal, key}, :ok)
+
   @doc false
   @spec record_llm_usage(t(), binary(), binary(), atom(), map() | nil) :: :ok | {:error, :closed}
   def record_llm_usage(state, alias_name, revision, status, usage)
@@ -565,6 +581,7 @@ defmodule PtcRunner.Kernel.RunState do
        source_checks: 0,
        protocol_errors: 0,
        agent_protocol_errors: 0,
+       capability_refusals: %{},
        llm_usage: %{},
        replay_misses: MapSet.new(),
        llm_provider_failures: MapSet.new(),
@@ -1008,6 +1025,16 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_call({token, :agent_protocol_error}, _from, %{token: token} = state) do
     {:reply, :ok, %{state | agent_protocol_errors: state.agent_protocol_errors + 1}}
+  end
+
+  def handle_call(
+        {token, {:record_capability_refusal, key}},
+        _from,
+        %{token: token} = state
+      )
+      when is_binary(key) and byte_size(key) in 1..192 do
+    {:reply, :ok,
+     %{state | capability_refusals: put_capability_refusal(state.capability_refusals, key)}}
   end
 
   def handle_call(
@@ -1842,6 +1869,21 @@ defmodule PtcRunner.Kernel.RunState do
   defp capability_limits(limits, :mission),
     do: {limits.mission_capability_calls, limits.mission_capability_calls_per_name}
 
+  defp put_capability_refusal(refusals, key) do
+    limit = SafeMetadata.capability_refusal_map_limit()
+
+    cond do
+      Map.has_key?(refusals, key) ->
+        Map.update!(refusals, key, &(&1 + 1))
+
+      map_size(Map.delete(refusals, "$overflow")) < limit ->
+        Map.put(refusals, key, 1)
+
+      true ->
+        Map.update(refusals, "$overflow", 1, &(&1 + 1))
+    end
+  end
+
   defp usage_projection(state) do
     %{
       closed?: state.closed?,
@@ -1852,6 +1894,7 @@ defmodule PtcRunner.Kernel.RunState do
       subordinate_source_checks: state.source_checks,
       protocol_errors: state.protocol_errors,
       agent_protocol_errors: state.agent_protocol_errors,
+      capability_refusals: state.capability_refusals,
       llm_spend: LLMUsageSummary.spend(state.llm_usage),
       evaluation_memory_bytes:
         continuations_total(state.continuations, :memory, state.limits.evaluation_memory_bytes),

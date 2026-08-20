@@ -1096,6 +1096,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       "evaluation_history_bytes" => 0,
       "evaluation_continuation_bytes" => 0,
       "events_dropped" => %{},
+      "capability_refusals" => %{},
       "llm_usage_state" => "available",
       "llm_usage" => [],
       "llm_usage_by_model" => [],

@@ -22,14 +22,18 @@ defmodule PtcRunner.Kernel.ToolGrant do
 
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Environment
+  alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.SafeMetadata
 
   @doc """
   Returns the capability dispatch callbacks plus reserved runtime routes for
   one environment.
 
   Callers add their own environment-specific routes (`kernel-eval`, the
-  workflow inventory routes, `TrustedTool` wrapping) to the result.
+  workflow inventory routes, `TrustedTool` wrapping) to the result. Those
+  extra routes are not capability callbacks and are not refusal-counted;
+  wrapping happens inside this grant, after `RuntimeTools.tools/5` is merged.
   """
   @spec capability_callbacks(
           term(),
@@ -97,5 +101,28 @@ defmodule PtcRunner.Kernel.ToolGrant do
         mission_name: Map.get(dispatch_context, :mission_name)
       )
     )
+    |> Map.new(fn {name, callback} ->
+      {name, wrap_refusal_counter(state, kind, callback)}
+    end)
   end
+
+  # Close over only the owner handle and environment atom. Capturing the
+  # environment map here would copy it once per callback on sandbox hand-over.
+  defp wrap_refusal_counter(state, kind, callback) do
+    fn arguments ->
+      result = callback.(arguments)
+      _ = maybe_record_capability_refusal(state, kind, result)
+      result
+    end
+  end
+
+  defp maybe_record_capability_refusal(state, kind, %{status: :error} = result)
+       when is_map(result) and not is_struct(result) do
+    RunState.record_capability_refusal(
+      state,
+      SafeMetadata.capability_refusal_key(kind, result)
+    )
+  end
+
+  defp maybe_record_capability_refusal(_state, _kind, _result), do: :ok
 end
