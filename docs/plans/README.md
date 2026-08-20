@@ -11,9 +11,9 @@ belongs in guides or retained specifications.
 
 - [`faster-hooks.md`](faster-hooks.md)
   records measured warm times for the git pre-commit hook, `mix precommit`,
-  and git pre-push, and the slices that can still shrink them. The 185s
-  `async: false` serial floor is the only way to make push substantially
-  faster; overlapping more gates on push is already spent.
+  and git pre-push, and the slices that can still shrink them. `mix precommit`
+  is quality-only (slice 3). The serial test floor is the remaining way to
+  make push substantially faster; `command_engine_test.exs` is split.
 
 ## Remaining Kernel product work
 

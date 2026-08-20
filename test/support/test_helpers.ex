@@ -10,6 +10,21 @@ defmodule PtcRunner.TestSupport.TestHelpers do
   @doc "Dummy tool that ignores name and args and returns :ok"
   def dummy_tool(_name, _args), do: :ok
 
+  @doc "A minimal valid application manifest. Merge `overrides` onto the top-level map."
+  def valid_manifest(overrides \\ %{}) do
+    base = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "app", "path" => "main.clj"}],
+        "entry" => "app/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
+
+    Map.merge(base, overrides)
+  end
+
   @doc "Builds the complete canonical dispatch context used by Kernel tests."
   def dispatch_context(state, environment, timeout_ms, opts \\ [])
       when environment in [:workflow, :mission] do

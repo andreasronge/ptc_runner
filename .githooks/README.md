@@ -41,11 +41,15 @@ diagnosing a failure or pushing from a machine too small to overlap them.
 For an ordinary push, run `git push` and let the hook execute the complete gate
 once. "Complete" excludes `:nightly` tests, which spawn Mix/OS processes or
 wait on multi-second deadlines and run in the `Nightly` workflow instead;
-everything else runs. `git push --no-verify` skips this hook entirely (Git
-never execs it). `git push --dry-run` still runs the hook — dry-run only
-skips sending refs. Run `mix prepush` directly only to diagnose that portion of the gate or
-when hooks are unavailable; do not run it immediately before a normal
-`git push`.
+everything else runs. `mix precommit` is the quality gate (nested fetch plus
+format, compile, credo, duplication, spec, and generated-artifact checks).
+It does not run the suite, Viewer, launcher, Dialyzer, ExDoc, or release —
+those belong here. Do not run `mix precommit` and then `git push --no-verify`:
+pre-push still adds Dialyzer and ExDoc. `git push --no-verify` skips this
+hook entirely (Git never execs it). `git push --dry-run` still runs the hook
+— dry-run only skips sending refs. Run `mix prepush` directly only to
+diagnose static analysis or Dialyzer, or when hooks are unavailable; do not
+run it immediately before a normal `git push`.
 
 Fresh clones and worktrees should follow the bootstrap commands in `AGENTS.md`.
 Linked worktrees share installed hook wrappers but keep their own build and

@@ -28,7 +28,7 @@ end
 #
 #   `:nightly` is deliberately NOT `:slow`. `:slow` means only "skip on the
 #   fast pre-commit path" and is consumed solely by `.githooks/pre-commit`;
-#   those tests still run in `precommit`, pre-push, and CI. Excluding `:slow`
+#   those tests still run in pre-push and CI. Excluding `:slow`
 #   globally removed ten correctness tests -- cross-runtime append leases,
 #   hard-link lease aliasing, concurrent same-path appends, input-size
 #   bounding, and the pre-push gate's own tests -- from every PR gate to save

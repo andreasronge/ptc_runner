@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+### Changed
+
+- `mix precommit` is nested fetch plus the quality scripts. The suite, Viewer,
+  launcher package, and release verification run on `git push` (and in GitHub
+  Actions), so an agent that already ran `mix precommit` should not follow it
+  with `git push --no-verify`: pre-push still adds Dialyzer and ExDoc.
+
 ### Added
 
 - ptc-runner.dev now serves the guides, installation routes, and reference

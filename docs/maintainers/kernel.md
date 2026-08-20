@@ -424,13 +424,8 @@ Prefer contract-level integration tests over tests that mirror implementation:
 - agent library tests for shipped workflow policy; and
 - Java oracle/conformance tests for admitted Java behavior.
 
-Run focused tests while editing, then:
-
-```bash
-mix precommit
-MIX_ENV=dev mix docs --warnings-as-errors  # when documentation changed
-```
-
+Run focused tests while editing, then `mix precommit` for quality. When
+documentation changed, also run `MIX_ENV=dev mix docs --warnings-as-errors`.
 For an ordinary push, let the tracked pre-push hook invoke the same
 repository-owned root, Viewer, launcher, release, and documentation scripts as
 GitHub Actions. Invoke `mix prepush` directly only for static or Dialyzer

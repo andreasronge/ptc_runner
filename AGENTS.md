@@ -59,16 +59,15 @@ how it was verified.
   path dependency (`ptc_runner_launcher/` or `ptc_viewer/`), run a normal
   `mix compile` once. Runtime manifests, host configuration, external inputs,
   and component override descriptors and sources remain live.
-- `mix precommit` — comprehensive local quality gate (nested-project dependency
-  preflight, format, compile, compile cycles, stable-CLI callers, credo,
-  duplication, spec, generated-artifact staleness, root/Viewer/launcher tests,
-  core-package and standalone release verification); run before every commit.
-  Much broader than the fast, staged-file Git pre-commit hook; takes a few
-  minutes in a fresh worktree. Every gate fetches the Mix project it compiles,
-  so an unfetched `ptc_viewer/` or `ptc_runner_launcher/` repairs itself
-  instead of failing the run.
+- `mix precommit` — local quality gate: nested-project fetch then format,
+  compile, compile cycles, credo, duplication, spec, and generated-artifact
+  staleness. Run it before a commit, or skip it and let `git push` be the
+  CI-equivalent gate. It does not run the suite, Viewer, launcher, Dialyzer,
+  ExDoc, or release — those belong to pre-push. The git pre-commit hook is
+  the fast staged-file path. Do not follow `mix precommit` with
+  `git push --no-verify`: pre-push still adds Dialyzer and ExDoc.
 - `scripts/ci/core-tests.sh` — canonical core compile/test gate used by
-  `mix precommit`, pre-push, and GitHub Actions. It always sets `CI=1`, so
+  pre-push and GitHub Actions. It always sets `CI=1`, so
   StreamData runs the same 300 cases locally and remotely, while retaining all
   native schedulers by default. Use `scripts/ci/core-tests.sh --schedulers 4`
   to reproduce GitHub's current CPU shape; this does not emulate Linux.
@@ -85,9 +84,10 @@ how it was verified.
   When one fires, run its matching write form — `mix ptc.gen_docs` for
   generated docs and schemas, or `mix ptc.conformance_report --write-inventory`
   for `conformance_inventory.json` — then stage the result. Do not run
-  `mix prepush` immediately before an ordinary push;
-  invoke it directly only for static/Dialyzer diagnosis or when hooks are
-  unavailable. PR CI runs the same scripts as individual jobs. The test suite uses
+  `mix precommit` and then a verified push of the same tree as a substitute
+  for the hook, and do not run `mix prepush` immediately before an ordinary
+  push; invoke `mix prepush` only for static/Dialyzer diagnosis or when hooks
+  are unavailable. PR CI runs the same scripts as individual jobs. The test suite uses
   `System.schedulers_online()` concurrent cases; do not reduce that pressure
   to make a failing push pass.
 - `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`).
@@ -100,8 +100,8 @@ how it was verified.
   The `Nightly` workflow runs them daily; run it locally when you touch the
   `mix ptc run` downstream path, example operator walks, Mix-process CLI
   wrappers, or the benchmark task. That workflow also runs the packaged
-  interactive REPL PTY check (`expect` + `ptc repl`); PR `core-release` and
-  `mix precommit` skip it via `PTC_SKIP_PTY_GATE`. Never add `--trace` (or
+  interactive REPL PTY check (`expect` + `ptc repl`); PR `core-release`
+  skips it via `PTC_SKIP_PTY_GATE`. Never add `--trace` (or
   `--slowest`, which implies it) to a suite you want to finish quickly: it
   pins `--max-cases` to 1.
 - `mix soak` — the `:soak` memory-leak suite; the scheduled `Soak` workflow
@@ -113,7 +113,7 @@ how it was verified.
   tests, not to in-process correctness cases that happen to take a few
   hundred milliseconds. `:slow` means only "skip on the fast pre-commit
   path" and is read solely by `.githooks/pre-commit`; those tests still run
-  in `precommit`, pre-push, and CI. Excluding `:slow` globally once dropped
+  in pre-push and CI. Excluding `:slow` globally once dropped
   ten correctness tests from every PR to save 14.2 s.
 - Fix all failures before committing/pushing.
 
@@ -155,8 +155,8 @@ load-sensitive failures.
   shown on ptc-runner.dev and HexDocs both come from the documentation
   groups in `mix.exs`.
 - `ptc_viewer/` — separate nested Mix project and canonical trace viewer. Root
-  `mix precommit` runs its tests but not its formatter; format Viewer edits
-  from that directory.
+  `mix precommit` does not run Viewer tests; the pre-push hook does. Format
+  Viewer edits from that directory.
 - `examples/` — runnable example manifests. Their tests use the `:native`
   projection while the CLI forces `:json`, so a green suite does not prove
   `mix ptc run` works.

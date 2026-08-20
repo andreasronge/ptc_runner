@@ -1,14 +1,15 @@
 # Faster git hooks and `mix precommit`
 
-**Status:** active; slices 1 and 2 implemented. Measurements from a warm
-worktree on 2026-08-18 (Elixir on a 10-scheduler Mac, HEAD `d9a814b0`).
+**Status:** active; slices 1, 2, and 3 implemented. Slice 7 started with
+`command_engine_test.exs`. Measurements from a warm worktree on 2026-08-18
+(Elixir on a 10-scheduler Mac, HEAD `d9a814b0`).
 
 The three local gates are easy to conflate, and they do not cost the same:
 
 | Gate | When | What it runs | Warm wall |
 | --- | --- | --- | --- |
 | `.githooks/pre-commit` | `git commit` | Staged-project format, compile, credo; scoped tests with `--exclude slow` | **13s** for static checks (target `<10s`) |
-| `mix precommit` | agents, before every commit | Nested fetch, quality, full core tests, Viewer, launcher package, core release | **~7.7 min** serial |
+| `mix precommit` | agents, before a commit | Nested fetch + quality (`core-quality.sh`) | **~1 min** warm |
 | `.githooks/pre-push` | `git push` | Docs, then core tests, then concurrent static+Dialyzer / release / Viewer, then launcher | **~6.8 min** when core is selected |
 
 GitHub Actions runs the same scripts as parallel jobs. A typical core PR is
@@ -85,42 +86,39 @@ refuse: timing-sensitive `async: false` tests have already flaked under
 unrelated background work. Do not spend a slice on overlapping tests with
 release or Dialyzer.
 
-`mix precommit` is different. It still runs quality, tests, Viewer, launcher,
-and release **back to back**. The same lane idea the push hook already has
-would cut it from ~7.7 min to about **5.1 min** (`max(quality+tests, release)`),
-with tests overlapping only the last ~70s of release (mostly the async
-portion of the suite). That is the one structural overlap that still has a
-large payoff.
+`mix precommit` used to run quality, tests, Viewer, launcher, and release
+**back to back**. Slice 3 dropped the product gates from it. Concurrent lanes
+for what remains would only overlap quality with nothing long enough to
+matter.
 
 ## The expensive double run
 
-`AGENTS.md` asks for `mix precommit` before every commit and a full pre-push
-on `git push`. An agent that follows both pays ~7.7 min then ~6.8 min, and
-repeats tests, quality, Viewer, and release. That duplicated 15-minute loop
-is larger than any remaining overlap inside a single gate.
+Slice 3 removed the duplicated suite/Viewer/release loop. `AGENTS.md` now
+asks for `mix precommit` (quality) before a commit and a full pre-push on
+`git push`. An agent that follows both still repeats quality (~1 min), which
+is the cheap half. `git push --no-verify` after a green `mix precommit` still
+skips Dialyzer and ExDoc.
 
-The git pre-commit hook is already the fast commit path. `mix precommit` is a
-third, almost-full CI.
+The git pre-commit hook is the fast commit path. `mix precommit` is quality
+plus nested fetch.
 
 ## Serial tests, not Mix boots, dominate
 
 - 250 files / 5541 tests are `async: true`.
 - 59 files / 850 tests are `async: false` on purpose.
-- **10 Lisp files / 523 tests** use `use ExUnit.Case` with no `async:` option,
-  so they are serial by Elixir default. They are pure unit modules
-  (`runtime_arithmetic`, `signature/coercion`, `spec_validator`, …) with no
-  `Application.put_env`, `System.put_env`, or `File.cd`. This looks accidental.
+- 10 Lisp files / 523 tests used `use ExUnit.Case` with no `async:` option
+  (slice 2 marked them `async: true`).
 
-Largest intentional serial module: `test/ptc_runner/kernel/command_engine_test.exs`
-(159 tests, 266 KB). A handful of cases need `Application.put_env` / `File.cd`;
-the rest sit in the same serial queue because they share the module.
+Largest remaining intentional serial CommandEngine module:
+`command_engine_global_state_test.exs` (13 tests). The rest of that suite is
+`async: true`.
 
 ## What not to do
 
 - Do not lower ExUnit `max_cases` or add `--trace` / `--slowest` to make a
   gate look faster. `--trace` pins `--max-cases` to 1 (measured 259s on CI
   when that happened).
-- Do not exclude `:slow` from `mix precommit`, pre-push, or CI. That tag exists
+- Do not exclude `:slow` from pre-push or CI. That tag exists
   only for the git pre-commit hook; excluding it globally dropped correctness
   tests from every PR to save 14s.
 - Do not tag in-process correctness tests `:nightly` to shrink the push suite
@@ -157,38 +155,17 @@ Implemented in this branch: `.githooks/pre-commit` passes sorted staged
 
 The ten `use ExUnit.Case` Lisp modules now declare `async: true`.
 
-### 3. Stop paying for `mix precommit` and pre-push back to back
+### 3. Stop paying for `mix precommit` and pre-push back to back — done
 
-Pick one policy and write it in `AGENTS.md` plus `.githooks/README.md`:
-
-- **A (recommended for agents):** `mix precommit` keeps quality + nested
-  fetch, and drops the full suite, Viewer, launcher package, and release.
-  Those already run on push. Commit cost falls from ~7.7 min to ~1 min.
-  Push stays the CI-equivalent gate.
-- **B:** Keep `mix precommit` comprehensive, and teach agents not to run it
-  immediately before `git push`. Weaker, because the instruction is easy to
-  ignore.
-- **C:** Stamp file: pre-push skips a script whose digest and HEAD match a
-  successful `mix precommit`. More machinery, easy to get wrong with dirty
-  trees.
-
-Do not silently drop Dialyzer or docs from push. Those are the parts
-`mix precommit` already omits.
+Policy A is in `AGENTS.md` and `.githooks/README.md`: `mix precommit` keeps
+quality + nested fetch and drops the full suite, Viewer, launcher package,
+and release. Push stays the CI-equivalent gate. Dialyzer and ExDoc remain
+on push.
 
 ### 4. Give `mix precommit` the same concurrent lanes as pre-push
 
-If slice 3 is not taken, extract the lane helper from `.githooks/pre-push`
-into a repository script both entry points call:
-
-- lane A: quality then tests (`_build/test`, shared Mix lock)
-- lane B: core release (`_build/prod`)
-- lane C: Viewer
-- lane D: launcher package
-
-Expected warm wall ≈ `max(302, 121)` ≈ **5.1 min** vs 7.7 min. Tests overlap
-only the tail of release, after quality, during mostly-async work. Keep
-`PTC_PRE_PUSH_SERIAL=1` as the escape hatch. GitHub Actions is already
-parallel jobs and must keep calling the individual scripts.
+Superseded by slice 3. `mix precommit` no longer runs tests, Viewer, launcher,
+or release, so overlapping those lanes there has nothing left to overlap.
 
 ### 5. Drop `mix clean` from `scripts/ci/launcher-package.sh` if evidence allows
 
@@ -215,7 +192,9 @@ This is the only way to cut the 185s serial floor, and therefore the only way
 to make **git push** substantially faster. Start with modules that mix
 pure unit tests with a few global-state cases:
 
-- `command_engine_test.exs` (159 tests)
+- `command_engine_test.exs` — done: 153 tests `async: true`; 13 global-state
+  cases in `command_engine_global_state_test.exs` (`async: false`); helpers
+  in `test/support/command_engine_fixtures.ex`
 - `mcp_source_test.exs` (52)
 - `ptc_repl_test.exs` (54 mix-task tests; many may have to stay serial)
 - `provider_active_session_test.exs` (41)
