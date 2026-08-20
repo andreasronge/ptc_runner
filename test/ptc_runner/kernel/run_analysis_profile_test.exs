@@ -629,7 +629,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   @tag :tmp_dir
   test "a private session admits pre-execution arity and form diagnostics", %{tmp_dir: root} do
     fixture = PrivateInspectionFixture.create!(root)
-    {:ok, session, _info} = start_internal_session(fixture)
+    {:ok, session, info} = start_internal_session(fixture)
     on_exit(fn -> AnalysisSession.stop(session) end)
 
     assert {:ok,
@@ -673,6 +673,13 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
 
     assert is_binary(parse_message) and parse_message != ""
     refute parse_message =~ "private result policy"
+
+    assert {:ok, %{lifecycle: :closed}} = AnalysisSession.close(session)
+
+    encoded_trace = File.read!(Path.join(fixture.output, info.session_id <> ".jsonl"))
+    refute encoded_trace =~ "expected (defn name [params] body)"
+    refute encoded_trace =~ "even number of forms"
+    refute encoded_trace =~ parse_message
   end
 
   @tag :tmp_dir
@@ -697,6 +704,33 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
 
     assert message =~ "argument"
     refute message =~ "private result policy"
+  end
+
+  @tag :tmp_dir
+  test "a private session redacts a post-capability arity fault of an allowlisted kind", %{
+    tmp_dir: root
+  } do
+    fixture = PrivateInspectionFixture.create!(root)
+    {:ok, session, _info} = start_internal_session(fixture)
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    # `invalid_arity` also has runtime producers. In the same evaluation that
+    # opens a private record, the activity flag must keep that path redacted.
+    source = ~s|(do (analysis/open "#{fixture.run_id}") (apply pmap [inc]))|
+
+    assert {:ok,
+            %{
+              status: :error,
+              error: %{
+                kind: :invalid_arity,
+                message: message,
+                message_redacted?: true,
+                capability_activity?: true
+              }
+            }} = AnalysisSession.evaluate(session, source)
+
+    assert message ==
+             "private evaluation failed; diagnostic withheld by the private result policy"
   end
 
   @tag :tmp_dir

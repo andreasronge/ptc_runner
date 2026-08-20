@@ -89,19 +89,40 @@ defmodule PtcRunner.Kernel.PrivateDiagnosticTest do
              )
   end
 
-  test "clips an oversized pre-execution message at the admission boundary" do
+  test "redacts a pre-execution kind when capability activity was never measured" do
+    assert {@redacted, true} =
+             PrivateDiagnostic.project(
+               :invalid_arity,
+               %{message: "expected (defn name [params] body)"},
+               "(defn foo)"
+             )
+  end
+
+  test "redacts blank or invalid pre-execution messages" do
+    for message <- ["", "   ", <<0xFF>>] do
+      assert {@redacted, true} =
+               PrivateDiagnostic.project(
+                 :parse_error,
+                 %{message: message, capability_activity?: false},
+                 "("
+               )
+    end
+  end
+
+  test "clips an oversized pre-execution message and says so" do
     message = String.duplicate("a", 5_000)
 
-    assert {admitted, false} =
+    assert {admitted, true} =
              PrivateDiagnostic.project(
                :parse_error,
                %{message: message, capability_activity?: false},
                "("
              )
 
-    assert byte_size(admitted) < byte_size(message)
     assert byte_size(admitted) <= 4_096
     assert String.valid?(admitted)
+    assert admitted =~ "further text withheld by the private result policy"
+    refute admitted == message
   end
 
   test "redacts evaluator-produced diagnostics of every other kind" do

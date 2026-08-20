@@ -24,6 +24,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   alias PtcRunner.Kernel.AnalysisProfileRegistry
   alias PtcRunner.Kernel.AnalysisResources
   alias PtcRunner.Kernel.BoundedPrints
+  alias PtcRunner.Kernel.BoundedUTF8
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
@@ -489,23 +490,23 @@ defmodule PtcRunner.Kernel.AnalysisSession do
     }
   end
 
-  # Prefer the top-level activity flag when present so a path that records
-  # activity only there cannot be admitted as pre-execution.
+  # OR top-level and details flags so either true blocks pre-execution
+  # admission. When neither recorded activity, leave the key absent so
+  # `PrivateDiagnostic` fails closed rather than inventing an idle measurement.
   defp private_diagnostic_details(result) do
-    details = Map.get(result, :details, %{})
+    details =
+      case Map.get(result, :details, %{}) do
+        map when is_map(map) -> map
+        _other -> %{}
+      end
 
-    case Map.fetch(result, :capability_activity?) do
-      {:ok, activity?} when is_map(details) ->
-        Map.put(details, :capability_activity?, activity?)
-
-      {:ok, _activity?} ->
-        %{capability_activity?: result.capability_activity?}
-
-      :error when is_map(details) ->
+    case {Map.fetch(result, :capability_activity?), Map.fetch(details, :capability_activity?)} do
+      {:error, :error} ->
         details
 
-      :error ->
-        %{}
+      {top, detail} ->
+        activity? = match?({:ok, true}, top) or match?({:ok, true}, detail)
+        Map.put(details, :capability_activity?, activity?)
     end
   end
 
@@ -523,7 +524,9 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   defp error_message(_kind, details, _state, _source),
     do: {bounded_message(Map.get(details, :message)), false}
 
-  defp bounded_message(message) when is_binary(message), do: elem(clip_utf8(message, 4_096), 0)
+  defp bounded_message(message) when is_binary(message),
+    do: elem(BoundedUTF8.clip(message, 4_096), 0)
+
   defp bounded_message(_message), do: nil
 
   defp enforce_result_limit(projection, limit, profile_id) do
@@ -722,19 +725,6 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   defp lifecycle_error(:persistence_failed), do: :persistence_failed
   defp lifecycle_error(:backend_failed), do: :backend_failed
   defp lifecycle_error(_lifecycle), do: :session_closed
-
-  defp clip_utf8(value, max_bytes) when byte_size(value) <= max_bytes, do: {value, false}
-
-  defp clip_utf8(value, max_bytes) do
-    clipped = binary_part(value, 0, max_bytes)
-    {trim_invalid_suffix(clipped), true}
-  end
-
-  defp trim_invalid_suffix(value) do
-    if String.valid?(value),
-      do: value,
-      else: trim_invalid_suffix(binary_part(value, 0, byte_size(value) - 1))
-  end
 
   defp redact_status(status) do
     Map.new(status, fn
