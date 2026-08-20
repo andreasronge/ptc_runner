@@ -25,6 +25,8 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
   @catalog [
     {"kernel-tutorial", "examples/kernel-tutorial",
      "Five numbered projects: deterministic workflow, model extraction, file agent, multi-turn agent, signature feedback"},
+    {"support-triage", "examples/support-triage",
+     "Three numbered projects growing one support-inbox scenario: one bounded question, a triage policy as a mission API, two specialist missions with a result contract"},
     {"debug-a-failed-run", "examples/debug-a-failed-run",
      "A failing project plus the deterministic and agent debuggers that read its evidence"},
     {"llm-replay", "examples/llm-replay",

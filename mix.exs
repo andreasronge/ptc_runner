@@ -440,6 +440,8 @@ defmodule PtcRunner.MixProject do
           "docs/guides/connecting-tools-with-mcp.md",
           "docs/guides/building-agents.md",
           "docs/guides/components-and-preludes.md",
+          "docs/guides/designing-agent-workflows.md",
+          "docs/guides/agent-workflow-patterns.md",
           "docs/guides/running-and-debugging.md",
           "docs/guides/kernel-repl.md",
           "docs/guides/debugging-a-failed-run.md",
@@ -483,6 +485,10 @@ defmodule PtcRunner.MixProject do
           "docs/guides/building-agents.md",
           "docs/guides/components-and-preludes.md"
         ],
+        Design: [
+          "docs/guides/designing-agent-workflows.md",
+          "docs/guides/agent-workflow-patterns.md"
+        ],
         "Run and debug": [
           "docs/guides/running-and-debugging.md",
           "docs/guides/kernel-repl.md",
@@ -502,7 +508,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run .formatter.exs mix.exs README.md usage-rules.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run examples/support-triage .formatter.exs mix.exs README.md usage-rules.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

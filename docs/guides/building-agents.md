@@ -62,6 +62,10 @@ One trusted workflow may call the loop several times with different named
 missions. Use sequential stages when a later specialist depends on earlier
 output. Use bounded parallel calls only for independent work, and size shared
 provider and evaluation limits for the complete fan-out.
+[Design an agent workflow](designing-agent-workflows.md) builds a runnable
+two-specialist example step by step, and
+[Choose a workflow shape](agent-workflow-patterns.md) names the recurring
+composition shapes.
 
 Do not automatically retry an indeterminate write. Keep effectful stages
 explicit and reconcile an unknown outcome before continuing.

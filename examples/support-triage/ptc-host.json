@@ -1,0 +1,15 @@
+{
+  "credentials": {
+    "openrouter_key": {"env": "OPENROUTER_API_KEY"}
+  },
+  "install": {
+    "deepseek": {
+      "source": "llm",
+      "installation_revision": "support-triage-llm-v1",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "credential": "openrouter_key",
+      "cache": false,
+      "params": {"max_tokens": 4096}
+    }
+  }
+}

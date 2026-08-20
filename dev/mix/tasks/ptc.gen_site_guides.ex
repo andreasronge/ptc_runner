@@ -39,6 +39,7 @@ defmodule Mix.Tasks.Ptc.GenSiteGuides do
     "Language" => "guides",
     "Configure" => "guides",
     "Build" => "guides",
+    "Design" => "guides",
     "Run and debug" => "guides",
     "Installation" => "installation",
     "Reference" => "reference"

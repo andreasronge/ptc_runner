@@ -38,6 +38,15 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     end
   end
 
+  test "every materializable example ships in the hex package" do
+    packaged = Mix.Project.config()[:package][:files]
+
+    for name <- ExampleLibrary.names() do
+      assert "examples/#{name}" in packaged,
+             "examples/#{name} is materializable but missing from mix.exs package files"
+    end
+  end
+
   @tag :tmp_dir
   test "init materializes env stubs, gitignore, and docs commands instead of checkout paths", %{
     tmp_dir: directory

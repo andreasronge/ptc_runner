@@ -37,6 +37,8 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     {"building-agents", "docs/guides/building-agents.md"},
     {"manifests-and-capabilities", "docs/guides/manifests-and-capabilities.md"},
     {"components-and-preludes", "docs/guides/components-and-preludes.md"},
+    {"designing-agent-workflows", "docs/guides/designing-agent-workflows.md"},
+    {"agent-workflow-patterns", "docs/guides/agent-workflow-patterns.md"},
     {"using-models", "docs/guides/using-models.md"},
     {"host-configuration", "docs/guides/host-configuration.md"},
     {"project-configuration", "docs/guides/project-configuration.md"},
