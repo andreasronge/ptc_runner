@@ -2,7 +2,9 @@
 //
 // Consumes the SSE stream at /api/live/stream. Every frame is self-contained,
 // so rendering is idempotent: cards are created once per run and their fields
-// updated in place (keeps CSS animations and text selection stable).
+// updated in place (keeps CSS animations and text selection stable). Cards
+// sort newest-first by the store's `first_seen_at` stamp, matching
+// `GET /api/live/runs`.
 //
 // Honesty rules mirrored from the runtime side:
 //  - Budget meters are true enforced fractions (deadline, evaluations, calls).
@@ -27,6 +29,32 @@ export function liveReadPath(path, liveToken) {
 export function launchPollDelay(responseOk, launch) {
   if (!responseOk) return 3000;
   return launch?.status === 'running' ? 1500 : null;
+}
+
+// Snapshot and live frames share one insertion rule: newer `first_seen_at`
+// stamps go closer to the top, so hydrating newest-first or oldest-first
+// yields the same DOM order.
+export function newerFirstInsertIndex(stamps, stamp) {
+  const value = typeof stamp === 'string' ? stamp : '';
+  const index = stamps.findIndex(existing => value >= (existing || ''));
+  return index === -1 ? stamps.length : index;
+}
+
+export function formatFirstSeenAt(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+}
+
+export function isNewestEndedStamp(existingStamps, stamp) {
+  const value = typeof stamp === 'string' ? stamp : '';
+  return existingStamps.every(existing => value >= (existing || ''));
 }
 
 export function projectDisplayPath(project) {
@@ -96,7 +124,7 @@ export function createLiveController({ onInspectRun, onLiveCount, onProject, mut
         void inspectRun(card, frame.run_id);
       });
       cards.set(frame.run_id, card);
-      runsEl.prepend(card.el);
+      placeCard(runsEl, card.el, frame.first_seen_at);
     }
     if (card.frame && typeof frame.seq === 'number' && frame.seq < card.frame.seq) return;
     card.frame = frame;
@@ -105,20 +133,37 @@ export function createLiveController({ onInspectRun, onLiveCount, onProject, mut
     refreshChrome();
   }
 
-  // A run that just ended takes the expanded slot from the previous one; a run
-  // still going is never collapsible.
+  // Only the newest ended run stays expanded. Compare first_seen_at rather than
+  // arrival order so a newest-first SSE snapshot does not expand the oldest card.
   function trackLifecycle(card, frame) {
     const wasEnded = card.ended;
     card.ended = frame.phase !== 'running';
     card.fields.inspect.hidden = !card.ended;
 
-    if (card.ended && !wasEnded) {
-      const previous = newestEndedId && newestEndedId !== frame.run_id && cards.get(newestEndedId);
-      if (previous) setCollapsed(previous, true);
-      newestEndedId = frame.run_id;
+    if (!card.ended) {
+      setCollapsed(card, false);
+      return;
     }
 
-    setCollapsed(card, card.ended ? card.collapsed : false);
+    if (!wasEnded) {
+      const incoming = frame.first_seen_at || '';
+      const otherStamps = [];
+      for (const other of cards.values()) {
+        if (other === card || !other.ended) continue;
+        otherStamps.push(other.frame?.first_seen_at || '');
+      }
+      const newest = isNewestEndedStamp(otherStamps, incoming);
+      if (newest) {
+        for (const other of cards.values()) {
+          if (other !== card && other.ended) setCollapsed(other, true);
+        }
+        newestEndedId = frame.run_id;
+      }
+      setCollapsed(card, !newest);
+      return;
+    }
+
+    setCollapsed(card, card.collapsed);
   }
 
   function setCollapsed(card, collapsed) {
@@ -725,6 +770,7 @@ function createCard(runId) {
       <div class="live-card-meta">
         <span class="live-card-summary" data-role="summary" hidden></span>
         <span class="live-run-id" data-role="run-id"></span>
+        <span class="live-first-seen" data-role="first-seen" hidden></span>
         <span class="live-elapsed" data-role="elapsed"></span>
         <a class="live-card-inspect" data-role="inspect" hidden>View result</a>
         <button type="button" class="live-card-close" data-role="close" aria-label="Close run" title="Close run">✕</button>
@@ -776,6 +822,18 @@ export function runRoute(runId) {
   return `#/run/${encodeURIComponent(runId)}`;
 }
 
+function placeCard(runsEl, el, stamp) {
+  const children = [...runsEl.children];
+  const stamps = children.map(child => child.dataset.firstSeenAt || '');
+  const index = newerFirstInsertIndex(stamps, stamp);
+  el.dataset.firstSeenAt = typeof stamp === 'string' ? stamp : '';
+  if (index >= children.length) {
+    runsEl.append(el);
+  } else {
+    runsEl.insertBefore(el, children[index]);
+  }
+}
+
 /* ---------- per-frame update ---------- */
 
 function updateCard(card, frame) {
@@ -785,6 +843,9 @@ function updateCard(card, frame) {
 
   f.label.textContent = frame.label || frame.run_id;
   f.elapsed.textContent = fmtClock(frame.elapsed_ms);
+  const started = formatFirstSeenAt(frame.first_seen_at);
+  f['first-seen'].textContent = started ? `started ${started}` : '';
+  f['first-seen'].hidden = !started;
 
   updateBadge(card, frame);
   updateFailure(f.failure, frame);

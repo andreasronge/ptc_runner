@@ -718,7 +718,9 @@ ptc viewer ptc-project.json --env-file .env
 
 Viewer-launched workflow cards use the manifest label and workflow entry as
 their human-facing title, while retaining the `cmd-...` value as the stable run
-identifier.
+identifier. The Live tab and `GET /api/live/runs` list newest first, and each
+card shows when the Viewer first saw that run, so an edited ceiling cannot be
+read off an older card as a stale enforcement.
 
 The command is already a long-running PtcRunner host, so Viewer-started work
 runs inside that BEAM instance under the ordinary execution-session owner. A

@@ -211,6 +211,32 @@ defmodule PtcViewer.LiveRouterTest do
              Jason.decode!(get_conn.resp_body)
   end
 
+  test "snapshot endpoint returns newest run first so runs[0] is the latest ceiling", %{
+    opts: opts
+  } do
+    for {run_id, limit} <- [{"run-old", 30_000}, {"run-new", 1}] do
+      frame = %{"seq" => 0, "phase" => "ok", "limits" => %{"run_duration_ms" => limit}}
+
+      post_conn =
+        conn(:post, "/api/live/runs/#{run_id}", Jason.encode!(frame))
+        |> Plug.Conn.put_req_header("content-type", "application/json")
+        |> call_router(opts)
+
+      assert post_conn.status == 200
+    end
+
+    get_conn = browser_conn(:get, "/api/live/runs") |> call_router(opts)
+    assert get_conn.status == 200
+
+    assert %{"runs" => [newest, oldest]} = Jason.decode!(get_conn.resp_body)
+    assert newest["run_id"] == "run-new"
+    assert newest["limits"]["run_duration_ms"] == 1
+    assert oldest["run_id"] == "run-old"
+    assert oldest["limits"]["run_duration_ms"] == 30_000
+    assert {:ok, _at, 0} = DateTime.from_iso8601(newest["first_seen_at"])
+    assert {:ok, _at, 0} = DateTime.from_iso8601(oldest["first_seen_at"])
+  end
+
   test "deleting a run removes it from the snapshot", %{opts: opts, store: store} do
     :ok = LiveStore.put_frame(store, "run-abc", %{"seq" => 0, "phase" => "ok"})
 

@@ -2161,9 +2161,10 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--muted);
 }
 .live-elapsed { font-size: 13px; color: var(--fg); font-variant-numeric: tabular-nums; }
+.live-first-seen { white-space: nowrap; }
 
-/* Collapsed ended runs keep only the head row: badge, label, elapsed,
-   tool-call count, run id. Running cards never collapse. */
+/* Collapsed ended runs keep only the head row: badge, label, launch time,
+   elapsed, tool-call count, run id. Running cards never collapse. */
 .live-card.collapsed { padding: 10px 20px; }
 .live-card.collapsed .live-card-head { margin-bottom: 0; flex-wrap: nowrap; }
 .live-card.collapsed > *:not(.live-card-head) { display: none; }
@@ -2173,7 +2174,8 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   color: var(--muted); font-size: 12px; line-height: 1;
 }
 .live-card-toggle:hover, .live-card-close:hover { color: var(--fg); }
-.live-card-toggle[hidden], .live-card-summary[hidden], .live-card-inspect[hidden] { display: none; }
+.live-card-toggle[hidden], .live-card-summary[hidden], .live-card-inspect[hidden],
+.live-first-seen[hidden] { display: none; }
 .live-card-summary { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .live-card-inspect {
   color: var(--accent); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

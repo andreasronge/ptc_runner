@@ -8,9 +8,12 @@ import {
   leadingLimitRows,
   limitNote,
   limitSummary,
+  formatFirstSeenAt,
+  isNewestEndedStamp,
   liveReadPath,
   liveTokenFromSearch,
   missionNames,
+  newerFirstInsertIndex,
   plural,
   projectDisplayPath,
   runRoute,
@@ -208,5 +211,30 @@ const hostOnlyTimeout = {
 };
 assert.equal(limitNote(hostOnlyTimeout), '');
 assert.deepEqual(leadingLimitRows([hostOnlyTimeout]), []);
+
+assert.equal(newerFirstInsertIndex([], '2026-01-01T00:00:02.000000Z'), 0);
+assert.equal(
+  newerFirstInsertIndex(['2026-01-01T00:00:02.000000Z'], '2026-01-01T00:00:01.000000Z'),
+  1
+);
+assert.equal(
+  newerFirstInsertIndex(
+    ['2026-01-01T00:00:02.000000Z', '2026-01-01T00:00:01.000000Z'],
+    '2026-01-01T00:00:03.000000Z'
+  ),
+  0
+);
+assert.equal(formatFirstSeenAt('2026-08-20T13:32:01.000Z').length > 0, true);
+assert.equal(formatFirstSeenAt('not-a-date'), '');
+assert.equal(formatFirstSeenAt(null), '');
+assert.equal(
+  isNewestEndedStamp(['2026-01-01T00:00:01Z', '2026-01-01T00:00:02Z'], '2026-01-01T00:00:03Z'),
+  true
+);
+assert.equal(
+  isNewestEndedStamp(['2026-01-01T00:00:02Z'], '2026-01-01T00:00:01Z'),
+  false
+);
+assert.equal(isNewestEndedStamp([], '2026-01-01T00:00:01Z'), true);
 
 process.stdout.write('ok');
