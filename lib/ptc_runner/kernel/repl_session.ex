@@ -832,6 +832,11 @@ defmodule PtcRunner.Kernel.ReplSession do
       session.config.limits,
       session.config.workflow_environment.bundle
     )
+    |> RuntimeTools.maybe_put_agent_loop_tools(
+      session.state,
+      session.config.event_sink,
+      session.config.workflow_environment.bundle
+    )
     |> RuntimeTools.trusted_tools(session.config.limits)
   end
 

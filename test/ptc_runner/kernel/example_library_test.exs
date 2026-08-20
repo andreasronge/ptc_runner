@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.ExampleLibrary
+  alias PtcRunner.Kernel.ProjectConfig
 
   @root Path.expand("../../..", __DIR__)
 
@@ -15,21 +16,58 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
       for {relative, content} <- files do
         source = Path.join([@root, "examples", name, relative])
 
-        assert File.regular?(source), "#{name} embeds #{relative}, which is not a file"
-        assert File.read!(source) == content, "#{name}/#{relative} drifted from its source"
+        if File.regular?(source) do
+          assert File.read!(source) == content, "#{name}/#{relative} drifted from its source"
+        end
       end
     end
   end
 
-  test "run artifacts and local environment files are not embedded" do
+  test "run artifacts are not embedded and local .env files are not copied from the source tree" do
     for name <- ExampleLibrary.names(),
         {:ok, files} = ExampleLibrary.fetch(name),
-        relative <- Map.keys(files) do
+        {relative, _content} <- files do
       segments = Path.split(relative)
+      source = Path.join([@root, "examples", name, relative])
 
       refute ".ptc" in segments, "#{name} embeds a run artifact: #{relative}"
-      refute List.last(segments) == ".env", "#{name} embeds a local environment file"
+
+      if List.last(segments) == ".env" do
+        refute File.regular?(source), "#{name} copied a local environment file"
+      end
     end
+  end
+
+  @tag :tmp_dir
+  test "init materializes env stubs, gitignore, and docs commands instead of checkout paths", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "kernel-tutorial")
+
+    assert {:ok, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["init", target, "--example", "kernel-tutorial"])
+
+    assert File.exists?(Path.join(target, ".env"))
+    assert File.exists?(Path.join(target, ".gitignore"))
+    refute File.read!(Path.join(target, "README.md")) =~ "../../docs/"
+    refute File.read!(Path.join(target, ".env")) == ""
+
+    for project_path <- Path.wildcard(Path.join(target, "*.ptc-project.json")) do
+      assert {:ok, project} = ProjectConfig.load(project_path)
+
+      if is_binary(project.env_file) do
+        assert File.exists?(project.env_file), project.env_file
+      end
+    end
+
+    assert {:ok, created} = ExampleLibrary.created("kernel-tutorial")
+    assert ".env" in created
+    assert ".gitignore" in created
+    assert envelope["result"] == %{"created" => created}
+    assert CommandContract.valid_envelope?(envelope)
+
+    assert {:ok, replay} = ExampleLibrary.fetch("llm-replay")
+    refute Map.has_key?(replay, ".env")
   end
 
   @tag :tmp_dir

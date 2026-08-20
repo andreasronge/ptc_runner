@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.CommandRunOutcome do
   @moduledoc false
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
@@ -513,6 +514,23 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     end
   end
 
+  defp failure_diagnostic(
+         %Error{
+           kind: :workflow_failed,
+           reason: :invalid_agent_config,
+           details: details
+         },
+         provider_activity
+       ) do
+    case AgentConfigDiagnostic.message(details) do
+      {:ok, message} ->
+        diagnostic(:execution, :invalid_agent_config, provider_activity, message: message)
+
+      :error ->
+        diagnostic(:execution, :invalid_agent_config, provider_activity)
+    end
+  end
+
   defp failure_diagnostic(%Error{kind: :workflow_failed}, provider_activity),
     do: diagnostic(:execution, :workflow_failed, provider_activity)
 
@@ -639,6 +657,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
              "subordinate_evaluations" => Map.get(usage, :subordinate_evaluations),
              "evaluations_by_mission" => evaluations_by_mission,
              "protocol_errors" => Map.get(usage, :protocol_errors),
+             "agent_protocol_errors" => Map.get(usage, :agent_protocol_errors),
              "evaluation_memory_bytes" => Map.get(usage, :evaluation_memory_bytes),
              "evaluation_history_bytes" => Map.get(usage, :evaluation_history_bytes),
              "evaluation_continuation_bytes" => Map.get(usage, :evaluation_continuation_bytes),

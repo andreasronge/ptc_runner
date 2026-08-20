@@ -400,7 +400,8 @@ defmodule PtcRunner.LiveStatus.Reporter do
             :evaluation_memory_bytes,
             :evaluation_history_bytes,
             :protocol_errors,
-            :evaluation_busy?
+            :evaluation_busy?,
+            :llm_spend
           ]),
       heap: heap_frame(state),
       parallel: parallel_frame(state.budget),

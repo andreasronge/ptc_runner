@@ -66,5 +66,15 @@ defmodule PtcRunner.MixCommandAdapter do
   defp write_output(stdout, stderr) do
     if stdout != "", do: IO.write(stdout)
     if stderr != "", do: IO.write(:stderr, stderr)
+  rescue
+    error in ErlangError ->
+      drop_closed_pipe_or_reraise(error, __STACKTRACE__)
   end
+
+  defp drop_closed_pipe_or_reraise(%ErlangError{original: reason}, _stacktrace)
+       when reason in [:terminated, :epipe] do
+    :ok
+  end
+
+  defp drop_closed_pipe_or_reraise(error, stacktrace), do: reraise(error, stacktrace)
 end

@@ -14,8 +14,9 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   requirements. A missing MCP tool message may retain only the validated,
   declaration-owned upstream name and carries no provider catalog payload.
   Kernel runtime and replay messages require fixed runtime
-  provenance. An agent turn-limit message has no source because `max_turns`
-  belongs to one `agent.core` call rather than a host or manifest document.
+  provenance. An agent turn-limit message and an out-of-range agent option
+  have no source because `max_turns` and the other bounded options belong to
+  one `agent.core` call rather than a host or manifest document.
   Every other message is the catalog literal.
 
   `notes` is reserved and always empty: the published V2 envelope schema pins
@@ -24,6 +25,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   broke is a later-version change, not a producer-side one.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
@@ -382,6 +384,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: :runtime}
        ),
        do: RuntimeLimitDiagnostic.run_duration_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :invalid_agent_config},
+         nil
+       ),
+       do: AgentConfigDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          message,

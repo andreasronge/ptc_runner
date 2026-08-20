@@ -89,8 +89,8 @@ defmodule PtcRunner.Kernel.CommandInitializer do
 
   - `ptc help` lists every command; `ptc help COMMAND` gives its switches.
   - `ptc docs` lists every shipped document; read `ptc docs agent-guide` first.
-  - `ptc repl -e '(doc "name")'` documents one function, and
-    `ptc repl -e '(apropos "term")'` searches the available language surface.
+  - `ptc repl --project ptc-project.json -e '(doc "name")'` documents one function, and
+    `ptc repl --project ptc-project.json -e '(apropos "term")'` searches the available language surface.
 
   ## Files here
 

@@ -16,6 +16,22 @@
 (defn- protocol-error [reason]
   {:kind :protocol-error :reason reason})
 
+(defn- bound-narration [prose]
+  (let [max-chars 2000
+        marker "… [truncated]"]
+    (if (or (not (string? prose)) (blank? prose))
+      nil
+      (if (<= (count prose) max-chars)
+        prose
+        (str (subs prose 0 (- max-chars (count marker))) marker)))))
+
+(defn- with-evidence [error prose call]
+  (let [narration (bound-narration prose)
+        error (if narration (assoc error :narration narration) error)]
+    (if call
+      (assoc error :offending-call call)
+      error)))
+
 (defn- call-name [call]
   (or (get call "name")
       (get-in call ["function" "name"])))
@@ -55,24 +71,45 @@
       (cond
         (not (sequential? calls))
         (if narrating?
-          (protocol-error :assistant-text-without-tool-call)
-          (protocol-error :missing-tool-call))
+          (with-evidence (protocol-error :assistant-text-without-tool-call) prose nil)
+          (with-evidence (protocol-error :missing-tool-call) prose nil))
 
-        (not= 1 (count calls)) (protocol-error :multiple-or-missing-tool-calls)
+        (not= 1 (count calls))
+        (with-evidence (protocol-error :multiple-or-missing-tool-calls) prose nil)
+
         :else
         (let [call (first calls)
               arguments (call-arguments call)
               program (if (map? arguments) (get arguments "program") nil)]
           (cond
-            (not= "run_ptc_lisp" (call-name call)) (protocol-error :wrong-tool-name)
+            (not= "run_ptc_lisp" (call-name call))
+            (with-evidence (protocol-error :wrong-tool-name) prose call)
+
             (or (not (string? (get call "id")))
-                (blank? (get call "id"))) (protocol-error :invalid-tool-call-id)
-            (not (map? arguments)) (protocol-error :invalid-json-arguments)
+                (blank? (get call "id")))
+            (with-evidence (protocol-error :invalid-tool-call-id) prose call)
+
+            (not (map? arguments))
+            (with-evidence (protocol-error :invalid-json-arguments) prose call)
+
             (or (not= 1 (count arguments))
-                (not (contains? arguments "program"))) (protocol-error :extra-or-missing-arguments)
-            (not (string? program)) (protocol-error :program-not-string)
-            (blank? program) (protocol-error :program-empty)
-            (> (count program) max-program-chars) (protocol-error :program-too-large)
+                (not (contains? arguments "program")))
+            (with-evidence (protocol-error :extra-or-missing-arguments) prose call)
+
+            (not (string? program))
+            (with-evidence (protocol-error :program-not-string) prose call)
+
+            (blank? program)
+            (with-evidence (protocol-error :program-empty) prose call)
+
+            (> (count program) max-program-chars)
+            (with-evidence
+              (assoc (assoc (protocol-error :program-too-large)
+                            :limit max-program-chars)
+                     :size (count program))
+              prose
+              call)
+
             :else {:kind :tool-call
                    :program program
                    :rationale (when narrating? prose)

@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   root. `schema/0` still materializes the source map for generators and docs.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandSource
@@ -1207,20 +1208,33 @@ defmodule PtcRunner.Kernel.CommandContract do
        ),
        do: ResultContractDiagnostic.message_schema(row.message)
 
-  # The terminal-result ceiling belongs to the effective limits, not to a
-  # document the command can point a source at, so it publishes its bounded
-  # message against a null source.
+  # The terminal-result ceiling belongs to the effective limits and the agent
+  # option to one agent.core/run call, so both publish their bounded message
+  # against a null source.
   defp diagnostic_message_schema(
          %{phase: :result_cleanup, code: :result_limit_exceeded} = row,
          %{"type" => "null"}
        ),
        do: RuntimeLimitDiagnostic.result_limit_message_schema(row.message)
 
-  # The message above is admitted only against a null source, so the sourced
-  # branch of the same row must stay pinned to the catalog literal; otherwise
-  # the published schema would accept a pairing the command refuses to build.
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :invalid_agent_config} = row,
+         %{"type" => "null"}
+       ),
+       do: AgentConfigDiagnostic.message_schema(row.message)
+
+  # Both dynamic messages above are admitted only against a null source, so the
+  # sourced branches of the same rows must stay pinned to the catalog literal;
+  # otherwise the published schema would accept a pairing the command refuses to
+  # build.
   defp diagnostic_message_schema(
          %{phase: :result_cleanup, code: :result_limit_exceeded} = row,
+         _source
+       ),
+       do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :invalid_agent_config} = row,
          _source
        ),
        do: %{"const" => row.message}
@@ -1393,7 +1407,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     event_counts = count_map(@event_type, ["$overflow"])
 
     required =
-      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
+      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors agent_protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
 
     common = %{
       "remaining_ms" => nonnegative_integer(),
@@ -1401,6 +1415,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       "subordinate_evaluations" => nonnegative_integer(),
       "evaluations_by_mission" => count_map(@alias),
       "protocol_errors" => nonnegative_integer(),
+      "agent_protocol_errors" => nonnegative_integer(),
       "evaluation_memory_bytes" => nonnegative_integer(),
       "evaluation_history_bytes" => nonnegative_integer(),
       "evaluation_continuation_bytes" => nonnegative_integer(),

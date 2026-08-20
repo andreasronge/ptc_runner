@@ -397,6 +397,7 @@ Every classified diagnostic and the status it exits with:
 | 4 | `provider_acquisition` | `provider_protocol_version_unsupported` | no | the installed endpoint does not support MCP protocol 2026-07-28 |
 | 4 | `provider_acquisition` | `provider_tool_missing` | no | the installed endpoint does not expose a declared tool |
 | 4 | `provider_acquisition` | `provider_unavailable` | no | the selected provider could not be acquired |
+| 5 | `execution` | `invalid_agent_config` | no | an agent configuration option is outside its supported range |
 | 5 | `execution` | `llm_access_denied` | no | the LLM provider denied access to the configured model |
 | 5 | `execution` | `llm_authentication_failed` | no | the LLM provider rejected authentication; check the installed credential |
 | 5 | `execution` | `llm_model_not_found` | no | the LLM provider could not find the configured model |

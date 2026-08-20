@@ -9,9 +9,11 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
   directory. Each example is therefore embedded the way documentation pages are,
   and `ptc init --example` writes the tree wherever the caller asks for it.
 
-  A tree is embedded byte-for-byte, including its relative layout, so a
-  materialized example is the same project the repository tests exercise. Paths
-  inside it stay valid because nothing is rewritten and nothing is flattened.
+  A tree is embedded from its checked-in files. `.env` stubs are generated from
+  host credential declarations when a project names an `env_file`, and a
+  `.gitignore` is generated when the tree has none, so a materialized copy can
+  run without a checkout. Paths inside the tree stay valid because nothing is
+  rewritten and nothing is flattened.
   """
 
   @root Path.expand("../../..", __DIR__)
@@ -34,6 +36,73 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
   # example.
   @excluded_directories [".ptc"]
   @excluded_files [".env"]
+  @gitignore """
+  .env
+  .ptc/
+  .ptc-private-*
+  .ptc-private-result-*
+  """
+
+  env_file_paths = fn files ->
+    files
+    |> Enum.flat_map(fn {_path, content} ->
+      case Jason.decode(content) do
+        {:ok, %{"kind" => "ptc-project", "host" => %{"env_file" => %{"path" => path}}}}
+        when is_binary(path) and path != "" ->
+          [path]
+
+        _other ->
+          []
+      end
+    end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  credential_env_names = fn files ->
+    files
+    |> Enum.flat_map(fn {_path, content} ->
+      case Jason.decode(content) do
+        {:ok, %{"credentials" => credentials}} when is_map(credentials) ->
+          for {_name, %{"env" => env}} <- credentials, is_binary(env) and env != "", do: env
+
+        _other ->
+          []
+      end
+    end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  env_stub = fn
+    [] ->
+      "# Local environment for this example.\n"
+
+    names ->
+      "# Local credentials for this example. Fill in values; do not commit secrets.\n" <>
+        Enum.map_join(names, "", &"#{&1}=\n")
+  end
+
+  with_generated_files = fn files ->
+    files =
+      if Map.has_key?(files, ".gitignore"),
+        do: files,
+        else: Map.put(files, ".gitignore", @gitignore)
+
+    stub = env_stub.(credential_env_names.(files))
+
+    Enum.reduce(env_file_paths.(files), files, fn path, acc ->
+      if Map.has_key?(acc, path), do: acc, else: Map.put(acc, path, stub)
+    end)
+  end
+
+  created_entries = fn files ->
+    files
+    |> Map.keys()
+    |> Enum.map(&(&1 |> Path.split() |> hd()))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
 
   @trees (for {name, directory, description} <- @catalog do
             absolute = Path.join(@root, directory)
@@ -52,6 +121,7 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
               end)
               |> Enum.sort()
               |> Map.new(&{&1, File.read!(Path.join(absolute, &1))})
+              |> with_generated_files.()
 
             if map_size(files) == 0 do
               raise "example #{name} embeds no files"
@@ -61,18 +131,16 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
               name: name,
               description: description,
               files: files,
-              created:
-                files
-                |> Map.keys()
-                |> Enum.map(&(&1 |> Path.split() |> hd()))
-                |> Enum.uniq()
-                |> Enum.sort(),
+              created: created_entries.(files),
               bytes: files |> Map.values() |> Enum.map(&byte_size/1) |> Enum.sum()
             }
           end)
 
-  for tree <- @trees, {relative, _content} <- tree.files do
-    @external_resource Path.join([@root, "examples", tree.name, relative])
+  for tree <- @trees,
+      {relative, _content} <- tree.files,
+      source = Path.join([@root, "examples", tree.name, relative]),
+      File.regular?(source) do
+    @external_resource source
   end
 
   @names Enum.map(@trees, & &1.name)

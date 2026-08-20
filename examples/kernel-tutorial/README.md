@@ -3,12 +3,9 @@
 Materialize a copy of this directory with
 `ptc init kernel-tutorial --example kernel-tutorial`, then run the commands
 below from the directory that copy sits in.
-[`docs/guides/quickstart.md`](../../docs/guides/quickstart.md) is the shortest
-path from a clone to a live model run;
-[`docs/guides/getting-started.md`](../../docs/guides/getting-started.md) walks
-through the same examples in detail, and
-[`docs/guides/building-agents.md`](../../docs/guides/building-agents.md)
-explains the agent examples.
+`ptc docs quickstart` is the shortest path from a clone to a live model run;
+`ptc docs getting-started` walks through the same examples in detail, and
+`ptc docs building-agents` explains the agent examples.
 
 Each example has a project document in this directory. Point `ptc run` at
 it to reuse the application, host, environment, artifact, and Viewer paths.
@@ -29,15 +26,10 @@ ptc run kernel-tutorial/03-file-agent.ptc-project.json
 ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
-The MCP server this step launches is the repository's
-`examples/mcp/filesystem` bundle, which is too large to embed. Copy that
-directory to `mcp/filesystem` beside the materialized tutorial, or run this
-step from a checkout.
-
-They require `OPENROUTER_API_KEY` and use the trusted `deepseek` model alias.
-Follow the [model-authored Quickstart](../../docs/guides/quickstart.md#run-a-model-authored-program)
-once before running them. Example 03 also requires Node.js 22 or newer; its
-server bundle is committed, so no `npm install` or build is needed.
+They require `OPENROUTER_API_KEY` in that `.env` and use the trusted `deepseek`
+model alias. Follow `ptc docs quickstart` once before running them. Example 03
+launches `ptc-fs-mcp@0.1.0` through `npx`; the first run may download that
+package. Node.js is required.
 
 Direct manifest invocation with explicit `--env-file` and `--host-config`
 switches remains available as the low-level automation form.
@@ -50,11 +42,9 @@ for the model-driven steps, the program the model generated for each
 evaluation. That evidence contains prompts, responses, and tool payloads; a
 project that should not retain it sets both settings back to `false`.
 
-[`ptc-host.json`](ptc-host.json) is the shared operator document these examples
-install from;
-[`docs/guides/host-configuration.md`](../../docs/guides/host-configuration.md)
-explains its fields.
+`ptc-host.json` is the shared operator document these examples install from;
+`ptc docs host-configuration` explains its fields.
 
-The [Quickstart](../../docs/guides/quickstart.md) owns the shortest live path;
-the [MCP guide](../../docs/guides/connecting-tools-with-mcp.md) explains the
-filesystem tool connection used by Example 03.
+The Quickstart (`ptc docs quickstart`) owns the shortest live path; the MCP
+guide (`ptc docs connecting-tools-with-mcp`) explains the filesystem tool
+connection used by Example 03.

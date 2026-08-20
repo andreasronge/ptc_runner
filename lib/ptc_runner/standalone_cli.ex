@@ -37,8 +37,27 @@ defmodule PtcRunner.StandaloneCLI do
   @spec main([binary()]) :: no_return()
   def main(argv) do
     presentation = execute(argv)
-    if presentation.stdout != "", do: IO.write(:stdio, presentation.stdout)
-    if presentation.stderr != "", do: IO.write(:stderr, presentation.stderr)
-    System.halt(presentation.exit_status)
+    # The dump is Logger reporting the writer's :terminated; removing the
+    # default handler after the command has produced its presentation, and
+    # before the write, is what keeps stderr empty when the pipe is already
+    # closed. MixCommandAdapter cannot do this: it returns to Mix.
+    _ = :logger.remove_handler(:default)
+
+    try do
+      if presentation.stdout != "", do: IO.write(:stdio, presentation.stdout)
+      if presentation.stderr != "", do: IO.write(:stderr, presentation.stderr)
+      System.halt(presentation.exit_status)
+    rescue
+      error in ErlangError ->
+        halt_closed_pipe_or_reraise(error, __STACKTRACE__)
+    end
   end
+
+  @spec halt_closed_pipe_or_reraise(Exception.t(), list()) :: no_return()
+  defp halt_closed_pipe_or_reraise(%ErlangError{original: reason}, _stacktrace)
+       when reason in [:terminated, :epipe] do
+    System.halt(141)
+  end
+
+  defp halt_closed_pipe_or_reraise(error, stacktrace), do: reraise(error, stacktrace)
 end

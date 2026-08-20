@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
@@ -168,8 +169,84 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
              )
   end
 
+  # Unlike the installed-ceiling regex, these branches can name the accepted
+  # range, so an in-range or overflowing integer must fail both the constructor
+  # and the published schema — otherwise `CommandDiagnostic.new/3` would admit
+  # "max_turns 4 is outside 1–128".
+  test "an in-range or overflowing agent option is not an invalid_agent_config message" do
+    assert {:ok, schema} =
+             JSV.build(CommandContract.catalog_diagnostic_schema(),
+               atoms: false,
+               warnings: :silent
+             )
+
+    {:ok, producible} = AgentConfigDiagnostic.integer_message("max_turns", 1, 128, 129)
+
+    assert {:ok, diagnostic} =
+             CommandDiagnostic.new(
+               :execution,
+               :invalid_agent_config,
+               diagnostic_opts(
+                 %{phase: :execution, code: :invalid_agent_config, source: nil},
+                 producible
+               )
+             )
+
+    rendered = CommandDiagnostic.to_map(diagnostic)
+
+    for {option, minimum, maximum} <- AgentConfigDiagnostic.options() do
+      {:ok, out_of_range} =
+        AgentConfigDiagnostic.integer_message(option, minimum, maximum, maximum + 1)
+
+      in_range =
+        String.replace(
+          out_of_range,
+          Integer.to_string(maximum + 1),
+          Integer.to_string(minimum),
+          global: false
+        )
+
+      overflow =
+        String.replace(
+          out_of_range,
+          Integer.to_string(maximum + 1),
+          "9223372036854775808",
+          global: false
+        )
+
+      refute AgentConfigDiagnostic.valid_message?(in_range),
+             "#{option} in-range sentence was admitted: #{in_range}"
+
+      refute AgentConfigDiagnostic.valid_message?(overflow),
+             "#{option} overflow sentence was admitted: #{overflow}"
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(
+                 :execution,
+                 :invalid_agent_config,
+                 diagnostic_opts(
+                   %{phase: :execution, code: :invalid_agent_config, source: nil},
+                   in_range
+                 )
+               )
+
+      assert {:error, _in_range} =
+               JSV.validate(Map.put(rendered, "message", in_range), schema, cast: false)
+
+      assert {:error, _overflow} =
+               JSV.validate(Map.put(rendered, "message", overflow), schema, cast: false)
+    end
+
+    int64_max = 9_223_372_036_854_775_807
+    {:ok, max_message} = AgentConfigDiagnostic.integer_message("max_turns", 1, 128, int64_max)
+    assert AgentConfigDiagnostic.valid_message?(max_message)
+
+    assert {:ok, _int64_max} =
+             JSV.validate(Map.put(rendered, "message", max_message), schema, cast: false)
+  end
+
   defp setting_rows do
-    limit_rows() ++ agent_turn_rows()
+    limit_rows() ++ agent_turn_rows() ++ agent_config_rows()
   end
 
   # Every ceiling a run can breach, with the setting it must name, the
@@ -305,6 +382,50 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         build: fn -> RuntimeLimitDiagnostic.agent_turns_message(4, reason) end
       }
     end
+  end
+
+  defp agent_config_rows do
+    integer_rows =
+      for {option, minimum, maximum} <- AgentConfigDiagnostic.options() do
+        value = maximum + 1
+
+        %{
+          phase: :execution,
+          code: :invalid_agent_config,
+          source: nil,
+          setting: option,
+          value: "#{value}",
+          remedy: "lower it",
+          build: fn ->
+            AgentConfigDiagnostic.integer_message(option, minimum, maximum, value)
+          end
+        }
+      end
+
+    type_rows =
+      for {option, minimum, maximum} <- AgentConfigDiagnostic.options(),
+          type <- AgentConfigDiagnostic.types() do
+        phrase =
+          case type do
+            nil -> "nil"
+            :other -> "unsupported"
+            _other -> Atom.to_string(type)
+          end
+
+        %{
+          phase: :execution,
+          code: :invalid_agent_config,
+          source: nil,
+          setting: option,
+          value: phrase,
+          remedy: "must be an integer",
+          build: fn ->
+            AgentConfigDiagnostic.type_message(option, minimum, maximum, type)
+          end
+        }
+      end
+
+    integer_rows ++ type_rows
   end
 
   defp diagnostic_opts(row, message) do

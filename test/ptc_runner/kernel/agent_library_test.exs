@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.EvaluationObservation
@@ -13,6 +14,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -100,6 +102,234 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
       assert action["kind"] == expected_kind
       if expected_reason, do: assert(action["reason"] == expected_reason)
+    end
+  end
+
+  test "agent.native protocol errors carry the branch's recoverable evidence" do
+    {:ok, component} = Library.component("agent.native")
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    valid_call = %{
+      "id" => "c1",
+      "name" => "run_ptc_lisp",
+      "args" => %{"program" => "(return 42)"}
+    }
+
+    oversized = String.duplicate("x", 41)
+
+    oversized_call = %{
+      "id" => "big",
+      "name" => "run_ptc_lisp",
+      "args" => %{"program" => oversized}
+    }
+
+    cases = [
+      %{
+        response: "not-a-map",
+        max: 64_000,
+        reason: "invalid-response",
+        narration: :absent,
+        call: :absent
+      },
+      %{
+        response: %{"content" => "I will explain"},
+        max: 64_000,
+        reason: "assistant-text-without-tool-call",
+        narration: "I will explain",
+        call: :absent
+      },
+      %{
+        response: %{"content" => nil},
+        max: 64_000,
+        reason: "missing-tool-call",
+        narration: :absent,
+        call: :absent
+      },
+      %{
+        response: %{"content" => "zero calls", "tool_calls" => []},
+        max: 64_000,
+        reason: "multiple-or-missing-tool-calls",
+        narration: "zero calls",
+        call: :absent
+      },
+      %{
+        response: %{"tool_calls" => [valid_call, valid_call]},
+        max: 64_000,
+        reason: "multiple-or-missing-tool-calls",
+        narration: :absent,
+        call: :absent
+      },
+      %{
+        response: %{
+          "content" => "wrong tool",
+          "tool_calls" => [%{"id" => "w1", "name" => "wrong", "args" => %{"program" => "x"}}]
+        },
+        max: 64_000,
+        reason: "wrong-tool-name",
+        narration: "wrong tool",
+        call: %{"id" => "w1", "name" => "wrong", "args" => %{"program" => "x"}}
+      },
+      %{
+        response: %{
+          "content" => "blank id",
+          "tool_calls" => [
+            %{"id" => "", "name" => "run_ptc_lisp", "args" => %{"program" => "(return 1)"}}
+          ]
+        },
+        max: 64_000,
+        reason: "invalid-tool-call-id",
+        narration: "blank id",
+        call: %{"id" => "", "name" => "run_ptc_lisp", "args" => %{"program" => "(return 1)"}}
+      },
+      %{
+        response: %{
+          "content" => "bad json",
+          "tool_calls" => [
+            %{"id" => "j1", "name" => "run_ptc_lisp", "args" => "{not json"}
+          ]
+        },
+        max: 64_000,
+        reason: "invalid-json-arguments",
+        narration: "bad json",
+        call: %{"id" => "j1", "name" => "run_ptc_lisp", "args" => "{not json"}
+      },
+      %{
+        response: %{
+          "content" => "extra arg",
+          "tool_calls" => [
+            %{
+              "id" => "e1",
+              "name" => "run_ptc_lisp",
+              "args" => %{"program" => "x", "extra" => 1}
+            }
+          ]
+        },
+        max: 64_000,
+        reason: "extra-or-missing-arguments",
+        narration: "extra arg",
+        call: %{
+          "id" => "e1",
+          "name" => "run_ptc_lisp",
+          "args" => %{"program" => "x", "extra" => 1}
+        }
+      },
+      %{
+        response: %{
+          "content" => "not a string",
+          "tool_calls" => [
+            %{"id" => "p1", "name" => "run_ptc_lisp", "args" => %{"program" => 1}}
+          ]
+        },
+        max: 64_000,
+        reason: "program-not-string",
+        narration: "not a string",
+        call: %{"id" => "p1", "name" => "run_ptc_lisp", "args" => %{"program" => 1}}
+      },
+      %{
+        response: %{
+          "tool_calls" => [
+            %{"id" => "empty", "name" => "run_ptc_lisp", "args" => %{"program" => ""}}
+          ]
+        },
+        max: 64_000,
+        reason: "program-empty",
+        narration: :absent,
+        call: %{"id" => "empty", "name" => "run_ptc_lisp", "args" => %{"program" => ""}}
+      },
+      %{
+        response: %{"content" => "too large", "tool_calls" => [oversized_call]},
+        max: 40,
+        reason: "program-too-large",
+        narration: "too large",
+        call: oversized_call,
+        limit: 40,
+        size: 41
+      }
+    ]
+
+    for {spec, index} <- Enum.with_index(cases) do
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: "native-evidence-#{index}")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          missions: %{"default" => mission},
+          input: %{"response" => spec.response, "max" => spec.max},
+          limits: limits,
+          event_sink: sink
+        )
+
+      assert {:ok, %{value: action}} =
+               Kernel.run("(return (agent.native/normalize data/response data/max))", config),
+             spec.reason
+
+      assert action["kind"] == "protocol-error", spec.reason
+      assert action["reason"] == spec.reason
+
+      if spec.narration == :absent do
+        refute Map.has_key?(action, "narration"), spec.reason
+      else
+        assert action["narration"] == spec.narration, spec.reason
+      end
+
+      if spec.call == :absent do
+        refute Map.has_key?(action, "offending-call"), spec.reason
+      else
+        assert action["offending-call"] == spec.call, spec.reason
+      end
+
+      if Map.has_key?(spec, :limit) do
+        assert action["limit"] == spec.limit, spec.reason
+        assert action["size"] == spec.size, spec.reason
+      else
+        refute Map.has_key?(action, "limit"), spec.reason
+        refute Map.has_key?(action, "size"), spec.reason
+      end
+    end
+  end
+
+  test "agent.native caps protocol-error narration at 2000 characters" do
+    {:ok, component} = Library.component("agent.native")
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    marker = "… [truncated]"
+    exact = String.duplicate("n", 2000)
+    over = exact <> "!"
+
+    for {label, content, expected} <- [
+          {"under", String.duplicate("n", 1999), String.duplicate("n", 1999)},
+          {"exact", exact, exact},
+          {"over", over, String.duplicate("n", 2000 - String.length(marker)) <> marker}
+        ] do
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: "native-narration-#{label}")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          missions: %{"default" => mission},
+          input: %{"response" => %{"content" => content}},
+          limits: limits,
+          event_sink: sink
+        )
+
+      assert {:ok, %{value: action}} =
+               Kernel.run("(return (agent.native/normalize data/response 64000))", config),
+             label
+
+      assert action["narration"] == expected, label
+      assert String.length(action["narration"]) <= 2000, label
+
+      if label == "over" do
+        assert String.ends_with?(action["narration"], marker)
+        refute String.ends_with?(over, marker)
+      else
+        refute action["narration"] =~ "truncated"
+      end
     end
   end
 
@@ -1477,24 +1707,29 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     }
 
     out_of_range = [
-      {"max_turns", 0},
-      {"max_turns", 129},
-      {"max_program_chars", 0},
-      {"max_program_chars", 1_000_001},
-      {"max_observation_chars", 0},
-      {"max_observation_chars", 65_537},
-      {"max_transcript_chars", 0},
-      {"max_transcript_chars", 1_000_001}
+      {"max_turns", 0, 1, 128},
+      {"max_turns", 129, 1, 128},
+      {"max_program_chars", 0, 1, 1_000_000},
+      {"max_program_chars", 1_000_001, 1, 1_000_000},
+      {"max_observation_chars", 0, 1, 65_536},
+      {"max_observation_chars", 65_537, 1, 65_536},
+      {"max_transcript_chars", 0, 1, 1_000_000},
+      {"max_transcript_chars", 1_000_001, 1, 1_000_000}
     ]
 
-    for {option, value} <- out_of_range do
+    for {option, value, minimum, maximum} <- out_of_range do
       {:ok, config} = agent_config([response])
 
       assert {:error,
               %{
                 kind: :workflow_failed,
-                reason: :explicit_failure,
-                details: %{failure_kind: "invalid-agent-config"},
+                reason: :invalid_agent_config,
+                details: %{
+                  option: ^option,
+                  min: ^minimum,
+                  max: ^maximum,
+                  value: ^value
+                },
                 usage: usage
               }} =
                Kernel.run(
@@ -1502,9 +1737,161 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                  config
                )
 
+      assert {:ok, message} =
+               AgentConfigDiagnostic.integer_message(option, minimum, maximum, value)
+
       assert usage.subordinate_evaluations == 0
       refute_receive {:agent_request, _request}
+      assert message =~ option
     end
+  end
+
+  test "agent.core rejects a non-integer bounded option by type, never by content" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+      ]
+    }
+
+    {:ok, config} = agent_config([response])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :invalid_agent_config,
+              details: %{
+                option: "max_turns",
+                min: 1,
+                max: 128,
+                type: :string
+              }
+            }} =
+             Kernel.run(~s|(agent.core/run "Compute" {"max_turns" "nope"})|, config)
+
+    refute_receive {:agent_request, _request}
+
+    {:ok, config} = agent_config([response])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :invalid_agent_config,
+              details: %{option: "max_turns", type: :float}
+            }} =
+             Kernel.run(~s|(agent.core/run "Compute" {"max_turns" 1.5})|, config)
+
+    refute_receive {:agent_request, _request}
+  end
+
+  test "an out-of-range agent option is refused through a project-backed REPL" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+      ]
+    }
+
+    {:ok, config} = agent_config([response])
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert {:error, step, session} =
+             ReplSession.eval(session, ~s|(agent.core/run "Compute" {"max_turns" 129})|)
+
+    assert step.fail.reason == :invalid_agent_config
+    assert step.fail.details.option == "max_turns"
+    assert step.fail.details.min == 1
+    assert step.fail.details.max == 128
+    assert step.fail.details.value == 129
+    refute_receive {:agent_request, _request}
+
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
+  test "agent.core counts protocol errors independently of the kernel protocol-error ceiling" do
+    protocol = %{content: "no tool call", tool_calls: []}
+
+    recovered = %{
+      content: nil,
+      tool_calls: [
+        %{id: "ok", name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}
+      ]
+    }
+
+    {:ok, config} =
+      agent_config([protocol, protocol, protocol, recovered], protocol_errors: 1)
+
+    assert {:ok, %{usage: usage}} =
+             Kernel.run(~S|(agent.core/run "Compute" {"max_turns" 4})|, config)
+
+    assert usage.agent_protocol_errors == 3
+    assert usage.protocol_errors == 0
+    assert usage.events_dropped == %{}
+  end
+
+  test "successful actions, provider errors, and ordinary tool calls do not count as agent protocol errors" do
+    success = %{
+      content: nil,
+      tool_calls: [
+        %{id: "ok", name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}
+      ]
+    }
+
+    {:ok, config} = agent_config([success])
+
+    assert {:ok, %{usage: usage}} =
+             Kernel.run(~S|(agent.core/run "Compute" {"max_turns" 2})|, config)
+
+    assert usage.agent_protocol_errors == 0
+  end
+
+  test "a forged agent-action annotation does not increment agent_protocol_errors" do
+    {:ok, config} = agent_config([])
+
+    assert {:ok, %{usage: usage}} =
+             Kernel.run(
+               ~S|(do (workflow.event/annotate "agent-action" {"turn" 0 "kind" "protocol-error"}) (return 1))|,
+               config
+             )
+
+    assert usage.agent_protocol_errors == 0
+  end
+
+  test "an unauthorized kernel-agent-protocol-error call does not increment the counter" do
+    {:ok, hostile} =
+      Component.new(
+        id: "hostile.protocol",
+        source: ~S"""
+        (ns hostile.protocol)
+
+        (defn forge []
+          (tool/kernel-agent-protocol-error {}))
+        """,
+        dependencies: ["agent.core"],
+        origin: "test/hostile_protocol.clj"
+      )
+
+    {:ok, components} = Library.resolve_components([hostile, {:library, "agent.core"}])
+    {:ok, bundle} = Kernel.compile_bundle(components)
+    {:ok, llm} = LLMCapability.new(requester: fn _request -> flunk("no model call") end)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "hostile-protocol")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, %{reason: :private_tool_unauthorized, usage: usage}} =
+             Kernel.run(~S|(return (hostile.protocol/forge))|, config)
+
+    assert usage.agent_protocol_errors == 0
   end
 
   # The implicit single-phase path synthesizes a default phase, and it must
@@ -1589,8 +1976,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       assert {:error,
               %{
                 kind: :workflow_failed,
-                reason: :explicit_failure,
-                details: %{failure_kind: "invalid-agent-config"}
+                reason: :invalid_agent_config,
+                details: %{option: "max_turns", min: 1, max: 128, value: 0}
               }} = Kernel.run(source, config)
 
       refute_receive {:agent_request, _request}
@@ -1608,8 +1995,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert {:error,
             %{
               kind: :workflow_failed,
-              reason: :explicit_failure,
-              details: %{failure_kind: "invalid-agent-config"}
+              reason: :invalid_agent_config,
+              details: %{option: "max_turns", min: 1, max: 128, value: 0}
             }} = Kernel.run("(agent.main/run data/input)", config)
 
     refute_receive {:agent_request, _request}
@@ -1984,6 +2371,73 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:runtime_limit_failure, %{"max_transcript_chars" => 1}}
   end
 
+  test "a transcript ceiling that admits the first request can still block protocol-error recovery" do
+    protocol = %{
+      content: "I will explain the approach at some length before calling.",
+      tool_calls: []
+    }
+
+    recovered = %{
+      content: nil,
+      tool_calls: [
+        %{id: "ok", name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}
+      ]
+    }
+
+    prompt_source = tiny_prompt_source()
+
+    {:ok, measured} =
+      agent_config([protocol, recovered], [], prompt_source: prompt_source)
+
+    assert {:ok, _result} =
+             Kernel.run(
+               ~S|(agent.core/run "Recover" {"max_turns" 2})|,
+               measured
+             )
+
+    assert_receive {:agent_request, first_request}
+    assert_receive {:agent_request, second_request}
+
+    first_chars = first_request |> Jason.encode!() |> String.length()
+    second_chars = second_request |> Jason.encode!() |> String.length()
+    assert second_chars > first_chars
+
+    {:ok, inspection_sink} =
+      InspectionSink.start(run_id: "protocol-blocked", trace_id: "protocol-blocked")
+
+    {:ok, limited} =
+      agent_config([protocol, recovered], [],
+        prompt_source: prompt_source,
+        provider_closers: [close_counter(self(), :protocol_blocked)],
+        inspection_sink: inspection_sink
+      )
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :runtime_limit_exceeded,
+              details: %{limit: :max_transcript_chars, limit_value: ^first_chars}
+            }} =
+             Kernel.run(
+               ~s|(agent.core/run "Recover" {"max_turns" 2 "max_transcript_chars" #{first_chars}})|,
+               limited
+             )
+
+    assert_receive {:agent_request, _}
+    refute_receive {:agent_request, _}
+    assert_receive {:provider_closed, :protocol_blocked}
+    refute_receive {:provider_closed, :protocol_blocked}
+
+    assert {:ok, records} = InspectionSink.records(inspection_sink)
+    assert diagnostic = Enum.find(records, &(&1["record_type"] == "execution-error"))
+    assert diagnostic["payload"]["reason"] == "runtime_limit_exceeded"
+
+    assert diagnostic["payload"]["details"] == %{
+             "limit" => "max_transcript_chars",
+             "limit_value" => first_chars
+           }
+  end
+
   @tag :tmp_dir
   test "agent.core rejects an unencodable request before provider dispatch", %{tmp_dir: _dir} do
     response = %{
@@ -2228,6 +2682,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert [
              %{"role" => "user", "content" => initial_task},
+             %{"role" => "assistant", "content" => "I will explain"},
              %{"role" => "user", "content" => protocol_feedback},
              %{
                "role" => "assistant",
@@ -2256,6 +2711,217 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert evaluation_feedback =~ "evaluation did not return successfully"
     assert evaluation_feedback =~ "TURN BUDGET: 1 turn remains, including the next program."
     assert evaluation_feedback =~ "FINAL TURN:"
+  end
+
+  test "agent.core retains the model's protocol-error turn without attributing kernel text" do
+    recovered = %{
+      content: nil,
+      tool_calls: [
+        %{id: "recovered", name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}
+      ]
+    }
+
+    oversized = String.duplicate("x", 50)
+
+    cases = [
+      %{
+        reason: :assistant_text_without_tool_call,
+        response: %{content: "I will explain"},
+        group: :no_call,
+        narration: "I will explain"
+      },
+      %{
+        reason: :missing_tool_call,
+        response: %{content: nil},
+        group: :no_call,
+        narration: nil
+      },
+      %{
+        reason: :zero_calls,
+        response: %{content: "zero calls", tool_calls: []},
+        group: :no_call,
+        narration: "zero calls"
+      },
+      %{
+        reason: :multiple_calls,
+        response: %{
+          content: "two calls",
+          tool_calls: [
+            %{id: "a", name: "run_ptc_lisp", args: %{"program" => "(return 1)"}},
+            %{id: "b", name: "run_ptc_lisp", args: %{"program" => "(return 2)"}}
+          ]
+        },
+        group: :no_call,
+        narration: "two calls"
+      },
+      %{
+        reason: :wrong_tool_name,
+        response: %{
+          content: "wrong tool",
+          tool_calls: [%{id: "w1", name: "wrong", args: %{"program" => "x"}}]
+        },
+        group: :malformed,
+        narration: "wrong tool"
+      },
+      %{
+        reason: :invalid_tool_call_id,
+        response: %{
+          content: "blank id",
+          tool_calls: [%{id: "", name: "run_ptc_lisp", args: %{"program" => "(return 1)"}}]
+        },
+        group: :malformed,
+        narration: "blank id"
+      },
+      %{
+        reason: :invalid_json_arguments,
+        response: %{
+          content: "bad json",
+          tool_calls: [%{id: "j1", name: "run_ptc_lisp", args: "{not json"}]
+        },
+        group: :malformed,
+        narration: "bad json"
+      },
+      %{
+        reason: :extra_or_missing_arguments,
+        response: %{
+          content: "extra arg",
+          tool_calls: [
+            %{id: "e1", name: "run_ptc_lisp", args: %{"program" => "x", "extra" => 1}}
+          ]
+        },
+        group: :malformed,
+        narration: "extra arg"
+      },
+      %{
+        reason: :program_not_string,
+        response: %{
+          content: "not a string",
+          tool_calls: [%{id: "p1", name: "run_ptc_lisp", args: %{"program" => 1}}]
+        },
+        group: :malformed,
+        narration: "not a string"
+      },
+      %{
+        reason: :program_empty,
+        response: %{
+          tool_calls: [%{id: "empty", name: "run_ptc_lisp", args: %{"program" => ""}}]
+        },
+        group: :malformed,
+        narration: nil
+      },
+      %{
+        reason: :program_too_large,
+        response: %{
+          content: "too large",
+          tool_calls: [
+            %{id: "big", name: "run_ptc_lisp", args: %{"program" => oversized}}
+          ]
+        },
+        group: :too_large,
+        narration: "too large",
+        cfg: ~S|{"max_turns" 2 "max_program_chars" 40}|
+      }
+    ]
+
+    for spec <- cases do
+      cfg = Map.get(spec, :cfg, ~S|{"max_turns" 2}|)
+      {:ok, config} = agent_config([spec.response, recovered])
+
+      assert {:ok, %{value: %{"ok" => true, "value" => 1}}} =
+               Kernel.run("(agent.core/run \"Recover\" #{cfg})", config),
+             "#{spec.reason}"
+
+      assert_receive {:agent_request, _first}
+      assert_receive {:agent_request, second}
+
+      messages = second["messages"]
+      refute_kernel_text_in_assistant_turns(messages)
+
+      correction = List.last(messages)
+      assert correction["content"] =~ "Protocol error", "#{spec.reason}"
+
+      case spec.group do
+        :too_large ->
+          assert Enum.any?(messages, fn
+                   %{"role" => "assistant", "tool_calls" => [call]} ->
+                     call["id"] == "big" and call["args"]["program"] == oversized
+
+                   _ ->
+                     false
+                 end),
+                 "#{spec.reason}"
+
+          assert Enum.any?(messages, fn
+                   %{"role" => "tool", "tool_call_id" => "big", "content" => content} ->
+                     content =~ "your program was 50 characters; the limit is 40"
+
+                   _ ->
+                     false
+                 end),
+                 "#{spec.reason}"
+
+          refute Enum.any?(messages, &(&1["role"] == "user" and &1 != hd(messages))),
+                 "#{spec.reason}"
+
+        :malformed ->
+          refute Enum.any?(messages, &Map.has_key?(&1, "tool_calls")), "#{spec.reason}"
+          assert_protocol_narration(messages, spec.narration)
+          assert correction["role"] == "user"
+
+        :no_call ->
+          refute Enum.any?(messages, &Map.has_key?(&1, "tool_calls")), "#{spec.reason}"
+          assert_protocol_narration(messages, spec.narration)
+          assert correction["role"] == "user"
+      end
+    end
+  end
+
+  test "agent.core corrects an invalid-response protocol error with no assistant turn" do
+    parent = self()
+    {:ok, queue} = Agent.start_link(fn -> [:invalid, :recovered] end)
+
+    {:ok, llm} =
+      Capability.new(
+        name: "llm-request",
+        input_schema: %{"type" => "object", "additionalProperties" => true},
+        callback: fn request ->
+          send(parent, {:agent_request, request})
+
+          Agent.get_and_update(queue, fn
+            [:invalid | rest] -> {{:ok, "not-a-map"}, rest}
+            [:recovered | rest] -> {{:ok, recovered_llm_value()}, rest}
+            [] -> {{:error, ProviderError.new(:unavailable, "script exhausted")}, []}
+          end)
+        end
+      )
+
+    {:ok, bundle} = agent_bundle([])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "invalid-response")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 1}}} =
+             Kernel.run(~S|(agent.core/run "Recover" {"max_turns" 2})|, config)
+
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, second}
+
+    messages = second["messages"]
+    refute_kernel_text_in_assistant_turns(messages)
+    refute Enum.any?(messages, &(&1["role"] == "assistant"))
+    refute Enum.any?(messages, &Map.has_key?(&1, "tool_calls"))
+    assert List.last(messages)["role"] == "user"
+    assert List.last(messages)["content"] =~ "Protocol error"
   end
 
   test "agent.core retries an input contract failure with public correction details" do
@@ -3511,7 +4177,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp required_agent_tools do
     Map.new(
-      ~w(kernel-check-source kernel-eval kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
+      ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
          llm-request workflow-annotate),
       &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
     )
@@ -3540,5 +4206,45 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
          {:ok, bundle} <- Kernel.compile_bundle([component]) do
       MissionEnvironment.new(bundle: bundle)
     end
+  end
+
+  defp recovered_llm_value do
+    %{
+      "content" => nil,
+      "tool_calls" => [
+        %{
+          "id" => "recovered",
+          "name" => "run_ptc_lisp",
+          "args" => %{"program" => "(return 1)"}
+        }
+      ]
+    }
+  end
+
+  defp refute_kernel_text_in_assistant_turns(messages) do
+    fragments = [
+      "Protocol error",
+      "TURN BUDGET",
+      "PHASE BUDGET",
+      "Call run_ptc_lisp exactly once",
+      "your program was"
+    ]
+
+    for %{"role" => "assistant"} = message <- messages,
+        is_binary(message["content"]),
+        fragment <- fragments do
+      refute String.contains?(message["content"], fragment),
+             "assistant turn contains kernel text #{inspect(fragment)}: #{inspect(message["content"])}"
+    end
+  end
+
+  defp assert_protocol_narration(messages, nil) do
+    refute Enum.any?(messages, &(&1["role"] == "assistant"))
+  end
+
+  defp assert_protocol_narration(messages, narration) when is_binary(narration) do
+    assistants = Enum.filter(messages, &(&1["role"] == "assistant"))
+    assert [%{"content" => ^narration} = assistant] = assistants
+    refute Map.has_key?(assistant, "tool_calls")
   end
 end

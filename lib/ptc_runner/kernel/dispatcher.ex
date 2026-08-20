@@ -420,6 +420,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
           })
           |> Events.put_rejection_class(result)
 
+        _ = maybe_record_llm_usage(state, stopped_data)
+
         :telemetry.execute(
           [:ptc_runner, :capability, :stop],
           %{duration_ms: Events.duration_ms(started_ms)},
@@ -1089,6 +1091,34 @@ defmodule PtcRunner.Kernel.Dispatcher do
   end
 
   defp maybe_put_usage(data, _result, nil), do: data
+
+  defp maybe_record_llm_usage(state, data) when is_map(data) do
+    name = Map.get(data, :name) || Map.get(data, "name")
+    alias_name = Map.get(data, :alias) || Map.get(data, "alias")
+    revision = Map.get(data, :installation_revision) || Map.get(data, "installation_revision")
+    status = Map.get(data, :status) || Map.get(data, "status")
+    usage = Map.get(data, :usage) || Map.get(data, "usage")
+
+    if llm_spend_identity?(name, alias_name, revision) do
+      case spend_status(status) do
+        nil -> :ok
+        normalized -> RunState.record_llm_usage(state, alias_name, revision, normalized, usage)
+      end
+    else
+      :ok
+    end
+  end
+
+  defp llm_spend_identity?(name, alias_name, revision)
+       when name in ["llm-request", :"llm-request"] and is_binary(alias_name) and
+              is_binary(revision),
+       do: true
+
+  defp llm_spend_identity?(_name, _alias_name, _revision), do: false
+
+  defp spend_status(status) when status in [:ok, "ok"], do: :ok
+  defp spend_status(status) when status in [:error, "error"], do: :error
+  defp spend_status(_status), do: nil
 
   defp valid_output?(%Capability{output_validator: nil}, _value), do: true
 

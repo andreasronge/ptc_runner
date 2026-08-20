@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
   reserved routes such as `workflow-annotate`.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunState
@@ -144,6 +145,48 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
              SafeMetadata.fingerprint("capability-reason:secret_rejection_reason")
 
     refute inspect(stopped) =~ "secret_rejection"
+  end
+
+  test "kernel-agent-config-failure authors the integer and type payloads" do
+    callback = RuntimeTools.agent_config_failure()
+
+    assert %TrustedError{
+             reason: :invalid_agent_config,
+             details: %{option: "max_turns", min: 1, max: 128, value: 129}
+           } = callback.(%{"option" => "max_turns", "min" => 1, "max" => 128, "value" => 129})
+
+    assert %TrustedError{
+             reason: :invalid_agent_config,
+             details: %{option: "max_turns", min: 1, max: 128, type: :string}
+           } = callback.(%{"option" => "max_turns", "min" => 1, "max" => 128, "type" => "string"})
+
+    assert %{status: :error, reason: :invalid_agent_config_failure} =
+             callback.(%{"option" => "max_turns", "min" => 1, "max" => 128, "value" => 4})
+
+    assert %{status: :error, reason: :invalid_agent_config_failure} =
+             callback.(%{"option" => "not_an_option", "min" => 1, "max" => 128, "value" => 129})
+
+    assert {:ok, _} = AgentConfigDiagnostic.integer_message("max_turns", 1, 128, 129)
+  end
+
+  test "kernel-agent-protocol-error increments a non-limiting counter" do
+    {:ok, limits} = Limits.new(protocol_errors: 2)
+    {:ok, state} = RunState.start(limits)
+    callback = RuntimeTools.agent_protocol_error(state)
+
+    for _count <- 1..5 do
+      assert true = callback.(%{})
+    end
+
+    usage = RunState.usage(state)
+    assert usage.agent_protocol_errors == 5
+    assert usage.protocol_errors == 0
+    assert usage.closed? == false
+
+    assert %{status: :error, reason: :invalid_agent_protocol_error} =
+             callback.(%{"extra" => true})
+
+    assert RunState.usage(state).agent_protocol_errors == 5
   end
 
   defp instrumented_call(callback) do

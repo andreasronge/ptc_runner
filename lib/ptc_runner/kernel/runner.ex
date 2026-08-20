@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.Runner do
   projection, and terminal error normalization.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.BoundedPrints
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.Events
@@ -616,6 +617,11 @@ defmodule PtcRunner.Kernel.Runner do
       config.limits,
       config.workflow_environment.bundle
     )
+    |> RuntimeTools.maybe_put_agent_loop_tools(
+      state,
+      config.event_sink,
+      config.workflow_environment.bundle
+    )
     |> RuntimeTools.trusted_tools(config.limits)
   end
 
@@ -940,6 +946,18 @@ defmodule PtcRunner.Kernel.Runner do
     if RuntimeLimitDiagnostic.agent_turns_reason?(limit_reason),
       do: %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason},
       else: %{}
+  end
+
+  defp workflow_error_details(
+         %{reason: :invalid_agent_config, details: details},
+         _timeout_ms,
+         _limits,
+         _sink
+       ) do
+    case AgentConfigDiagnostic.retain_details(details) do
+      {:ok, retained} -> retained
+      :error -> %{}
+    end
   end
 
   defp workflow_error_details(

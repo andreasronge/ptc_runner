@@ -1091,6 +1091,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       "subordinate_evaluations" => 0,
       "evaluations_by_mission" => %{},
       "protocol_errors" => 0,
+      "agent_protocol_errors" => 0,
       "evaluation_memory_bytes" => 0,
       "evaluation_history_bytes" => 0,
       "evaluation_continuation_bytes" => 0,

@@ -5,6 +5,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   Provides type error formatting and type description utilities.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -419,6 +420,13 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     else
       {:private_prelude_error, "private prelude evaluation failed"}
     end
+  end
+
+  def sanitize_private_error({:invalid_agent_config, message, details} = reason)
+      when is_binary(message) do
+    if AgentConfigDiagnostic.valid_error?(message, details),
+      do: reason,
+      else: {:private_prelude_error, "private prelude evaluation failed"}
   end
 
   def sanitize_private_error({:loop_limit_exceeded, limit}) when is_integer(limit),

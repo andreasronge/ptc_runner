@@ -64,18 +64,67 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
   def alias_rows(calls) when is_list(calls) do
     calls
     |> Enum.reduce(%{}, fn {alias_name, revision, usage}, counters ->
-      update_counter(
-        counters,
-        {alias_name, revision},
-        Map.merge(empty_row(), %{
-          "alias" => alias_name,
-          "installation_revision" => revision
-        }),
-        usage,
-        true
-      )
+      accumulate(counters, alias_name, revision, :ok, usage)
     end)
     |> rows()
+  end
+
+  @doc """
+  Records one LLM call into a bounded `{alias, revision}` accumulator.
+
+  Unlike `alias_rows/1`, this preserves failed calls so live spend can use the
+  same classification terminal accounting does: count every call, withhold
+  pricing only when a successful call lacks priced usage.
+  """
+  @spec accumulate(map(), binary(), binary(), atom() | binary(), map() | nil) :: map()
+  def accumulate(counters, alias_name, revision, status, usage)
+      when is_map(counters) and is_binary(alias_name) and is_binary(revision) do
+    update_counter(
+      counters,
+      {alias_name, revision},
+      Map.merge(empty_row(), %{
+        "alias" => alias_name,
+        "installation_revision" => revision
+      }),
+      usage,
+      stringify(status) == "ok"
+    )
+  end
+
+  @doc """
+  Projects live spend from an `accumulate/5` map.
+
+  Exactly four states, and none of `unpriced`, `incomplete`, or `empty` may
+  render as zero cost:
+
+  * `available` — successful usage complete and priced
+  * `unpriced` — successful usage exists, tokens valid, cost absent
+  * `incomplete` — at least one successful call has missing or invalid usage
+  * `empty` — no successful LLM call yet
+  """
+  @spec spend(map()) :: map()
+  def spend(counters) when is_map(counters) do
+    {successful, missing, cost_complete?, usage} =
+      Enum.reduce(counters, {0, 0, true, %{}}, fn {_key, {row, row_complete?}},
+                                                  {successful, missing, complete?, usage} ->
+        {successful + Map.fetch!(row, "successful_calls"),
+         missing + Map.fetch!(row, "missing_usage_calls"), complete? and row_complete?,
+         sum_usage(usage, Map.fetch!(row, "usage"))}
+      end)
+
+    cond do
+      successful == 0 ->
+        %{"state" => "empty"}
+
+      missing > 0 ->
+        %{"state" => "incomplete"}
+
+      cost_complete? ->
+        Map.put(Map.take(usage, @total_keys), "state", "available")
+
+      true ->
+        Map.put(Map.take(usage, ~w(input output)), "state", "unpriced")
+    end
   end
 
   @spec totals([map()]) :: map()

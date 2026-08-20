@@ -625,6 +625,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       subordinate_evaluations: 4,
       evaluations_by_mission: %{"default" => 4},
       protocol_errors: 0,
+      agent_protocol_errors: 0,
       evaluation_memory_bytes: 0,
       evaluation_history_bytes: 0,
       evaluation_continuation_bytes: 0,
@@ -768,6 +769,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       subordinate_evaluations: 2,
       evaluations_by_mission: %{},
       protocol_errors: 2,
+      agent_protocol_errors: 0,
       evaluation_memory_bytes: 0,
       evaluation_history_bytes: 0,
       evaluation_continuation_bytes: 0,
@@ -989,6 +991,120 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["message"] == expected
     assert outcome.envelope["error"]["message"] =~ "raise limits.terminal_result_bytes"
     assert_schema_valid(outcome.envelope)
+  end
+
+  test "an out-of-range agent option names the option, range, and rejected integer" do
+    usage = %{
+      remaining_ms: 0,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 0,
+      evaluations_by_mission: %{"default" => 0},
+      protocol_errors: 0,
+      agent_protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{}
+    }
+
+    evidence = %{
+      result:
+        {:error,
+         %Error{
+           kind: :workflow_failed,
+           reason: :invalid_agent_config,
+           details: %{option: "max_turns", min: 1, max: 128, value: 129},
+           usage: usage
+         }}
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: %{
+           "trace" => "not_requested",
+           "inspection" => "not_requested",
+           "result" => "not_requested"
+         },
+         error: nil,
+         secondary_errors: []
+       }}
+
+    run_ref = CommandRunRef.encode(@zero_entropy)
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandRunOutcome.project(evidence, settlement, run_ref, true)
+
+    assert outcome.envelope["error"]["code"] == "invalid_agent_config"
+    assert outcome.envelope["error"]["source"] == nil
+
+    assert outcome.envelope["error"]["message"] ==
+             "max_turns 129 is outside the supported range 1–128 for agent.core/run; lower it"
+
+    assert_schema_valid(outcome.envelope)
+
+    string_evidence = %{
+      evidence
+      | result:
+          {:error,
+           %Error{
+             kind: :workflow_failed,
+             reason: :invalid_agent_config,
+             details: %{option: "max_turns", min: 1, max: 128, type: :string},
+             usage: usage
+           }}
+    }
+
+    assert {:error, %CommandOutcome{} = typed} =
+             CommandRunOutcome.project(string_evidence, settlement, run_ref, true)
+
+    assert typed.envelope["error"]["message"] ==
+             "max_turns must be an integer in 1–128 for agent.core/run; received a string"
+
+    assert_schema_valid(typed.envelope)
+
+    int64_min = -9_223_372_036_854_775_808
+
+    min_evidence = %{
+      evidence
+      | result:
+          {:error,
+           %Error{
+             kind: :workflow_failed,
+             reason: :invalid_agent_config,
+             details: %{option: "max_turns", min: 1, max: 128, value: int64_min},
+             usage: usage
+           }}
+    }
+
+    assert {:error, %CommandOutcome{} = minimum} =
+             CommandRunOutcome.project(min_evidence, settlement, run_ref, true)
+
+    assert minimum.envelope["error"]["code"] == "invalid_agent_config"
+
+    assert minimum.envelope["error"]["message"] ==
+             "max_turns #{int64_min} is outside the supported range 1–128 for agent.core/run; lower it"
+
+    assert_schema_valid(minimum.envelope)
+
+    drifted = %{
+      evidence
+      | result:
+          {:error,
+           %Error{
+             kind: :workflow_failed,
+             reason: :invalid_agent_config,
+             details: %{option: "max_turns", min: 1, max: 4096, value: 129},
+             usage: usage
+           }}
+    }
+
+    assert {:error, %CommandOutcome{} = fallback} =
+             CommandRunOutcome.project(drifted, settlement, run_ref, true)
+
+    assert fallback.envelope["error"]["message"] ==
+             "an agent configuration option is outside its supported range"
   end
 
   test "transcript-ceiling diagnostics bind their bounded message to a null source" do
@@ -7388,6 +7504,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       subordinate_evaluations: 0,
       evaluations_by_mission: %{},
       protocol_errors: 0,
+      agent_protocol_errors: 0,
       evaluation_memory_bytes: 0,
       evaluation_history_bytes: 0,
       evaluation_continuation_bytes: 0,
@@ -7433,6 +7550,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "subordinate_evaluations" => 0,
       "evaluations_by_mission" => %{"default" => 0},
       "protocol_errors" => 0,
+      "agent_protocol_errors" => 0,
       "evaluation_memory_bytes" => 0,
       "evaluation_history_bytes" => 0,
       "evaluation_continuation_bytes" => 0,

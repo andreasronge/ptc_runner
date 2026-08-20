@@ -13,7 +13,7 @@ defmodule PtcRunner.Kernel.Environment do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.RoutedCapability
 
-  @reserved ~w(kernel-check-source kernel-eval kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
+  @reserved ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
   @workflow_implicit ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
 
   @doc "Validates common environment fields and returns normalized attributes."
@@ -131,6 +131,8 @@ defmodule PtcRunner.Kernel.Environment do
   defp implicit_capabilities(:workflow, bundle) do
     if Library.shipped_component?(bundle, "agent.core"),
       do: [
+        "kernel-agent-config-failure",
+        "kernel-agent-protocol-error",
         "kernel-llm-provider-failure",
         "kernel-result-contract-failure",
         "kernel-runtime-limit-failure"

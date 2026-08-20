@@ -2219,7 +2219,7 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 
 /* --- KPI row --- */
 .live-kpis {
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 10px; margin-bottom: 16px;
 }
 .live-kpi {
@@ -2233,6 +2233,15 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
 .live-kpi-label {
   font-size: 10px; color: var(--muted);
   text-transform: uppercase; letter-spacing: 0.06em;
+}
+.live-kpi-spend .live-kpi-value {
+  font-size: 13px;
+  line-height: 1.25;
+}
+.live-kpi-spend[data-spend-state="incomplete"] .live-kpi-value,
+.live-kpi-spend[data-spend-state="unpriced"] .live-kpi-value,
+.live-kpi-spend[data-spend-state="empty"] .live-kpi-value {
+  color: var(--muted);
 }
 .live-worker-dots { display: flex; gap: 3px; margin: 3px 0 1px; }
 .live-dot {

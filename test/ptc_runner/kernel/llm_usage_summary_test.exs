@@ -177,6 +177,73 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
     assert LLMUsageSummary.totals(dropped) == %{}
   end
 
+  test "the live accumulator names empty, unpriced, incomplete, and available spend" do
+    empty = %{}
+    assert LLMUsageSummary.spend(empty) == %{"state" => "empty"}
+
+    failed =
+      LLMUsageSummary.accumulate(empty, "writer", "stable-v1", :error, %{
+        "input" => 3,
+        "total_cost" => 0.25
+      })
+
+    assert LLMUsageSummary.spend(failed) == %{"state" => "empty"}
+
+    unpriced =
+      LLMUsageSummary.accumulate(empty, "writer", "stable-v1", :ok, %{
+        "input" => 3,
+        "output" => 2
+      })
+
+    assert LLMUsageSummary.spend(unpriced) == %{
+             "state" => "unpriced",
+             "input" => 3,
+             "output" => 2
+           }
+
+    incomplete = LLMUsageSummary.accumulate(empty, "writer", "stable-v1", :ok, nil)
+    assert LLMUsageSummary.spend(incomplete) == %{"state" => "incomplete"}
+
+    invalid =
+      LLMUsageSummary.accumulate(empty, "writer", "stable-v1", :ok, %{"content" => "nope"})
+
+    assert LLMUsageSummary.spend(invalid) == %{"state" => "incomplete"}
+
+    available =
+      empty
+      |> LLMUsageSummary.accumulate("writer", "stable-v1", :ok, %{
+        "input" => 3,
+        "output" => 2,
+        "total_cost" => 0.25
+      })
+      |> LLMUsageSummary.accumulate("writer", "stable-v1", :error, nil)
+      |> LLMUsageSummary.accumulate("other", "stable-v1", :ok, %{
+        "input" => 5,
+        "output" => 4,
+        "total_cost" => 0.5
+      })
+
+    assert LLMUsageSummary.spend(available) == %{
+             "state" => "available",
+             "input" => 8,
+             "output" => 6,
+             "total_cost" => 0.75
+           }
+  end
+
+  test "a missing successful usage withholds priced totals even when another call is priced" do
+    mixed =
+      %{}
+      |> LLMUsageSummary.accumulate("writer", "stable-v1", :ok, %{
+        "input" => 3,
+        "output" => 2,
+        "total_cost" => 0.25
+      })
+      |> LLMUsageSummary.accumulate("writer", "stable-v1", :ok, nil)
+
+    assert LLMUsageSummary.spend(mixed) == %{"state" => "incomplete"}
+  end
+
   defp event(sequence, type, data) do
     %{
       "schema_version" => 2,
