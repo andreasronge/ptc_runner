@@ -118,8 +118,13 @@ about whether the documents are well formed.</p><h2 id="author-fixtures-from-exa
 workflow expects. A normal-data miss reports:</p><pre><code class="text language-text">no replay fixture matches this request (request_hash: sha256:...)</code></pre><p>Copy that hash into the fixture and rerun. For private-data requests, publish an
 owner-only inspection artifact and read the hash from its capability record;
 the public diagnostic intentionally omits the unsalted value.</p><p>Matching is exact. Changed messages, tools, or provider-neutral parameters
-produce another hash and fail instead of silently consuming unrelated evidence.
-An ordered <code class="inline">responses</code> sequence supports workflows that make the same request
+produce another hash rather than silently consuming unrelated evidence. A miss
+is a provider error (<code class="inline">kind</code> <code class="inline">provider_error</code>, <code class="inline">reason</code> <code class="inline">not_found</code>).
+<code class="inline">llm/request</code> returns that envelope as a value with <code class="inline">:status :error</code>; it does
+not fail the evaluation. The shipped <code class="inline">llm-replay</code> example calls <code class="inline">cap/unwrap!</code>
+on the raw <code class="inline">tool/llm-request</code> envelope so a miss exits non-zero. The run
+envelope also reports the miss in usage: that alias's <code class="inline">successful_calls</code> stays
+0 while <code class="inline">calls</code> increments.</p><p>An ordered <code class="inline">responses</code> sequence supports workflows that make the same request
 more than once.</p><h2 id="evaluate-the-candidate-without-installing-it">Evaluate the candidate without installing it</h2><p><code class="inline">--component-override-descriptor</code> replaces one component already selected by
 the manifest:</p><pre><code class="json language-json">{
   &quot;target&quot;: {&quot;environment&quot;: &quot;workflow&quot;},

@@ -554,8 +554,20 @@ inspection authority. Calls emit ordinary bounded capability facts without
 copying returned payloads into the trace.</p><p>Active-run trace self-query remains unsupported. Every trace capability call
 adds events to the same sink, while pagination cursors are source-digest-bound;
 the query would mutate the source it is paging. Same-run correction retains the
-bounded prior program directly in provider-valid assistant/tool/result history.</p><p>Workflow annotations are host stamped, use a finite semantic vocabulary with
-no caller-defined keys or string values, and cannot forge canonical events.</p><h2 id="viewer-and-cli-sharing">Viewer and CLI sharing</h2><p><code class="inline">ptc_viewer</code>, CLI debugging, and the model-facing <code class="inline">analysis/*</code> capabilities
+bounded prior program directly in provider-valid assistant/tool/result history.</p><p>Workflow annotations are host stamped and cannot forge canonical events.
+They use a finite semantic vocabulary: types and keys are closed, and
+enumerated values (<code class="inline">stage</code>, <code class="inline">kind</code>) are closed. A phased <code class="inline">agent-action</code>
+may also carry <code class="inline">mission</code>, a bounded identifier rather than a free string.
+<code class="inline">workflow.event/annotate</code> accepts exactly these rows. A string type that
+is not in the table, or a listed type with the wrong keys or values,
+returns
+<code class="inline">{&quot;status&quot;:&quot;error&quot;,&quot;kind&quot;:&quot;invalid_annotation&quot;,&quot;reason&quot;:&quot;invalid_workflow_annotation&quot;}</code>
+to the caller and does not fail the evaluation:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;"><code class="inline">annotation_type</code></th><th style="text-align: left;">accepted <code class="inline">data</code></th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">&quot;progress&quot;</code></td><td style="text-align: left;"><code class="inline">{&quot;stage&quot;: started | planning | executing | validating | completed | failed}</code> — that key and no other</td></tr><tr><td style="text-align: left;"><code class="inline">&quot;agent-action&quot;</code></td><td style="text-align: left;"><code class="inline">{&quot;turn&quot;: 0..127, &quot;kind&quot;: tool-call | protocol-error | provider-error | max-calls}</code>, or that plus <code class="inline">{&quot;phase&quot;: 0..7, &quot;phase_turn&quot;: 0..127, &quot;mission&quot;: &lt;name&gt;}</code> — exactly two keys or exactly five</td></tr></tbody></table></div><p>Keyword types and keys normalize (<code class="inline">:phase-turn</code> → <code class="inline">&quot;phase_turn&quot;</code>). A phased
+<code class="inline">agent-action</code> takes all three extra keys or none. <code class="inline">mission</code> is the phase's
+mission name: a lowercase letter, then up to 127 letters, digits, <code class="inline">.</code>, <code class="inline">_</code>, or
+<code class="inline">-</code>. The vocabulary never carries detailed reasons, generated source, or model
+content. A non-string annotation type is a malformed call, not this
+vocabulary rejection.</p><h2 id="viewer-and-cli-sharing">Viewer and CLI sharing</h2><p><code class="inline">ptc_viewer</code>, CLI debugging, and the model-facing <code class="inline">analysis/*</code> capabilities
 share the same loader, metadata derivation, filtering, ordering, pagination,
 and bounded <code class="inline">RunAnalysis</code> navigation where practical.</p><p>The viewer may render richer presentations, but it is not a second canonical
 query implementation or authority source. A development mode may additionally

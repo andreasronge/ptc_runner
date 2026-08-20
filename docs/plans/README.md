@@ -54,6 +54,11 @@ belongs in guides or retained specifications.
   released native launcher companion into its own Git repository. Extraction
   is not scheduled while core and launcher protocol changes still benefit from
   atomic commits.
+- [`future/ptc-lisp-library-extraction.md`](future/ptc-lisp-library-extraction.md)
+  records the measured boundary, the unconditional boundary-cleanup slice,
+  and the trigger-gated plan for extracting the PTC-Lisp implementation into
+  a nested Mix library. A separate Git repository is explicitly not planned
+  while language and Kernel changes still benefit from atomic commits.
 - [`future/reqllm-removal.md`](future/reqllm-removal.md) records the trigger
   and required adapter shape for replacing the optional `req_llm`/`llm_db`
   closure with a direct `Req` adapter for OpenAI-compatible endpoints.
