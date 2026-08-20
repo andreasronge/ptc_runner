@@ -155,10 +155,12 @@ lists declared missions in sorted order before sinks or provider activity.</p><p
 :quit             Leave the REPL</code></pre><p>Mission sessions additionally provide <code class="inline">:context</code>, shown above. Profile
 sessions explain that <code class="inline">:context</code> requires a manifest mission instead of
 attempting to use a manifest session internally.</p><p>The language functions are the canonical discovery interface in every input
-context, not only at a terminal: <code class="inline">(apropos &quot;term&quot;)</code> searches attached prelude
-exports, fixed built-ins, and the bounded Java surface, while <code class="inline">(doc &quot;name&quot;)</code>
-prints documentation. <code class="inline">(dir)</code> and <code class="inline">(export-meta &quot;ns/name&quot;)</code> inspect the
-attached prelude API specifically. An attached interactive terminal prints
+context, not only at a terminal: <code class="inline">(apropos &quot;term&quot;)</code> / <code class="inline">(apropos term)</code> searches
+attached prelude exports, fixed built-ins, and the bounded Java surface, while
+<code class="inline">(doc &quot;name&quot;)</code> / <code class="inline">(doc name)</code> prints documentation. <code class="inline">(dir)</code> and
+<code class="inline">(export-meta &quot;ns/name&quot;)</code> / <code class="inline">(export-meta ns/name)</code> inspect the attached
+prelude API specifically. Unquoted and quoted symbols are accepted the same
+way as strings. An attached interactive terminal prints
 this guidance in its startup banner, and <code class="inline">:help</code> repeats it. Detached input,
 scripts, repeated <code class="inline">--eval</code>, stdin mode, and JSONL output do not print the
 startup hint.</p><p>See the <a href="/reference/ptc-lisp-specification/">PTC-Lisp specification</a> and <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">function

@@ -64,6 +64,8 @@ defmodule PtcRunner.Lisp.Analyze do
                       :quote
                     ])
 
+  @bindings_key :__ptc_analyze_bindings__
+
   @type error_reason ::
           {:invalid_form, String.t()}
           | {:invalid_form, String.t(),
@@ -431,6 +433,20 @@ defmodule PtcRunner.Lisp.Analyze do
      {:invalid_arity, :quote, "(quote symbol) requires exactly 1 symbol, got #{length(args)}"}}
   end
 
+  # Discovery forms (`doc`/`dir`/`apropos`/`export-meta`) are ordinary env
+  # specials, but their *ref* argument is macro-like (clojure.repl/doc style,
+  # issue #1094): a bare or namespaced symbol is auto-quoted to a
+  # `{:symbol_ref, _}` instead of being evaluated to a closure/builtin first.
+  # `dir` with no args stays an ordinary zero-arity call.
+  defp dispatch_list_form({:symbol, head}, args, _list, tail?)
+       when head in [:doc, :apropos, :"export-meta"] do
+    analyze_discovery_call(head, args, tail?)
+  end
+
+  defp dispatch_list_form({:symbol, :dir}, [_ | _] = args, _list, tail?) do
+    analyze_discovery_call(:dir, args, tail?)
+  end
+
   # Tool invocation via tool/ namespace: (tool/name args...)
   defp dispatch_list_form({:ns_symbol, :tool, tool_name}, rest, _list, tail?),
     do: analyze_tool_call(tool_name, rest, tail?)
@@ -467,10 +483,13 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_let([bindings_ast | body_asts], tail?) do
     with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast) do
       body_asts = mark_shadowed_asts(body_asts, shadowed)
+      bound = Enum.flat_map(bindings, fn {:binding, pattern, _} -> pattern_names(pattern) end)
 
-      with {:ok, body} <- wrap_body(body_asts, tail?) do
-        {:ok, {:let, bindings, body}}
-      end
+      with_bindings(bound, fn ->
+        with {:ok, body} <- wrap_body(body_asts, tail?) do
+          {:ok, {:let, bindings, body}}
+        end
+      end)
     end
   end
 
@@ -484,20 +503,22 @@ defmodule PtcRunner.Lisp.Analyze do
     else
       elems
       |> Enum.chunk_every(2)
-      |> Enum.reduce_while({:ok, [], MapSet.new()}, fn [pattern_ast, value_ast],
-                                                       {:ok, acc, shadowed} ->
+      |> Enum.reduce_while({:ok, [], MapSet.new(), []}, fn [pattern_ast, value_ast],
+                                                           {:ok, acc, shadowed, bound} ->
         marked_value = mark_shadowed_calls(value_ast, shadowed)
 
         with {:ok, pattern} <- analyze_pattern(pattern_ast),
-             {:ok, value} <- do_analyze(marked_value, false) do
+             {:ok, value} <-
+               with_bindings(bound, fn -> do_analyze(marked_value, false) end) do
           new_shadows = MapSet.union(shadowed, compute_shadowed_names(pattern))
-          {:cont, {:ok, [{:binding, pattern, value} | acc], new_shadows}}
+          new_bound = bound ++ pattern_names(pattern)
+          {:cont, {:ok, [{:binding, pattern, value} | acc], new_shadows, new_bound}}
         else
           {:error, reason} -> {:halt, {:error, reason}}
         end
       end)
       |> case do
-        {:ok, rev, shadows} -> {:ok, Enum.reverse(rev), shadows}
+        {:ok, rev, shadows, _bound} -> {:ok, Enum.reverse(rev), shadows}
         {:error, _} = err -> err
       end
     end
@@ -514,10 +535,13 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_loop([bindings_ast | body_asts], _tail?) do
     with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast) do
       body_asts = mark_shadowed_asts(body_asts, shadowed)
+      bound = Enum.flat_map(bindings, fn {:binding, pattern, _} -> pattern_names(pattern) end)
 
-      with {:ok, body} <- wrap_body(body_asts, true) do
-        {:ok, {:loop, bindings, body}}
-      end
+      with_bindings(bound, fn ->
+        with {:ok, body} <- wrap_body(body_asts, true) do
+          {:ok, {:loop, bindings, body}}
+        end
+      end)
     end
   end
 
@@ -629,9 +653,11 @@ defmodule PtcRunner.Lisp.Analyze do
       shadowed = compute_shadowed_names(params)
       body_asts = mark_shadowed_asts(body_asts, shadowed)
 
-      with {:ok, body} <- wrap_body(body_asts, true) do
-        {:ok, {:fn, name, params, body}}
-      end
+      with_bindings(param_names(params), fn ->
+        with {:ok, body} <- wrap_body(body_asts, true) do
+          {:ok, {:fn, name, params, body}}
+        end
+      end)
     end
   end
 
@@ -641,9 +667,11 @@ defmodule PtcRunner.Lisp.Analyze do
       shadowed = compute_shadowed_names(params)
       body_asts = mark_shadowed_asts(body_asts, shadowed)
 
-      with {:ok, body} <- wrap_body(body_asts, true) do
-        {:ok, {:fn, params, body}}
-      end
+      with_bindings(param_names(params), fn ->
+        with {:ok, body} <- wrap_body(body_asts, true) do
+          {:ok, {:fn, params, body}}
+        end
+      end)
     end
   end
 
@@ -679,6 +707,54 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_quote(other) do
     {:error, {:invalid_form, "quote only supports symbols in this phase, got #{inspect(other)}"}}
   end
+
+  # Macro-like ref analysis for discovery forms (issue #1094). Bare symbols,
+  # namespaced symbols, and reader-quoted symbols become `{:symbol_ref, _}` so
+  # `(doc paged/profile)` looks the symbol up instead of evaluating it. Locals
+  # (including short-fn params after `#(doc %)` desugars to `(doc p1)`) and any
+  # computed expression keep evaluating normally.
+  defp analyze_discovery_call(head, args, tail?) do
+    with {:ok, analyzed_args} <- Patterns.collect_results(args, &analyze_discovery_ref/1) do
+      analyze_call(
+        {:list, [{:symbol, head} | Enum.map(analyzed_args, &{:analyzed, &1})]},
+        tail?
+      )
+    end
+  end
+
+  defp analyze_discovery_ref({:symbol, name}) do
+    if bound_local?(name) do
+      do_analyze({:symbol, name}, false)
+    else
+      {:ok, {:symbol_ref, to_string(name)}}
+    end
+  end
+
+  defp analyze_discovery_ref({:ns_symbol, ns, name}), do: {:ok, {:symbol_ref, "#{ns}/#{name}"}}
+
+  defp analyze_discovery_ref({:quoted_symbol, name}) when is_binary(name),
+    do: {:ok, {:symbol_ref, name}}
+
+  defp analyze_discovery_ref({:shadowed_local, _} = local), do: do_analyze(local, false)
+  defp analyze_discovery_ref(other), do: do_analyze(other, false)
+
+  defp with_bindings(names, fun) when is_list(names) and is_function(fun, 0) do
+    previous = Process.get(@bindings_key, MapSet.new())
+    added = names |> Enum.map(&normalize_binding_name/1) |> MapSet.new()
+    Process.put(@bindings_key, MapSet.union(previous, added))
+
+    try do
+      fun.()
+    after
+      Process.put(@bindings_key, previous)
+    end
+  end
+
+  defp bound_local?(name) do
+    MapSet.member?(Process.get(@bindings_key, MapSet.new()), normalize_binding_name(name))
+  end
+
+  defp normalize_binding_name(name), do: to_string(name)
 
   defp analyze_list_of_patterns(patterns),
     do: Patterns.collect_results(patterns, &analyze_pattern/1)

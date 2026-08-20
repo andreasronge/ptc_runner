@@ -139,10 +139,12 @@ sessions explain that `:context` requires a manifest mission instead of
 attempting to use a manifest session internally.
 
 The language functions are the canonical discovery interface in every input
-context, not only at a terminal: `(apropos "term")` searches attached prelude
-exports, fixed built-ins, and the bounded Java surface, while `(doc "name")`
-prints documentation. `(dir)` and `(export-meta "ns/name")` inspect the
-attached prelude API specifically. An attached interactive terminal prints
+context, not only at a terminal: `(apropos "term")` / `(apropos term)` searches
+attached prelude exports, fixed built-ins, and the bounded Java surface, while
+`(doc "name")` / `(doc name)` prints documentation. `(dir)` and
+`(export-meta "ns/name")` / `(export-meta ns/name)` inspect the attached
+prelude API specifically. Unquoted and quoted symbols are accepted the same
+way as strings. An attached interactive terminal prints
 this guidance in its startup banner, and `:help` repeats it. Detached input,
 scripts, repeated `--eval`, stdin mode, and JSONL output do not print the
 startup hint.

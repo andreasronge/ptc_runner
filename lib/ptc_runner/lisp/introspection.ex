@@ -10,6 +10,11 @@ defmodule PtcRunner.Lisp.Introspection do
   a prelude export reading another prelude's documentation — there is no
   REPL-only path.
 
+  Ref arguments accept a string or a `{:symbol_ref, name}` runtime value (from
+  a quoted symbol, or from the analyzer's bare-symbol rewrite on these forms).
+  `meta` is intentionally not included: in Clojure it is an ordinary function
+  over values, not a discovery form.
+
   ## Attached prelude visibility
 
   Only public export records (`%PtcRunner.Lisp.Prelude.Export{}`), which cover
@@ -90,32 +95,52 @@ defmodule PtcRunner.Lisp.Introspection do
   """
   @spec invoke(operation(), [term()], EvalContext.t()) ::
           {:ok, term()} | {:print, String.t()} | {:error, term()}
-  def invoke(:dir, [], %EvalContext{} = context),
+  def invoke(op, args, %EvalContext{} = context) when op in @operations do
+    case normalize_args(args) do
+      {:ok, normalized} -> invoke_normalized(op, normalized, context)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp invoke_normalized(:dir, [], %EvalContext{} = context),
     do: {:ok, namespaces(context.prelude, filter(context))}
 
-  def invoke(:dir, [namespace], %EvalContext{} = context) when is_binary(namespace),
+  defp invoke_normalized(:dir, [namespace], %EvalContext{} = context) when is_binary(namespace),
     do: {:ok, dir(context.prelude, namespace, filter(context))}
 
-  def invoke(:apropos, [query], %EvalContext{} = context) when is_binary(query),
+  defp invoke_normalized(:apropos, [query], %EvalContext{} = context) when is_binary(query),
     do: {:ok, apropos(context.prelude, query, filter(context))}
 
-  def invoke(:export_meta, [ref], %EvalContext{} = context) when is_binary(ref),
+  defp invoke_normalized(:export_meta, [ref], %EvalContext{} = context) when is_binary(ref),
     do: {:ok, export_meta(context.prelude, ref, filter(context))}
 
-  def invoke(:doc, [ref], %EvalContext{} = context) when is_binary(ref),
+  defp invoke_normalized(:doc, [ref], %EvalContext{} = context) when is_binary(ref),
     do: {:print, render_doc(context.prelude, ref, filter(context))}
 
-  def invoke(op, args, %EvalContext{}) when op in @operations do
+  defp invoke_normalized(op, args, %EvalContext{}) when op in @operations do
     name = Map.fetch!(@names, op)
     arities = Map.fetch!(@arities, op)
 
     if length(args) in arities do
-      {:error, {:type_error, "#{name} expects a string reference", args}}
+      {:error, {:type_error, "#{name} expects a string or symbol reference", args}}
     else
       {:error,
        {:arity_error,
         "#{name} expects #{Enum.join(arities, " or ")} argument(s), got #{length(args)}"}}
     end
+  end
+
+  # Quoted symbols evaluate to `{:symbol_ref, name}` (`analyze.ex` / `eval.ex`).
+  # Discovery forms accept that runtime value the same way they accept a string,
+  # so `(doc 'str)` and the analyzer's bare-symbol rewrite both land here.
+  defp normalize_args(args) do
+    Enum.reduce_while(args, {:ok, []}, fn
+      {:symbol_ref, ref}, {:ok, acc} when is_binary(ref) ->
+        {:cont, {:ok, acc ++ [ref]}}
+
+      other, {:ok, acc} ->
+        {:cont, {:ok, acc ++ [other]}}
+    end)
   end
 
   # What a program can discover must equal what it can call. The run's

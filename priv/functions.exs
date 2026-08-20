@@ -2841,7 +2841,8 @@
       examples: [],
       notes:
         "Only namespaces holding at least one visible public export are listed; a namespace of " <>
-          "private `defn-` helpers does not appear. An unknown namespace returns an empty vector.",
+          "private `defn-` helpers does not appear. An unknown namespace returns an empty vector. " <>
+          "The one-argument form is macro-like over its namespace ref: unquoted, quoted, or string.",
       see_also: ["apropos", "doc", "export-meta"],
       clojure_var: nil,
       divergences: nil
@@ -2862,7 +2863,8 @@
         "Case-insensitive literal substring match over prelude refs/docstrings and fixed " <>
           "canonical names, signatures, descriptions, notes, divergences, and sections. " <>
           "Qualified Java aliases in signatures are searchable; fixed results use canonical " <>
-          "names. Results are sorted and deduplicated. A blank query returns an empty vector.",
+          "names. Results are sorted and deduplicated. A blank query returns an empty vector. " <>
+          "Macro-like over the query: accepts an unquoted symbol, a quoted symbol, or a string.",
       see_also: ["dir", "doc", "export-meta"],
       clojure_var: nil,
       divergences: nil
@@ -2883,8 +2885,9 @@
         "Prints rather than returns, so documentation is charged to the print budget instead " <>
           "of the result channel and is subject to print truncation. Exact attached exports " <>
           "resolve before fixed registry entries; a hidden collision does not fall through. " <>
-          "Use `export-meta` for attached export information as data. A miss prints a " <>
-          "not-found line and still returns `nil`.",
+          "Macro-like over the ref: accepts an unquoted symbol (`str`, `ns/name`), a quoted " <>
+          "symbol (`'ns/name`), or a string. Use `export-meta` for attached export information " <>
+          "as data. A miss prints a not-found line and still returns `nil`.",
       see_also: ["apropos", "dir", "export-meta"],
       clojure_var: nil,
       divergences: nil
@@ -2906,9 +2909,10 @@
           "`:doc`, `:visibility`, `:effect`, plus `:arity`/`:params` for functions and " <>
           "`:signature` or `:type` when declared. Capability wiring is not reported, and " <>
           "`:effect` is conservative: an export reaching a capability is never reported as " <>
-          "`:read`, since only the mission inventory can resolve installed effects. This is " <>
-          "not `clojure.core/meta`, which takes an object rather than a reference string and " <>
-          "is not implemented.",
+          "`:read`, since only the mission inventory can resolve installed effects. Macro-like " <>
+          "over the ref: accepts an unquoted symbol, a quoted symbol, or a string. This is " <>
+          "not `clojure.core/meta`, which takes an object rather than a reference and is not " <>
+          "implemented.",
       see_also: ["apropos", "dir", "doc"],
       clojure_var: nil,
       divergences: nil

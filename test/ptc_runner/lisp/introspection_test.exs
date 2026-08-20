@@ -71,6 +71,11 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                ["alpha/greet", "alpha/limit", "alpha/shout"]
     end
 
+    test "accepts unquoted and quoted namespace symbols", %{prelude: prelude} do
+      assert eval!("(dir alpha)", prelude).return == eval!(~S|(dir "alpha")|, prelude).return
+      assert eval!("(dir 'alpha)", prelude).return == eval!(~S|(dir "alpha")|, prelude).return
+    end
+
     test "omits private helpers from a namespace listing", %{prelude: prelude} do
       refute "alpha/helper" in eval!(~S|(dir "alpha")|, prelude).return
     end
@@ -83,6 +88,14 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
   describe "apropos" do
     test "matches on ref", %{prelude: prelude} do
       assert "beta/hidden" in eval!(~S|(apropos "hidden")|, prelude).return
+    end
+
+    test "accepts a quoted or unquoted symbol query", %{prelude: prelude} do
+      assert eval!("(apropos hidden)", prelude).return ==
+               eval!(~S|(apropos "hidden")|, prelude).return
+
+      assert eval!("(apropos 'hidden)", prelude).return ==
+               eval!(~S|(apropos "hidden")|, prelude).return
     end
 
     test "matches on docstring", %{prelude: prelude} do
@@ -137,6 +150,14 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                effect: :read,
                signature: "(name :string) -> :string"
              }
+    end
+
+    test "accepts unquoted and quoted refs", %{prelude: prelude} do
+      assert eval!("(export-meta alpha/greet)", prelude).return ==
+               eval!(~S|(export-meta "alpha/greet")|, prelude).return
+
+      assert eval!("(export-meta 'alpha/greet)", prelude).return ==
+               eval!(~S|(export-meta "alpha/greet")|, prelude).return
     end
 
     test "omits the signature key entirely when unsigned", %{prelude: prelude} do
@@ -225,6 +246,42 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                  Greets a name.\
                """
              ]
+    end
+
+    test "accepts unquoted, quoted, and string refs identically (issue #1094)", %{
+      prelude: prelude
+    } do
+      string = eval!(~S|(doc "alpha/greet")|, prelude)
+      quoted = eval!("(doc 'alpha/greet)", prelude)
+      unquoted = eval!("(doc alpha/greet)", prelude)
+
+      assert string.prints == quoted.prints
+      assert string.prints == unquoted.prints
+      assert string.return == nil
+    end
+
+    test "accepts an unquoted builtin name", %{prelude: prelude} do
+      assert eval!("(doc str)", prelude).prints == eval!(~S|(doc "str")|, prelude).prints
+    end
+
+    test "a missing namespaced ref is a clean miss, not an analysis fault", %{prelude: prelude} do
+      result = eval!("(doc missing/ns)", prelude)
+      assert result.return == nil
+      assert Enum.join(result.prints, "\n") =~ ~s(No documentation found for "missing/ns")
+    end
+
+    test "computed refs still evaluate", %{prelude: prelude} do
+      assert eval!(~S|(doc (str "alpha/" "greet"))|, prelude).prints ==
+               eval!(~S|(doc "alpha/greet")|, prelude).prints
+    end
+
+    test "short-fn params keep evaluating (not auto-quoted)", %{prelude: prelude} do
+      # `#(doc %)` desugars to `(fn [p1] (doc p1))`. The local must evaluate so
+      # mapping over string refs still works.
+      result = eval!(~S|(mapv #(doc %) ["alpha/greet" "str"])|, prelude)
+      assert result.return == [nil, nil]
+      assert Enum.join(result.prints, "\n") =~ "alpha/greet"
+      assert Enum.join(result.prints, "\n") =~ "str"
     end
 
     test "renders a constant with its type and bare ref", %{prelude: prelude} do

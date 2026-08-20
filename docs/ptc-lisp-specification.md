@@ -3554,7 +3554,11 @@ fixed built-ins and the bounded Java surface.
 | `(doc "name")` | Prints prelude or fixed-function documentation, returns `nil` |
 | `(export-meta "ns/name")` | Metadata map, or `nil` when unknown |
 
-References are strings, not symbols:
+References accept a string, a quoted symbol, or an unquoted symbol (the
+analyzer auto-quotes bare and namespaced symbols in these call positions,
+matching `clojure.repl/doc`). Computed arguments still evaluate normally, so
+`(doc (str "ns/" "name"))` and `#(doc %)` over string refs keep working.
+`clojure.core/meta` is unchanged and is not part of this family.
 
 Answers depend on the prelude a given run attaches, so the results below are
 illustrative:
