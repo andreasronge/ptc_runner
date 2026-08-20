@@ -871,13 +871,6 @@ defmodule PtcRunner.Kernel.Runner do
   defp maybe_emit_workflow_limit(
          _state,
          _sink,
-         {:error, %Error{kind: :limit_exceeded, details: %{limit: :protocol_errors}}}
-       ),
-       do: :ok
-
-  defp maybe_emit_workflow_limit(
-         _state,
-         _sink,
          {:error, %Error{kind: :limit_exceeded, details: %{limit: limit, name: _name}}}
        )
        when limit in [
