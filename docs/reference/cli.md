@@ -187,8 +187,10 @@ component without installing it. A trusted build step creates the owner-only
 candidate and descriptor from model-authored source. The
 [replay evaluation guide](../guides/evaluating-with-replay.md) owns the complete workflow
 for holding model responses fixed, gating effect changes, and comparing a
-baseline with that candidate. Candidate creation is not currently a standalone
-command; the source-checkout tool belongs to the maintainer documentation.
+baseline with that candidate, and its descriptor reference defines every
+field. Candidate creation is not currently a standalone command; a source
+checkout provides `mix ptc.materialize` as documented in the
+[core-prompt replacement tutorial](../guides/components-and-preludes.md#trial-a-different-core-prompt).
 
 ## Read results and failures
 

@@ -130,23 +130,35 @@ envelope also reports the miss in usage: that alias's <code class="inline">succe
 0 while <code class="inline">calls</code> increments, and <code class="inline">capability_refusals</code> records
 <code class="inline">workflow/provider_error/not_found</code>.</p><p>An ordered <code class="inline">responses</code> sequence supports workflows that make the same request
 more than once.</p><h2 id="evaluate-the-candidate-without-installing-it">Evaluate the candidate without installing it</h2><p><code class="inline">--component-override-descriptor</code> replaces one component already selected by
-the manifest:</p><pre><code class="json language-json">{
+the manifest. A transitively selected component is also eligible, so selecting
+<code class="inline">agent.core</code> makes its <code class="inline">agent.prompt</code> dependency available as a workflow
+override target.</p><p>The descriptor contains the replacement instruction, not the source itself:</p><pre><code class="json language-json">{
   &quot;target&quot;: {&quot;environment&quot;: &quot;workflow&quot;},
   &quot;component_id&quot;: &quot;my.agent&quot;,
   &quot;base_source_hash&quot;: &quot;sha256:&lt;64 lowercase hex&gt;&quot;,
   &quot;source_hash&quot;: &quot;sha256:&lt;64 lowercase hex&gt;&quot;,
   &quot;path&quot;: &quot;candidate.clj&quot;
-}</code></pre><p>For a mission component, use
+}</code></pre><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Field</th><th style="text-align: left;">Meaning</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">target</code></td><td style="text-align: left;">The workflow bundle, or one exact mission bundle</td></tr><tr><td style="text-align: left;"><code class="inline">component_id</code></td><td style="text-align: left;">An already-selected component whose source will be replaced</td></tr><tr><td style="text-align: left;"><code class="inline">base_source_hash</code></td><td style="text-align: left;">Hash of the installed source the candidate was derived from</td></tr><tr><td style="text-align: left;"><code class="inline">source_hash</code></td><td style="text-align: left;">Hash of the candidate source bytes</td></tr><tr><td style="text-align: left;"><code class="inline">path</code></td><td style="text-align: left;">Candidate source path relative to the descriptor directory</td></tr><tr><td style="text-align: left;"><code class="inline">provenance</code></td><td style="text-align: left;">Optional operator assertions about how the candidate was authored</td></tr></tbody></table></div><p>For a mission component, use
 <code class="inline">{&quot;environment&quot;: &quot;mission&quot;, &quot;mission&quot;: &quot;reader&quot;}</code> as the target. The
-candidate path is confined to the descriptor directory. <code class="inline">source_hash</code>
-identifies the candidate bytes; <code class="inline">base_source_hash</code> prevents evaluation against
-a component version from which it was not derived. Dependencies, signatures,
-exports, and capability requirements are checked normally.</p><p>Candidate creation is a trusted build step and is not currently exposed by the
+candidate path is confined to the descriptor directory. PtcRunner verifies
+both hashes before compiling: <code class="inline">source_hash</code> prevents substituted candidate
+bytes, while <code class="inline">base_source_hash</code> rejects a candidate built for a component that
+has since changed. The source is read once, and those verified bytes are the
+bytes compiled.</p><p>An override preserves the selected component's ID and declared dependencies;
+it cannot add a component or change the graph. The replacement still passes
+the normal dependency, signature, export, capability-requirement, and bundle
+checks. The descriptor contains no source, credentials, provider grants, or
+installation instruction.</p><p>Candidate creation is a trusted build step and is not currently exposed by the
 standalone executable. The source-checkout tool for maintainers is documented
 under &quot;Materialize candidate source&quot; in <code class="inline">docs/maintainers/embedding.md</code>, which
 is a repository document rather than a page the executable carries.</p><p>The optional closed <code class="inline">provenance</code> object may contain <code class="inline">run_id</code>, <code class="inline">prompt_hash</code>,
 <code class="inline">authored_at</code>, and <code class="inline">accept_widened_effect</code>. These are operator claims rather
-than proof of origin.</p><p>Run the unchanged baseline and the override with the same replay installation,
+than proof of origin. <code class="inline">mix ptc.materialize</code> writes the candidate and completed
+descriptor as owner-only files and calculates the candidate path and hash from
+the bytes it publishes.</p><p>The active bundle stays immutable for the whole run. A run may author source,
+but only a later host invocation can materialize it and start with the newly
+compiled bundle. Component-override switches are invocation-only and are not
+stored in <code class="inline">ptc-project.json</code>.</p><p>Run the unchanged baseline and the override with the same replay installation,
 inputs, host ceilings, and content snapshots. Compare their values, envelopes,
 usage, and canonical traces. Replay removes model sampling as a variable; it
 does not make external MCP content deterministic unless that content is also

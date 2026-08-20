@@ -106,7 +106,35 @@ policies, libraries, or complete agent loops.</p></blockquote><p>Most applicatio
 }</code></pre><p>The shipped <code class="inline">agent.core</code> loop is a replaceable library, not Kernel behavior.
 Start with it, then introduce a custom component under a new ID when the
 application needs different prompts, feedback, retry policy, continuation, or
-completion rules.</p><p>Each component declares its direct namespace dependencies. Selecting a library
+completion rules.</p><h2 id="trial-a-different-core-prompt">Trial a different core prompt</h2><p>Selecting <code class="inline">agent.core</code> also selects its <code class="inline">agent.prompt</code> dependency. A component
+override can therefore trial a replacement prompt without changing the
+application manifest. The replacement keeps the installed component ID and
+dependencies and must provide the three functions <code class="inline">agent.core</code> calls:</p><pre><code class="clojure language-clojure">(ns agent.prompt &quot;Application prompt policy.&quot; {:visibility :discoverable})
+
+(defn initial-state [cfg]
+  {:turns-remaining (get cfg &quot;max_turns&quot;)})
+
+(defn render {:effect :read} [_state]
+  &quot;Use run_ptc_lisp to solve the task. Return the completed value; do not answer in prose.&quot;)
+
+(defn transition [state event]
+  (assoc state :turns-remaining (get event :turns-remaining)))</code></pre><p>In a source checkout, save that source as <code class="inline">custom-agent-prompt.clj</code>, then
+materialize and run the candidate:</p><pre><code class="console language-console">mkdir -p private
+mix ptc.materialize ptc.json \
+  --workflow \
+  --component agent.prompt \
+  --source custom-agent-prompt.clj \
+  --out private/agent-prompt-candidate
+
+mix ptc run ptc.json \
+  --component-override-descriptor private/agent-prompt-candidate/descriptor.json</code></pre><p>The descriptor binds the candidate bytes to the exact installed
+<code class="inline">agent.prompt</code> source they replace. The override applies to this invocation
+only; project files do not store component overrides. See <a href="/guides/evaluating-with-replay/#evaluate-the-candidate-without-installing-it">Evaluate changes
+with replay</a>
+for the descriptor fields and replay comparison.</p><p>The active bundle cannot be replaced during its run. A workflow may return
+candidate source as its result, but materialization and execution happen in a
+later host invocation so the replacement is compiled, hashed, and validated
+before it becomes active.</p><p>Each component declares its direct namespace dependencies. Selecting a library
 installs its immutable dependency closure, but does not grant tool authority.
 Mission tools still come only from providers installed by the operator and
 selected for that mission.</p><p>Keep reusable components narrow:</p><ul><li>expose a small documented public surface;</li><li>declare signatures where model-written calls benefit from validation;</li><li>keep prompt-visible helpers focused on the task contract;</li><li>separate workflow policy from mission-only task functions; and</li><li>use a new component ID for a permanently customized prompt or loop.</li></ul><p>Use the <a href="/reference/component-contracts/">components-and-preludes reference</a>

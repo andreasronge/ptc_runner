@@ -102,7 +102,11 @@ more than once.
 ## Evaluate the candidate without installing it
 
 `--component-override-descriptor` replaces one component already selected by
-the manifest:
+the manifest. A transitively selected component is also eligible, so selecting
+`agent.core` makes its `agent.prompt` dependency available as a workflow
+override target.
+
+The descriptor contains the replacement instruction, not the source itself:
 
 ```json
 {
@@ -114,12 +118,28 @@ the manifest:
 }
 ```
 
+| Field | Meaning |
+| --- | --- |
+| `target` | The workflow bundle, or one exact mission bundle |
+| `component_id` | An already-selected component whose source will be replaced |
+| `base_source_hash` | Hash of the installed source the candidate was derived from |
+| `source_hash` | Hash of the candidate source bytes |
+| `path` | Candidate source path relative to the descriptor directory |
+| `provenance` | Optional operator assertions about how the candidate was authored |
+
 For a mission component, use
 `{"environment": "mission", "mission": "reader"}` as the target. The
-candidate path is confined to the descriptor directory. `source_hash`
-identifies the candidate bytes; `base_source_hash` prevents evaluation against
-a component version from which it was not derived. Dependencies, signatures,
-exports, and capability requirements are checked normally.
+candidate path is confined to the descriptor directory. PtcRunner verifies
+both hashes before compiling: `source_hash` prevents substituted candidate
+bytes, while `base_source_hash` rejects a candidate built for a component that
+has since changed. The source is read once, and those verified bytes are the
+bytes compiled.
+
+An override preserves the selected component's ID and declared dependencies;
+it cannot add a component or change the graph. The replacement still passes
+the normal dependency, signature, export, capability-requirement, and bundle
+checks. The descriptor contains no source, credentials, provider grants, or
+installation instruction.
 
 Candidate creation is a trusted build step and is not currently exposed by the
 standalone executable. The source-checkout tool for maintainers is documented
@@ -128,7 +148,14 @@ is a repository document rather than a page the executable carries.
 
 The optional closed `provenance` object may contain `run_id`, `prompt_hash`,
 `authored_at`, and `accept_widened_effect`. These are operator claims rather
-than proof of origin.
+than proof of origin. `mix ptc.materialize` writes the candidate and completed
+descriptor as owner-only files and calculates the candidate path and hash from
+the bytes it publishes.
+
+The active bundle stays immutable for the whole run. A run may author source,
+but only a later host invocation can materialize it and start with the newly
+compiled bundle. Component-override switches are invocation-only and are not
+stored in `ptc-project.json`.
 
 Run the unchanged baseline and the override with the same replay installation,
 inputs, host ceilings, and content snapshots. Compare their values, envelopes,

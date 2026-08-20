@@ -22,6 +22,52 @@ Start with it, then introduce a custom component under a new ID when the
 application needs different prompts, feedback, retry policy, continuation, or
 completion rules.
 
+## Trial a different core prompt
+
+Selecting `agent.core` also selects its `agent.prompt` dependency. A component
+override can therefore trial a replacement prompt without changing the
+application manifest. The replacement keeps the installed component ID and
+dependencies and must provide the three functions `agent.core` calls:
+
+```clojure
+(ns agent.prompt "Application prompt policy." {:visibility :discoverable})
+
+(defn initial-state [cfg]
+  {:turns-remaining (get cfg "max_turns")})
+
+(defn render {:effect :read} [_state]
+  "Use run_ptc_lisp to solve the task. Return the completed value; do not answer in prose.")
+
+(defn transition [state event]
+  (assoc state :turns-remaining (get event :turns-remaining)))
+```
+
+In a source checkout, save that source as `custom-agent-prompt.clj`, then
+materialize and run the candidate:
+
+```console
+mkdir -p private
+mix ptc.materialize ptc.json \
+  --workflow \
+  --component agent.prompt \
+  --source custom-agent-prompt.clj \
+  --out private/agent-prompt-candidate
+
+mix ptc run ptc.json \
+  --component-override-descriptor private/agent-prompt-candidate/descriptor.json
+```
+
+The descriptor binds the candidate bytes to the exact installed
+`agent.prompt` source they replace. The override applies to this invocation
+only; project files do not store component overrides. See [Evaluate changes
+with replay](evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
+for the descriptor fields and replay comparison.
+
+The active bundle cannot be replaced during its run. A workflow may return
+candidate source as its result, but materialization and execution happen in a
+later host invocation so the replacement is compiled, hashed, and validated
+before it becomes active.
+
 Each component declares its direct namespace dependencies. Selecting a library
 installs its immutable dependency closure, but does not grant tool authority.
 Mission tools still come only from providers installed by the operator and
