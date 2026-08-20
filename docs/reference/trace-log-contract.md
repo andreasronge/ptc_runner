@@ -702,11 +702,12 @@ partial correlation overlay described above. Retention belongs to the host in
 
 Installed defaults are 2,000,000 encoded bytes per record and 16,000,000
 encoded bytes for the artifact; a host may lower them but a manifest cannot
-raise or select them. Retained-size validation runs before JSON encoding and an
-encoded-byte check follows it, so an oversized record is rejected without first
-being encoded. Persistence is atomic and no-clobber, so a failed write
-is never mistaken for a complete capture, and this increment deliberately does
-not append or merge inspection runs.
+raise or select them. A record over the retained-size limit is rejected before
+encoding; encoded expansion — a record within the retained limit that grows
+past it under JSON escaping — is necessarily caught after encoding.
+Persistence is atomic and no-clobber, so a failed write is never mistaken for
+a complete capture, and this increment deliberately does not append or merge
+inspection runs.
 
 This increment captures the normalized LLM request and response, exact
 generated subordinate PTC-Lisp, exact effective prelude component source, and
