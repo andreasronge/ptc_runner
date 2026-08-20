@@ -39,6 +39,25 @@ defmodule PtcRunner.Kernel.ProjectConfigTest do
   end
 
   @tag :tmp_dir
+  test "an omitted Viewer port asks the operating system for a free port", %{tmp_dir: directory} do
+    path = Path.join(directory, "ptc-project.json")
+
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "kind" => "ptc-project",
+        "version" => 1,
+        "application" => %{"path" => "ptc.json"},
+        "viewer" => %{}
+      })
+    )
+
+    assert {:ok, project} = ProjectConfig.load(path)
+    assert project.viewer.port == 0
+    assert ProjectConfig.schema()["properties"]["viewer"]["properties"]["port"]["default"] == 0
+  end
+
+  @tag :tmp_dir
   test "rejects duplicate, unknown, traversing, and inconsistent values", %{tmp_dir: directory} do
     path = Path.join(directory, "ptc-project.json")
 

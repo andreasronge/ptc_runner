@@ -322,9 +322,12 @@ provider and follows typed evidence links with the shipped <code class="inline">
 the port, browser-opening preference, REPL setting, and private-data grant. The
 Viewer pins the selected data and can open a bounded analysis REPL over an
 immutable capture. <code class="inline">--port</code> overrides the project's port; <code class="inline">0</code> asks the
-operating system for a free one. The command runs in the foreground until
-<code class="inline">Ctrl+C</code>, and opens a browser only when the project asks for it <em>and</em> a
-terminal is attached.</p><p>The Viewer does not search the invocation directory or its parents for a
+operating system for a free one and is the project default. Startup prints the
+selected address. If an explicitly selected port is occupied, the command
+probes loopback: another PTC Viewer is reported with its exact project document
+path, while any other listener is reported as an occupied service. The command
+runs in the foreground until <code class="inline">Ctrl+C</code>, and opens a browser only when the project
+asks for it <em>and</em> a terminal is attached.</p><p>The Viewer does not search the invocation directory or its parents for a
 <code class="inline">.env</code> file. Environment-backed provider credentials come from the inherited
 process environment, the project's <code class="inline">host.env_file</code>, or an explicit
 <code class="inline">--env-file FILE</code>. The command-line file is resolved when the Viewer starts

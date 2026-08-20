@@ -158,7 +158,7 @@ defmodule PtcRunner.Kernel.ProjectConfig do
               "type" => "integer",
               "minimum" => 0,
               "maximum" => 65_535,
-              "default" => 4123
+              "default" => 0
             },
             "open" => bool,
             "repl" => bool,
@@ -304,7 +304,7 @@ defmodule PtcRunner.Kernel.ProjectConfig do
   end
 
   defp port(map) do
-    case Map.get(map, "port", 4123) do
+    case Map.get(map, "port", 0) do
       value when is_integer(value) and value in 0..65_535 -> {:ok, value}
       _invalid -> {:error, :project_invalid}
     end
@@ -331,7 +331,7 @@ defmodule PtcRunner.Kernel.ProjectConfig do
     do: %{trace: false, inspection: false, result: false, envelope: false}
 
   defp default_viewer,
-    do: %{port: 4123, open: false, repl: false, private: false}
+    do: %{port: 0, open: false, repl: false, private: false}
 
   defp object_schema(required, properties) do
     %{

@@ -109,6 +109,7 @@ defmodule PtcRunner.ViewerFrontendTest do
 
     assert {:ok, %{status: 200, body: project}} = Req.get(base_url <> "/api/live/project")
     assert project["enabled"] == true
+    assert project["project"] == project_path
     assert project["manifest"] == Path.join(directory, "demo/ptc.json")
 
     assert {:ok, %{status: 200, body: launch}} = Req.get(base_url <> "/api/live/launch")
@@ -312,6 +313,70 @@ defmodule PtcRunner.ViewerFrontendTest do
   end
 
   @tag :tmp_dir
+  test "a fixed-port collision names the project already served there", %{tmp_dir: directory} do
+    first_directory = Path.join(directory, "first")
+    second_directory = Path.join(directory, "second")
+    File.mkdir!(first_directory)
+    File.mkdir!(second_directory)
+
+    first_project = viewer_project(first_directory)
+    second_project = viewer_project(second_directory)
+
+    assert {:ok, first_viewer, _address, port} = ViewerFrontend.start(first_project)
+    on_exit(fn -> if Process.alive?(first_viewer), do: PtcViewer.stop(first_viewer) end)
+
+    arguments = viewer_arguments(second_project, port)
+
+    assert {:error, :viewer_port_in_use, message} =
+             ViewerFrontend.run(arguments, CommandRuntime.standalone())
+
+    assert message ==
+             "port #{port} is already serving a PTC Viewer for #{first_project}; " <>
+               "stop it, pass --port 0, or choose another port"
+
+    assert :ok = PtcViewer.stop(first_viewer)
+  end
+
+  @tag :tmp_dir
+  test "a fixed-port collision distinguishes another service from a Viewer", %{
+    tmp_dir: directory
+  } do
+    project_path = viewer_project(directory)
+
+    assert {:ok, listener} =
+             :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
+
+    on_exit(fn -> :gen_tcp.close(listener) end)
+    assert {:ok, {_address, port}} = :inet.sockname(listener)
+
+    responder =
+      Task.async(fn ->
+        {:ok, probe_socket} = :gen_tcp.accept(listener)
+        :ok = :gen_tcp.close(probe_socket)
+        {:ok, request_socket} = :gen_tcp.accept(listener)
+
+        :ok =
+          :gen_tcp.send(
+            request_socket,
+            "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+          )
+
+        :ok = :gen_tcp.close(request_socket)
+      end)
+
+    assert {:error, :viewer_port_in_use, message} =
+             ViewerFrontend.run(
+               viewer_arguments(project_path, port),
+               CommandRuntime.standalone()
+             )
+
+    assert message ==
+             "port #{port} is already in use; stop that service, pass --port 0, or choose another port"
+
+    assert :ok = Task.await(responder, 1_000)
+  end
+
+  @tag :tmp_dir
   test "browser opening stays inert without an attached terminal", %{tmp_dir: directory} do
     # The suite never runs with stdin and stdout both on a terminal, so this
     # asserts the gate rather than simulating it: a project that asks to open a
@@ -406,6 +471,18 @@ defmodule PtcRunner.ViewerFrontendTest do
           false
       end
     end)
+  end
+
+  defp viewer_arguments(project_path, port) do
+    %CommandArguments{
+      command: :viewer,
+      application: project_path,
+      directory: nil,
+      options: %{port: Integer.to_string(port)},
+      ordered_options: [],
+      frontend: :standalone,
+      frontend_options: []
+    }
   end
 
   defp viewer_project(directory, viewer_overrides \\ %{}, artifact_overrides \\ %{}) do

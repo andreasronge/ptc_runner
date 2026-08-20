@@ -20,8 +20,10 @@ defmodule PtcViewer do
 
   `:ip` selects the bind address from a closed pair: `{127, 0, 0, 1}`, the
   default, and `{0, 0, 0, 0}`, which serves this unauthenticated browser to
-  every host that can reach the port. Any other value fails startup. In a
-  container, bind the wildcard internally but publish only on host loopback:
+  every host that can reach the port. The port defaults to `0`, asking the
+  operating system for a free one; `listener_info/1` returns the selected port.
+  Any other address fails startup. In a container, bind the wildcard internally
+  but publish only on host loopback:
 
       docker run -p 127.0.0.1:4123:4123 ... --listen 0.0.0.0
 

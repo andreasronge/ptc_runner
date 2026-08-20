@@ -69,7 +69,7 @@ file. Project choices do not become part of application content identity.
     "envelope": true
   },
   "viewer": {
-    "port": 4123,
+    "port": 0,
     "open": true,
     "repl": true,
     "private": false
@@ -153,6 +153,14 @@ and correlated inspection directories are captured before the listener starts;
 HTTP requests select only a run ID and never a filesystem path. Browser opening
 is a bounded convenience, and additionally requires an attached terminal:
 missing or failing platform openers do not stop Viewer.
+
+The Viewer port defaults to `0`, which asks the operating system for a free
+port; startup prints the selected address before opening a browser. Set a fixed
+port only when another process needs a stable address. If that port is occupied,
+the command probes loopback and names the project when another PTC Viewer owns
+it. The Live project header and `/api/live/project` expose the exact project
+document path, so a working page cannot silently look like the project whose
+startup just failed.
 
 The REPL and private-data settings are orthogonal. Enabling both presents the
 public-trace REPL alongside the private evidence panels without adding private

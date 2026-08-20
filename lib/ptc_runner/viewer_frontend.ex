@@ -39,6 +39,9 @@ defmodule PtcRunner.ViewerFrontend do
   alias PtcRunner.ViewerLaunchAdapter
   alias PtcRunner.ViewerSnapshotStore
 
+  @collision_probe_body_bytes 8_192
+  @collision_probe_timeout_ms 500
+
   # `scripts/verify_core_package.sh` compiles the packaged Hex source with
   # `--warnings-as-errors` and without this optional companion, where a literal
   # `PtcViewer.start/1` is an undefined-module warning and therefore a gate
@@ -135,6 +138,9 @@ defmodule PtcRunner.ViewerFrontend do
           {:error, reason} -> {:error, reason, "PTC Viewer stopped"}
         end
 
+      {:error, {:viewer_port_in_use, port, owner}} ->
+        {:error, :viewer_port_in_use, port_in_use_message(port, owner)}
+
       {:error, reason} ->
         {:error, reason, "could not start PTC Viewer"}
     end
@@ -220,7 +226,7 @@ defmodule PtcRunner.ViewerFrontend do
 
       {:error, _reason} = error ->
         ViewerSnapshotStore.stop(snapshots)
-        error
+        classify_start_error(error, options)
     end
   end
 
@@ -398,7 +404,102 @@ defmodule PtcRunner.ViewerFrontend do
 
   defp describe_project(project) do
     opts = if project.host, do: [host_config: project.host], else: []
-    ViewerProjectAdapter.describe(project.application, opts)
+
+    with {:ok, description} <- ViewerProjectAdapter.describe(project.application, opts) do
+      {:ok, Map.put(description, :project, project.path)}
+    end
+  end
+
+  defp classify_start_error({:error, :viewer_start_failed} = error, options) do
+    case Keyword.fetch!(options, :port) do
+      port when port in 1..65_535 -> classify_occupied_port(port, error)
+      _operating_system_assigned -> error
+    end
+  end
+
+  defp classify_start_error(error, _options), do: error
+
+  defp classify_occupied_port(port, fallback) do
+    case probe_occupied_port(port) do
+      {:viewer, project} -> {:error, {:viewer_port_in_use, port, project}}
+      :occupied -> {:error, {:viewer_port_in_use, port, nil}}
+      :unreachable -> fallback
+    end
+  end
+
+  defp probe_occupied_port(port) do
+    with {:ok, socket} <-
+           :gen_tcp.connect(
+             ~c"127.0.0.1",
+             port,
+             [:binary, active: false],
+             @collision_probe_timeout_ms
+           ),
+         :ok <- :gen_tcp.close(socket) do
+      probe_viewer_owner(port)
+    else
+      {:error, _reason} -> :unreachable
+    end
+  rescue
+    _exception -> :unreachable
+  catch
+    _kind, _reason -> :unreachable
+  end
+
+  defp probe_viewer_owner(port) do
+    url = "http://127.0.0.1:#{port}/api/live/project"
+
+    case Req.get(url,
+           raw: true,
+           redirect: false,
+           retry: false,
+           connect_options: [timeout: @collision_probe_timeout_ms],
+           receive_timeout: @collision_probe_timeout_ms,
+           into: &collect_probe_body/2
+         ) do
+      {:ok, %{status: 200, body: body}} when is_binary(body) -> viewer_owner(body)
+      {:ok, _response} -> :occupied
+      {:error, _reason} -> :occupied
+    end
+  rescue
+    _exception -> :occupied
+  catch
+    _kind, _reason -> :occupied
+  end
+
+  defp collect_probe_body({:data, data}, {request, %{body: body} = response})
+       when is_binary(data) and is_binary(body) do
+    body = body <> data
+
+    if byte_size(body) <= @collision_probe_body_bytes,
+      do: {:cont, {request, %{response | body: body}}},
+      else: {:halt, {request, %{response | body: :too_large}}}
+  end
+
+  defp collect_probe_body(_chunk, {request, response}),
+    do: {:halt, {request, %{response | body: :invalid}}}
+
+  defp viewer_owner(body) do
+    case Jason.decode(body) do
+      {:ok, %{"enabled" => true, "project" => project}}
+      when is_binary(project) and project != "" ->
+        {:viewer, project}
+
+      {:ok, _other_viewer_response} ->
+        :occupied
+
+      {:error, _reason} ->
+        :occupied
+    end
+  end
+
+  defp port_in_use_message(port, project) when is_binary(project) do
+    "port #{port} is already serving a PTC Viewer for #{project}; " <>
+      "stop it, pass --port 0, or choose another port"
+  end
+
+  defp port_in_use_message(port, nil) do
+    "port #{port} is already in use; stop that service, pass --port 0, or choose another port"
   end
 
   defp repl_adapter(%{viewer: %{repl: true}}),

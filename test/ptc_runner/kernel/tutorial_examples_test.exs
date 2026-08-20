@@ -55,7 +55,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
       # The tutorial teaches by showing the PTC-Lisp a run actually loaded and
       # generated, and the Viewer serves neither without both settings.
       assert project.artifacts == %{trace: true, inspection: true, result: false, envelope: true}
-      assert project.viewer == %{port: 4123, open: true, repl: true, private: true}
+      assert project.viewer == %{port: 0, open: true, repl: true, private: true}
 
       if example in ~w(02-deepseek-extract 03-file-agent 04-multi-turn-agent) do
         assert project.host == @host

@@ -116,6 +116,20 @@ defmodule PtcViewer.ServerTest do
     assert_receive {:DOWN, ^backend_ref, :process, ^backend, _reason}, 1_000
   end
 
+  test "default starts use independent operating-system-assigned ports" do
+    assert {:ok, first} = PtcViewer.start(open: false)
+    assert {:ok, second} = PtcViewer.start(open: false)
+
+    assert {:ok, {_address, first_port}} = PtcViewer.listener_info(first)
+    assert {:ok, {_address, second_port}} = PtcViewer.listener_info(second)
+    assert first_port > 0
+    assert second_port > 0
+    assert first_port != second_port
+
+    assert :ok = PtcViewer.stop(second)
+    assert :ok = PtcViewer.stop(first)
+  end
+
   test "unexpected store death fails the whole local server closed" do
     {:ok, viewer} =
       PtcViewer.start(
