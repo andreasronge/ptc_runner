@@ -627,6 +627,79 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
+  test "a private session admits pre-execution arity and form diagnostics", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root)
+    {:ok, session, _info} = start_internal_session(fixture)
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    assert {:ok,
+            %{
+              status: :error,
+              error: %{
+                kind: :invalid_arity,
+                message: arity_message,
+                message_redacted?: false,
+                capability_activity?: false
+              }
+            }} = AnalysisSession.evaluate(session, "(defn foo)")
+
+    assert arity_message =~ "expected (defn name [params] body)"
+    refute arity_message =~ "private result policy"
+
+    assert {:ok,
+            %{
+              status: :error,
+              error: %{
+                kind: :invalid_form,
+                message: form_message,
+                message_redacted?: false,
+                capability_activity?: false
+              }
+            }} = AnalysisSession.evaluate(session, "(let [x] x)")
+
+    assert form_message =~ "even number of forms"
+    refute form_message =~ "private result policy"
+
+    assert {:ok,
+            %{
+              status: :error,
+              error: %{
+                kind: :parse_error,
+                message: parse_message,
+                message_redacted?: false,
+                capability_activity?: false
+              }
+            }} = AnalysisSession.evaluate(session, "(unclosed")
+
+    assert is_binary(parse_message) and parse_message != ""
+    refute parse_message =~ "private result policy"
+  end
+
+  @tag :tmp_dir
+  test "a private session names a prelude arity fault without opening evidence", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root)
+    {:ok, session, _info} = start_internal_session(fixture)
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    # Same shape as the operator detour in #1175: analysis/runs takes one options
+    # map, while analysis/read takes [run-id options]. Calling read the way runs
+    # is taught is an analyzer arity fault before any capability executes.
+    assert {:ok,
+            %{
+              status: :error,
+              error: %{
+                kind: :invalid_arity,
+                message: message,
+                message_redacted?: false,
+                capability_activity?: false
+              }
+            }} = AnalysisSession.evaluate(session, ~s|(analysis/read "x")|)
+
+    assert message =~ "argument"
+    refute message =~ "private result policy"
+  end
+
+  @tag :tmp_dir
   test "resource directories whose artifacts sit one level down are refused", %{tmp_dir: root} do
     fixture = PrivateInspectionFixture.create!(Path.join(root, "nested"))
     nested_traces = Path.join(root, "nested-traces")

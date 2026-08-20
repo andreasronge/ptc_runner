@@ -375,8 +375,11 @@ private data.
 
 Private evaluation diagnostics never forward arbitrary evaluator text that
 could quote captured evidence. Safe diagnostics may rebuild names found
-verbatim in the operator's submitted source; otherwise the message is visibly
-redacted while the fault kind, continuation effect, and usage remain exact.
+verbatim in the operator's submitted source, or admit a bounded message for a
+pre-execution fault (parse, analyze, symbol-limit, compile-budget, or
+tool-resolution) when no capability has run in that evaluation; otherwise the
+message is visibly redacted while the fault kind, continuation effect, and
+usage remain exact.
 
 ## Keep analysis traces separate
 

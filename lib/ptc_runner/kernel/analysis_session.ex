@@ -12,10 +12,11 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   every host must eventually call `stop/1`.
 
   A session whose profile declares a private result class projects its failure
-  messages through `PtcRunner.Kernel.PrivateDiagnostic`, which rebuilds them
-  from the submitted source instead of forwarding evaluator text. Every error
-  map this module emits carries `message_redacted?` so a withheld diagnostic is
-  distinguishable from one that was never produced.
+  messages through `PtcRunner.Kernel.PrivateDiagnostic`, which rebuilds
+  source-derived names or admits bounded pre-execution diagnostics instead of
+  forwarding arbitrary evaluator text. Every error map this module emits
+  carries `message_redacted?` so a withheld diagnostic is distinguishable from
+  one that was never produced.
   """
   use GenServer
 
@@ -472,7 +473,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
        do: nil
 
   defp error_projection(result, state, source) do
-    details = Map.get(result, :details, %{})
+    details = private_diagnostic_details(result)
     kind = Map.get(result, :kind, result.outcome)
     {message, redacted?} = error_message(kind, details, state, source)
 
@@ -488,8 +489,28 @@ defmodule PtcRunner.Kernel.AnalysisSession do
     }
   end
 
-  # A private session never forwards evaluator message text; it rebuilds what
-  # the operator's own source already says. See `PrivateDiagnostic`.
+  # Prefer the top-level activity flag when present so a path that records
+  # activity only there cannot be admitted as pre-execution.
+  defp private_diagnostic_details(result) do
+    details = Map.get(result, :details, %{})
+
+    case Map.fetch(result, :capability_activity?) do
+      {:ok, activity?} when is_map(details) ->
+        Map.put(details, :capability_activity?, activity?)
+
+      {:ok, _activity?} ->
+        %{capability_activity?: result.capability_activity?}
+
+      :error when is_map(details) ->
+        details
+
+      :error ->
+        %{}
+    end
+  end
+
+  # A private session never forwards arbitrary evaluator text; see
+  # `PrivateDiagnostic` for the two admission rules.
   defp error_message(
          kind,
          details,
