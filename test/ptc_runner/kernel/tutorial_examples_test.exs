@@ -103,20 +103,26 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
   end
 
   test "the replay example returns its frozen response without network access" do
-    {:ok, host} = HostConfig.load(Path.join(@replay_example, "ptc-host.json"))
+    assert {:ok, %{value: %{"content" => "Frozen answer"}}} = run_replay(@replay_example)
+  end
 
-    {:ok, registry} =
-      HostInstallation.catalog(host)
-      |> then(fn {:ok, catalog} ->
-        HostInstallation.runtime_registry(host, catalog)
-      end)
+  @tag :tmp_dir
+  test "a replay miss fails the shipped example instead of returning the error as the value", %{
+    tmp_dir: directory
+  } do
+    example = Path.join(directory, "llm-replay")
+    File.cp_r!(@replay_example, example)
 
-    assert {:ok, %{value: %{"content" => "Frozen answer"}}} =
-             @replay_example
-             |> Path.join("ptc.json")
-             |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
-             |> RunLifecycle.build(registry)
-             |> RunLifecycle.execute()
+    workflow = Path.join(example, "workflow.clj")
+    source = File.read!(workflow)
+    assert source =~ "What value is frozen?"
+
+    File.write!(
+      workflow,
+      String.replace(source, "What value is frozen?", "What value is frozen NOW?")
+    )
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} = run_replay(example)
   end
 
   test "the viewer journeys load against one strict host-only installation" do
@@ -133,4 +139,20 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
   end
 
   defp path(example), do: Path.join([@examples, example, "ptc.json"])
+
+  defp run_replay(directory) do
+    {:ok, host} = HostConfig.load(Path.join(directory, "ptc-host.json"))
+
+    {:ok, registry} =
+      HostInstallation.catalog(host)
+      |> then(fn {:ok, catalog} ->
+        HostInstallation.runtime_registry(host, catalog)
+      end)
+
+    directory
+    |> Path.join("ptc.json")
+    |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
+    |> RunLifecycle.build(registry)
+    |> RunLifecycle.execute()
+  end
 end

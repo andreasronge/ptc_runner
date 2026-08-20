@@ -2,7 +2,13 @@
 
 (defn request
   "Send a provider-neutral request. Tool calls use id, name, and args; token
-  usage may include input, output, cache_creation, cache_read, and total_cost."
+  usage may include input, output, cache_creation, cache_read, and total_cost.
+
+  On success this returns the model response value. Provider failures,
+  including a replay miss, are returned as error envelopes with :status
+  :error rather than failing the evaluation. Branch on :status and fail, or
+  call cap/unwrap! on the raw tool/llm-request envelope, so an unserved call
+  cannot look like a result."
   [request]
   (let [response (tool/llm-request request)]
     (if (= :ok (get response :status))

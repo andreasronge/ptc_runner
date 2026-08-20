@@ -91,6 +91,73 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
     end
   end
 
+  describe "published workflow annotation vocabulary" do
+    @source Path.expand("../../../lib/ptc_runner/kernel/safe_metadata.ex", __DIR__)
+    @contract Path.expand("../../../docs/trace-log-contract.md", __DIR__)
+
+    # Clause order of every accepting SafeMetadata.annotation?/2 head. A new
+    # type or key set must land in docs/trace-log-contract.md in the same
+    # change, or this test fails.
+    @published [
+      {"progress", ["stage"]},
+      {"agent-action", ["turn", "kind"]},
+      {"agent-action", ["turn", "kind", "phase", "phase_turn", "mission"]}
+    ]
+
+    test "annotation?/2 accepting clauses are exactly the published rows" do
+      assert accepting_annotation_clauses(@source) == @published
+    end
+
+    test "docs/trace-log-contract.md publishes those types, keys, and enumerations" do
+      source = File.read!(@source)
+      section = workflow_annotation_section(File.read!(@contract))
+      [progress_row, agent_row] = published_table_rows(section)
+      stages = attribute_list(source, :progress_stages)
+      kinds = attribute_list(source, :agent_action_kinds)
+      bounds = annotation_field_bounds(source)
+
+      assert stages == ~w(started planning executing validating completed failed)
+      assert kinds == ~w(tool-call protocol-error provider-error max-calls)
+
+      assert progress_row =~ ~s("progress")
+      refute progress_row =~ "agent-action"
+      assert progress_row =~ ~s("stage")
+      refute progress_row =~ ~s("turn")
+
+      for stage <- stages do
+        assert progress_row =~ stage
+      end
+
+      unescaped_progress = String.replace(progress_row, "\\", "")
+      assert unescaped_progress =~ Enum.join(stages, " | ")
+
+      assert agent_row =~ ~s("agent-action")
+      refute agent_row =~ "progress"
+      assert agent_row =~ "exactly two keys or exactly five"
+
+      [two_key, five_key] = String.split(agent_row, "or that plus", parts: 2)
+
+      assert two_key =~ ~s("turn": #{bounds.turn})
+      assert two_key =~ ~s("kind")
+      refute two_key =~ "phase"
+      refute two_key =~ "mission"
+
+      assert five_key =~ ~s("phase": #{bounds.phase})
+      assert five_key =~ ~s("phase_turn": #{bounds.phase_turn})
+      assert five_key =~ ~s("mission")
+
+      for kind <- kinds do
+        assert two_key =~ kind
+      end
+
+      unescaped_kinds = String.replace(two_key, "\\", "")
+      assert unescaped_kinds =~ Enum.join(kinds, " | ")
+
+      assert section =~ "a lowercase letter, then up to #{bounds.mission_max} letters, digits"
+      assert source =~ ~s|~r/\\A[a-z][a-z0-9._-]{0,#{bounds.mission_max}}\\z/|
+    end
+  end
+
   describe "capability rejection class" do
     test "keeps known Kernel envelope atoms readable" do
       assert SafeMetadata.rejection_class(%{
@@ -179,6 +246,92 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
                kind: :llm_provider_error,
                reason: %{reason: :payment_required}
              }) == %{}
+    end
+  end
+
+  defp accepting_annotation_clauses(path) do
+    {_ast, clauses} =
+      path
+      |> File.read!()
+      |> Code.string_to_quoted!()
+      |> Macro.prewalk([], fn
+        {:def, _, [{:when, _, [{:annotation?, _, [type, data]} | _]} | _]} = node, acc ->
+          {node, [annotation_clause_row(type, data) | acc]}
+
+        {:def, _, [{:annotation?, _, [type, data]} | _]} = node, acc ->
+          {node, [annotation_clause_row(type, data) | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    clauses
+    |> Enum.reverse()
+    |> Enum.reject(&(&1 == :catchall))
+  end
+
+  defp annotation_clause_row(type, _data) when is_tuple(type), do: :catchall
+
+  defp annotation_clause_row(type, {:=, _, [map_pattern, _name]}) when is_binary(type) do
+    {type, map_pattern_keys(map_pattern)}
+  end
+
+  defp map_pattern_keys({:%{}, _, pairs}) do
+    Enum.map(pairs, fn {key, _value} -> key end)
+  end
+
+  defp workflow_annotation_section(contract) do
+    case String.split(contract, "Workflow annotations are host stamped", parts: 2) do
+      [_before, rest] ->
+        rest
+        |> String.split("\n## ", parts: 2)
+        |> hd()
+
+      _missing ->
+        flunk("docs/trace-log-contract.md has no workflow-annotation vocabulary section")
+    end
+  end
+
+  defp published_table_rows(section) do
+    rows =
+      section
+      |> String.split("\n")
+      |> Enum.filter(&String.starts_with?(&1, "| `"))
+      |> Enum.reject(&String.contains?(&1, "annotation_type"))
+
+    assert length(rows) == 2,
+           "expected exactly two published annotation rows, got: #{inspect(rows)}"
+
+    rows
+  end
+
+  defp attribute_list(source, name) do
+    pattern = ~r/@#{name} ~w\(([^)]+)\)/
+
+    case Regex.run(pattern, source, capture: :all_but_first) do
+      [body] -> String.split(body)
+      _missing -> flunk("SafeMetadata is missing @#{name} ~w(...)")
+    end
+  end
+
+  defp annotation_field_bounds(source) do
+    turn = integer_bound(source, ~r/turn >= 0 and turn <= (\d+)/)
+    phase = integer_bound(source, ~r/phase >= 0 and phase <= (\d+)/)
+    phase_turn = integer_bound(source, ~r/phase_turn >= 0 and phase_turn <= (\d+)/)
+    mission_max = integer_bound(source, ~r/\[a-z0-9\._-\]\{0,(\d+)\}/)
+
+    %{
+      turn: "0..#{turn}",
+      phase: "0..#{phase}",
+      phase_turn: "0..#{phase_turn}",
+      mission_max: mission_max
+    }
+  end
+
+  defp integer_bound(source, pattern) do
+    case Regex.run(pattern, source, capture: :all_but_first) do
+      [digits] -> String.to_integer(digits)
+      _missing -> flunk("SafeMetadata annotation?/2 is missing #{inspect(pattern)}")
     end
   end
 end

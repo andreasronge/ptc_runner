@@ -83,7 +83,14 @@ owner-only inspection artifact and read the hash from its capability record;
 the public diagnostic intentionally omits the unsalted value.
 
 Matching is exact. Changed messages, tools, or provider-neutral parameters
-produce another hash and fail instead of silently consuming unrelated evidence.
+produce another hash rather than silently consuming unrelated evidence. A miss
+is a provider error (`kind` `provider_error`, `reason` `not_found`).
+`llm/request` returns that envelope as a value with `:status :error`; it does
+not fail the evaluation. The shipped `llm-replay` example calls `cap/unwrap!`
+on the raw `tool/llm-request` envelope so a miss exits non-zero. The run
+envelope also reports the miss in usage: that alias's `successful_calls` stays
+0 while `calls` increments.
+
 An ordered `responses` sequence supports workflows that make the same request
 more than once.
 

@@ -635,6 +635,12 @@ Provider-neutral language-model requests.
 Send a provider-neutral request. Tool calls use id, name, and args; token
 usage may include input, output, cache_creation, cache_read, and total_cost.
 
+On success this returns the model response value. Provider failures,
+including a replay miss, are returned as error envelopes with :status
+:error rather than failing the evaluation. Branch on :status and fail, or
+call cap/unwrap! on the raw tool/llm-request envelope, so an unserved call
+cannot look like a result.
+
 - **Kind:** `function`
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
@@ -843,6 +849,12 @@ Bounded workflow-authored semantic annotations.
 ```
 
 Emits one bounded workflow-authored semantic annotation.
+
+A refused well-formed annotation — a string type or data shape that is
+not in the traces vocabulary — returns {:status :error :kind
+:invalid_annotation :reason :invalid_workflow_annotation} rather than
+failing the evaluation. Accepted types and keys are the finite vocabulary
+published by ptc docs traces.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`

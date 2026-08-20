@@ -4,8 +4,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   Both environments receive read-only usage and local capability discovery.
   Only the workflow receives the annotation route. Annotation data uses a
-  finite type/key/value vocabulary, not caller-defined scalar metadata or
-  arbitrary JSON payloads. Every route is instrumented with the same canonical
+  finite type/key vocabulary with closed enumerations, plus a bounded mission
+  identifier on phased agent-action records — not arbitrary JSON payloads. Every route is instrumented with the same canonical
   capability start/stop events.
   """
 
