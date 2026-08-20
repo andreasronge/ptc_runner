@@ -141,8 +141,10 @@ PTC-Lisp binds these names to language introspection (see *Introspection* in
 the specification). They are not implementations of
 `clojure.repl/dir`, `clojure.repl/doc`, `clojure.repl/apropos`, or
 `clojure.core/meta`, and they carry no `clojure_var` in `priv/functions.exs`:
-they take a reference (string, quoted symbol, or unquoted symbol via the same
-macro-like rewrite as `clojure.repl/doc`) rather than a Clojure var or object.
+`dir`/`doc`/`export-meta`/`source` take a reference (string, quoted symbol, or
+unquoted symbol via the same macro-like rewrite as `clojure.repl/doc`);
+`apropos` takes a string or quoted symbol and otherwise evaluates its argument.
+None take a Clojure var or object.
 `dir`, `export-meta`, and `source` read attached prelude exports (`source`
 also covers reachable private helpers); `apropos` and `doc` also cover
 PTC-Lisp's fixed registry and bounded Java surface. The corresponding Clojure

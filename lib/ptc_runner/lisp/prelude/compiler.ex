@@ -1702,15 +1702,12 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # un-expanded); comments and original whitespace are NOT (the reader discards
   # them) — see the fidelity disclaimer in the spec.
 
-  # A documented (def ...) constant: `(def name "doc" value)`.
-  defp spec_to_source_form(%Spec{params_form: nil, body_form: [value_ast], doc: doc} = spec)
-       when is_binary(doc) do
-    {:list, [{:symbol, :def}, {:symbol, spec.symbol}, {:string, doc}, value_ast]}
-  end
-
-  # A bare (def ...) constant: `(def name value)`.
+  # A (def ...) constant: optional docstring and author metadata map.
   defp spec_to_source_form(%Spec{params_form: nil, body_form: [value_ast]} = spec) do
-    {:list, [{:symbol, :def}, {:symbol, spec.symbol}, value_ast]}
+    doc_part = if is_binary(spec.doc), do: [{:string, spec.doc}], else: []
+    meta_part = if spec.metadata_form, do: [spec.metadata_form], else: []
+
+    {:list, [{:symbol, :def}, {:symbol, spec.symbol}] ++ doc_part ++ meta_part ++ [value_ast]}
   end
 
   # A (defn ...) / (defn- ...) function.

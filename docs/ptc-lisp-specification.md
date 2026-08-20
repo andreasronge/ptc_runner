@@ -3555,11 +3555,13 @@ fixed built-ins and the bounded Java surface.
 | `(export-meta "ns/name")` | Metadata map, or `nil` when unknown |
 | `(source "ns/name")` | Prints the attached prelude defining form, or a miss notice; returns `nil` |
 
-References accept a string, a quoted symbol, or an unquoted symbol (the
-analyzer auto-quotes bare and namespaced symbols in these call positions,
-matching `clojure.repl/doc`). Computed arguments still evaluate normally, so
-`(doc (str "ns/" "name"))` and `#(doc %)` over string refs keep working.
-`clojure.core/meta` is unchanged and is not part of this family.
+For `dir`/`doc`/`export-meta`/`source`, references accept a string, a quoted
+symbol, or an unquoted symbol (the analyzer auto-quotes bare and namespaced
+symbols in those call positions, matching `clojure.repl/doc`). `apropos`
+accepts a string or a quoted symbol; an unquoted query evaluates normally.
+Computed arguments still evaluate normally, so `(doc (str "ns/" "name"))` and
+`#(doc %)` over string refs keep working. `clojure.core/meta` is unchanged and
+is not part of this family.
 
 Answers depend on the prelude a given run attaches, so the results below are
 illustrative:

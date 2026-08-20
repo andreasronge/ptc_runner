@@ -125,8 +125,10 @@ automatically authorized while preserving exact behavior for admitted
 the specification). They are not implementations of
 <code class="inline">clojure.repl/dir</code>, <code class="inline">clojure.repl/doc</code>, <code class="inline">clojure.repl/apropos</code>, or
 <code class="inline">clojure.core/meta</code>, and they carry no <code class="inline">clojure_var</code> in <code class="inline">priv/functions.exs</code>:
-they take a reference (string, quoted symbol, or unquoted symbol via the same
-macro-like rewrite as <code class="inline">clojure.repl/doc</code>) rather than a Clojure var or object.
+<code class="inline">dir</code>/<code class="inline">doc</code>/<code class="inline">export-meta</code>/<code class="inline">source</code> take a reference (string, quoted symbol, or
+unquoted symbol via the same macro-like rewrite as <code class="inline">clojure.repl/doc</code>);
+<code class="inline">apropos</code> takes a string or quoted symbol and otherwise evaluates its argument.
+None take a Clojure var or object.
 <code class="inline">dir</code>, <code class="inline">export-meta</code>, and <code class="inline">source</code> read attached prelude exports (<code class="inline">source</code>
 also covers reachable private helpers); <code class="inline">apropos</code> and <code class="inline">doc</code> also cover
 PTC-Lisp's fixed registry and bounded Java surface. The corresponding Clojure

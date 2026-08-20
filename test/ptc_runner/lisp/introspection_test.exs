@@ -464,6 +464,25 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
                prelude
              ).prints == eval!(~S|(doc "alpha/greet")|, prelude).prints
     end
+
+    test "as-> bindings are not auto-quoted", %{prelude: prelude} do
+      assert eval!(
+               ~S|(as-> "alpha/greet" r (doc r))|,
+               prelude
+             ).prints == eval!(~S|(doc "alpha/greet")|, prelude).prints
+    end
+
+    test "a rebound doc evaluates args instead of auto-quoting", %{prelude: prelude} do
+      # Bare `shout` is a variable reference again (not a discovery ref), so it
+      # must be bound — the same fault a plain local fn would raise.
+      assert match?(
+               {:error, _},
+               Lisp.run(~S|(let [doc (fn [x] (str "local:" x))] (doc shout))|, prelude: prelude)
+             )
+
+      assert eval!(~S|(let [doc (fn [x] (str "local:" x))] (doc "shout"))|, prelude).return ==
+               "local:shout"
+    end
   end
 
   describe "source visibility" do
@@ -559,7 +578,7 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
     test "renders constants", %{prelude: prelude} do
       text = Enum.join(eval!("(source alpha/limit)", prelude).prints, "\n")
-      assert text =~ ~s[(def limit "Default page size." 10)]
+      assert text =~ ~s[(def limit "Default page size." {:type ":int"} 10)]
     end
 
     test "unknown refs and builtins print a miss notice without raising", %{prelude: prelude} do

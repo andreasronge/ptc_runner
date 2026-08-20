@@ -61,7 +61,14 @@ defmodule PtcRunner.Lisp.Analyze do
                       :comment,
                       :doseq,
                       :for,
-                      :quote
+                      :quote,
+                      # Discovery forms are env specials the analyzer rewrites
+                      # for macro-like refs; keep them rebindable so a local
+                      # `doc`/`dir`/`export-meta`/`source` evaluates args normally.
+                      :dir,
+                      :doc,
+                      :"export-meta",
+                      :source
                     ])
 
   @bindings_key :__ptc_analyze_bindings__
@@ -437,14 +444,24 @@ defmodule PtcRunner.Lisp.Analyze do
   # specials, but their *ref* argument is macro-like (clojure.repl/doc style,
   # issue #1094): a bare or namespaced symbol is auto-quoted to a
   # `{:symbol_ref, _}` instead of being evaluated to a closure/builtin first.
-  # `dir` with no args stays an ordinary zero-arity call.
-  defp dispatch_list_form({:symbol, head}, args, _list, tail?)
+  # `dir` with no args stays an ordinary zero-arity call. When the head is
+  # rebound as a local (`@shadowable_forms` + `mark_shadowed` / `with_bindings`),
+  # skip the rewrite so arguments evaluate normally.
+  defp dispatch_list_form({:symbol, head}, args, list, tail?)
        when head in [:doc, :"export-meta", :source] do
-    analyze_discovery_call(head, args, tail?)
+    if bound_local?(head) do
+      analyze_call(list, tail?)
+    else
+      analyze_discovery_call(head, args, tail?)
+    end
   end
 
-  defp dispatch_list_form({:symbol, :dir}, [_ | _] = args, _list, tail?) do
-    analyze_discovery_call(:dir, args, tail?)
+  defp dispatch_list_form({:symbol, :dir}, [_ | _] = args, list, tail?) do
+    if bound_local?(:dir) do
+      analyze_call(list, tail?)
+    else
+      analyze_discovery_call(:dir, args, tail?)
+    end
   end
 
   # Tool invocation via tool/ namespace: (tool/name args...)
@@ -899,7 +916,7 @@ defmodule PtcRunner.Lisp.Analyze do
     shadowed = compute_shadowed_names({:var, name})
     form = mark_shadowed_calls(form, shadowed)
 
-    with {:ok, form_core} <- do_analyze(form, step_tail?) do
+    with {:ok, form_core} <- with_bindings([name], fn -> do_analyze(form, step_tail?) end) do
       if is_last? do
         {:ok, {:let, [{:binding, {:var, name}, acc}], form_core}}
       else

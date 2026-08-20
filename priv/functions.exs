@@ -2864,7 +2864,8 @@
           "canonical names, signatures, descriptions, notes, divergences, and sections. " <>
           "Qualified Java aliases in signatures are searchable; fixed results use canonical " <>
           "names. Results are sorted and deduplicated. A blank query returns an empty vector. " <>
-          "Macro-like over the query: accepts an unquoted symbol, a quoted symbol, or a string.",
+          "Accepts a string or a quoted symbol (via symbol-ref normalization). An unquoted " <>
+          "query evaluates normally — `apropos` is not macro-like.",
       see_also: ["dir", "doc", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil
