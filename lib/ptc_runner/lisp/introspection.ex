@@ -324,7 +324,7 @@ defmodule PtcRunner.Lisp.Introspection do
 
   defp form_reaches?(_graph, from, target, _visited) when from == target, do: true
 
-  defp form_reaches?(graph, from, target, visited) when is_map_key(visited, from), do: false
+  defp form_reaches?(_graph, from, _target, visited) when is_map_key(visited, from), do: false
 
   defp form_reaches?(graph, from, target, visited) do
     callees = get_in(graph, [from, :calls]) || []
