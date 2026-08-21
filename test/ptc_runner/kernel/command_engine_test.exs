@@ -6832,6 +6832,80 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "CLI --input accepts application-relative and absolute paths and documents resolution", %{
+    tmp_dir: directory
+  } do
+    application =
+      write_application(directory, "orders", valid_manifest(), %{
+        "orders.json" => ~S({"answer":1})
+      })
+
+    alternate = Path.join(directory, "cwd-orders.json")
+    File.write!(alternate, ~S({"answer":2}))
+
+    assert {:ok, %CommandOutcome{} = application_relative} =
+             CommandEngine.dispatch(["run", application, "--input", "orders.json"])
+
+    assert application_relative.envelope["result"]["value"] == %{"answer" => 1}
+
+    assert {:ok, %CommandOutcome{} = absolute} =
+             CommandEngine.dispatch(["run", application, "--input", alternate])
+
+    assert absolute.envelope["result"]["value"] == %{"answer" => 2}
+
+    assert {:ok, %CommandOutcome{} = private_absolute} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--private-input",
+               alternate,
+               "--private-output",
+               Path.join(directory, "private-result.json")
+             ])
+
+    assert private_absolute.envelope["artifact_class"] == "private"
+    assert private_absolute.envelope["result"] == %{"result_class" => "private"}
+
+    assert Jason.decode!(File.read!(Path.join(directory, "private-result.json"))) == %{
+             "answer" => 2
+           }
+
+    missing =
+      assert_error(
+        ["run", application, "--input", "missing-orders.json"],
+        "application",
+        "reference_missing"
+      )
+
+    assert missing.envelope["error"]["source"] == %{
+             "kind" => "external_input",
+             "name" => "input.json"
+           }
+
+    assert missing.envelope["error"]["message"] =~ "working-directory"
+    refute Jason.encode!(missing.envelope) =~ "missing-orders"
+
+    assert {:ok, %CommandOutcome{} = help} = CommandEngine.prepare(["help", "run"])
+
+    assert Enum.any?(help.envelope["result"]["options"], fn option ->
+             "--input INPUT.json" in option["switches"] and
+               option["description"] =~ "absolute/cwd path"
+           end)
+
+    assert {:error, {:source_role, :external_input, :reference_missing}} =
+             ApplicationPackage.request_memory(
+               "ptc.json",
+               %{
+                 "ptc.json" => Jason.encode!(valid_manifest()),
+                 "main.clj" => "(ns app) (defn run [input] (return input))",
+                 "orders.json" => ~S({"answer":1})
+               },
+               input: alternate,
+               result_projection: :json
+             )
+  end
+
+  @tag :tmp_dir
   test "manifest source aggregate failures precede external override acquisition", %{
     tmp_dir: directory
   } do

@@ -128,6 +128,9 @@ ptc run ptc.json \
 Useful run switches are:
 
 - `--input INPUT.json` replaces the manifest input with another normal object.
+  Resolve the path as an application-relative document first; otherwise treat it
+  as absolute or relative to the process working directory (same rule as
+  `--component-override-descriptor` host paths).
 - `--private-input INPUT.json` does the same and classifies the run as private.
 - `--output VALUE.json` publishes a normal result value without replacing an
   existing file.
@@ -339,7 +342,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `application` | `installed_limit_exceeded` | no | an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling |
 | 3 | `application` | `invalid_json` | no | an application document is not valid JSON |
 | 3 | `application` | `override_invalid` | no | the component override is invalid |
-| 3 | `application` | `reference_missing` | no | a referenced application document is unavailable |
+| 3 | `application` | `reference_missing` | no | a referenced document is unavailable; for --input/--private-input try an application-relative name or an absolute/working-directory path |
 | 3 | `application` | `required_property_missing` | no | the application manifest is missing a required property |
 | 3 | `application` | `schema_violation` | no | the application manifest does not satisfy its schema |
 | 3 | `bundle` | `bundle_invalid` | no | the component bundle is invalid |

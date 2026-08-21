@@ -169,12 +169,14 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
 
   defp handle_request(id, "stderr-echo", _line, _marker) when is_integer(id) do
     IO.write(:stderr, "child diagnostic\n")
-    respond(id, "stderr-echo")
+    # Delay the response so multiplexed launcher E frames reach the transport
+    # before the O-framed JSON response under suite load.
+    respond_after(id, "stderr-echo", 75)
   end
 
   defp handle_request(id, "stderr-overflow", _line, _marker) when is_integer(id) do
     IO.write(:stderr, "abcdefghijklmnopqrstuvwxyz\n")
-    respond(id, "stderr-overflow")
+    respond_after(id, "stderr-overflow", 75)
   end
 
   defp handle_request(id, "stderr-slow", _line, _marker) when is_integer(id) do

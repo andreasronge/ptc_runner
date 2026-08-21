@@ -529,6 +529,34 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   end
 
   @tag :tmp_dir
+  test "CLI --input prefers application-relative names over cwd files and accepts cwd paths",
+       %{
+         tmp_dir: directory
+       } do
+    application =
+      write_application(directory, "orders", valid_manifest(), %{
+        "choice.json" => ~S({"answer":"application"})
+      })
+
+    File.write!(Path.join(directory, "choice.json"), ~S({"answer":"cwd"}))
+    File.write!(Path.join(directory, "cwd-only.json"), ~S({"answer":"cwd-only"}))
+
+    original = File.cwd!()
+    on_exit(fn -> File.cd!(original) end)
+    File.cd!(directory)
+
+    assert {:ok, %CommandOutcome{} = preferred} =
+             CommandEngine.dispatch(["run", application, "--input", "choice.json"])
+
+    assert preferred.envelope["result"]["value"] == %{"answer" => "application"}
+
+    assert {:ok, %CommandOutcome{} = cwd_only} =
+             CommandEngine.dispatch(["run", application, "--input", "cwd-only.json"])
+
+    assert cwd_only.envelope["result"]["value"] == %{"answer" => "cwd-only"}
+  end
+
+  @tag :tmp_dir
   test "entry still rejects captured envelope collisions when another destination cannot anchor",
        %{
          tmp_dir: directory
