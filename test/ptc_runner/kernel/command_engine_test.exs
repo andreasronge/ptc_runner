@@ -4561,6 +4561,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     data = Enum.map(1..257, fn index -> "data/k#{index}" end)
     long_export = String.duplicate("n", 200) <> "/" <> String.duplicate("s", 200)
+    long_data_form = "data/" <> String.duplicate("k", 70_000)
 
     result = %{
       "application_content_digest" => "sha256:" <> String.duplicate("0", 64),
@@ -4569,7 +4570,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "mission_bundle_hashes" => %{"intake" => String.duplicate("3", 64)},
       "mission_authority" => %{
         "intake" => %{
-          "data" => data,
+          "data" => [long_data_form | data],
           "exports" => [long_export],
           "providers" => ["workspace.read"]
         }
@@ -4580,7 +4581,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     outcome = CommandOutcome.success(:validate, run_ref, result)
     assert_schema_valid(outcome.envelope)
 
-    assert length(outcome.envelope["result"]["mission_authority"]["intake"]["data"]) == 257
+    assert length(outcome.envelope["result"]["mission_authority"]["intake"]["data"]) == 258
+
+    assert hd(outcome.envelope["result"]["mission_authority"]["intake"]["data"]) ==
+             long_data_form
 
     assert outcome.envelope["result"]["mission_authority"]["intake"]["exports"] == [
              long_export
