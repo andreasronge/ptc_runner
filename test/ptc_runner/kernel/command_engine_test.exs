@@ -6832,7 +6832,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "CLI --input accepts application-relative, cwd-relative, and absolute paths", %{
+  test "CLI --input accepts application-relative and absolute paths and documents resolution", %{
     tmp_dir: directory
   } do
     application =
@@ -6848,27 +6848,27 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert application_relative.envelope["result"]["value"] == %{"answer" => 1}
 
-    File.cd!(directory, fn ->
-      assert {:ok, %CommandOutcome{} = cwd_relative} =
-               CommandEngine.dispatch([
-                 "run",
-                 application,
-                 "--input",
-                 "cwd-orders.json"
-               ])
+    assert {:ok, %CommandOutcome{} = absolute} =
+             CommandEngine.dispatch(["run", application, "--input", alternate])
 
-      assert cwd_relative.envelope["result"]["value"] == %{"answer" => 2}
+    assert absolute.envelope["result"]["value"] == %{"answer" => 2}
 
-      assert {:ok, %CommandOutcome{} = absolute} =
-               CommandEngine.dispatch([
-                 "run",
-                 application,
-                 "--input",
-                 alternate
-               ])
+    assert {:ok, %CommandOutcome{} = private_absolute} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--private-input",
+               alternate,
+               "--private-output",
+               Path.join(directory, "private-result.json")
+             ])
 
-      assert absolute.envelope["result"]["value"] == %{"answer" => 2}
-    end)
+    assert private_absolute.envelope["artifact_class"] == "private"
+    assert private_absolute.envelope["result"] == %{"result_class" => "private"}
+
+    assert Jason.decode!(File.read!(Path.join(directory, "private-result.json"))) == %{
+             "answer" => 2
+           }
 
     missing =
       assert_error(
@@ -6891,6 +6891,18 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "--input INPUT.json" in option["switches"] and
                option["description"] =~ "absolute/cwd path"
            end)
+
+    assert {:error, {:source_role, :external_input, :reference_missing}} =
+             ApplicationPackage.request_memory(
+               "ptc.json",
+               %{
+                 "ptc.json" => Jason.encode!(valid_manifest()),
+                 "main.clj" => "(ns app) (defn run [input] (return input))",
+                 "orders.json" => ~S({"answer":1})
+               },
+               input: alternate,
+               result_projection: :json
+             )
   end
 
   @tag :tmp_dir

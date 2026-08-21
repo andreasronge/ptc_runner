@@ -281,24 +281,12 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   end
 
   # CLI `--input` / `--private-input` are host authority, like component
-  # overrides: prefer an application-relative logical name when one matches,
-  # otherwise read an absolute or process-cwd path for directory sources only.
-  # Memory acquisition stays logical-name-only so an API caller cannot silently
-  # pull bytes from the host filesystem.
+  # overrides: try an application-relative logical name first, then an absolute
+  # or process-cwd path for directory sources only. Memory acquisition stays
+  # logical-name-only so an API caller cannot silently pull bytes from the host
+  # filesystem. Application-relative names win when the same spelling exists
+  # both under the application and under the process working directory.
   defp read_selected_input(source, path) do
-    case ApplicationSource.logical_name(source, path) do
-      {:ok, name} ->
-        ApplicationSource.read_reference(source, name, @max_input_bytes)
-
-      {:error, :outside_application_source} ->
-        read_outside_application_input(source, path)
-
-      {:error, :invalid_logical_name} ->
-        read_host_input_if_directory(source, path)
-    end
-  end
-
-  defp read_outside_application_input(source, path) do
     if ApplicationSource.valid_name?(path) do
       case ApplicationSource.read_reference(source, path, @max_input_bytes) do
         {:ok, _raw} = ok ->
@@ -308,13 +296,23 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
           # Directory resolve_reference maps a missing application document to
           # `:invalid_logical_name`; treat both as a miss so a cwd/absolute host
           # path with the same spelling can still load.
-          read_host_input_if_directory(source, path)
+          read_expanded_or_host_input(source, path)
 
         {:error, _reason} = error ->
           error
       end
     else
-      read_host_input_if_directory(source, path)
+      read_expanded_or_host_input(source, path)
+    end
+  end
+
+  defp read_expanded_or_host_input(source, path) do
+    case ApplicationSource.logical_name(source, path) do
+      {:ok, name} ->
+        ApplicationSource.read_reference(source, name, @max_input_bytes)
+
+      {:error, _reason} ->
+        read_host_input_if_directory(source, path)
     end
   end
 
