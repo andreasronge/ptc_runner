@@ -69,6 +69,14 @@ while IFS= read -r path || [ -n "$path" ]; do
       docs=true
       ;;
 
+    site/schemas/mcp-*.schema.json)
+      # Published rather than shipped, but not documentation-only: the core
+      # suite validates the requests PtcRunner actually sends against these
+      # definitions, so an edit here can break `core` and not just the site.
+      core=true
+      docs=true
+      ;;
+
     docs/*|README.md|CHANGELOG.md|LICENSES/*|ptc_runner_launcher/README.md|\
       ptc_runner_launcher/CHANGELOG.md|ptc_viewer/README.md|ptc_viewer/CHANGELOG.md|\
       AGENTS.md|CLAUDE.md|usage-rules.md|.env.example|.lycheeignore|\

@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- ptc-runner.dev now publishes the pinned MCP 2026-07-28 wire schema at
+  `/schemas/mcp-2026-07-28.schema.json`, which is what a third-party author
+  needs to write a server PtcRunner can acquire. It is upstream's document
+  with two corrections PtcRunner maintains, both stated in the file. The MCP
+  reference names the discovery, tool-list, tool-call, and error definitions a
+  server must satisfy, and records the narrower result policy PtcRunner
+  enforces on top of them.
 - ptc-runner.dev now serves the guides, installation routes, and reference
   documentation as generated pages under `/guides/`, `/installation/`, and
   `/reference/`, behind a sectioned sidebar that is also spliced into the

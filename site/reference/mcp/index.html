@@ -122,7 +122,32 @@ Upgrade or replace the MCP server rather than adding a fallback handshake.</p><p
 <code class="inline">-32601 Method not found</code>. It is therefore not compatible with this PtcRunner
 profile, despite starting and serving legacy clients normally.
 <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a> implements the
-required profile and is the deterministic baseline for this reference.</p><p>A cold <code class="inline">npx</code> launch can spend more than the default budget before that protocol
+required profile and is the deterministic baseline for this reference.</p><h3 id="implement-the-wire-profile">Implement the wire profile</h3><p>The pinned protocol definitions are published as
+<a href="https://ptc-runner.dev/schemas/mcp-2026-07-28.schema.json"><code class="inline">mcp-2026-07-28.schema.json</code></a>.
+That document is the final upstream 2026-07-28 schema plus the two corrections
+PtcRunner maintains and upstream does not publish: <code class="inline">JSONValue</code> accepts JSON
+numbers and nulls, which the generated upstream document drops, and
+<code class="inline">PtcRunnerJSONRPCErrorResponse</code> is the failure envelope described below. A
+tools server needs these definitions:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Exchange</th><th style="text-align: left;">Request definition</th><th style="text-align: left;">Success-response definition</th></tr></thead><tbody><tr><td style="text-align: left;">Negotiate the profile</td><td style="text-align: left;"><code class="inline">DiscoverRequest</code></td><td style="text-align: left;"><code class="inline">DiscoverResultResponse</code></td></tr><tr><td style="text-align: left;">Publish the tool catalog</td><td style="text-align: left;"><code class="inline">ListToolsRequest</code></td><td style="text-align: left;"><code class="inline">ListToolsResultResponse</code></td></tr><tr><td style="text-align: left;">Invoke one tool</td><td style="text-align: left;"><code class="inline">CallToolRequest</code></td><td style="text-align: left;"><code class="inline">CallToolResultResponse</code></td></tr></tbody></table></div><p><code class="inline">PtcRunnerJSONRPCErrorResponse</code> is the failure envelope for all three. Resolve
+each as <code class="inline">#/$defs/NAME</code> inside the served document. Its <code class="inline">id</code> is the same positive
+integer sent with the request. Its closed <code class="inline">error</code> object requires an integer
+<code class="inline">code</code> and a UTF-8 <code class="inline">message</code> of at most 4,096 bytes, with optional JSON <code class="inline">data</code>;
+no other envelope or error fields are accepted. Requests carry
+<code class="inline">io.modelcontextprotocol/protocolVersion</code>, <code class="inline">io.modelcontextprotocol/clientInfo</code>,
+and an empty <code class="inline">io.modelcontextprotocol/clientCapabilities</code> object under
+<code class="inline">params._meta</code>.</p><p>PtcRunner deliberately implements a narrower client policy than the complete
+schema surface. Every successful result includes <code class="inline">resultType: &quot;complete&quot;</code>.
+Discovery advertises <code class="inline">2026-07-28</code> in <code class="inline">supportedVersions</code> and a <code class="inline">tools</code>
+capability. Discovery and tool-list pages include a non-negative <code class="inline">ttlMs</code> and a
+<code class="inline">cacheScope</code> of <code class="inline">public</code> or <code class="inline">private</code>; all pages in one catalog traversal keep
+the same scope. Tool names are unique, and a selected tool has an object
+<code class="inline">inputSchema</code>. A tool call returns text blocks or embedded text resources;
+<code class="inline">structuredContent</code> is accepted only when the selected tool published an
+object <code class="inline">outputSchema</code>. Binary resources, image and audio blocks, task results,
+and server requests for sampling, elicitation, or roots are unsupported.
+Schema-valid <code class="inline">input_required</code> results are refused rather than fulfilled because
+the client advertises none of those capabilities.</p><p>The schema defines wire shape. The bounds and closed-result rules above remain
+runtime policy, so passing the schema alone is necessary but not sufficient.</p><p>A cold <code class="inline">npx</code> launch can spend more than the default budget before that protocol
 response arrives. Acquisition derives one per-operation budget and then applies
 it to each step separately: once to starting the transport, which for stdio
 covers launcher staging and the child spawn, and again to each discovery request,
