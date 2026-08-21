@@ -269,9 +269,12 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
          }
        })
        when is_binary(root) do
-    if MapSet.disjoint?(derived, MapSet.new([:trace_dir, :inspect, :result, :envelope])),
-      do: nil,
-      else: root
+    if MapSet.disjoint?(
+         derived,
+         MapSet.new([:trace_dir, :inspect, :result, :envelope_ledger])
+       ),
+       do: nil,
+       else: root
   end
 
   defp project_artifact_root(_arguments), do: nil

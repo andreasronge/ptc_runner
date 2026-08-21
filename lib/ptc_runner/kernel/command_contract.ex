@@ -890,18 +890,6 @@ defmodule PtcRunner.Kernel.CommandContract do
        when mode in [:models, :doctor, {:doctor, :connect}],
        do: true
 
-  # Every command that accepts a project document in its positional argument can
-  # be refused for one that names itself a project and is not one.
-  defp diagnostic_pair_allowed?(mode, :arguments, :project_invalid)
-       when mode in [
-              :validate,
-              :models,
-              :doctor,
-              {:doctor, :connect},
-              :run_unclassified
-            ],
-       do: true
-
   # Every command that accepts `--envelope` can be refused for naming a
   # destination that already exists. `:run` admits the whole catalog, and a run
   # refused at admission is reported unclassified.

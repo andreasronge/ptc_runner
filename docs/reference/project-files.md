@@ -79,12 +79,17 @@ file. Project choices do not become part of application content identity.
 
 `kind`, `version`, and `application` are required. `host`, `artifacts`, and
 `viewer` are optional. A document that declares `"kind": "ptc-project"` and
-then fails this schema is refused as `arguments/project_invalid`, naming the
-document rather than the command line, which was correct. Every object rejects
-unknown and duplicate keys. Paths
-are portable relative paths resolved beneath the project document's directory;
-absolute paths and `..` traversal are rejected. The generated schema is served
-as `ptc docs schema-project`
+then fails this schema reports `project/project_schema_invalid`. The diagnostic
+names a bounded schema rule and the deepest project-schema-authorized JSON
+Pointer; it does not retain the rejected value, an unknown property name, or
+the filesystem path. A syntactically valid `run`, `validate`, `doctor`, or
+`models` invocation still publishes a requested `--envelope` before any project
+reference or provider is opened. Malformed command syntax remains an argument
+rejection and publishes no envelope.
+
+Every object rejects unknown and duplicate keys. Paths are portable relative
+paths resolved beneath the project document's directory; absolute paths and
+`..` traversal are rejected. The generated schema is served as `ptc docs schema-project`
 ([`priv/schemas/ptc-project-config.schema.json`](https://github.com/andreasronge/ptc_runner/blob/main/priv/schemas/ptc-project-config.schema.json)
 in the repository).
 

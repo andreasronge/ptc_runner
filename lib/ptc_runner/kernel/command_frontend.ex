@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.CommandFrontend do
 
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandDeclaration
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandEnvelope
@@ -41,6 +42,14 @@ defmodule PtcRunner.Kernel.CommandFrontend do
 
   @doc false
   @spec present_entry(CommandEntry.t(), bootstrap()) :: CommandPresentation.t()
+  def present_entry(
+        %CommandEntry{diagnostic: %CommandDiagnostic{} = _diagnostic} = entry,
+        _bootstrap
+      ) do
+    {:error, outcome} = CommandEngine.entry_failure(entry)
+    present(entry, outcome, nil)
+  end
+
   def present_entry(%CommandEntry{rejection: %{} = _rejection} = entry, _bootstrap) do
     {:error, outcome} = CommandEngine.entry_failure(entry)
     present(entry, outcome, entry.rejection)

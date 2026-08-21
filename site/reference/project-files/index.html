@@ -137,12 +137,15 @@ file. Project choices do not become part of application content identity.</p><h2
   }
 }</code></pre><p><code class="inline">kind</code>, <code class="inline">version</code>, and <code class="inline">application</code> are required. <code class="inline">host</code>, <code class="inline">artifacts</code>, and
 <code class="inline">viewer</code> are optional. A document that declares <code class="inline">&quot;kind&quot;: &quot;ptc-project&quot;</code> and
-then fails this schema is refused as <code class="inline">arguments/project_invalid</code>, naming the
-document rather than the command line, which was correct. Every object rejects
-unknown and duplicate keys. Paths
-are portable relative paths resolved beneath the project document's directory;
-absolute paths and <code class="inline">..</code> traversal are rejected. The generated schema is served
-as <code class="inline">ptc docs schema-project</code>
+then fails this schema reports <code class="inline">project/project_schema_invalid</code>. The diagnostic
+names a bounded schema rule and the deepest project-schema-authorized JSON
+Pointer; it does not retain the rejected value, an unknown property name, or
+the filesystem path. A syntactically valid <code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, or
+<code class="inline">models</code> invocation still publishes a requested <code class="inline">--envelope</code> before any project
+reference or provider is opened. Malformed command syntax remains an argument
+rejection and publishes no envelope.</p><p>Every object rejects unknown and duplicate keys. Paths are portable relative
+paths resolved beneath the project document's directory; absolute paths and
+<code class="inline">..</code> traversal are rejected. The generated schema is served as <code class="inline">ptc docs schema-project</code>
 (<a href="https://github.com/andreasronge/ptc_runner/blob/main/priv/schemas/ptc-project-config.schema.json"><code class="inline">priv/schemas/ptc-project-config.schema.json</code></a>
 in the repository).</p><p>Inspection requires traces because private records must correlate with a
 canonical run. <code class="inline">viewer.private</code> is a separate explicit local grant: creating a

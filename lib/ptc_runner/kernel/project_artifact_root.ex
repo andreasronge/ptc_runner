@@ -19,9 +19,12 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
         project: %ProjectContext{config: %{artifact_root: root}, derived_options: derived}
       })
       when is_binary(root) do
-    if MapSet.disjoint?(derived, MapSet.new([:trace_dir, :inspect, :result, :envelope])),
-      do: :ok,
-      else: ensure(root)
+    if MapSet.disjoint?(
+         derived,
+         MapSet.new([:trace_dir, :inspect, :result, :envelope_ledger])
+       ),
+       do: :ok,
+       else: ensure(root)
   end
 
   def ensure_for(%CommandArguments{}), do: :ok

@@ -2,7 +2,9 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   @moduledoc false
 
   alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandParser
+  alias PtcRunner.Kernel.CommandProjectDiagnostic
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.ProjectContext
@@ -10,7 +12,9 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   @project_commands ~w(validate run doctor models)
 
   @spec parse([binary()], :standalone | :mix, binary()) ::
-          {:ok, CommandArguments.t()} | {:error, CommandRejection.t()}
+          {:ok, CommandArguments.t()}
+          | {:document_error, CommandArguments.t(), CommandDiagnostic.t()}
+          | {:error, CommandRejection.t()}
   def parse(argv, frontend, run_ref)
       when is_list(argv) and frontend in [:standalone, :mix] and is_binary(run_ref) do
     case expand(argv, run_ref) do
@@ -23,11 +27,14 @@ defmodule PtcRunner.Kernel.ProjectResolver do
           # terminator still reports itself. Only its unqualified verdict is
           # reconsidered, and only when a supplied project explains it.
           {:error, %CommandRejection{} = rejection} ->
-            {:error, undeclared_host_rejection(rejection, project)}
+            {:error, undeclared_host_rejection(rejection, project, expanded, frontend)}
         end
 
       {:error, %CommandRejection{} = rejection} ->
         {:error, rejection}
+
+      {:document_error, expanded, reason} ->
+        document_error(expanded, frontend, reason)
 
       {:error, command} ->
         {:error, CommandRejection.generic(command, :invalid_arguments)}
@@ -61,11 +68,76 @@ defmodule PtcRunner.Kernel.ProjectResolver do
         project_argv(command, rest, project, run_ref)
 
       # `classify/1` reads `kind` first and only rejects a document that names
-      # itself a project, so the command line is known to be correct here.
+      # itself a project, so its diagnostic has project-document authority. The
+      # command line is parsed separately before that diagnostic is admitted.
+      {:error, {:project_schema_invalid, _violation} = reason} ->
+        {:document_error, [command, path | rest], reason}
+
       {:error, _reason} ->
-        {:error, CommandRejection.invalid_project(command_atom(command))}
+        {:error, CommandRejection.generic(command_atom(command), :invalid_arguments)}
     end
   end
+
+  defp document_error(["models", _project_path | rest], frontend, reason) do
+    if switch?(rest, "--host-config") do
+      # A project and an explicit host are conflicting authority modes, but the
+      # shared parser still owns switch syntax and duplicate detection. Let it
+      # reject those faults before collapsing an otherwise valid parse to the
+      # authority conflict.
+      case CommandParser.parse(["models" | rest], frontend) do
+        {:ok, _arguments} -> {:error, CommandRejection.generic(:models, :invalid_arguments)}
+        {:error, %CommandRejection{} = rejection} -> {:error, rejection}
+      end
+    else
+      ["models" | rest]
+      |> insert_options(["--host-config", "ptc-host.json"])
+      |> parse_document_error(frontend, reason)
+      |> without_synthetic_host()
+    end
+  end
+
+  defp document_error(["doctor", project_path | rest], frontend, reason) do
+    if switch?(rest, "--connect") and not switch?(rest, "--host-config") do
+      parse_document_error(
+        insert_options(
+          ["doctor", project_path | rest],
+          ["--host-config", "ptc-host.json"]
+        ),
+        frontend,
+        reason
+      )
+      |> without_synthetic_host()
+    else
+      parse_document_error(["doctor", project_path | rest], frontend, reason)
+    end
+  end
+
+  defp document_error(argv, frontend, reason), do: parse_document_error(argv, frontend, reason)
+
+  defp parse_document_error(argv, frontend, reason) do
+    case CommandParser.parse(argv, frontend) do
+      {:ok, arguments} ->
+        {:document_error, arguments, CommandProjectDiagnostic.project(reason)}
+
+      {:error, %CommandRejection{} = rejection} ->
+        {:error, rejection}
+    end
+  end
+
+  # `models` and active `doctor` require the host path that a valid project
+  # would derive before they reach `CommandParser`. A fixed placeholder lets the
+  # shared parser validate only their remaining syntax; it is removed before
+  # the admitted terminal entry can be observed or bootstrapped.
+  defp without_synthetic_host({:document_error, arguments, diagnostic}) do
+    {:document_error,
+     %{
+       arguments
+       | options: Map.delete(arguments.options, :host_config),
+         ordered_options: Keyword.delete(arguments.ordered_options, :host_config)
+     }, diagnostic}
+  end
+
+  defp without_synthetic_host(result), do: result
 
   # The resolver is the only layer that knows a project was supplied and that it
   # declares no host. Downstream sees an absent `--host-config` and can only
@@ -75,7 +147,7 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   # stays an argument fault whether or not the project declares a host —
   # otherwise the project argument would be silently ignored. Without the
   # switch nothing is added, the parser rejects for itself, and
-  # `undeclared_host_rejection/2` supplies the reason.
+  # `undeclared_host_rejection/4` supplies the reason.
   defp project_argv("models", rest, %ProjectConfig{host: nil} = project, _run_ref) do
     if switch?(rest, "--host-config"),
       do: {:error, :models},
@@ -86,7 +158,8 @@ defmodule PtcRunner.Kernel.ProjectResolver do
     if switch?(rest, "--host-config") do
       {:error, :models}
     else
-      {:ok, ["models" | rest] ++ ["--host-config", project.host], project, [:host_config]}
+      {:ok, insert_options(["models" | rest], ["--host-config", project.host]), project,
+       [:host_config]}
     end
   end
 
@@ -103,12 +176,21 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   # and a project declaring no host is ordinary for them.
   defp undeclared_host_rejection(
          %CommandRejection{kind: :generic, code: :invalid_arguments, command: command},
-         %ProjectConfig{host: nil}
+         %ProjectConfig{host: nil},
+         argv,
+         frontend
        )
-       when command in [:models, :doctor],
-       do: CommandRejection.undeclared_project_host(command)
+       when command in [:models, :doctor] do
+    argv
+    |> insert_options(["--host-config", "ptc-host.json"])
+    |> CommandParser.parse(frontend)
+    |> case do
+      {:ok, _arguments} -> CommandRejection.undeclared_project_host(command)
+      {:error, %CommandRejection{} = rejection} -> rejection
+    end
+  end
 
-  defp undeclared_host_rejection(rejection, _project), do: rejection
+  defp undeclared_host_rejection(rejection, _project, _argv, _frontend), do: rejection
 
   defp expand_repl(argv, rest, _run_ref) do
     case take_project(rest) do
@@ -140,7 +222,7 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   defp expand_loaded_repl_project(project, option_arguments, positional_suffix) do
     case option_value(option_arguments, "--profile") do
       nil ->
-        argv = ["repl" | option_arguments] ++ ["--manifest", project.application]
+        argv = insert_options(["repl" | option_arguments], ["--manifest", project.application])
         derived = [:manifest]
         {argv, derived} = add_host(argv, option_arguments, project, derived)
         {argv, derived} = add_environment("repl", argv, option_arguments, project, derived)
@@ -189,7 +271,7 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   defp add_host(argv, rest, %ProjectConfig{host: host}, derived) when is_binary(host) do
     if switch?(rest, "--host-config"),
       do: {argv, derived},
-      else: {argv ++ ["--host-config", host], put_derived(derived, :host_config)}
+      else: {insert_options(argv, ["--host-config", host]), put_derived(derived, :host_config)}
   end
 
   defp add_host(argv, _rest, _project, derived), do: {argv, derived}
@@ -198,13 +280,13 @@ defmodule PtcRunner.Kernel.ProjectResolver do
        when command in ["run", "repl"] and is_binary(env_file) do
     if switch?(rest, "--env-file"),
       do: {argv, derived},
-      else: {argv ++ ["--env-file", env_file], put_derived(derived, :env_file)}
+      else: {insert_options(argv, ["--env-file", env_file]), put_derived(derived, :env_file)}
   end
 
   defp add_environment("doctor", argv, rest, %ProjectConfig{env_file: env_file}, derived)
        when is_binary(env_file) do
     if switch?(rest, "--connect") and not switch?(rest, "--env-file"),
-      do: {argv ++ ["--env-file", env_file], put_derived(derived, :env_file)},
+      do: {insert_options(argv, ["--env-file", env_file]), put_derived(derived, :env_file)},
       else: {argv, derived}
   end
 
@@ -244,15 +326,16 @@ defmodule PtcRunner.Kernel.ProjectResolver do
     {argv, derived} =
       if project.artifacts.result and
            not Enum.any?(["--output", "--private-output"], &switch?(rest, &1)) do
-        {argv ++ ["--output", Path.join([root, "results", run_ref <> ".json"])],
+        {insert_options(argv, ["--output", Path.join([root, "results", run_ref <> ".json"])]),
          put_derived(derived, :result)}
       else
         {argv, derived}
       end
 
-    # The project envelope is a ledger: keep deriving it even when the caller
-    # also asked for `--envelope FILE`, so the convenience copy never suppresses
-    # `.ptc/envelopes/<run_ref>.json`. Inject the switch only when absent.
+    # The project envelope is a ledger: retain its root requirement even when
+    # the caller also asked for `--envelope FILE`, so the convenience copy never
+    # suppresses `.ptc/envelopes/<run_ref>.json`. Only the switch injected here
+    # is project-derived; an explicit frontend option must keep its provenance.
     add_envelope_artifact(argv, rest, project.artifacts.envelope, root, run_ref, derived)
   end
 
@@ -262,12 +345,12 @@ defmodule PtcRunner.Kernel.ProjectResolver do
     do: {argv, derived}
 
   defp add_envelope_artifact(argv, rest, true, root, run_ref, derived) do
-    derived = put_derived(derived, :envelope)
+    derived = put_derived(derived, :envelope_ledger)
     ledger = Path.join([root, "envelopes", run_ref <> ".json"])
 
     if switch?(rest, "--envelope"),
       do: {argv, derived},
-      else: {argv ++ ["--envelope", ledger], derived}
+      else: {insert_options(argv, ["--envelope", ledger]), put_derived(derived, :envelope)}
   end
 
   defp add_profile_resources(
@@ -303,7 +386,8 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   defp maybe_add_profile_resource(argv, rest, true, name, path, derived) do
     if resource_named?(rest, name),
       do: {argv, derived},
-      else: {argv ++ ["--resource", "#{name}=#{path}"], put_derived(derived, :resource)}
+      else:
+        {insert_options(argv, ["--resource", "#{name}=#{path}"]), put_derived(derived, :resource)}
   end
 
   defp maybe_add_profile_resource(argv, _rest, false, _name, _path, derived),
@@ -312,16 +396,19 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   defp maybe_add_artifact(argv, rest, true, switch, key, value, derived) do
     if switch?(rest, switch),
       do: {argv, derived},
-      else: {argv ++ [switch, value], put_derived(derived, key)}
+      else: {insert_options(argv, [switch, value]), put_derived(derived, key)}
   end
 
   defp maybe_add_artifact(argv, _rest, false, _switch, _key, _value, derived),
     do: {argv, derived}
 
   defp switch?(arguments, switch) do
-    Enum.any?(arguments, &(&1 == switch or String.starts_with?(&1, switch <> "=")))
+    arguments
+    |> Enum.take_while(&(&1 != "--"))
+    |> Enum.any?(&(&1 == switch or String.starts_with?(&1, switch <> "=")))
   end
 
+  defp option_value(["--" | _rest], _switch), do: nil
   defp option_value([switch, value | _rest], switch) when value != "", do: value
 
   defp option_value([argument | rest], switch) do
@@ -333,6 +420,8 @@ defmodule PtcRunner.Kernel.ProjectResolver do
 
   defp option_value([], _switch), do: nil
 
+  defp resource_named?(["--" | _rest], _name), do: false
+
   defp resource_named?(["--resource", value | rest], name),
     do: String.starts_with?(value, name <> "=") or resource_named?(rest, name)
 
@@ -341,6 +430,11 @@ defmodule PtcRunner.Kernel.ProjectResolver do
 
   defp resource_named?([_argument | rest], name), do: resource_named?(rest, name)
   defp resource_named?([], _name), do: false
+
+  defp insert_options(argv, options) do
+    {option_arguments, positional_suffix} = Enum.split_while(argv, &(&1 != "--"))
+    option_arguments ++ options ++ positional_suffix
+  end
 
   defp context(nil, _derived), do: nil
 
