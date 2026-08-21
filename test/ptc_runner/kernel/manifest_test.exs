@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.SchemaViolation
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Lisp.Format
   alias PtcRunner.TestSupport.RunLifecycle
@@ -67,6 +68,27 @@ defmodule PtcRunner.Kernel.ManifestTest do
              |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
              |> RunLifecycle.execute()
+  end
+
+  test "wide invalid manifests keep schema validation time and heap bounded" do
+    components =
+      for index <- 1..10_000 do
+        %{"invalid-#{index}" => true}
+      end
+
+    raw =
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{"components" => components, "entry" => "main/run"},
+        "input" => %{"value" => %{}}
+      })
+
+    task = Task.async(fn -> Manifest.load_memory("ptc.json", %{"ptc.json" => raw}) end)
+
+    assert {:ok, {:error, {:manifest_schema_invalid, %SchemaViolation{rule: rule}}}} =
+             Task.yield(task, 3_000)
+
+    assert rule in SchemaViolation.rules()
   end
 
   @tag :tmp_dir
@@ -137,16 +159,17 @@ defmodule PtcRunner.Kernel.ManifestTest do
   end
 
   @tag :tmp_dir
-  test "directory and memory manifests reject non-object JSON roots without raising", %{
+  test "directory and memory manifests classify non-object JSON roots", %{
     tmp_dir: dir
   } do
     for {name, raw} <- [{"array", "[]"}, {"null", "null"}, {"number", "1"}] do
       path = Path.join(dir, "#{name}.json")
       File.write!(path, raw)
 
-      assert {:error, :invalid_manifest} = Manifest.load(path)
+      assert {:error, {:manifest_schema_invalid, %SchemaViolation{rule: :type, path: []}}} =
+               Manifest.load(path)
 
-      assert {:error, :invalid_manifest} =
+      assert {:error, {:manifest_schema_invalid, %SchemaViolation{rule: :type, path: []}}} =
                Manifest.load_memory("#{name}.json", %{"#{name}.json" => raw})
     end
   end
@@ -277,12 +300,15 @@ defmodule PtcRunner.Kernel.ManifestTest do
     File.write!(path, Jason.encode!(escaped))
 
     assert {:error,
-            {:manifest_path,
-             [
-               {:property, "contracts"},
-               {:property, "input_schema"},
-               {:property, "path"}
-             ], :invalid_contract_reference}} = Manifest.load(path)
+            {:manifest_schema_invalid,
+             %SchemaViolation{
+               rule: :pattern,
+               path: [
+                 {:property, "contracts"},
+                 {:property, "input_schema"},
+                 {:property, "path"}
+               ]
+             }}} = Manifest.load(path)
   end
 
   @tag :tmp_dir
@@ -522,15 +548,21 @@ defmodule PtcRunner.Kernel.ManifestTest do
     File.write!(path, Jason.encode!(credential_labels))
 
     assert {:error,
-            {:manifest_path, [{:property, "labels"}, {:property, "tags"}], :unknown_properties}} =
-             Manifest.load(path)
+            {:manifest_schema_invalid,
+             %SchemaViolation{
+               rule: :unknown_property,
+               path: [{:property, "labels"}, {:property, "tags"}]
+             }}} = Manifest.load(path)
 
     private = "PRIVATE GENERATED SOURCE (return 42)"
     File.write!(path, Jason.encode!(Map.put(base, "labels", %{"name" => private})))
 
     assert {:error,
-            {:manifest_path, [{:property, "labels"}, {:property, "name"}], :invalid_manifest}} =
-             Manifest.load(path)
+            {:manifest_schema_invalid,
+             %SchemaViolation{
+               rule: :pattern,
+               path: [{:property, "labels"}, {:property, "name"}]
+             }}} = Manifest.load(path)
   end
 
   @tag :tmp_dir
@@ -550,7 +582,9 @@ defmodule PtcRunner.Kernel.ManifestTest do
     path = Path.join(dir, "inspection.json")
     File.write!(path, Jason.encode!(manifest))
 
-    assert {:error, :unknown_properties} = Manifest.load(path)
+    assert {:error,
+            {:manifest_schema_invalid, %SchemaViolation{rule: :unknown_property, path: []}}} =
+             Manifest.load(path)
 
     manifest = Map.delete(manifest, "inspect")
     File.write!(path, Jason.encode!(manifest))

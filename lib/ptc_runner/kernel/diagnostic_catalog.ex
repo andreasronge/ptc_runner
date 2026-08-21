@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.SchemaViolationDiagnostic
 
   # A refused replay fixture is reported through the environment code on a run
   # and the fixtures code in doctor, and both carry the same bounded message.
@@ -346,6 +347,23 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :application, code: :installed_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.installed_ceiling_message_schema(fallback)
 
+  def message_schema(%{phase: :host, code: :host_schema_invalid, message: fallback}),
+    do:
+      SchemaViolationDiagnostic.message_schema(
+        :host,
+        SchemaViolationDiagnostic.rules(:host, :host_schema_invalid),
+        fallback
+      )
+
+  def message_schema(%{phase: :application, code: code, message: fallback})
+      when code in [:schema_violation, :required_property_missing],
+      do:
+        SchemaViolationDiagnostic.message_schema(
+          :application,
+          SchemaViolationDiagnostic.rules(:application, code),
+          fallback
+        )
+
   def message_schema(%{phase: :local_preflight, code: code, message: fallback})
       when code in @fixture_codes,
       do: LLMReplayFixtureDiagnostic.message_schema(fallback)
@@ -387,6 +405,23 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:application, :installed_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.installed_ceiling_message?(message)
+
+  defp valid_dynamic_message?(:host, :host_schema_invalid, message),
+    do:
+      SchemaViolationDiagnostic.valid_message?(
+        :host,
+        SchemaViolationDiagnostic.rules(:host, :host_schema_invalid),
+        message
+      )
+
+  defp valid_dynamic_message?(:application, code, message)
+       when code in [:schema_violation, :required_property_missing],
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :application,
+           SchemaViolationDiagnostic.rules(:application, code),
+           message
+         )
 
   defp valid_dynamic_message?(:local_preflight, code, message) when code in @fixture_codes,
     do: LLMReplayFixtureDiagnostic.valid_message?(message)

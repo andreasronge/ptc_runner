@@ -34,6 +34,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.SchemaViolationDiagnostic
 
   @enforce_keys [
     :phase,
@@ -321,6 +322,31 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_span?(_span, _source), do: false
 
   defp valid_message_source?(message, %{message: message}, _source), do: true
+
+  defp valid_message_source?(
+         message,
+         %{phase: :host, code: :host_schema_invalid},
+         %CommandSource{kind: :host}
+       ),
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :host,
+           SchemaViolationDiagnostic.rules(:host, :host_schema_invalid),
+           message
+         )
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: code},
+         %CommandSource{kind: :application}
+       )
+       when code in [:schema_violation, :required_property_missing],
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :application,
+           SchemaViolationDiagnostic.rules(:application, code),
+           message
+         )
 
   defp valid_message_source?(
          message,

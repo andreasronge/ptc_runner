@@ -154,6 +154,32 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        do: " at " <> path <> " "
 
   defp location_suffix(%{
+         "phase" => "application",
+         "code" => code,
+         "source" => %{"kind" => "application"},
+         "path" => ""
+       })
+       when code in ["schema_violation", "required_property_missing"],
+       do: " at document root "
+
+  defp location_suffix(%{
+         "phase" => "host",
+         "code" => "host_schema_invalid",
+         "source" => %{"kind" => "host"},
+         "path" => path
+       })
+       when is_binary(path) and path != "",
+       do: " at " <> path <> " "
+
+  defp location_suffix(%{
+         "phase" => "host",
+         "code" => "host_schema_invalid",
+         "source" => %{"kind" => "host"},
+         "path" => ""
+       }),
+       do: " at document root "
+
+  defp location_suffix(%{
          "phase" => "bundle",
          "source" => %{"kind" => "component", "name" => name},
          "span" => %{"start_byte" => start_byte, "end_byte" => end_byte}

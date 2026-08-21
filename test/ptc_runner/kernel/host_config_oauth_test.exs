@@ -125,6 +125,52 @@ defmodule PtcRunner.Kernel.HostConfigOAuthTest do
     assert {:ok, _validated} = JSV.validate(host_config(), root, cast: false)
   end
 
+  test "command diagnostics retain a contains-only failure in the selected OAuth branch" do
+    invalid =
+      put_in(
+        host_config(),
+        ["install", "github", "transport", "oauth", "client", "grant_types"],
+        ["refresh_token"]
+      )
+
+    assert {:error,
+            {:host_schema_invalid,
+             %PtcRunner.Kernel.SchemaViolation{
+               rule: :contains,
+               path: [
+                 {:property, "install"},
+                 {:property, "*"},
+                 {:property, "transport"},
+                 {:property, "oauth"},
+                 {:property, "client"},
+                 {:property, "grant_types"}
+               ]
+             }}} = HostConfig.decode_command(invalid, "/tmp")
+  end
+
+  test "command diagnostics select the OAuth branch before reporting a missing field" do
+    invalid =
+      update_in(
+        host_config(),
+        ["install", "github", "transport", "oauth", "client"],
+        &Map.delete(&1, "grant_types")
+      )
+
+    assert {:error,
+            {:host_schema_invalid,
+             %PtcRunner.Kernel.SchemaViolation{
+               rule: :required,
+               path: [
+                 {:property, "install"},
+                 {:property, "*"},
+                 {:property, "transport"},
+                 {:property, "oauth"},
+                 {:property, "client"},
+                 {:property, "grant_types"}
+               ]
+             }}} = HostConfig.decode_command(invalid, "/tmp")
+  end
+
   test "catalog construction retains only an OAuth runtime marker" do
     assert {:ok, decoded} = HostConfig.decode(host_config(), "/tmp")
 

@@ -12,6 +12,11 @@ complete structural reference. Runtime loading additionally performs semantic
 checks and path-confined referenced-file handling. Manifest
 schema diagnostics include a safe JSON Pointer when one is available; a
 missing-required diagnostic points to the absent schema-declared property.
+The message also names the bounded JSON Schema rule (`type`, `pattern`,
+`maximum`, `required`, or another supported rule) without copying the rejected
+value or an unknown caller-authored key. Paths through named maps use `*` for
+the caller-selected name, and an unknown property stops at its schema-owned
+parent.
 
 ## Start with one workflow
 

@@ -200,7 +200,11 @@ source, result, quota, provider, and event failures retain bounded Kernel
 classifications.</p><p>One-shot public diagnostics come from a closed catalog. They never render an
 arbitrary exception, rejected value, provider response, credential, or private
 payload. A provider subject appears as <code class="inline">provider/&lt;alias&gt;/&lt;operation&gt;</code> with its
-workflow or mission occurrence when known.</p><p><code class="inline">validate</code> also reads the files a declaration owns rather than the environment
+workflow or mission occurrence when known.</p><p>Host and application schema diagnostics distinguish a closed set of violated
+rules and carry only schema-authorized JSON Pointers. A missing required field
+may name that schema-declared field; an unknown caller-authored key is omitted
+and the pointer stops at its declared parent. Caller-selected map members such
+as installation aliases and mission names render as <code class="inline">*</code>.</p><p><code class="inline">validate</code> also reads the files a declaration owns rather than the environment
 it will run in. A replay installation names a fixture file, so <code class="inline">validate</code> parses
 it under the installed ceilings and reports the rule a rejected file broke —
 with the line number for a line-level rejection. It still acquires nothing: an

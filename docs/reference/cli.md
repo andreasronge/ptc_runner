@@ -214,6 +214,12 @@ arbitrary exception, rejected value, provider response, credential, or private
 payload. A provider subject appears as `provider/<alias>/<operation>` with its
 workflow or mission occurrence when known.
 
+Host and application schema diagnostics distinguish a closed set of violated
+rules and carry only schema-authorized JSON Pointers. A missing required field
+may name that schema-declared field; an unknown caller-authored key is omitted
+and the pointer stops at its declared parent. Caller-selected map members such
+as installation aliases and mission names render as `*`.
+
 `validate` also reads the files a declaration owns rather than the environment
 it will run in. A replay installation names a fixture file, so `validate` parses
 it under the installed ceilings and reports the rule a rejected file broke —

@@ -1683,7 +1683,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert outcome.envelope["error"] == %{
                "phase" => "application",
                "code" => "schema_violation",
-               "message" => "the application manifest does not satisfy its schema",
+               "message" => "the application manifest violates the pattern schema rule",
                "source" => %{"kind" => "application", "name" => "ptc.json"},
                "path" => "/workflow/components/0/path",
                "span" => nil,
@@ -4672,16 +4672,18 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     refute Jason.encode!(unknown.envelope) =~ "caller-secret"
     refute Jason.encode!(unknown.envelope) =~ "must-not-escape"
 
-    for {name, input, expected_path} <- [
-          {"invalid-input-value", %{"value" => []}, [{:property, "input"}, {:property, "value"}]},
-          {"invalid-input-path", %{"path" => 42}, [{:property, "input"}, {:property, "path"}]},
-          {"empty-input", %{}, [{:property, "input"}]}
+    for {name, input, code, expected_path} <- [
+          {"invalid-input-value", %{"value" => []}, "schema_violation",
+           [{:property, "input"}, {:property, "value"}]},
+          {"invalid-input-path", %{"path" => 42}, "schema_violation",
+           [{:property, "input"}, {:property, "path"}]},
+          {"empty-input", %{}, "required_property_missing",
+           [{:property, "input"}, {:property, "value"}]}
         ] do
       manifest = valid_manifest(%{"input" => input})
       malformed_input = write_application(directory, name, manifest)
 
-      outcome =
-        assert_error(["validate", malformed_input], "application", "schema_violation")
+      outcome = assert_error(["validate", malformed_input], "application", code)
 
       expected_pointer =
         Enum.map_join(expected_path, "", fn {:property, property} -> "/#{property}" end)
@@ -4693,12 +4695,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "main.clj" => "(ns app) (defn run [input] (return input))"
       }
 
-      assert {:error, {:manifest_path, ^expected_path, :invalid_input_declaration}} =
-               ApplicationPackage.request_memory(
-                 "ptc.json",
-                 documents,
-                 result_projection: :json
-               )
+      assert {:error, reason} =
+               ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+
+      assert manifest_error_path(reason) == expected_path
     end
 
     missing_component_path =
@@ -4885,6 +4885,70 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end
 
     assert length(Enum.uniq(pointers)) == 5
+  end
+
+  @tag :tmp_dir
+  test "host and manifest schema failures name the bounded rule that was violated", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "schema-rules", valid_manifest())
+    host = valid_host_config()
+
+    host_cases = [
+      {"unknown-root", Map.put(host, "limitss", %{}), "", "contains an unknown property"},
+      {"unknown-nested",
+       put_in(host, ["install", "workspace", "ceilings"], %{
+         "evaluation_timeout_ms" => 60_000
+       }), "/install/*/ceilings", "contains an unknown property"},
+      {"maximum", put_in(host, ["install", "workspace", "ceilings"], %{"timeout_ms" => 999_999}),
+       "/install/*/ceilings/timeout_ms", "violates the maximum schema rule"},
+      {"pattern", put_in(host, ["install", "workspace", "installation_revision"], "WORKSPACE-V1"),
+       "/install/*/installation_revision", "violates the pattern schema rule"},
+      {"required", update_in(host, ["install", "workspace"], &Map.delete(&1, "tools")),
+       "/install/*/tools", "is missing a required property"}
+    ]
+
+    for {name, document, expected_path, expected_message} <- host_cases do
+      host_path = write_host_config(directory, "rule-#{name}", document)
+
+      outcome =
+        assert_error(
+          ["validate", application, "--host-config", host_path],
+          "host",
+          "host_schema_invalid"
+        )
+
+      assert outcome.envelope["error"]["path"] == expected_path
+      assert outcome.envelope["error"]["message"] =~ expected_message
+      refute Jason.encode!(outcome.envelope) =~ "workspace"
+      refute Jason.encode!(outcome.envelope) =~ "limitss"
+      assert_schema_valid(outcome.envelope)
+    end
+
+    manifest = valid_manifest()
+
+    manifest_cases = [
+      {"unknown-root", Map.put(manifest, "artifactz", %{}), "schema_violation", "",
+       "contains an unknown property"},
+      {"unknown-nested", put_in(manifest, ["workflow", "libraries"], []), "schema_violation",
+       "/workflow", "contains an unknown property"},
+      {"type", put_in(manifest, ["workflow", "entry"], 123), "schema_violation",
+       "/workflow/entry", "violates the type schema rule"},
+      {"pattern", put_in(manifest, ["workflow", "entry"], "Main/Run"), "schema_violation",
+       "/workflow/entry", "violates the pattern schema rule"},
+      {"required", update_in(manifest, ["workflow"], &Map.delete(&1, "entry")),
+       "required_property_missing", "/workflow/entry", "is missing a required property"}
+    ]
+
+    for {name, document, code, expected_path, expected_message} <- manifest_cases do
+      path = write_application(directory, "manifest-rule-#{name}", document)
+      outcome = assert_error(["validate", path], "application", code)
+
+      assert outcome.envelope["error"]["path"] == expected_path
+      assert outcome.envelope["error"]["message"] =~ expected_message
+      refute Jason.encode!(outcome.envelope) =~ "artifactz"
+      assert_schema_valid(outcome.envelope)
+    end
   end
 
   @tag :tmp_dir
@@ -5117,14 +5181,20 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       directory_path =
         write_application(directory, "nested-#{length(path)}-#{hd(path)}", manifest)
 
-      outcome = assert_error(["validate", directory_path], "application", "schema_violation")
+      input_without_variant? =
+        path == ["input"] and Map.has_key?(override["input"], "caller-secret")
+
+      code = if input_without_variant?, do: "required_property_missing", else: "schema_violation"
+      outcome = assert_error(["validate", directory_path], "application", code)
 
       # A mission name is the author's own, so it is elided rather than named;
       # the closed schema beneath it stays addressable.
       expected_pointer =
-        if hd(path) == "missions",
-          do: "/missions/*",
-          else: Enum.map_join(path, "", &"/#{&1}")
+        cond do
+          input_without_variant? -> "/input/value"
+          hd(path) == "missions" -> "/missions/*"
+          true -> Enum.map_join(path, "", &"/#{&1}")
+        end
 
       assert outcome.envelope["error"]["path"] == expected_pointer
       refute Jason.encode!(outcome.envelope) =~ "caller-secret"
@@ -5136,12 +5206,24 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       }
 
       typed_path =
-        Enum.map(path, fn
-          segment when is_binary(segment) -> {:property, segment}
-          segment when is_integer(segment) -> {:index, segment}
-        end)
+        if input_without_variant? do
+          [{:property, "input"}, {:property, "value"}]
+        else
+          Enum.map(path, fn
+            "default" -> {:property, "*"}
+            segment when is_binary(segment) -> {:property, segment}
+            segment when is_integer(segment) -> {:index, segment}
+          end)
+        end
 
-      assert {:error, {:manifest_path, ^typed_path, :unknown_properties}} =
+      expected_rule = if input_without_variant?, do: :required, else: :unknown_property
+
+      assert {:error,
+              {:manifest_schema_invalid,
+               %PtcRunner.Kernel.SchemaViolation{
+                 rule: ^expected_rule,
+                 path: ^typed_path
+               }}} =
                ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
     end
   end
@@ -5247,12 +5329,15 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
       typed_path =
         Enum.map(path, fn
+          "default" -> {:property, "*"}
           segment when is_binary(segment) -> {:property, segment}
           segment when is_integer(segment) -> {:index, segment}
         end)
 
-      assert {:error, {:manifest_path, ^typed_path, _reason}} =
+      assert {:error, reason} =
                ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+
+      assert manifest_error_path(reason) == typed_path
     end
   end
 
@@ -6224,7 +6309,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         {:property, "path"}
       ]
 
-      assert {:error, {:manifest_path, ^typed_path, :invalid_contract_reference}} =
+      assert {:error,
+              {:manifest_schema_invalid, %PtcRunner.Kernel.SchemaViolation{path: ^typed_path}}} =
                ApplicationPackage.request_memory(
                  "ptc.json",
                  %{
@@ -6256,7 +6342,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
       typed_path = [{:property, "contracts"}, {:property, role}]
 
-      assert {:error, {:manifest_path, ^typed_path, :invalid_contract_reference}} =
+      assert {:error,
+              {:manifest_schema_invalid,
+               %PtcRunner.Kernel.SchemaViolation{rule: :type, path: ^typed_path}}} =
                ApplicationPackage.request_memory(
                  "ptc.json",
                  %{
@@ -6275,7 +6363,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert invalid_contracts_outcome.envelope["error"]["path"] == "/contracts"
 
-    assert {:error, {:manifest_path, [{:property, "contracts"}], :invalid_contracts_section}} =
+    assert {:error,
+            {:manifest_schema_invalid,
+             %PtcRunner.Kernel.SchemaViolation{
+               rule: :type,
+               path: [{:property, "contracts"}]
+             }}} =
              ApplicationPackage.request_memory(
                "ptc.json",
                %{
@@ -7078,4 +7171,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       refute Jason.encode!(outcome.envelope) =~ "caller-secret"
     end
   end
+
+  defp manifest_error_path({:manifest_path, path, _reason}), do: path
+
+  defp manifest_error_path(
+         {:manifest_schema_invalid, %PtcRunner.Kernel.SchemaViolation{path: path}}
+       ),
+       do: path
 end
