@@ -26,6 +26,21 @@ The nested projects are listed because `mix test` inside `ptc_viewer/` or
 each gate fetches the project it compiles — running
 `mix deps.get --check-locked`, the command GitHub runs once per job.
 
+### PtcLlmHttp compatibility coverage
+
+Dev and test builds pin the published Hex package `ptc_llm_http` at exact
+version `0.1.0`. Ordinary `mix test` runs the loopback, credential-free
+streaming smoke in `test/ptc_runner/llm/ptc_llm_http_smoke_test.exs`. That
+coverage is compatibility only: production still uses the ReqLLM adapter,
+`ptc_llm_http` is not a production runtime dependency, and it is not selected
+for ordinary requests.
+
+```bash
+mix test test/ptc_runner/llm/ptc_llm_http_smoke_test.exs
+```
+
+The focused tests use only a loopback raw HTTP fixture and no credentials.
+
 ## Worktree seeding
 
 `scripts/worktree.sh new` seeds a fresh worktree with the main checkout's

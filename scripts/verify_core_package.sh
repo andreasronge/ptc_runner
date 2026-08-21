@@ -42,6 +42,14 @@ elixir -e '
     Enum.find(requirements, fn requirement ->
       Map.new(requirement)[<<"name">>] == <<"ptc_viewer">>
     end)
+
+  # PtcLlmHttp is published, but it is compatibility coverage only: exact Hex
+  # `0.1.0` in dev/test, never a production runtime requirement, and never
+  # selected for ordinary requests.
+  nil =
+    Enum.find(requirements, fn requirement ->
+      Map.new(requirement)[<<"name">>] == <<"ptc_llm_http">>
+    end)
 ' "$package_tmp_dir/package/metadata.config"
 
 test ! -e "$package_tmp_dir/source/ptc_runner_launcher"
@@ -70,6 +78,15 @@ for mix_env in dev test; do
       {:ptc_runner_launcher, "~> 0.1.0", options} = dependency
       true = options[:optional]
       false = Keyword.has_key?(options, :path)
+
+      llm_http =
+        PtcRunner.MixProject.project()
+        |> Keyword.fetch!(:deps)
+        |> Enum.find(&(elem(&1, 0) == :ptc_llm_http))
+
+      {:ptc_llm_http, "== 0.1.0", llm_http_options} = llm_http
+      true = llm_http_options[:only] == [:dev, :test]
+      false = llm_http_options[:runtime]
     '
   )
 done
@@ -92,6 +109,11 @@ active_build_lib="$project_root/_build/$build_env/lib"
 
 if [[ ! -d "$active_build_lib/jason" ]]; then
   echo "no compiled $build_env dependencies at $active_build_lib" >&2
+  exit 1
+fi
+
+if [[ -d "$active_build_lib/ptc_llm_http" ]]; then
+  echo "ptc_llm_http must not compile into $build_env" >&2
   exit 1
 fi
 
