@@ -26,23 +26,20 @@ The nested projects are listed because `mix test` inside `ptc_viewer/` or
 each gate fetches the project it compiles — running
 `mix deps.get --check-locked`, the command GitHub runs once per job.
 
-### Unpublished PtcLlmHttp compatibility smoke
+### PtcLlmHttp compatibility coverage
 
-Before `ptc_llm_http` has a Hex release, its PtcRunner streaming checkpoint is
-an explicit local compatibility build. Point the complete build at a local
-checkout and keep the variable set for every Mix command in that build:
+Dev and test builds pin the published Hex package `ptc_llm_http` at exact
+version `0.1.0`. Ordinary `mix test` runs the loopback, credential-free
+streaming smoke in `test/ptc_runner/llm/ptc_llm_http_smoke_test.exs`. That
+coverage is compatibility only: production still uses the ReqLLM adapter,
+`ptc_llm_http` is not a production runtime dependency, and it is not selected
+for ordinary requests.
 
 ```bash
-export PTC_LLM_HTTP_PATH=/absolute/path/to/ptc_llm_http
-mix deps.get
 mix test test/ptc_runner/llm/ptc_llm_http_smoke_test.exs
 ```
 
-The focused test uses only a loopback raw HTTP fixture and no credentials. An
-ordinary build with `PTC_LLM_HTTP_PATH` unset declares no `ptc_llm_http`
-dependency and does not define this unpublished-checkpoint test module. This
-manual gate is local-only until the dependency can move to exact Hex version
-`0.1.0`; it is not a package-publication or candidate-CI workflow.
+The focused tests use only a loopback raw HTTP fixture and no credentials.
 
 ## Worktree seeding
 

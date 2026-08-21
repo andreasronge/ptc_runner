@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Dev and test builds pin published `ptc_llm_http` `0.1.0` for loopback
+  streaming compatibility coverage. The package is not a production runtime
+  dependency and is not selected for ordinary requests.
 - ptc-runner.dev now publishes the pinned MCP 2026-07-28 wire schema at
   `/schemas/mcp-2026-07-28.schema.json`, which is what a third-party author
   needs to write a server PtcRunner can acquire. It is upstream's document
