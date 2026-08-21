@@ -221,7 +221,7 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
   end
 
   test "classifies only discovery's standard unsupported-profile errors specially" do
-    for code <- [-32_601, -32_022] do
+    for code <- [-32_601, -32_602, -32_022] do
       response = %{
         "error" => %{
           "code" => code,
