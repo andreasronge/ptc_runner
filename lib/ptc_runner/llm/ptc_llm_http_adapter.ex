@@ -40,7 +40,6 @@ if Code.ensure_loaded?(PtcLlmHttp) do
     alias PtcLlmHttp.{
       Credential,
       Deadline,
-      Error,
       ProcessBudget,
       Request,
       Response,
@@ -167,7 +166,7 @@ if Code.ensure_loaded?(PtcLlmHttp) do
 
     defp stream_delta(_chunk, _on_delta, _acc), do: :cont
 
-    defp normalize_call({:ok, %Response{} = response}) do
+    defp normalize_call({:ok, response}) do
       {:ok,
        normalize_response(
          Response.content(response),
@@ -176,12 +175,9 @@ if Code.ensure_loaded?(PtcLlmHttp) do
        )}
     end
 
-    defp normalize_call({:error, %Error{} = error}), do: {:error, classify(error)}
+    defp normalize_call({:error, error}), do: {:error, classify(error)}
 
-    defp normalize_call(_invalid),
-      do: {:error, invalid_request_error("LLM provider returned an invalid result")}
-
-    defp normalize_stream({:ok, %StreamComplete{} = complete}, acc) do
+    defp normalize_stream({:ok, complete}, acc) do
       content = accumulated_content(acc)
 
       {:ok,
@@ -191,13 +187,10 @@ if Code.ensure_loaded?(PtcLlmHttp) do
        }}
     end
 
-    defp normalize_stream({:error, %Error{} = error}, _acc), do: {:error, classify(error)}
+    defp normalize_stream({:error, error}, _acc), do: {:error, classify(error)}
 
     defp normalize_stream({:halted, _halt}, _acc),
       do: {:error, invalid_request_error("LLM stream halted before completion")}
-
-    defp normalize_stream(_invalid, _acc),
-      do: {:error, invalid_request_error("LLM provider returned an invalid stream result")}
 
     defp accumulated_content(acc) do
       case :ets.lookup(acc, :content) do
@@ -207,7 +200,7 @@ if Code.ensure_loaded?(PtcLlmHttp) do
     end
 
     defp normalize_response(content, [], usage) do
-      %{content: content || "", tokens: normalize_usage(usage)}
+      %{content: content, tokens: normalize_usage(usage)}
     end
 
     defp normalize_response(content, tool_calls, usage) do
@@ -228,7 +221,7 @@ if Code.ensure_loaded?(PtcLlmHttp) do
 
     defp normalize_usage(nil), do: %{}
 
-    defp normalize_usage(%Usage{} = usage) do
+    defp normalize_usage(usage) do
       facts = Usage.facts(usage)
 
       [
@@ -273,8 +266,6 @@ if Code.ensure_loaded?(PtcLlmHttp) do
       byte_size(value) in 1..256 and String.valid?(value) and
         Enum.all?(:binary.bin_to_list(value), &(&1 > 31 and &1 != 127))
     end
-
-    defp valid_identifier?(_value), do: false
 
     defp target({:openrouter, model}) do
       build_target(
@@ -344,7 +335,7 @@ if Code.ensure_loaded?(PtcLlmHttp) do
              usage_guarantees: usage_guarantees
            ) do
         {:ok, target} -> {:ok, target}
-        {:error, %Error{} = error} -> {:error, classify(error)}
+        {:error, error} -> {:error, classify(error)}
       end
     end
 
@@ -367,12 +358,10 @@ if Code.ensure_loaded?(PtcLlmHttp) do
 
         case Request.new(opts) do
           {:ok, request} -> {:ok, request}
-          {:error, %Error{} = error} -> {:error, classify(error)}
+          {:error, error} -> {:error, classify(error)}
         end
       end
     end
-
-    defp request(_req), do: {:error, invalid_request_error("LLM request is invalid")}
 
     defp maybe_put(opts, _key, nil), do: opts
     defp maybe_put(opts, :tools, []), do: opts
@@ -483,7 +472,7 @@ if Code.ensure_loaded?(PtcLlmHttp) do
     defp wrap_bearer(key) do
       case Credential.bearer(key) do
         {:ok, credential} -> {:ok, credential}
-        {:error, %Error{} = error} -> {:error, classify(error)}
+        {:error, error} -> {:error, classify(error)}
       end
     end
 
@@ -493,7 +482,7 @@ if Code.ensure_loaded?(PtcLlmHttp) do
       if is_integer(timeout) and timeout > 0 do
         case Deadline.new(System.monotonic_time(:millisecond) + timeout) do
           {:ok, deadline} -> {:ok, deadline}
-          {:error, %Error{} = error} -> {:error, classify(error)}
+          {:error, error} -> {:error, classify(error)}
         end
       else
         {:error, invalid_request_error("LLM request deadline is invalid")}
@@ -503,11 +492,13 @@ if Code.ensure_loaded?(PtcLlmHttp) do
     defp process_budget(_req) do
       case ProcessBudget.new(total_heap_words: @default_process_budget_words) do
         {:ok, budget} -> {:ok, budget}
-        {:error, %Error{} = error} -> {:error, classify(error)}
+        {:error, error} -> {:error, classify(error)}
       end
     end
 
-    defp classify(%Error{} = error) do
+    @dialyzer {:nowarn_function, classify: 1}
+
+    defp classify(error) do
       # PtcLlmHttp 0.1.0 publishes closed Error struct keys and `contract/0`,
       # but no instance accessor. Classification reads those documented keys
       # and never copies provider text, bodies, or credentials.

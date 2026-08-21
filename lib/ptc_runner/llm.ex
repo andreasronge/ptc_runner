@@ -32,7 +32,7 @@ defmodule PtcRunner.LLM do
           tokens: tokens()
         }
 
-  @type chunk :: %{delta: String.t()} | %{done: true, tokens: tokens()}
+  @type chunk :: %{delta: String.t()}
   @type catalog_status :: :cataloged | :uncataloged | :unavailable
 
   @doc """
