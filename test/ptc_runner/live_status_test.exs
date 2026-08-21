@@ -473,12 +473,15 @@ defmodule PtcRunner.LiveStatusTest do
   test "a real run deadline reports the configured run-duration ceiling" do
     parent = self()
     {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)
-    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [park_capability()])
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [park_capability(parent)])
     {:ok, mission} = MissionEnvironment.new([])
 
+    # 200 ms used to be eaten by Kernel.run setup under a loaded 4-scheduler
+    # suite, so pcalls returned a recoverable provider_timeout instead of the
+    # run-duration abort. Stay well below the 5 s parallel/workflow ceilings.
     {:ok, limits} =
       Limits.new(
-        run_duration_ms: 200,
+        run_duration_ms: 2_000,
         workflow_timeout_ms: 5_000,
         parallel_timeout_ms: 5_000
       )
@@ -486,19 +489,25 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "live-run-duration-timeout")
     {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
 
-    assert {:error, %{kind: :limit_exceeded, details: details}} =
-             PtcRunner.LiveStatus.with_target(target, fn ->
-               Kernel.run(~S[(return (pcalls #(tool/park {})))], config)
-             end)
+    run =
+      Task.async(fn ->
+        PtcRunner.LiveStatus.with_target(target, fn ->
+          Kernel.run(~S[(return (pcalls #(tool/park {})))], config)
+        end)
+      end)
+
+    assert_receive {:parked, _callback}
+
+    assert {:error, %{kind: :limit_exceeded, details: details}} = Task.await(run, 5_000)
 
     assert details.limit == :run_duration_ms
-    assert details.limit_ms == 200
+    assert details.limit_ms == 2_000
 
     assert_receive {:live_frame,
                     %{
                       phase: "error",
                       outcome_reason:
-                        "run_duration_ms limit 200 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower"
+                        "run_duration_ms limit 2000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower"
                     }},
                    2_000
   end
@@ -531,13 +540,15 @@ defmodule PtcRunner.LiveStatusTest do
     bundle
   end
 
-  defp park_capability do
+  defp park_capability(notify \\ nil) do
     {:ok, capability} =
       Capability.new(
         name: "park",
         description: "Park until the parallel operation times out.",
         input_schema: %{"type" => "object"},
         callback: fn _arguments ->
+          if is_pid(notify), do: send(notify, {:parked, self()})
+
           receive do
             :never -> {:ok, %{}}
           after
