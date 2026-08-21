@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.CommandSource do
 
   @kinds [
     :host,
+    :project,
     :application,
     :component,
     :input_contract,
@@ -38,6 +39,7 @@ defmodule PtcRunner.Kernel.CommandSource do
 
   @type kind ::
           :host
+          | :project
           | :application
           | :component
           | :input_contract
@@ -110,6 +112,7 @@ defmodule PtcRunner.Kernel.CommandSource do
 
   @spec fixed(kind()) :: t()
   def fixed(:host), do: new!(:host, "ptc-host.json")
+  def fixed(:project), do: new!(:project, "ptc-project.json")
   def fixed(:application), do: new!(:application, "ptc.json")
   def fixed(:external_input), do: new!(:external_input, "input.json")
 
@@ -125,6 +128,7 @@ defmodule PtcRunner.Kernel.CommandSource do
   end
 
   defp valid_name?(:host, name), do: name == "ptc-host.json"
+  defp valid_name?(:project, name), do: name == "ptc-project.json"
   defp valid_name?(:application, name), do: name == "ptc.json"
   defp valid_name?(:external_input, name), do: name == "input.json"
   defp valid_name?(:component_override, name), do: name == "component-override.json"

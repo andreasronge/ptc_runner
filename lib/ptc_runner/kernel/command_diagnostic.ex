@@ -249,6 +249,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_path_for_row?(_path, _source, _row), do: false
 
   defp valid_path_authority?(
+         :project,
+         %CommandSource{kind: :project, contract_authority: nil},
+         %{phase: :project}
+       ),
+       do: true
+
+  defp valid_path_authority?(
          :manifest,
          %CommandSource{kind: :application, contract_authority: nil},
          %{phase: :application}
@@ -322,6 +329,18 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_span?(_span, _source), do: false
 
   defp valid_message_source?(message, %{message: message}, _source), do: true
+
+  defp valid_message_source?(
+         message,
+         %{phase: :project, code: :project_schema_invalid},
+         %CommandSource{kind: :project}
+       ),
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :project,
+           SchemaViolationDiagnostic.rules(:project, :project_schema_invalid),
+           message
+         )
 
   defp valid_message_source?(
          message,

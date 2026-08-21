@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.SchemaViolationDiagnostic do
 
   @roles %{
     host: "the host configuration",
+    project: "the project configuration",
     application: "the application manifest"
   }
 
@@ -32,9 +33,24 @@ defmodule PtcRunner.Kernel.SchemaViolationDiagnostic do
     :unknown_property
   ]
 
+  @project_rules [
+    :const,
+    :duplicate_property,
+    :max_length,
+    :maximum,
+    :min_length,
+    :minimum,
+    :pattern,
+    :required,
+    :schema,
+    :type,
+    :unknown_property
+  ]
+
   @role_rules %{
     host: SchemaViolation.rules(),
-    application: @application_rules
+    application: @application_rules,
+    project: @project_rules
   }
 
   @rule_suffixes %{
@@ -76,6 +92,7 @@ defmodule PtcRunner.Kernel.SchemaViolationDiagnostic do
   def rules(:host, :host_schema_invalid), do: @role_rules.host
   def rules(:application, :required_property_missing), do: [:required]
   def rules(:application, :schema_violation), do: @role_rules.application -- [:required]
+  def rules(:project, :project_schema_invalid), do: @role_rules.project
   def rules(_role, _code), do: []
 
   @doc "Renders a fixed document-role/rule message."

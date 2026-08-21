@@ -108,6 +108,9 @@ defmodule PtcRunner.ViewerFrontend do
          :ok <- require_trace(project),
          :ok <- ProjectArtifactRoot.ensure(project.artifact_root) do
       start_captured(project, overrides, callbacks)
+    else
+      {:error, {:project_schema_invalid, _violation}} -> {:error, :project_invalid}
+      {:error, _reason} = error -> error
     end
   end
 

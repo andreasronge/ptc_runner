@@ -56,6 +56,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   @finalization_uncertain_publication_codes [:result_publication_failed]
   @unclassified_run_phases [
     :arguments,
+    :project,
     :host,
     :application,
     :bundle,
@@ -67,6 +68,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   @codes_by_phase DiagnosticCatalog.rows()
                   |> Enum.group_by(& &1.phase, & &1.code)
+  @project_codes Map.fetch!(@codes_by_phase, :project)
   @host_codes Map.fetch!(@codes_by_phase, :host)
   @application_codes Map.fetch!(@codes_by_phase, :application)
   @static_application_codes @application_codes -- [:override_invalid, :event_identity_conflict]
@@ -950,6 +952,11 @@ defmodule PtcRunner.Kernel.CommandContract do
               code in @host_codes,
        do: true
 
+  defp diagnostic_pair_allowed?(mode, :project, code)
+       when mode in [:validate, :models, :doctor, {:doctor, :connect}, :run_unclassified] and
+              code in @project_codes,
+       do: true
+
   defp diagnostic_pair_allowed?(mode, :application, code)
        when mode in [:validate, :doctor, {:doctor, :connect}] and
               code in @static_application_codes,
@@ -1155,7 +1162,14 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   defp source_schema(kind)
-       when kind in [:host, :application, :external_input, :component_override, :runtime],
+       when kind in [
+              :host,
+              :project,
+              :application,
+              :external_input,
+              :component_override,
+              :runtime
+            ],
        do: source_branch(kind, %{"const" => CommandSource.fixed(kind).name})
 
   defp source_schema(kind) when kind in [:component, :input_contract, :result_contract] do

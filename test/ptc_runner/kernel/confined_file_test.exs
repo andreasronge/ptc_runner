@@ -119,6 +119,26 @@ defmodule PtcRunner.Kernel.ConfinedFileTest do
                )
     end
 
+    test "prefix status rejects replacement of a resolved parent before opening the file",
+         %{root: root, outside: outside} do
+      outside_nested = Path.join(outside, "outside-prefix")
+      File.mkdir_p!(outside_nested)
+      File.write!(Path.join(outside_nested, "component.clj"), "outside")
+      original = Path.join(root, "nested")
+      held = Path.join(root, "nested-prefix-held")
+
+      replace_parent = fn ->
+        File.rename!(original, held)
+        File.ln_s!(outside_nested, original)
+        :ok
+      end
+
+      assert {:error, :changed_during_read} =
+               ConfinedFile.read_prefix_status(root, "nested/component.clj", @max_bytes,
+                 before_open: replace_parent
+               )
+    end
+
     test "rejects a link cycle", %{root: root} do
       File.ln_s!("b.json", Path.join(root, "a.json"))
       File.ln_s!("a.json", Path.join(root, "b.json"))
@@ -132,6 +152,34 @@ defmodule PtcRunner.Kernel.ConfinedFileTest do
     test "rejects a file larger than max_bytes", %{root: root} do
       File.write!(Path.join(root, "large"), String.duplicate("a", 128))
       assert {:error, :too_large} = ConfinedFile.read(root, "large", 64)
+      assert {:ok, prefix} = ConfinedFile.read_prefix(root, "large", 64)
+      assert prefix == String.duplicate("a", 64)
+      assert {:ok, ^prefix, :truncated} = ConfinedFile.read_prefix_status(root, "large", 64)
+    end
+
+    test "reports complete content and trims only a partial UTF-8 codepoint", %{root: root} do
+      File.write!(Path.join(root, "small"), "small")
+      File.write!(Path.join(root, "utf8-boundary"), "aåz")
+
+      assert {:ok, "small", :complete} =
+               ConfinedFile.read_prefix_status(root, "small", 64)
+
+      assert {:ok, "a", :truncated} =
+               ConfinedFile.read_prefix_status(root, "utf8-boundary", 2)
+    end
+
+    test "rejects malformed UTF-8 at or before a prefix cutoff", %{root: root} do
+      File.write!(Path.join(root, "invalid-at-cutoff"), <<"a", 0xFF, "z">>)
+      File.write!(Path.join(root, "continuation-at-cutoff"), <<"a", 0x80, "z">>)
+      File.write!(Path.join(root, "invalid-before-cutoff"), <<0xFF, "ab">>)
+      File.write!(Path.join(root, "complete-incomplete"), <<0xC3>>)
+
+      for name <- ~w(invalid-at-cutoff continuation-at-cutoff invalid-before-cutoff) do
+        assert {:error, :invalid_utf8} = ConfinedFile.read_prefix_status(root, name, 2)
+      end
+
+      assert {:error, :invalid_utf8} =
+               ConfinedFile.read_prefix(root, "complete-incomplete", 2)
     end
 
     test "rejects invalid UTF-8", %{root: root} do

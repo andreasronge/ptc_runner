@@ -317,7 +317,7 @@ diagnostic behind it.
 | ---: | --- | --- |
 | 0 | the command succeeded | — |
 | 2 | the arguments were rejected before any document was read | `arguments` |
-| 3 | a declaration document was unavailable, invalid, or rejected | `host`, `application`, `bundle`, `provider_declaration` |
+| 3 | a declaration document was unavailable, invalid, or rejected | `project`, `host`, `application`, `bundle`, `provider_declaration` |
 | 4 | a selected provider could not be checked or acquired | `local_preflight`, `active_preflight`, `provider_acquisition` |
 | 5 | the workflow ran and failed | `execution` |
 | 6 | the run exceeded a limit or its duration | `execution` |
@@ -370,6 +370,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `host` | `installation_endpoint_literal_loopback_required` | no | allow_insecure_loopback requires a literal 127.0.0.1 or [::1] address |
 | 3 | `host` | `installation_revision_missing` | no | an installed provider is missing its behavior revision |
 | 3 | `host` | `installed_limit_invalid` | no | an installed limit is invalid |
+| 3 | `project` | `project_schema_invalid` | no | the project configuration does not satisfy its schema |
 | 3 | `provider_declaration` | `data_policy_denied` | no | the selected providers do not admit the effective data class |
 | 3 | `provider_declaration` | `dependency_invalid` | no | the selected provider dependency graph is invalid |
 | 3 | `provider_declaration` | `placement_denied` | no | the provider is not allowed in this destination |

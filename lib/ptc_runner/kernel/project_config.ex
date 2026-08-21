@@ -10,10 +10,15 @@ defmodule PtcRunner.Kernel.ProjectConfig do
 
   The V1 discriminator is `"kind": "ptc-project"`. Unknown and duplicate
   keys are rejected at every level. The runtime never discovers a project
-  implicitly; callers must name its JSON document.
+  implicitly; callers must name its JSON document. Schema failures retain a
+  bounded `PtcRunner.Kernel.SchemaViolation` so command admission can publish
+  the rule and a project-schema-authorized path without retaining rejected
+  values or filesystem names.
   """
 
   alias PtcRunner.Kernel.ConfinedFile
+  alias PtcRunner.Kernel.SchemaPath
+  alias PtcRunner.Kernel.SchemaViolation
   alias PtcRunner.Kernel.StrictJSON
 
   @schema_uri "https://ptc-runner.dev/schemas/ptc-project-config.schema.json"
@@ -57,23 +62,32 @@ defmodule PtcRunner.Kernel.ProjectConfig do
         }
 
   @doc "Classifies an explicitly named JSON document by its `kind` field."
-  @spec classify(binary()) :: :application | {:project, t()} | {:error, atom()}
+  @spec classify(binary()) :: :application | {:project, t()} | {:error, failure()}
   def classify(path) when is_binary(path) do
     case read_document(path) do
-      {:ok, _canonical, %{"kind" => "ptc-project"}} ->
-        case load(path) do
+      {:ok, canonical, %{"kind" => "ptc-project"} = decoded} ->
+        case load_decoded(canonical, decoded) do
           {:ok, project} -> {:project, project}
-          {:error, _reason} -> {:error, :project_invalid}
+          {:error, reason} -> {:error, reason}
         end
 
       {:ok, _canonical, %{"kind" => _other}} ->
-        {:error, :project_invalid}
+        {:error, {:project_schema_invalid, SchemaViolation.new(:const, [{:property, "kind"}])}}
 
       {:ok, _canonical, _manifest_without_kind} ->
         :application
 
       {:error, :project_unavailable} ->
         :application
+
+      {:error, {:project_schema_invalid, %SchemaViolation{}} = reason, :project_document} ->
+        {:error, reason}
+
+      {:error, _reason, :project_document} ->
+        generic_schema_failure()
+
+      {:error, _reason, :foreign_document} ->
+        {:error, {:project_schema_invalid, SchemaViolation.new(:const, [{:property, "kind"}])}}
 
       {:error, _reason} ->
         :application
@@ -87,20 +101,48 @@ defmodule PtcRunner.Kernel.ProjectConfig do
   def classify(_path), do: {:error, :project_invalid}
 
   @doc "Loads one project document without opening its references."
-  @spec load(binary()) :: {:ok, t()} | {:error, :project_unavailable | :project_invalid}
+  @type failure ::
+          :project_unavailable
+          | :project_invalid
+          | {:project_schema_invalid, SchemaViolation.t()}
+
+  @spec load(binary()) :: {:ok, t()} | {:error, failure()}
   def load(path) when is_binary(path) do
-    with {:ok, canonical, decoded} <- read_document(path),
+    case read_document(path) do
+      {:ok, canonical, decoded} ->
+        load_decoded(canonical, decoded)
+
+      {:error, :project_unavailable} = error ->
+        error
+
+      {:error, :project_invalid} = error ->
+        error
+
+      {:error, {:project_schema_invalid, %SchemaViolation{}}} = error ->
+        error
+
+      {:error, {:project_schema_invalid, %SchemaViolation{}} = reason, classification}
+      when classification in [:project_document, :foreign_document] ->
+        {:error, reason}
+
+      _invalid ->
+        generic_schema_failure()
+    end
+  end
+
+  def load(_path), do: {:error, :project_invalid}
+
+  defp load_decoded(canonical, decoded) do
+    with :ok <- validate_schema(decoded),
          directory = Path.dirname(canonical),
          {:ok, values} <- decode(decoded),
          {:ok, project} <- build(canonical, directory, values) do
       {:ok, project}
     else
-      {:error, :project_unavailable} = error -> error
-      _invalid -> {:error, :project_invalid}
+      {:error, {:project_schema_invalid, %SchemaViolation{}}} = error -> error
+      _invalid -> generic_schema_failure()
     end
   end
-
-  def load(_path), do: {:error, :project_invalid}
 
   @doc "Returns the generated JSON Schema for project configuration V1."
   @spec schema() :: map()
@@ -169,12 +211,10 @@ defmodule PtcRunner.Kernel.ProjectConfig do
   end
 
   defp read_document(path) do
-    with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
-         directory = Path.dirname(canonical),
-         {:ok, bytes} <- ConfinedFile.read(directory, Path.basename(canonical), @max_bytes),
-         {:ok, decoded} <- StrictJSON.decode_with_locations(bytes) do
-      {:ok, canonical, decoded}
-    else
+    case ConfinedFile.resolve_absolute(Path.expand(path)) do
+      {:ok, canonical} ->
+        read_canonical_document(canonical)
+
       {:error, reason}
       when reason in [:not_found, :not_regular, :invalid_path, :symlink_escape] ->
         {:error, :project_unavailable}
@@ -184,11 +224,92 @@ defmodule PtcRunner.Kernel.ProjectConfig do
     end
   end
 
+  defp read_canonical_document(canonical) do
+    directory = Path.dirname(canonical)
+    name = Path.basename(canonical)
+
+    case ConfinedFile.read_prefix_status(directory, name, @max_bytes) do
+      {:ok, bytes, :complete} ->
+        decode_document(canonical, bytes)
+
+      {:ok, prefix, :truncated} ->
+        classify_discriminator_prefix(prefix)
+
+      {:error, reason}
+      when reason in [:not_found, :not_regular, :invalid_path, :symlink_escape] ->
+        {:error, :project_unavailable}
+
+      {:error, _reason} ->
+        {:error, :project_invalid}
+    end
+  end
+
+  defp classify_discriminator_prefix(prefix) do
+    case StrictJSON.root_string_prefix(prefix, "kind") do
+      {:ok, "ptc-project"} -> {:error, :project_invalid, :project_document}
+      {:ok, _foreign} -> {:error, :project_invalid, :foreign_document}
+      :error -> {:error, :project_invalid}
+    end
+  end
+
+  defp decode_document(canonical, bytes) do
+    case StrictJSON.decode_with_locations(bytes) do
+      {:ok, decoded} ->
+        {:ok, canonical, decoded}
+
+      {:error, {:duplicate_json_key, path}} ->
+        reason =
+          {:project_schema_invalid,
+           SchemaViolation.new(:duplicate_property, safe_project_path(path))}
+
+        classify_decode_failure(bytes, reason)
+
+      _invalid ->
+        classify_decode_failure(bytes, :project_invalid)
+    end
+  end
+
+  defp classify_decode_failure(bytes, reason) do
+    case StrictJSON.unique_root_string(bytes, "kind") do
+      {:ok, "ptc-project"} -> {:error, reason, :project_document}
+      {:ok, _foreign} -> {:error, reason, :foreign_document}
+      :error -> {:error, reason}
+    end
+  end
+
+  defp validate_schema(document) do
+    with :ok <- validate_cross_fields(document) do
+      case SchemaViolation.validate(document, schema()) do
+        :ok -> :ok
+        {:error, violation} -> {:error, {:project_schema_invalid, violation}}
+      end
+    end
+  end
+
+  defp validate_cross_fields(%{
+         "artifacts" => %{"inspection" => true} = artifacts
+       }) do
+    path = [{:property, "artifacts"}, {:property, "trace"}]
+
+    case Map.fetch(artifacts, "trace") do
+      {:ok, true} -> :ok
+      :error -> {:error, {:project_schema_invalid, SchemaViolation.new(:required, path)}}
+      {:ok, _value} -> {:error, {:project_schema_invalid, SchemaViolation.new(:const, path)}}
+    end
+  end
+
+  defp validate_cross_fields(_document), do: :ok
+
+  defp safe_project_path(path), do: SchemaPath.explained_prefix(path, schema())
+
+  defp generic_schema_failure,
+    do: {:error, {:project_schema_invalid, SchemaViolation.new(:schema, [])}}
+
   defp decode(%{} = root) do
     with :ok <- exact_keys(root, @root_keys, ~w(kind version application)),
          :ok <- optional_schema(root),
          "ptc-project" <- Map.get(root, "kind"),
-         1 <- Map.get(root, "version"),
+         :ok <- version(Map.get(root, "version")),
          {:ok, application} <- path_object(Map.get(root, "application"), @application_keys),
          {:ok, host, env_file} <- host(Map.get(root, "host")),
          {:ok, artifact_root, artifacts} <- artifacts(Map.get(root, "artifacts")),
@@ -305,10 +426,17 @@ defmodule PtcRunner.Kernel.ProjectConfig do
 
   defp port(map) do
     case Map.get(map, "port", 0) do
-      value when is_integer(value) and value in 0..65_535 -> {:ok, value}
-      _invalid -> {:error, :project_invalid}
+      value
+      when is_number(value) and value >= 0 and value <= 65_535 and value == trunc(value) ->
+        {:ok, trunc(value)}
+
+      _invalid ->
+        {:error, :project_invalid}
     end
   end
+
+  defp version(value) when value == 1, do: :ok
+  defp version(_value), do: {:error, :project_invalid}
 
   defp build(path, directory, values) do
     {:ok,

@@ -54,6 +54,28 @@ defmodule PtcRunner.Kernel.TypedCanonicalJSONTest do
              StrictJSON.admit([1, 2], max_nodes: 2)
   end
 
+  test "root string inspection requires one unique root property" do
+    assert {:ok, "ptc-project"} =
+             StrictJSON.unique_root_string(
+               ~S({"kind":"ptc-project","nested":{"key":1,"key":2}}),
+               "kind"
+             )
+
+    assert :error =
+             StrictJSON.unique_root_string(
+               ~S({"kind":"ptc-project","kind":"other"}),
+               "kind"
+             )
+
+    assert :error = StrictJSON.unique_root_string(~S({"kind":1}), "kind")
+  end
+
+  test "root string prefix inspection stops after the requested member" do
+    prefix = ~S({"nested":{"quoted":"}"},"kind":"ptc-\u0070roject","unfinished":)
+    assert {:ok, "ptc-project"} = StrictJSON.root_string_prefix(prefix, "kind")
+    assert :error = StrictJSON.root_string_prefix(~S({"kind":1,"unfinished":), "kind")
+  end
+
   test "structural admission rejects unknown and duplicate limit options" do
     assert {:error, :invalid_json} = StrictJSON.admit(%{}, max_node: 1)
 

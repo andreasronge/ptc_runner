@@ -24,6 +24,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:host, :host_schema_invalid},
     {:local_preflight, :environment_unavailable},
     {:local_preflight, :fixtures_unreadable},
+    {:project, :project_schema_invalid},
     {:provider_acquisition, :capability_requirement_missing},
     {:provider_acquisition, :provider_tool_missing},
     {:result_cleanup, :result_contract_failed}
@@ -149,6 +150,23 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
       assert {:error, :invalid_command_diagnostic} =
                CommandDiagnostic.new(:application, :schema_violation,
                  source: CommandSource.fixed(:application),
+                 message: message
+               )
+    end
+  end
+
+  test "project schema diagnostics refuse rules its schema cannot produce" do
+    for {rule, message} <- [
+          {:contains, "the project configuration violates the contains schema rule"},
+          {:one_of, "the project configuration violates the oneOf schema rule"},
+          {:unique_items, "the project configuration violates the uniqueItems schema rule"}
+        ] do
+      assert :error = SchemaViolationDiagnostic.message(:project, rule)
+      refute DiagnosticCatalog.valid_message?(:project, :project_schema_invalid, message)
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:project, :project_schema_invalid,
+                 source: CommandSource.fixed(:project),
                  message: message
                )
     end
