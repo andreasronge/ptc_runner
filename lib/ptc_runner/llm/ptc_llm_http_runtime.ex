@@ -3,8 +3,10 @@ defmodule PtcRunner.LLM.PtcLlmHttpRuntime do
 
   # Owns the optional PtcLlmHttp Runtime as a PtcRunner application child.
   # Capacity is reserved and released by that runtime; this supervisor only
-  # starts, restarts, and locates it. Tests may bind an isolated runtime
-  # through `:ptc_llm_http_runtime` without replacing this owner.
+  # starts, restarts, and locates it. The Runtime process is started when
+  # `ptc_llm_http` is compiled into the host, not per request. Tests may bind
+  # an isolated runtime through `:ptc_llm_http_runtime` without replacing this
+  # owner.
 
   use Supervisor
 

@@ -30,7 +30,7 @@ if Code.ensure_loaded?(PtcLlmHttp) do
     PtcRunner owns selector parsing, target construction, credential wrapping,
     request and response limits, the absolute deadline, the attempt process
     budget, retry refusal, usage projection, tracing redaction, and error
-    classification. `PtcRunner.LLM.PtcLlmHttpRuntime` supervises the PtcLlmHttp
+    classification. The application supervision tree owns the PtcLlmHttp
     Runtime. This adapter never starts unowned global processes per request and
     never exposes PtcLlmHttp types to callers.
     """
@@ -49,6 +49,7 @@ if Code.ensure_loaded?(PtcLlmHttp) do
 
     alias PtcLlmHttp.{Target, ToolCall, Usage}
     alias PtcRunner.Kernel.ProviderError
+    alias PtcRunner.LLM.HTTPStatus
     alias PtcRunner.LLM.PtcLlmHttpPreparedModel
     alias PtcRunner.LLM.PtcLlmHttpRuntime
 
@@ -507,6 +508,9 @@ if Code.ensure_loaded?(PtcLlmHttp) do
     end
 
     defp classify(%Error{} = error) do
+      # PtcLlmHttp 0.1.0 publishes closed Error struct keys and `contract/0`,
+      # but no instance accessor. Classification reads those documented keys
+      # and never copies provider text, bodies, or credentials.
       kind = error.kind
       status = error.http_status
       {error_kind, retryable?} = error_class(kind, status, error.provider_code)
@@ -552,7 +556,7 @@ if Code.ensure_loaded?(PtcLlmHttp) do
       invalid_target: {:invalid_request, false},
       invalid_credential: {:authentication_failed, false},
       unsupported_capability: {:invalid_request, false},
-      invalid_tool_arguments: {:invalid_request, false},
+      invalid_tool_arguments: {:invalid_result, false},
       malformed_provider_response: {:invalid_result, false},
       malformed_stream: {:invalid_result, false},
       response_too_large: {:invalid_result, false},
@@ -561,25 +565,24 @@ if Code.ensure_loaded?(PtcLlmHttp) do
       model_refusal: {:denied, false}
     }
 
-    defp error_class(:http_status, status, _code) when is_integer(status),
-      do: {http_error_kind(status), http_retryable?(status)}
+    @quota_codes [
+      :credit_balance_exhausted,
+      :organization_spend_limit_exceeded,
+      :organization_usage_limit_exceeded,
+      :project_spend_limit_exceeded
+    ]
+
+    defp error_class(:http_status, status, code) when is_integer(status) do
+      if quota_code?(code),
+        do: {:payment_required, false},
+        else: {HTTPStatus.error_kind(status), HTTPStatus.retryable?(status)}
+    end
 
     defp error_class(kind, _status, _code),
       do: Map.get(@error_classes, kind, {:unavailable, true})
 
-    defp http_error_kind(401), do: :authentication_failed
-    defp http_error_kind(402), do: :payment_required
-    defp http_error_kind(403), do: :denied
-    defp http_error_kind(404), do: :not_found
-    defp http_error_kind(408), do: :timeout
-    defp http_error_kind(429), do: :rate_limited
-    defp http_error_kind(status) when status in 400..499, do: :invalid_request
-    defp http_error_kind(status) when status in 500..599, do: :unavailable
-    defp http_error_kind(_status), do: :unavailable
-
-    defp http_retryable?(status) when status in [408, 409, 425, 429], do: true
-    defp http_retryable?(status) when status in 500..599, do: true
-    defp http_retryable?(_status), do: false
+    defp quota_code?(code) when code in @quota_codes, do: true
+    defp quota_code?(_code), do: false
 
     defp details(:http_status, status) when is_integer(status), do: "HTTP #{status}"
     defp details(:deadline_exceeded, _status), do: "LLM request exceeded its deadline"
@@ -594,6 +597,10 @@ if Code.ensure_loaded?(PtcLlmHttp) do
 
     defp details(:invalid_target, _status), do: "LLM model selector is not supported"
     defp details(:invalid_request, _status), do: "LLM request is invalid"
+
+    defp details(:invalid_tool_arguments, _status),
+      do: "LLM provider returned invalid tool arguments"
+
     defp details(_kind, _status), do: "LLM provider unavailable"
 
     defp unsupported_selector_error do

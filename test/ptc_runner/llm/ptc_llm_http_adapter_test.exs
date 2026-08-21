@@ -229,27 +229,78 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
       assert {:ok, %{tool_calls: [call], content: content}} =
                requester.(%{
                  messages: [%{role: :user, content: "call it"}],
-                 tools: [
-                   %{
-                     "type" => "function",
-                     "function" => %{
-                       "name" => "lookup",
-                       "description" => "Lookup",
-                       "parameters" => %{
-                         "type" => "object",
-                         "properties" => %{},
-                         "required" => [],
-                         "additionalProperties" => false
-                       }
-                     }
-                   }
-                 ]
+                 tools: [lookup_tool()]
                })
 
       assert call.id == "call_1"
       assert call.name == "lookup"
       assert call.args == %{}
       assert content in [nil, ""]
+    end
+
+    test "classifies malformed provider tool arguments as an invalid result" do
+      gateway =
+        OpenAICompatLLMGateway.start(fn _request ->
+          body =
+            Jason.encode!(%{
+              "choices" => [
+                %{
+                  "index" => 0,
+                  "finish_reason" => "tool_calls",
+                  "message" => %{
+                    "role" => "assistant",
+                    "content" => nil,
+                    "tool_calls" => [
+                      %{
+                        "id" => "call_1",
+                        "type" => "function",
+                        "function" => %{"name" => "lookup", "arguments" => "[]"}
+                      }
+                    ]
+                  }
+                }
+              ],
+              "usage" => %{
+                "prompt_tokens" => 1,
+                "completion_tokens" => 1,
+                "total_tokens" => 2
+              }
+            })
+
+          {200, [{"content-type", "application/json"}], body}
+        end)
+
+      on_exit(gateway.close)
+      {:ok, requester} = requester(gateway.port)
+
+      assert {:error, %ProviderError{kind: :invalid_result, retryable?: false}} =
+               requester.(%{
+                 messages: [%{role: :user, content: "call it"}],
+                 tools: [lookup_tool()]
+               })
+    end
+
+    test "classifies a quota 429 as a non-retryable payment failure" do
+      gateway =
+        OpenAICompatLLMGateway.start(fn _request ->
+          body =
+            Jason.encode!(%{
+              "error" => %{
+                "code" => "credit_balance_exhausted",
+                "message" => "no credits"
+              }
+            })
+
+          {429, [{"content-type", "application/json"}], body}
+        end)
+
+      on_exit(gateway.close)
+      {:ok, requester} = requester(gateway.port)
+
+      assert {:error, %ProviderError{kind: :payment_required, retryable?: false} = error} =
+               requester.(%{messages: [%{role: :user, content: "pay"}]})
+
+      refute inspect(error) =~ "no credits"
     end
 
     test "rejects a loopback credential without logging or tracing it" do
@@ -363,23 +414,7 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
       assert {:error, %ProviderError{kind: :transport_error}} = Task.await(failed, 5_000)
       assert_receive {:DOWN, ^callback_ref, :process, ^callback, _reason}
       assert_released(runtime)
-
-      recovered =
-        Task.async(fn ->
-          requester.(%{
-            messages: [%{role: :user, content: "again"}],
-            stream: fn %{delta: delta} ->
-              send(parent, {:admitted_delta, delta})
-              :ok
-            end
-          })
-        end)
-
-      assert_receive {:gateway_request, second_worker}
-      send(second_worker, {release, :serve_recovery})
-      assert_receive {:admitted_delta, "recovered"}
-      assert {:ok, %{content: "recovered"}} = Task.await(recovered, 5_000)
-      assert_released(runtime)
+      assert_next_admission(requester, parent, runtime, release)
     end
 
     test "releases capacity after a stream callback failure", %{runtime: runtime} do
@@ -468,23 +503,7 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
       Process.unlink(caller.pid)
       Process.exit(caller.pid, :kill)
       assert_receive {:DOWN, ^ref, :process, _pid, :killed}
-
-      recovered =
-        Task.async(fn ->
-          requester.(%{
-            messages: [%{role: :user, content: "again"}],
-            stream: fn %{delta: delta} ->
-              send(parent, {:admitted_delta, delta})
-              :ok
-            end
-          })
-        end)
-
-      assert_receive {:gateway_request, second_worker}
-      send(second_worker, {release, :serve_recovery})
-      assert_receive {:admitted_delta, "recovered"}
-      assert {:ok, %{content: "recovered"}} = Task.await(recovered, 5_000)
-      assert_released(runtime)
+      assert_next_admission(requester, parent, runtime, release)
     end
   end
 
@@ -532,9 +551,44 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
     )
   end
 
+  defp lookup_tool do
+    %{
+      "type" => "function",
+      "function" => %{
+        "name" => "lookup",
+        "description" => "Lookup",
+        "parameters" => %{
+          "type" => "object",
+          "properties" => %{},
+          "required" => [],
+          "additionalProperties" => false
+        }
+      }
+    }
+  end
+
   defp assert_released(runtime) do
     assert {:ok, %{in_use: 0, groups: groups}} = Runtime.snapshot(runtime)
     assert groups[PtcLlmHttpRuntime.capacity_group()].in_use == 0
+  end
+
+  defp assert_next_admission(requester, parent, runtime, release) do
+    recovered =
+      Task.async(fn ->
+        requester.(%{
+          messages: [%{role: :user, content: "again"}],
+          stream: fn %{delta: delta} ->
+            send(parent, {:admitted_delta, delta})
+            :ok
+          end
+        })
+      end)
+
+    assert_receive {:gateway_request, worker}
+    send(worker, {release, :serve_recovery})
+    assert_receive {:admitted_delta, "recovered"}
+    assert {:ok, %{content: "recovered"}} = Task.await(recovered, 5_000)
+    assert_released(runtime)
   end
 
   defp serve_disconnect(socket, parent, release) do

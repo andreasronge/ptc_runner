@@ -34,6 +34,7 @@ if Code.ensure_loaded?(ReqLLM) do
     @behaviour PtcRunner.LLM
 
     alias PtcRunner.Kernel.ProviderError
+    alias PtcRunner.LLM.HTTPStatus
     alias PtcRunner.LLM.ReqLLMPreparedModel
     alias ReqLLM.Message
     alias ReqLLM.Message.ContentPart
@@ -638,7 +639,7 @@ if Code.ensure_loaded?(ReqLLM) do
     defp normalize_provider_error(%ReqLLM.Error.API.Request{status: status} = error)
          when is_integer(status) do
       ProviderError.new(
-        http_error_kind(status),
+        HTTPStatus.error_kind(status),
         http_error_details(status, error.reason),
         retryable?: http_retryable?(status, error.retryable)
       )
@@ -655,7 +656,7 @@ if Code.ensure_loaded?(ReqLLM) do
     defp normalize_provider_error(%ReqLLM.Error.API.Response{status: status} = error)
          when is_integer(status) do
       ProviderError.new(
-        http_error_kind(status),
+        HTTPStatus.error_kind(status),
         http_error_details(status, error.reason),
         retryable?: http_retryable?(status, nil)
       )
@@ -670,7 +671,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp normalize_provider_error(%{status: status} = error) when is_integer(status) do
       ProviderError.new(
-        http_error_kind(status),
+        HTTPStatus.error_kind(status),
         direct_http_error_details(status, Map.get(error, :body)),
         retryable?: http_retryable?(status, nil)
       )
@@ -693,20 +694,8 @@ if Code.ensure_loaded?(ReqLLM) do
     defp normalize_provider_error(_reason),
       do: ProviderError.new(:unavailable, "LLM provider unavailable", retryable?: true)
 
-    defp http_error_kind(401), do: :authentication_failed
-    defp http_error_kind(402), do: :payment_required
-    defp http_error_kind(403), do: :denied
-    defp http_error_kind(404), do: :not_found
-    defp http_error_kind(408), do: :timeout
-    defp http_error_kind(429), do: :rate_limited
-    defp http_error_kind(status) when status in 400..499, do: :invalid_request
-    defp http_error_kind(status) when status in 500..599, do: :unavailable
-    defp http_error_kind(_status), do: :unavailable
-
     defp http_retryable?(_status, retryable?) when is_boolean(retryable?), do: retryable?
-    defp http_retryable?(status, _retryable?) when status in [408, 409, 425, 429], do: true
-    defp http_retryable?(status, _retryable?) when status in 500..599, do: true
-    defp http_retryable?(_status, _retryable?), do: false
+    defp http_retryable?(status, _retryable?), do: HTTPStatus.retryable?(status)
 
     defp http_error_details(status, reason) when is_binary(reason),
       do: safe_error_details("HTTP #{status}: #{reason}", "HTTP #{status}")
