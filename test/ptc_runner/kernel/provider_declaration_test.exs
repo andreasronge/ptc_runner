@@ -1747,8 +1747,48 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                outcome.envelope["result"]["effective_application_digest"],
              "workflow_bundle_hash" => outcome.envelope["result"]["workflow_bundle_hash"],
              "mission_bundle_hashes" => %{},
+             "mission_authority" => %{},
              "provider_activity" => false
            }
+  end
+
+  test "successful validate summarizes per-mission data, exports, and providers", %{
+    tmp_dir: directory
+  } do
+    manifest =
+      manifest()
+      |> Map.put("missions", %{
+        "intake" => %{
+          "components" => [%{"id" => "intake", "path" => "intake.clj"}],
+          "data" => %{"customer" => %{"id" => "c1"}},
+          "providers" => []
+        }
+      })
+
+    application =
+      write_application(directory, "validate-authority", %{
+        "ptc.json" => Jason.encode!(manifest),
+        "main.clj" => "(ns app) (defn run [input] (return input))",
+        "intake.clj" => """
+        (ns intake "Intake." {:visibility :prompt})
+        (defn summarize "Summarize." [value] value)
+        """
+      })
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["validate", application])
+
+    assert outcome.exit_status == 0
+
+    assert outcome.envelope["result"]["mission_authority"] == %{
+             "intake" => %{
+               "data" => ["data/customer"],
+               "exports" => ["intake/summarize"],
+               "providers" => []
+             }
+           }
+
+    assert Map.keys(outcome.envelope["result"]["mission_bundle_hashes"]) == ["intake"]
   end
 
   defp manifest, do: TestHelpers.valid_manifest()

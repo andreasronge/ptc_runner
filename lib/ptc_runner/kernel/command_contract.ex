@@ -1612,7 +1612,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp validate_result do
     closed(
-      ~w(application_content_digest effective_application_digest workflow_bundle_hash mission_bundle_hashes provider_activity),
+      ~w(application_content_digest effective_application_digest workflow_bundle_hash mission_bundle_hashes mission_authority provider_activity),
       %{
         "application_content_digest" => %{"type" => "string", "pattern" => @digest},
         "effective_application_digest" => %{"type" => "string", "pattern" => @digest},
@@ -1625,9 +1625,47 @@ defmodule PtcRunner.Kernel.CommandContract do
           },
           "maxProperties" => 16
         },
+        "mission_authority" => %{
+          "type" => "object",
+          "propertyNames" => %{"pattern" => "^[a-z][a-z0-9._-]{0,127}$"},
+          "additionalProperties" => mission_authority_entry(),
+          "maxProperties" => 16
+        },
         "provider_activity" => %{"const" => false}
       }
     )
+  end
+
+  defp mission_authority_entry do
+    closed(~w(data exports providers), %{
+      "data" => %{
+        "type" => "array",
+        "maxItems" => 256,
+        "items" => %{
+          "type" => "string",
+          "minLength" => 6,
+          "maxLength" => 512,
+          "pattern" => "^data/.+$(?![\\s\\S])"
+        }
+      },
+      "exports" => %{
+        "type" => "array",
+        "maxItems" => 4_096,
+        "items" => %{
+          "type" => "string",
+          "minLength" => 1,
+          "maxLength" => 256
+        }
+      },
+      "providers" => %{
+        "type" => "array",
+        "maxItems" => 32,
+        "items" => %{
+          "type" => "string",
+          "pattern" => "^[a-z][a-z0-9._-]{0,127}$(?![\\s\\S])"
+        }
+      }
+    })
   end
 
   defp doctor_success_result, do: doctor_result(:success)

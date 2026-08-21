@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LocalPreflight
+  alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
@@ -709,9 +710,28 @@ defmodule PtcRunner.Kernel.RunCoordinator do
            "effective_application_digest" => prepared.effective_application_digest,
            "workflow_bundle_hash" => prepared.workflow_bundle.hash,
            "mission_bundle_hashes" => mission_bundle_hashes(prepared.mission_bundles),
+           "mission_authority" => mission_authority(prepared),
            "provider_activity" => false
          }}
     end
+  end
+
+  defp mission_authority(%PreparedRun{} = prepared) do
+    providers = prepared.request.package.providers.mission
+
+    Map.new(prepared.request.package.missions, fn {name, mission} ->
+      provider_names =
+        Enum.map(mission.provider_occurrences, fn index ->
+          providers |> Enum.at(index) |> Map.fetch!("name")
+        end)
+
+      {name,
+       MissionInventory.authority_summary(
+         mission.data,
+         Map.get(prepared.mission_bundles, name),
+         provider_names
+       )}
+    end)
   end
 
   defp first_active_declaration(declarations) do

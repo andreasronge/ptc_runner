@@ -4541,6 +4541,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
       "workflow_bundle_hash" => String.duplicate("2", 64),
       "mission_bundle_hashes" => %{},
+      "mission_authority" => %{},
       "provider_activity" => false
     }
 

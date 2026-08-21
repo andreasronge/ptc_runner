@@ -2,7 +2,7 @@
   "success": {
     "run_normal": "{\"a\":1,\"b\":2}\n",
     "run_private": "{\"artifact_class\":\"private\",\"status\":\"ok\"}\n",
-    "validate": "{\"application_content_digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"effective_application_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"mission_bundle_hashes\":{},\"provider_activity\":false,\"workflow_bundle_hash\":\"2222222222222222222222222222222222222222222222222222222222222222\"}\n",
+    "validate": "{\"application_content_digest\":\"sha256:0000000000000000000000000000000000000000000000000000000000000000\",\"effective_application_digest\":\"sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"mission_authority\":{},\"mission_bundle_hashes\":{},\"provider_activity\":false,\"workflow_bundle_hash\":\"2222222222222222222222222222222222222222222222222222222222222222\"}\n",
     "doctor_default": "{\"checks\":[{\"code\":\"supported\",\"name\":\"runtime\",\"status\":\"pass\"},{\"code\":\"not_requested\",\"name\":\"application\",\"status\":\"skipped\"},{\"code\":\"available\",\"name\":\"viewer\",\"status\":\"pass\"}],\"model_aliases\":[],\"provider_activity\":false,\"readiness\":\"unverified\",\"usage\":{\"llm_usage\":[],\"llm_usage_state\":\"available\"}}\n",
     "doctor_connect": "{\"checks\":[{\"code\":\"supported\",\"name\":\"runtime\",\"status\":\"pass\"},{\"code\":\"valid\",\"name\":\"application\",\"status\":\"pass\"},{\"code\":\"available\",\"name\":\"viewer\",\"status\":\"pass\"}],\"model_aliases\":[],\"provider_activity\":false,\"readiness\":\"ready\",\"usage\":{\"llm_usage\":[],\"llm_usage_state\":\"available\"}}\n",
     "models": "{\"installations\":[]}\n",

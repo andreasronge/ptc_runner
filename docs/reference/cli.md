@@ -227,6 +227,13 @@ with the line number for a line-level rejection. It still acquires nothing: an
 installed model's adapter and an MCP server's executable are environment
 dependencies and belong to `doctor`.
 
+On success, the validate result includes `mission_authority`: for each named
+mission, the sorted `data/<name>` grants, prompt-visible export refs, and
+selected mission provider names. Use it to audit mission-scoped authority
+without opening a REPL. Capability tool names that appear only after provider
+acquisition remain absent here; `kernel/mission-inventory` lists them once a
+run or REPL session has built the frozen inventory.
+
 Environment files fail before provider acquisition with a cause-specific code:
 `environment_file_not_found`, `environment_file_not_regular`,
 `environment_file_unreadable`, `environment_file_too_large`, or

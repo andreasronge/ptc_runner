@@ -3,12 +3,13 @@ defmodule PtcRunner.Kernel.MissionInventory do
   Builds the exact frozen model-facing inventory for one mission environment.
 
   Version 2 contains prompt-visible prelude exports, model-visible capability
-  schemas, and the mission execution limits relevant to generated programs.
-  A separate version 2 model-contract rendering normalizes prompt-visible
-  exports and directly callable capabilities into one structured API list.
-  Arrays are sorted by public form. Both UTF-8 renderings and lower-case SHA-256
-  hashes are frozen into `PtcRunner.Kernel.RunConfig` and are identical for
-  normal runs and `PtcRunner.Kernel.ReplSession`.
+  schemas, mission data grants, and the mission execution limits relevant to
+  generated programs. A separate version 2 model-contract rendering normalizes
+  prompt-visible exports, directly callable capabilities, and mission data into
+  one structured API list. Arrays are sorted by public form. Both UTF-8
+  renderings and lower-case SHA-256 hashes are frozen into
+  `PtcRunner.Kernel.RunConfig` and are identical for normal runs and
+  `PtcRunner.Kernel.ReplSession`.
 
   Every bare capability entry carries a frozen `call` form. In the secondary
   model-contract projection, required input fields are expanded into the
@@ -90,12 +91,54 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   def build(_mission, _limits, _opts), do: {:error, :invalid_mission_inventory}
 
+  @doc """
+  Summarizes per-mission grants for operator surfaces such as `ptc validate`.
+
+  Lists parseable `data/<name>` forms, prompt-visible export refs from the
+  mission bundle, and selected mission provider names. Capability tool names
+  discovered only after provider acquisition are intentionally absent: validate
+  does not activate providers.
+  """
+  @spec authority_summary(map(), PtcRunner.Kernel.FrozenBundle.t() | nil, [binary()]) :: map()
+  def authority_summary(data, bundle, provider_names)
+      when is_map(data) and not is_struct(data) and is_list(provider_names) do
+    %{
+      "data" => data_grant_forms(data),
+      "exports" => prompt_export_refs(bundle),
+      "providers" => provider_names
+    }
+  end
+
+  defp data_grant_forms(data) do
+    data
+    |> Map.keys()
+    |> Enum.sort()
+    |> Enum.flat_map(fn name ->
+      case data_form(name) do
+        {:ok, form} -> [form]
+        :skip -> []
+      end
+    end)
+  end
+
+  defp prompt_export_refs(nil), do: []
+
+  defp prompt_export_refs(%{prelude: prelude}) do
+    prelude
+    |> Prelude.prompt_exports()
+    |> Enum.map(& &1.ref)
+    |> Enum.sort()
+  end
+
+  defp prompt_export_refs(_bundle), do: []
+
   defp projection(mission, limits) do
     {:object,
      [
        {"schema_version", 2},
        {"exports", exports(mission)},
        {"capabilities", capabilities(mission)},
+       {"data", data_grants(mission)},
        {"limits", limit_projection(limits)}
      ]}
   end
@@ -200,6 +243,40 @@ defmodule PtcRunner.Kernel.MissionInventory do
   end
 
   defp model_data(_mission), do: {:ok, []}
+
+  # Authoritative inventory lists every parseable data grant. Unsupported value
+  # contracts still appear with a null contract so an auditor cannot miss the
+  # key; the compact model projection omits those same unsupported values.
+  defp data_grants(%{data: data}) when is_map(data) and not is_struct(data) do
+    data
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.flat_map(fn {name, value} ->
+      case data_form(name) do
+        {:ok, form} ->
+          contract =
+            case ModelContract.json_value(value) do
+              {:ok, projected} -> projected
+              {:error, :unsupported_contract} -> nil
+            end
+
+          [
+            {:object,
+             [
+               {"kind", "value"},
+               {"form", form},
+               {"contract", contract},
+               {"effect", "read"},
+               {"docs", "Mission data supplied by the application manifest."}
+             ]}
+          ]
+
+        :skip ->
+          []
+      end
+    end)
+  end
+
+  defp data_grants(_mission), do: []
 
   defp data_form(name) when is_binary(name) do
     case Parser.parse("data/" <> name) do
