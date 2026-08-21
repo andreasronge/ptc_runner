@@ -39,8 +39,11 @@ lives in `test/ptc_runner/llm/ptc_llm_http_adapter_test.exs` and includes:
 - deterministic loopback streams, including a minimized OpenRouter terminal
   usage replay (finish event, usage event with the same empty terminal choice,
   then `[DONE]`)
-- a fresh-OS-process cold-hostname regression (`https://localhost`) that must
-  not fail with a process-budget exhaustion during DNS
+- a fresh-OS-process cold-hostname regression against a public HTTPS
+  hostname (`https://example.com`) that must not fail with a process-budget
+  exhaustion during DNS once the published pin includes ptc_llm_http#16.
+  Hosts-file names such as `localhost` are rejected as loopback before that
+  DNS-role work runs, so they cannot detect the defect.
 
 Those two fixtures cover the published `0.1.0` defects tracked as
 [ptc_llm_http#15](https://github.com/andreasronge/ptc_llm_http/issues/15) and
@@ -52,8 +55,7 @@ succeeded against the final exact dependency:
 
 1. Deterministic loopback (always in `mix test`)
 2. Live non-streaming OpenRouter `llm/request` (`--include e2e`)
-3. Live streaming OpenRouter (`--include e2e`; the current live test was
-   non-streaming and cannot detect #15)
+3. Live streaming OpenRouter (`--include e2e`)
 
 To trial the adapter from a downstream host or this checkout:
 

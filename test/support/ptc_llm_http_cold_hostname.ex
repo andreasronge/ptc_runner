@@ -2,17 +2,18 @@ defmodule PtcRunner.TestSupport.PtcLlmHttpColdHostname do
   @moduledoc false
 
   # Probe used by a fresh OS/BEAM process so resolver state cannot already be
-  # warm. A hosts-file-backed hostname is enough: public-policy rejection after
-  # DNS is acceptable; exhausting the process budget during DNS is not.
+  # warm. A public HTTPS hostname is required: hosts-file names such as
+  # localhost are rejected as loopback before the DNS-role CA store load that
+  # exhausts the 0.1.0 partition (ptc_llm_http#16).
 
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.LLM
   alias PtcRunner.LLM.PtcLlmHttpAdapter
   alias PtcRunner.LLM.PtcLlmHttpRuntime
 
-  @selector "openai-compat:https://localhost/v1|local-model"
+  @selector "openai-compat:https://example.com/v1|local-model"
 
-  @spec probe() :: {:error, atom()} | {:ok, :unexpected_success} | {:other, String.t()}
+  @spec probe() :: atom()
   def probe do
     Logger.configure(level: :critical)
     {:ok, _} = Application.ensure_all_started(:ssl)
@@ -32,9 +33,9 @@ defmodule PtcRunner.TestSupport.PtcLlmHttpColdHostname do
       end
 
     case result do
-      {:error, %ProviderError{kind: kind}} -> {:error, kind}
-      {:ok, _response} -> {:ok, :unexpected_success}
-      other -> {:other, inspect(other)}
+      {:error, %ProviderError{kind: kind}} -> kind
+      {:ok, _response} -> :unexpected_success
+      _other -> :unexpected_result
     end
   end
 end

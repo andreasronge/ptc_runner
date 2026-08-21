@@ -74,21 +74,16 @@ defmodule PtcRunner.TestSupport.OpenAICompatLLMGateway do
   @spec sse_openrouter_terminal_text([String.t()], map()) ::
           {:script, (:gen_tcp.socket() -> :ok)}
   def sse_openrouter_terminal_text(deltas, usage) when is_list(deltas) and is_map(usage) do
+    terminal_choice = %{
+      "index" => 0,
+      "delta" => %{"content" => ""},
+      "finish_reason" => "stop"
+    }
+
     sse_script(
       deltas,
-      event(%{
-        "choices" => [%{"index" => 0, "delta" => %{"content" => ""}, "finish_reason" => "stop"}]
-      }) <>
-        event(%{
-          "choices" => [
-            %{
-              "index" => 0,
-              "delta" => %{"content" => "", "role" => "assistant"},
-              "finish_reason" => "stop"
-            }
-          ],
-          "usage" => usage_object(usage)
-        })
+      event(%{"choices" => [terminal_choice]}) <>
+        event(%{"choices" => [terminal_choice], "usage" => usage_object(usage)})
     )
   end
 

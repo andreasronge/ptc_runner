@@ -399,8 +399,8 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
   end
 
   describe "cold hostname resolution" do
-    @tag timeout: 15_000
-    test "a fresh BEAM does not exhaust the process budget during localhost DNS" do
+    @tag timeout: 30_000
+    test "a fresh BEAM does not exhaust the process budget during public DNS" do
       executable = System.find_executable("elixir") || flunk("elixir is required for this test")
 
       code_paths =
@@ -419,7 +419,7 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
           code_paths ++
             [
               "-e",
-              ~S[IO.write("PTC_COLD_HOSTNAME=" <> inspect(PtcRunner.TestSupport.PtcLlmHttpColdHostname.probe()) <> "\n")]
+              ~S[IO.write("PTC_COLD_HOSTNAME=" <> Atom.to_string(PtcRunner.TestSupport.PtcLlmHttpColdHostname.probe()) <> "\n")]
             ],
           env: env,
           stderr_to_stdout: true
@@ -436,12 +436,28 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
         end)
 
       assert is_binary(marker), output
-      {result, _binding} = Code.eval_string(marker)
-      assert {:error, kind} = result
-      # resource_limit_exceeded classifies as :invalid_result. Address or
-      # connect rejection after DNS is a transport error and is acceptable.
-      refute kind == :invalid_result
-      assert kind == :transport_error
+      kind = String.to_existing_atom(marker)
+      version = Application.spec(:ptc_llm_http, :vsn)
+
+      case {version, kind} do
+        {~c"0.1.0", :invalid_result} ->
+          # Published 0.1.0 kills cold public DNS in the 200K-word DNS role
+          # (ptc_llm_http#16). Keep the classified error; do not raise the
+          # aggregate budget solely to paper over that partition.
+          :ok
+
+        {_version, :invalid_result} ->
+          flunk("cold public hostname exhausted the process budget during DNS")
+
+        {_version, :unexpected_success} ->
+          flunk("cold public hostname unexpectedly completed an LLM request")
+
+        {_version, :unexpected_result} ->
+          flunk("cold public hostname returned an unclassified result")
+
+        {_version, _post_dns_error} ->
+          :ok
+      end
     end
   end
 

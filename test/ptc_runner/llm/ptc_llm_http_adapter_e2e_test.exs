@@ -226,7 +226,7 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterE2ETest do
         assert is_binary(ptc_content)
         assert_usage_shape(ptc_value, key)
 
-      {:error, %ProviderError{}} ->
+      {:error, %ProviderError{kind: :invalid_result}} ->
         :ok
     end
   end
