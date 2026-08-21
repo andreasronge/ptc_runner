@@ -8,7 +8,12 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
   @children ~w(envelopes inspection results traces)
   @attempts 16
 
-  @spec ensure_for(CommandArguments.t()) :: :ok | {:error, :project_artifact_root_invalid}
+  @type ensure_error ::
+          :project_artifact_root_invalid
+          | {:project_artifact_root_not_owner_only, binary()}
+          | {:project_artifact_root_incomplete, binary()}
+
+  @spec ensure_for(CommandArguments.t()) :: :ok | {:error, ensure_error()}
   def ensure_for(%CommandArguments{
         command: :run,
         project: %ProjectContext{config: %{artifact_root: root}, derived_options: derived}
@@ -21,7 +26,7 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
 
   def ensure_for(%CommandArguments{}), do: :ok
 
-  @spec ensure(binary()) :: :ok | {:error, :project_artifact_root_invalid}
+  @spec ensure(binary()) :: :ok | {:error, ensure_error()}
   def ensure(root) when is_binary(root) do
     case File.lstat(root) do
       {:ok, _stat} -> validate(root)
@@ -73,8 +78,12 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
 
       {:error, :publication_status_unknown} ->
         case validate(root) do
-          :ok -> :ok
-          {:error, _reason} -> cleanup(staging)
+          :ok ->
+            :ok
+
+          {:error, _reason} = error ->
+            _ = cleanup(staging)
+            error
         end
 
       {:error, _reason} ->
@@ -83,21 +92,40 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
   end
 
   defp validate(root) do
-    with :ok <- owner_directory(root),
+    with :ok <- require_owner_directory(root),
          {:ok, names} <- File.ls(root),
-         true <- Enum.sort(names) == @children,
-         true <- Enum.all?(@children, &(owner_directory(Path.join(root, &1)) == :ok)) do
+         :ok <- complete_children(root, names),
+         :ok <- require_owner_children(root) do
       :ok
     else
+      {:error, _reason} = error -> error
       _invalid -> {:error, :project_artifact_root_invalid}
     end
   end
 
-  defp owner_directory(path) do
+  defp complete_children(root, names) do
+    if Enum.sort(names) == @children,
+      do: :ok,
+      else: {:error, {:project_artifact_root_incomplete, root}}
+  end
+
+  defp require_owner_children(root) do
+    Enum.reduce_while(@children, :ok, fn child, :ok ->
+      case require_owner_directory(Path.join(root, child)) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp require_owner_directory(path) do
     case File.lstat(path, time: :posix) do
       {:ok, %File.Stat{type: :directory, mode: mode}}
       when Bitwise.band(mode, 0o077) == 0 ->
         :ok
+
+      {:ok, %File.Stat{type: :directory}} ->
+        {:error, {:project_artifact_root_not_owner_only, path}}
 
       _invalid ->
         {:error, :project_artifact_root_invalid}
@@ -105,11 +133,11 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
   end
 
   defp cleanup(staging) do
-    case owner_directory(staging) do
+    case require_owner_directory(staging) do
       :ok ->
         Enum.each(@children, fn child ->
           path = Path.join(staging, child)
-          if owner_directory(path) == :ok, do: File.rmdir(path)
+          if require_owner_directory(path) == :ok, do: File.rmdir(path)
         end)
 
         File.rmdir(staging)

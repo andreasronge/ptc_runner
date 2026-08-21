@@ -79,6 +79,31 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
   @spec envelope_failure(binary()) :: binary()
   def envelope_failure(run_ref) when is_binary(run_ref),
+    do: envelope_failure(run_ref, :envelope_publication_failed)
+
+  @spec envelope_failure(binary(), term()) :: binary()
+  def envelope_failure(run_ref, {:project_artifact_root_not_owner_only, path})
+      when is_binary(run_ref) and is_binary(path) do
+    "error: envelope/publication_failed: #{path} is group/other-accessible; " <>
+      "artifact directories must be owner-only (0700); chmod 700 #{path} " <>
+      "(run_ref: #{run_ref})\n"
+  end
+
+  def envelope_failure(run_ref, {:project_artifact_root_incomplete, root})
+      when is_binary(run_ref) and is_binary(root) do
+    "error: envelope/publication_failed: #{root} is incomplete; remove it and let " <>
+      "ptc recreate the owner-only artifact layout (run_ref: #{run_ref})\n"
+  end
+
+  def envelope_failure(run_ref, {:envelope_destination_parent_unavailable, path})
+      when is_binary(run_ref) and is_binary(path) do
+    parent = Path.dirname(path)
+
+    "error: envelope/destination_parent_unavailable: the parent directory for " <>
+      "--envelope must be an existing directory (#{parent}) (run_ref: #{run_ref})\n"
+  end
+
+  def envelope_failure(run_ref, _reason) when is_binary(run_ref),
     do:
       "error: envelope/publication_failed: command envelope could not be published " <>
         "(run_ref: #{run_ref})\n"

@@ -1676,9 +1676,17 @@ defmodule PtcRunner.Lisp do
     do: UntrustedRenderer.tool_failure(name, reason)
 
   # Handle other 3-tuple error formats from Eval: {type, message, data}
-  def format_error({type, msg, _}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
-  def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
+  def format_error({type, msg, _}) when is_atom(type) and is_binary(msg),
+    do: "#{type}: #{strip_typed_prefix(msg, type)}"
+
+  def format_error({type, msg}) when is_atom(type) and is_binary(msg),
+    do: "#{type}: #{strip_typed_prefix(msg, type)}"
+
   def format_error(other), do: "Error: #{inspect(other, limit: 5)}"
+
+  defp strip_typed_prefix(message, type) when is_atom(type) and is_binary(message) do
+    String.replace_prefix(message, Atom.to_string(type) <> ": ", "")
+  end
 
   defp grant_filter_reason(:ptc_tool_denied), do: "ptc_tool_denied"
   defp grant_filter_reason(reason) when is_atom(reason), do: Atom.to_string(reason)

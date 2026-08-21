@@ -33,6 +33,19 @@ defmodule PtcRunner.LispTest do
     end
   end
 
+  describe "format_error/1" do
+    test "does not stack a type_error kind already baked into the message" do
+      assert Lisp.format_error(
+               {:type_error, "type_error: split: delimiter must be a regex pattern", []}
+             ) == "type_error: split: delimiter must be a regex pattern"
+    end
+
+    test "keeps a single type prefix when the message has none" do
+      assert Lisp.format_error({:type_error, "split: delimiter must be a regex pattern", []}) ==
+               "type_error: split: delimiter must be a regex pattern"
+    end
+  end
+
   describe "externalize_value/1" do
     test "replaces every executable value with an inert display wrapper" do
       closure =

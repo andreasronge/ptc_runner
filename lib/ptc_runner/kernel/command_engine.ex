@@ -254,10 +254,11 @@ defmodule PtcRunner.Kernel.CommandEngine do
        ) do
     result = dispatch_entry(%{entry | envelope_path: nil}, runtime)
     {_status, outcome} = result
+    paths = CommandEnvelope.destinations(entry.arguments, path, entry.run_ref)
 
     publication =
       with :ok <- ProjectArtifactRoot.ensure_for(entry.arguments),
-           do: CommandEnvelope.publish(outcome, path)
+           do: CommandEnvelope.publish_all(outcome, paths)
 
     case publication do
       :ok ->

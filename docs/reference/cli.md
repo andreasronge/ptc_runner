@@ -137,7 +137,9 @@ Useful run switches are:
   `<run_ref>.private.jsonl` according to the run's artifact class.
 - `--inspect FILE` writes sensitive execution evidence to an owner-only
   `.inspection.jsonl` file.
-- `--envelope FILE` atomically adds the stable V2 command envelope.
+- `--envelope FILE` atomically publishes a convenience copy of the stable V2
+  command envelope. When a project enables `artifacts.envelope`, the project's
+  `.ptc/envelopes/<run_ref>.json` ledger entry is still written for that run.
 
 The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.

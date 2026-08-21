@@ -62,9 +62,11 @@ editing a component, revalidating, or spending a provider call.
 
 `run`, `validate`, `doctor`, `models`, and `init` accept `--envelope FILE`,
 which atomically publishes one JSON document describing the outcome: status,
-run reference, result or classified error, and artifact state. Parse that file
-rather than scraping stdout, which is a human presentation channel that may
-also carry application output.
+run reference, result or classified error, and artifact state. For `run` on a
+project with `artifacts.envelope` enabled, that flag is an extra copy — the
+project's `.ptc/envelopes/<run_ref>.json` ledger entry is still written. Parse
+the envelope rather than scraping stdout, which is a human presentation
+channel that may also carry application output.
 
 Exit status is part of the contract: `0` on success, the diagnostic catalog's
 status for a classified failure, `70` for a caught internal failure, and `74`

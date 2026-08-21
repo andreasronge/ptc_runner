@@ -21,6 +21,19 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     description: "load environment variables from this exact file",
     owner: :frontend
   }
+  @envelope_option %{
+    key: :envelope,
+    type: :string,
+    syntax: ["--envelope ENVELOPE.json"],
+    description: "atomically publish the V2 command envelope"
+  }
+  @run_envelope_option %{
+    key: :envelope,
+    type: :string,
+    syntax: ["--envelope ENVELOPE.json"],
+    description:
+      "atomically publish a V2 command envelope copy (project ledger still written when artifacts.envelope is enabled)"
+  }
 
   @declarations %{
     root: %{
@@ -56,12 +69,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--example NAME"],
           description: "materialize one embedded example tree instead of the scaffold"
         },
-        %{
-          key: :envelope,
-          type: :string,
-          syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V2 command envelope"
-        },
+        @envelope_option,
         @help_option
       ]
     },
@@ -78,12 +86,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--host-config HOST.json"],
           description: "trusted provider installation document"
         },
-        %{
-          key: :envelope,
-          type: :string,
-          syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V2 command envelope"
-        },
+        @envelope_option,
         @help_option
       ]
     },
@@ -139,12 +142,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "verified replacement component descriptor"
         },
         @env_file_option,
-        %{
-          key: :envelope,
-          type: :string,
-          syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V2 command envelope"
-        },
+        @run_envelope_option,
         %{
           key: :authorize_mcp,
           type: [:string, :keep],
@@ -181,12 +179,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "include safe configured model selectors"
         },
         @env_file_option,
-        %{
-          key: :envelope,
-          type: :string,
-          syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V2 command envelope"
-        },
+        @envelope_option,
         @help_option
       ]
     },
@@ -199,12 +192,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--host-config HOST.json"],
           description: "trusted provider installation document"
         },
-        %{
-          key: :envelope,
-          type: :string,
-          syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V2 command envelope"
-        },
+        @envelope_option,
         @help_option
       ]
     },

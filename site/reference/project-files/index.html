@@ -157,12 +157,18 @@ displayed elsewhere in the Viewer.</p><h2 id="artifact-layout">Artifact layout</
 .ptc/results/&lt;run-ref&gt;.private.json
 .ptc/envelopes/&lt;run-ref&gt;.json</code></pre><p>The root and its fixed child directories are owner-only. The first project run
 creates the complete layout atomically; an existing incomplete, permissive, or
-symlinked layout is refused. Artifact files retain the normal no-replace and
-privacy rules.</p><h2 id="overrides-and-lazy-environment-loading">Overrides and lazy environment loading</h2><p>An explicit command value wins over the corresponding project default:</p><pre><code class="console language-console">ptc run ptc-project.json --host-config deployment/staging-host.json
+symlinked layout is refused. When a pre-existing directory fails the owner-only
+(0700) check, the command names the path and the <code class="inline">chmod 700</code> remedy rather than
+a bare publication failure. Artifact files retain the normal no-replace and
+privacy rules.</p><h2 id="overrides-and-lazy-environment-loading">Overrides and lazy environment loading</h2><p>An explicit command value wins over the corresponding project default for host,
+environment, and trace/inspection/result destinations:</p><pre><code class="console language-console">ptc run ptc-project.json --host-config deployment/staging-host.json
 ptc run ptc-project.json --trace-dir tmp/one-off-traces
 ptc repl --project ptc-project.json --env-file deployment/staging.env
 ptc repl --project ptc-project.json --mission review
-ptc viewer ptc-project.json --env-file deployment/staging.env</code></pre><p>Mission selection, input, and component-override switches remain
+ptc viewer ptc-project.json --env-file deployment/staging.env</code></pre><p><code class="inline">--envelope FILE</code> is different: it adds a convenience copy for the invocation
+and does <strong>not</strong> suppress the project ledger under <code class="inline">.ptc/envelopes/</code> when
+<code class="inline">artifacts.envelope</code> is enabled. Trace, inspection, and result overrides still
+replace their project defaults.</p><p>Mission selection, input, and component-override switches remain
 invocation-only. Mission names stay in the application manifest rather than
 being duplicated as project defaults. A project environment file is loaded
 only when inert preparation proves that a selected mission provider or its

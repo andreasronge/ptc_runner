@@ -91,20 +91,22 @@ defmodule PtcRunner.Kernel.CommandFrontend do
          rejection
        )
        when is_binary(path) do
+    paths = CommandEnvelope.destinations(entry.arguments, path, entry.run_ref)
+
     result =
       with :ok <- ProjectArtifactRoot.ensure_for(entry.arguments),
-           do: CommandEnvelope.publish(outcome, path)
+           do: CommandEnvelope.publish_all(outcome, paths)
 
     case result do
       :ok ->
         rendered_presentation(outcome, path, rejection)
 
-      {:error, _reason} ->
+      {:error, reason} ->
         presentation(
           outcome,
           nil,
           "",
-          CommandRenderer.envelope_failure(entry.run_ref),
+          CommandRenderer.envelope_failure(entry.run_ref, reason),
           @envelope_failure_exit_status
         )
     end

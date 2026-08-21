@@ -111,12 +111,15 @@ For `run`, enabled project artifacts derive from the command run reference:
 
 The root and its fixed child directories are owner-only. The first project run
 creates the complete layout atomically; an existing incomplete, permissive, or
-symlinked layout is refused. Artifact files retain the normal no-replace and
+symlinked layout is refused. When a pre-existing directory fails the owner-only
+(0700) check, the command names the path and the `chmod 700` remedy rather than
+a bare publication failure. Artifact files retain the normal no-replace and
 privacy rules.
 
 ## Overrides and lazy environment loading
 
-An explicit command value wins over the corresponding project default:
+An explicit command value wins over the corresponding project default for host,
+environment, and trace/inspection/result destinations:
 
 ```console
 ptc run ptc-project.json --host-config deployment/staging-host.json
@@ -125,6 +128,11 @@ ptc repl --project ptc-project.json --env-file deployment/staging.env
 ptc repl --project ptc-project.json --mission review
 ptc viewer ptc-project.json --env-file deployment/staging.env
 ```
+
+`--envelope FILE` is different: it adds a convenience copy for the invocation
+and does **not** suppress the project ledger under `.ptc/envelopes/` when
+`artifacts.envelope` is enabled. Trace, inspection, and result overrides still
+replace their project defaults.
 
 Mission selection, input, and component-override switches remain
 invocation-only. Mission names stay in the application manifest rather than

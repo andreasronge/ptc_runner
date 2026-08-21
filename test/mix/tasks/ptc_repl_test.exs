@@ -64,7 +64,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
   test "direct eval retains canonical unknown-namespace guidance" do
     expected =
-      "Error (invalid_form): invalid_form: " <> NamespaceDiagnostic.message("kernel")
+      "Error (invalid_form): " <> NamespaceDiagnostic.message("kernel")
 
     output =
       capture_io(:stderr, fn ->
@@ -75,12 +75,34 @@ defmodule PtcRunner.ReplFrontendTest do
 
         assert String.starts_with?(
                  error.message,
-                 "error: repl/command_failed: Error (invalid_form): invalid_form: " <>
+                 "error: repl/command_failed: Error (invalid_form): " <>
                    "unknown namespace kernel/"
                )
       end)
 
     assert output == expected <> "\n"
+  end
+
+  test "direct eval renders a type_error kind only once" do
+    output =
+      capture_io(:stderr, fn ->
+        error =
+          assert_raise Mix.Error, fn ->
+            run_repl(["-e", ~S|(str/split "a-VERDICT-b" "VERDICT")|])
+          end
+
+        assert String.starts_with?(
+                 error.message,
+                 "error: repl/command_failed: Error (type_error): split: " <>
+                   "delimiter must be a regex pattern"
+               )
+
+        refute error.message =~ "type_error: type_error"
+      end)
+
+    assert output ==
+             "Error (type_error): split: delimiter must be a regex pattern, " <>
+               "got plain string \"VERDICT\"\n"
   end
 
   test "interactive mode prints output and exits on EOF" do
@@ -286,6 +308,45 @@ defmodule PtcRunner.ReplFrontendTest do
     assert error.message =~ "unknown namespace review/"
     assert error.message =~ "--mission NAME"
     assert error.message =~ "declared: review, writing"
+  end
+
+  @tag :tmp_dir
+  test "kernel/eval-source from a workflow session names --mission instead of :busy", %{
+    tmp_dir: directory
+  } do
+    manifest_path = Path.join(directory, "ptc.json")
+    File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [x] (return x))")
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [
+            %{"id" => "app", "path" => "main.clj", "dependencies" => ["kernel"]},
+            %{"library" => "kernel"}
+          ],
+          "entry" => "app/run"
+        },
+        "missions" => %{"writing" => %{}, "review" => %{}},
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl([
+          "--manifest",
+          manifest_path,
+          "-e",
+          ~S|(kernel/eval-source "review" "(return 1)")|
+        ])
+      end
+
+    assert error.message =~ "Error (mission_session_required):"
+    assert error.message =~ "--mission NAME"
+    assert error.message =~ "declared: review, writing"
+    refute error.message =~ "evaluation_in_progress"
   end
 
   @tag :tmp_dir
