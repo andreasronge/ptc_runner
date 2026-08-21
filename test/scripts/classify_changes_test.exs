@@ -66,6 +66,10 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
           {"cliff.toml", docs},
           {"REUSE.toml", docs},
           {"site/index.html", docs},
+          # The vendored MCP wire schema is served from `site/`, but the core
+          # suite validates PtcRunner's own requests against it.
+          {"site/schemas/mcp-2026-07-28.schema.json",
+           all_false() |> Map.put("core", "true") |> Map.put("docs", "true")},
           {"dev/mix/tasks/ptc.verify_docs.ex", docs},
           {".duplication-baseline.json", core},
           {".ex_dna.exs", core},

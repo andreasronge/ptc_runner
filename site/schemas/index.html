@@ -31,6 +31,8 @@ editor at one to get completion and validation while authoring:</p>
 declarations do not belong in the project file, and project choices do not become part of
 application content identity.</p>
 
+<h2>PtcRunner documents</h2>
+
 <div class="schema">
   <h3><a href="/schemas/ptc-project-config.schema.json">ptc-project-config.schema.json</a></h3>
   <span class="role">operator or project checkout</span>
@@ -66,8 +68,35 @@ application content identity.</p>
   <span class="url mono">https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json</span>
 </div>
 
-<p class="muted-note">Each schema is published verbatim from <code>priv/schemas/</code> in the
-repository, so the hosted copy and the runtime validator are always the same bytes.</p>
+<p class="muted-note">Each schema above is published verbatim from <code>priv/schemas/</code> in
+the repository, so the hosted copy and the runtime validator are always the same bytes.</p>
+
+<h2>Model Context Protocol</h2>
+
+<p>PtcRunner speaks exactly one MCP revision, <code>2026-07-28</code>, and refuses anything
+older. A copy of that wire schema is published here because upstream&rsquo;s generated document
+is not quite the wire PtcRunner implements: <code>JSONValue</code> there narrows numbers to
+integers and omits null, and the closed JSON-RPC error envelope PtcRunner accepts has no
+upstream definition at all. Those two corrections are the entire delta &mdash; everything else
+is upstream byte-for-byte at commit <code>5f5440bb</code> &mdash; and the document states them
+in its own <code>$comment</code>.</p>
+
+<div class="schema">
+  <h3><a href="/schemas/mcp-2026-07-28.schema.json">mcp-2026-07-28.schema.json</a></h3>
+  <span class="role">third-party MCP server author</span>
+  <p>The definitions a tools server must satisfy to be acquirable: <code>DiscoverRequest</code>,
+  <code>ListToolsRequest</code>, <code>CallToolRequest</code>, their result responses, and
+  <code>PtcRunnerJSONRPCErrorResponse</code>. Wire shape only &mdash; the
+  <a href="/reference/mcp/">MCP reference</a> owns the narrower runtime policy, which a
+  schema-valid server can still fail.</p>
+  <span class="url mono">https://ptc-runner.dev/schemas/mcp-2026-07-28.schema.json</span>
+</div>
+
+<p class="muted-note">Third-party, and licensed accordingly: Apache-2.0 and MIT, per
+<a href="https://github.com/andreasronge/ptc_runner/blob/main/THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a>.
+It has no runtime validator to stay identical to, so it is checked in under <code>site/</code>
+and this page is its only distribution &mdash; it is in neither the Hex package nor the
+standalone release.</p>
 
 <footer>
   <a href="/">&larr; PtcRunner</a>

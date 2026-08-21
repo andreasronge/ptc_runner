@@ -42,6 +42,47 @@ profile, despite starting and serving legacy clients normally.
 [`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp) implements the
 required profile and is the deterministic baseline for this reference.
 
+### Implement the wire profile
+
+The pinned protocol definitions are published as
+[`mcp-2026-07-28.schema.json`](https://ptc-runner.dev/schemas/mcp-2026-07-28.schema.json).
+That document is the final upstream 2026-07-28 schema plus the two corrections
+PtcRunner maintains and upstream does not publish: `JSONValue` accepts JSON
+numbers and nulls, which the generated upstream document drops, and
+`PtcRunnerJSONRPCErrorResponse` is the failure envelope described below. A
+tools server needs these definitions:
+
+| Exchange | Request definition | Success-response definition |
+| --- | --- | --- |
+| Negotiate the profile | `DiscoverRequest` | `DiscoverResultResponse` |
+| Publish the tool catalog | `ListToolsRequest` | `ListToolsResultResponse` |
+| Invoke one tool | `CallToolRequest` | `CallToolResultResponse` |
+
+`PtcRunnerJSONRPCErrorResponse` is the failure envelope for all three. Resolve
+each as `#/$defs/NAME` inside the served document. Its `id` is the same positive
+integer sent with the request. Its closed `error` object requires an integer
+`code` and a UTF-8 `message` of at most 4,096 bytes, with optional JSON `data`;
+no other envelope or error fields are accepted. Requests carry
+`io.modelcontextprotocol/protocolVersion`, `io.modelcontextprotocol/clientInfo`,
+and an empty `io.modelcontextprotocol/clientCapabilities` object under
+`params._meta`.
+
+PtcRunner deliberately implements a narrower client policy than the complete
+schema surface. Every successful result includes `resultType: "complete"`.
+Discovery advertises `2026-07-28` in `supportedVersions` and a `tools`
+capability. Discovery and tool-list pages include a non-negative `ttlMs` and a
+`cacheScope` of `public` or `private`; all pages in one catalog traversal keep
+the same scope. Tool names are unique, and a selected tool has an object
+`inputSchema`. A tool call returns text blocks or embedded text resources;
+`structuredContent` is accepted only when the selected tool published an
+object `outputSchema`. Binary resources, image and audio blocks, task results,
+and server requests for sampling, elicitation, or roots are unsupported.
+Schema-valid `input_required` results are refused rather than fulfilled because
+the client advertises none of those capabilities.
+
+The schema defines wire shape. The bounds and closed-result rules above remain
+runtime policy, so passing the schema alone is necessary but not sufficient.
+
 A cold `npx` launch can spend more than the default budget before that protocol
 response arrives. Acquisition derives one per-operation budget and then applies
 it to each step separately: once to starting the transport, which for stdio

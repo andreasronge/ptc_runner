@@ -59,3 +59,14 @@ SPDX-License-Identifier = "MIT"
 path = ["**/*.hrl", "**/*.app.src", "**/rebar.config", "**/rebar.lock", "**/*.dag"]
 SPDX-FileCopyrightText = "2025 Andreas Ronge"
 SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = [
+  "priv/schemas/mcp-input-request-2026-07-28.schema.json",
+  "site/schemas/mcp-2026-07-28.schema.json"
+]
+SPDX-FileCopyrightText = [
+  "2024-2025 Model Context Protocol a Series of LF Projects, LLC.",
+  "2026 Andreas Ronge"
+]
+SPDX-License-Identifier = "Apache-2.0 AND MIT"

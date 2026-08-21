@@ -11,6 +11,12 @@
 # keeps the hosted document and the runtime validator the same bytes; a second
 # copy checked in under `site/` would drift silently.
 #
+# `site/schemas/mcp-2026-07-28.schema.json` is deliberately the other way
+# round. It is vendored from upstream MCP, nothing in the runtime reads it, and
+# so there is no second copy for it to drift from: the file under `site/` is
+# the source, and this page is its only distribution. It still passes the `$id`
+# check below, because it is served like any other schema.
+#
 # Every published schema declares its own URL in `$id`, and the runtime hard
 # codes those URLs. A renamed or newly added schema would therefore publish to
 # a path nobody resolves, so the assembly below verifies that each `$id` still
@@ -171,9 +177,10 @@ for schema in "${schemas[@]}"; do
 done
 
 # Identity is checked against the assembled artifact, not against the sources
-# copied into it. Validating only `priv/schemas/` would leave any schema that
-# arrived some other way -- a stray `site/**/*.schema.json`, say -- published
-# unchecked while this guard still claimed to cover the site.
+# copied into it. Validating only `priv/schemas/` would leave every schema that
+# arrived some other way -- the vendored `site/schemas/*.schema.json`, or a
+# stray one -- published unchecked while this guard still claimed to cover the
+# site.
 python3 - "$output_dir" "$site_origin" <<'IDENTITY' || exit 65
 import json
 import pathlib
@@ -292,4 +299,6 @@ done <<< "$references"
 
 [ "$missing" -eq 0 ] || exit 65
 
-echo "Assembled $output_dir ($published schemas)"
+served="$(find "$output_dir" -name '*.schema.json' | wc -l | tr -d ' ')"
+
+echo "Assembled $output_dir ($served schemas, $published of them from priv/schemas)"
