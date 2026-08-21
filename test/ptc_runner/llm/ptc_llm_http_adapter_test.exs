@@ -16,6 +16,7 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
   alias PtcRunner.LLM.PtcLlmHttpAdapter
   alias PtcRunner.LLM.PtcLlmHttpPreparedModel
   alias PtcRunner.LLM.PtcLlmHttpRuntime
+  alias PtcRunner.TestSupport.Eventually
   alias PtcRunner.TestSupport.OpenAICompatLLMGateway
 
   @secret "sk-or-test-credential-sentinel"
@@ -568,11 +569,19 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
   end
 
   defp assert_released(runtime) do
-    assert {:ok, %{in_use: 0, groups: groups}} = Runtime.snapshot(runtime)
-    assert groups[PtcLlmHttpRuntime.capacity_group()].in_use == 0
+    group = PtcLlmHttpRuntime.capacity_group()
+
+    Eventually.assert_eventually(fn ->
+      case Runtime.snapshot(runtime) do
+        {:ok, %{in_use: 0, groups: groups}} -> groups[group].in_use == 0
+        _busy -> false
+      end
+    end)
   end
 
   defp assert_next_admission(requester, parent, runtime, release) do
+    assert_released(runtime)
+
     recovered =
       Task.async(fn ->
         requester.(%{
