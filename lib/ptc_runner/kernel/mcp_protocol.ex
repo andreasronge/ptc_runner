@@ -73,7 +73,12 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   @rfc3339_datetime ~r/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\z/i
   @max_schema_depth 16
   @input_required_methods ~w(tools/call prompts/get resources/read)
-  @unsupported_protocol_version_codes [-32_601, -32_022]
+  # A legacy server answers an unknown pre-`initialize` request with an
+  # implementation-defined error; the stdio backward-compatibility rules name
+  # `-32601` and `-32602` as the common pair. `-32022` is the modern
+  # `UnsupportedProtocolVersionError`. All three mean the endpoint does not
+  # serve the pinned profile, which is the only distinction this client draws.
+  @unsupported_protocol_version_codes [-32_601, -32_602, -32_022]
   # A maximum-depth schema in tools/list occupies four envelope containers,
   # `2 * depth - 1` schema containers, and `depth` const/enum instance
   # containers: 4 + 31 + 16 = 51 at the configured limits.
