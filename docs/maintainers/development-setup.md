@@ -26,20 +26,42 @@ The nested projects are listed because `mix test` inside `ptc_viewer/` or
 each gate fetches the project it compiles — running
 `mix deps.get --check-locked`, the command GitHub runs once per job.
 
-### PtcLlmHttp compatibility coverage
+### PtcLlmHttp opt-in adapter
 
-Dev and test builds pin the published Hex package `ptc_llm_http` at exact
-version `0.1.0`. Ordinary `mix test` runs the loopback, credential-free
-streaming smoke in `test/ptc_runner/llm/ptc_llm_http_smoke_test.exs`. That
-coverage is compatibility only: production still uses the ReqLLM adapter,
-`ptc_llm_http` is not a production runtime dependency, and it is not selected
-for ordinary requests.
+Dev, test, and packaged metadata pin the published Hex package `ptc_llm_http`
+at exact version `0.1.0` as an **optional** dependency.
+`PtcRunner.LLM.ReqLLMAdapter` remains the shipped default. Ordinary
+`mix test` still runs the loopback, credential-free streaming smoke in
+`test/ptc_runner/llm/ptc_llm_http_smoke_test.exs`. Adapter integration coverage
+lives in `test/ptc_runner/llm/ptc_llm_http_adapter_test.exs`.
 
-```bash
-mix test test/ptc_runner/llm/ptc_llm_http_smoke_test.exs
+To trial the adapter from a downstream host or this checkout:
+
+```elixir
+# mix.exs
+{:ptc_llm_http, "== 0.1.0"}
+
+# config/config.exs
+config :ptc_runner, :llm_adapter, PtcRunner.LLM.PtcLlmHttpAdapter
 ```
 
-The focused tests use only a loopback raw HTTP fixture and no credentials.
+```bash
+mix test test/ptc_runner/llm/ptc_llm_http_adapter_test.exs
+mix ptc run examples/kernel-tutorial/02-deepseek-extract.ptc-project.json
+```
+
+The Mix command uses the existing host-installation OpenRouter model and
+`OPENROUTER_API_KEY`. Do not add a manifest adapter module or an ad hoc
+environment switch. The live E2E test skips cleanly when the key is absent:
+
+```bash
+mix test test/ptc_runner/llm/ptc_llm_http_adapter_e2e_test.exs --include e2e
+```
+
+The focused tests use only a loopback raw HTTP fixture and no credentials,
+except the optional live OpenRouter case. HTTPS is required whenever a
+credential is present, so a credentialed HTTP loopback target is rejected
+rather than special-cased.
 
 ## Worktree seeding
 

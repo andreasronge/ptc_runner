@@ -43,13 +43,22 @@ elixir -e '
       Map.new(requirement)[<<"name">>] == <<"ptc_viewer">>
     end)
 
-  # PtcLlmHttp is published, but it is compatibility coverage only: exact Hex
-  # `0.1.0` in dev/test, never a production runtime requirement, and never
-  # selected for ordinary requests.
-  nil =
+  # PtcLlmHttp is an exact optional Hex dependency. Downstream hosts that
+  # select `PtcRunner.LLM.PtcLlmHttpAdapter` install it explicitly. Ordinary
+  # packaged builds compile without it.
+  llm_http =
     Enum.find(requirements, fn requirement ->
       Map.new(requirement)[<<"name">>] == <<"ptc_llm_http">>
     end)
+
+  true =
+    Map.new(llm_http) == %{
+      <<"app">> => <<"ptc_llm_http">>,
+      <<"name">> => <<"ptc_llm_http">>,
+      <<"optional">> => true,
+      <<"repository">> => <<"hexpm">>,
+      <<"requirement">> => <<"== 0.1.0">>
+    }
 ' "$package_tmp_dir/package/metadata.config"
 
 test ! -e "$package_tmp_dir/source/ptc_runner_launcher"
@@ -63,7 +72,7 @@ test -f "$package_tmp_dir/source/docs/kernel-limits-reference.md"
 test -f "$package_tmp_dir/source/docs/prelude-reference.md"
 test ! -e "$package_tmp_dir/source/dev"
 
-for mix_env in dev test; do
+for mix_env in dev test prod; do
   (
     cd "$package_tmp_dir/source"
     MIX_ENV="$mix_env" elixir -e '
@@ -85,8 +94,9 @@ for mix_env in dev test; do
         |> Enum.find(&(elem(&1, 0) == :ptc_llm_http))
 
       {:ptc_llm_http, "== 0.1.0", llm_http_options} = llm_http
-      true = llm_http_options[:only] == [:dev, :test]
+      true = llm_http_options[:optional]
       false = llm_http_options[:runtime]
+      false = Keyword.has_key?(llm_http_options, :only)
     '
   )
 done
@@ -107,13 +117,11 @@ MIX_ENV="$build_env" mix deps.compile
 
 active_build_lib="$project_root/_build/$build_env/lib"
 
+# Optional provider packages may compile into this checkout's prod build when
+# they are locked. The packaged-source compile below is the proof that ordinary
+# Hex consumers are not forced to install them.
 if [[ ! -d "$active_build_lib/jason" ]]; then
   echo "no compiled $build_env dependencies at $active_build_lib" >&2
-  exit 1
-fi
-
-if [[ -d "$active_build_lib/ptc_llm_http" ]]; then
-  echo "ptc_llm_http must not compile into $build_env" >&2
   exit 1
 fi
 
@@ -123,10 +131,16 @@ fi
 # `_build/prod/lib/ptc_viewer` behind, so linking everything would make the
 # check pass on every run after the first while still failing in a fresh
 # worktree.
+#
+# Optional LLM packages are excluded here so `--no-optional-deps` compiles the
+# stub adapter rather than the real `PtcLlmHttp` module that happens to exist
+# in this checkout's prod build.
+skip_optional="ptc_runner ptc_runner_launcher ptc_viewer ptc_llm_http req_llm llm_db"
+
 for dependency in "$active_build_lib"/*; do
   name="$(basename "$dependency")"
 
-  if [[ "$name" != "ptc_runner" && "$name" != "ptc_runner_launcher" && "$name" != "ptc_viewer" ]]; then
+  if [[ " $skip_optional " != *" $name "* ]]; then
     ln -s "$dependency" "$package_tmp_dir/build/lib/$name"
   fi
 done
@@ -137,4 +151,50 @@ done
     MIX_DEPS_PATH="$project_root/deps" \
     MIX_BUILD_PATH="$package_tmp_dir/build" \
     mix compile --no-deps-check --no-optional-deps --warnings-as-errors
+)
+
+(
+  cd "$package_tmp_dir/source"
+  MIX_ENV=prod \
+    MIX_DEPS_PATH="$project_root/deps" \
+    MIX_BUILD_PATH="$package_tmp_dir/build" \
+    mix run --no-deps-check --no-start --no-compile -e '
+      false = Code.ensure_loaded?(PtcLlmHttp)
+      {:error, error} =
+        PtcRunner.LLM.PtcLlmHttpAdapter.prepare_model("openrouter:deepseek/deepseek-v4-flash")
+      :internal = error.kind
+      true = is_binary(error.details)
+      false = String.contains?(error.details, "sk-")
+    '
+)
+
+optional_build="$package_tmp_dir/optional-build"
+mkdir -p "$optional_build/lib"
+
+for dependency in "$active_build_lib"/*; do
+  name="$(basename "$dependency")"
+
+  if [[ "$name" != "ptc_runner" && "$name" != "ptc_runner_launcher" && "$name" != "ptc_viewer" ]]; then
+    ln -s "$dependency" "$optional_build/lib/$name"
+  fi
+done
+
+(
+  cd "$package_tmp_dir/source"
+  MIX_ENV=prod \
+    MIX_DEPS_PATH="$project_root/deps" \
+    MIX_BUILD_PATH="$optional_build" \
+    mix compile --no-deps-check --warnings-as-errors
+)
+
+(
+  cd "$package_tmp_dir/source"
+  MIX_ENV=prod \
+    MIX_DEPS_PATH="$project_root/deps" \
+    MIX_BUILD_PATH="$optional_build" \
+    mix run --no-deps-check --no-start --no-compile -e '
+      true = Code.ensure_loaded?(PtcLlmHttp)
+      {:ok, _prepared, :unavailable} =
+        PtcRunner.LLM.PtcLlmHttpAdapter.prepare_model("openrouter:deepseek/deepseek-v4-flash")
+    '
 )

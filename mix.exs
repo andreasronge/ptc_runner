@@ -41,7 +41,16 @@ defmodule PtcRunner.MixProject do
       dialyzer: [
         plt_core_path: dialyzer_plt_core_path(),
         plt_file: {:no_warn, "priv/plts/project.plt"},
-        plt_add_apps: [:earmark_parser, :ex_unit, :mix, :req, :req_llm, :llm_db, :recon],
+        plt_add_apps: [
+          :earmark_parser,
+          :ex_unit,
+          :mix,
+          :req,
+          :req_llm,
+          :llm_db,
+          :ptc_llm_http,
+          :recon
+        ],
         ignore_warnings: ".dialyzer_ignore.exs",
         list_unused_filters: true
       ]
@@ -129,7 +138,7 @@ defmodule PtcRunner.MixProject do
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:earmark_parser, "~> 1.4.44", only: [:dev, :test], runtime: false},
       {:req_llm, "~> 1.20", optional: true, runtime: false},
-      {:ptc_llm_http, "== 0.1.0", only: [:dev, :test], runtime: false},
+      {:ptc_llm_http, "== 0.1.0", optional: true, runtime: false},
       launcher_dep(),
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:recon, "~> 2.5", only: [:dev, :test], runtime: false},
@@ -414,6 +423,8 @@ defmodule PtcRunner.MixProject do
         ],
         LLM: [
           PtcRunner.LLM,
+          PtcRunner.LLM.PtcLlmHttpAdapter,
+          PtcRunner.LLM.PtcLlmHttpPreparedModel,
           PtcRunner.LLM.ReqLLMAdapter
         ]
       ],

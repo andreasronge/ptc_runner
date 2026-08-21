@@ -152,11 +152,14 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     @impl true
-    @spec stream(String.t() | ReqLLMPreparedModel.t(), map()) ::
-            {:ok, Enumerable.t()} | {:error, :streaming_not_supported | ProviderError.t()}
-    def stream(%ReqLLMPreparedModel{} = model, req), do: stream_req_llm(model, req)
+    @spec stream(String.t() | ReqLLMPreparedModel.t(), map(), (map() -> term())) ::
+            {:ok, map()}
+            | {:error, :streaming_not_supported | ProviderError.t() | {:stream_error, term()}}
+    def stream(%ReqLLMPreparedModel{} = model, req, on_delta) when is_function(on_delta, 1) do
+      consume_req_llm_stream(stream_req_llm(model, req), on_delta)
+    end
 
-    def stream(model, req) do
+    def stream(model, req, on_delta) when is_function(on_delta, 1) do
       case parse_provider(model) do
         {:ollama, _} ->
           {:error, :streaming_not_supported}
@@ -165,8 +168,9 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, :streaming_not_supported}
 
         {:req_llm, model_id} ->
-          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
-               do: stream_req_llm(prepared, req)
+          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id) do
+            consume_req_llm_stream(stream_req_llm(prepared, req), on_delta)
+          end
       end
     end
 
@@ -394,6 +398,27 @@ if Code.ensure_loaded?(ReqLLM) do
           provider_failure(reason)
       end
     end
+
+    defp consume_req_llm_stream({:ok, stream}, on_delta) do
+      {content, tokens} =
+        Enum.reduce(stream, {"", nil}, fn
+          %{delta: text}, {acc, tok} ->
+            on_delta.(%{delta: text})
+            {acc <> text, tok}
+
+          %{done: true, tokens: tokens}, {acc, _tok} ->
+            {acc, tokens}
+
+          _other, acc ->
+            acc
+        end)
+
+      {:ok, %{content: content, tokens: tokens || %{}}}
+    rescue
+      exception -> {:error, {:stream_error, exception}}
+    end
+
+    defp consume_req_llm_stream(result, _on_delta), do: result
 
     # --- Provider Implementations ---
 

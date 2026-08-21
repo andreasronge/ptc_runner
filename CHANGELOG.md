@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `PtcRunner.LLM` streaming is now a synchronous callback (`stream/3`) that
+  receives normalized `%{delta: text}` maps and returns the final
+  `%{content: ..., tokens: ...}` response or a classified error. `ReqLLMAdapter`
+  consumes its enumerable internally so callers keep the same observable
+  stream and usage behavior.
 - `mix precommit` is nested fetch plus the quality scripts. The suite, Viewer,
   launcher package, and release verification run on `git push` (and in GitHub
   Actions), so an agent that already ran `mix precommit` should not follow it
@@ -16,9 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Dev and test builds pin published `ptc_llm_http` `0.1.0` for loopback
-  streaming compatibility coverage. The package is not a production runtime
-  dependency and is not selected for ordinary requests.
+- Opt-in `PtcRunner.LLM.PtcLlmHttpAdapter` for downstream hosts that add exact
+  `{:ptc_llm_http, "== 0.1.0"}` and select the adapter with
+  `config :ptc_runner, :llm_adapter, PtcRunner.LLM.PtcLlmHttpAdapter`.
+  `PtcRunner.LLM.ReqLLMAdapter` remains the shipped default. Ordinary builds
+  compile and run without the optional dependency; selecting the adapter
+  without it fails during preparation and never falls back to ReqLLM.
+- Dev and test builds pin published `ptc_llm_http` `0.1.0` as an optional
+  runtime-selectable HTTP adapter and as loopback streaming compatibility
+  coverage. The package is not started by default and is not selected for
+  ordinary requests.
 - ptc-runner.dev now publishes the pinned MCP 2026-07-28 wire schema at
   `/schemas/mcp-2026-07-28.schema.json`, which is what a third-party author
   needs to write a server PtcRunner can acquire. It is upstream's document
