@@ -196,6 +196,19 @@ defmodule PtcRunner.Kernel.ApplicationSource do
     :exit, _reason -> :ok
   end
 
+  @spec directory?(t()) :: boolean()
+  @doc false
+  def directory?(%__MODULE__{pid: pid}) do
+    Agent.get(pid, fn
+      %{mode: {:directory, _root}} -> true
+      _state -> false
+    end)
+  catch
+    :exit, _reason -> false
+  end
+
+  def directory?(_source), do: false
+
   @spec valid_name?(term()) :: boolean()
   @doc "Checks the portable lowercase ASCII logical-name grammar."
   def valid_name?(name) when is_binary(name) and byte_size(name) <= 1_024,

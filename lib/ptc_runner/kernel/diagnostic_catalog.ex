@@ -69,7 +69,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:application, :required_property_missing, 3, false,
      "the application manifest is missing a required property"},
     {:application, :reference_missing, 3, false,
-     "a referenced application document is unavailable"},
+     "a referenced application document is unavailable; for --input/--private-input use an application-relative name or an absolute/working-directory path"},
     {:application, :document_limit_exceeded, 3, false,
      "the application document closure exceeds its limit"},
     {:application, :contract_invalid, 3, false, "an application value contract is invalid"},

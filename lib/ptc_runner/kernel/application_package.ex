@@ -36,6 +36,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.ComponentOverride
+  alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.Library
@@ -50,6 +51,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   @content_domain <<"ptc.application-content.v2", 0>>
   @max_records 512
   @max_bytes 8_388_608
+  @max_input_bytes 2_000_000
   @input_marker %{"$ptc_input" => "excluded"}
   @common_acquisition_options [:installed_limits, :input_authority, :input]
   @directory_acquisition_options @common_acquisition_options ++
@@ -264,9 +266,9 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
       nil ->
         select_declared_input(source, manifest, authority)
 
-      name when is_binary(name) ->
+      path when is_binary(path) ->
         result =
-          with {:ok, raw} <- ApplicationSource.read_reference(source, name, 2_000_000),
+          with {:ok, raw} <- read_selected_input(source, path),
                {:ok, value} <- StrictJSON.decode(raw) do
             ExecutionInput.new(value, authority, manifest.contracts.input)
           end
@@ -278,13 +280,74 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
     end
   end
 
+  # CLI `--input` / `--private-input` are host authority, like component
+  # overrides: prefer an application-relative logical name when one matches,
+  # otherwise read an absolute or process-cwd path for directory sources only.
+  # Memory acquisition stays logical-name-only so an API caller cannot silently
+  # pull bytes from the host filesystem.
+  defp read_selected_input(source, path) do
+    case ApplicationSource.logical_name(source, path) do
+      {:ok, name} ->
+        ApplicationSource.read_reference(source, name, @max_input_bytes)
+
+      {:error, :outside_application_source} ->
+        read_outside_application_input(source, path)
+
+      {:error, :invalid_logical_name} ->
+        read_host_input_if_directory(source, path)
+    end
+  end
+
+  defp read_outside_application_input(source, path) do
+    if ApplicationSource.valid_name?(path) do
+      case ApplicationSource.read_reference(source, path, @max_input_bytes) do
+        {:ok, _raw} = ok ->
+          ok
+
+        {:error, reason} when reason in [:reference_missing, :invalid_logical_name] ->
+          # Directory resolve_reference maps a missing application document to
+          # `:invalid_logical_name`; treat both as a miss so a cwd/absolute host
+          # path with the same spelling can still load.
+          read_host_input_if_directory(source, path)
+
+        {:error, _reason} = error ->
+          error
+      end
+    else
+      read_host_input_if_directory(source, path)
+    end
+  end
+
+  defp read_host_input_if_directory(source, path) do
+    if ApplicationSource.directory?(source) do
+      read_host_input(path)
+    else
+      {:error, :reference_missing}
+    end
+  end
+
+  defp read_host_input(path) do
+    with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
+         directory = Path.dirname(canonical),
+         {:ok, bytes} <-
+           ConfinedFile.read(directory, Path.basename(canonical), @max_input_bytes) do
+      {:ok, bytes}
+    else
+      {:error, :too_large} ->
+        {:error, :document_limit_exceeded}
+
+      {:error, _reason} ->
+        {:error, :reference_missing}
+    end
+  end
+
   defp select_declared_input(source, manifest, authority) do
     case manifest.input_declaration do
       %{"value" => value} ->
         ExecutionInput.new(value, authority, manifest.contracts.input)
 
       %{"path" => name} ->
-        with {:ok, raw} <- ApplicationSource.read_reference(source, name, 2_000_000),
+        with {:ok, raw} <- ApplicationSource.read_reference(source, name, @max_input_bytes),
              {:ok, value} <- StrictJSON.decode(raw) do
           ExecutionInput.new(value, authority, manifest.contracts.input)
         end

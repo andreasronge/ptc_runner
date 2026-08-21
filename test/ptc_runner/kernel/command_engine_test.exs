@@ -6832,6 +6832,68 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "CLI --input accepts application-relative, cwd-relative, and absolute paths", %{
+    tmp_dir: directory
+  } do
+    application =
+      write_application(directory, "orders", valid_manifest(), %{
+        "orders.json" => ~S({"answer":1})
+      })
+
+    alternate = Path.join(directory, "cwd-orders.json")
+    File.write!(alternate, ~S({"answer":2}))
+
+    assert {:ok, %CommandOutcome{} = application_relative} =
+             CommandEngine.dispatch(["run", application, "--input", "orders.json"])
+
+    assert application_relative.envelope["result"]["value"] == %{"answer" => 1}
+
+    File.cd!(directory, fn ->
+      assert {:ok, %CommandOutcome{} = cwd_relative} =
+               CommandEngine.dispatch([
+                 "run",
+                 application,
+                 "--input",
+                 "cwd-orders.json"
+               ])
+
+      assert cwd_relative.envelope["result"]["value"] == %{"answer" => 2}
+
+      assert {:ok, %CommandOutcome{} = absolute} =
+               CommandEngine.dispatch([
+                 "run",
+                 application,
+                 "--input",
+                 alternate
+               ])
+
+      assert absolute.envelope["result"]["value"] == %{"answer" => 2}
+    end)
+
+    missing =
+      assert_error(
+        ["run", application, "--input", "missing-orders.json"],
+        "application",
+        "reference_missing"
+      )
+
+    assert missing.envelope["error"]["source"] == %{
+             "kind" => "external_input",
+             "name" => "input.json"
+           }
+
+    assert missing.envelope["error"]["message"] =~ "working-directory"
+    refute Jason.encode!(missing.envelope) =~ "missing-orders"
+
+    assert {:ok, %CommandOutcome{} = help} = CommandEngine.prepare(["help", "run"])
+
+    assert Enum.any?(help.envelope["result"]["options"], fn option ->
+             "--input INPUT.json" in option["switches"] and
+               option["description"] =~ "absolute/cwd path"
+           end)
+  end
+
+  @tag :tmp_dir
   test "manifest source aggregate failures precede external override acquisition", %{
     tmp_dir: directory
   } do

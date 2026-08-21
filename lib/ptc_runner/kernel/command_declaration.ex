@@ -103,13 +103,15 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :input,
           type: :string,
           syntax: ["--input INPUT.json"],
-          description: "normal alternate input object"
+          description:
+            "normal alternate input object (application-relative document, or absolute/cwd path)"
         },
         %{
           key: :private_input,
           type: :string,
           syntax: ["--private-input INPUT.json"],
-          description: "private alternate input object"
+          description:
+            "private alternate input object (application-relative document, or absolute/cwd path)"
         },
         %{
           key: :trace_dir,
