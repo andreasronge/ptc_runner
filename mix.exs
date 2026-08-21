@@ -133,7 +133,7 @@ defmodule PtcRunner.MixProject do
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:recon, "~> 2.5", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: [:dev, :test], runtime: false}
-    ] ++ viewer_dep()
+    ] ++ ptc_llm_http_dep() ++ viewer_dep()
   end
 
   # Keep published and ordinary development builds on Hex while allowing an
@@ -149,6 +149,20 @@ defmodule PtcRunner.MixProject do
 
       {_env, _path} ->
         {:ex_dna, "~> 1.5", options}
+    end
+  end
+
+  # Exercise an unpublished PtcLlmHttp checkout only in an explicitly isolated
+  # compatibility build. Ordinary development and package builds name no such
+  # dependency until the first Hex release exists, so callers must keep the
+  # path set for every Mix command in this build.
+  defp ptc_llm_http_dep do
+    case {Mix.env(), System.get_env("PTC_LLM_HTTP_PATH")} do
+      {env, path} when env in [:dev, :test] and is_binary(path) and path != "" ->
+        [{:ptc_llm_http, path: Path.expand(path), only: [:dev, :test], runtime: false}]
+
+      {_env, _path} ->
+        []
     end
   end
 
