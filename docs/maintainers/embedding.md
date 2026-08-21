@@ -157,8 +157,11 @@ config :ptc_runner, :llm_adapter, PtcRunner.LLM.PtcLlmHttpAdapter
 ```
 
 PtcRunner supervises the PtcLlmHttp Runtime. Do not start unowned per-request
-processes, and do not configure a manifest adapter module. Then run an existing
-model-backed project:
+processes, and do not configure a manifest adapter module. `ReqLLMAdapter`
+remains the shipped default and the control adapter. Treat the Mix command as
+a trial path, not a green end-user cutover, until deterministic loopback, live
+non-stream, and live streaming coverage have all succeeded against the exact
+published pin:
 
 ```console
 mix ptc run examples/kernel-tutorial/02-deepseek-extract.ptc-project.json

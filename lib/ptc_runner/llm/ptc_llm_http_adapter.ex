@@ -13,6 +13,10 @@ if Code.ensure_loaded?(PtcLlmHttp) do
                :llm_adapter,
                PtcRunner.LLM.PtcLlmHttpAdapter
 
+    `ReqLLMAdapter` remains the control for this trial. Do not treat the Mix
+    command as green until deterministic loopback, live non-stream, and live
+    streaming coverage have all succeeded against the exact published pin.
+
     Then run an existing model-backed project through the host Mix command:
 
         mix ptc run examples/kernel-tutorial/02-deepseek-extract.ptc-project.json
@@ -54,6 +58,9 @@ if Code.ensure_loaded?(PtcLlmHttp) do
 
     @openrouter_base_url "https://openrouter.ai/api/v1"
     @default_timeout_ms 120_000
+    # PtcLlmHttp 0.1.0 example aggregate. The package owns the opaque role
+    # partition (DNS is 5% of this total). Do not raise the aggregate solely
+    # to keep cold public DNS alive, and do not move DNS outside the attempt.
     @default_process_budget_words 4_000_000
     @max_encoded_request_bytes 1_048_576
     @max_wire_response_bytes 1_048_576
@@ -631,7 +638,8 @@ else
 
     This module is present so hosts can name it in application configuration.
     Requests fail during preparation until the exact optional dependency is
-    installed; they never fall back to ReqLLM.
+    installed; they never fall back to ReqLLM. `ReqLLMAdapter` remains the
+    shipped default and the control adapter for this trial.
     """
 
     @behaviour PtcRunner.LLM

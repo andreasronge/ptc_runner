@@ -24,9 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Opt-in `PtcRunner.LLM.PtcLlmHttpAdapter` for downstream hosts that add exact
   `{:ptc_llm_http, "== 0.1.0"}` and select the adapter with
   `config :ptc_runner, :llm_adapter, PtcRunner.LLM.PtcLlmHttpAdapter`.
-  `PtcRunner.LLM.ReqLLMAdapter` remains the shipped default. Ordinary builds
-  compile and run without the optional dependency; selecting the adapter
-  without it fails during preparation and never falls back to ReqLLM.
+  `PtcRunner.LLM.ReqLLMAdapter` remains the shipped default and the control
+  adapter. Ordinary builds compile and run without the optional dependency;
+  selecting the adapter without it fails during preparation and never falls
+  back to ReqLLM. Deterministic loopback coverage includes a minimized
+  OpenRouter terminal-usage replay and a fresh-BEAM cold-hostname DNS
+  regression. Do not treat the documented `mix ptc run` path as green until
+  deterministic, live non-stream, and live streaming coverage have all
+  succeeded against the exact published pin.
 - Dev and test builds pin published `ptc_llm_http` `0.1.0` as an optional
   runtime-selectable HTTP adapter and as loopback streaming compatibility
   coverage. The package is not started by default and is not selected for

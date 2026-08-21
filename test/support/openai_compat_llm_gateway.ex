@@ -62,16 +62,34 @@ defmodule PtcRunner.TestSupport.OpenAICompatLLMGateway do
 
   @spec sse_text([String.t()], map() | nil) :: {:script, (:gen_tcp.socket() -> :ok)}
   def sse_text(deltas, usage \\ nil) when is_list(deltas) do
-    body =
-      event(%{"choices" => [%{"index" => 0, "delta" => %{"role" => "assistant"}}]}) <>
-        Enum.map_join(deltas, fn delta ->
-          event(%{"choices" => [%{"index" => 0, "delta" => %{"content" => delta}}]})
-        end) <>
-        event(%{"choices" => [%{"index" => 0, "delta" => %{}, "finish_reason" => "stop"}]}) <>
-        usage_event(usage) <>
-        "data: [DONE]\n\n"
+    sse_script(
+      deltas,
+      event(%{"choices" => [%{"index" => 0, "delta" => %{}, "finish_reason" => "stop"}]}) <>
+        usage_event(usage)
+    )
+  end
 
-    {:script, fn socket -> send_fixed(socket, body) end}
+  # Minimized OpenRouter terminal sequence: finish, then a usage event that
+  # repeats the empty index-zero terminal choice instead of `choices: []`.
+  @spec sse_openrouter_terminal_text([String.t()], map()) ::
+          {:script, (:gen_tcp.socket() -> :ok)}
+  def sse_openrouter_terminal_text(deltas, usage) when is_list(deltas) and is_map(usage) do
+    sse_script(
+      deltas,
+      event(%{
+        "choices" => [%{"index" => 0, "delta" => %{"content" => ""}, "finish_reason" => "stop"}]
+      }) <>
+        event(%{
+          "choices" => [
+            %{
+              "index" => 0,
+              "delta" => %{"content" => "", "role" => "assistant"},
+              "finish_reason" => "stop"
+            }
+          ],
+          "usage" => usage_object(usage)
+        })
+    )
   end
 
   @spec send_fixed(:gen_tcp.socket(), binary()) :: :ok
@@ -96,6 +114,18 @@ defmodule PtcRunner.TestSupport.OpenAICompatLLMGateway do
       {:error, :closed} -> :ok
       error -> error
     end
+  end
+
+  defp sse_script(deltas, terminal) do
+    body =
+      event(%{"choices" => [%{"index" => 0, "delta" => %{"role" => "assistant"}}]}) <>
+        Enum.map_join(deltas, fn delta ->
+          event(%{"choices" => [%{"index" => 0, "delta" => %{"content" => delta}}]})
+        end) <>
+        terminal <>
+        "data: [DONE]\n\n"
+
+    {:script, fn socket -> send_fixed(socket, body) end}
   end
 
   defp usage_event(nil), do: ""

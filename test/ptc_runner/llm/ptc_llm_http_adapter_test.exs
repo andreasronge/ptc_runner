@@ -188,6 +188,49 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
                Task.await(stream, 5_000)
     end
 
+    test "replays the OpenRouter terminal usage sequence with a repeated finish choice" do
+      parent = self()
+      deltas = ["hello ", "world"]
+
+      gateway =
+        OpenAICompatLLMGateway.start(fn request ->
+          send(parent, {:served, request})
+
+          OpenAICompatLLMGateway.sse_openrouter_terminal_text(deltas, %{
+            input: 13,
+            output: 9
+          })
+        end)
+
+      on_exit(gateway.close)
+      {:ok, requester} = requester(gateway.port)
+
+      received = :ets.new(__MODULE__.OpenRouterTerminal, [:public, :ordered_set])
+
+      result =
+        requester.(%{
+          messages: [%{role: :user, content: "hello"}],
+          stream: fn %{delta: text} ->
+            :ets.insert(received, {:erlang.unique_integer([:monotonic]), text})
+            send(parent, {:delta, text})
+          end
+        })
+
+      assert_receive {:served, %{body: body}}
+      assert body["stream"] == true
+      assert_receive {:delta, "hello "}
+      assert_receive {:delta, "world"}
+
+      delivered =
+        received
+        |> :ets.tab2list()
+        |> Enum.sort()
+        |> Enum.map(&elem(&1, 1))
+
+      assert delivered == deltas
+      assert_openrouter_terminal_replay(result, deltas)
+    end
+
     test "returns structured JSON content" do
       schema = %{
         "type" => "object",
@@ -352,6 +395,53 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
 
       assert {:error, %ProviderError{kind: :timeout}} = Task.await(caller, 5_000)
       send(worker, {release, :close})
+    end
+  end
+
+  describe "cold hostname resolution" do
+    @tag timeout: 15_000
+    test "a fresh BEAM does not exhaust the process budget during localhost DNS" do
+      executable = System.find_executable("elixir") || flunk("elixir is required for this test")
+
+      code_paths =
+        :code.get_path()
+        |> Enum.flat_map(fn path -> ["-pa", List.to_string(path)] end)
+
+      env =
+        System.get_env()
+        |> Map.put("LANG", "C.UTF-8")
+        |> Map.put("ELIXIR_ERL_OPTIONS", "+fnu")
+        |> Enum.to_list()
+
+      {output, status} =
+        System.cmd(
+          executable,
+          code_paths ++
+            [
+              "-e",
+              ~S[IO.write("PTC_COLD_HOSTNAME=" <> inspect(PtcRunner.TestSupport.PtcLlmHttpColdHostname.probe()) <> "\n")]
+            ],
+          env: env,
+          stderr_to_stdout: true
+        )
+
+      assert status == 0, output
+
+      marker =
+        output
+        |> String.split("\n")
+        |> Enum.find_value(fn
+          "PTC_COLD_HOSTNAME=" <> rest -> rest
+          _other -> nil
+        end)
+
+      assert is_binary(marker), output
+      {result, _binding} = Code.eval_string(marker)
+      assert {:error, kind} = result
+      # resource_limit_exceeded classifies as :invalid_result. Address or
+      # connect rejection after DNS is a transport error and is acceptable.
+      refute kind == :invalid_result
+      assert kind == :transport_error
     end
   end
 
@@ -626,6 +716,25 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
     :ok = :gen_tcp.shutdown(socket, :write)
     send(parent, {release, :gateway_disconnected})
     OpenAICompatLLMGateway.await_client_close(socket)
+  end
+
+  defp assert_openrouter_terminal_replay(result, deltas) do
+    content = Enum.join(deltas)
+    version = Application.spec(:ptc_llm_http, :vsn)
+
+    case {version, result} do
+      {_, {:ok, %{content: ^content, tokens: tokens}}} ->
+        assert tokens.input == 13
+        assert tokens.output == 9
+
+      {~c"0.1.0", {:error, %ProviderError{kind: :invalid_result, retryable?: false} = error}} ->
+        # Published 0.1.0 rejects the repeated finish choice as malformed_stream
+        # (ptc_llm_http#15). Keep the classified error; do not salvage content.
+        assert error.dispatch_provenance == :possibly_dispatched
+
+      other ->
+        flunk("unexpected OpenRouter terminal replay result: #{inspect(other)}")
+    end
   end
 
   defp restore_env(key, {:ok, value}), do: Application.put_env(:ptc_runner, key, value)

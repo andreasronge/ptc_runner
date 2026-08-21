@@ -30,10 +30,30 @@ each gate fetches the project it compiles — running
 
 Dev, test, and packaged metadata pin the published Hex package `ptc_llm_http`
 at exact version `0.1.0` as an **optional** dependency.
-`PtcRunner.LLM.ReqLLMAdapter` remains the shipped default. Ordinary
-`mix test` still runs the loopback, credential-free streaming smoke in
+`PtcRunner.LLM.ReqLLMAdapter` remains the shipped default and the control
+adapter for this trial. Ordinary `mix test` still runs the loopback,
+credential-free streaming smoke in
 `test/ptc_runner/llm/ptc_llm_http_smoke_test.exs`. Adapter integration coverage
-lives in `test/ptc_runner/llm/ptc_llm_http_adapter_test.exs`.
+lives in `test/ptc_runner/llm/ptc_llm_http_adapter_test.exs` and includes:
+
+- deterministic loopback streams, including a minimized OpenRouter terminal
+  usage replay (finish event, usage event with the same empty terminal choice,
+  then `[DONE]`)
+- a fresh-OS-process cold-hostname regression (`https://localhost`) that must
+  not fail with a process-budget exhaustion during DNS
+
+Those two fixtures cover the published `0.1.0` defects tracked as
+[ptc_llm_http#15](https://github.com/andreasronge/ptc_llm_http/issues/15) and
+[ptc_llm_http#16](https://github.com/andreasronge/ptc_llm_http/issues/16). They
+are not a consumer workaround: the adapter still classifies
+`:malformed_stream` and `:resource_limit_exceeded` faithfully. Do not report
+the documented `mix ptc run` path green until all three layers below have
+succeeded against the final exact dependency:
+
+1. Deterministic loopback (always in `mix test`)
+2. Live non-streaming OpenRouter `llm/request` (`--include e2e`)
+3. Live streaming OpenRouter (`--include e2e`; the current live test was
+   non-streaming and cannot detect #15)
 
 To trial the adapter from a downstream host or this checkout:
 
@@ -47,21 +67,21 @@ config :ptc_runner, :llm_adapter, PtcRunner.LLM.PtcLlmHttpAdapter
 
 ```bash
 mix test test/ptc_runner/llm/ptc_llm_http_adapter_test.exs
+mix test test/ptc_runner/llm/ptc_llm_http_adapter_e2e_test.exs --include e2e
 mix ptc run examples/kernel-tutorial/02-deepseek-extract.ptc-project.json
 ```
 
 The Mix command uses the existing host-installation OpenRouter model and
-`OPENROUTER_API_KEY`. Do not add a manifest adapter module or an ad hoc
-environment switch. The live E2E test skips cleanly when the key is absent:
-
-```bash
-mix test test/ptc_runner/llm/ptc_llm_http_adapter_e2e_test.exs --include e2e
-```
+`OPENROUTER_API_KEY`. Run it in a fresh OS process so the resolver is cold.
+Keep ReqLLM as the control in the same session and compare the stable
+result/usage shape. Do not add a manifest adapter module or an ad hoc
+environment switch. The live E2E tests skip cleanly when the key is absent.
 
 The focused tests use only a loopback raw HTTP fixture and no credentials,
-except the optional live OpenRouter case. HTTPS is required whenever a
+except the optional live OpenRouter cases. HTTPS is required whenever a
 credential is present, so a credentialed HTTP loopback target is rejected
-rather than special-cased.
+rather than special-cased. Do not pin a path or Git checkout of `ptc_llm_http`
+in this repository.
 
 ## Worktree seeding
 
