@@ -105,7 +105,12 @@ path-confined, and inert; it executes no workflow or provider callback.</p><p>Th
 complete structural reference. Runtime loading additionally performs semantic
 checks and path-confined referenced-file handling. Manifest
 schema diagnostics include a safe JSON Pointer when one is available; a
-missing-required diagnostic points to the absent schema-declared property.</p><h2 id="start-with-one-workflow">Start with one workflow</h2><pre><code class="json language-json">{
+missing-required diagnostic points to the absent schema-declared property.
+The message also names the bounded JSON Schema rule (<code class="inline">type</code>, <code class="inline">pattern</code>,
+<code class="inline">maximum</code>, <code class="inline">required</code>, or another supported rule) without copying the rejected
+value or an unknown caller-authored key. Paths through named maps use <code class="inline">*</code> for
+the caller-selected name, and an unknown property stops at its schema-owned
+parent.</p><h2 id="start-with-one-workflow">Start with one workflow</h2><pre><code class="json language-json">{
   &quot;version&quot;: 1,
   &quot;workflow&quot;: {
     &quot;components&quot;: [

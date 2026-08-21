@@ -21,6 +21,8 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
+  alias PtcRunner.Kernel.SchemaViolation
+  alias PtcRunner.Kernel.SchemaViolationDiagnostic
 
   @doc false
   @spec prepare_repl(binary(), binary() | nil, CommandRuntime.t()) ::
@@ -106,8 +108,8 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
         {:error,
          CommandDiagnostic.new!(:host, endpoint_diagnostic_code(reason), subject: subject)}
 
-      {:error, {:host_schema_invalid, segments}} ->
-        {:error, host_path_diagnostic(:host_schema_invalid, segments)}
+      {:error, {:host_schema_invalid, %SchemaViolation{} = violation}} ->
+        {:error, host_schema_diagnostic(violation)}
 
       {:error, {:installed_limit_invalid, segments}} ->
         {:error, host_path_diagnostic(:installed_limit_invalid, segments)}
@@ -267,9 +269,12 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
          }
        })
        when is_binary(root) do
-    if MapSet.disjoint?(derived, MapSet.new([:trace_dir, :inspect, :result, :envelope])),
-      do: nil,
-      else: root
+    if MapSet.disjoint?(
+         derived,
+         MapSet.new([:trace_dir, :inspect, :result, :envelope_ledger])
+       ),
+       do: nil,
+       else: root
   end
 
   defp project_artifact_root(_arguments), do: nil
@@ -490,6 +495,17 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   defp host_path_diagnostic(code, segments) do
     {:ok, path} = CommandPath.host(segments)
     CommandDiagnostic.new!(:host, code, source: CommandSource.fixed(:host), path: path)
+  end
+
+  defp host_schema_diagnostic(%SchemaViolation{rule: rule, path: segments}) do
+    {:ok, path} = CommandPath.host(segments)
+    {:ok, message} = SchemaViolationDiagnostic.message(:host, rule)
+
+    CommandDiagnostic.new!(:host, :host_schema_invalid,
+      source: CommandSource.fixed(:host),
+      path: path,
+      message: message
+    )
   end
 
   defp diagnostic(phase, code) do

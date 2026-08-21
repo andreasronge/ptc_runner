@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.NamedMissionsManifestTest do
 
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.SchemaViolation
 
   defp manifest_documents(missions) do
     %{
@@ -110,7 +111,9 @@ defmodule PtcRunner.Kernel.NamedMissionsManifestTest do
         Map.new(1..17, fn index -> {"mission-#{index}", %{}} end)
       )
 
-    assert {:error, {:manifest_path, [{:property, "missions"}], :invalid_missions_manifest}} =
+    assert {:error,
+            {:manifest_schema_invalid,
+             %SchemaViolation{rule: :max_properties, path: [property: "missions"]}}} =
              Manifest.load_memory(
                "ptc.json",
                %{"ptc.json" => Jason.encode!(too_many)},
@@ -162,7 +165,8 @@ defmodule PtcRunner.Kernel.NamedMissionsManifestTest do
     documents = manifest_documents(%{})
     manifest = documents["ptc.json"] |> Jason.decode!() |> Map.put("mission", %{})
 
-    assert {:error, :unknown_properties} =
+    assert {:error,
+            {:manifest_schema_invalid, %SchemaViolation{rule: :unknown_property, path: []}}} =
              Manifest.load_memory(
                "ptc.json",
                Map.put(documents, "ptc.json", Jason.encode!(manifest)),
@@ -171,7 +175,12 @@ defmodule PtcRunner.Kernel.NamedMissionsManifestTest do
   end
 
   test "provider grants are unique and bounded" do
-    assert {:error, {:manifest_path, _, :duplicate_mission_provider}} =
+    assert {:error,
+            {:manifest_schema_invalid,
+             %SchemaViolation{
+               rule: :unique_items,
+               path: [property: "missions", property: "*", property: "providers"]
+             }}} =
              load(%{"review" => %{"providers" => ["reader_tool", "reader_tool"]}})
   end
 

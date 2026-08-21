@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.SchemaViolationDiagnostic
 
   # Catalog rows whose dynamic message describes a document, a fixture, or a
   # contract rule rather than a setting the caller chose. Listed so the sweep
@@ -14,12 +15,16 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   # message has to land in one list or the other.
   @prose_rows [
     {:application, :contract_invalid},
+    {:application, :required_property_missing},
+    {:application, :schema_violation},
     {:bundle, :duplicate_definition},
     {:bundle, :undefined_variable},
     {:bundle, :unknown_namespace},
     {:execution, :replay_fixture_missing},
+    {:host, :host_schema_invalid},
     {:local_preflight, :environment_unavailable},
     {:local_preflight, :fixtures_unreadable},
+    {:project, :project_schema_invalid},
     {:provider_acquisition, :capability_requirement_missing},
     {:provider_acquisition, :provider_tool_missing},
     {:result_cleanup, :result_contract_failed}
@@ -131,6 +136,40 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
       |> Enum.sort()
 
     assert dynamic == covered
+  end
+
+  test "application schema diagnostics refuse rules its schema cannot produce" do
+    for {rule, message} <- [
+          {:contains, "the application manifest violates the contains schema rule"},
+          {:duplicate_property, "the application manifest contains a duplicate property"},
+          {:not, "the application manifest violates the not schema rule"}
+        ] do
+      assert :error = SchemaViolationDiagnostic.message(:application, rule)
+      refute DiagnosticCatalog.valid_message?(:application, :schema_violation, message)
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:application, :schema_violation,
+                 source: CommandSource.fixed(:application),
+                 message: message
+               )
+    end
+  end
+
+  test "project schema diagnostics refuse rules its schema cannot produce" do
+    for {rule, message} <- [
+          {:contains, "the project configuration violates the contains schema rule"},
+          {:one_of, "the project configuration violates the oneOf schema rule"},
+          {:unique_items, "the project configuration violates the uniqueItems schema rule"}
+        ] do
+      assert :error = SchemaViolationDiagnostic.message(:project, rule)
+      refute DiagnosticCatalog.valid_message?(:project, :project_schema_invalid, message)
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:project, :project_schema_invalid,
+                 source: CommandSource.fixed(:project),
+                 message: message
+               )
+    end
   end
 
   # The published schema concatenates two independent integer groups and cannot

@@ -426,6 +426,38 @@ defmodule PtcRunner.ViewerFrontendTest do
     end
   end
 
+  @tag :tmp_dir
+  test "a schema-invalid Viewer project retains the atomic frontend error contract", %{
+    tmp_dir: directory
+  } do
+    project_path = Path.join(directory, "ptc-project.json")
+
+    File.write!(
+      project_path,
+      Jason.encode!(%{
+        "kind" => "ptc-project",
+        "version" => 1,
+        "application" => %{"path" => "ptc.json"},
+        "viewer" => %{"port" => 65_536}
+      })
+    )
+
+    assert {:error, :project_invalid} = ViewerFrontend.start(project_path)
+
+    arguments = %CommandArguments{
+      command: :viewer,
+      application: project_path,
+      directory: nil,
+      options: %{},
+      ordered_options: [],
+      frontend: :standalone,
+      frontend_options: []
+    }
+
+    assert {:error, :project_invalid, "could not start PTC Viewer"} =
+             ViewerFrontend.run(arguments, CommandRuntime.standalone())
+  end
+
   defp announce(address, port) do
     ViewerFrontend.announce(address, port, :stdio)
   end

@@ -60,6 +60,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.SchemaPath
+  alias PtcRunner.Kernel.SchemaViolation
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Lisp.RetainedSize
 
@@ -72,7 +73,6 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_secret_bytes 65_536
   @max_result_bytes 1_048_576
   @max_trace_source_bytes 8_000_000
-  @max_validation_error_depth 8
   @max_inspection_source_bytes 64_000_000
   @max_inspection_files 1_024
   @max_replay_entries 10_000
@@ -268,7 +268,7 @@ defmodule PtcRunner.Kernel.HostConfig do
              | :host_invalid
              | {:installation_revision_missing, binary()}
              | {:installation_endpoint_invalid, binary(), atom()}
-             | {:host_schema_invalid, [PtcRunner.Kernel.CommandPath.segment()]}
+             | {:host_schema_invalid, SchemaViolation.t()}
              | {:installed_limit_invalid, [PtcRunner.Kernel.CommandPath.segment()]}}
   def load_command(path) when is_binary(path) do
     with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
@@ -288,7 +288,8 @@ defmodule PtcRunner.Kernel.HostConfig do
        )}
     else
       {:error, {:duplicate_json_key, path}} ->
-        {:error, {:host_schema_invalid, safe_host_path(path)}}
+        {:error,
+         {:host_schema_invalid, SchemaViolation.new(:duplicate_property, safe_host_path(path))}}
 
       {:error, reason}
       when reason in [
@@ -362,36 +363,20 @@ defmodule PtcRunner.Kernel.HostConfig do
              exact_keys(value, ~w($schema runtime limits credentials install), ~w(install)),
              []
            ),
-         :ok <-
-           command_schema_result(
-             optional_schema(value["$schema"]),
-             [{:property, "$schema"}],
-             value
-           ),
+         :ok <- command_semantic_result(optional_schema(value["$schema"])),
          {:ok, runtime} <-
-           command_schema_result(
-             runtime(Map.get(value, "runtime", %{})),
-             [{:property, "runtime"}],
-             value
-           ),
+           command_semantic_result(runtime(Map.get(value, "runtime", %{}))),
          {:ok, limits} <- command_limits(Map.get(value, "limits", %{})),
          {:ok, credentials} <-
-           command_schema_result(
-             credentials(Map.get(value, "credentials", %{})),
-             [{:property, "credentials"}],
-             value
-           ),
+           command_semantic_result(credentials(Map.get(value, "credentials", %{}))),
          {:ok, install} <-
-           command_schema_result(
-             installations(value["install"], credentials),
-             [{:property, "install"}],
-             value
-           ) do
+           command_semantic_result(installations(value["install"], credentials)) do
       {:ok, %{runtime: runtime, limits: limits, credentials: credentials, install: install}}
     end
   end
 
-  def decode_command(_value, _directory), do: {:error, {:host_schema_invalid, []}}
+  def decode_command(_value, _directory),
+    do: {:error, {:host_schema_invalid, SchemaViolation.new(:type, [])}}
 
   defp require_installation_revisions(%{"install" => installations})
        when is_map(installations) do
@@ -465,16 +450,14 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp schema_result(:ok, _segments), do: :ok
 
   defp schema_result({:error, _reason}, segments),
-    do: {:error, {:host_schema_invalid, segments}}
+    do: {:error, {:host_schema_invalid, SchemaViolation.new(:schema, segments)}}
 
-  defp command_schema_result(:ok, _segments, _value), do: :ok
-  defp command_schema_result({:ok, decoded}, _segments, _value), do: {:ok, decoded}
-
-  defp command_schema_result({:error, _reason}, segments, value) do
-    if schema_valid?(value),
-      do: {:error, :host_invalid},
-      else: {:error, {:host_schema_invalid, segments}}
-  end
+  # `validate_command_schema/1` has already proved the whole document under a
+  # bounded worker. Failures after that boundary are semantic host failures;
+  # do not repeat schema validation outside the worker to distinguish them.
+  defp command_semantic_result(:ok), do: :ok
+  defp command_semantic_result({:ok, decoded}), do: {:ok, decoded}
+  defp command_semantic_result({:error, _reason}), do: {:error, :host_invalid}
 
   defp schema_valid?(value) do
     with {:ok, root} <- JSV.build(schema(), atoms: false, warnings: :silent),
@@ -488,21 +471,12 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp validate_command_schema(value) do
-    case JSV.build(schema(), atoms: false, warnings: :silent) do
-      {:ok, root} ->
-        case JSV.validate(command_schema_value(value), root, cast: false) do
-          {:ok, _validated} ->
-            :ok
+    schema = schema()
 
-          {:error, %JSV.ValidationError{errors: errors}} ->
-            {:error, {:host_schema_invalid, command_validation_path(errors)}}
-        end
-
-      {:error, _reason} ->
-        {:error, {:host_schema_invalid, []}}
+    case SchemaViolation.validate(command_schema_value(value), schema) do
+      :ok -> :ok
+      {:error, violation} -> {:error, {:host_schema_invalid, violation}}
     end
-  rescue
-    _exception -> {:error, {:host_schema_invalid, []}}
   end
 
   # Installed-limit values have their own closed diagnostic and exact path
@@ -527,47 +501,6 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp command_schema_value(value), do: value
 
-  defp command_validation_path(errors) do
-    errors
-    |> validation_data_paths(@max_validation_error_depth)
-    |> Enum.map(&safe_host_path/1)
-    |> Enum.sort_by(fn path -> {-length(path), path} end)
-    |> case do
-      [path | _rest] -> path
-      [] -> []
-    end
-  end
-
-  # An installation is a tagged union, so every mistake inside one is reported
-  # at the union node as a `oneOf` failure; the member that actually broke is
-  # named only inside the rejected branches. Reading the top level alone gave
-  # one pointer for a wrong `ceilings` key, an out-of-range
-  # `transport.start_timeout_ms`, and a missing `tools` block alike. Depth is
-  # bounded because the tree is only as deep as the schema.
-  defp validation_data_paths(errors, depth) when is_list(errors) and depth > 0 do
-    Enum.flat_map(errors, fn
-      %{data_path: path} = error when is_list(path) ->
-        [Enum.reverse(path) | validation_data_paths(branch_errors(error), depth - 1)]
-
-      _error ->
-        []
-    end)
-  end
-
-  defp validation_data_paths(_errors, _depth), do: []
-
-  defp branch_errors(%{args: args}) when is_list(args) do
-    args
-    |> Keyword.get_values(:invalidated)
-    |> Enum.concat()
-    |> Enum.flat_map(fn
-      {_index, %{errors: errors}} when is_list(errors) -> errors
-      _other -> []
-    end)
-  end
-
-  defp branch_errors(_error), do: []
-
   defp safe_host_path(path), do: SchemaPath.explained_prefix(path, schema())
 
   defp command_limits(value) when is_map(value) do
@@ -577,12 +510,13 @@ defmodule PtcRunner.Kernel.HostConfig do
         {:error, _reason} -> {:error, {:installed_limit_invalid, invalid_limit_path(value)}}
       end
     else
-      {:error, {:host_schema_invalid, [{:property, "limits"}]}}
+      {:error,
+       {:host_schema_invalid, SchemaViolation.new(:unknown_property, [{:property, "limits"}])}}
     end
   end
 
   defp command_limits(_value),
-    do: {:error, {:host_schema_invalid, [{:property, "limits"}]}}
+    do: {:error, {:host_schema_invalid, SchemaViolation.new(:type, [{:property, "limits"}])}}
 
   defp invalid_limit_path(value) when is_map(value) do
     invalid_name =

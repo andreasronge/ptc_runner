@@ -40,6 +40,18 @@ defmodule PtcRunner.Kernel.SchemaPath do
   @spec explained_prefix([binary() | non_neg_integer()], map()) :: [CommandPath.segment()]
   def explained_prefix(path, schema) when is_list(path), do: walk(path, schema, [])
 
+  @doc false
+  @spec schemas_at([binary() | non_neg_integer()], map()) :: [map()]
+  def schemas_at(path, schema) when is_list(path) and is_map(schema) do
+    Enum.reduce(path, [schema], fn segment, schemas ->
+      schemas
+      |> Enum.flat_map(&children(&1, segment))
+      |> Enum.uniq()
+    end)
+  end
+
+  def schemas_at(_path, _schema), do: []
+
   defp walk([], _schema, retained), do: Enum.reverse(retained)
 
   defp walk([segment | rest], schema, retained) do
@@ -82,4 +94,25 @@ defmodule PtcRunner.Kernel.SchemaPath do
   end
 
   defp child(_schema, _segment), do: :error
+
+  defp children(schema, segment) do
+    direct =
+      case child(schema, segment) do
+        {:ok, child} -> [child]
+        :error -> additional_children(schema, segment)
+      end
+
+    union =
+      schema
+      |> Map.get("oneOf", [])
+      |> Enum.flat_map(&children(&1, segment))
+
+    direct ++ union
+  end
+
+  defp additional_children(%{"additionalProperties" => child}, segment)
+       when is_map(child) and is_binary(segment),
+       do: [child]
+
+  defp additional_children(_schema, _segment), do: []
 end

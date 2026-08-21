@@ -3,7 +3,7 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   Deterministic, privacy-preserving human projection of sealed command outcomes.
 
   Provider failures include the validated provider subject already present in
-  the public command envelope. Manifest and value-contract failures with a
+  the public command envelope. Project, manifest, and value-contract failures with a
   non-root, schema-authorized path include its JSON Pointer. A contract schema
   rejected before it compiles also names the document its pointer indexes,
   because a manifest may carry two and the pointer means nothing without it.
@@ -144,6 +144,23 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   defp diagnostic_suffix(_error), do: ""
 
   defp location_suffix(%{
+         "phase" => "project",
+         "code" => "project_schema_invalid",
+         "source" => %{"kind" => "project"},
+         "path" => path
+       })
+       when is_binary(path) and path != "",
+       do: " at " <> path <> " "
+
+  defp location_suffix(%{
+         "phase" => "project",
+         "code" => "project_schema_invalid",
+         "source" => %{"kind" => "project"},
+         "path" => ""
+       }),
+       do: " at document root "
+
+  defp location_suffix(%{
          "phase" => "application",
          "code" => code,
          "source" => %{"kind" => "application"},
@@ -152,6 +169,32 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        when code in ["schema_violation", "required_property_missing"] and is_binary(path) and
               path != "",
        do: " at " <> path <> " "
+
+  defp location_suffix(%{
+         "phase" => "application",
+         "code" => code,
+         "source" => %{"kind" => "application"},
+         "path" => ""
+       })
+       when code in ["schema_violation", "required_property_missing"],
+       do: " at document root "
+
+  defp location_suffix(%{
+         "phase" => "host",
+         "code" => "host_schema_invalid",
+         "source" => %{"kind" => "host"},
+         "path" => path
+       })
+       when is_binary(path) and path != "",
+       do: " at " <> path <> " "
+
+  defp location_suffix(%{
+         "phase" => "host",
+         "code" => "host_schema_invalid",
+         "source" => %{"kind" => "host"},
+         "path" => ""
+       }),
+       do: " at document root "
 
   defp location_suffix(%{
          "phase" => "bundle",

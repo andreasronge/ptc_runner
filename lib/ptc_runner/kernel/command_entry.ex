@@ -4,6 +4,9 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
   Entry generates the command reference, parses exactly once, and validates an
   envelope destination against every derivable artifact target before startup.
+  A syntactically valid invocation whose named project fails schema validation
+  is retained as an admitted terminal diagnostic, so its envelope destination
+  is available without bootstrapping the command or opening project references.
   One-shot result destinations are anchored into both parsed option views before
   their frontends receive them. A rejected entry retains no caller-owned
   destination or unknown switch text.
@@ -12,6 +15,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandDestination
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.DestinationIdentity
@@ -21,13 +25,22 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
   @fallback_run_ref "cmd-00000000000000000000000000"
   @frontend_commands CommandDeclaration.frontend_commands()
-  @enforce_keys [:run_ref, :frontend, :arguments, :rejection, :envelope_path, :destinations]
+  @enforce_keys [
+    :run_ref,
+    :frontend,
+    :arguments,
+    :diagnostic,
+    :rejection,
+    :envelope_path,
+    :destinations
+  ]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           run_ref: binary(),
           frontend: :standalone | :mix,
           arguments: CommandArguments.t() | nil,
+          diagnostic: CommandDiagnostic.t() | nil,
           rejection: CommandRejection.t() | nil,
           envelope_path: binary() | nil,
           destinations: {map(), [atom()]} | nil
@@ -63,7 +76,10 @@ defmodule PtcRunner.Kernel.CommandEntry do
   defp open_safely(argv, frontend, run_ref) do
     case ProjectResolver.parse(argv, frontend, run_ref) do
       {:ok, %CommandArguments{} = arguments} ->
-        finish(arguments, run_ref, frontend)
+        finish(arguments, run_ref, frontend, nil)
+
+      {:document_error, %CommandArguments{} = arguments, %CommandDiagnostic{} = diagnostic} ->
+        finish(arguments, run_ref, frontend, diagnostic)
 
       {:error, %CommandRejection{} = rejection} ->
         {:error, rejected(run_ref, frontend, rejection)}
@@ -78,12 +94,12 @@ defmodule PtcRunner.Kernel.CommandEntry do
        rejected(run_ref, frontend, CommandRejection.generic(:unknown, :invalid_arguments))}
   end
 
-  defp finish(arguments, run_ref, frontend) do
+  defp finish(arguments, run_ref, frontend, diagnostic) do
     destinations = CommandDestination.capture(arguments.options)
 
     with {:ok, arguments} <- anchor_entry_paths(arguments),
          {:ok, arguments} <- anchor_one_shot_destinations(arguments, destinations, frontend) do
-      finish(arguments, destinations, run_ref, frontend)
+      finish_envelope(arguments, destinations, run_ref, frontend, diagnostic)
     else
       {:error, %CommandRejection{} = rejection} ->
         {:error, rejected(run_ref, frontend, rejection)}
@@ -153,10 +169,10 @@ defmodule PtcRunner.Kernel.CommandEntry do
     end
   end
 
-  defp finish(arguments, destinations, run_ref, frontend) do
+  defp finish_envelope(arguments, destinations, run_ref, frontend, diagnostic) do
     case Keyword.fetch(arguments.frontend_options, :envelope) do
       :error ->
-        {:ok, accepted(run_ref, frontend, arguments, nil, destinations)}
+        {:ok, accepted(run_ref, frontend, arguments, diagnostic, nil, destinations)}
 
       {:ok, envelope} ->
         with {:ok, envelope} <- anchor_file(envelope),
@@ -167,7 +183,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
             | frontend_options: Keyword.delete(arguments.frontend_options, :envelope)
           }
 
-          {:ok, accepted(run_ref, frontend, arguments, envelope, destinations)}
+          {:ok, accepted(run_ref, frontend, arguments, diagnostic, envelope, destinations)}
         else
           {:error, :invalid_destination} ->
             {:error,
@@ -325,11 +341,12 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
   defp anchor_path(_path), do: {:error, :invalid_destination}
 
-  defp accepted(run_ref, frontend, arguments, envelope_path, destinations) do
+  defp accepted(run_ref, frontend, arguments, diagnostic, envelope_path, destinations) do
     %__MODULE__{
       run_ref: run_ref,
       frontend: frontend,
       arguments: arguments,
+      diagnostic: diagnostic,
       rejection: nil,
       envelope_path: envelope_path,
       destinations: destinations
@@ -341,6 +358,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
       run_ref: run_ref,
       frontend: frontend,
       arguments: nil,
+      diagnostic: nil,
       rejection: rejection,
       envelope_path: nil,
       destinations: nil

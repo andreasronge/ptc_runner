@@ -29,6 +29,12 @@ Loading validates bounded, path-confined JSON without reading credentials,
 resolving executables, starting processes, or contacting endpoints. Those
 actions happen later during preflight and acquisition.
 
+A host schema diagnostic names the bounded rule that failed and includes a
+safe JSON Pointer. Installation aliases and other caller-selected map keys are
+rendered as `*`; unknown keys and rejected values are never copied into the
+diagnostic. For example, an excessive installation timeout is located at
+`/install/*/ceilings/timeout_ms` and classified as a `maximum` rule failure.
+
 ## Start with a small document
 
 ```json

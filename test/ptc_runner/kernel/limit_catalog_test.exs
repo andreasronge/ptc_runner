@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.SchemaViolation
 
   @manifest_narrowable [
     {"capability_argument_bytes", :capability_argument_bytes, 262_144, 4_000_000},
@@ -261,7 +262,9 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     for name <- Map.keys(@installed_only) do
       manifest = valid_manifest(%{"limits" => %{name => 100}})
 
-      assert {:error, {:manifest_path, [{:property, "limits"}], :unknown_properties}} =
+      assert {:error,
+              {:manifest_schema_invalid,
+               %SchemaViolation{rule: :unknown_property, path: [property: "limits"]}}} =
                Manifest.load_memory("ptc.json", documents(manifest))
     end
   end

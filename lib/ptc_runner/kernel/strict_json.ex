@@ -65,6 +65,35 @@ defmodule PtcRunner.Kernel.StrictJSON do
 
   def decode_with_locations(_source, _opts), do: {:error, :invalid_json}
 
+  @doc false
+  @spec unique_root_string(binary(), binary()) :: {:ok, binary()} | :error
+  def unique_root_string(source, key) when is_binary(source) and is_binary(key) do
+    bounded(fn ->
+      case Jason.decode(source, objects: :ordered_objects) do
+        {:ok, %OrderedObject{values: pairs}} -> unique_string_value(pairs, key)
+        _other -> :error
+      end
+    end)
+    |> case do
+      {:ok, value} when is_binary(value) -> {:ok, value}
+      _other -> :error
+    end
+  end
+
+  def unique_root_string(_source, _key), do: :error
+
+  @doc false
+  @spec root_string_prefix(binary(), binary()) :: {:ok, binary()} | :error
+  def root_string_prefix(source, key) when is_binary(source) and is_binary(key) do
+    bounded(fn -> root_member(source, key) end)
+    |> case do
+      {:ok, value} when is_binary(value) -> {:ok, value}
+      _other -> :error
+    end
+  end
+
+  def root_string_prefix(_source, _key), do: :error
+
   @spec admit(term(), keyword()) :: {:ok, term()} | {:error, error()}
   @doc """
   Admits a trusted in-memory JSON value under the same limits as `decode/2`.
@@ -122,6 +151,114 @@ defmodule PtcRunner.Kernel.StrictJSON do
       end
     end)
   end
+
+  defp unique_string_value(pairs, key) do
+    case for({^key, value} <- pairs, do: value) do
+      [value] when is_binary(value) ->
+        if String.valid?(value), do: {:ok, value}, else: :error
+
+      _other ->
+        :error
+    end
+  end
+
+  defp root_member(source, key) do
+    case skip_space(source) do
+      <<"{", rest::binary>> -> root_members(rest, key)
+      _other -> :error
+    end
+  end
+
+  defp root_members(source, wanted) do
+    with {:ok, key, rest} <- take_string(skip_space(source)),
+         <<":", value::binary>> <- skip_space(rest) do
+      value = skip_space(value)
+
+      if key == wanted do
+        case take_string(value) do
+          {:ok, found, _rest} -> {:ok, found}
+          :error -> :error
+        end
+      else
+        case skip_value(value) do
+          {:ok, rest} -> next_root_member(rest, wanted)
+          :error -> :error
+        end
+      end
+    else
+      _other -> :error
+    end
+  end
+
+  defp next_root_member(source, wanted) do
+    case skip_space(source) do
+      <<",", rest::binary>> -> root_members(rest, wanted)
+      _other -> :error
+    end
+  end
+
+  defp take_string(<<"\"", rest::binary>>), do: take_string_bytes(rest, "\"")
+  defp take_string(_source), do: :error
+
+  defp take_string_bytes(<<>>, _quoted), do: :error
+
+  defp take_string_bytes(<<"\"", rest::binary>>, quoted) do
+    case Jason.decode(quoted <> "\"") do
+      {:ok, value} when is_binary(value) -> {:ok, value, rest}
+      _other -> :error
+    end
+  end
+
+  defp take_string_bytes(<<"\\", escaped, rest::binary>>, quoted),
+    do: take_string_bytes(rest, quoted <> <<"\\", escaped>>)
+
+  defp take_string_bytes(<<byte, rest::binary>>, quoted),
+    do: take_string_bytes(rest, quoted <> <<byte>>)
+
+  defp skip_value(<<"\"", _rest::binary>> = source) do
+    case take_string(source) do
+      {:ok, _value, rest} -> {:ok, rest}
+      :error -> :error
+    end
+  end
+
+  defp skip_value(<<open, rest::binary>>) when open in ~c"[{",
+    do: skip_compound(rest, [closing(open)])
+
+  defp skip_value(source), do: skip_scalar(source, false)
+
+  defp skip_compound(<<>>, _closings), do: :error
+
+  defp skip_compound(<<"\"", _rest::binary>> = source, closings) do
+    case take_string(source) do
+      {:ok, _value, rest} -> skip_compound(rest, closings)
+      :error -> :error
+    end
+  end
+
+  defp skip_compound(<<open, rest::binary>>, closings) when open in ~c"[{",
+    do: skip_compound(rest, [closing(open) | closings])
+
+  defp skip_compound(<<close, rest::binary>>, [close]), do: {:ok, rest}
+
+  defp skip_compound(<<close, rest::binary>>, [close | closings]),
+    do: skip_compound(rest, closings)
+
+  defp skip_compound(<<_byte, rest::binary>>, closings), do: skip_compound(rest, closings)
+
+  defp skip_scalar(<<>>, _seen), do: :error
+  defp skip_scalar(<<byte, _rest::binary>> = source, true) when byte in ~c",}", do: {:ok, source}
+
+  defp skip_scalar(<<byte, rest::binary>>, seen) when byte in ~c" \t\r\n",
+    do: skip_scalar(rest, seen)
+
+  defp skip_scalar(<<_byte, rest::binary>>, _seen), do: skip_scalar(rest, true)
+
+  defp closing(?[), do: ?]
+  defp closing(?{), do: ?}
+
+  defp skip_space(<<byte, rest::binary>>) when byte in ~c" \t\r\n", do: skip_space(rest)
+  defp skip_space(source), do: source
 
   defp bounded(function) do
     case BoundedWorker.run(function,

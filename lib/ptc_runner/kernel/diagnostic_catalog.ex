@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.SchemaViolationDiagnostic
 
   # A refused replay fixture is reported through the environment code on a run
   # and the fixtures code in doctor, and both carry the same bounded message.
@@ -35,12 +36,12 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "choose only one option from the conflicting argument group"},
     {:arguments, :project_host_undeclared, 2, false,
      "the project document declares no host block; add one to use this command"},
-    {:arguments, :project_invalid, 2, false,
-     "the named project document is not a valid project document; check it against the project schema (ptc docs schema-project)"},
     {:arguments, :envelope_destination_exists, 2, false,
      "the envelope destination already exists"},
     {:arguments, :docs_page_unknown, 2, false, "no documentation page is served under that name"},
     {:arguments, :example_unknown, 2, false, "no example is embedded under that name"},
+    {:project, :project_schema_invalid, 3, false,
+     "the project configuration does not satisfy its schema"},
     {:host, :host_unavailable, 3, false, "the host configuration is unavailable"},
     {:host, :host_invalid, 3, false, "the host configuration is invalid"},
     {:host, :host_schema_invalid, 3, false, "the host configuration does not satisfy its schema"},
@@ -264,6 +265,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @type phase ::
           :arguments
+          | :project
           | :host
           | :application
           | :bundle
@@ -346,6 +348,31 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :application, code: :installed_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.installed_ceiling_message_schema(fallback)
 
+  def message_schema(%{phase: :host, code: :host_schema_invalid, message: fallback}),
+    do:
+      SchemaViolationDiagnostic.message_schema(
+        :host,
+        SchemaViolationDiagnostic.rules(:host, :host_schema_invalid),
+        fallback
+      )
+
+  def message_schema(%{phase: :project, code: :project_schema_invalid, message: fallback}),
+    do:
+      SchemaViolationDiagnostic.message_schema(
+        :project,
+        SchemaViolationDiagnostic.rules(:project, :project_schema_invalid),
+        fallback
+      )
+
+  def message_schema(%{phase: :application, code: code, message: fallback})
+      when code in [:schema_violation, :required_property_missing],
+      do:
+        SchemaViolationDiagnostic.message_schema(
+          :application,
+          SchemaViolationDiagnostic.rules(:application, code),
+          fallback
+        )
+
   def message_schema(%{phase: :local_preflight, code: code, message: fallback})
       when code in @fixture_codes,
       do: LLMReplayFixtureDiagnostic.message_schema(fallback)
@@ -387,6 +414,31 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:application, :installed_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.installed_ceiling_message?(message)
+
+  defp valid_dynamic_message?(:host, :host_schema_invalid, message),
+    do:
+      SchemaViolationDiagnostic.valid_message?(
+        :host,
+        SchemaViolationDiagnostic.rules(:host, :host_schema_invalid),
+        message
+      )
+
+  defp valid_dynamic_message?(:project, :project_schema_invalid, message),
+    do:
+      SchemaViolationDiagnostic.valid_message?(
+        :project,
+        SchemaViolationDiagnostic.rules(:project, :project_schema_invalid),
+        message
+      )
+
+  defp valid_dynamic_message?(:application, code, message)
+       when code in [:schema_violation, :required_property_missing],
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :application,
+           SchemaViolationDiagnostic.rules(:application, code),
+           message
+         )
 
   defp valid_dynamic_message?(:local_preflight, code, message) when code in @fixture_codes,
     do: LLMReplayFixtureDiagnostic.valid_message?(message)
@@ -656,6 +708,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   defp doctor_report_operation(operation), do: operation
 
   @spec source_kinds(phase(), atom()) :: [atom()]
+  def source_kinds(:project, :project_schema_invalid), do: [:project]
   def source_kinds(:host, :installation_revision_missing), do: []
   def source_kinds(:host, code) when code in @endpoint_codes, do: []
   def source_kinds(:host, _code), do: [:host]
@@ -712,6 +765,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def provider_activity_policy(phase, _code)
       when phase in [
              :arguments,
+             :project,
              :host,
              :application,
              :bundle,
@@ -763,6 +817,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec path_policy(phase(), atom(), atom() | nil) :: :optional | :forbidden
   def path_policy(_phase, _code, nil), do: :forbidden
+
+  def path_policy(:project, :project_schema_invalid, :project), do: :optional
 
   def path_policy(:host, code, :host)
       when code in [:host_schema_invalid, :installed_limit_invalid],

@@ -34,6 +34,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.SchemaViolationDiagnostic
 
   @enforce_keys [
     :phase,
@@ -248,6 +249,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_path_for_row?(_path, _source, _row), do: false
 
   defp valid_path_authority?(
+         :project,
+         %CommandSource{kind: :project, contract_authority: nil},
+         %{phase: :project}
+       ),
+       do: true
+
+  defp valid_path_authority?(
          :manifest,
          %CommandSource{kind: :application, contract_authority: nil},
          %{phase: :application}
@@ -321,6 +329,43 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_span?(_span, _source), do: false
 
   defp valid_message_source?(message, %{message: message}, _source), do: true
+
+  defp valid_message_source?(
+         message,
+         %{phase: :project, code: :project_schema_invalid},
+         %CommandSource{kind: :project}
+       ),
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :project,
+           SchemaViolationDiagnostic.rules(:project, :project_schema_invalid),
+           message
+         )
+
+  defp valid_message_source?(
+         message,
+         %{phase: :host, code: :host_schema_invalid},
+         %CommandSource{kind: :host}
+       ),
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :host,
+           SchemaViolationDiagnostic.rules(:host, :host_schema_invalid),
+           message
+         )
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: code},
+         %CommandSource{kind: :application}
+       )
+       when code in [:schema_violation, :required_property_missing],
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :application,
+           SchemaViolationDiagnostic.rules(:application, code),
+           message
+         )
 
   defp valid_message_source?(
          message,

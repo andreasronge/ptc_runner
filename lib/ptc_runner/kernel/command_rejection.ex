@@ -40,8 +40,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
             | :destination_collision
             | :private_output_recovery_collision
             | :init_destination_collision
-            | :project_host_undeclared
-            | :project_invalid,
+            | :project_host_undeclared,
           accepted: [binary()],
           option: binary() | nil,
           destination: binary() | nil,
@@ -60,27 +59,6 @@ defmodule PtcRunner.Kernel.CommandRejection do
     %__MODULE__{
       command: command,
       code: :project_host_undeclared,
-      kind: :generic,
-      accepted: [],
-      option: nil,
-      destination: nil,
-      conflicts: []
-    }
-  end
-
-  @doc """
-  Builds the rejection for a document that declares itself a project and is not
-  one.
-
-  The classifier reads `kind` before anything else, so a document that reached
-  this point named itself; only a project command can be refused for it, and
-  the command line it was invoked with was correct.
-  """
-  @spec invalid_project(:validate | :run | :doctor | :models) :: t()
-  def invalid_project(command) when command in [:validate, :run, :doctor, :models] do
-    %__MODULE__{
-      command: command,
-      code: :project_invalid,
       kind: :generic,
       accepted: [],
       option: nil,

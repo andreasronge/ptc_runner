@@ -109,7 +109,11 @@ references in the separate operator-owned
 <a href="/reference/project-files/">project configuration</a>:</p><pre><code class="console language-console">ptc run ptc-project.json
 ptc doctor ptc-project.json --connect</code></pre><p>Loading validates bounded, path-confined JSON without reading credentials,
 resolving executables, starting processes, or contacting endpoints. Those
-actions happen later during preflight and acquisition.</p><h2 id="start-with-a-small-document">Start with a small document</h2><pre><code class="json language-json">{
+actions happen later during preflight and acquisition.</p><p>A host schema diagnostic names the bounded rule that failed and includes a
+safe JSON Pointer. Installation aliases and other caller-selected map keys are
+rendered as <code class="inline">*</code>; unknown keys and rejected values are never copied into the
+diagnostic. For example, an excessive installation timeout is located at
+<code class="inline">/install/*/ceilings/timeout_ms</code> and classified as a <code class="inline">maximum</code> rule failure.</p><h2 id="start-with-a-small-document">Start with a small document</h2><pre><code class="json language-json">{
   &quot;credentials&quot;: {
     &quot;openrouter_key&quot;: {&quot;env&quot;: &quot;OPENROUTER_API_KEY&quot;}
   },

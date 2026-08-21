@@ -15,6 +15,7 @@
   },
   "failure": {
     "arguments": "error: arguments/invalid_arguments: use the documented arguments for this command (run_ref: cmd-00000000000000000000000001)\n",
+    "project": "error: project/project_schema_invalid: the project configuration does not satisfy its schema (run_ref: cmd-00000000000000000000000001)\n",
     "host": "error: host/host_unavailable: the host configuration is unavailable (run_ref: cmd-00000000000000000000000001)\n",
     "application": "error: application/application_unavailable: the application is unavailable (run_ref: cmd-00000000000000000000000001)\n",
     "bundle": "error: bundle/bundle_invalid: the component bundle is invalid (run_ref: cmd-00000000000000000000000001)\n",

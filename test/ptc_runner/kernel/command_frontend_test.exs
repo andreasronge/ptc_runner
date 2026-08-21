@@ -313,10 +313,50 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     assert presentation.stderr ==
              "error: application/schema_violation: " <>
-               "the application manifest does not satisfy its schema " <>
+               "the application manifest violates the pattern schema rule " <>
                "at /workflow/components/0/path (run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
 
     refute presentation.stderr =~ "../shared/main.clj"
+  end
+
+  @tag :tmp_dir
+  test "a host schema rejection renders its bounded rule and safe path", %{tmp_dir: dir} do
+    application = write_application(dir)
+    host = Path.join(dir, "host-schema-rule.json")
+
+    document = %{
+      "install" => %{
+        "model" => %{
+          "source" => "mcp",
+          "installation_revision" => "model-v1",
+          "transport" => %{"type" => "stdio", "command" => "node"},
+          "tools" => %{"read" => %{"as" => "model.read", "effect" => "read"}}
+        }
+      }
+    }
+
+    invalid = put_in(document, ["install", "model", "ceilings"], %{"timeout_ms" => 999_999})
+
+    File.write!(host, Jason.encode!(invalid))
+
+    presentation =
+      CommandFrontend.execute(
+        ["validate", application, "--host-config", host],
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+      )
+
+    assert presentation.exit_status == 3
+    assert presentation.outcome.envelope["error"]["path"] == "/install/*/ceilings/timeout_ms"
+
+    assert presentation.stderr ==
+             "error: host/host_schema_invalid: " <>
+               "the host configuration violates the maximum schema rule " <>
+               "at /install/*/ceilings/timeout_ms " <>
+               "(run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+
+    refute presentation.stderr =~ "model"
+    refute presentation.stderr =~ "999999"
   end
 
   @tag :tmp_dir

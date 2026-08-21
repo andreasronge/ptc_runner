@@ -110,6 +110,16 @@ defmodule PtcRunner.Kernel.CommandEngine do
     do: dispatch_entry_context(entry, runtime, true)
 
   defp dispatch_entry_context(
+         %CommandEntry{
+           arguments: %CommandArguments{} = arguments,
+           diagnostic: %CommandDiagnostic{} = diagnostic
+         } = entry,
+         _runtime,
+         _presentation?
+       ),
+       do: with_rejection({:error, arguments_outcome(arguments, entry.run_ref, diagnostic)})
+
+  defp dispatch_entry_context(
          %CommandEntry{arguments: %CommandArguments{command: command}} = entry,
          _runtime,
          _presentation?
@@ -161,6 +171,13 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   @doc false
   @spec entry_failure(CommandEntry.t()) :: {:error, CommandOutcome.t()}
+  def entry_failure(%CommandEntry{
+        arguments: %CommandArguments{} = arguments,
+        diagnostic: %CommandDiagnostic{} = diagnostic,
+        run_ref: run_ref
+      }),
+      do: {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+
   def entry_failure(
         %CommandEntry{rejection: %CommandRejection{command: command} = rejection} = entry
       )
@@ -241,6 +258,13 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
       {:error, %CommandRejection{} = rejection} ->
         {:error, outcome(rejection.command, run_ref, :arguments, rejection.code)}
+
+      {:document_error, %CommandArguments{frontend_options: []} = arguments,
+       %CommandDiagnostic{} = diagnostic} ->
+        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+
+      {:document_error, %CommandArguments{} = arguments, %CommandDiagnostic{}} ->
+        {:error, arguments_outcome(arguments, run_ref, :arguments, :invalid_arguments)}
     end
   rescue
     _exception -> {:error, outcome(:unknown, run_ref, :internal, :internal_error)}

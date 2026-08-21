@@ -75,6 +75,7 @@ defmodule PtcRunner.Kernel.Manifest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SchemaPath
+  alias PtcRunner.Kernel.SchemaViolation
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Kernel.ValueContract
 
@@ -205,6 +206,7 @@ defmodule PtcRunner.Kernel.Manifest do
          {:ok, raw} <- ApplicationSource.manifest(source),
          true <- byte_size(raw) <= @max_manifest_bytes,
          {:ok, manifest} <- decode_manifest(raw),
+         :ok <- validate_manifest_schema(manifest),
          true <- is_map(manifest) and not is_struct(manifest),
          :ok <- root_keys(manifest, @top_keys, ~w(version workflow input)),
          :ok <- optional_schema(manifest),
@@ -262,6 +264,15 @@ defmodule PtcRunner.Kernel.Manifest do
 
       result ->
         result
+    end
+  end
+
+  defp validate_manifest_schema(manifest) do
+    schema = schema()
+
+    case SchemaViolation.validate(manifest, schema) do
+      :ok -> :ok
+      {:error, violation} -> {:error, {:manifest_schema_invalid, violation}}
     end
   end
 

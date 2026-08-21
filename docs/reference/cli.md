@@ -214,6 +214,12 @@ arbitrary exception, rejected value, provider response, credential, or private
 payload. A provider subject appears as `provider/<alias>/<operation>` with its
 workflow or mission occurrence when known.
 
+Host, project, and application schema diagnostics distinguish a closed set of
+violated rules and carry only schema-authorized JSON Pointers. A missing
+required field may name that schema-declared field; an unknown caller-authored
+key is omitted and the pointer stops at its declared parent. Caller-selected
+map members such as installation aliases and mission names render as `*`.
+
 `validate` also reads the files a declaration owns rather than the environment
 it will run in. A replay installation names a fixture file, so `validate` parses
 it under the installed ceilings and reports the rule a rejected file broke —
@@ -265,7 +271,12 @@ file whose JSON Schema this executable serves as `ptc docs schema-envelope`
 status and exit-code relationship is sealed by the same command contract.
 
 After arguments parse, an ordinary or caught command outcome publishes one
-requested envelope. Invalid arguments and VM/OS termination can produce none.
+requested envelope. This includes a recognized `run`, `validate`, `doctor`, or
+`models` invocation whose named project fails schema validation: project
+diagnostics terminate before command bootstrap or project references are
+opened, but after the envelope destination is admitted. Malformed command
+syntax, conflicting arguments, invalid envelope destinations, and VM/OS
+termination can produce no envelope.
 Publication is no-replace, so a destination that already exists is refused
 during argument admission with `arguments/envelope_destination_exists` and exit
 `2`, before any provider work: a repeated CI step is told to remove the file
@@ -311,7 +322,7 @@ diagnostic behind it.
 | ---: | --- | --- |
 | 0 | the command succeeded | — |
 | 2 | the arguments were rejected before any document was read | `arguments` |
-| 3 | a declaration document was unavailable, invalid, or rejected | `host`, `application`, `bundle`, `provider_declaration` |
+| 3 | a declaration document was unavailable, invalid, or rejected | `project`, `host`, `application`, `bundle`, `provider_declaration` |
 | 4 | a selected provider could not be checked or acquired | `local_preflight`, `active_preflight`, `provider_acquisition` |
 | 5 | the workflow ran and failed | `execution` |
 | 6 | the run exceeded a limit or its duration | `execution` |
@@ -330,7 +341,6 @@ Every classified diagnostic and the status it exits with:
 | 2 | `arguments` | `invalid_arguments` | no | use the documented arguments for this command |
 | 2 | `arguments` | `invalid_command` | no | use one of the supported commands |
 | 2 | `arguments` | `project_host_undeclared` | no | the project document declares no host block; add one to use this command |
-| 2 | `arguments` | `project_invalid` | no | the named project document is not a valid project document; check it against the project schema (ptc docs schema-project) |
 | 3 | `application` | `application_not_found` | no | the application manifest does not exist |
 | 3 | `application` | `application_unavailable` | no | the application is unavailable |
 | 3 | `application` | `contract_invalid` | no | an application value contract is invalid |
@@ -364,6 +374,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `host` | `installation_endpoint_literal_loopback_required` | no | allow_insecure_loopback requires a literal 127.0.0.1 or [::1] address |
 | 3 | `host` | `installation_revision_missing` | no | an installed provider is missing its behavior revision |
 | 3 | `host` | `installed_limit_invalid` | no | an installed limit is invalid |
+| 3 | `project` | `project_schema_invalid` | no | the project configuration does not satisfy its schema |
 | 3 | `provider_declaration` | `data_policy_denied` | no | the selected providers do not admit the effective data class |
 | 3 | `provider_declaration` | `dependency_invalid` | no | the selected provider dependency graph is invalid |
 | 3 | `provider_declaration` | `placement_denied` | no | the provider is not allowed in this destination |

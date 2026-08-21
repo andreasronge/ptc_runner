@@ -166,7 +166,9 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     for {config, expected_path} <- cases do
       assert {:error, :invalid_host_config} = HostConfig.decode(config, "/tmp")
 
-      assert {:error, {:host_schema_invalid, ^expected_path}} =
+      assert {:error,
+              {:host_schema_invalid,
+               %PtcRunner.Kernel.SchemaViolation{rule: :type, path: ^expected_path}}} =
                HostConfig.decode_command(config, "/tmp")
     end
   end
@@ -185,6 +187,48 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       assert {:error, {:installation_revision_missing, ^name}} =
                HostConfig.decode_command(document, "/tmp")
     end
+  end
+
+  test "oneOf branch selection does not mistake nested enum failures for discriminators" do
+    invalid =
+      put_in(valid_config(), ["install", "workspace", "tools"], %{
+        "first" => %{"as" => "workspace.first", "effect" => "execute"},
+        "second" => %{"as" => "workspace.second", "effect" => "execute"}
+      })
+
+    assert {:error,
+            {:host_schema_invalid,
+             %PtcRunner.Kernel.SchemaViolation{
+               rule: :enum,
+               path: [
+                 {:property, "install"},
+                 {:property, "*"},
+                 {:property, "tools"}
+               ]
+             }}} = HostConfig.decode_command(invalid, "/tmp")
+  end
+
+  test "oneOf branch selection does not mistake an immediate shared enum for a discriminator" do
+    invalid = %{
+      "install" => %{
+        "replay" => %{
+          "source" => "llm_replay",
+          "installation_revision" => "replay-v1",
+          "data_class" => "secret"
+        }
+      }
+    }
+
+    assert {:error,
+            {:host_schema_invalid,
+             %PtcRunner.Kernel.SchemaViolation{
+               rule: :enum,
+               path: [
+                 {:property, "install"},
+                 {:property, "*"},
+                 {:property, "data_class"}
+               ]
+             }}} = HostConfig.decode_command(invalid, "/tmp")
   end
 
   @tag :tmp_dir
@@ -612,6 +656,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert {:ok, _validated} = JSV.validate(dangling_llm, root, cast: false)
     assert {:error, :invalid_host_config} = HostConfig.decode(dangling_llm, "/tmp")
+    assert {:error, :host_invalid} = HostConfig.decode_command(dangling_llm, "/tmp")
   end
 
   test "stdio credential environment reserves the complete compatibility budget" do

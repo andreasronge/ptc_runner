@@ -8,6 +8,8 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaPath
+  alias PtcRunner.Kernel.SchemaViolation
+  alias PtcRunner.Kernel.SchemaViolationDiagnostic
   alias PtcRunner.Kernel.ValueContractDiagnostic
 
   @spec project(:validate | :run | :doctor, term()) :: CommandDiagnostic.t()
@@ -29,6 +31,13 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   # catalog literal, including a rule this boundary has no message for.
   defp message_option({:contract_schema_invalid, %{rule: rule}}) do
     case ContractSchemaDiagnostic.message(rule) do
+      {:ok, message} -> [message: message]
+      :error -> []
+    end
+  end
+
+  defp message_option({:manifest_schema_invalid, %SchemaViolation{rule: rule}}) do
+    case SchemaViolationDiagnostic.message(:application, rule) do
       {:ok, message} -> [message: message]
       :error -> []
     end
@@ -94,6 +103,16 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
     do: {:required_property_missing, [{:property, name}]}
 
   defp projection(_role, :unknown_properties), do: {:schema_violation, []}
+
+  defp projection(
+         _role,
+         {:manifest_schema_invalid, %SchemaViolation{rule: :required, path: path}}
+       ),
+       do: {:required_property_missing, path}
+
+  defp projection(_role, {:manifest_schema_invalid, %SchemaViolation{path: path}}),
+    do: {:schema_violation, path}
+
   defp projection(_role, :reference_missing), do: {:reference_missing, nil}
   defp projection(_role, :invalid_logical_name), do: {:reference_missing, nil}
   defp projection(:application, :not_found), do: {:application_not_found, nil}

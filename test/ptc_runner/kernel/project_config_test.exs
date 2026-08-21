@@ -1,8 +1,15 @@
 defmodule PtcRunner.Kernel.ProjectConfigTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.CommandPath
+  alias PtcRunner.Kernel.CommandRenderer
+  alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.ProjectArtifactRoot
   alias PtcRunner.Kernel.ProjectConfig
+  alias PtcRunner.Kernel.SchemaViolation
+  alias PtcRunner.Kernel.SchemaViolationDiagnostic
 
   @tag :tmp_dir
   test "loads the closed project document and resolves paths below its directory", %{
@@ -70,8 +77,99 @@ defmodule PtcRunner.Kernel.ProjectConfigTest do
 
     Enum.each(invalid, fn bytes ->
       File.write!(path, bytes)
-      assert {:error, :project_invalid} = ProjectConfig.load(path)
+
+      assert {:error, {:project_schema_invalid, %SchemaViolation{}}} =
+               ProjectConfig.load(path)
     end)
+  end
+
+  @tag :tmp_dir
+  test "preserves bounded schema violations for project document failures", %{tmp_dir: directory} do
+    path = Path.join(directory, "ptc-project.json")
+
+    base = %{
+      "kind" => "ptc-project",
+      "version" => 1,
+      "application" => %{"path" => "ptc.json"}
+    }
+
+    cases = [
+      {Map.put(base, "artifactz", %{}), :unknown_property, []},
+      {Map.delete(base, "application"), :required, [{:property, "application"}]},
+      {Map.put(base, "artifacts", %{"root" => ".ptc", "trace" => "yes"}), :type,
+       [{:property, "artifacts"}, {:property, "trace"}]},
+      {Map.put(base, "viewer", %{"port" => 65_536}), :maximum,
+       [{:property, "viewer"}, {:property, "port"}]},
+      {put_in(base, ["application", "path"], "../ptc.json"), :pattern,
+       [{:property, "application"}, {:property, "path"}]},
+      {Map.put(base, "artifacts", %{
+         "root" => ".ptc",
+         "trace" => false,
+         "inspection" => true
+       }), :const, [{:property, "artifacts"}, {:property, "trace"}]}
+    ]
+
+    for {document, rule, segments} <- cases do
+      File.write!(path, Jason.encode!(document))
+
+      assert {:error, {:project_schema_invalid, %SchemaViolation{rule: ^rule, path: ^segments}}} =
+               ProjectConfig.load(path)
+    end
+
+    File.write!(
+      path,
+      ~s({"kind":"ptc-project","version":1,"application":{"path":"ptc.json","path":"other.json"}})
+    )
+
+    assert {:error,
+            {:project_schema_invalid,
+             %SchemaViolation{
+               rule: :duplicate_property,
+               path: [{:property, "application"}]
+             }}} = ProjectConfig.load(path)
+  end
+
+  test "project diagnostics accept only project source and schema-authorized paths" do
+    source = CommandSource.fixed(:project)
+    segments = [{:property, "viewer"}, {:property, "port"}]
+    assert {:ok, path} = CommandPath.project(segments)
+    assert {:ok, message} = SchemaViolationDiagnostic.message(:project, :maximum)
+
+    assert {:ok, diagnostic} =
+             CommandDiagnostic.new(:project, :project_schema_invalid,
+               source: source,
+               path: path,
+               message: message
+             )
+
+    assert CommandDiagnostic.to_map(diagnostic) == %{
+             "phase" => "project",
+             "code" => "project_schema_invalid",
+             "message" => "the project configuration violates the maximum schema rule",
+             "source" => %{"kind" => "project", "name" => "ptc-project.json"},
+             "path" => "/viewer/port",
+             "span" => nil,
+             "subject" => nil,
+             "notes" => [],
+             "retryable" => false,
+             "provider_activity" => false
+           }
+
+    outcome =
+      CommandOutcome.error(:validate, "cmd-00000000000000000000000000", diagnostic)
+
+    assert CommandRenderer.render(outcome) ==
+             {:stderr,
+              "error: project/project_schema_invalid: " <>
+                "the project configuration violates the maximum schema rule " <>
+                "at /viewer/port (run_ref: cmd-00000000000000000000000000)\n"}
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:project, :project_schema_invalid,
+               source: CommandSource.fixed(:application),
+               path: path,
+               message: message
+             )
   end
 
   @tag :tmp_dir
@@ -82,11 +180,76 @@ defmodule PtcRunner.Kernel.ProjectConfigTest do
 
     File.write!(project, ~s({"kind":"ptc-project","version":1,"application":{"path":"ptc.json"}}))
     File.write!(manifest, ~s({"version":1,"workflow":{}}))
-    File.write!(foreign, ~s({"kind":"something-else"}))
+
+    File.write!(
+      foreign,
+      ~s({"kind":"something-else","artifacts":{"root":"artifacts","inspection":true}})
+    )
 
     assert {:project, _config} = ProjectConfig.classify(project)
     assert :application = ProjectConfig.classify(manifest)
-    assert {:error, :project_invalid} = ProjectConfig.classify(foreign)
+
+    assert {:error,
+            {:project_schema_invalid, %SchemaViolation{rule: :const, path: [{:property, "kind"}]}}} =
+             ProjectConfig.classify(foreign)
+
+    File.write!(
+      project,
+      ~s({"kind":"ptc-project","version":1,"application":{"path":"ptc.json","path":"other.json"}})
+    )
+
+    assert {:error,
+            {:project_schema_invalid,
+             %SchemaViolation{
+               rule: :duplicate_property,
+               path: [{:property, "application"}]
+             }}} = ProjectConfig.classify(project)
+
+    File.write!(
+      foreign,
+      ~s({"kind":"something-else","application":{"path":"ptc.json","path":"other.json"}})
+    )
+
+    assert {:error,
+            {:project_schema_invalid, %SchemaViolation{rule: :const, path: [{:property, "kind"}]}}} =
+             ProjectConfig.classify(foreign)
+
+    nested = String.duplicate("[", 65) <> "0" <> String.duplicate("]", 65)
+
+    File.write!(
+      project,
+      ~s({"kind":"ptc-project","version":1,"application":{"path":"ptc.json"},"viewer":#{nested}})
+    )
+
+    assert {:error, {:project_schema_invalid, %SchemaViolation{rule: :schema, path: []}}} =
+             ProjectConfig.classify(project)
+  end
+
+  @tag :tmp_dir
+  test "an oversized document keeps an early project discriminator", %{tmp_dir: directory} do
+    path = Path.join(directory, "oversized.json")
+
+    File.write!(
+      path,
+      ~s({"kind":"ptc-project","version":1,"application":{"path":"ptc.json"},"padding":") <>
+        String.duplicate("x", 300_000) <> ~s("})
+    )
+
+    assert {:error, {:project_schema_invalid, %SchemaViolation{rule: :schema, path: []}}} =
+             ProjectConfig.classify(path)
+  end
+
+  @tag :tmp_dir
+  test "accepts schema-integral JSON numbers in the manual decoder", %{tmp_dir: directory} do
+    path = Path.join(directory, "ptc-project.json")
+
+    File.write!(
+      path,
+      ~s({"kind":"ptc-project","version":1.0,"application":{"path":"ptc.json"},"viewer":{"port":3000.0}})
+    )
+
+    assert {:ok, project} = ProjectConfig.load(path)
+    assert project.viewer.port == 3_000
   end
 
   @tag :tmp_dir
@@ -107,7 +270,9 @@ defmodule PtcRunner.Kernel.ProjectConfigTest do
 
       path = Path.join(directory, "ptc-project.json")
       File.write!(path, Jason.encode!(document))
-      assert {:error, :project_invalid} = ProjectConfig.load(path)
+
+      assert {:error, {:project_schema_invalid, %SchemaViolation{rule: :pattern}}} =
+               ProjectConfig.load(path)
     end
 
     valid = %{

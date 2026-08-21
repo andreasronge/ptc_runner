@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.CommandPath do
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.ProjectConfig
 
   @max_codepoints 8_192
   @max_bytes 32_768
@@ -42,6 +43,7 @@ defmodule PtcRunner.Kernel.CommandPath do
           segments: [segment()],
           authority:
             :host
+            | :project
             | :manifest
             | :component_override
             | {:value_contract_schema, binary()}
@@ -51,6 +53,9 @@ defmodule PtcRunner.Kernel.CommandPath do
 
   @spec host([segment()]) :: {:ok, t()} | {:error, :invalid_command_path}
   def host(segments), do: authorize(segments, HostConfig.schema(), :host)
+
+  @spec project([segment()]) :: {:ok, t()} | {:error, :invalid_command_path}
+  def project(segments), do: authorize(segments, ProjectConfig.schema(), :project)
 
   @spec manifest([segment()]) :: {:ok, t()} | {:error, :invalid_command_path}
   def manifest(segments), do: authorize(segments, Manifest.schema(), :manifest)
@@ -132,8 +137,9 @@ defmodule PtcRunner.Kernel.CommandPath do
 
   defp attest(_segments, _authority, false), do: {:error, :invalid_command_path}
 
-  defp valid_authority?(authority) when authority in [:host, :manifest, :component_override],
-    do: true
+  defp valid_authority?(authority)
+       when authority in [:host, :project, :manifest, :component_override],
+       do: true
 
   defp valid_authority?({:value_contract_schema, name}) when is_binary(name),
     do: ApplicationSource.valid_name?(name)
