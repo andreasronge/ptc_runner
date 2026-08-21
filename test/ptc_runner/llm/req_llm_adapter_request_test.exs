@@ -5,6 +5,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.TestSupport.LLMSupport
+  alias PtcRunner.TestSupport.MCPHTTPFixture
 
   setup do
     LLMSupport.admit_provider_application!()
@@ -50,6 +51,51 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
              )
 
     assert_receive {:request_body, %{"max_tokens" => 2_048}}
+  end
+
+  test "a real Finch request uses current Req options without dependency warnings" do
+    server =
+      MCPHTTPFixture.start(fn _request ->
+        body =
+          Jason.encode!(%{
+            "id" => "gen-test",
+            "model" => "google/gemma-2-27b-it",
+            "choices" => [
+              %{
+                "index" => 0,
+                "finish_reason" => "stop",
+                "message" => %{"role" => "assistant", "content" => "ok"}
+              }
+            ],
+            "usage" => %{"prompt_tokens" => 1, "completion_tokens" => 1, "total_tokens" => 2}
+          })
+
+        {200, [{"content-type", "application/json"}], body}
+      end)
+
+    on_exit(server.close)
+    previous_openrouter = Application.fetch_env(:req_llm, :openrouter)
+    Application.put_env(:req_llm, :openrouter, base_url: server.endpoint)
+
+    on_exit(fn ->
+      case previous_openrouter do
+        {:ok, value} -> Application.put_env(:req_llm, :openrouter, value)
+        :error -> Application.delete_env(:req_llm, :openrouter)
+      end
+    end)
+
+    warnings =
+      capture_io(:stderr, fn ->
+        assert {:ok, %{content: "ok"}} =
+                 ReqLLMAdapter.generate_text(
+                   "openrouter:google/gemma-2-27b-it",
+                   [%{role: :user, content: "hi"}],
+                   api_key: "test",
+                   receive_timeout: 2_000
+                 )
+      end)
+
+    refute warnings =~ "deprecated"
   end
 
   test "preserves a namespaced provider output budget", %{test: test} do

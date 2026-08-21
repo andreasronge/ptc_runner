@@ -56,7 +56,7 @@ if Code.ensure_loaded?(ReqLLM) do
     ]
     @req_llm_stream_generation_options @req_llm_generation_options -- [:tool_choice]
     @token_limit_options [:max_tokens, :max_completion_tokens, :max_output_tokens]
-    # ReqLLM 1.19 gives these providers richer uncataloged fallbacks than its
+    # ReqLLM gives these providers richer uncataloged fallbacks than its
     # documented generic inline form. Keep only the dispatch list here and let
     # ReqLLM's public string resolver construct each target. Generic providers
     # use the documented inline form so the dependency warning never escapes.
