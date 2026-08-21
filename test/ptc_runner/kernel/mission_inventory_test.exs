@@ -113,6 +113,27 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     assert data_grant["docs"] == model_data["docs"]
   end
 
+  test "authoritative inventory keeps unsupported data contracts that model context omits" do
+    {:ok, mission, limits} = mission_fixture()
+
+    # MissionEnvironment admits only JSON-like data, so isolate the inventory
+    # projection with a post-assembly map that includes an unsupported value.
+    mission = %{mission | data: %{"ok" => 1, "pid" => self()}}
+    {:ok, inventory} = MissionInventory.build(mission, limits)
+
+    rendered = Jason.decode!(inventory.rendered)
+    model = Jason.decode!(inventory.model_rendered)
+
+    assert Enum.map(rendered["data"], & &1["form"]) == ["data/ok", "data/pid"]
+    assert Enum.find(rendered["data"], &(&1["form"] == "data/pid"))["contract"] == nil
+
+    assert Enum.map(model["entries"], & &1["form"]) == [
+             "(tool/native.read {\"query\" query})",
+             "(tools/ping value)",
+             "data/ok"
+           ]
+  end
+
   test "hidden exports and capabilities are excluded" do
     source = """
     (ns visible "Visible" {:visibility :prompt})

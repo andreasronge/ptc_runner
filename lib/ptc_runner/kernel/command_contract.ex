@@ -1637,24 +1637,28 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   defp mission_authority_entry do
+    # Ceilings follow StrictJSON admission (max 100_000 nodes) and aggregate
+    # component-source bounds rather than inventing tighter validate-only caps:
+    # CommandOutcome seals against this schema, so an under-bound here turns a
+    # legal package into an internal_error after successful preparation.
     closed(~w(data exports providers), %{
       "data" => %{
         "type" => "array",
-        "maxItems" => 256,
+        "maxItems" => 100_000,
         "items" => %{
           "type" => "string",
           "minLength" => 6,
-          "maxLength" => 512,
+          "maxLength" => 65_536,
           "pattern" => "^data/.+$(?![\\s\\S])"
         }
       },
       "exports" => %{
         "type" => "array",
-        "maxItems" => 4_096,
+        "maxItems" => 100_000,
         "items" => %{
           "type" => "string",
           "minLength" => 1,
-          "maxLength" => 256
+          "maxLength" => 65_536
         }
       },
       "providers" => %{
