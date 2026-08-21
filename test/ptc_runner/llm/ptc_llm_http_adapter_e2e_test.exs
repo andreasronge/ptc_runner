@@ -3,6 +3,7 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterE2ETest do
 
   @moduletag :e2e
   @moduletag timeout: 120_000
+  @external_resource Path.expand("../../../.env", __DIR__)
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.EventSink
@@ -20,8 +21,15 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterE2ETest do
 
   @host Path.expand("../../../examples/kernel-tutorial/ptc-host.json", __DIR__)
 
+  # ExUnit 1.20 only honors skip tags, not `{:skip, reason}` from setup.
+  # Load `.env` before the tag so a checkout-local key is visible here.
+  _ = LLMSupport.load_dotenv()
+
+  if System.get_env("OPENROUTER_API_KEY") in [nil, ""] do
+    @moduletag skip: "OPENROUTER_API_KEY is not configured"
+  end
+
   setup_all do
-    :ok = LLMSupport.load_dotenv()
     previous_adapter = Application.fetch_env(:ptc_runner, :llm_adapter)
     Application.put_env(:ptc_runner, :llm_adapter, PtcLlmHttpAdapter)
 
@@ -29,13 +37,7 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterE2ETest do
       restore_env(:llm_adapter, previous_adapter)
     end)
 
-    case System.fetch_env("OPENROUTER_API_KEY") do
-      {:ok, key} when byte_size(key) > 0 ->
-        :ok
-
-      _missing ->
-        {:skip, "OPENROUTER_API_KEY is not configured"}
-    end
+    :ok
   end
 
   test "a live OpenRouter host installation completes through PtcLlmHttp" do
