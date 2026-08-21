@@ -105,10 +105,14 @@ defmodule PtcRunner.TestSupport.OpenAICompatLLMGateway do
   end
 
   defp usage_object(usage) when is_map(usage) do
+    prompt = Map.get(usage, :input, Map.get(usage, "prompt_tokens", 1))
+    completion = Map.get(usage, :output, Map.get(usage, "completion_tokens", 1))
+
     %{
-      "prompt_tokens" => Map.get(usage, :input, Map.get(usage, "prompt_tokens", 1)),
-      "completion_tokens" => Map.get(usage, :output, Map.get(usage, "completion_tokens", 1)),
-      "total_tokens" => Map.get(usage, :total, Map.get(usage, "total_tokens", 2))
+      "prompt_tokens" => prompt,
+      "completion_tokens" => completion,
+      "total_tokens" =>
+        Map.get(usage, :total, Map.get(usage, "total_tokens", prompt + completion))
     }
     |> maybe_put_cost(usage)
     |> maybe_put_cached(usage)

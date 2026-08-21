@@ -9,6 +9,7 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.LLM
@@ -237,6 +238,7 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
                        "parameters" => %{
                          "type" => "object",
                          "properties" => %{},
+                         "required" => [],
                          "additionalProperties" => false
                        }
                      }
@@ -462,8 +464,9 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
       send(first_worker, {release, :serve_hold})
       assert_receive {:blocked, _callback}
       assert {:ok, %{in_use: 1}} = Runtime.snapshot(runtime)
-      Process.exit(caller.pid, :kill)
       ref = Process.monitor(caller.pid)
+      Process.unlink(caller.pid)
+      Process.exit(caller.pid, :kill)
       assert_receive {:DOWN, ^ref, :process, _pid, :killed}
 
       recovered =
@@ -487,7 +490,16 @@ defmodule PtcRunner.LLM.PtcLlmHttpAdapterTest do
 
   defp kernel_complete(port, request) do
     {:ok, requester} = requester(port)
-    {:ok, capability} = LLMCapability.new(requester: requester)
+
+    {:ok, capability} =
+      LLMCapability.new(
+        requester: fn llm_request ->
+          llm_request
+          |> ProviderRegistry.adapter_request()
+          |> requester.()
+        end
+      )
+
     {:ok, component} = Library.component("llm")
     {:ok, bundle} = Kernel.compile_bundle([component])
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [capability])

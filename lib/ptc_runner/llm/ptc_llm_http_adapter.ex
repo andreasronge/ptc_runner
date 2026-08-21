@@ -157,7 +157,7 @@ if Code.ensure_loaded?(PtcLlmHttp) do
       end
     end
 
-    defp stream_delta(%{delta: text} = chunk, on_delta, acc) when is_binary(text) do
+    defp stream_delta(%{delta: text}, on_delta, acc) when is_binary(text) do
       [{_key, content}] = :ets.lookup(acc, :content)
       :ets.insert(acc, {:content, content <> text})
       on_delta.(%{delta: text})
@@ -593,6 +593,7 @@ if Code.ensure_loaded?(PtcLlmHttp) do
       do: "LLM request is not supported by this adapter"
 
     defp details(:invalid_target, _status), do: "LLM model selector is not supported"
+    defp details(:invalid_request, _status), do: "LLM request is invalid"
     defp details(_kind, _status), do: "LLM provider unavailable"
 
     defp unsupported_selector_error do
