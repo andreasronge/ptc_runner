@@ -58,6 +58,18 @@ defmodule PtcRunner.Lisp.NamespaceDiagnostic do
 
   def unknown_namespace?(_message), do: false
 
+  @data_not_callable_prefix "not callable: data/"
+
+  @doc """
+  Answers whether a rendered message is a `not_callable` diagnostic for a
+  `data/<name>` symbol.
+  """
+  @spec data_not_callable?(binary()) :: boolean()
+  def data_not_callable?(message) when is_binary(message),
+    do: String.starts_with?(message, @data_not_callable_prefix)
+
+  def data_not_callable?(_message), do: false
+
   @doc false
   @spec rejected_namespace(binary()) :: {:ok, binary()} | :error
   def rejected_namespace(message) when is_binary(message) do

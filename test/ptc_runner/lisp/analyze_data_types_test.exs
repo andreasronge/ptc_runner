@@ -127,5 +127,10 @@ defmodule PtcRunner.Lisp.AnalyzeDataTypesTest do
       assert {:ok, {:data, :data}} = Analyze.analyze({:ns_symbol, :data, :data})
       assert {:ok, {:data, :query}} = Analyze.analyze({:ns_symbol, :data, :query})
     end
+
+    test "data namespace in call position is a call of the data value" do
+      assert {:ok, {:call, {:data, :tickets}, []}} =
+               Analyze.analyze({:list, [{:ns_symbol, :data, :tickets}]})
+    end
   end
 end

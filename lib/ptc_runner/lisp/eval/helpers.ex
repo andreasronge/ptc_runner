@@ -467,6 +467,10 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   def sanitize_private_error({:destructure_error, _message}),
     do: {:destructure_error, "private prelude evaluation failed during destructuring"}
 
+  def sanitize_private_error({:not_callable, {:data_ref, symbol}} = reason)
+      when is_binary(symbol),
+      do: reason
+
   def sanitize_private_error({:not_callable, _private_value}),
     do: {:not_callable, :private_prelude_value}
 

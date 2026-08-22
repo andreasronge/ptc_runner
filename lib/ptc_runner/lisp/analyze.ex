@@ -468,6 +468,12 @@ defmodule PtcRunner.Lisp.Analyze do
   defp dispatch_list_form({:ns_symbol, :tool, tool_name}, rest, _list, tail?),
     do: analyze_tool_call(tool_name, rest, tail?)
 
+  # Data values in call position: `(data/tickets)` is a call of the granted
+  # value, not a namespaced function lookup. The evaluator resolves the grant
+  # first, then reports `not_callable` naming the symbol.
+  defp dispatch_list_form({:ns_symbol, :data, _key} = head, rest, _list, tail?),
+    do: analyze_call({:list, [head | rest]}, tail?)
+
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
   defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do
     case java_reference(ns, func) do

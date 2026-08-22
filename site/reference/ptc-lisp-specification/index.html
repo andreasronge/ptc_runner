@@ -547,7 +547,10 @@ language-level failure outcome. A Kernel host uses that outcome to abort and
 roll back a multi-turn run. Direct <code class="inline">PtcRunner.Lisp.run/2</code> reports it as a
 successful evaluation whose <code class="inline">Result.return</code> is <code class="inline">{:__ptc_fail__, value}</code>; this
 is distinct from an evaluator error returned under the outer <code class="inline">:error</code> tag.</p><p><strong>Syntax:</strong></p><pre><code class="clojure language-clojure">(fail error)</code></pre><p><strong>Semantics:</strong></p><ul><li>Immediately terminates the current program execution</li><li>The outer call to <code class="inline">PtcRunner.Lisp.run/2</code> succeeds and <code class="inline">Result.return</code> contains
-<code class="inline">{:__ptc_fail__, value}</code></li><li>Cannot be used inside <code class="inline">pmap</code> or <code class="inline">pcalls</code> (raises an error)</li></ul><pre><code class="clojure language-clojure">;; Signal failure when a required condition isn't met
+<code class="inline">{:__ptc_fail__, value}</code></li><li>Cannot be used inside <code class="inline">pmap</code> or <code class="inline">pcalls</code> (raises an error)</li></ul><pre><code class="clojure language-clojure">;; Signal failure when a required condition isn't met.
+;; Valid at the workflow boundary and in `PtcRunner.Lisp.run/2`, where a
+;; missing `data/&lt;name&gt;` is `nil`. Mission-scoped evaluation is strict: name
+;; the granted keys or let a missing grant fail instead of testing `nil?`.
 (if (nil? data/input)
   (fail &quot;No input data provided&quot;)
   (process data/input))</code></pre><hr class="thin"><h2 id="6-threading-macros">6. Threading Macros</h2><p>Threading macros transform nested function calls into linear pipelines.</p><h3 id="6-1-thread-last">6.1 <code class="inline">-&gt;&gt;</code> — Thread Last</h3><p>Threads the value as the <strong>last argument</strong> to each form:</p><pre><code class="clojure language-clojure">(-&gt;&gt; value
@@ -1308,7 +1311,17 @@ query-count</code></pre><h3 id="9-3-context-access-data">9.3 Context Access — 
 data/user-id              ; get :user-id from context
 data/request-id           ; get :request-id from context</code></pre><p>Context is <strong>per-request</strong> data passed by the host. It does not persist across turns.</p><pre><code class="clojure language-clojure">(-&gt;&gt; data/expenses
      (filter (fn [e] (= (:category e) &quot;travel&quot;)))
-     (sum-by :amount))</code></pre><h3 id="9-4-turn-history-1-2-3">9.4 Turn History — <code class="inline">*1</code>, <code class="inline">*2</code>, <code class="inline">*3</code></h3><p>Access results from previous turns using the turn history symbols:</p><pre><code class="clojure language-clojure">*1                        ; result from the previous turn (most recent)
+     (sum-by :amount))</code></pre><p>At the generic <code class="inline">PtcRunner.Lisp.run/2</code> embedding API and at the Kernel workflow
+boundary, a missing <code class="inline">data/&lt;name&gt;</code> evaluates to <code class="inline">nil</code>. Mission-scoped evaluation
+— a normal mission run and <code class="inline">ptc repl --mission</code> — is strict: a missing grant is
+a <code class="inline">:runtime_error</code> that names the rejected symbol and lists the mission's
+granted <code class="inline">data/&lt;name&gt;</code> forms. Calling a granted data value, as in
+<code class="inline">(data/tickets)</code>, is <code class="inline">:not_callable</code> and names the symbol rather than rendering
+the value.</p><p><code class="inline">data/params</code> is injected only by <code class="inline">kernel/eval-with</code> and
+<code class="inline">kernel/eval-source-with</code>. Referencing it when this evaluation supplied no
+params is a distinct error, not a missing-grant diagnostic. Discover granted
+names from the mission inventory (<code class="inline">:context</code> in a mission REPL), not from
+<code class="inline">apropos</code> or <code class="inline">doc</code>.</p><h3 id="9-4-turn-history-1-2-3">9.4 Turn History — <code class="inline">*1</code>, <code class="inline">*2</code>, <code class="inline">*3</code></h3><p>Access results from previous turns using the turn history symbols:</p><pre><code class="clojure language-clojure">*1                        ; result from the previous turn (most recent)
 *2                        ; result from 2 turns ago
 *3                        ; result from 3 turns ago</code></pre><p><strong>Semantics:</strong></p><ul><li><code class="inline">*1</code> returns the exact native result of the most recent ordinary successful turn</li><li><code class="inline">*2</code> and <code class="inline">*3</code> return the next two older ordinary successful results</li><li>Returns <code class="inline">nil</code> if the turn doesn't exist (e.g., <code class="inline">*1</code> on turn 1)</li><li>A Kernel run and direct Kernel REPL retain exactly the last three results;
 the oldest is discarded when a fourth ordinary success commits</li><li>Explicit <code class="inline">return</code> commits definitions but does not advance history</li><li>Failed evaluations and explicit <code class="inline">fail</code> roll back definitions and history</li><li>History values retain their exact native types and callable identities; only
@@ -1742,7 +1755,9 @@ memory and turn history only for successful turns.</p><h4 id="parameterized-subo
 argument must project to a JSON value and is available only for that mission
 evaluation as <code class="inline">data/params</code>. It replaces any mission data already stored at
 the <code class="inline">&quot;params&quot;</code> key for that evaluation; <code class="inline">kernel/eval</code> and <code class="inline">kernel/eval-source</code>
-leave mission data unchanged.</p><p>Use this boundary for evidence identifiers, paths, queries, and other runtime
+leave mission data unchanged. Referencing <code class="inline">data/params</code> when this evaluation
+supplied none is a runtime error that names those two entry points; it is not
+reported as a missing mission grant.</p><p>Use this boundary for evidence identifiers, paths, queries, and other runtime
 values. Building source strings from those values changes the program identity
 and creates an avoidable code-injection boundary. Parameter values and source
 text are withheld from the public effect ledger; only deterministic byte-size

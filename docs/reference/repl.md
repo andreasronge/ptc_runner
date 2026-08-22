@@ -103,9 +103,9 @@ application, host configuration, and lazy environment-file paths, while
 duplicated in `ptc-project.json`. The manifest form is the equivalent low-level
 command. Omitting `--mission` keeps the workflow REPL behavior — which carries
 no mission namespaces, so a mission's own namespace is rejected as unknown.
-That rejection names `--mission` and lists the missions the manifest declares,
-because the language diagnostic that raises it knows only the language's
-namespaces.
+Calling `data/<name>` in that session is `not_callable` rather than an unknown
+namespace, because `data/` is a language namespace. Both answers name
+`--mission` and list the missions the manifest declares.
 
 A mission session starts with a fresh continuation and evaluates through the
 same strict JSON boundary as ordinary mission execution. It exposes that
@@ -115,6 +115,13 @@ dependency closure are opened; unrelated providers do not run local checks,
 start applications, request authorization or credentials, or acquire
 resources. Dependency-only providers support the session without contributing
 task capabilities.
+
+A mission session looks up `data/<name>` strictly: a granted name resolves to
+its value, a missing name is a runtime error that lists the granted
+`data/<name>` forms, and calling a granted value as in `(data/tickets)` is
+`not_callable` naming the symbol. Discover those names with `:context`. The
+workflow session and the generic embedding API keep the permissive `nil`
+default.
 
 The interactive banner names the selected mission, components, and direct
 provider aliases. Mission sessions add one meta-command:

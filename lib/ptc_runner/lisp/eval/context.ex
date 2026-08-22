@@ -107,6 +107,13 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # in the context raises a runtime error naming the binding instead of
     # returning `nil`. It is off by default for permissive embedded execution.
     strict_data: false,
+    # Sorted `data/<name>` forms supplied by the Kernel mission boundary for
+    # missing-grant diagnostics. `nil` means the caller did not pass a list;
+    # Eval must not derive one from `ctx`.
+    data_grants: nil,
+    # Kernel-supplied diagnostic used when `data/params` is missing under
+    # strict data. `nil` treats `params` as an ordinary missing key.
+    missing_data_params_message: nil,
     # When true, session-authored code may only name prelude namespaces that
     # were directly attached. Prelude-internal calls remain allowed because the
     # compiler already validated their declared namespace deps.
@@ -207,6 +214,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
           effects: Effects.t(),
           tools_meta: %{String.t() => %{optional(atom()) => term()}},
           strict_data: boolean(),
+          data_grants: [String.t()] | nil,
+          missing_data_params_message: String.t() | nil,
           strict_transitive_calls: boolean(),
           private_tool_authority?: boolean(),
           direct_namespaces: MapSet.t(String.t()),
@@ -286,6 +295,9 @@ defmodule PtcRunner.Lisp.Eval.Context do
       effects: Effects.empty(),
       tools_meta: Keyword.get(opts, :tools_meta, %{}),
       strict_data: Keyword.get(opts, :strict_data, false),
+      data_grants: normalize_data_grants(Keyword.get(opts, :data_grants)),
+      missing_data_params_message:
+        normalize_missing_params_message(Keyword.get(opts, :missing_data_params_message)),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       private_tool_authority?: Keyword.get(opts, :private_tool_authority?, false),
       direct_namespaces: namespace_set(Keyword.get(opts, :direct_namespaces, [])),
@@ -341,6 +353,14 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   defp namespace_set(%MapSet{} = namespaces), do: namespaces
   defp namespace_set(_namespaces), do: MapSet.new()
+
+  defp normalize_data_grants(names) when is_list(names), do: Enum.filter(names, &is_binary/1)
+  defp normalize_data_grants(_names), do: nil
+
+  defp normalize_missing_params_message(message) when is_binary(message) and message != "",
+    do: message
+
+  defp normalize_missing_params_message(_message), do: nil
 
   defp normalize_namespace_requirers(requirers) when is_map(requirers) do
     Map.new(requirers, fn
@@ -594,7 +614,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
         failure_origin: source.failure_origin,
         return_origin: source.return_origin,
         origin_stack: source.origin_stack,
-        prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack
+        prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack,
+        strict_data: source.strict_data,
+        data_grants: source.data_grants,
+        missing_data_params_message: source.missing_data_params_message
     }
   end
 

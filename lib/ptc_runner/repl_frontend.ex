@@ -1560,16 +1560,18 @@ defmodule PtcRunner.ReplFrontend do
 
   # The analyzer answers an unknown namespace with the language's own list,
   # thirty-odd entries that name no mission, because a workflow session cannot
-  # reach one. Which switch would add them is a REPL fact rather than a language
-  # fact, so it is said here instead of in the shared diagnostic -- whose exact
-  # text is also reverse-parsed by `NamespaceDiagnostic.rejected_namespace/1`.
+  # reach one. Calling `data/<name>` is `not_callable` rather than unknown
+  # namespace, because `data/` is a language namespace. Which switch would add
+  # mission names is a REPL fact rather than a language fact, so it is said
+  # here instead of in the shared diagnostic -- whose exact text is also
+  # reverse-parsed by `NamespaceDiagnostic.rejected_namespace/1`.
   #
   # It leads, because the enumeration that follows is long enough to be
   # truncated by the one-shot renderer and is the least actionable part of the
   # answer.
   defp mission_hint(%{fail: %{message: message}}, session, %{mission_selectable?: true})
        when is_binary(message) do
-    with true <- NamespaceDiagnostic.unknown_namespace?(message),
+    with true <- workflow_mission_hint?(message),
          %{kind: :workflow, declared_missions: [_ | _] = declared} <-
            ReplSession.mode_info(session) do
       "this session evaluates the workflow environment and carries no mission " <>
@@ -1581,6 +1583,11 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp mission_hint(_step, _session, _render), do: ""
+
+  defp workflow_mission_hint?(message) do
+    NamespaceDiagnostic.unknown_namespace?(message) or
+      NamespaceDiagnostic.data_not_callable?(message)
+  end
 
   defp finish({:ok, session}, _render) do
     stop_session(session)

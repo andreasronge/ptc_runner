@@ -274,6 +274,17 @@ defmodule PtcRunner.Lisp do
     - `:max_program_bytes` - Max source code size in bytes (default: 1_000_000)
     - `:max_print_length` - Max characters per `println` call (default: 2000)
     - `:filter_context` - Filter context to only include accessed data keys (default: true)
+    - `:strict_data` - When true, a missing `data/<name>` is a runtime error
+      instead of `nil` (default: false). The Kernel enables this at the mission
+      boundary; `run/2` stays permissive.
+    - `:data_grants` - Optional sorted `data/<name>` forms included in the
+      missing-grant diagnostic under `:strict_data`. The Kernel passes the same
+      list the mission inventory publishes rather than deriving it from context
+      keys. When omitted, the diagnostic names the missing key without a grant
+      list.
+    - `:missing_data_params_message` - Optional diagnostic used when `data/params`
+      is missing under `:strict_data`. The Kernel sets this so a no-params
+      evaluation is not reported as a missing grant.
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
       SOURCE string, or a list of source-bearing selection maps accepted by
       `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code.
@@ -791,6 +802,8 @@ defmodule PtcRunner.Lisp do
       max_tool_call_result_bytes: Keyword.get(opts, :max_tool_call_result_bytes),
       turn_history_mode: Keyword.fetch!(opts, :turn_history_mode),
       strict_data: Keyword.get(opts, :strict_data, false),
+      data_grants: Keyword.get(opts, :data_grants),
+      missing_data_params_message: Keyword.get(opts, :missing_data_params_message),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
@@ -1192,6 +1205,8 @@ defmodule PtcRunner.Lisp do
       max_tool_call_result_bytes: max_tool_call_result_bytes,
       turn_history_mode: turn_history_mode,
       strict_data: strict_data,
+      data_grants: data_grants,
+      missing_data_params_message: missing_data_params_message,
       strict_transitive_calls: strict_transitive_calls,
       private_tool_authority?: private_tool_authority?,
       direct_namespaces: direct_namespaces,
@@ -1232,6 +1247,8 @@ defmodule PtcRunner.Lisp do
         max_tool_calls: max_tool_calls,
         max_tool_call_result_bytes: max_tool_call_result_bytes,
         strict_data: strict_data,
+        data_grants: data_grants,
+        missing_data_params_message: missing_data_params_message,
         strict_transitive_calls: strict_transitive_calls,
         private_tool_authority?: private_tool_authority?,
         direct_namespaces: direct_namespaces,
@@ -1616,6 +1633,9 @@ defmodule PtcRunner.Lisp do
     <<first::utf8, rest::binary>> = msg
     <<String.downcase(<<first::utf8>>)::binary, rest::binary>>
   end
+
+  def format_error({:not_callable, {:data_ref, symbol}}) when is_binary(symbol),
+    do: "not callable: #{symbol}"
 
   def format_error({:not_callable, value}), do: "not callable: #{inspect(value, limit: 3)}"
   def format_error({:arity_error, msg}), do: "arity error: #{msg}"
