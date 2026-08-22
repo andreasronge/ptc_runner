@@ -66,7 +66,7 @@ defmodule PtcRunner.Lisp.NamespaceDiagnostic do
   """
   @spec data_not_callable?(binary()) :: boolean()
   def data_not_callable?(message) when is_binary(message),
-    do: String.contains?(message, @data_not_callable_prefix)
+    do: String.starts_with?(message, @data_not_callable_prefix)
 
   def data_not_callable?(_message), do: false
 

@@ -313,6 +313,26 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "a workflow session does not hint --mission for an unrelated not_callable string", %{
+    tmp_dir: directory
+  } do
+    manifest_path = write_workflow_repl_manifest(directory)
+
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl([
+          "--manifest",
+          manifest_path,
+          "-e",
+          ~S|(let [x "not callable: data/tickets"] (x))|
+        ])
+      end
+
+    assert error.message =~ "not callable:"
+    refute error.message =~ "--mission NAME"
+  end
+
+  @tag :tmp_dir
   test "a mission session resolves data grants, rejects misses, and does not render called values",
        %{
          tmp_dir: directory

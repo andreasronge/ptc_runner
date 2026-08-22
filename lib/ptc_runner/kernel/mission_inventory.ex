@@ -115,10 +115,10 @@ defmodule PtcRunner.Kernel.MissionInventory do
   Returns the sorted `data/<name>` source forms for keys that can be written as
   a `data/<name>` reference.
 
-  Names that cannot be parsed as that form are omitted, matching the inventory's
-  published grant list. The Kernel mission evaluator prints this same list in
-  missing-grant diagnostics rather than deriving names from the evaluation
-  context.
+  Names that cannot be parsed as that form are omitted. Inventory data entries
+  and missing-grant diagnostics both consume this list rather than selecting
+  forms independently. The Kernel mission evaluator prints it rather than
+  deriving names from the evaluation context.
   """
   @spec source_referenceable_forms(map()) :: [binary()]
   def source_referenceable_forms(data) when is_map(data) and not is_struct(data) do
@@ -231,15 +231,13 @@ defmodule PtcRunner.Kernel.MissionInventory do
   defp data_entries(%{data: data}) when is_map(data) and not is_struct(data) do
     if JSONValue.map?(data) do
       data
-      |> Enum.sort_by(&elem(&1, 0))
-      |> Enum.reduce_while({:ok, []}, fn {name, value}, {:ok, entries} ->
-        with {:ok, form} <- source_referenceable_form(name),
-             {:ok, contract} <- ModelContract.json_value(value) do
-          entry = data_entry(form, contract)
+      |> source_referenceable_forms()
+      |> Enum.reduce_while({:ok, []}, fn form, {:ok, entries} ->
+        "data/" <> name = form
+        value = Map.fetch!(data, name)
 
-          {:cont, {:ok, [entry | entries]}}
-        else
-          :skip -> {:cont, {:ok, entries}}
+        case ModelContract.json_value(value) do
+          {:ok, contract} -> {:cont, {:ok, [data_entry(form, contract) | entries]}}
           {:error, :unsupported_contract} = error -> {:halt, error}
         end
       end)
