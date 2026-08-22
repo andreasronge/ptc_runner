@@ -505,7 +505,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
                  trace_dir
                ])
 
-      assert exhausted.envelope["error"]["code"] == "runtime_limit_exceeded",
+      assert exhausted.envelope["error"]["code"] == "turn_limit_exceeded",
              inspect(exhausted.envelope)
 
       assert exhausted.envelope["error"]["message"] ==
@@ -514,6 +514,8 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
                  "max_tokens leaves room for a complete call"
 
       assert exhausted.envelope["error"]["source"] == nil
+      assert exhausted.envelope["error"]["subject"] == nil
+      assert exhausted.envelope["error"]["provider_activity"] == true
       assert CommandContract.valid_envelope?(exhausted.envelope)
 
       assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))

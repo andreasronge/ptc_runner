@@ -395,7 +395,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
       },
       %{
         phase: :execution,
-        code: :runtime_limit_exceeded,
+        code: :capability_quota_exceeded,
         source: :runtime,
         setting: "max_calls",
         value: "4",
@@ -404,7 +404,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
       },
       %{
         phase: :execution,
-        code: :runtime_limit_exceeded,
+        code: :capability_quota_exceeded,
         source: :runtime,
         setting: "workflow_capability_calls_per_name",
         value: "2",
@@ -475,7 +475,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     for {reason, remedy} <- remedies do
       %{
         phase: :execution,
-        code: :runtime_limit_exceeded,
+        code: :turn_limit_exceeded,
         source: nil,
         setting: "max_turns",
         value: "4",

@@ -930,6 +930,7 @@ defmodule PtcRunner.Kernel.Runner do
        when reason in [
               :timeout,
               :compile_timeout,
+              :compile_memory_exceeded,
               :memory_exceeded,
               :program_too_large,
               :model_output_truncated
@@ -1011,6 +1012,19 @@ defmodule PtcRunner.Kernel.Runner do
       limit: :workflow_heap_words,
       limit_value: limits.workflow_heap_words
     }
+
+  defp workflow_error_details(
+         %{reason: :compile_memory_exceeded},
+         _timeout_ms,
+         limits,
+         _sink
+       ),
+       do: %{
+         message: "workflow_heap_words exceeded during compilation",
+         limit: :workflow_heap_words,
+         limit_value: limits.workflow_heap_words,
+         phase: :compilation
+       }
 
   defp workflow_error_details(
          %{reason: :llm_provider_failed, details: details} = fail,

@@ -748,6 +748,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
     assert outcome.envelope["error"]["message"] == expected
     assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert outcome.envelope["error"]["subject"] == nil
+    assert outcome.envelope["error"]["provider_activity"] == true
     assert_schema_valid(outcome.envelope)
 
     runtime_source = CommandSource.fixed(:runtime)
@@ -775,21 +777,23 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              })
 
     assert {:ok, expected} = RuntimeLimitDiagnostic.max_calls_message("deepseek", 4)
-    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.envelope["error"]["code"] == "capability_quota_exceeded"
     assert outcome.envelope["error"]["message"] == expected
     assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert outcome.envelope["error"]["subject"] == nil
+    assert outcome.envelope["error"]["provider_activity"] == true
     assert_schema_valid(outcome.envelope)
 
     runtime_source = CommandSource.fixed(:runtime)
 
     assert {:error, :invalid_command_diagnostic} =
-             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+             CommandDiagnostic.new(:execution, :capability_quota_exceeded,
                message: expected,
                provider_activity: true
              )
 
     assert {:ok, %CommandDiagnostic{source: ^runtime_source}} =
-             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+             CommandDiagnostic.new(:execution, :capability_quota_exceeded,
                message: expected,
                source: runtime_source,
                provider_activity: true
@@ -811,9 +815,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                2
              )
 
-    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.envelope["error"]["code"] == "capability_quota_exceeded"
     assert outcome.envelope["error"]["message"] == expected
     assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert outcome.envelope["error"]["subject"] == nil
+    assert outcome.envelope["error"]["provider_activity"] == true
     assert_schema_valid(outcome.envelope)
   end
 
@@ -894,13 +900,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert {:ok, message} = RuntimeLimitDiagnostic.agent_turns_message(limit, reason)
 
       assert {:ok, %CommandDiagnostic{source: nil}} =
-               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               CommandDiagnostic.new(:execution, :turn_limit_exceeded,
                  message: message,
                  provider_activity: true
                )
 
       assert {:error, :invalid_command_diagnostic} =
-               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               CommandDiagnostic.new(:execution, :turn_limit_exceeded,
                  message: message,
                  source: runtime_source,
                  provider_activity: true
@@ -916,7 +922,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           "the model produced no valid tool call in 2 turns; raise max_turns"
         ] do
       assert {:error, :invalid_command_diagnostic} =
-               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               CommandDiagnostic.new(:execution, :turn_limit_exceeded,
                  message: invalid_message,
                  provider_activity: true
                )
@@ -930,6 +936,51 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                message: subordinate_message,
                provider_activity: true
              )
+  end
+
+  @tag :tmp_dir
+  test "a compilation heap kill names the workflow heap limit", %{tmp_dir: directory} do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "tiny", "path" => "tiny.clj"}],
+        "entry" => "tiny/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"workflow_heap_words" => 1_000},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
+
+    application =
+      write_application(directory, "compile-heap-exhausted", manifest, [
+        {"tiny.clj", "(ns tiny) (defn run [input] (return input))"}
+      ])
+
+    trace_dir = Path.join(directory, "compile-heap-traces")
+    File.mkdir_p!(trace_dir)
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--trace-dir", trace_dir])
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.heap_words_message(1_000)
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.exit_status == 6
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+
+    assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
+
+    limit_event =
+      trace_path
+      |> File.stream!()
+      |> Stream.map(&Jason.decode!/1)
+      |> Enum.find(&(&1["type"] == "limit-exceeded"))
+
+    assert limit_event["data"]["reason"] == "compile_memory_exceeded"
+    assert limit_event["data"]["limit"] == "workflow_heap_words"
+    assert limit_event["data"]["limit_value"] == 1_000
+    assert limit_event["data"]["phase"] == "compilation"
   end
 
   @tag :tmp_dir

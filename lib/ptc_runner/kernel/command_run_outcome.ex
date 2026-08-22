@@ -402,11 +402,12 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp failure_diagnostic(
          %Error{
            kind: :limit_exceeded,
-           reason: :memory_exceeded,
+           reason: reason,
            details: %{limit: :workflow_heap_words, limit_value: limit}
          },
          provider_activity
-       ) do
+       )
+       when reason in [:memory_exceeded, :compile_memory_exceeded] do
     case RuntimeLimitDiagnostic.heap_words_message(limit) do
       {:ok, message} ->
         diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
@@ -429,13 +430,13 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        ) do
     case RuntimeLimitDiagnostic.max_calls_message(alias_name, limit) do
       {:ok, message} ->
-        diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
+        diagnostic(:execution, :capability_quota_exceeded, provider_activity,
           message: message,
           source: CommandSource.fixed(:runtime)
         )
 
       :error ->
-        diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
+        diagnostic(:execution, :capability_quota_exceeded, provider_activity)
     end
   end
 
@@ -449,13 +450,13 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        ) do
     case RuntimeLimitDiagnostic.capability_quota_message(limit, name, value) do
       {:ok, message} ->
-        diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
+        diagnostic(:execution, :capability_quota_exceeded, provider_activity,
           message: message,
           source: CommandSource.fixed(:runtime)
         )
 
       :error ->
-        diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
+        diagnostic(:execution, :capability_quota_exceeded, provider_activity)
     end
   end
 
@@ -573,7 +574,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        ) do
     case RuntimeLimitDiagnostic.agent_turns_message(limit, limit_reason) do
       {:ok, message} ->
-        diagnostic(:execution, :runtime_limit_exceeded, provider_activity, message: message)
+        diagnostic(:execution, :turn_limit_exceeded, provider_activity, message: message)
 
       :error ->
         diagnostic(:execution, :workflow_failed, provider_activity)
