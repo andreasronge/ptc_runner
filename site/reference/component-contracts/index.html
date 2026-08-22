@@ -174,7 +174,12 @@ candidate path is confined to the descriptor directory. PtcRunner verifies
 both hashes before compiling: <code class="inline">source_hash</code> prevents substituted candidate
 bytes, while <code class="inline">base_source_hash</code> rejects a candidate built for a component that
 has since changed. The source is read once, and those verified bytes are the
-bytes compiled.</p><p>An override preserves the selected component's ID and declared dependencies.
+bytes compiled.</p><p>A refused descriptor keeps the <code class="inline">override_invalid</code> code and the logical source
+<code class="inline">component-override.json</code>. The message names the field and the rule — stale
+<code class="inline">base_source_hash</code>, mismatched <code class="inline">source_hash</code>, an unknown <code class="inline">component_id</code>, or a
+<code class="inline">path</code> that is not a confined candidate — and <code class="inline">path</code> points at that field.
+The descriptor's filesystem path and the rejected hash values stay out of the
+envelope.</p><p>An override preserves the selected component's ID and declared dependencies.
 It cannot add a component or change the graph. The replacement still passes
 the normal dependency, signature, export, capability-requirement, and bundle
 checks. The descriptor contains no source, credentials, provider grants, or

@@ -6,10 +6,10 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   typed safe provenance.
   Contract-authorized paths must also match the sealed contract authority bound
   to their source classification. Rendering never inspects a lower-level
-  reason or rejected value. Catalog-authorized dynamic message shapes contain
+  reason or rejected value.   Catalog-authorized dynamic message shapes contain
   only fixed literals plus bounded PTC-Lisp symbol names, a catalog-validated
-  runtime ceiling, a bounded agent turn ceiling, or an opaque replay request
-  hash. Compile messages require component-source provenance; a missing
+  runtime ceiling, a bounded agent turn ceiling, an opaque replay request
+  hash, or a closed component-override field rule. Compile messages require component-source provenance; a missing
   capability message is rebuilt from the frozen bundle's sorted tool
   requirements. A missing MCP tool message may retain only the validated,
   declaration-owned upstream name and carries no provider catalog payload.
@@ -29,6 +29,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
@@ -381,6 +382,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        )
        when kind in [:input_contract, :result_contract],
        do: ContractSchemaDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :override_invalid},
+         %CommandSource{kind: :component_override}
+       ),
+       do: ComponentOverrideDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          _message,

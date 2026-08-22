@@ -161,6 +161,13 @@ bytes, while `base_source_hash` rejects a candidate built for a component that
 has since changed. The source is read once, and those verified bytes are the
 bytes compiled.
 
+A refused descriptor keeps the `override_invalid` code and the logical source
+`component-override.json`. The message names the field and the rule — stale
+`base_source_hash`, mismatched `source_hash`, an unknown `component_id`, or a
+`path` that is not a confined candidate — and `path` points at that field.
+The descriptor's filesystem path and the rejected hash values stay out of the
+envelope.
+
 An override preserves the selected component's ID and declared dependencies.
 It cannot add a component or change the graph. The replacement still passes
 the normal dependency, signature, export, capability-requirement, and bundle

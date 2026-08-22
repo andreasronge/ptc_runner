@@ -3,17 +3,18 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   Deterministic, privacy-preserving human projection of sealed command outcomes.
 
   Provider failures include the validated provider subject already present in
-  the public command envelope. Project, manifest, and value-contract failures with a
-  non-root, schema-authorized path include its JSON Pointer. A contract schema
-  rejected before it compiles also names the document its pointer indexes,
-  because a manifest may carry two and the pointer means nothing without it.
-  Unusual contract-authored pointers and logical names use an escaped quoted
-  representation before they enter a terminal. Rendering never derives labels from a rejected value,
-  provider response, credential, or unvalidated path. Component compile
-  failures with a proven byte span render the logical component name and
-  canonical half-open byte range already present in the envelope; rendering
-  does not retain or reopen component source. A replay miss may include only
-  its validated opaque request hash.
+  the public command envelope. Project, manifest, component-override, and
+  value-contract failures with a non-root, schema-authorized path include its
+  JSON Pointer. A contract schema rejected before it compiles also names the
+  document its pointer indexes, because a manifest may carry two and the
+  pointer means nothing without it. Unusual contract-authored pointers and
+  logical names use an escaped quoted representation before they enter a
+  terminal. Rendering never derives labels from a rejected value, provider
+  response, credential, or unvalidated path. Component compile failures with a
+  proven byte span render the logical component name and canonical half-open
+  byte range already present in the envelope; rendering does not retain or
+  reopen component source. A replay miss may include only its validated opaque
+  request hash.
   """
 
   alias PtcRunner.Kernel.CommandDeclaration
@@ -235,6 +236,15 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        when kind in ["input_contract", "result_contract"] and is_binary(name) and
               is_binary(path) and path != "",
        do: " at #{terminal_contract_path(path)} in #{terminal_source_name(name)} "
+
+  defp location_suffix(%{
+         "phase" => "application",
+         "code" => "override_invalid",
+         "source" => %{"kind" => "component_override"},
+         "path" => path
+       })
+       when is_binary(path) and path != "",
+       do: " at " <> path <> " "
 
   defp location_suffix(_error), do: " "
 

@@ -111,7 +111,10 @@ override target.
 The descriptor binds the candidate to the installed source it replaces and to
 the exact candidate bytes. It cannot add a component, change dependencies, or
 grant a provider. The replacement still passes compilation, dependency,
-signature, export, capability-requirement, and bundle checks. See the
+signature, export, capability-requirement, and bundle checks. A refused
+descriptor names the field it broke (`base_source_hash`, `source_hash`,
+`component_id`, or `path`) rather than collapsing every mistake into one
+sentence. See the
 [component reference](../reference/component-contracts.md#evaluate-one-replacement-component)
 for every descriptor field and validation rule.
 

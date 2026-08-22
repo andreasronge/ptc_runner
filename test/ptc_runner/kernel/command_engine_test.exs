@@ -7208,6 +7208,102 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
+  @tag :tmp_dir
+  test "override verification failures name the field they broke", %{tmp_dir: directory} do
+    base_source = "(ns app) (defn run [input] (return input))"
+    candidate = "(ns app) (defn run [input] (return \"candidate\"))"
+    application = write_application(directory, "override-verification", valid_manifest())
+    File.write!(Path.join(directory, "candidate.clj"), candidate)
+
+    digest = fn bytes -> ComponentOverride.hash(bytes) end
+    wrong = "sha256:" <> String.duplicate("0", 64)
+
+    cases = [
+      {"ov-stale-base.json", digest.(candidate), wrong, "app",
+       "base_source_hash does not match the installed source", "/base_source_hash"},
+      {"ov-source-mismatch.json", wrong, digest.(base_source), "app",
+       "source_hash does not match the candidate bytes", "/source_hash"},
+      {"ov-unknown-component.json", digest.(candidate), digest.(base_source), "nosuchcomponent",
+       "component_id is not a selected component", "/component_id"}
+    ]
+
+    for {name, source_hash, base_hash, component_id, message, pointer} <- cases do
+      descriptor = Path.join(directory, name)
+
+      File.write!(
+        descriptor,
+        Jason.encode!(%{
+          "target" => %{"environment" => "workflow"},
+          "component_id" => component_id,
+          "base_source_hash" => base_hash,
+          "source_hash" => source_hash,
+          "path" => "candidate.clj"
+        })
+      )
+
+      outcome =
+        assert_error(
+          ["run", application, "--component-override-descriptor", descriptor],
+          "application",
+          "override_invalid"
+        )
+
+      error = outcome.envelope["error"]
+      assert error["message"] == message
+      assert error["path"] == pointer
+      assert error["subject"] == nil
+
+      assert error["source"] == %{
+               "kind" => "component_override",
+               "name" => "component-override.json"
+             }
+
+      encoded = Jason.encode!(outcome.envelope)
+      refute encoded =~ name
+      refute encoded =~ directory
+
+      {:stderr, rendered} = CommandRenderer.render(outcome)
+      assert rendered =~ "#{message} at #{pointer} "
+    end
+  end
+
+  @tag :tmp_dir
+  test "override source confinement names the path field", %{tmp_dir: directory} do
+    application = write_application(directory, "override-source-path", valid_manifest())
+    digest = "sha256:" <> String.duplicate("0", 64)
+    descriptor = Path.join(directory, "ov-escape.json")
+
+    File.write!(
+      descriptor,
+      Jason.encode!(%{
+        "target" => %{"environment" => "workflow"},
+        "component_id" => "app",
+        "base_source_hash" => digest,
+        "source_hash" => digest,
+        "path" => "../escape.clj"
+      })
+    )
+
+    outcome =
+      assert_error(
+        ["run", application, "--component-override-descriptor", descriptor],
+        "application",
+        "override_invalid"
+      )
+
+    error = outcome.envelope["error"]
+    assert error["message"] == "path is not a confined candidate source"
+    assert error["path"] == "/path"
+
+    assert error["source"] == %{
+             "kind" => "component_override",
+             "name" => "component-override.json"
+           }
+
+    refute Jason.encode!(outcome.envelope) =~ "ov-escape"
+    refute Jason.encode!(outcome.envelope) =~ "escape.clj"
+  end
+
   defp manifest_error_path({:manifest_path, path, _reason}), do: path
 
   defp manifest_error_path(
