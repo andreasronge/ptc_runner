@@ -634,12 +634,16 @@ ptc transcript RUN_ID \
   --private-output tmp/transcript/conversation.private.json
 ```
 
-The command reserves an owner-only destination before capture. Trace,
+The command reserves an owner-only destination before capture. The parent of
+`--private-output` must already exist and be reached without a symbolic link
+— on macOS `/tmp` is a symlink, so `/tmp/out.json` is refused. Trace,
 inspection, and output directories must be pairwise physically separate: no
-directory may equal, contain, or be contained by either of the others. A
-rejection names the two conflicting switches and their physical relationship,
-and discloses no path. Ambiguous, incomplete, changed, unsupported, or
-oversized evidence fails without a partial output.
+directory may equal, contain, or be contained by either of the others. A file
+in the current directory fails when that directory contains `--traces`; create
+a sibling directory instead, as above. A rejection names the two conflicting
+switches and their physical relationship, and discloses no path. Ambiguous,
+incomplete, changed, unsupported, or oversized evidence fails without a
+partial output.
 
 Use `private-run-analysis-v1` when you need several correlated questions or
 custom PTC-Lisp analysis. Its results can include exact messages, generated

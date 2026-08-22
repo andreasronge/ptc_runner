@@ -111,10 +111,12 @@ shipped <code class="inline">debug.nav</code> library without gaining filesystem
 nested-evaluation access.</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
 ptc run debug-a-failed-run/target.ptc-project.json
 ptc run debug-a-failed-run/debugger.ptc-project.json</code></pre><p>The same example optionally closes the loop: a phased repair agent proposes a
-complete component replacement or abstains, and the host validates a proposal
-against its own held-out cases with <code class="inline">mix ptc.repair</code> before any human promotes
-it. The README materialized beside the example walks both arms; the validation
-contract is documented in the repository's maintainer guide on embedding.</p><h2 id="where-is-the-complete-evidence-contract">Where is the complete evidence contract?</h2><p>Use the <a href="/reference/debug-navigation/">debug-navigation reference</a> for the
+complete component replacement or abstains, and a later <code class="inline">ptc run</code> can evaluate
+that candidate through <code class="inline">--component-override-descriptor</code> without editing a
+file. Hand-authoring the descriptor skips the host-owned G1–G4 gate and
+held-out suite; those remain a source-checkout Mix task documented in the
+repository's maintainer guide on embedding. The README materialized beside
+the example walks the release path.</p><h2 id="where-is-the-complete-evidence-contract">Where is the complete evidence contract?</h2><p>Use the <a href="/reference/debug-navigation/">debug-navigation reference</a> for the
 complete evidence graph, typed links, collections, resources, pagination,
 private-inspection rules, and model-assisted navigation contract. The
 <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md">TraceLog and run-analysis reference</a> owns

@@ -61,6 +61,15 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     refute File.read!(Path.join(target, "README.md")) =~ "../../docs/"
     refute File.read!(Path.join(target, ".env")) == ""
 
+    for name <- ExampleLibrary.names() do
+      assert {:ok, files} = ExampleLibrary.fetch(name)
+
+      if Map.has_key?(files, "README.md") do
+        refute files["README.md"] =~ "../../docs/",
+               "#{name} README still points at checkout documentation"
+      end
+    end
+
     for project_path <- Path.wildcard(Path.join(target, "*.ptc-project.json")) do
       assert {:ok, project} = ProjectConfig.load(project_path)
 
@@ -77,6 +86,19 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
 
     assert {:ok, replay} = ExampleLibrary.fetch("llm-replay")
     refute Map.has_key?(replay, ".env")
+  end
+
+  test "the debug-a-failed-run README walks the standalone executable, not Mix" do
+    assert {:ok, files} = ExampleLibrary.fetch("debug-a-failed-run")
+    readme = files["README.md"]
+
+    refute readme =~ "mix ptc"
+    refute readme =~ "examples/debug-a-failed-run/"
+    assert readme =~ "ptc run debug-a-failed-run/target.ptc-project.json"
+    assert readme =~ "ptc run debug-a-failed-run/repair-agent.ptc-project.json"
+    assert readme =~ "--component-override-descriptor"
+    assert readme =~ "skips the host-owned suite"
+    assert readme =~ "ptc docs debugging-a-failed-run"
   end
 
   @tag :tmp_dir

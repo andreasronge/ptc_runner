@@ -339,12 +339,16 @@ ptc transcript RUN_ID \
   --traces tmp/traces \
   --inspection tmp/inspection \
   --private-unattended \
-  --private-output tmp/transcript/conversation.private.json</code></pre><p>The command reserves an owner-only destination before capture. Trace,
+  --private-output tmp/transcript/conversation.private.json</code></pre><p>The command reserves an owner-only destination before capture. The parent of
+<code class="inline">--private-output</code> must already exist and be reached without a symbolic link
+— on macOS <code class="inline">/tmp</code> is a symlink, so <code class="inline">/tmp/out.json</code> is refused. Trace,
 inspection, and output directories must be pairwise physically separate: no
-directory may equal, contain, or be contained by either of the others. A
-rejection names the two conflicting switches and their physical relationship,
-and discloses no path. Ambiguous, incomplete, changed, unsupported, or
-oversized evidence fails without a partial output.</p><p>Use <code class="inline">private-run-analysis-v1</code> when you need several correlated questions or
+directory may equal, contain, or be contained by either of the others. A file
+in the current directory fails when that directory contains <code class="inline">--traces</code>; create
+a sibling directory instead, as above. A rejection names the two conflicting
+switches and their physical relationship, and discloses no path. Ambiguous,
+incomplete, changed, unsupported, or oversized evidence fails without a
+partial output.</p><p>Use <code class="inline">private-run-analysis-v1</code> when you need several correlated questions or
 custom PTC-Lisp analysis. Its results can include exact messages, generated
 source, effective components, capability payloads, prints, diagnostics, and
 terminal values. The attached-terminal and unattended switches are accident

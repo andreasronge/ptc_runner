@@ -341,10 +341,14 @@ ptc transcript RUN_ID \
 ```
 
 The destination is reserved at owner-only mode before capture. Incomplete or
-ambiguous evidence fails without publication. The trace, inspection, and
-output directories must be pairwise physically separate: none may equal or
-contain another. A rejection names the two conflicting switches and how they
-overlap, without disclosing any path:
+ambiguous evidence fails without publication. The parent of
+`--private-output` must already exist and be reached without a symbolic link
+— on macOS `/tmp` is a symlink, so `/tmp/out.json` is refused. The trace,
+inspection, and output directories must be pairwise physically separate: none
+may equal or contain another. A file in the current directory fails when that
+directory contains `--traces`; create a sibling directory instead, as above.
+A rejection names the two conflicting switches and how they overlap, without
+disclosing any path:
 
 ```text
 directories for --traces and --inspection must be physically separate;

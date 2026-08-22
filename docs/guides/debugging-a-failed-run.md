@@ -42,10 +42,12 @@ ptc run debug-a-failed-run/debugger.ptc-project.json
 ```
 
 The same example optionally closes the loop: a phased repair agent proposes a
-complete component replacement or abstains, and the host validates a proposal
-against its own held-out cases with `mix ptc.repair` before any human promotes
-it. The README materialized beside the example walks both arms; the validation
-contract is documented in the repository's maintainer guide on embedding.
+complete component replacement or abstains, and a later `ptc run` can evaluate
+that candidate through `--component-override-descriptor` without editing a
+file. Hand-authoring the descriptor skips the host-owned G1–G4 gate and
+held-out suite; those remain a source-checkout Mix task documented in the
+repository's maintainer guide on embedding. The README materialized beside
+the example walks the release path.
 
 ## Where is the complete evidence contract?
 
