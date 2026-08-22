@@ -13,7 +13,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
 
-  @expected ~S|{"schema_version":2,"exports":[{"ref":"tools/ping","kind":"function","call":"(tools/ping value)","doc":"Ping.","effect":"unknown","contract":null}],"capabilities":[{"name":"native.read","call":"(tool/native.read arguments)","description":"Read","effect":"read","input_schema":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"},"output_schema":null}],"data":[],"limits":{"evaluation_timeout_ms":30000,"parallel_timeout_ms":60000,"subordinate_source_bytes":131072,"subordinate_source_checks":128,"mission_capability_calls":256,"mission_capability_calls_per_name":128,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
+  @expected ~S|{"schema_version":3,"exports":[{"ref":"tools/ping","kind":"function","call":"(tools/ping value)","doc":"Ping.","effect":"unknown","contract":null}],"capabilities":[{"name":"native.read","call":"(tool/native.read arguments)","description":"Read","effect":"read","input_schema":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"},"output_schema":null}],"data":[],"limits":{"evaluation_timeout_ms":30000,"parallel_timeout_ms":60000,"subordinate_source_bytes":131072,"subordinate_source_checks":128,"mission_capability_calls":256,"mission_capability_calls_per_name":128,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
   @expected_model ~S|{"schema_version":2,"namespaces":[{"namespace":"tools","doc":"Tools."}],"entries":[{"kind":"call","form":"(tool/native.read {\"query\" query})","contract":{"parameters":[{"name":"arguments","type":{"kind":"object","nullable":false,"closed":true,"fields":[{"name":"query","required":true,"type":{"kind":"string","nullable":false}}]}}],"returns":null},"effect":"read","docs":"Read"},{"kind":"call","form":"(tools/ping value)","contract":null,"effect":"unknown","docs":"Ping."}],"limits":{"evaluation_timeout_ms":30000,"parallel_timeout_ms":60000,"subordinate_source_bytes":131072,"subordinate_source_checks":128,"mission_capability_calls":256,"mission_capability_calls_per_name":128,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
 
   test "renders and hashes the exact versioned frozen inventory" do
@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     assert inventory.hash ==
              :crypto.hash(:sha256, @expected) |> Base.encode16(case: :lower)
 
+    assert inventory.schema_version == 3
     assert inventory.model_schema_version == 2
     assert inventory.model_rendered == @expected_model
     assert inventory.model_bytes == byte_size(@expected_model)
@@ -111,27 +112,6 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     assert model_data["effect"] == "read"
     assert data_grant["contract"] == model_data["contract"]
     assert data_grant["docs"] == model_data["docs"]
-  end
-
-  test "authoritative inventory keeps unsupported data contracts that model context omits" do
-    {:ok, mission, limits} = mission_fixture()
-
-    # MissionEnvironment admits only JSON-like data, so isolate the inventory
-    # projection with a post-assembly map that includes an unsupported value.
-    mission = %{mission | data: %{"ok" => 1, "pid" => self()}}
-    {:ok, inventory} = MissionInventory.build(mission, limits)
-
-    rendered = Jason.decode!(inventory.rendered)
-    model = Jason.decode!(inventory.model_rendered)
-
-    assert Enum.map(rendered["data"], & &1["form"]) == ["data/ok", "data/pid"]
-    assert Enum.find(rendered["data"], &(&1["form"] == "data/pid"))["contract"] == nil
-
-    assert Enum.map(model["entries"], & &1["form"]) == [
-             "(tool/native.read {\"query\" query})",
-             "(tools/ping value)",
-             "data/ok"
-           ]
   end
 
   test "hidden exports and capabilities are excluded" do

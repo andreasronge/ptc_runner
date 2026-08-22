@@ -1612,7 +1612,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp validate_result do
     closed(
-      ~w(application_content_digest effective_application_digest workflow_bundle_hash mission_bundle_hashes mission_authority provider_activity),
+      ~w(application_content_digest effective_application_digest workflow_bundle_hash mission_bundle_hashes mission_grants provider_activity),
       %{
         "application_content_digest" => %{"type" => "string", "pattern" => @digest},
         "effective_application_digest" => %{"type" => "string", "pattern" => @digest},
@@ -1625,10 +1625,10 @@ defmodule PtcRunner.Kernel.CommandContract do
           },
           "maxProperties" => 16
         },
-        "mission_authority" => %{
+        "mission_grants" => %{
           "type" => "object",
           "propertyNames" => %{"pattern" => "^[a-z][a-z0-9._-]{0,127}$"},
-          "additionalProperties" => mission_authority_entry(),
+          "additionalProperties" => mission_grants_entry(),
           "maxProperties" => 16
         },
         "provider_activity" => %{"const" => false}
@@ -1636,7 +1636,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     )
   end
 
-  defp mission_authority_entry do
+  defp mission_grants_entry do
     # Ceilings follow StrictJSON admission (max 100_000 nodes) and the
     # application-manifest byte budget rather than inventing tighter
     # validate-only caps: CommandOutcome seals against this schema, so an

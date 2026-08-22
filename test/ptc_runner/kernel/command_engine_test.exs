@@ -4541,7 +4541,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
       "workflow_bundle_hash" => String.duplicate("2", 64),
       "mission_bundle_hashes" => %{},
-      "mission_authority" => %{},
+      "mission_grants" => %{},
       "provider_activity" => false
     }
 
@@ -4556,7 +4556,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
-  test "validate mission_authority schema admits producer-scale data and export refs" do
+  test "validate mission_grants schema admits producer-scale data and export refs" do
     run_ref = CommandRunRef.encode(@zero_entropy)
 
     data = Enum.map(1..257, fn index -> "data/k#{index}" end)
@@ -4568,7 +4568,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
       "workflow_bundle_hash" => String.duplicate("2", 64),
       "mission_bundle_hashes" => %{"intake" => String.duplicate("3", 64)},
-      "mission_authority" => %{
+      "mission_grants" => %{
         "intake" => %{
           "data" => [long_data_form | data],
           "exports" => [long_export],
@@ -4581,12 +4581,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     outcome = CommandOutcome.success(:validate, run_ref, result)
     assert_schema_valid(outcome.envelope)
 
-    assert length(outcome.envelope["result"]["mission_authority"]["intake"]["data"]) == 258
+    assert length(outcome.envelope["result"]["mission_grants"]["intake"]["data"]) == 258
 
-    assert hd(outcome.envelope["result"]["mission_authority"]["intake"]["data"]) ==
+    assert hd(outcome.envelope["result"]["mission_grants"]["intake"]["data"]) ==
              long_data_form
 
-    assert outcome.envelope["result"]["mission_authority"]["intake"]["exports"] == [
+    assert outcome.envelope["result"]["mission_grants"]["intake"]["exports"] == [
              long_export
            ]
   end

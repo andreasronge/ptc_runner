@@ -1747,7 +1747,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                outcome.envelope["result"]["effective_application_digest"],
              "workflow_bundle_hash" => outcome.envelope["result"]["workflow_bundle_hash"],
              "mission_bundle_hashes" => %{},
-             "mission_authority" => %{},
+             "mission_grants" => %{},
              "provider_activity" => false
            }
   end
@@ -1759,7 +1759,10 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       manifest()
       |> Map.put("missions", %{
         "intake" => %{
-          "components" => [%{"id" => "intake", "path" => "intake.clj"}],
+          "components" => [
+            %{"id" => "intake", "path" => "intake.clj"},
+            %{"id" => "intake-internal", "path" => "intake-internal.clj"}
+          ],
           "data" => %{"customer" => %{"id" => "c1"}},
           "providers" => []
         }
@@ -1772,6 +1775,10 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
         "intake.clj" => """
         (ns intake "Intake." {:visibility :prompt})
         (defn summarize "Summarize." [value] value)
+        """,
+        "intake-internal.clj" => """
+        (ns intake.internal "Intake internals." {:visibility :discoverable})
+        (defn normalize "Normalize." [value] value)
         """
       })
 
@@ -1780,10 +1787,10 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
 
     assert outcome.exit_status == 0
 
-    assert outcome.envelope["result"]["mission_authority"] == %{
+    assert outcome.envelope["result"]["mission_grants"] == %{
              "intake" => %{
                "data" => ["data/customer"],
-               "exports" => ["intake/summarize"],
+               "exports" => ["intake.internal/normalize", "intake/summarize"],
                "providers" => []
              }
            }

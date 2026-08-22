@@ -209,12 +209,12 @@ it will run in. A replay installation names a fixture file, so <code class="inli
 it under the installed ceilings and reports the rule a rejected file broke —
 with the line number for a line-level rejection. It still acquires nothing: an
 installed model's adapter and an MCP server's executable are environment
-dependencies and belong to <code class="inline">doctor</code>.</p><p>On success, the validate result includes <code class="inline">mission_authority</code>: for each named
-mission, the sorted <code class="inline">data/&lt;name&gt;</code> grants, prompt-visible export refs, and
-selected mission provider names. Use it to audit mission-scoped authority
-without opening a REPL. Capability tool names that appear only after provider
-acquisition remain absent here; <code class="inline">kernel/mission-inventory</code> lists them once a
-run or REPL session has built the frozen inventory.</p><p>Environment files fail before provider acquisition with a cause-specific code:
+dependencies and belong to <code class="inline">doctor</code>.</p><p>On success, the validate result includes <code class="inline">mission_grants</code>: for each named
+mission, the sorted parseable <code class="inline">data/&lt;name&gt;</code> grants, every public export ref,
+and selected mission provider names. This is the static grant declaration;
+validate does not acquire providers, so capability tool names remain unresolved.
+<code class="inline">kernel/mission-inventory</code> lists model-visible capabilities once a run or REPL
+session has built the frozen inventory.</p><p>Environment files fail before provider acquisition with a cause-specific code:
 <code class="inline">environment_file_not_found</code>, <code class="inline">environment_file_not_regular</code>,
 <code class="inline">environment_file_unreadable</code>, <code class="inline">environment_file_too_large</code>, or
 <code class="inline">environment_file_invalid_utf8</code>. The code identifies whether to create the

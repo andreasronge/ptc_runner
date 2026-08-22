@@ -710,13 +710,13 @@ defmodule PtcRunner.Kernel.RunCoordinator do
            "effective_application_digest" => prepared.effective_application_digest,
            "workflow_bundle_hash" => prepared.workflow_bundle.hash,
            "mission_bundle_hashes" => mission_bundle_hashes(prepared.mission_bundles),
-           "mission_authority" => mission_authority(prepared),
+           "mission_grants" => mission_grants(prepared),
            "provider_activity" => false
          }}
     end
   end
 
-  defp mission_authority(%PreparedRun{} = prepared) do
+  defp mission_grants(%PreparedRun{} = prepared) do
     providers = prepared.request.package.providers.mission
 
     Map.new(prepared.request.package.missions, fn {name, mission} ->
@@ -726,7 +726,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
         end)
 
       {name,
-       MissionInventory.authority_summary(
+       MissionInventory.grant_summary(
          mission.data,
          Map.get(prepared.mission_bundles, name),
          provider_names

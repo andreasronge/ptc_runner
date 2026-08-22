@@ -235,9 +235,9 @@ has the author-facing rules.
 `MissionInventory` owns the deterministic structured and prompt-facing mission
 API projection, including mission data grants. `agent.prompt` renders model
 context from the compact secondary projection. Prompt visibility never changes
-the underlying environment grant. `ptc validate` reports the same data forms,
-prompt-visible exports, and selected providers per mission under
-`mission_authority` without acquiring providers.
+the underlying environment grant. `ptc validate` reports parseable data forms,
+all public exports, and selected providers per mission under `mission_grants`
+without acquiring providers.
 
 ## Evaluation, limits, and concurrency
 

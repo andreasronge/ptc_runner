@@ -903,7 +903,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
           "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
           "workflow_bundle_hash" => String.duplicate("2", 64),
           "mission_bundle_hashes" => %{},
-          "mission_authority" => %{},
+          "mission_grants" => %{},
           "provider_activity" => false
         }),
       "doctor_default" => CommandOutcome.success(:doctor, @run_ref, doctor_default),

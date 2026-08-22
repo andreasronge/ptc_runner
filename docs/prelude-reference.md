@@ -584,7 +584,7 @@ Evaluate an opaque static Program with JSON parameters at data/params.
 (kernel/mission-inventory mission)
 ```
 
-Return the exact frozen model-visible mission inventory JSON, including data grants.
+Return the frozen prompt-facing mission inventory JSON, including data grants.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`
