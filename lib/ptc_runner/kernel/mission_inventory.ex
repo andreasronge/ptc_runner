@@ -24,6 +24,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Environment
+  alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ModelContract
@@ -218,20 +219,24 @@ defmodule PtcRunner.Kernel.MissionInventory do
   end
 
   defp data_entries(%{data: data}) when is_map(data) and not is_struct(data) do
-    data
-    |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.reduce_while({:ok, []}, fn {name, value}, {:ok, entries} ->
-      with {:ok, form} <- data_form(name),
-           {:ok, contract} <- ModelContract.json_value(value) do
-        entry = data_entry(form, contract)
+    if JSONValue.map?(data) do
+      data
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.reduce_while({:ok, []}, fn {name, value}, {:ok, entries} ->
+        with {:ok, form} <- data_form(name),
+             {:ok, contract} <- ModelContract.json_value(value) do
+          entry = data_entry(form, contract)
 
-        {:cont, {:ok, [entry | entries]}}
-      else
-        :skip -> {:cont, {:ok, entries}}
-        {:error, :unsupported_contract} = error -> {:halt, error}
-      end
-    end)
-    |> reverse_entries()
+          {:cont, {:ok, [entry | entries]}}
+        else
+          :skip -> {:cont, {:ok, entries}}
+          {:error, :unsupported_contract} = error -> {:halt, error}
+        end
+      end)
+      |> reverse_entries()
+    else
+      {:error, :unsupported_contract}
+    end
   end
 
   defp data_entries(_mission), do: {:ok, []}

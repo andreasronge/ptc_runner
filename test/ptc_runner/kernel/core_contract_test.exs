@@ -1835,7 +1835,6 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     for {malformed, expected_kind} <- malformed_values do
       {:ok, sink} = EventSink.start(:normal, limits, run_id: "malformed-#{expected_kind}")
       {:ok, mission} = MissionEnvironment.new([])
-      mission = %{mission | data: %{"bad" => malformed}}
 
       {:ok, config} =
         RunConfig.new(
@@ -1845,6 +1844,20 @@ defmodule PtcRunner.Kernel.CoreContractTest do
           limits: limits,
           event_sink: sink
         )
+
+      # Mission inventory construction validates and projects mission data.
+      # Pin that boundary, then forge only the direct evaluation input so its
+      # defensive projector classification remains covered independently.
+      forged_mission = %{mission | data: %{"bad" => malformed}}
+
+      assert {:error, :invalid_run_config} =
+               RunConfig.new(
+                 workflow_environment: workflow,
+                 missions: %{"default" => forged_mission},
+                 input: %{},
+                 limits: limits,
+                 event_sink: sink
+               )
 
       config = %{config | input: %{"bad" => malformed}}
 
@@ -1859,7 +1872,15 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                continuation_effect: :preserved,
                retryable?: false
              } =
-               Evaluation.evaluate_source(state, "default", mission, "data/bad", 100, nil, nil)
+               Evaluation.evaluate_source(
+                 state,
+                 "default",
+                 forged_mission,
+                 "data/bad",
+                 100,
+                 nil,
+                 nil
+               )
 
       assert %{defined_count: 0, history_count: 0} =
                RunState.evaluation_memory_summary(state)
