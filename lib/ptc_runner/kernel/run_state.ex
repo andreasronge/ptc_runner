@@ -455,6 +455,19 @@ defmodule PtcRunner.Kernel.RunState do
   @doc "Records the first terminal failure and closes the run."
   def fail(state, kind, reason), do: safe_call(state, {:fail, kind, reason}, :ok)
 
+  @doc false
+  @spec fail_once(t(), atom(), atom()) ::
+          {:recorded, %{kind: atom(), reason: atom()}}
+          | {:existing,
+             %{kind: atom(), reason: atom()} | %{kind: atom(), reason: atom(), details: map()}}
+  def fail_once(state, kind, reason) do
+    safe_call(
+      state,
+      {:fail_once, kind, reason},
+      {:existing, %{kind: :session_closed, reason: :run_closed}}
+    )
+  end
+
   @spec terminal_failure(t()) ::
           nil | %{kind: atom(), reason: atom(), details: map()} | %{kind: atom(), reason: atom()}
   @doc "Returns the first terminal failure, if any."
@@ -1055,6 +1068,20 @@ defmodule PtcRunner.Kernel.RunState do
       when is_atom(kind) and is_atom(reason) do
     failure = state.terminal_failure || %{kind: kind, reason: reason}
     {:reply, :ok, admit_from_queue(%{state | closed?: true, terminal_failure: failure})}
+  end
+
+  def handle_call({token, {:fail_once, kind, reason}}, _from, %{token: token} = state)
+      when is_atom(kind) and is_atom(reason) do
+    case state.terminal_failure do
+      nil ->
+        failure = %{kind: kind, reason: reason}
+
+        {:reply, {:recorded, failure},
+         admit_from_queue(%{state | closed?: true, terminal_failure: failure})}
+
+      failure ->
+        {:reply, {:existing, failure}, state}
+    end
   end
 
   def handle_call({token, :terminal_failure}, _from, %{token: token} = state),

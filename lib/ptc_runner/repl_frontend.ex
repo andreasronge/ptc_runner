@@ -57,7 +57,17 @@ defmodule PtcRunner.ReplFrontend do
 
   A positional file runs as one script. `-` reads one script from standard
   input. With no script or `--eval`, the task starts an interactive multi-line
-  REPL; `:quit` exits it.
+  REPL; `:quit` exits it. That line loop receives the same dedicated bounded
+  session profile whether input is attached or piped. A lone `--load` is setup
+  for the loop; repeated `--eval`, scripts, explicit `-` stdin, and loads that
+  precede those inputs retain ordinary effective limits.
+
+  Direct interactive sessions widen only their session lifetime and retained
+  normal-event capacity. Interactive manifest and mission sessions default
+  omitted session-lifetime and retained-event limits to installed host ceilings
+  while preserving explicit narrower values. Every session keeps one finite
+  absolute deadline, including time spent at the prompt; its owner closes
+  provider resources at expiry without waiting for another form.
 
   An interactive workflow REPL attached to a terminal runs under the Erlang
   line editor, so emacs key bindings, arrow-key history, and reverse search
@@ -1245,7 +1255,12 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp run_direct_session(opts, arguments) do
-    case ReplSession.new(trace_path: opts[:trace]) do
+    constructor =
+      if interactive_input?(opts, arguments),
+        do: &ReplSession.new_interactive/1,
+        else: &ReplSession.new/1
+
+    case constructor.(trace_path: opts[:trace]) do
       {:ok, session} -> run_workflow_session(session, opts, arguments)
       {:error, reason} -> fail("ptc repl setup failed: #{inspect(reason)}")
     end
@@ -1260,7 +1275,8 @@ defmodule PtcRunner.ReplFrontend do
              trace_path: opts[:trace],
              private_terminal: Keyword.get(opts, :private_terminal, false),
              terminal_attached: Keyword.fetch!(opts, :terminal_attached),
-             input_mode: manifest_input_mode(opts, arguments)
+             input_mode: manifest_input_mode(opts, arguments),
+             interactive_loop: interactive_input?(opts, arguments)
            ) do
       run_workflow_session(session, opts, arguments)
     else
@@ -1298,6 +1314,9 @@ defmodule PtcRunner.ReplFrontend do
       true -> :interactive
     end
   end
+
+  defp interactive_input?(opts, arguments),
+    do: Keyword.get_values(opts, :eval) == [] and arguments == []
 
   defp manifest_runtime(opts) do
     case Keyword.fetch(opts, :command_runtime) do
@@ -1459,7 +1478,16 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp loop(session, render) do
-    case read_expression("ptc> ", "") do
+    input = read_expression("ptc> ", "")
+
+    case ReplSession.terminal_error(session) do
+      {:error, step} -> {:error, step, session}
+      :none -> handle_loop_input(input, session, render)
+    end
+  end
+
+  defp handle_loop_input(input, session, render) do
+    case input do
       :eof ->
         info("\nGoodbye!")
         {:ok, session}
@@ -1477,8 +1505,13 @@ defmodule PtcRunner.ReplFrontend do
 
       source ->
         case evaluate(session, source, :interactive, render) do
-          {:ok, _step, next} -> loop(next, render)
-          {:error, _step, next} -> loop(next, render)
+          {:ok, _step, next} ->
+            loop(next, render)
+
+          {:error, step, next} ->
+            if ReplSession.terminal?(next),
+              do: {:error, step, next},
+              else: loop(next, render)
         end
     end
   end
@@ -1529,7 +1562,13 @@ defmodule PtcRunner.ReplFrontend do
 
       {:error, step, next} ->
         message = format_error(step, next, render)
-        if mode == :interactive, do: info(message), else: error(message)
+
+        cond do
+          mode == :interactive and not ReplSession.terminal?(next) -> info(message)
+          mode == :noninteractive -> error(message)
+          true -> :ok
+        end
+
         {:error, step, next}
     end
   end

@@ -42,6 +42,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.ReplLimitProfile
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SemanticRevision
   alias PtcRunner.Kernel.StrictJSON
@@ -158,12 +159,30 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
   def request_directory(path, opts) when is_binary(path) and is_list(opts) do
     with :ok <- validate_options(opts, @directory_request_options),
-         {:ok, package, input} <- do_acquire_directory(path, opts),
-         {:ok, policy} <- execution_policy(package, opts),
-         do: RunRequest.new(package, input, policy)
+         do: request_directory_with_profile(path, opts, false)
   end
 
   def request_directory(_path, _opts), do: {:error, :invalid_application_source}
+
+  @doc false
+  @spec request_repl_directory(binary(), keyword(), boolean()) ::
+          {:ok, RunRequest.t()} | {:error, term()}
+  def request_repl_directory(path, opts, interactive_loop?)
+      when is_binary(path) and is_list(opts) and is_boolean(interactive_loop?) do
+    with :ok <- validate_options(opts, @directory_request_options),
+         do: request_directory_with_profile(path, opts, interactive_loop?)
+  end
+
+  def request_repl_directory(_path, _opts, _interactive_loop?),
+    do: {:error, :invalid_application_source}
+
+  defp request_directory_with_profile(path, opts, interactive_loop?) do
+    acquisition_opts = Keyword.put(opts, :repl_interactive_loop, interactive_loop?)
+
+    with {:ok, package, input} <- do_acquire_directory(path, acquisition_opts),
+         {:ok, policy} <- execution_policy(package, opts),
+         do: RunRequest.new(package, input, policy)
+  end
 
   @spec request_memory(binary(), %{binary() => binary()}, keyword()) ::
           {:ok, RunRequest.t()} | {:error, term()}
@@ -243,6 +262,11 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
       with true <- Limits.valid?(installed_limits),
            {:ok, manifest} <-
              Manifest.load_source(source, installed_limits, materialize_input: false),
+           {:ok, manifest} <-
+             ReplLimitProfile.apply_manifest(
+               manifest,
+               Keyword.get(opts, :repl_interactive_loop, false)
+             ),
            {:ok, input} <- select_input(source, manifest, opts),
            {:ok, override} <- override_result,
            {:ok, effective, identities} <- apply_override(manifest, override),

@@ -80,13 +80,14 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
 
   @spec resources(pid(), reference()) ::
           {:ok, RunConfig.t(), RunState.t()} | {:error, :session_owner_mismatch}
-  def resources(pid, token), do: GenServer.call(pid, {token, :resources})
+  def resources(pid, token), do: GenServer.call(pid, {token, :resources}, :infinity)
 
   @doc false
   @spec session_resources(pid(), reference()) ::
-          {:ok, RunConfig.t(), RunState.t(), :workflow | map()}
+          {:ok, RunConfig.t(), RunState.t(), :direct | :workflow | map()}
           | {:error, :session_owner_mismatch}
-  def session_resources(pid, token), do: GenServer.call(pid, {token, :session_resources})
+  def session_resources(pid, token),
+    do: GenServer.call(pid, {token, :session_resources}, :infinity)
 
   @spec release(pid(), reference()) :: :ok | {:error, :session_owner_mismatch}
   def release(pid, token) do
@@ -96,7 +97,9 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   end
 
   @spec close_provider_session(pid(), reference()) ::
-          :ok | {:error, :provider_cleanup_failed | :session_owner_mismatch}
+          {:ok, :ok | {:error, :provider_cleanup_failed},
+           nil | %{kind: atom(), reason: atom()} | %{kind: atom(), reason: atom(), details: map()}}
+          | {:error, :session_owner_mismatch}
   def close_provider_session(pid, token) do
     GenServer.call(pid, {token, :close_provider_session}, :infinity)
   catch
@@ -128,21 +131,26 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
     Process.flag(:trap_exit, true)
     Process.link(run_state.pid)
 
-    {:ok,
-     %{
-       token: token,
-       owner: owner,
-       owner_ref: Process.monitor(owner),
-       config: config,
-       run_state: run_state,
-       opening: nil,
-       opening_ref: nil,
-       trace_path: trace_path,
-       mode: :workflow,
-       terminalized?: false,
-       terminal_batch: nil,
-       provider_cleanup: nil
-     }}
+    state =
+      %{
+        token: token,
+        owner: owner,
+        owner_ref: Process.monitor(owner),
+        config: config,
+        run_state: run_state,
+        opening: nil,
+        opening_ref: nil,
+        trace_path: trace_path,
+        mode: :workflow,
+        terminalized?: false,
+        terminal_batch: nil,
+        terminal_failure: nil,
+        provider_cleanup: nil,
+        deadline_timer: nil,
+        deadline_token: nil
+      }
+
+    {:ok, arm_deadline(state)}
   end
 
   def init({:pending, token, owner}) do
@@ -161,7 +169,10 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
        mode: :workflow,
        terminalized?: false,
        terminal_batch: nil,
-       provider_cleanup: nil
+       terminal_failure: nil,
+       provider_cleanup: nil,
+       deadline_timer: nil,
+       deadline_token: nil
      }}
   end
 
@@ -187,16 +198,18 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
       opening_pid = ManifestReplOpening.pid(opening)
       Process.link(run_state.pid)
 
-      {:reply, :ok,
-       %{
-         state
-         | config: config,
-           run_state: run_state,
-           opening: opening,
-           opening_ref: Process.monitor(opening_pid),
-           trace_path: trace_path,
-           mode: mode
-       }}
+      next =
+        %{
+          state
+          | config: config,
+            run_state: run_state,
+            opening: opening,
+            opening_ref: Process.monitor(opening_pid),
+            trace_path: trace_path,
+            mode: mode
+        }
+
+      {:reply, :ok, arm_deadline(next)}
     else
       {:reply, {:error, :session_owner_mismatch}, state}
     end
@@ -209,7 +222,11 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
       ) do
     if direct_adoption?(config, run_state, trace_path) do
       Process.link(run_state.pid)
-      {:reply, :ok, %{state | config: config, run_state: run_state, trace_path: trace_path}}
+
+      next =
+        %{state | config: config, run_state: run_state, trace_path: trace_path, mode: :direct}
+
+      {:reply, :ok, arm_deadline(next)}
     else
       {:reply, {:error, :session_owner_mismatch}, state}
     end
@@ -220,8 +237,10 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
         {caller, _tag},
         %{token: token, owner: caller} = state
       ) do
+    state = state |> record_elapsed_deadline() |> disarm_deadline()
+    terminal_failure = terminal_failure(state)
     {result, state} = close_provider_session(state)
-    {:reply, result, state}
+    {:reply, {:ok, result, terminal_failure}, state}
   end
 
   def handle_call(
@@ -241,6 +260,16 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state),
     do: {:stop, :normal, state}
+
+  def handle_info(
+        {:repl_deadline_expired, deadline_token},
+        %{deadline_token: deadline_token, config: %RunConfig{}, run_state: %RunState{}} = state
+      ) do
+    state = %{state | deadline_timer: nil, deadline_token: nil}
+    state = record_deadline_expiry(state)
+    {_cleanup, state} = close_provider_session(state)
+    {:noreply, state}
+  end
 
   # A run state that dies on its own is *ignored* here, deliberately.
   #
@@ -275,6 +304,7 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   end
 
   defp close_resources(state) do
+    state = disarm_deadline(state)
     _state = close_owned_resources(state)
     :ok
   end
@@ -304,9 +334,11 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
 
   defp finalize_abandoned_session(%{config: %RunConfig{} = config} = state) do
     reason =
-      if state.provider_cleanup == {:error, :provider_cleanup_failed},
-        do: :provider_cleanup_failed,
-        else: :session_owner_failed
+      case {state.provider_cleanup, terminal_failure(state)} do
+        {{:error, :provider_cleanup_failed}, _failure} -> :provider_cleanup_failed
+        {_cleanup, %{reason: reason}} -> reason
+        {_cleanup, nil} -> :session_owner_failed
+      end
 
     usage =
       try do
@@ -405,6 +437,66 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   end
 
   defp close_provider_session(state), do: {state.provider_cleanup, state}
+
+  defp arm_deadline(%{run_state: %RunState{} = run_state} = state) do
+    deadline_token = make_ref()
+
+    deadline_timer =
+      Process.send_after(
+        self(),
+        {:repl_deadline_expired, deadline_token},
+        deadline_remaining_ms(run_state)
+      )
+
+    %{state | deadline_timer: deadline_timer, deadline_token: deadline_token}
+  end
+
+  defp disarm_deadline(%{deadline_timer: timer} = state) when is_reference(timer) do
+    Process.cancel_timer(timer)
+    %{state | deadline_timer: nil, deadline_token: nil}
+  end
+
+  defp disarm_deadline(state), do: state
+
+  defp record_elapsed_deadline(%{deadline_timer: timer, run_state: %RunState{}} = state)
+       when is_reference(timer) do
+    if deadline_remaining_ms(state.run_state) == 0,
+      do: record_deadline_expiry(state),
+      else: state
+  end
+
+  defp record_elapsed_deadline(state), do: state
+
+  defp record_deadline_expiry(state) do
+    case RunState.fail_once(state.run_state, :limit_exceeded, :deadline_expired) do
+      {:recorded, failure} ->
+        _ =
+          EventSink.emit(state.config.event_sink, "limit-exceeded", %{
+            reason: :deadline_expired
+          })
+
+        %{state | terminal_failure: failure}
+
+      {:existing, failure} ->
+        %{state | terminal_failure: failure}
+    end
+  end
+
+  defp terminal_failure(%{terminal_failure: failure}) when not is_nil(failure), do: failure
+
+  defp terminal_failure(%{run_state: %RunState{} = run_state}) do
+    RunState.terminal_failure(run_state)
+  catch
+    :exit, _reason -> nil
+  end
+
+  defp terminal_failure(_state), do: nil
+
+  defp deadline_remaining_ms(run_state) do
+    RunState.remaining_ms(run_state)
+  catch
+    :exit, _reason -> 0
+  end
 
   defp persist_trace(%{trace_path: nil}, _events), do: :ok
 

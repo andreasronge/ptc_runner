@@ -171,6 +171,11 @@ REPL. The process that calls `new/1` must also call every `eval/2`, `close/1`,
 and `abort/2`. Passing the public struct to another process does not transfer
 continuation or cleanup authority.
 
+`new/0` and `new/1` retain ordinary run limits. The CLI's argumentless direct
+line loop selects its separate interactive limit profile explicitly; embedding
+callers never receive that wider session lifetime merely by constructing a
+`ReplSession`.
+
 Each evaluation returns an observation projection and updated public session;
 the authoritative definitions and `*1`/`*2`/`*3` history stay inside the owner.
 Call `close/1` for normal finalization or `abort/2` after an early frontend

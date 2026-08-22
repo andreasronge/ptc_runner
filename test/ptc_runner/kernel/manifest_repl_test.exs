@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.HostRuntimePayload
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.ManifestReplOpening
   alias PtcRunner.Kernel.ManifestReplPreparation
@@ -27,7 +28,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     manifest = write_provider_free_application(directory, :normal)
     {:ok, runtime} = CommandRuntime.new(provider_application_mode: :host_owned)
 
-    assert {:ok, preparation} = CommandAcquisition.prepare_repl(manifest, nil, runtime)
+    assert {:ok, preparation} = CommandAcquisition.prepare_repl(manifest, nil, runtime, true)
     assert ManifestReplPreparation.valid?(preparation)
 
     refute preparation
@@ -35,6 +36,150 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
            |> ManifestReplPreparation.valid?()
 
     assert :ok = ManifestReplPreparation.close(preparation)
+  end
+
+  @tag :tmp_dir
+  test "interactive workflow and mission sessions default lifetime rows to host ceilings", %{
+    tmp_dir: directory
+  } do
+    write_component(directory)
+    manifest = Path.join(directory, "interactive-limits.json")
+    host = Path.join(directory, "interactive-limits-host.json")
+
+    document =
+      :normal
+      |> manifest_document(%{})
+      |> Map.put("missions", %{"review" => %{}})
+
+    File.write!(manifest, Jason.encode!(document))
+
+    File.write!(
+      host,
+      Jason.encode!(%{
+        "install" => %{},
+        "limits" => %{
+          "run_duration_ms" => 120_000,
+          "subordinate_evaluations" => 300
+        }
+      })
+    )
+
+    for mission <- [nil, "review"] do
+      assert {:ok, session} =
+               ManifestRepl.open(manifest, host,
+                 input_mode: :interactive,
+                 interactive_loop: true,
+                 mission: mission,
+                 terminal_attached: true
+               )
+
+      limits = owned_limits(session)
+      assert limits.run_duration_ms == 120_000
+      assert limits.subordinate_evaluations == 300
+      assert limits.evaluation_timeout_ms == Limits.defaults().evaluation_timeout_ms
+      assert %{remaining_ms: remaining} = ReplSession.usage(session)
+      assert remaining in 1..120_000
+      assert {:ok, _events} = ReplSession.close(session)
+    end
+  end
+
+  @tag :tmp_dir
+  test "explicit lifetime values win and non-interactive sessions keep ordinary defaults", %{
+    tmp_dir: directory
+  } do
+    write_component(directory)
+    manifest = Path.join(directory, "explicit-limits.json")
+    host = Path.join(directory, "explicit-limits-host.json")
+
+    document =
+      :normal
+      |> manifest_document(%{})
+      |> Map.put("limits", %{
+        "normal_event_bytes" => 8_000_000,
+        "normal_event_count" => 300,
+        "run_duration_ms" => 60_000,
+        "subordinate_evaluations" => 7
+      })
+
+    File.write!(manifest, Jason.encode!(document))
+
+    File.write!(
+      host,
+      Jason.encode!(%{
+        "install" => %{},
+        "limits" => %{
+          "run_duration_ms" => 120_000,
+          "subordinate_evaluations" => 300
+        }
+      })
+    )
+
+    assert {:ok, interactive} =
+             ManifestRepl.open(manifest, host,
+               input_mode: :interactive,
+               interactive_loop: true,
+               terminal_attached: true
+             )
+
+    assert %{
+             normal_event_bytes: 8_000_000,
+             normal_event_count: 300,
+             run_duration_ms: 60_000,
+             subordinate_evaluations: 7
+           } = owned_limits(interactive)
+
+    assert {:ok, _events} = ReplSession.close(interactive)
+
+    plain_manifest = Path.join(directory, "ordinary-limits.json")
+    File.write!(plain_manifest, Jason.encode!(manifest_document(:normal, %{})))
+
+    assert {:ok, noninteractive} =
+             ManifestRepl.open(plain_manifest, host,
+               input_mode: :eval,
+               interactive_loop: false,
+               terminal_attached: true
+             )
+
+    defaults = Limits.defaults()
+
+    assert %{run_duration_ms: run_duration_ms, subordinate_evaluations: evaluations} =
+             owned_limits(noninteractive)
+
+    assert run_duration_ms == defaults.run_duration_ms
+    assert evaluations == defaults.subordinate_evaluations
+    assert {:ok, _events} = ReplSession.close(noninteractive)
+  end
+
+  @tag :tmp_dir
+  test "a private interactive session retains canonical events beyond 128 forms", %{
+    tmp_dir: directory
+  } do
+    manifest = write_provider_free_application(directory, :private)
+
+    assert {:ok, session} =
+             ManifestRepl.open(manifest, nil,
+               input_mode: :interactive,
+               interactive_loop: true,
+               private_terminal: true,
+               terminal_attached: true
+             )
+
+    installed = Limits.installed_defaults()
+    limits = owned_limits(session)
+    assert limits.normal_event_count == installed.normal_event_count
+    assert limits.normal_event_bytes == installed.normal_event_bytes
+
+    session =
+      Enum.reduce(1..140, session, fn value, current ->
+        assert {:ok, %{return: ^value}, next} =
+                 ReplSession.eval(current, Integer.to_string(value))
+
+        next
+      end)
+
+    assert {:ok, events} = ReplSession.close(session)
+    assert List.last(events).type == "run-stopped"
+    refute Enum.any?(events, &(&1.type == "events-dropped"))
   end
 
   @tag :tmp_dir
@@ -63,7 +208,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     :persistent_term.put(storage_key, :invalid_hmac_key)
     owners_before = provider_activity_owners()
 
-    assert {:error, _reason} = CommandAcquisition.prepare_repl(manifest, host, runtime)
+    assert {:error, _reason} = CommandAcquisition.prepare_repl(manifest, host, runtime, true)
 
     assert MapSet.difference(provider_activity_owners(), owners_before) == MapSet.new()
   end
@@ -250,6 +395,53 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     assert message =~ "raise limits.evaluation_timeout_ms in the manifest"
 
     assert {:ok, _events} = ReplSession.close(session)
+  end
+
+  @tag :tmp_dir
+  test "a mission form that consumes the absolute deadline terminalizes synchronously", %{
+    tmp_dir: directory
+  } do
+    manifest = write_provider_free_application(directory, :normal)
+    document = manifest |> File.read!() |> Jason.decode!()
+
+    document =
+      document
+      |> Map.put("limits", %{
+        "run_duration_ms" => 200,
+        "evaluation_timeout_ms" => 5_000
+      })
+      |> Map.put("missions", %{
+        "review" => %{"components" => [], "data" => %{}, "providers" => []}
+      })
+
+    File.write!(manifest, Jason.encode!(document))
+
+    assert {:ok, session} =
+             ManifestRepl.open(manifest, nil,
+               mission: "review",
+               input_mode: :eval,
+               interactive_loop: false,
+               terminal_attached: true
+             )
+
+    [{_, {owner, _token}}] = :ets.lookup(session.access, session.id)
+
+    :sys.replace_state(owner, fn state ->
+      Process.cancel_timer(state.deadline_timer)
+      %{state | deadline_timer: nil, deadline_token: nil}
+    end)
+
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: message}}, session} =
+             ReplSession.eval(session, long_running_body(4))
+
+    assert message =~ "run_duration_ms limit 200 ms was exceeded"
+    assert ReplSession.terminal?(session)
+    assert {:ok, events} = ReplSession.close(session)
+
+    assert [%{data: %{reason: :deadline_expired}}] =
+             Enum.filter(events, &(&1.type == "limit-exceeded"))
+
+    assert List.last(events).data.reason == :deadline_expired
   end
 
   @tag :tmp_dir
@@ -477,7 +669,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     configure_host_llm(host_llm_test_ready_gate: gate)
     {manifest, host} = write_llm_application(directory, :normal)
     {:ok, runtime} = CommandRuntime.new(provider_application_mode: :host_owned)
-    assert {:ok, preparation} = CommandAcquisition.prepare_repl(manifest, host, runtime)
+    assert {:ok, preparation} = CommandAcquisition.prepare_repl(manifest, host, runtime, true)
     assert {:ok, authority} = PublicationAuthority.new([])
     assert {:ok, opening} = ManifestReplOpening.start(preparation, authority, nil, self())
     opening_ref = Process.monitor(ManifestReplOpening.pid(opening))
@@ -520,14 +712,14 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     assert {:error, %{fail: %{reason: reason}}, session} =
              ReplSession.eval(session, "42")
 
-    assert reason in [:limit_exceeded, :run_deadline_exceeded, :evaluation_timeout]
+    assert reason == :limit_exceeded
     assert {:ok, _events} = ReplSession.close(session)
 
     assert_eventually(fn ->
       lifecycle(marker) |> Enum.count(&(&1 == "session-closed")) == 1
     end)
 
-    assert File.read!(trace_path) =~ "repl_evaluation_error"
+    assert File.read!(trace_path) =~ "deadline_expired"
   end
 
   defp configure_host_llm(extra \\ []) do
@@ -769,6 +961,12 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
       {:ok, contents} -> String.split(contents, "\n", trim: true)
       {:error, :enoent} -> []
     end
+  end
+
+  defp owned_limits(%ReplSession{access: access, id: id}) do
+    [{^id, {owner, token}}] = :ets.lookup(access, id)
+    assert {:ok, config, _state} = ReplSessionOwner.resources(owner, token)
+    config.limits
   end
 
   defp provider_activity_owners do

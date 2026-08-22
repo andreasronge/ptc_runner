@@ -25,21 +25,22 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
 
   @doc false
-  @spec prepare_repl(binary(), binary() | nil, CommandRuntime.t()) ::
+  @spec prepare_repl(binary(), binary() | nil, CommandRuntime.t(), boolean()) ::
           {:ok, ManifestReplPreparation.t()}
           | {:error, CommandDiagnostic.t() | :host_config_required | :invalid_manifest_repl}
-  def prepare_repl(application, host_config, %CommandRuntime{} = runtime)
-      when is_binary(application) and (is_binary(host_config) or is_nil(host_config)) do
+  def prepare_repl(application, host_config, %CommandRuntime{} = runtime, interactive_loop?)
+      when is_binary(application) and (is_binary(host_config) or is_nil(host_config)) and
+             is_boolean(interactive_loop?) do
     case catalog(host_config) do
       {:ok, host, catalog} ->
-        prepare_repl_with_catalog(application, runtime, host, catalog)
+        prepare_repl_with_catalog(application, runtime, host, catalog, interactive_loop?)
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, diagnostic}
     end
   end
 
-  def prepare_repl(_application, _host_config, _runtime),
+  def prepare_repl(_application, _host_config, _runtime, _interactive_loop?),
     do: {:error, :invalid_manifest_repl}
 
   @spec prepare(CommandArguments.t(), binary(), {map(), [atom()]}, CommandRuntime.t()) ::
@@ -294,14 +295,18 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
         provider_application_mode: runtime.provider_application_mode
       )
 
-  defp prepare_repl_with_catalog(application, runtime, host, catalog) do
+  defp prepare_repl_with_catalog(application, runtime, host, catalog, interactive_loop?) do
     result =
       with {:ok, request} <-
-             ApplicationPackage.request_directory(application,
-               installed_limits: catalog.installed_limits,
-               result_projection: :native,
-               input_authority: :normal,
-               inspection_capture: false
+             ApplicationPackage.request_repl_directory(
+               application,
+               [
+                 installed_limits: catalog.installed_limits,
+                 result_projection: :native,
+                 input_authority: :normal,
+                 inspection_capture: false
+               ],
+               interactive_loop?
              ),
            :ok <- require_repl_host(request, host),
            {:ok, prepared} <- RunCoordinator.prepare(request, catalog) do

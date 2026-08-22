@@ -111,6 +111,93 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output =~ "Goodbye!"
   end
 
+  test "direct interactive sessions exceed the ordinary evaluation ceiling with or without a TTY" do
+    input = Enum.map_join(1..140, "", &"#{&1}\n")
+
+    for terminal_attached? <- [false, true] do
+      output =
+        capture_io(input, fn ->
+          run_repl([], terminal_attached: terminal_attached?)
+        end)
+
+      assert output =~ "140\n"
+      assert output =~ "Goodbye!"
+      refute output =~ "subordinate_evaluations limit"
+    end
+  end
+
+  @tag :tmp_dir
+  test "a setup load followed by the direct line loop receives the interactive profile", %{
+    tmp_dir: directory
+  } do
+    setup = Path.join(directory, "setup.clj")
+    File.write!(setup, "(def loaded 42)")
+    input = String.duplicate("loaded\n", 129)
+
+    output = capture_io(input, fn -> run_repl(["--load", setup]) end)
+
+    assert output =~ "Loaded #{setup}"
+    assert output =~ "42\n"
+    assert output =~ "Goodbye!"
+    refute output =~ "subordinate_evaluations limit"
+  end
+
+  test "direct repeated eval retains the ordinary session ceiling" do
+    arguments = Enum.flat_map(1..129, &["--eval", Integer.to_string(&1)])
+
+    stderr =
+      capture_io(:stderr, fn ->
+        _stdout =
+          capture_io(fn ->
+            error = assert_raise Mix.Error, fn -> run_repl(arguments) end
+
+            assert error.message =~
+                     "subordinate_evaluations limit 128 was exceeded"
+
+            refute error.message =~ "manifest"
+          end)
+      end)
+
+    assert stderr =~ "subordinate_evaluations limit 128 was exceeded"
+    refute stderr =~ "manifest"
+  end
+
+  @tag :tmp_dir
+  test "a terminal session failure prints once and stops before another prompt", %{
+    tmp_dir: directory
+  } do
+    manifest = Path.join(directory, "terminal-limit.json")
+    File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [input] (return input))")
+
+    File.write!(
+      manifest,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "main.clj"}],
+          "entry" => "app/run"
+        },
+        "input" => %{"value" => %{}},
+        "limits" => %{"subordinate_evaluations" => 1}
+      })
+    )
+
+    output =
+      capture_io("101\n202\n303\n", fn ->
+        error =
+          assert_raise Mix.Error, fn ->
+            run_repl(["--manifest", manifest], terminal_attached: false)
+          end
+
+        assert error.message =~ "subordinate_evaluations limit 1 was exceeded"
+      end)
+
+    assert length(String.split(output, "ptc> ")) - 1 == 2
+    assert output =~ "101\n"
+    refute output =~ "303\n"
+    refute output =~ "subordinate_evaluations limit"
+  end
+
   test "Lisp doc replaces the removed :doc meta-command" do
     output = capture_io(":doc >\n(doc \">\")\n:quit\n", fn -> run_repl([]) end)
 
