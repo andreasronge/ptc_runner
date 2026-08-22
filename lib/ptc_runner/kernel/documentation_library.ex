@@ -34,6 +34,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     {"agent-guide", "docs/guides/agent-cli-usage.md"},
     {"quickstart", "docs/guides/quickstart.md"},
     {"getting-started", "docs/guides/getting-started.md"},
+    {"concepts", "docs/guides/concepts.md"},
     {"building-agents", "docs/guides/building-agents.md"},
     {"manifests-and-capabilities", "docs/guides/manifests-and-capabilities.md"},
     {"components-and-preludes", "docs/guides/components-and-preludes.md"},

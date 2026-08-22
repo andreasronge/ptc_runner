@@ -21,6 +21,7 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
 
     assert classify(["docs/guides/quickstart.md"]) ==
              all_false()
+             |> Map.put("core", "true")
              |> Map.put("docs", "true")
 
     assert classify(["docs/maintainers/development-setup.md"]) ==

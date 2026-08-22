@@ -1,9 +1,10 @@
 # Customize an agent
 
-> **Audience:** application authors using the shipped agent loop or replacing
-> its prompt, policy, mission composition, or complete implementation.
+Configure the shipped agent loop or replace its prompt, policy, mission
+composition, or complete implementation.
 
-Most users do not write the programs an agent executes. They configure a task,
+Most users do not write the programs
+an agent executes. They configure a task,
 model, approved tools, data, limits, and the shipped `agent.core` loop. The
 model writes bounded mission programs during the run.
 
@@ -22,7 +23,7 @@ a mission in which generated programs run. The two environments are separate:
 
 Mission code cannot call the workflow model or re-enter the evaluation
 boundary. Giving the workflow a model therefore does not give generated code
-that authority.
+access to it.
 
 ## Start with the shipped loop
 
@@ -35,8 +36,8 @@ A thin workflow entry can delegate to the shipped loop:
   (agent.core/run (get input "task") {"max_turns" 6}))
 ```
 
-Application authors normally generate this scaffold or start from an example;
-they do not write each mission program the model produces. Configure the loop
+Normally, generate this scaffold or start from an example. You do not write
+each mission program the model produces. Configure the loop
 through its documented options and keep the mission tool surface smaller than
 the workflow surface.
 
@@ -54,7 +55,8 @@ an application may introduce new component IDs for:
 - a complete alternative loop.
 
 Changing those components cannot grant a new model, tool, credential, endpoint,
-or higher limit. The host and application authority rules still apply.
+or higher limit. `ptc.json` can still select only what `ptc-host.json` makes
+available, and it can ask for less but never more.
 
 ## Compose specialists deliberately
 
@@ -72,12 +74,12 @@ explicit and reconcile an unknown outcome before continuing.
 
 ## Inspect and improve
 
-Every agent run produces a canonical trace. Opt-in private inspection can also
+Every agent run produces a trace. Opt-in private inspection can also
 retain prompts, responses, generated source, and tool payloads. Use replay to
 hold model responses fixed while comparing a prompt or prelude candidate, then
 promote a change only after evaluating its evidence.
 
-The short [core-prompt replacement tutorial](components-and-preludes.md#trial-a-different-core-prompt)
+The short [component replacement guide](components-and-preludes.md#trial-a-replacement-safely)
 shows how to materialize and run an `agent.prompt` candidate.
 
 Use the [agent library reference](../agent-library-reference.md) for exact entry

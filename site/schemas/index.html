@@ -27,7 +27,7 @@ editor at one to get completion and validation while authoring:</p>
   "application": {"path": "ptc.json"}
 }</code></pre>
 
-<p>PtcRunner keeps three roles in three separate files. Credential values and provider
+<p>PtcRunner keeps configuration responsibilities in three separate files. Credential values and provider
 declarations do not belong in the project file, and project choices do not become part of
 application content identity.</p>
 
@@ -35,7 +35,6 @@ application content identity.</p>
 
 <div class="schema">
   <h3><a href="/schemas/ptc-project-config.schema.json">ptc-project-config.schema.json</a></h3>
-  <span class="role">operator or project checkout</span>
   <p><code>ptc-project.json</code> — paths to the other files, local artifact policy, and Viewer
   preferences. This is the document you hand to <code>ptc run</code>, <code>ptc doctor</code>,
   <code>ptc repl</code>, and <code>ptc viewer</code>.</p>
@@ -44,7 +43,6 @@ application content identity.</p>
 
 <div class="schema">
   <h3><a href="/schemas/ptc-application-manifest.schema.json">ptc-application-manifest.schema.json</a></h3>
-  <span class="role">application author or model</span>
   <p><code>ptc.json</code> — workflow, components, input, provider selections, and narrower
   limits. Model-authorable application selection; runtime loading remains authoritative.</p>
   <span class="url mono">https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json</span>
@@ -52,16 +50,14 @@ application content identity.</p>
 
 <div class="schema">
   <h3><a href="/schemas/ptc-host-config.schema.json">ptc-host-config.schema.json</a></h3>
-  <span class="role">operator</span>
   <p><code>ptc-host.json</code> — installed providers, credential references, commands,
-  endpoints, and outer limits. Operator-owned provider installation; runtime loading remains
+  endpoints, and outer limits. Runtime loading remains
   authoritative.</p>
   <span class="url mono">https://ptc-runner.dev/schemas/ptc-host-config.schema.json</span>
 </div>
 
 <div class="schema">
   <h3><a href="/schemas/ptc-command-envelope-v2.schema.json">ptc-command-envelope-v2.schema.json</a></h3>
-  <span class="role">machine integration</span>
   <p>The V2 command envelope written by <code>ptc run --envelope FILE</code>. An atomic,
   no-replace file whose status and exit-code relationship is sealed by the command contract —
   parse this instead of stdout.</p>
@@ -83,7 +79,6 @@ in its own <code>$comment</code>.</p>
 
 <div class="schema">
   <h3><a href="/schemas/mcp-2026-07-28.schema.json">mcp-2026-07-28.schema.json</a></h3>
-  <span class="role">third-party MCP server author</span>
   <p>The definitions a tools server must satisfy to be acquirable: <code>DiscoverRequest</code>,
   <code>ListToolsRequest</code>, <code>CallToolRequest</code>, their result responses, and
   <code>PtcRunnerJSONRPCErrorResponse</code>. Wire shape only &mdash; the

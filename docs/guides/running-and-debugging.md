@@ -1,9 +1,10 @@
 # Run and inspect a project
 
-> **Audience:** application authors and operators running, validating, and
-> inspecting PtcRunner applications through the `ptc` executable.
+Run, validate, and inspect a PtcRunner project through the `ptc` executable.
 
-Create a provider-free project and run it:
+## How do I run a project?
+
+Start with a project that needs no API key:
 
 ```console
 ptc init hello-ptc
@@ -15,23 +16,29 @@ The result is written to standard output. The project document remembers its
 artifact root, so traces and optional envelopes or results stay beside the
 project rather than depending on the caller's current directory.
 
-Before a credentialed run, check configuration without network activity:
+## How do I check a model-backed project?
+
+Materialize the tutorial projects, then check the multi-turn agent without
+network activity:
 
 ```console
-ptc doctor ptc-project.json
-ptc models ptc-project.json
+ptc init kernel-tutorial --example kernel-tutorial
+ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json
+ptc models kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 Use `--connect` only when an active provider probe is intended:
 
 ```console
-ptc doctor ptc-project.json --connect
+ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect
 ```
+
+## How do I browse completed runs?
 
 Browse completed runs locally:
 
 ```console
-ptc viewer ptc-project.json
+ptc viewer hello-ptc/ptc-project.json
 ```
 
 The Runs list uses a matching project `labels.name` as its readable headline,
@@ -53,11 +60,13 @@ wildcard, and set `PTC_VIEWER_TOKEN`. Open
 `http://localhost:4123/?live_token=THE_TOKEN#/live` to authorize the Live
 controls; the token does not authenticate the Runs trace browser.
 
+## How do I consume results from automation?
+
 For automation, request a command envelope instead of parsing human-readable
 diagnostics:
 
 ```console
-ptc run ptc-project.json --envelope command-envelope.json
+ptc run hello-ptc/ptc-project.json --envelope command-envelope.json
 ```
 
 Use the [CLI reference](../reference/cli.md) for the complete command grammar,

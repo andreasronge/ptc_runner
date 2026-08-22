@@ -4,14 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Docker installation · PtcRunner</title>
-<meta name="description" content="Linux is currently verified through a local container scaffold. A public image
-and multi-architecture publication contract are still pending, so there is no
-re…">
+<meta name="description" content="Build and run the self-contained PtcRunner container image.">
 <link rel="canonical" href="https://ptc-runner.dev/installation/docker/">
 <meta property="og:title" content="Docker installation · PtcRunner">
-<meta property="og:description" content="Linux is currently verified through a local container scaffold. A public image
-and multi-architecture publication contract are still pending, so there is no
-re…">
+<meta property="og:description" content="Build and run the self-contained PtcRunner container image.">
 <meta property="og:url" content="https://ptc-runner.dev/installation/docker/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +25,7 @@ re…">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,8 +95,8 @@ re…">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="docker-installation">Docker installation</h1><blockquote><p><strong>Audience:</strong> operators building or running the self-contained PtcRunner
-container image.</p></blockquote><p>Linux is currently verified through a local container scaffold. A public image
+<h1 id="docker-installation">Docker installation</h1><p>Build and run the self-contained PtcRunner container image.</p><p>Linux is currently
+verified through a local container scaffold. A public image
 and multi-architecture publication contract are still pending, so there is no
 registry name that the documentation can truthfully present as an installation
 today.</p><p>Build and verify the local image from a source checkout:</p><pre><code class="console language-console">scripts/build_container_image.sh</code></pre><p>The script produces <code class="inline">ptc:dev</code>, runs the standalone verification inside the

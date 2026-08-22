@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Design an agent workflow · PtcRunner</title>
-<meta name="description" content="Design a small support-inbox agent in three runnable steps: grant the data,
+<meta name="description" content="Design a small support-inbox agent in three runnable steps: provide the data,
 move the rules into code, then split the work between specialists.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/designing-agent-workflows/">
 <meta property="og:title" content="Design an agent workflow · PtcRunner">
-<meta property="og:description" content="Design a small support-inbox agent in three runnable steps: grant the data,
+<meta property="og:description" content="Design a small support-inbox agent in three runnable steps: provide the data,
 move the rules into code, then split the work between specialists.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/designing-agent-workflows/">
 <meta property="og:type" content="article">
@@ -27,6 +27,7 @@ move the rules into code, then split the work between specialists.">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -96,8 +97,7 @@ move the rules into code, then split the work between specialists.">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="design-an-agent-workflow">Design an agent workflow</h1><blockquote><p><strong>Audience:</strong> application authors turning a real task into their first
-multi-stage agent design.</p></blockquote><p>Design a small support-inbox agent in three runnable steps: grant the data,
+<h1 id="design-an-agent-workflow">Design an agent workflow</h1><p>Design a small support-inbox agent in three runnable steps: provide the data,
 move the rules into code, then split the work between specialists.</p><p>Each step answers one design question — where does the data live, where do
 the business rules live, and how is work divided between agents. The
 configuration guides explain each surface exhaustively; this page shows why a
@@ -134,7 +134,7 @@ policy computes. The model
 decides <em>how to use</em> the rules; it cannot <em>reinterpret</em> them. That split is
 the core of code-mode design: judgment in the model, policy in reviewable
 code. <a href="/guides/components-and-preludes/">Customize agent components</a> covers the
-component and signature rules this step relies on.</p><h2 id="step-3-split-authority-between-specialists">Step 3: split authority between specialists</h2><p>The final step routes each breached ticket to a team. Classification is
+component and signature rules this step relies on.</p><h2 id="step-3-give-each-specialist-only-what-it-needs">Step 3: give each specialist only what it needs</h2><p>The final step routes each breached ticket to a team. Classification is
 model judgment, but routing is policy — and the routing stage needs none of
 the raw ticket pool. So the third manifest declares two named missions with
 different grants:</p><pre><code class="json language-json">&quot;missions&quot;: {

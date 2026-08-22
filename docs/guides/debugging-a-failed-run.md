@@ -1,9 +1,11 @@
 # Debug a failed run
 
-> **Audience:** application authors and operators diagnosing a run from its
-> immutable trace and, when explicitly retained, private inspection evidence.
+Follow a failed run from its immutable trace into private inspection only when
+the trace cannot answer the question.
 
-Start with the public evidence:
+## What failed?
+
+Start with the trace:
 
 ```console
 ptc viewer ptc-project.json
@@ -26,10 +28,12 @@ profile separately and write unattended output to an owner-controlled file.
 Private inspection is for questions that public evidence cannot answer; it is
 not the default debugging path.
 
+## Can another run inspect the failure?
+
 The checked-in debugging example demonstrates another useful pattern: one
 ordinary PtcRunner application can navigate a frozen failed capture through the
 shipped `debug.nav` library without gaining filesystem, network, model, or
-nested-evaluation authority.
+nested-evaluation access.
 
 ```console
 ptc init debug-a-failed-run --example debug-a-failed-run
@@ -43,8 +47,10 @@ against its own held-out cases with `mix ptc.repair` before any human promotes
 it. The README materialized beside the example walks both arms; the validation
 contract is documented in the repository's maintainer guide on embedding.
 
+## Where is the complete evidence contract?
+
 Use the [debug-navigation reference](../reference/debug-navigation.md) for the
 complete evidence graph, typed links, collections, resources, pagination,
-private-authority rules, and model-assisted navigation contract. The
+private-inspection rules, and model-assisted navigation contract. The
 [TraceLog and run-analysis reference](../maintainers/trace-log-contract.md) owns
-the canonical event schema.
+the event schema.

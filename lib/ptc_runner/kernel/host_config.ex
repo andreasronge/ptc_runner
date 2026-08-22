@@ -1295,7 +1295,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       "$id" => "https://ptc-runner.dev/schemas/ptc-host-config.schema.json",
       "title" => "PtcRunner host configuration",
       "description" =>
-        "Operator-owned provider installation and installed ceilings. An empty install map is valid. Runtime loading remains authoritative.",
+        "Installed provider configuration and ceilings. An empty install map is valid. Runtime loading remains authoritative.",
       "type" => "object",
       "additionalProperties" => false,
       "required" => ["install"],
@@ -1331,7 +1331,7 @@ defmodule PtcRunner.Kernel.HostConfig do
     |> closed_object()
     |> Map.put(
       "description",
-      "Optional operator-owned installed ceilings. Omitted limits keep their cataloged installed defaults."
+      "Optional installed ceilings. Omitted limits keep their cataloged installed defaults."
     )
   end
 

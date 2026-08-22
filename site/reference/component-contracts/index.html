@@ -4,14 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Components-and-preludes reference · PtcRunner</title>
-<meta name="description" content="A component is one immutable PTC-Lisp module with one namespace. Its declared
-component dependencies define the only namespaces it may call while compiling.
-Co…">
+<meta name="description" content="This is the complete component, dependency, visibility, and shipped-library
+contract.">
 <link rel="canonical" href="https://ptc-runner.dev/reference/component-contracts/">
 <meta property="og:title" content="Components-and-preludes reference · PtcRunner">
-<meta property="og:description" content="A component is one immutable PTC-Lisp module with one namespace. Its declared
-component dependencies define the only namespaces it may call while compiling.
-Co…">
+<meta property="og:description" content="This is the complete component, dependency, visibility, and shipped-library
+contract.">
 <meta property="og:url" content="https://ptc-runner.dev/reference/component-contracts/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +27,7 @@ Co…">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,8 +97,8 @@ Co…">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="components-and-preludes-reference">Components-and-preludes reference</h1><blockquote><p><strong>Audience:</strong> advanced application and PTC-Lisp authors who need the complete
-component, dependency, visibility, and shipped-library contract.</p></blockquote><p>A component is one immutable PTC-Lisp module with one namespace. Its declared
+<h1 id="components-and-preludes-reference">Components-and-preludes reference</h1><p>This is the complete component, dependency, visibility, and shipped-library
+contract.</p><p>A component is one immutable PTC-Lisp module with one namespace. Its declared
 component dependencies define the only namespaces it may call while compiling.
 Components compile into a frozen bundle; shipped components are selected as
 libraries instead of copied into an application.</p><p>A project names its components in the manifest:</p><pre><code class="json language-json">&quot;components&quot;: [
@@ -161,7 +160,27 @@ history across resumptions.</p><p><a href="/guides/building-agents/">Building ag
 ID. A hash-checked
 <a href="/guides/evaluating-with-replay/#evaluate-the-candidate-without-installing-it">component override</a>
 can evaluate replacement source for one selected component on a run, but it is
-an invocation option rather than a permanent manifest library installation.</p><h2 id="boundaries">Boundaries</h2><p>The manifest selects component sources and trusted provider aliases;
+an invocation option rather than a permanent manifest library installation.</p><h2 id="evaluate-one-replacement-component">Evaluate one replacement component</h2><p><code class="inline">--component-override-descriptor</code> replaces one component already selected by
+the manifest. A transitively selected component is also eligible. The
+descriptor contains the replacement instruction, not the source itself:</p><pre><code class="json language-json">{
+  &quot;target&quot;: {&quot;environment&quot;: &quot;workflow&quot;},
+  &quot;component_id&quot;: &quot;my.agent&quot;,
+  &quot;base_source_hash&quot;: &quot;sha256:&lt;64 lowercase hex&gt;&quot;,
+  &quot;source_hash&quot;: &quot;sha256:&lt;64 lowercase hex&gt;&quot;,
+  &quot;path&quot;: &quot;candidate.clj&quot;
+}</code></pre><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Field</th><th style="text-align: left;">Meaning</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">target</code></td><td style="text-align: left;">The workflow bundle, or one exact mission bundle</td></tr><tr><td style="text-align: left;"><code class="inline">component_id</code></td><td style="text-align: left;">An already-selected component whose source will be replaced</td></tr><tr><td style="text-align: left;"><code class="inline">base_source_hash</code></td><td style="text-align: left;">Hash of the installed source the candidate was derived from</td></tr><tr><td style="text-align: left;"><code class="inline">source_hash</code></td><td style="text-align: left;">Hash of the candidate source bytes</td></tr><tr><td style="text-align: left;"><code class="inline">path</code></td><td style="text-align: left;">Candidate source path relative to the descriptor directory</td></tr><tr><td style="text-align: left;"><code class="inline">provenance</code></td><td style="text-align: left;">Optional claims about how the candidate was authored</td></tr></tbody></table></div><p>For a mission component, use
+<code class="inline">{&quot;environment&quot;: &quot;mission&quot;, &quot;mission&quot;: &quot;reader&quot;}</code> as the target. The
+candidate path is confined to the descriptor directory. PtcRunner verifies
+both hashes before compiling: <code class="inline">source_hash</code> prevents substituted candidate
+bytes, while <code class="inline">base_source_hash</code> rejects a candidate built for a component that
+has since changed. The source is read once, and those verified bytes are the
+bytes compiled.</p><p>An override preserves the selected component's ID and declared dependencies.
+It cannot add a component or change the graph. The replacement still passes
+the normal dependency, signature, export, capability-requirement, and bundle
+checks. The descriptor contains no source, credentials, provider grants, or
+installation instruction.</p><p>The optional closed <code class="inline">provenance</code> object may contain <code class="inline">run_id</code>, <code class="inline">prompt_hash</code>,
+<code class="inline">authored_at</code>, and <code class="inline">accept_widened_effect</code>. These are supplied claims rather
+than proof of origin.</p><h2 id="boundaries">Boundaries</h2><p>The manifest selects component sources and trusted provider aliases;
 executable callbacks stay in the host-owned provider registry. New provider
 types must preserve this boundary: manifests must not introduce endpoints,
 credentials, SQL, commands, or callbacks.</p><p>Private inspection is a separate host-selected artifact, described in

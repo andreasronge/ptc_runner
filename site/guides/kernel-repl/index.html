@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Explore a project interactively · PtcRunner</title>
-<meta name="description" content="Open the workflow environment declared by a project:">
+<meta name="description" content="Inspect a workflow, mission, or immutable run capture from an interactive or
+unattended REPL session.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/kernel-repl/">
 <meta property="og:title" content="Explore a project interactively · PtcRunner">
-<meta property="og:description" content="Open the workflow environment declared by a project:">
+<meta property="og:description" content="Inspect a workflow, mission, or immutable run capture from an interactive or
+unattended REPL session.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/kernel-repl/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -25,6 +27,7 @@
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -94,16 +97,16 @@
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="explore-a-project-interactively">Explore a project interactively</h1><blockquote><p><strong>Audience:</strong> application authors and operators inspecting a workflow,
-mission, or immutable run capture.</p></blockquote><p>Open the workflow environment declared by a project:</p><pre><code class="console language-console">ptc repl --project ptc-project.json</code></pre><p>Evaluate one expression without opening a terminal:</p><pre><code class="console language-console">ptc repl --project ptc-project.json -e '(dir)'</code></pre><p>Inspect one mission with its own components, data, and direct provider closure:</p><pre><code class="console language-console">ptc repl --project ptc-project.json --mission default</code></pre><p>Mission sessions do not inherit workflow model access or other missions. They
-are useful for checking exactly what a generated program can see.</p><p>Analyze public traces through the fixed, read-only profile:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
+<h1 id="explore-a-project-interactively">Explore a project interactively</h1><p>Inspect a workflow, mission, or immutable run capture from an interactive or
+unattended REPL session.</p><h2 id="how-do-i-open-a-workflow">How do I open a workflow?</h2><p>Open the workflow environment declared by a project:</p><pre><code class="console language-console">ptc repl --project ptc-project.json</code></pre><p>Evaluate one expression without opening a terminal:</p><pre><code class="console language-console">ptc repl --project ptc-project.json -e '(dir)'</code></pre><p>Inspect one mission with its own components, data, and direct provider closure:</p><pre><code class="console language-console">ptc repl --project ptc-project.json --mission default</code></pre><p>Mission sessions do not inherit workflow model access or other missions. They
+are useful for checking exactly what a generated program can see.</p><h2 id="how-do-i-query-past-runs">How do I query past runs?</h2><p>Analyze public traces through the fixed, read-only profile:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
   --profile run-analysis-v1 \
   -e '(analysis/runs {})'</code></pre><p>Every form evaluates under <code class="inline">evaluation_timeout_ms</code>, whose effective default is
 30,000 ms. A form stopped by that ceiling names it and its configured value.
-Raise it in the manifest if a form needs longer:</p><pre><code class="json language-json">{ &quot;limits&quot;: { &quot;evaluation_timeout_ms&quot;: 60000 } }</code></pre><p>Private inspection is a separate explicit mode because it can reveal prompts,
+Raise it in the manifest if a form needs longer:</p><pre><code class="json language-json">{ &quot;limits&quot;: { &quot;evaluation_timeout_ms&quot;: 60000 } }</code></pre><h2 id="how-do-i-inspect-private-records">How do I inspect private records?</h2><p>Private inspection is a separate explicit mode because it can reveal prompts,
 responses, generated source, and tool payloads. Do not grant it merely to query
 ordinary activity.</p><p>Use the <a href="/reference/repl/">REPL reference</a> for every session mode, selector,
-profile, preview limit, script form, JSON Lines contract, private-authority
+profile, preview limit, script form, JSON Lines contract, private-inspection
 requirement, and cleanup rule.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/running-and-debugging/">&larr; Run and inspect a project</a><a class="pager-next" href="/guides/debugging-a-failed-run/">Debug a failed run &rarr;</a></nav>

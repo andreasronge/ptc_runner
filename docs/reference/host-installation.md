@@ -1,23 +1,22 @@
 # Host-configuration reference
 
-> **Audience:** operators who need the complete installed-provider, credential,
-> transport, data-class, and outer-policy contract.
+This is the complete contract for installed providers, credentials, transports,
+data classes, and outer limits.
 
-The host document is the operator-owned half of a PtcRunner deployment. This
-strict JSON file installs provider aliases, credentials, data classes, and
-outer limits separately from the application manifest:
+The strict `ptc-host.json` file keeps them
+separate from the application manifest:
 
 ```console
 ptc run MANIFEST --host-config ptc-host.json
 ```
 
-A manifest may select and narrow an installed alias. It cannot add a provider,
+A manifest may select an installed alias and ask for less. It cannot add a provider,
 change an endpoint or executable, supply a credential, or raise a ceiling. A
-provider-bearing manifest requires `--host-config`; a provider-free manifest
+provider-bearing manifest requires `--host-config`; a manifest with no providers
 does not.
 
 For a checkout used repeatedly, store the host and optional environment-file
-references in the separate operator-owned
+references in the separate
 [project configuration](project-files.md):
 
 ```console
@@ -99,7 +98,7 @@ Credentials have exactly one source:
 Credentials are resolved once and passed explicitly to the provider. A
 missing, empty, or unreadable value fails with `credential_unavailable`; there
 is no ambient provider-specific fallback. Never put credentials in a manifest,
-PTC-Lisp, canonical traces, or committed files.
+PTC-Lisp, traces, or committed files.
 
 Surrounding whitespace is not part of a secret and is trimmed from every
 source, so `gh auth token > vendor.token` and an editor that adds a trailing
@@ -127,8 +126,8 @@ The source set and placement are closed:
 | `llm` | Live language model | Workflow |
 | `llm_replay` | Frozen model responses | Workflow |
 | `mcp` | External tool server | Mission |
-| `ptc_trace_snapshot` | Public canonical trace queries | Mission |
-| `ptc_private_trace_snapshot` | Private-authorized canonical trace queries | Mission |
+| `ptc_trace_snapshot` | Trace queries | Mission |
+| `ptc_private_trace_snapshot` | Trace queries joined with authorized private records | Mission |
 | `ptc_inspection_snapshot` | Private inspection queries | Mission |
 
 Selecting an alias into the wrong environment fails with
@@ -232,7 +231,7 @@ including any runtime that server requires.
 ### MCP servers
 
 An MCP installation fixes its stdio or streamable-HTTP transport and maps
-upstream tool names to stable public capability names with operator-declared
+upstream tool names to stable public capability names with host-declared
 read/write effects. A manifest selects and narrows that mapping but cannot
 change its executable, endpoint, credentials, or effect declarations.
 
@@ -264,7 +263,7 @@ Directories resolve against the host document and are captured once.
 `ptc_private_trace_snapshot` reads ordinary and `.private.jsonl` traces and
 classifies the run as `private_inspection`. An inspection snapshot requires
 exactly one of those trace sources so it can validate every private artifact
-against the captured canonical evidence.
+against the captured trace evidence.
 
 Set a trace selection's manifest config to `{"expose": false}` when it exists
 only as the inspection source's dependency. It still supplies the frozen trace
@@ -311,7 +310,7 @@ parallel timeout, and event count/byte ceilings too. Source checks have their
 own quota and do not execute code.
 
 `install` is required and may be empty. A limits-only host document raises
-ceilings for a provider-free application without fabricating a provider:
+ceilings for an application that selects no providers:
 
 ```json
 {

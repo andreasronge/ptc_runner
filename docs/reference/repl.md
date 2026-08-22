@@ -1,7 +1,7 @@
 # REPL reference
 
-> **Audience:** application authors and operators who need the complete
-> interactive, unattended, analysis-profile, and private-session contract.
+This is the complete interactive, unattended, analysis-profile, and
+private-session contract.
 
 `ptc repl` keeps its workflow, manifest-mission, and code-owned profile
 environments deliberately separate:
@@ -11,8 +11,8 @@ environments deliberately separate:
 | Direct scratchpad | no selector | fresh workflow | core REPL only |
 | Manifest workflow | `--project` or `--manifest` | manifest workflow | workflow capabilities and model routes |
 | Manifest mission | `--project` or `--manifest` plus `--mission NAME` | selected manifest mission | direct mission capabilities plus provider dependency closure |
-| Public analysis profile | `--profile run-analysis-v1` | fixed code-owned mission | immutable canonical traces |
-| Private analysis profile | `--profile private-run-analysis-v1` | fixed code-owned mission | correlated canonical and private inspection evidence |
+| Public analysis profile | `--profile run-analysis-v1` | fixed code-owned mission | immutable traces |
+| Private analysis profile | `--profile private-run-analysis-v1` | fixed code-owned mission | correlated traces and private inspection records |
 
 Successful definitions and exact `*1`, `*2`, and `*3` history persist for one
 command. A failed form preserves the previously committed state. Profile and
@@ -261,7 +261,7 @@ stdin remain unattended input and require `--private-unattended` instead.
 
 The trace, inspection, and analysis-trace directories must be physically
 separate, including through ancestors and symlink aliases. Capture validates
-every private artifact against its canonical run. A malformed, changed,
+every private artifact against its matching run. A malformed, changed,
 uncorrelated, oversized, or unsupported artifact rejects the complete private
 source. Use the PtcRunner build matching the artifact's reported schema when
 versions differ.
@@ -379,7 +379,7 @@ private data.
 
 Private evaluation diagnostics never forward arbitrary evaluator text that
 could quote captured evidence. Safe diagnostics may rebuild names found
-verbatim in the operator's submitted source, or admit a bounded message for a
+verbatim in the submitted source, or admit a bounded message for a
 pre-execution fault (parse, analyze, symbol-limit, compile-budget, or
 tool-resolution) when no capability has run in that evaluation; otherwise the
 message is visibly redacted while the fault kind, continuation effect, and
@@ -387,7 +387,7 @@ usage remain exact.
 
 ## Keep analysis traces separate
 
-Profile sessions write a separate safe canonical trace, never into their input
+Profile sessions write a separate safe trace, never into their input
 tree:
 
 ```console

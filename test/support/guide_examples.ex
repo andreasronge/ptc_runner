@@ -4,7 +4,17 @@ defmodule PtcRunner.TestSupport.GuideExamples do
   alias __MODULE__, as: GuideExamples
   alias PtcRunner.Kernel.ProjectConfig
 
-  defstruct [:assertion, :command, :expected, :id, :line, :project, :requires, :scratch]
+  defstruct [
+    :assertion,
+    :command,
+    :expected,
+    :frontend,
+    :id,
+    :line,
+    :project,
+    :requires,
+    :scratch
+  ]
 
   @annotation ~r/<!-- ptc-guide-e2e: (?<options>[^>]+) -->/
   @example ~r/<!-- ptc-guide-e2e: (?<options>[^>]+) -->\s*```console\n(?<command>.*?)\n```\s*```json\n(?<expected>.*?)\n```/s
@@ -17,6 +27,7 @@ defmodule PtcRunner.TestSupport.GuideExamples do
   @type t :: %__MODULE__{
           command: String.t(),
           expected: term(),
+          frontend: String.t() | nil,
           id: String.t(),
           line: pos_integer(),
           project: String.t() | nil,
@@ -167,6 +178,7 @@ defmodule PtcRunner.TestSupport.GuideExamples do
       stderr_path = Path.join(temporary, "stderr")
       {command, project_path} = isolate_project(example, root, temporary)
       command = isolate_scratch(command, example, temporary)
+      command = select_frontend(command, example)
       environment = command_environment(example, temporary, project_path)
 
       {_output, status} =
@@ -231,6 +243,7 @@ defmodule PtcRunner.TestSupport.GuideExamples do
 
     %__MODULE__{
       id: Map.fetch!(options, "id"),
+      frontend: Map.get(options, "frontend"),
       project: Map.get(options, "project"),
       requires: Map.get(options, "requires"),
       assertion: Map.get(options, "assert"),
@@ -255,9 +268,10 @@ defmodule PtcRunner.TestSupport.GuideExamples do
       end)
 
     if map_size(parsed) != length(option_list) or
-         Map.keys(parsed) -- ~w(assert id project requires scratch) != [] or
+         Map.keys(parsed) -- ~w(assert frontend id project requires scratch) != [] or
          not Map.has_key?(parsed, "id") or
          not Regex.match?(@id, parsed["id"]) or
+         not valid_frontend?(parsed["frontend"]) or
          not valid_project?(parsed["project"]) or
          not valid_requirement?(parsed["requires"]) or
          not valid_scratch?(parsed["scratch"]) or
@@ -278,6 +292,10 @@ defmodule PtcRunner.TestSupport.GuideExamples do
 
   defp valid_project?(path),
     do: canonical_registry_entry?(path) and String.ends_with?(path, ".json")
+
+  defp valid_frontend?(nil), do: true
+  defp valid_frontend?("mix"), do: true
+  defp valid_frontend?(_frontend), do: false
 
   defp valid_assertion?(nil), do: true
   defp valid_assertion?(name), do: name in @assertions
@@ -430,6 +448,12 @@ defmodule PtcRunner.TestSupport.GuideExamples do
       _matches ->
         String.replace(command, relative_path, shell_quote(Path.join(temporary, relative_path)))
     end
+  end
+
+  defp select_frontend(command, %{frontend: nil}), do: command
+
+  defp select_frontend(command, %{frontend: "mix"}) do
+    Regex.replace(~r/^ptc(?=\s)/m, command, "mix ptc")
   end
 
   defp shell_quote(path), do: "'" <> String.replace(path, "'", "'\\''") <> "'"

@@ -4,14 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Source installation · PtcRunner</title>
-<meta name="description" content="The ordinary product interface is the ptc executable. A source checkout is
-for changing PtcRunner, validating an unreleased revision, or building a
-standalone …">
+<meta name="description" content="Build PtcRunner from a repository checkout when changing the runtime,
+validating an unreleased revision, or producing a standalone artifact.">
 <link rel="canonical" href="https://ptc-runner.dev/installation/source/">
 <meta property="og:title" content="Source installation · PtcRunner">
-<meta property="og:description" content="The ordinary product interface is the ptc executable. A source checkout is
-for changing PtcRunner, validating an unreleased revision, or building a
-standalone …">
+<meta property="og:description" content="Build PtcRunner from a repository checkout when changing the runtime,
+validating an unreleased revision, or producing a standalone artifact.">
 <meta property="og:url" content="https://ptc-runner.dev/installation/source/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +27,7 @@ standalone …">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,10 +97,9 @@ standalone …">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="source-installation">Source installation</h1><blockquote><p><strong>Audience:</strong> maintainers and package integrators building PtcRunner from a
-repository checkout.</p></blockquote><p>The ordinary product interface is the <code class="inline">ptc</code> executable. A source checkout is
-for changing PtcRunner, validating an unreleased revision, or building a
-standalone artifact before the public installer is available.</p><p>Tool versions are pinned in <code class="inline">mise.toml</code>:</p><pre><code class="console language-console">mise install
+<h1 id="source-installation">Source installation</h1><p>Build PtcRunner from a repository checkout when changing the runtime,
+validating an unreleased revision, or producing a standalone artifact.</p><p>The
+ordinary product interface is the installed <code class="inline">ptc</code> executable.</p><p>Tool versions are pinned in <code class="inline">mise.toml</code>:</p><pre><code class="console language-console">mise install
 mix deps.get
 mix compile</code></pre><p>Run the command frontend from the checkout:</p><pre><code class="console language-console">mix ptc init hello-ptc
 mix ptc run hello-ptc/ptc-project.json</code></pre><p>Build the local runtime-included release:</p><pre><code class="console language-console">MIX_ENV=prod mix release ptc_runner --overwrite

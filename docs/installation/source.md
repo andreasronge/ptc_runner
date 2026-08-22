@@ -1,11 +1,10 @@
 # Source installation
 
-> **Audience:** maintainers and package integrators building PtcRunner from a
-> repository checkout.
+Build PtcRunner from a repository checkout when changing the runtime,
+validating an unreleased revision, or producing a standalone artifact.
 
-The ordinary product interface is the `ptc` executable. A source checkout is
-for changing PtcRunner, validating an unreleased revision, or building a
-standalone artifact before the public installer is available.
+The
+ordinary product interface is the installed `ptc` executable.
 
 Tool versions are pinned in `mise.toml`:
 

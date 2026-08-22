@@ -1,7 +1,9 @@
 # Explore a project interactively
 
-> **Audience:** application authors and operators inspecting a workflow,
-> mission, or immutable run capture.
+Inspect a workflow, mission, or immutable run capture from an interactive or
+unattended REPL session.
+
+## How do I open a workflow?
 
 Open the workflow environment declared by a project:
 
@@ -24,6 +26,8 @@ ptc repl --project ptc-project.json --mission default
 Mission sessions do not inherit workflow model access or other missions. They
 are useful for checking exactly what a generated program can see.
 
+## How do I query past runs?
+
 Analyze public traces through the fixed, read-only profile:
 
 ```console
@@ -40,10 +44,12 @@ Raise it in the manifest if a form needs longer:
 { "limits": { "evaluation_timeout_ms": 60000 } }
 ```
 
+## How do I inspect private records?
+
 Private inspection is a separate explicit mode because it can reveal prompts,
 responses, generated source, and tool payloads. Do not grant it merely to query
 ordinary activity.
 
 Use the [REPL reference](../reference/repl.md) for every session mode, selector,
-profile, preview limit, script form, JSON Lines contract, private-authority
+profile, preview limit, script form, JSON Lines contract, private-inspection
 requirement, and cleanup rule.

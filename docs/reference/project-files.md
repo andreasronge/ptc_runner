@@ -1,7 +1,7 @@
 # Project-configuration reference
 
-> **Audience:** application authors and operators who need the complete local
-> path, artifact, override, and Viewer-preference contract.
+This is the complete local path, artifact, override, and Viewer-preference
+contract.
 
 Use one explicitly named `ptc-project.json` to remember stable local paths and
 development preferences:
@@ -38,13 +38,13 @@ single-argument shape:
 ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
-## Keep the three roles separate
+## Keep the three files separate
 
-| File | Owner | Purpose |
-| --- | --- | --- |
-| `ptc.json` | application author or model | workflow, components, input, provider selections, narrower limits |
-| `ptc-host.json` | operator | installed providers, credential references, commands, endpoints, outer limits |
-| `ptc-project.json` | operator or project checkout | paths to those files, local artifact policy, Viewer preferences |
+| File | What it holds |
+| --- | --- |
+| `ptc.json` | workflow, components, input, provider selections, and narrower limits |
+| `ptc-host.json` | installed providers, credential references, commands, endpoints, and outer limits |
+| `ptc-project.json` | paths to those files, local artifact policy, and Viewer preferences |
 
 Credential values and provider declarations do not belong in the project
 file. Project choices do not become part of application content identity.
@@ -94,7 +94,7 @@ paths resolved beneath the project document's directory; absolute paths and
 in the repository).
 
 Inspection requires traces because private records must correlate with a
-canonical run. `viewer.private` is a separate explicit local grant: creating a
+matching run. `viewer.private` is a separate explicit local grant: creating a
 private artifact does not automatically expose it to Viewer. `viewer.repl`
 independently enables the browser REPL, including when `viewer.private` is
 `true`. REPL evaluations remain fixed to the public `run-analysis-v1` profile
@@ -144,7 +144,7 @@ invocation-only. Mission names stay in the application manifest rather than
 being duplicated as project defaults. A project environment file is loaded
 only when inert preparation proves that a selected mission provider or its
 dependency uses an environment-backed credential. Unrelated providers do not
-cause environment-backed credentials to be read. Provider-free runs, passive
+cause environment-backed credentials to be read. Runs without providers, passive
 doctor, Viewer startup, and file- or literal-backed credentials do not read it.
 Viewer-started workflows and missions read the selected file lazily through
 their ordinary command preparation.

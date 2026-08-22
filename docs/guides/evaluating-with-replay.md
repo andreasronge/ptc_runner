@@ -1,22 +1,24 @@
 # Evaluate changes with replay
 
-> **Audience:** application authors comparing an agent prompt or prelude change
-> against fixed model responses before an explicit promotion decision.
+Compare an agent prompt or prelude change against fixed model responses before
+deciding whether to promote it.
 
-Live model output drifts between runs. The `llm_replay` provider holds model
+Live model output drifts between runs, while
+the `llm_replay` provider holds model
 responses fixed so a difference between a baseline and candidate run can be
 attributed to the candidate component rather than another model sample.
 
 Replay changes neither the manifest grammar nor the application's model alias.
-The operator swaps the installed provider behind that alias.
+Replace the installed provider behind that alias in `ptc-host.json`.
 
 ## Run the network-free example
 
 The checked-in example needs no credential or network access:
 
+<!-- ptc-guide-e2e: id=guide-replay-frozen-answer frontend=mix scratch=replay-example -->
 ```console
-ptc init llm-replay --example llm-replay
-ptc run llm-replay/ptc-project.json
+ptc init replay-example --example llm-replay
+ptc run replay-example/ptc-project.json
 ```
 
 ```json
@@ -26,7 +28,7 @@ ptc run llm-replay/ptc-project.json
 The project records private inspection and grants it to the Viewer:
 
 ```console
-ptc viewer llm-replay/ptc-project.json
+ptc viewer replay-example/ptc-project.json
 ```
 
 ## Install a replay model
@@ -53,7 +55,7 @@ Plain doctor parses the selected fixture under installed ceilings without
 starting the provider:
 
 ```console
-ptc doctor llm-replay/ptc-project.json
+ptc doctor replay-example/ptc-project.json
 ```
 
 A missing, empty, malformed, duplicate, or oversized fixture set fails its
@@ -106,51 +108,17 @@ the manifest. A transitively selected component is also eligible, so selecting
 `agent.core` makes its `agent.prompt` dependency available as a workflow
 override target.
 
-The descriptor contains the replacement instruction, not the source itself:
-
-```json
-{
-  "target": {"environment": "workflow"},
-  "component_id": "my.agent",
-  "base_source_hash": "sha256:<64 lowercase hex>",
-  "source_hash": "sha256:<64 lowercase hex>",
-  "path": "candidate.clj"
-}
-```
-
-| Field | Meaning |
-| --- | --- |
-| `target` | The workflow bundle, or one exact mission bundle |
-| `component_id` | An already-selected component whose source will be replaced |
-| `base_source_hash` | Hash of the installed source the candidate was derived from |
-| `source_hash` | Hash of the candidate source bytes |
-| `path` | Candidate source path relative to the descriptor directory |
-| `provenance` | Optional operator assertions about how the candidate was authored |
-
-For a mission component, use
-`{"environment": "mission", "mission": "reader"}` as the target. The
-candidate path is confined to the descriptor directory. PtcRunner verifies
-both hashes before compiling: `source_hash` prevents substituted candidate
-bytes, while `base_source_hash` rejects a candidate built for a component that
-has since changed. The source is read once, and those verified bytes are the
-bytes compiled.
-
-An override preserves the selected component's ID and declared dependencies;
-it cannot add a component or change the graph. The replacement still passes
-the normal dependency, signature, export, capability-requirement, and bundle
-checks. The descriptor contains no source, credentials, provider grants, or
-installation instruction.
+The descriptor binds the candidate to the installed source it replaces and to
+the exact candidate bytes. It cannot add a component, change dependencies, or
+grant a provider. The replacement still passes compilation, dependency,
+signature, export, capability-requirement, and bundle checks. See the
+[component reference](../reference/component-contracts.md#evaluate-one-replacement-component)
+for every descriptor field and validation rule.
 
 Candidate creation is a trusted build step and is not currently exposed by the
 standalone executable. The source-checkout tool for maintainers is documented
 under "Materialize candidate source" in `docs/maintainers/embedding.md`, which
 is a repository document rather than a page the executable carries.
-
-The optional closed `provenance` object may contain `run_id`, `prompt_hash`,
-`authored_at`, and `accept_widened_effect`. These are operator claims rather
-than proof of origin. `mix ptc.materialize` writes the candidate and completed
-descriptor as owner-only files and calculates the candidate path and hash from
-the bytes it publishes.
 
 The active bundle stays immutable for the whole run. A run may author source,
 but only a later host invocation can materialize it and start with the newly
@@ -159,7 +127,7 @@ stored in `ptc-project.json`.
 
 Run the unchanged baseline and the override with the same replay installation,
 inputs, host ceilings, and content snapshots. Compare their values, envelopes,
-usage, and canonical traces. Replay removes model sampling as a variable; it
+usage, and traces. Replay removes model sampling as a variable; it
 does not make external MCP content deterministic unless that content is also
 frozen and identified.
 

@@ -24,14 +24,63 @@ defmodule PtcRunner.DocumentationGuidelinesTest do
     end
   end
 
-  test "declares the audience of every hand-written documentation page" do
+  test "opens every published page with a useful summary" do
     paths =
-      Path.wildcard("docs/{guides,installation,reference}/*.md") ++
-        Path.wildcard("docs/maintainers/**/*.md")
+      published_product_paths()
+      |> Enum.reject(&(&1 == "README.md" or File.read!(&1) =~ "<!-- Auto-generated"))
 
     for path <- paths do
-      assert File.read!(path) =~ ~r/^> \*\*Audience:\*\*/m,
-             "#{path} must start with a visible audience declaration"
+      content = File.read!(path)
+
+      assert content =~ ~r/\A# [^\n]+\n\n[^\n#>`*+-][^\n]*(?:\n(?!\n)[^\n]+)*\n\n/,
+             "#{path} must open with a paragraph after its title"
+
+      [_title, body] = String.split(content, "\n\n", parts: 2)
+      [opening | _rest] = String.split(body, "\n\n")
+      opening = String.replace(opening, "\n", " ")
+
+      assert String.length(opening) <= 160,
+             "#{path} opening must fit the site's 160-character description"
+
+      assert String.ends_with?(opening, [".", "?", "!"]),
+             "#{path} opening must be a complete sentence"
+
+      refute content =~ ~r/^> \*\*Audience:\*\*/m,
+             "#{path} must describe its purpose instead of naming an audience role"
+    end
+  end
+
+  test "uses plain terminology in published product prose" do
+    paths =
+      published_product_paths() ++
+        Path.wildcard("priv/schemas/*.json") ++
+        ["site/index.html", "site/schemas/index.html"]
+
+    for path <- paths do
+      content = File.read!(path)
+      normalized = String.replace(content, ~r/\s+/, " ")
+
+      refute content =~ ~r/^> \*\*Audience:\*\*/m,
+             "#{path} must describe its purpose instead of naming an audience role"
+
+      unless path == "docs/ptc-lisp-specification.md" do
+        refute normalized =~ ~r/\b(?:application authors?|operators?)\b/i,
+               "#{path} should name the responsible file or address the reader directly"
+      end
+
+      refute normalized =~
+               ~r/\bcanonical (?:trace|traces|run|runs|event|events|evidence)\b/i,
+             "#{path} should say trace or private inspection record"
+
+      refute normalized =~ ~r/\bprovider-free\b/i,
+             "#{path} should say whether the workflow needs an API key or provider"
+    end
+  end
+
+  test "keeps every guide skimmable" do
+    for path <- Path.wildcard("docs/guides/*.md") do
+      assert File.read!(path) =~ ~r/^## /m,
+             "#{path} must use task-oriented section headings"
     end
   end
 
@@ -59,6 +108,17 @@ defmodule PtcRunner.DocumentationGuidelinesTest do
 
     guide_extras = Enum.filter(extras, &String.starts_with?(&1, "docs/guides/"))
     assert Enum.sort(grouped_guides) == Enum.sort(guide_extras)
+  end
+
+  defp published_product_paths do
+    Mix.Project.config()
+    |> Keyword.fetch!(:docs)
+    |> Keyword.fetch!(:extras)
+    |> Enum.filter(&String.ends_with?(&1, ".md"))
+    |> Enum.reject(
+      &(String.starts_with?(&1, "docs/maintainers/") or
+          String.starts_with?(&1, "docs/conformance/"))
+    )
   end
 
   test "uses canonical anchors for conformance gaps" do

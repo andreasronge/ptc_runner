@@ -1,9 +1,9 @@
 # Drive ptc as an agent
 
-> **Audience:** LLMs and coding agents that run the `ptc` executable directly,
-> and the people configuring them.
+Use the executable's own help and embedded documentation when a coding agent
+drives `ptc`.
 
-You do not need network access or a remembered API to use PtcRunner. The
+You do not need network access or a remembered API. The
 executable you are running carries its own command grammar and documentation,
 so both always describe the version you actually invoke.
 
@@ -78,7 +78,7 @@ contract.
 A failed run reports a closed phase and code pair. Deliberate `fail` values are
 deliberately not copied into the command diagnostic, and private detail never
 reaches public evidence, so do not expect a stack trace or a model transcript
-in normal output. To debug, read the canonical trace the run recorded, then
+in normal output. To debug, read the trace the run recorded, then
 `ptc docs debug` for the query surface and `ptc docs traces` for the record
 contract. `ptc viewer PROJECT.json` browses the same evidence when a human is
 present.
@@ -87,9 +87,9 @@ When you need the exact private records — model exchanges, generated source,
 capability payloads — they require explicit private authorization; see
 `ptc docs repl` and `ptc docs cli`.
 
-## Respect the authority boundary
+## Respect what each file can configure
 
-An application document selects only what the operator already installed. It
+An application document selects only what `ptc-host.json` already installed. It
 cannot add credentials, endpoints, commands, or wider limits, and no prompt or
 generated program can escalate that. If a provider or tool is missing, the fix
 belongs in the host configuration a person controls (`ptc docs host`), not in

@@ -1,7 +1,7 @@
 # Components-and-preludes reference
 
-> **Audience:** advanced application and PTC-Lisp authors who need the complete
-> component, dependency, visibility, and shipped-library contract.
+This is the complete component, dependency, visibility, and shipped-library
+contract.
 
 A component is one immutable PTC-Lisp module with one namespace. Its declared
 component dependencies define the only namespaces it may call while compiling.
@@ -127,6 +127,49 @@ ID. A hash-checked
 [component override](../guides/evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
 can evaluate replacement source for one selected component on a run, but it is
 an invocation option rather than a permanent manifest library installation.
+
+## Evaluate one replacement component
+
+`--component-override-descriptor` replaces one component already selected by
+the manifest. A transitively selected component is also eligible. The
+descriptor contains the replacement instruction, not the source itself:
+
+```json
+{
+  "target": {"environment": "workflow"},
+  "component_id": "my.agent",
+  "base_source_hash": "sha256:<64 lowercase hex>",
+  "source_hash": "sha256:<64 lowercase hex>",
+  "path": "candidate.clj"
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `target` | The workflow bundle, or one exact mission bundle |
+| `component_id` | An already-selected component whose source will be replaced |
+| `base_source_hash` | Hash of the installed source the candidate was derived from |
+| `source_hash` | Hash of the candidate source bytes |
+| `path` | Candidate source path relative to the descriptor directory |
+| `provenance` | Optional claims about how the candidate was authored |
+
+For a mission component, use
+`{"environment": "mission", "mission": "reader"}` as the target. The
+candidate path is confined to the descriptor directory. PtcRunner verifies
+both hashes before compiling: `source_hash` prevents substituted candidate
+bytes, while `base_source_hash` rejects a candidate built for a component that
+has since changed. The source is read once, and those verified bytes are the
+bytes compiled.
+
+An override preserves the selected component's ID and declared dependencies.
+It cannot add a component or change the graph. The replacement still passes
+the normal dependency, signature, export, capability-requirement, and bundle
+checks. The descriptor contains no source, credentials, provider grants, or
+installation instruction.
+
+The optional closed `provenance` object may contain `run_id`, `prompt_hash`,
+`authored_at`, and `accept_widened_effect`. These are supplied claims rather
+than proof of origin.
 
 ## Boundaries
 

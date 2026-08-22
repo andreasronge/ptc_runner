@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Debug a failed run · PtcRunner</title>
-<meta name="description" content="Start with the public evidence:">
+<meta name="description" content="Follow a failed run from its immutable trace into private inspection only when
+the trace cannot answer the question.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/debugging-a-failed-run/">
 <meta property="og:title" content="Debug a failed run · PtcRunner">
-<meta property="og:description" content="Start with the public evidence:">
+<meta property="og:description" content="Follow a failed run from its immutable trace into private inspection only when
+the trace cannot answer the question.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/debugging-a-failed-run/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -25,6 +27,7 @@
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -94,28 +97,28 @@
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="debug-a-failed-run">Debug a failed run</h1><blockquote><p><strong>Audience:</strong> application authors and operators diagnosing a run from its
-immutable trace and, when explicitly retained, private inspection evidence.</p></blockquote><p>Start with the public evidence:</p><pre><code class="console language-console">ptc viewer ptc-project.json</code></pre><p>Or query it with the fixed analysis profile:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
+<h1 id="debug-a-failed-run">Debug a failed run</h1><p>Follow a failed run from its immutable trace into private inspection only when
+the trace cannot answer the question.</p><h2 id="what-failed">What failed?</h2><p>Start with the trace:</p><pre><code class="console language-console">ptc viewer ptc-project.json</code></pre><p>Or query it with the fixed analysis profile:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
   --profile run-analysis-v1 \
   -e '(analysis/runs {&quot;status&quot; &quot;error&quot;})'</code></pre><p>Use the run ID to open its activity, terminal reason, evaluations, tool use,
 limits, and completeness flags. Public traces deliberately omit prompts,
 responses, generated source, and tool payloads.</p><p>If the run was configured to retain private inspection, authorize the private
 profile separately and write unattended output to an owner-controlled file.
 Private inspection is for questions that public evidence cannot answer; it is
-not the default debugging path.</p><p>The checked-in debugging example demonstrates another useful pattern: one
+not the default debugging path.</p><h2 id="can-another-run-inspect-the-failure">Can another run inspect the failure?</h2><p>The checked-in debugging example demonstrates another useful pattern: one
 ordinary PtcRunner application can navigate a frozen failed capture through the
 shipped <code class="inline">debug.nav</code> library without gaining filesystem, network, model, or
-nested-evaluation authority.</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
+nested-evaluation access.</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
 ptc run debug-a-failed-run/target.ptc-project.json
 ptc run debug-a-failed-run/debugger.ptc-project.json</code></pre><p>The same example optionally closes the loop: a phased repair agent proposes a
 complete component replacement or abstains, and the host validates a proposal
 against its own held-out cases with <code class="inline">mix ptc.repair</code> before any human promotes
 it. The README materialized beside the example walks both arms; the validation
-contract is documented in the repository's maintainer guide on embedding.</p><p>Use the <a href="/reference/debug-navigation/">debug-navigation reference</a> for the
+contract is documented in the repository's maintainer guide on embedding.</p><h2 id="where-is-the-complete-evidence-contract">Where is the complete evidence contract?</h2><p>Use the <a href="/reference/debug-navigation/">debug-navigation reference</a> for the
 complete evidence graph, typed links, collections, resources, pagination,
-private-authority rules, and model-assisted navigation contract. The
+private-inspection rules, and model-assisted navigation contract. The
 <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md">TraceLog and run-analysis reference</a> owns
-the canonical event schema.</p>
+the event schema.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/kernel-repl/">&larr; Explore a project interactively</a><a class="pager-next" href="/guides/evaluating-with-replay/">Evaluate changes with replay &rarr;</a></nav>
 <footer>

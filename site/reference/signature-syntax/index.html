@@ -4,14 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Signature reference · PtcRunner</title>
-<meta name="description" content="Signatures tell a model what a function accepts and returns, and let PtcRunner
-validate both sides of the call. They are compact enough to include in model
-con…">
+<meta name="description" content="Use signatures to describe component and model-visible tool inputs and outputs,
+then validate both sides of each call.">
 <link rel="canonical" href="https://ptc-runner.dev/reference/signature-syntax/">
 <meta property="og:title" content="Signature reference · PtcRunner">
-<meta property="og:description" content="Signatures tell a model what a function accepts and returns, and let PtcRunner
-validate both sides of the call. They are compact enough to include in model
-con…">
+<meta property="og:description" content="Use signatures to describe component and model-visible tool inputs and outputs,
+then validate both sides of each call.">
 <meta property="og:url" content="https://ptc-runner.dev/reference/signature-syntax/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +27,7 @@ con…">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,8 +97,8 @@ con…">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="signature-reference">Signature reference</h1><blockquote><p><strong>Audience:</strong> application and PTC-Lisp authors declaring compact input and
-output contracts for components and model-visible tools.</p></blockquote><p>Signatures tell a model what a function accepts and returns, and let PtcRunner
+<h1 id="signature-reference">Signature reference</h1><p>Use signatures to describe component and model-visible tool inputs and outputs,
+then validate both sides of each call.</p><p>Signatures tell a model what a function accepts and returns, and let PtcRunner
 validate both sides of the call. They are compact enough to include in model
 context while remaining readable in application source.</p><h2 id="shape">Shape</h2><p>An input-and-output signature uses an arrow:</p><pre><code class="text language-text">(query :string, limit :int) -&gt; {count :int, items [{id :int}]}</code></pre><p>Output-only signatures omit the empty input list:</p><pre><code class="text language-text">{name :string, price :float}</code></pre><p>This is equivalent to:</p><pre><code class="text language-text">() -&gt; {name :string, price :float}</code></pre><h2 id="primitive-types">Primitive types</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Type</th><th style="text-align: left;">Accepts</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">:string</code></td><td style="text-align: left;">UTF-8 strings</td></tr><tr><td style="text-align: left;"><code class="inline">:int</code></td><td style="text-align: left;">integers</td></tr><tr><td style="text-align: left;"><code class="inline">:float</code></td><td style="text-align: left;">finite floating-point values and integers</td></tr><tr><td style="text-align: left;"><code class="inline">:bool</code></td><td style="text-align: left;"><code class="inline">true</code> or <code class="inline">false</code></td></tr><tr><td style="text-align: left;"><code class="inline">:keyword</code></td><td style="text-align: left;">PTC-Lisp keywords</td></tr><tr><td style="text-align: left;"><code class="inline">:datetime</code></td><td style="text-align: left;">a runtime datetime value supplied by the runtime or host</td></tr><tr><td style="text-align: left;"><code class="inline">:map</code></td><td style="text-align: left;">a map with unrestricted string-like keys and values</td></tr><tr><td style="text-align: left;"><code class="inline">:any</code></td><td style="text-align: left;">any public PTC-Lisp value</td></tr></tbody></table></div><p>There are no <code class="inline">:list</code>, <code class="inline">:array</code>, <code class="inline">:tuple</code>, or <code class="inline">:object</code> primitive names. Use a
 collection or typed map instead.</p><h2 id="collections-and-maps">Collections and maps</h2><p>A vector containing one type describes a list:</p><pre><code class="text language-text">[:int]
@@ -130,9 +129,9 @@ only the declared shape:</p><pre><code class="clojure language-clojure">(defn re
   {:signature &quot;(path :string, cursor :string?) -&gt; :any&quot;}
   [path cursor]
   (tool/workspace.read
-    (if cursor {&quot;path&quot; path &quot;cursor&quot; cursor} {&quot;path&quot; path})))</code></pre><p>A signature documents and validates a capability; it does not grant one. The
-operator must still install the tool and the application must select it for the
-mission.</p><h2 id="prompt-schemas">Prompt schemas</h2><p>PtcRunner projects signatures into the model-visible tool schema. The schema
+    (if cursor {&quot;path&quot; path &quot;cursor&quot; cursor} {&quot;path&quot; path})))</code></pre><p>A signature documents and validates a capability; it does not grant one.
+<code class="inline">ptc-host.json</code> must still install the tool, and <code class="inline">ptc.json</code> must select it for
+the mission.</p><h2 id="prompt-schemas">Prompt schemas</h2><p>PtcRunner projects signatures into the model-visible tool schema. The schema
 contains the parameter names, nested collection and map shapes, required and
 optional fields, and descriptions supplied by the component. Runtime validation
 remains authoritative even when a provider performs its own structured-output

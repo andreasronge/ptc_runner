@@ -432,6 +432,7 @@ defmodule PtcRunner.MixProject do
           "docs/conformance/index.md",
           "docs/guides/quickstart.md",
           "docs/guides/getting-started.md",
+          "docs/guides/concepts.md",
           "docs/guides/agent-cli-usage.md",
           "docs/guides/ptc-lisp-basics.md",
           "docs/guides/project-configuration.md",
@@ -470,6 +471,7 @@ defmodule PtcRunner.MixProject do
         Start: [
           "docs/guides/quickstart.md",
           "docs/guides/getting-started.md",
+          "docs/guides/concepts.md",
           "docs/guides/agent-cli-usage.md"
         ],
         Language: [

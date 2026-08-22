@@ -4,14 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Evaluate changes with replay · PtcRunner</title>
-<meta name="description" content="Live model output drifts between runs. The llm_replay provider holds model
-responses fixed so a difference between a baseline and candidate run can be
-attribut…">
+<meta name="description" content="Compare an agent prompt or prelude change against fixed model responses before
+deciding whether to promote it.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/evaluating-with-replay/">
 <meta property="og:title" content="Evaluate changes with replay · PtcRunner">
-<meta property="og:description" content="Live model output drifts between runs. The llm_replay provider holds model
-responses fixed so a difference between a baseline and candidate run can be
-attribut…">
+<meta property="og:description" content="Compare an agent prompt or prelude change against fixed model responses before
+deciding whether to promote it.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/evaluating-with-replay/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +27,7 @@ attribut…">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,19 +97,20 @@ attribut…">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="evaluate-changes-with-replay">Evaluate changes with replay</h1><blockquote><p><strong>Audience:</strong> application authors comparing an agent prompt or prelude change
-against fixed model responses before an explicit promotion decision.</p></blockquote><p>Live model output drifts between runs. The <code class="inline">llm_replay</code> provider holds model
+<h1 id="evaluate-changes-with-replay">Evaluate changes with replay</h1><p>Compare an agent prompt or prelude change against fixed model responses before
+deciding whether to promote it.</p><p>Live model output drifts between runs, while
+the <code class="inline">llm_replay</code> provider holds model
 responses fixed so a difference between a baseline and candidate run can be
 attributed to the candidate component rather than another model sample.</p><p>Replay changes neither the manifest grammar nor the application's model alias.
-The operator swaps the installed provider behind that alias.</p><h2 id="run-the-network-free-example">Run the network-free example</h2><p>The checked-in example needs no credential or network access:</p><pre><code class="console language-console">ptc init llm-replay --example llm-replay
-ptc run llm-replay/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;content&quot;:&quot;Frozen answer&quot;}</code></pre><p>The project records private inspection and grants it to the Viewer:</p><pre><code class="console language-console">ptc viewer llm-replay/ptc-project.json</code></pre><h2 id="install-a-replay-model">Install a replay model</h2><p>The host document names a JSON Lines fixture:</p><pre><code class="json language-json">&quot;frozen-model&quot;: {
+Replace the installed provider behind that alias in <code class="inline">ptc-host.json</code>.</p><h2 id="run-the-network-free-example">Run the network-free example</h2><p>The checked-in example needs no credential or network access:</p><pre><code class="console language-console">ptc init replay-example --example llm-replay
+ptc run replay-example/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;content&quot;:&quot;Frozen answer&quot;}</code></pre><p>The project records private inspection and grants it to the Viewer:</p><pre><code class="console language-console">ptc viewer replay-example/ptc-project.json</code></pre><h2 id="install-a-replay-model">Install a replay model</h2><p>The host document names a JSON Lines fixture:</p><pre><code class="json language-json">&quot;frozen-model&quot;: {
   &quot;source&quot;: &quot;llm_replay&quot;,
   &quot;installation_revision&quot;: &quot;frozen-model-v1&quot;,
   &quot;fixtures&quot;: &quot;evaluation/replay.jsonl&quot;
 }</code></pre><p>Every fixture line has <code class="inline">schema_version</code> 1, a deterministic hash of the
 provider-neutral request, and exactly one <code class="inline">response</code> or ordered <code class="inline">responses</code>
 field:</p><pre><code class="json language-json">{&quot;schema_version&quot;:1,&quot;request_hash&quot;:&quot;sha256:0000000000000000000000000000000000000000000000000000000000000000&quot;,&quot;response&quot;:{&quot;content&quot;:&quot;frozen&quot;}}</code></pre><p>Plain doctor parses the selected fixture under installed ceilings without
-starting the provider:</p><pre><code class="console language-console">ptc doctor llm-replay/ptc-project.json</code></pre><p>A missing, empty, malformed, duplicate, or oversized fixture set fails its
+starting the provider:</p><pre><code class="console language-console">ptc doctor replay-example/ptc-project.json</code></pre><p>A missing, empty, malformed, duplicate, or oversized fixture set fails its
 local provider check as <code class="inline">fixtures_unreadable</code>, and the message names the rule
 the file broke. A line-level rejection names the line as well:</p><pre><code class="text language-text">replay fixture line 3 must set schema_version to 1</code></pre><p>The line number is the number in the file, counting blank lines. Nothing the
 line contains is published — only which rule it broke.</p><p><code class="inline">ptc validate</code> reads the same file under the same ceilings, so a manifest and
@@ -132,35 +132,20 @@ envelope also reports the miss in usage: that alias's <code class="inline">succe
 more than once.</p><h2 id="evaluate-the-candidate-without-installing-it">Evaluate the candidate without installing it</h2><p><code class="inline">--component-override-descriptor</code> replaces one component already selected by
 the manifest. A transitively selected component is also eligible, so selecting
 <code class="inline">agent.core</code> makes its <code class="inline">agent.prompt</code> dependency available as a workflow
-override target.</p><p>The descriptor contains the replacement instruction, not the source itself:</p><pre><code class="json language-json">{
-  &quot;target&quot;: {&quot;environment&quot;: &quot;workflow&quot;},
-  &quot;component_id&quot;: &quot;my.agent&quot;,
-  &quot;base_source_hash&quot;: &quot;sha256:&lt;64 lowercase hex&gt;&quot;,
-  &quot;source_hash&quot;: &quot;sha256:&lt;64 lowercase hex&gt;&quot;,
-  &quot;path&quot;: &quot;candidate.clj&quot;
-}</code></pre><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Field</th><th style="text-align: left;">Meaning</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">target</code></td><td style="text-align: left;">The workflow bundle, or one exact mission bundle</td></tr><tr><td style="text-align: left;"><code class="inline">component_id</code></td><td style="text-align: left;">An already-selected component whose source will be replaced</td></tr><tr><td style="text-align: left;"><code class="inline">base_source_hash</code></td><td style="text-align: left;">Hash of the installed source the candidate was derived from</td></tr><tr><td style="text-align: left;"><code class="inline">source_hash</code></td><td style="text-align: left;">Hash of the candidate source bytes</td></tr><tr><td style="text-align: left;"><code class="inline">path</code></td><td style="text-align: left;">Candidate source path relative to the descriptor directory</td></tr><tr><td style="text-align: left;"><code class="inline">provenance</code></td><td style="text-align: left;">Optional operator assertions about how the candidate was authored</td></tr></tbody></table></div><p>For a mission component, use
-<code class="inline">{&quot;environment&quot;: &quot;mission&quot;, &quot;mission&quot;: &quot;reader&quot;}</code> as the target. The
-candidate path is confined to the descriptor directory. PtcRunner verifies
-both hashes before compiling: <code class="inline">source_hash</code> prevents substituted candidate
-bytes, while <code class="inline">base_source_hash</code> rejects a candidate built for a component that
-has since changed. The source is read once, and those verified bytes are the
-bytes compiled.</p><p>An override preserves the selected component's ID and declared dependencies;
-it cannot add a component or change the graph. The replacement still passes
-the normal dependency, signature, export, capability-requirement, and bundle
-checks. The descriptor contains no source, credentials, provider grants, or
-installation instruction.</p><p>Candidate creation is a trusted build step and is not currently exposed by the
+override target.</p><p>The descriptor binds the candidate to the installed source it replaces and to
+the exact candidate bytes. It cannot add a component, change dependencies, or
+grant a provider. The replacement still passes compilation, dependency,
+signature, export, capability-requirement, and bundle checks. See the
+<a href="/reference/component-contracts/#evaluate-one-replacement-component">component reference</a>
+for every descriptor field and validation rule.</p><p>Candidate creation is a trusted build step and is not currently exposed by the
 standalone executable. The source-checkout tool for maintainers is documented
 under &quot;Materialize candidate source&quot; in <code class="inline">docs/maintainers/embedding.md</code>, which
-is a repository document rather than a page the executable carries.</p><p>The optional closed <code class="inline">provenance</code> object may contain <code class="inline">run_id</code>, <code class="inline">prompt_hash</code>,
-<code class="inline">authored_at</code>, and <code class="inline">accept_widened_effect</code>. These are operator claims rather
-than proof of origin. <code class="inline">mix ptc.materialize</code> writes the candidate and completed
-descriptor as owner-only files and calculates the candidate path and hash from
-the bytes it publishes.</p><p>The active bundle stays immutable for the whole run. A run may author source,
+is a repository document rather than a page the executable carries.</p><p>The active bundle stays immutable for the whole run. A run may author source,
 but only a later host invocation can materialize it and start with the newly
 compiled bundle. Component-override switches are invocation-only and are not
 stored in <code class="inline">ptc-project.json</code>.</p><p>Run the unchanged baseline and the override with the same replay installation,
 inputs, host ceilings, and content snapshots. Compare their values, envelopes,
-usage, and canonical traces. Replay removes model sampling as a variable; it
+usage, and traces. Replay removes model sampling as a variable; it
 does not make external MCP content deterministic unless that content is also
 frozen and identified.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/guides/components-and-preludes/">Components and preludes</a> defines component
 identity, dependencies, exports, and signatures.</li><li><a href="/guides/running-and-debugging/">Running and debugging</a> documents override switches,

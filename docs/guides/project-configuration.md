@@ -1,10 +1,12 @@
 # Keep a runnable project together
 
-> **Audience:** application authors and operators who want one stable command
-> for local runs, traces, results, and the Viewer.
+Use `ptc-project.json` as one stable command target for local runs, traces,
+results, and the Viewer.
 
-`ptc-project.json` remembers paths and local artifact preferences. It is not an
-application manifest and cannot grant model or tool authority.
+It remembers paths and local artifact preferences but
+cannot add a model or tool.
+
+## How do I create a project?
 
 Create and run one:
 
@@ -17,7 +19,8 @@ ptc viewer my-project/ptc-project.json
 The project document keeps three responsibilities separate:
 
 - `application.path` points to the application manifest;
-- `host.path` and an optional environment-file path belong to the operator;
+- `host.path` points to installed providers, and `host.env_file` may name one
+  exact environment file;
 - `artifacts` and `viewer` describe local outputs and inspection preferences.
 
 Paths resolve from the project document rather than from the caller's current
@@ -29,6 +32,8 @@ launched from the Live tab; no `.env` path is discovered implicitly.
 Commit the project and application configuration when they contain no secrets.
 Keep credential values and private run artifacts outside version control. New
 projects include the required artifact ignore patterns.
+
+## Where is the complete contract?
 
 Use the [project-configuration reference](../reference/project-files.md)
 for the complete document shape, path resolution, override precedence,

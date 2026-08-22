@@ -207,7 +207,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :traces,
           type: :string,
           syntax: ["--traces DIRECTORY"],
-          description: "private-authorized canonical trace directory"
+          description: "private-authorized trace directory"
         },
         %{
           key: :inspection,

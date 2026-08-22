@@ -1,12 +1,11 @@
 # Configure an application
 
-> **Audience:** application authors assembling a PtcRunner workflow and its
-> bounded mission environments.
+Use `ptc.json` to declare code, input, selected providers, missions, and limits.
 
-A PtcRunner application declares code, input, selected providers, missions,
-and narrower limits in `ptc.json`. The document can select only names that the
-operator installed. It cannot add credentials, endpoints, commands, or wider
-authority.
+The document can select only names installed by `ptc-host.json`. It cannot add
+credentials, endpoints, commands, or permissions.
+
+## How do I start an application?
 
 Start with a generated project:
 
@@ -28,7 +27,29 @@ The generated application is deliberately small:
 }
 ```
 
-Add a provider only after the operator has installed its alias. Every provider
+## How do I run the same application on new data?
+
+Keep stable default input in `ptc.json`. For one run, put another JSON object in
+a file such as `input.json`:
+
+```json
+{"name":"Ada"}
+```
+
+Pass it with `--input`. The path resolves relative to `ptc.json` first, so this
+works even when the command runs from another directory:
+
+```console
+ptc run my-application/ptc-project.json --input input.json
+```
+
+Use `--private-input` instead when the input must not appear in ordinary output
+or traces. Private input also requires private output handling; see the
+[command-line reference](../reference/cli.md#run-a-manifest).
+
+## How do I select a provider?
+
+Add a provider only after `ptc-host.json` has installed its alias. Every provider
 the application uses is selected at the top level, under `providers.workflow`
 for model access the trusted workflow holds, and under `providers.mission` for
 the task tools that missions running model-authored programs may hold. Add both
@@ -53,6 +74,30 @@ A mission's own `providers` list can only narrow what `providers.mission`
 already selected; naming an alias there does not introduce it, and a name
 absent from `providers.mission` is rejected. Omitting a name is the point: the
 grant is then absent from that mission's environment.
+
+## How do I stop a long or expensive run?
+
+Set runtime ceilings under `limits` and cap model calls on the selected alias:
+
+```json
+{
+  "providers": {
+    "workflow": [{"name": "model", "config": {"max_calls": 6}}]
+  },
+  "limits": {
+    "run_duration_ms": 60000,
+    "workflow_capability_calls": 12
+  }
+}
+```
+
+`run_duration_ms` bounds the whole run. `max_calls` bounds calls to that model
+alias, while `workflow_capability_calls` covers all workflow capability calls.
+The installed ceilings in `ptc-host.json` remain the maximum values `ptc.json`
+may request. See the [limits reference](../kernel-limits-reference.md) for every
+ceiling and its default.
+
+## How do I check the configuration?
 
 Install the aliases first, then validate. Both commands resolve the selected
 providers against the host document, so they report the selected provider as

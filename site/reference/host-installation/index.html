@@ -4,14 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Host-configuration reference · PtcRunner</title>
-<meta name="description" content="The host document is the operator-owned half of a PtcRunner deployment. This
-strict JSON file installs provider aliases, credentials, data classes, and
-outer l…">
+<meta name="description" content="This is the complete contract for installed providers, credentials, transports,
+data classes, and outer limits.">
 <link rel="canonical" href="https://ptc-runner.dev/reference/host-installation/">
 <meta property="og:title" content="Host-configuration reference · PtcRunner">
-<meta property="og:description" content="The host document is the operator-owned half of a PtcRunner deployment. This
-strict JSON file installs provider aliases, credentials, data classes, and
-outer l…">
+<meta property="og:description" content="This is the complete contract for installed providers, credentials, transports,
+data classes, and outer limits.">
 <meta property="og:url" content="https://ptc-runner.dev/reference/host-installation/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +27,7 @@ outer l…">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,14 +97,13 @@ outer l…">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="host-configuration-reference">Host-configuration reference</h1><blockquote><p><strong>Audience:</strong> operators who need the complete installed-provider, credential,
-transport, data-class, and outer-policy contract.</p></blockquote><p>The host document is the operator-owned half of a PtcRunner deployment. This
-strict JSON file installs provider aliases, credentials, data classes, and
-outer limits separately from the application manifest:</p><pre><code class="console language-console">ptc run MANIFEST --host-config ptc-host.json</code></pre><p>A manifest may select and narrow an installed alias. It cannot add a provider,
+<h1 id="host-configuration-reference">Host-configuration reference</h1><p>This is the complete contract for installed providers, credentials, transports,
+data classes, and outer limits.</p><p>The strict <code class="inline">ptc-host.json</code> file keeps them
+separate from the application manifest:</p><pre><code class="console language-console">ptc run MANIFEST --host-config ptc-host.json</code></pre><p>A manifest may select an installed alias and ask for less. It cannot add a provider,
 change an endpoint or executable, supply a credential, or raise a ceiling. A
-provider-bearing manifest requires <code class="inline">--host-config</code>; a provider-free manifest
+provider-bearing manifest requires <code class="inline">--host-config</code>; a manifest with no providers
 does not.</p><p>For a checkout used repeatedly, store the host and optional environment-file
-references in the separate operator-owned
+references in the separate
 <a href="/reference/project-files/">project configuration</a>:</p><pre><code class="console language-console">ptc run ptc-project.json
 ptc doctor ptc-project.json --connect</code></pre><p>Loading validates bounded, path-confined JSON without reading credentials,
 resolving executables, starting processes, or contacting endpoints. Those
@@ -155,7 +153,7 @@ directory; absolute paths are canonicalized.</li><li><code class="inline">litera
 rendered by a secret manager.</li></ul><p>Credentials are resolved once and passed explicitly to the provider. A
 missing, empty, or unreadable value fails with <code class="inline">credential_unavailable</code>; there
 is no ambient provider-specific fallback. Never put credentials in a manifest,
-PTC-Lisp, canonical traces, or committed files.</p><p>Surrounding whitespace is not part of a secret and is trimmed from every
+PTC-Lisp, traces, or committed files.</p><p>Surrounding whitespace is not part of a secret and is trimmed from every
 source, so <code class="inline">gh auth token &gt; vendor.token</code> and an editor that adds a trailing
 newline both work. Interior structure is preserved: a PEM block or a JSON
 service-account key is one credential, and <code class="inline">transport.env</code> hands it to the
@@ -168,7 +166,7 @@ credential — an LLM through <code class="inline">credential</code>, or an MCP 
 <code class="inline">transport.env</code> or <code class="inline">transport.auth</code> — the frontend loads that exact file before
 provider activity; it never searches for one. Every imported value persists for
 the process lifetime, and an existing process value wins. Embedded hosts load
-no dotenv file implicitly.</p><h2 id="choose-a-provider-source">Choose a provider source</h2><p>The source set and placement are closed:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;"><code class="inline">source</code></th><th style="text-align: left;">Purpose</th><th style="text-align: left;">Environment</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">llm</code></td><td style="text-align: left;">Live language model</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">llm_replay</code></td><td style="text-align: left;">Frozen model responses</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">mcp</code></td><td style="text-align: left;">External tool server</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_trace_snapshot</code></td><td style="text-align: left;">Public canonical trace queries</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_private_trace_snapshot</code></td><td style="text-align: left;">Private-authorized canonical trace queries</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_inspection_snapshot</code></td><td style="text-align: left;">Private inspection queries</td><td style="text-align: left;">Mission</td></tr></tbody></table></div><p>Selecting an alias into the wrong environment fails with
+no dotenv file implicitly.</p><h2 id="choose-a-provider-source">Choose a provider source</h2><p>The source set and placement are closed:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;"><code class="inline">source</code></th><th style="text-align: left;">Purpose</th><th style="text-align: left;">Environment</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">llm</code></td><td style="text-align: left;">Live language model</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">llm_replay</code></td><td style="text-align: left;">Frozen model responses</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">mcp</code></td><td style="text-align: left;">External tool server</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_trace_snapshot</code></td><td style="text-align: left;">Trace queries</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_private_trace_snapshot</code></td><td style="text-align: left;">Trace queries joined with authorized private records</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_inspection_snapshot</code></td><td style="text-align: left;">Private inspection queries</td><td style="text-align: left;">Mission</td></tr></tbody></table></div><p>Selecting an alias into the wrong environment fails with
 <code class="inline">provider_destination_denied</code>. This keeps model authority out of
 model-authored mission code.</p><h3 id="live-models">Live models</h3><p>A live installation fixes the full model selector, credential, cache policy,
 optional request parameters, and request/response ceilings. <code class="inline">ceilings.max_calls</code>
@@ -225,7 +223,7 @@ cross-repository <code class="inline">../ptc_runner/examples/...</code> path is 
 experimentation but does not make the application independently cloneable.</p><p>The self-contained PtcRunner release does not include the repository's example
 MCP bundles. Copy or package any selected example server with the application,
 including any runtime that server requires.</p><h3 id="mcp-servers">MCP servers</h3><p>An MCP installation fixes its stdio or streamable-HTTP transport and maps
-upstream tool names to stable public capability names with operator-declared
+upstream tool names to stable public capability names with host-declared
 read/write effects. A manifest selects and narrows that mapping but cannot
 change its executable, endpoint, credentials, or effect declarations.</p><p><a href="/reference/mcp/">Connecting tools with MCP</a> owns the complete
 task-shaped setup, including tool mapping, prompt-visible facades, transport
@@ -245,7 +243,7 @@ immutable captures:</p><pre><code class="json language-json">&quot;history&quot;
 <code class="inline">ptc_private_trace_snapshot</code> reads ordinary and <code class="inline">.private.jsonl</code> traces and
 classifies the run as <code class="inline">private_inspection</code>. An inspection snapshot requires
 exactly one of those trace sources so it can validate every private artifact
-against the captured canonical evidence.</p><p>Set a trace selection's manifest config to <code class="inline">{&quot;expose&quot;: false}</code> when it exists
+against the captured trace evidence.</p><p>Set a trace selection's manifest config to <code class="inline">{&quot;expose&quot;: false}</code> when it exists
 only as the inspection source's dependency. It still supplies the frozen trace
 capture without creating a second analysis namespace. The
 <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md#query-contract">TraceLog and run-analysis reference</a>
@@ -268,7 +266,7 @@ or running beside private inspection data.</p><h2 id="set-installed-ceilings">Se
 workflow timeout, model-call and mission-call quotas, subordinate evaluations,
 parallel timeout, and event count/byte ceilings too. Source checks have their
 own quota and do not execute code.</p><p><code class="inline">install</code> is required and may be empty. A limits-only host document raises
-ceilings for a provider-free application without fabricating a provider:</p><pre><code class="json language-json">{
+ceilings for an application that selects no providers:</p><pre><code class="json language-json">{
   &quot;install&quot;: {},
   &quot;limits&quot;: {
     &quot;workflow_heap_words&quot;: 16000000

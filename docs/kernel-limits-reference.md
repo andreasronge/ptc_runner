@@ -36,12 +36,12 @@ Time values are milliseconds. Heap values are BEAM process heap words, not bytes
 | `evaluation_history_bytes` | Each value and the aggregate exact three-value continuation history. | bytes | 1,000,000 | 16,000,000 | 1–2,592,000,000 |
 | `evaluation_memory_bytes` | Retained mission definitions across successful turns. | bytes | 2,000,000 | 32,000,000 | 1–2,592,000,000 |
 | `evaluation_timeout_ms` | One subordinate mission evaluation, and one interactive REPL form. | milliseconds | 30,000 | 600,000 | 1–2,592,000,000 |
-| `event_payload_bytes` | One canonical event payload. | bytes | 262,144 | 4,000,000 | 1–2,592,000,000 |
+| `event_payload_bytes` | One trace event payload. | bytes | 262,144 | 4,000,000 | 1–2,592,000,000 |
 | `live_provider_tasks` | Concurrent provider callback processes and Kernel-owned parallel Lisp workers. | count | 8 | 8 | 1–2,592,000,000 |
 | `mission_capability_calls` | Total mission capability calls in one run. | count | 256 | 4,096 | 1–2,592,000,000 |
 | `mission_capability_calls_per_name` | Mission capability calls to any one public name in one run. | count | 128 | 2,048 | 1–2,592,000,000 |
-| `normal_event_bytes` | Aggregate encoded canonical events retained under the normal policy. | bytes | 4,000,000 | 64,000,000 | 1–2,592,000,000 |
-| `normal_event_count` | Canonical events retained under the normal policy. | count | 256 | 4,096 | 1–2,592,000,000 |
+| `normal_event_bytes` | Aggregate encoded trace events retained under the normal policy. | bytes | 4,000,000 | 64,000,000 | 1–2,592,000,000 |
+| `normal_event_count` | Trace events retained under the normal policy. | count | 256 | 4,096 | 1–2,592,000,000 |
 | `parallel_timeout_ms` | One pmap or pcalls operation, clamped by the run deadline. | milliseconds | 60,000 | 600,000 | 1–2,592,000,000 |
 | `protocol_errors` | Recoverable agent protocol errors in one run. | count | 64 | 512 | 1–2,592,000,000 |
 | `provider_heap_words` | Heap of each provider callback process. | BEAM heap words | 5,000,000 | 5,000,000 | 1–2,592,000,000 |
