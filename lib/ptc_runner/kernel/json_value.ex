@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.JSONValue do
   def value?(value) when is_boolean(value) or is_integer(value), do: true
   def value?(value) when is_float(value), do: value == value
   def value?(value) when is_binary(value), do: String.valid?(value)
-  def value?(value) when is_list(value), do: Enum.all?(value, &value?/1)
+  def value?(value) when is_list(value), do: list_value?(value)
 
   def value?(value) when is_map(value) and not is_struct(value),
     do:
@@ -23,6 +23,10 @@ defmodule PtcRunner.Kernel.JSONValue do
       end)
 
   def value?(_value), do: false
+
+  defp list_value?([]), do: true
+  defp list_value?([item | rest]), do: value?(item) and list_value?(rest)
+  defp list_value?(_improper_tail), do: false
 
   @doc "Normalizes atom keys and values into a JSON-like value."
   @spec normalize(term()) :: {:ok, term()} | :error

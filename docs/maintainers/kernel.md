@@ -233,8 +233,11 @@ as a callable-surface change. [Components and preludes](../guides/components-and
 has the author-facing rules.
 
 `MissionInventory` owns the deterministic structured and prompt-facing mission
-API projection. `agent.prompt` renders model context. Prompt visibility never
-changes the underlying environment grant.
+API projection, including mission data grants. `agent.prompt` renders model
+context from the compact secondary projection. Prompt visibility never changes
+the underlying environment grant. `ptc validate` reports parseable data forms,
+all public exports, and selected providers per mission under `mission_grants`
+without acquiring providers.
 
 ## Evaluation, limits, and concurrency
 

@@ -57,7 +57,7 @@
       response)))
 
 (defn mission-inventory
-  "Return the exact frozen model-visible mission inventory JSON."
+  "Return the frozen prompt-facing mission inventory JSON, including data grants."
   [mission]
   (let [response (tool/kernel-mission-inventory {:mission mission})]
     (if (= :ok (get response :status))

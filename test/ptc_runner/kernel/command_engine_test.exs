@@ -4541,6 +4541,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
       "workflow_bundle_hash" => String.duplicate("2", 64),
       "mission_bundle_hashes" => %{},
+      "mission_grants" => %{},
       "provider_activity" => false
     }
 
@@ -4553,6 +4554,41 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         ] do
       assert_schema_invalid(put_in(validate.envelope, ["result", field], result[field] <> "\n"))
     end
+  end
+
+  test "validate mission_grants schema admits producer-scale data and export refs" do
+    run_ref = CommandRunRef.encode(@zero_entropy)
+
+    data = Enum.map(1..257, fn index -> "data/k#{index}" end)
+    long_export = String.duplicate("n", 200) <> "/" <> String.duplicate("s", 200)
+    long_data_form = "data/" <> String.duplicate("k", 70_000)
+
+    result = %{
+      "application_content_digest" => "sha256:" <> String.duplicate("0", 64),
+      "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
+      "workflow_bundle_hash" => String.duplicate("2", 64),
+      "mission_bundle_hashes" => %{"intake" => String.duplicate("3", 64)},
+      "mission_grants" => %{
+        "intake" => %{
+          "data" => [long_data_form | data],
+          "exports" => [long_export],
+          "providers" => ["workspace.read"]
+        }
+      },
+      "provider_activity" => false
+    }
+
+    outcome = CommandOutcome.success(:validate, run_ref, result)
+    assert_schema_valid(outcome.envelope)
+
+    assert length(outcome.envelope["result"]["mission_grants"]["intake"]["data"]) == 258
+
+    assert hd(outcome.envelope["result"]["mission_grants"]["intake"]["data"]) ==
+             long_data_form
+
+    assert outcome.envelope["result"]["mission_grants"]["intake"]["exports"] == [
+             long_export
+           ]
   end
 
   test "an unknown command has one exact schema-valid phase-1 outcome" do

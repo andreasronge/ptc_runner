@@ -13,7 +13,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
 
-  @expected ~S|{"schema_version":2,"exports":[{"ref":"tools/ping","kind":"function","call":"(tools/ping value)","doc":"Ping.","effect":"unknown","contract":null}],"capabilities":[{"name":"native.read","call":"(tool/native.read arguments)","description":"Read","effect":"read","input_schema":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"},"output_schema":null}],"limits":{"evaluation_timeout_ms":30000,"parallel_timeout_ms":60000,"subordinate_source_bytes":131072,"subordinate_source_checks":128,"mission_capability_calls":256,"mission_capability_calls_per_name":128,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
+  @expected ~S|{"schema_version":3,"exports":[{"ref":"tools/ping","kind":"function","call":"(tools/ping value)","doc":"Ping.","effect":"unknown","contract":null}],"capabilities":[{"name":"native.read","call":"(tool/native.read arguments)","description":"Read","effect":"read","input_schema":{"additionalProperties":false,"properties":{"query":{"type":"string"}},"required":["query"],"type":"object"},"output_schema":null}],"data":[],"limits":{"evaluation_timeout_ms":30000,"parallel_timeout_ms":60000,"subordinate_source_bytes":131072,"subordinate_source_checks":128,"mission_capability_calls":256,"mission_capability_calls_per_name":128,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
   @expected_model ~S|{"schema_version":2,"namespaces":[{"namespace":"tools","doc":"Tools."}],"entries":[{"kind":"call","form":"(tool/native.read {\"query\" query})","contract":{"parameters":[{"name":"arguments","type":{"kind":"object","nullable":false,"closed":true,"fields":[{"name":"query","required":true,"type":{"kind":"string","nullable":false}}]}}],"returns":null},"effect":"read","docs":"Read"},{"kind":"call","form":"(tools/ping value)","contract":null,"effect":"unknown","docs":"Ping."}],"limits":{"evaluation_timeout_ms":30000,"parallel_timeout_ms":60000,"subordinate_source_bytes":131072,"subordinate_source_checks":128,"mission_capability_calls":256,"mission_capability_calls_per_name":128,"capability_argument_bytes":262144,"capability_result_bytes":1000000}}|
 
   test "renders and hashes the exact versioned frozen inventory" do
@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     assert inventory.hash ==
              :crypto.hash(:sha256, @expected) |> Base.encode16(case: :lower)
 
+    assert inventory.schema_version == 3
     assert inventory.model_schema_version == 2
     assert inventory.model_rendered == @expected_model
     assert inventory.model_bytes == byte_size(@expected_model)
@@ -92,6 +93,25 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
              ReplSession.eval(repl, "(kernel/mission-model-context \"default\")")
 
     assert {:ok, _events} = ReplSession.close(repl)
+  end
+
+  test "authoritative inventory includes the same mission data grants as model context" do
+    {:ok, mission, limits} = mission_fixture(%{"customer" => %{"id" => "c1"}})
+    {:ok, inventory} = MissionInventory.build(mission, limits)
+
+    rendered = Jason.decode!(inventory.rendered)
+    model = Jason.decode!(inventory.model_rendered)
+
+    assert [%{"form" => "data/customer", "kind" => "value", "effect" => "read"} = data_grant] =
+             rendered["data"]
+
+    model_data =
+      Enum.find(model["entries"], &(&1["form"] == "data/customer"))
+
+    assert model_data["kind"] == "value"
+    assert model_data["effect"] == "read"
+    assert data_grant["contract"] == model_data["contract"]
+    assert data_grant["docs"] == model_data["docs"]
   end
 
   test "hidden exports and capabilities are excluded" do
@@ -313,7 +333,7 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
     {config, sink}
   end
 
-  defp mission_fixture do
+  defp mission_fixture(data \\ %{}) do
     source = """
     (ns tools "Tools." {:visibility :prompt})
     (defn ping "Ping." [value] value)
@@ -335,7 +355,9 @@ defmodule PtcRunner.Kernel.MissionInventoryTest do
         callback: fn _ -> {:ok, %{}} end
       )
 
-    {:ok, mission} = MissionEnvironment.new(bundle: bundle, capabilities: [capability])
+    {:ok, mission} =
+      MissionEnvironment.new(bundle: bundle, capabilities: [capability], data: data)
+
     {:ok, limits} = Limits.new()
     {:ok, mission, limits}
   end

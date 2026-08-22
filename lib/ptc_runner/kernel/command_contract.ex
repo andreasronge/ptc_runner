@@ -1612,7 +1612,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp validate_result do
     closed(
-      ~w(application_content_digest effective_application_digest workflow_bundle_hash mission_bundle_hashes provider_activity),
+      ~w(application_content_digest effective_application_digest workflow_bundle_hash mission_bundle_hashes mission_grants provider_activity),
       %{
         "application_content_digest" => %{"type" => "string", "pattern" => @digest},
         "effective_application_digest" => %{"type" => "string", "pattern" => @digest},
@@ -1625,9 +1625,52 @@ defmodule PtcRunner.Kernel.CommandContract do
           },
           "maxProperties" => 16
         },
+        "mission_grants" => %{
+          "type" => "object",
+          "propertyNames" => %{"pattern" => "^[a-z][a-z0-9._-]{0,127}$"},
+          "additionalProperties" => mission_grants_entry(),
+          "maxProperties" => 16
+        },
         "provider_activity" => %{"const" => false}
       }
     )
+  end
+
+  defp mission_grants_entry do
+    # Ceilings follow StrictJSON admission (max 100_000 nodes) and the
+    # application-manifest byte budget rather than inventing tighter
+    # validate-only caps: CommandOutcome seals against this schema, so an
+    # under-bound here turns a legal package into an internal_error after
+    # successful preparation.
+    closed(~w(data exports providers), %{
+      "data" => %{
+        "type" => "array",
+        "maxItems" => 100_000,
+        "items" => %{
+          "type" => "string",
+          "minLength" => 6,
+          "maxLength" => 1_000_000,
+          "pattern" => "^data/.+$(?![\\s\\S])"
+        }
+      },
+      "exports" => %{
+        "type" => "array",
+        "maxItems" => 100_000,
+        "items" => %{
+          "type" => "string",
+          "minLength" => 1,
+          "maxLength" => 1_000_000
+        }
+      },
+      "providers" => %{
+        "type" => "array",
+        "maxItems" => 32,
+        "items" => %{
+          "type" => "string",
+          "pattern" => "^[a-z][a-z0-9._-]{0,127}$(?![\\s\\S])"
+        }
+      }
+    })
   end
 
   defp doctor_success_result, do: doctor_result(:success)

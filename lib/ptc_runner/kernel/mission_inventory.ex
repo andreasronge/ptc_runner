@@ -1,14 +1,15 @@
 defmodule PtcRunner.Kernel.MissionInventory do
   @moduledoc """
-  Builds the exact frozen model-facing inventory for one mission environment.
+  Builds the frozen prompt-facing inventory for one mission environment.
 
-  Version 2 contains prompt-visible prelude exports, model-visible capability
-  schemas, and the mission execution limits relevant to generated programs.
-  A separate version 2 model-contract rendering normalizes prompt-visible
-  exports and directly callable capabilities into one structured API list.
-  Arrays are sorted by public form. Both UTF-8 renderings and lower-case SHA-256
-  hashes are frozen into `PtcRunner.Kernel.RunConfig` and are identical for
-  normal runs and `PtcRunner.Kernel.ReplSession`.
+  Version 3 contains prompt-visible prelude exports, model-visible capability
+  schemas, mission data grants, and the mission execution limits relevant to
+  generated programs. A separate version 2 model-contract rendering normalizes
+  prompt-visible exports, directly callable capabilities, and mission data into
+  one structured API list. Arrays are sorted by public form. Both UTF-8
+  renderings and lower-case SHA-256 hashes are frozen into
+  `PtcRunner.Kernel.RunConfig` and are identical for normal runs and
+  `PtcRunner.Kernel.ReplSession`.
 
   Every bare capability entry carries a frozen `call` form. In the secondary
   model-contract projection, required input fields are expanded into the
@@ -23,6 +24,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Environment
+  alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ModelContract
@@ -45,7 +47,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
-          schema_version: 2,
+          schema_version: 3,
           rendered: binary(),
           hash: binary(),
           bytes: non_neg_integer(),
@@ -57,7 +59,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   @spec build(MissionEnvironment.t(), Limits.t(), keyword()) ::
           {:ok, t()} | {:error, :invalid_mission_inventory | :mission_inventory_exceeded}
-  @doc "Builds one bounded version 2 mission inventory."
+  @doc "Builds one bounded version 3 mission inventory."
   def build(mission, limits, opts \\ [])
 
   def build(%MissionEnvironment{} = mission, %Limits{} = limits, opts) when is_list(opts) do
@@ -66,14 +68,15 @@ defmodule PtcRunner.Kernel.MissionInventory do
            Keyword.get(opts, :max_bytes, @max_bytes),
          max_model_bytes when is_integer(max_model_bytes) and max_model_bytes > 0 <-
            Keyword.get(opts, :max_model_bytes, @max_model_bytes),
-         {:ok, rendered} <- DeterministicJSON.encode(projection(mission, limits)),
+         {:ok, data_entries} <- data_entries(mission),
+         {:ok, rendered} <- DeterministicJSON.encode(projection(mission, limits, data_entries)),
          true <- byte_size(rendered) <= max_bytes,
-         {:ok, model_projection} <- model_projection(mission, limits),
+         {:ok, model_projection} <- model_projection(mission, limits, data_entries),
          {:ok, model_rendered} <- DeterministicJSON.encode(model_projection),
          true <- byte_size(model_rendered) <= max_model_bytes do
       {:ok,
        %__MODULE__{
-         schema_version: 2,
+         schema_version: 3,
          rendered: rendered,
          hash: sha256(rendered),
          bytes: byte_size(rendered),
@@ -90,18 +93,59 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   def build(_mission, _limits, _opts), do: {:error, :invalid_mission_inventory}
 
-  defp projection(mission, limits) do
+  @doc """
+  Summarizes per-mission grants for operator surfaces such as `ptc validate`.
+
+  Lists parseable `data/<name>` forms, every public export ref from the mission
+  bundle, and selected mission provider names. Capability tool names discovered
+  only after provider acquisition are intentionally absent: validate does not
+  activate providers.
+  """
+  @spec grant_summary(map(), PtcRunner.Kernel.FrozenBundle.t() | nil, [binary()]) :: map()
+  def grant_summary(data, bundle, provider_names)
+      when is_map(data) and not is_struct(data) and is_list(provider_names) do
+    %{
+      "data" => data_grant_forms(data),
+      "exports" => public_export_refs(bundle),
+      "providers" => provider_names
+    }
+  end
+
+  defp data_grant_forms(data) do
+    data
+    |> Map.keys()
+    |> Enum.sort()
+    |> Enum.flat_map(fn name ->
+      case data_form(name) do
+        {:ok, form} -> [form]
+        :skip -> []
+      end
+    end)
+  end
+
+  defp public_export_refs(nil), do: []
+
+  defp public_export_refs(%{prelude: %{exports: exports}}) do
+    exports
+    |> Enum.map(& &1.ref)
+    |> Enum.sort()
+  end
+
+  defp public_export_refs(_bundle), do: []
+
+  defp projection(mission, limits, data_entries) do
     {:object,
      [
-       {"schema_version", 2},
+       {"schema_version", 3},
        {"exports", exports(mission)},
        {"capabilities", capabilities(mission)},
+       {"data", data_entries},
        {"limits", limit_projection(limits)}
      ]}
   end
 
-  defp model_projection(mission, limits) do
-    with {:ok, entries} <- model_entries(mission) do
+  defp model_projection(mission, limits, data_entries) do
+    with {:ok, entries} <- model_entries(mission, data_entries) do
       {:ok,
        {:object,
         [
@@ -167,39 +211,45 @@ defmodule PtcRunner.Kernel.MissionInventory do
 
   defp export_call(%Export{} = export), do: Export.call_form(export)
 
-  defp model_entries(mission) do
+  defp model_entries(mission, data_entries) do
     with {:ok, exports} <- model_exports(mission),
-         {:ok, capabilities} <- model_capabilities(mission),
-         {:ok, data} <- model_data(mission) do
-      {:ok, exports ++ capabilities ++ data}
+         {:ok, capabilities} <- model_capabilities(mission) do
+      {:ok, exports ++ capabilities ++ data_entries}
     end
   end
 
-  defp model_data(%{data: data}) when is_map(data) and not is_struct(data) do
-    data
-    |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.reduce_while({:ok, []}, fn {name, value}, {:ok, entries} ->
-      with {:ok, form} <- data_form(name),
-           {:ok, contract} <- ModelContract.json_value(value) do
-        entry =
-          model_entry(
-            "value",
-            form,
-            contract,
-            :read,
-            "Mission data supplied by the application manifest."
-          )
+  defp data_entries(%{data: data}) when is_map(data) and not is_struct(data) do
+    if JSONValue.map?(data) do
+      data
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.reduce_while({:ok, []}, fn {name, value}, {:ok, entries} ->
+        with {:ok, form} <- data_form(name),
+             {:ok, contract} <- ModelContract.json_value(value) do
+          entry = data_entry(form, contract)
 
-        {:cont, {:ok, [entry | entries]}}
-      else
-        :skip -> {:cont, {:ok, entries}}
-        {:error, :unsupported_contract} -> {:cont, {:ok, entries}}
-      end
-    end)
-    |> reverse_entries()
+          {:cont, {:ok, [entry | entries]}}
+        else
+          :skip -> {:cont, {:ok, entries}}
+          {:error, :unsupported_contract} = error -> {:halt, error}
+        end
+      end)
+      |> reverse_entries()
+    else
+      {:error, :unsupported_contract}
+    end
   end
 
-  defp model_data(_mission), do: {:ok, []}
+  defp data_entries(_mission), do: {:ok, []}
+
+  defp data_entry(form, contract) do
+    model_entry(
+      "value",
+      form,
+      contract,
+      :read,
+      "Mission data supplied by the application manifest."
+    )
+  end
 
   defp data_form(name) when is_binary(name) do
     case Parser.parse("data/" <> name) do
