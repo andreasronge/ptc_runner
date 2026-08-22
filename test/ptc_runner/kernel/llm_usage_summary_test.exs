@@ -438,6 +438,12 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
       ],
       [
         started,
+        llm_started_event(2, "capability-mission", %{"mission_name" => "alpha"}),
+        llm_stopped_event(3, "capability-mission", %{"input" => 1}, %{"mission_name" => "beta"}),
+        stopped
+      ],
+      [
+        started,
         event(2, "capability-started", %{
           "environment" => "workflow",
           "name" => "http-request",

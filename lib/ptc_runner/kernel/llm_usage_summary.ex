@@ -264,7 +264,8 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
 
       {start, open} ->
         if start.alias == stop.alias and start.revision == stop.revision and
-             start.environment == stop.environment do
+             start.environment == stop.environment and
+             start.mission_name == stop.mission_name do
           call = %{start | outcome: stop.outcome, usage: stop.usage}
 
           {:cont,
@@ -341,6 +342,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
         alias: alias_name,
         revision: revision,
         environment: stringify(field(event, "data", "environment")),
+        mission_name: stringify(field(event, "data", "mission_name")),
         outcome: stop_outcome(event),
         usage: field(event, "data", "usage")
       }
