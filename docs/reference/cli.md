@@ -303,10 +303,11 @@ not in this process-contract reference.
 
 ### Branch on the exit status
 
-An exit status is a class, not an identity: several diagnostics share one, and
-`runtime_limit_exceeded` and `run_timeout` both exit `6`. Branch on the status
-to decide whether to retry, and read `error.code` from the envelope when the
-branch needs to know which failure it was.
+An exit status is a class, not an identity: several diagnostics share one.
+`runtime_limit_exceeded`, `run_timeout`, `turn_limit_exceeded`,
+`capability_quota_exceeded`, and `model_output_truncated` all exit `6`. Branch
+on the status to decide whether to retry, and read `error.code` from the
+envelope when the branch needs to know which failure it was.
 
 A recoverable capability error does not change the exit status. Exhausting
 `workflow_capability_calls_per_name` returns
@@ -445,9 +446,11 @@ Every classified diagnostic and the status it exits with:
 | 5 | `execution` | `provider_failed` | no | a provider failed during execution |
 | 5 | `execution` | `replay_fixture_missing` | no | no replay fixture matches the workflow request |
 | 5 | `execution` | `workflow_failed` | no | the workflow failed |
+| 6 | `execution` | `capability_quota_exceeded` | no | a capability quota was exceeded |
 | 6 | `execution` | `model_output_truncated` | no | model output was truncated before producing a usable agent action |
 | 6 | `execution` | `run_timeout` | no | the run duration limit was exceeded |
 | 6 | `execution` | `runtime_limit_exceeded` | no | a runtime limit was exceeded |
+| 6 | `execution` | `turn_limit_exceeded` | no | the agent turn limit was exceeded |
 | 7 | `destination` | `destination_exists` | no | an artifact destination already exists |
 | 7 | `destination` | `inspection_destination_unavailable` | no | the inspection destination is unavailable |
 | 7 | `destination` | `inspection_destination_unsafe` | no | the inspection destination is unsafe |

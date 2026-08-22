@@ -514,15 +514,19 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     do: " ms was exceeded during #{phase}; raise limits.#{limit}" <> @manifest_remedy
 
   @doc false
-  @spec valid_message?(term()) :: boolean()
-  def valid_message?(message) when is_binary(message) do
-    subordinate_evaluations_message?(message) or agent_turns_message?(message) or
-      transcript_chars_message?(message) or timeout_message?(message) or
-      heap_words_message?(message) or max_calls_message?(message) or
-      capability_quota_message?(message) or protocol_errors_message?(message)
+  @spec runtime_limit_message?(term()) :: boolean()
+  def runtime_limit_message?(message) when is_binary(message) do
+    subordinate_evaluations_message?(message) or transcript_chars_message?(message) or
+      timeout_message?(message) or heap_words_message?(message) or
+      protocol_errors_message?(message)
   end
 
-  def valid_message?(_message), do: false
+  def runtime_limit_message?(_message), do: false
+
+  @doc false
+  @spec capability_quota_limit_message?(term()) :: boolean()
+  def capability_quota_limit_message?(message),
+    do: max_calls_message?(message) or capability_quota_message?(message)
 
   @doc false
   @spec agent_turns_message?(term()) :: boolean()
@@ -616,11 +620,9 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     message_schema(
       fallback,
       [subordinate_message_branch()] ++
-        agent_message_branches() ++
         [transcript_message_branch()] ++
         timeout_message_branches() ++
-        [heap_message_branch(), max_calls_message_branch()] ++
-        capability_quota_message_branches() ++ [protocol_errors_message_branch()]
+        [heap_message_branch(), protocol_errors_message_branch()]
     )
   end
 
@@ -636,14 +638,27 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       message_schema(
         fallback,
         [subordinate_message_branch() | timeout_message_branches()] ++
-          [heap_message_branch(), max_calls_message_branch()] ++
-          capability_quota_message_branches() ++ [protocol_errors_message_branch()]
+          [heap_message_branch(), protocol_errors_message_branch()]
       )
 
   @doc false
-  @spec agent_loop_message_schema(binary()) :: map()
-  def agent_loop_message_schema(fallback) when is_binary(fallback),
-    do: message_schema(fallback, agent_message_branches() ++ [transcript_message_branch()])
+  @spec transcript_message_schema(binary()) :: map()
+  def transcript_message_schema(fallback) when is_binary(fallback),
+    do: message_schema(fallback, [transcript_message_branch()])
+
+  @doc false
+  @spec capability_quota_message_schema(binary()) :: map()
+  def capability_quota_message_schema(fallback) when is_binary(fallback),
+    do:
+      message_schema(
+        fallback,
+        [max_calls_message_branch() | capability_quota_message_branches()]
+      )
+
+  @doc false
+  @spec turn_limit_message_schema(binary()) :: map()
+  def turn_limit_message_schema(fallback) when is_binary(fallback),
+    do: message_schema(fallback, agent_message_branches())
 
   @doc false
   @spec run_duration_message_schema(binary()) :: map()

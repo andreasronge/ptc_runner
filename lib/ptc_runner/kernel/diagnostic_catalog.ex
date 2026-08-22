@@ -232,7 +232,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:execution, :llm_provider_unavailable, 5, true, "the LLM provider is unavailable"},
     {:execution, :llm_provider_failed, 5, false, "the LLM provider request failed"},
     {:execution, :mission_failed, 5, false, "a subordinate mission failed"},
+    {:execution, :capability_quota_exceeded, 6, false, "a capability quota was exceeded"},
     {:execution, :runtime_limit_exceeded, 6, false, "a runtime limit was exceeded"},
+    {:execution, :turn_limit_exceeded, 6, false, "the agent turn limit was exceeded"},
     {:execution, :model_output_truncated, 6, false,
      "model output was truncated before producing a usable agent action"},
     {:execution, :run_timeout, 6, false, "the run duration limit was exceeded"},
@@ -338,6 +340,16 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :runtime_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.message_schema(fallback)
 
+  def message_schema(%{
+        phase: :execution,
+        code: :capability_quota_exceeded,
+        message: fallback
+      }),
+      do: RuntimeLimitDiagnostic.capability_quota_message_schema(fallback)
+
+  def message_schema(%{phase: :execution, code: :turn_limit_exceeded, message: fallback}),
+    do: RuntimeLimitDiagnostic.turn_limit_message_schema(fallback)
+
   def message_schema(%{phase: :execution, code: :model_output_truncated, message: fallback}),
     do: ModelOutputDiagnostic.message_schema(fallback)
 
@@ -416,7 +428,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     do: CompileDiagnostic.message_schema(code, fallback)
 
   defp valid_dynamic_message?(:execution, :runtime_limit_exceeded, message),
-    do: RuntimeLimitDiagnostic.valid_message?(message)
+    do: RuntimeLimitDiagnostic.runtime_limit_message?(message)
+
+  defp valid_dynamic_message?(:execution, :capability_quota_exceeded, message),
+    do: RuntimeLimitDiagnostic.capability_quota_limit_message?(message)
+
+  defp valid_dynamic_message?(:execution, :turn_limit_exceeded, message),
+    do: RuntimeLimitDiagnostic.agent_turns_message?(message)
 
   defp valid_dynamic_message?(:execution, :model_output_truncated, message),
     do: ModelOutputDiagnostic.valid_message?(message)
@@ -780,6 +798,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def source_kinds(:application, :override_invalid), do: [:component_override]
 
   def source_kinds(:bundle, _code), do: [:component]
+  def source_kinds(:execution, :turn_limit_exceeded), do: []
   def source_kinds(:execution, code) when code != :provider_failed, do: [:runtime]
 
   def source_kinds(:result_cleanup, code)

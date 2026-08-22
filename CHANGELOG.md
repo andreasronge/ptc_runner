@@ -100,6 +100,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Terminal limit failures now keep their specific command-envelope identity:
+  agent-turn exhaustion reports `execution/turn_limit_exceeded`, fail-fast
+  installation or capability-call quota exhaustion reports
+  `execution/capability_quota_exceeded`, and workflow compilation heap
+  exhaustion reports exit `6` as `execution/runtime_limit_exceeded` instead of
+  exit `5` as `execution/workflow_failed`, gaining the bounded heap-limit
+  message and fixed runtime source. Turn and quota failures retain their
+  existing bounded messages and provider-activity, source, and subject metadata.
+
 - Private analysis sessions now admit bounded pre-execution diagnostics
   (`:parse_error`, `:invalid_arity`, `:invalid_form`, symbol/compile limits,
   and tool-resolution faults) when no capability has run in that evaluation.

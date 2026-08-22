@@ -105,6 +105,9 @@ not resume the previous transcript.
 A spent per-alias `max_calls` is a named quota refusal, not a subject failure
 and not a transport error. `run-value`, `run-result-value`, `run-phased-result-value`,
 `agent.core/run`, and `agent.main` still fail-fast on every `:provider-failure`.
+When one of those fail-fast paths propagates an installation `max_calls` or a
+workflow or mission capability-call quota to the command boundary, it reports
+`execution/capability_quota_exceeded` while retaining the bounded quota message.
 
 ### `agent.core/run-result-value`
 
@@ -249,7 +252,7 @@ threshold adds domain-blind synthesis guidance before the final turn.
 If the loop spends its effective `max_turns` without returning, `run-outcome`
 returns bounded subject-failure data. Entries and callers that propagate that
 failure through `run`, `run-value`, or `run-result-value` report
-`execution/runtime_limit_exceeded` and name the effective turn ceiling.
+`execution/turn_limit_exceeded` and name the effective turn ceiling.
 
 What the message recommends depends on how the final turn ended, because only
 some of these endings are answered by buying more turns:

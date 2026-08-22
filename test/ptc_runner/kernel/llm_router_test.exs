@@ -432,7 +432,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              project_run(source, config, run_id, run_ref)
 
     assert {:ok, expected} = RuntimeLimitDiagnostic.max_calls_message("expensive", 1)
-    assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert command_outcome.envelope["error"]["code"] == "capability_quota_exceeded"
     assert command_outcome.envelope["error"]["message"] == expected
 
     assert command_outcome.envelope["error"]["source"] == %{
@@ -520,7 +520,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                project_run(source, fresh, run_id, run_ref)
 
       assert {:ok, expected} = RuntimeLimitDiagnostic.max_calls_message("expensive", 1)
-      assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+      assert command_outcome.envelope["error"]["code"] == "capability_quota_exceeded"
       assert command_outcome.envelope["error"]["message"] == expected
 
       assert Enum.any?(events, fn event ->
@@ -550,7 +550,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                project_run(source, config, run_id, run_ref)
 
       assert {:ok, expected} = RuntimeLimitDiagnostic.max_calls_message("expensive", 1)
-      assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+      assert command_outcome.envelope["error"]["code"] == "capability_quota_exceeded"
       assert command_outcome.envelope["error"]["message"] == expected
 
       assert [
@@ -868,7 +868,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                1
              )
 
-    assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert command_outcome.envelope["error"]["code"] == "capability_quota_exceeded"
     assert command_outcome.envelope["error"]["message"] == expected
 
     assert [
@@ -938,7 +938,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                1
              )
 
-    assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert command_outcome.envelope["error"]["code"] == "capability_quota_exceeded"
     assert command_outcome.envelope["error"]["message"] == expected
 
     assert Enum.any?(events, fn event ->

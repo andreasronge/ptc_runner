@@ -1189,7 +1189,13 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{phase: :execution, code: :runtime_limit_exceeded} = row,
          %{"type" => "null"}
        ),
-       do: RuntimeLimitDiagnostic.agent_loop_message_schema(row.message)
+       do: RuntimeLimitDiagnostic.transcript_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :turn_limit_exceeded} = row,
+         %{"type" => "null"}
+       ),
+       do: RuntimeLimitDiagnostic.turn_limit_message_schema(row.message)
 
   defp diagnostic_message_schema(
          %{phase: :local_preflight, code: code} = row,
@@ -1203,6 +1209,12 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"properties" => %{"kind" => %{"const" => "runtime"}}}
        ),
        do: RuntimeLimitDiagnostic.runtime_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :capability_quota_exceeded} = row,
+         %{"properties" => %{"kind" => %{"const" => "runtime"}}}
+       ),
+       do: RuntimeLimitDiagnostic.capability_quota_message_schema(row.message)
 
   defp diagnostic_message_schema(
          %{phase: :execution, code: :run_timeout} = row,
