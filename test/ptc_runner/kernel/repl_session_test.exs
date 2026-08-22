@@ -972,7 +972,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert message =~ "raise limits.evaluation_timeout_ms in the manifest"
   end
 
-  test "session-wide evaluation limits do not reset between expressions" do
+  test "session-wide evaluation exhaustion is exact and terminal" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new(subordinate_evaluations: 1)
@@ -990,10 +990,292 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     {:ok, session} = ReplSession.new(config: config)
     assert {:ok, _step, session} = ReplSession.eval(session, "(def retained 41)")
 
-    assert {:error, %{fail: %{reason: :limit_exceeded}, memory: memory}, _session} =
+    assert {:error,
+            %{
+              fail: %{reason: :limit_exceeded, message: message},
+              memory: memory
+            }, session} =
              ReplSession.eval(session, "42")
 
     assert memory["retained"] == 41
+    assert message =~ "subordinate_evaluations limit 1 was exceeded"
+    refute message =~ "manifest"
+    refute ReplSession.open?(session)
+
+    assert {:ok, events} = ReplSession.close(session)
+
+    assert %{type: "limit-exceeded", data: %{reason: :subordinate_evaluations}} =
+             Enum.find(events, &(&1.type == "limit-exceeded"))
+
+    assert List.last(events).data.reason == :subordinate_evaluations
+  end
+
+  test "the direct interactive profile preserves definitions and exact history past 128 forms" do
+    {:ok, session} = ReplSession.new_interactive()
+    assert {:ok, _step, session} = ReplSession.eval(session, "(def retained 40)")
+
+    session =
+      Enum.reduce(1..129, session, fn value, current ->
+        assert {:ok, %{return: ^value}, next} =
+                 ReplSession.eval(current, Integer.to_string(value))
+
+        next
+      end)
+
+    assert {:ok, %{return: [129, 128, 127, 40]}, session} =
+             ReplSession.eval(session, "[*1 *2 *3 retained]")
+
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
+  test "the owner closes provider resources when the absolute deadline expires at the prompt" do
+    parent = self()
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(run_duration_ms: 50)
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    close = fn ->
+      send(parent, :deadline_provider_closed)
+      :ok
+    end
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        provider_session: ProviderSessionFixture.start([close], limits)
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert_receive :deadline_provider_closed, 1_000
+    refute_receive :deadline_provider_closed
+    assert ReplSession.terminal?(session)
+
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: message}}, session} =
+             ReplSession.eval(session, "42")
+
+    assert message =~ "run_duration_ms limit 50 ms was exceeded"
+    assert {:ok, events} = ReplSession.close(session)
+    assert List.last(events).data.reason == :deadline_expired
+  end
+
+  test "close records an elapsed deadline before cancelling its pending timer" do
+    {:ok, session} = ReplSession.new()
+    state = owned_run_state(session)
+
+    :sys.replace_state(state.pid, fn run_state ->
+      %{run_state | deadline_ms: System.monotonic_time(:millisecond) - 1}
+    end)
+
+    assert {:ok, events} = ReplSession.close(session)
+
+    assert [%{data: %{reason: :deadline_expired}}] =
+             Enum.filter(events, &(&1.type == "limit-exceeded"))
+
+    assert List.last(events).data.reason == :deadline_expired
+  end
+
+  test "a form that consumes the absolute deadline terminalizes before the owner timer runs" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, limits} =
+      Limits.new(
+        run_duration_ms: 200,
+        evaluation_timeout_ms: 5_000,
+        workflow_timeout_ms: 5_000
+      )
+
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-in-flight-deadline")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+    owner = owned_owner(session)
+
+    :sys.replace_state(owner, fn state ->
+      Process.cancel_timer(state.deadline_timer)
+      %{state | deadline_timer: nil, deadline_token: nil}
+    end)
+
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: message}}, session} =
+             ReplSession.eval(session, long_running_body(4))
+
+    assert message =~ "run_duration_ms limit 200 ms was exceeded"
+    assert ReplSession.terminal?(session)
+    assert {:ok, events} = ReplSession.close(session)
+
+    assert [%{data: %{reason: :deadline_expired}}] =
+             Enum.filter(events, &(&1.type == "limit-exceeded"))
+
+    assert List.last(events).data.reason == :deadline_expired
+  end
+
+  @tag :nightly
+  test "resource lookup waits through provider cleanup beyond the default call timeout" do
+    parent = self()
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, limits} =
+      Limits.new(run_duration_ms: 50, provider_cleanup_timeout_ms: 6_000)
+
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    close = fn ->
+      send(parent, {:slow_deadline_cleanup_started, self()})
+
+      receive do
+        :finish_slow_deadline_cleanup -> :ok
+      end
+    end
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        provider_session: ProviderSessionFixture.start([close], limits)
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+    assert_receive {:slow_deadline_cleanup_started, cleanup_worker}, 1_000
+    Process.send_after(cleanup_worker, :finish_slow_deadline_cleanup, 5_100)
+
+    assert {:error, %{fail: %{reason: :limit_exceeded}}} =
+             ReplSession.terminal_error(session)
+
+    assert {:ok, events} = ReplSession.close(session)
+    assert List.last(events).data.reason == :deadline_expired
+  end
+
+  @tag :tmp_dir
+  test "owner death preserves an already-recorded deadline in the trace", %{tmp_dir: directory} do
+    parent = self()
+    trace_path = Path.join(directory, "deadline-owner-death.jsonl")
+
+    {creator, creator_ref} =
+      spawn_monitor(fn ->
+        {:ok, workflow} = WorkflowEnvironment.new([])
+        {:ok, mission} = MissionEnvironment.new([])
+        {:ok, limits} = Limits.new(run_duration_ms: 50)
+        {:ok, sink} = EventSink.start(:normal, limits)
+
+        close = fn ->
+          send(parent, :owner_death_deadline_provider_closed)
+          :ok
+        end
+
+        {:ok, config} =
+          RunConfig.new(
+            workflow_environment: workflow,
+            missions: %{"default" => mission},
+            input: %{},
+            limits: limits,
+            event_sink: sink,
+            provider_session: ProviderSessionFixture.start([close], limits)
+          )
+
+        {:ok, session} = ReplSession.new(config: config, trace_path: trace_path)
+        [{_, {owner, _token}}] = :ets.lookup(session.access, session.id)
+        send(parent, {:owner_death_deadline_ready, owner})
+
+        receive do
+          :disconnect -> :ok
+        end
+      end)
+
+    assert_receive {:owner_death_deadline_ready, owner}, 1_000
+    owner_ref = Process.monitor(owner)
+    assert_receive :owner_death_deadline_provider_closed, 1_000
+    send(creator, :disconnect)
+    assert_receive {:DOWN, ^creator_ref, :process, ^creator, :normal}, 1_000
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}, 1_000
+
+    trace = File.read!(trace_path)
+    assert trace =~ "deadline_expired"
+    refute trace =~ "session_owner_failed"
+  end
+
+  test "a direct session limit diagnostic does not prescribe a nonexistent manifest" do
+    {:ok, session} = ReplSession.new()
+    %{subordinate_evaluations: limit} = owned_limits(session)
+
+    state = owned_run_state(session)
+    :sys.replace_state(state.pid, &%{&1 | evaluations: limit})
+
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: message}}, session} =
+             ReplSession.eval(session, "42")
+
+    assert message =~ "subordinate_evaluations limit #{limit} was exceeded"
+    refute message =~ "manifest"
+    refute ReplSession.open?(session)
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
+  test "deadline, busy, and closed reservations preserve distinct public results" do
+    {:ok, busy_session} = ReplSession.new()
+    busy_state = owned_run_state(busy_session)
+    assert {:ok, _memory, _history, lease} = RunState.reserve_workflow_evaluation(busy_state)
+
+    assert {:error,
+            %{fail: %{reason: :evaluation_in_progress, message: "REPL evaluation in progress"}},
+            busy_session} = ReplSession.eval(busy_session, "42")
+
+    assert ReplSession.open?(busy_session)
+    assert :ok = RunState.release_evaluation(busy_state, lease)
+    assert {:ok, %{return: 42}, busy_session} = ReplSession.eval(busy_session, "42")
+    assert {:ok, busy_events} = ReplSession.close(busy_session)
+    refute Enum.any?(busy_events, &(&1.type == "limit-exceeded"))
+
+    {:ok, deadline_session} = ReplSession.new()
+    deadline_state = owned_run_state(deadline_session)
+
+    :sys.replace_state(deadline_state.pid, fn state ->
+      %{state | deadline_ms: System.monotonic_time(:millisecond) - 1}
+    end)
+
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: deadline_message}},
+            deadline_session} = ReplSession.eval(deadline_session, "42")
+
+    assert deadline_message =~ "run_duration_ms limit 30000 ms was exceeded"
+    refute deadline_message =~ "manifest"
+    refute ReplSession.open?(deadline_session)
+    assert {:ok, deadline_events} = ReplSession.close(deadline_session)
+
+    assert %{type: "limit-exceeded", data: %{reason: :deadline_expired}} =
+             Enum.find(deadline_events, &(&1.type == "limit-exceeded"))
+
+    assert List.last(deadline_events).data.reason == :deadline_expired
+
+    {:ok, closed_session} = ReplSession.new()
+    closed_state = owned_run_state(closed_session)
+    assert :ok = RunState.close(closed_state)
+
+    assert {:error, %{fail: %{reason: :session_closed, message: "REPL session is closed"}},
+            closed_session} = ReplSession.eval(closed_session, "42")
+
+    refute ReplSession.open?(closed_session)
+    assert {:ok, closed_events} = ReplSession.close(closed_session)
+
+    assert %{type: "limit-exceeded", data: %{reason: :run_closed}} =
+             Enum.find(closed_events, &(&1.type == "limit-exceeded"))
+
+    assert List.last(closed_events).data.reason == :run_closed
   end
 
   test "closed and constructor-failed sessions leave no live sink" do
@@ -1347,5 +1629,26 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     fun
     |> Task.async()
     |> Task.await()
+  end
+
+  defp owned_limits(session) do
+    {config, _state} = owned_resources(session)
+    config.limits
+  end
+
+  defp owned_run_state(session) do
+    {_config, state} = owned_resources(session)
+    state
+  end
+
+  defp owned_owner(%ReplSession{access: access, id: id}) do
+    [{^id, {owner, _token}}] = :ets.lookup(access, id)
+    owner
+  end
+
+  defp owned_resources(%ReplSession{access: access, id: id}) do
+    [{^id, {owner, token}}] = :ets.lookup(access, id)
+    assert {:ok, config, state} = ReplSessionOwner.resources(owner, token)
+    {config, state}
   end
 end

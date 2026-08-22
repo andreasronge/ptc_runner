@@ -17,6 +17,8 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @subordinate_suffix " was exceeded; raise limits.subordinate_evaluations" <>
                         @manifest_remedy <>
                         ", or reduce total subordinate evaluations or agent turns"
+  @direct_subordinate_suffix " was exceeded; start a new REPL session, or reduce total " <>
+                               "subordinate evaluations"
   @subordinate_limit_pattern "(?:[1-9][0-9]{0,8}|1[0-9]{9}|2[0-4][0-9]{8}|25[0-8][0-9]{7}|259[0-1][0-9]{6}|2592000000)"
   @subordinate_maximum_digits 10
   @subordinate_maximum_message_bytes byte_size(@subordinate_prefix) +
@@ -152,6 +154,17 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   end
 
   @doc false
+  @spec direct_subordinate_evaluations_message(term()) :: {:ok, binary()} | :error
+  def direct_subordinate_evaluations_message(limit) do
+    with {:ok, row} <- LimitCatalog.fetch(:subordinate_evaluations),
+         true <- LimitCatalog.valid_value?(row, limit) do
+      {:ok, @subordinate_prefix <> Integer.to_string(limit) <> @direct_subordinate_suffix}
+    else
+      _invalid -> :error
+    end
+  end
+
+  @doc false
   @spec agent_turns_reasons() :: [atom()]
   def agent_turns_reasons, do: @agent_reason_atoms
 
@@ -200,6 +213,23 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   end
 
   def live_timeout_message(_limit, _limit_ms, _phase), do: :error
+
+  @doc false
+  @spec direct_live_timeout_message(term(), term(), term()) :: {:ok, binary()} | :error
+  def direct_live_timeout_message(limit, limit_ms, phase)
+      when limit in @timeout_family and phase in @timeout_phases do
+    with {:ok, row} <- LimitCatalog.fetch(limit),
+         true <- LimitCatalog.valid_value?(row, limit_ms) do
+      {:ok,
+       timeout_prefix(limit) <>
+         Integer.to_string(limit_ms) <>
+         " ms was exceeded during #{phase}; start a new REPL session"}
+    else
+      _invalid -> :error
+    end
+  end
+
+  def direct_live_timeout_message(_limit, _limit_ms, _phase), do: :error
 
   # A heap kill is Kernel-observed runtime evidence, like a timeout. Raising the
   # ceiling still takes both documents: these remain `:manifest_narrowable` rows,

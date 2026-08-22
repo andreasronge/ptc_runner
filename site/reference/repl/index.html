@@ -128,7 +128,23 @@ defaults while preserving the manifest REPL input grammar. It conflicts with
 <code class="inline">--manifest</code>, <code class="inline">--profile</code>, and <code class="inline">--describe-profile</code>; an explicit
 <code class="inline">--host-config</code> or <code class="inline">--env-file</code> overrides the matching project reference.</p><p>A provider-bearing manifest requires <code class="inline">--host-config</code>. The session performs the
 same audited-local checks, acquires one provider session, and reuses it for
-every expression. Direct and profile modes reject host configuration.</p><p>Each form evaluates under the manifest's <code class="inline">evaluation_timeout_ms</code>, whose
+every expression. Direct and profile modes reject host configuration.</p><p>The interactive line loop has a dedicated bounded lifetime profile. Selection
+depends on the input grammar, never TTY detection: argumentless <code class="inline">ptc repl</code>
+uses it when lines arrive from a terminal or a pipe, and <code class="inline">--load SETUP.clj</code>
+uses it when the setup is followed by that loop. Direct interactive sessions
+set <code class="inline">run_duration_ms</code> and <code class="inline">subordinate_evaluations</code> to their catalog maxima and
+retain normal events up to the installed <code class="inline">normal_event_count</code> and
+<code class="inline">normal_event_bytes</code> ceilings. Per-form time, heap, source, memory, history,
+result, projection, and capability limits remain at their ordinary defaults.</p><p>Interactive manifest and mission sessions use the installed host ceilings for
+omitted <code class="inline">run_duration_ms</code>, <code class="inline">subordinate_evaluations</code>, <code class="inline">normal_event_count</code>, and
+<code class="inline">normal_event_bytes</code>; an explicit manifest value remains effective when it is
+narrower than that ceiling. Their deadline is one finite absolute session
+deadline, so time at the prompt counts. The session owner marks deadline
+failure and closes provider resources at expiry without waiting for another
+form; the next line ends the frontend with the named deadline diagnostic. Repeated
+<code class="inline">--eval</code>, a positional script, explicit <code class="inline">-</code> stdin, and loads followed by one of
+those inputs retain the ordinary effective limits. <code class="inline">ReplSession.new/0</code> also
+retains the ordinary embedding defaults.</p><p>Each form evaluates under the manifest's <code class="inline">evaluation_timeout_ms</code>, whose
 effective default is 30,000 ms. A form stopped by that ceiling names the
 limit and its configured value. Raise it in the manifest if a form needs
 longer:</p><pre><code class="json language-json">{ &quot;limits&quot;: { &quot;evaluation_timeout_ms&quot;: 60000 } }</code></pre><h2 id="work-directly-in-one-manifest-mission">Work directly in one manifest mission</h2><p>Select a declared mission without starting its workflow:</p><pre><code class="console language-console">ptc repl --project ptc-project.json --mission review
@@ -183,7 +199,13 @@ stays interactive-only by design. The terminal check remains an accident
 guard, not access control. Private traces use the reserved <code class="inline">.private.jsonl</code>
 suffix and owner-only permissions.</p><p>The session owner retains the continuation, event sink, and provider resources.
 Normal close, abort, caller death, worker failure, and deadline failure converge
-on bounded cleanup before final trace persistence.</p><h2 id="query-public-traces">Query public traces</h2><p>Select the fixed public profile and its required resource:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
+on bounded cleanup before final trace persistence.</p><p>Evaluation-count and deadline exhaustion name <code class="inline">subordinate_evaluations</code> or
+<code class="inline">run_duration_ms</code> and the effective value. They are terminal: the frontend
+prints one diagnostic, closes the session with that exact canonical reason,
+and exits unsuccessfully instead of issuing another prompt. A concurrent
+evaluation reports <code class="inline">evaluation_in_progress</code> and remains retryable; an already
+closed run reports <code class="inline">session_closed</code>. Normal event capture remains bounded and
+records its existing explicit overflow summary without terminating the REPL.</p><h2 id="query-public-traces">Query public traces</h2><p>Select the fixed public profile and its required resource:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
   --profile run-analysis-v1 \
   -e '(analysis/runs {})'</code></pre><p><code class="inline">--project</code> derives <code class="inline">traces</code> from the configured artifact root. The equivalent
 explicit form is useful for a copied capture or a project without trace

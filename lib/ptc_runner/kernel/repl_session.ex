@@ -35,6 +35,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.ReplLimitProfile
   alias PtcRunner.Kernel.ReplSessionOwner
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
@@ -84,8 +85,26 @@ defmodule PtcRunner.Kernel.ReplSession do
   def new(opts \\ [])
 
   def new(opts) when is_list(opts) do
-    with true <- Keyword.keys(opts) -- [:config, :trace_path] == [],
-         {:ok, config} <- config(Keyword.get(opts, :config)),
+    new_session(opts, [:config, :trace_path], fn -> config(Keyword.get(opts, :config)) end)
+  end
+
+  def new(_opts), do: {:error, :invalid_repl_session}
+
+  @doc false
+  @spec new_interactive(keyword()) :: {:ok, t()} | {:error, term()}
+  def new_interactive(opts \\ [])
+
+  def new_interactive(opts) when is_list(opts) do
+    new_session(opts, [:trace_path], fn ->
+      config_with_limits(ReplLimitProfile.direct_interactive())
+    end)
+  end
+
+  def new_interactive(_opts), do: {:error, :invalid_repl_session}
+
+  defp new_session(opts, allowed_keys, config_builder) do
+    with true <- Keyword.keyword?(opts) and Keyword.keys(opts) -- allowed_keys == [],
+         {:ok, config} <- config_builder.(),
          {:ok, trace_path} <- trace_path(config, Keyword.get(opts, :trace_path)) do
       start_session(config, trace_path)
     else
@@ -93,8 +112,6 @@ defmodule PtcRunner.Kernel.ReplSession do
       {:error, _reason} = error -> error
     end
   end
-
-  def new(_opts), do: {:error, :invalid_repl_session}
 
   @doc false
   @spec attach(pid(), reference()) :: {:ok, t()} | {:error, term()}
@@ -140,6 +157,56 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   @doc false
+  @spec open?(t()) :: boolean()
+  def open?(%__MODULE__{} = session) do
+    case owned_session(session) do
+      {:ok, owned} -> sink_alive?(owned) and RunState.open?(owned.state)
+      {:error, _reason} -> false
+    end
+  catch
+    :exit, _reason -> false
+  end
+
+  @doc false
+  @spec terminal?(t()) :: boolean()
+  def terminal?(%__MODULE__{} = session) do
+    case owned_session(session) do
+      {:ok, owned} ->
+        not sink_alive?(owned) or not is_nil(RunState.terminal_failure(owned.state))
+
+      {:error, _reason} ->
+        true
+    end
+  catch
+    :exit, _reason -> true
+  end
+
+  @doc false
+  @spec terminal_error(t()) :: {:error, Native.t()} | :none
+  def terminal_error(%__MODULE__{} = session) do
+    case owned_session(session) do
+      {:ok, owned} ->
+        case read_terminal_failure(owned.state) do
+          nil ->
+            :none
+
+          failure ->
+            {:error, step, _session} =
+              failure
+              |> terminal_failure_result(owned)
+              |> public_result(owned.mode)
+
+            {:error, step}
+        end
+
+      {:error, _reason} ->
+        :none
+    end
+  catch
+    :exit, _reason -> :none
+  end
+
+  @doc false
   @spec mode_info(t()) :: map() | {:error, atom()}
   def mode_info(%__MODULE__{} = session) do
     with {:ok, owned} <- owned_session(session), do: owned_mode_info(owned)
@@ -160,7 +227,7 @@ defmodule PtcRunner.Kernel.ReplSession do
          model_context_hash: inventory.model_hash
        }}
     else
-      :workflow -> {:error, :not_mission_session}
+      mode when mode in [:direct, :workflow] -> {:error, :not_mission_session}
       {:error, _reason} = error -> error
     end
   catch
@@ -185,10 +252,18 @@ defmodule PtcRunner.Kernel.ReplSession do
     case owned_session(session) do
       {:ok, owned} ->
         result =
-          if sink_alive?(owned) and not RunState.closed?(owned.state) do
-            eval_open(owned, source)
-          else
-            session_closed(owned)
+          cond do
+            not sink_alive?(owned) ->
+              session_closed(owned)
+
+            failure = read_terminal_failure(owned.state) ->
+              preexisting_terminal_failure(owned, failure)
+
+            reservable_session?(owned) ->
+              eval_open(owned, source)
+
+            true ->
+              session_closed(owned)
           end
 
         public_result(result, owned.mode)
@@ -203,7 +278,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     :exit, _reason -> session_closed(session)
   end
 
-  defp eval_open(%{mode: :workflow} = session, source) do
+  defp eval_open(%{mode: mode} = session, source) when mode in [:direct, :workflow] do
     case RunState.reserve_workflow_evaluation(session.state) do
       {:ok, memory, history, lease} ->
         session = Map.merge(session, %{memory: memory, history: history})
@@ -233,7 +308,12 @@ defmodule PtcRunner.Kernel.ReplSession do
         result_limit_bytes: limits.terminal_result_bytes
       )
 
-    mission_result(session, name_mission_timeout(result, limits, remaining_ms))
+    result =
+      result
+      |> name_mission_timeout(session, remaining_ms)
+      |> name_mission_session_failure(session)
+
+    mission_result(session, result)
   catch
     :exit, _reason -> session_closed(session)
   end
@@ -241,6 +321,55 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp session_closed(session) do
     step = Native.error(:session_closed, "REPL session is closed", observed_memory(session))
     {:error, step, session}
+  end
+
+  defp terminal_failure_result(
+         %{kind: :limit_exceeded, reason: :deadline_expired},
+         session
+       ) do
+    step = Native.error(:limit_exceeded, run_deadline_message(session), observed_memory(session))
+    {:error, step, session}
+  end
+
+  defp terminal_failure_result(
+         %{kind: :limit_exceeded, reason: :subordinate_evaluations},
+         session
+       ) do
+    step =
+      Native.error(
+        :limit_exceeded,
+        subordinate_evaluations_message(session),
+        observed_memory(session)
+      )
+
+    {:error, step, session}
+  end
+
+  defp terminal_failure_result(%{kind: :session_closed}, session),
+    do: session_closed(session)
+
+  defp terminal_failure_result(%{kind: kind, reason: reason}, session) do
+    step = Native.error(kind, "REPL session closed: #{reason}", observed_memory(session))
+    {:error, step, session}
+  end
+
+  defp increment_result_error({:error, step, session}),
+    do: {:error, step, increment_error(session)}
+
+  defp preexisting_terminal_failure(
+         session,
+         %{kind: :limit_exceeded, reason: reason} = failure
+       )
+       when reason in [:deadline_expired, :subordinate_evaluations] do
+    failure
+    |> terminal_failure_result(session)
+    |> increment_result_error()
+  end
+
+  defp preexisting_terminal_failure(session, _failure), do: session_closed(session)
+
+  defp reservable_session?(session) do
+    not RunState.closed?(session.state) or is_nil(RunState.terminal_failure(session.state))
   end
 
   @spec close(t()) ::
@@ -279,26 +408,40 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp close_owned(session) do
     state_result = close_run_state(session.state)
-    cleanup = ReplSessionOwner.close_provider_session(session.owner_pid, session.owner_token)
 
-    if state_result == :ok and cleanup_result?(cleanup) and
-         Process.alive?(session.config.event_sink.pid) do
-      finalize_close(session, cleanup)
-    else
-      prefer_cleanup_error({:error, :session_closed}, cleanup)
+    case ReplSessionOwner.close_provider_session(session.owner_pid, session.owner_token) do
+      {:ok, cleanup, terminal_failure} ->
+        if state_result == :ok and cleanup_result?(cleanup) and
+             Process.alive?(session.config.event_sink.pid) do
+          finalize_close(session, cleanup, terminal_failure)
+        else
+          prefer_cleanup_error({:error, :session_closed}, cleanup)
+        end
+
+      {:error, _reason} ->
+        {:error, :session_closed}
     end
   end
 
-  defp finalize_close(session, cleanup) do
+  defp read_terminal_failure(state) do
+    RunState.terminal_failure(state)
+  catch
+    :exit, _reason -> nil
+  end
+
+  defp finalize_close(session, cleanup, terminal_failure) do
     {outcome, reason} =
-      case {cleanup, bounded_counter(session.errors)} do
-        {:ok, 0} ->
+      case {cleanup, terminal_failure, bounded_counter(session.errors)} do
+        {:ok, %{reason: reason}, _errors} ->
+          {:error, reason}
+
+        {:ok, nil, 0} ->
           {:ok, nil}
 
-        {:ok, _errors} ->
+        {:ok, nil, _errors} ->
           {:error, :repl_evaluation_error}
 
-        {{:error, :provider_cleanup_failed}, _errors} ->
+        {{:error, :provider_cleanup_failed}, _failure, _errors} ->
           {:error, :provider_cleanup_failed}
       end
 
@@ -384,15 +527,23 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp abort_owned(session, reason) do
     state_result = close_run_state(session.state)
-    cleanup = ReplSessionOwner.close_provider_session(session.owner_pid, session.owner_token)
 
-    if state_result == :ok and cleanup_result?(cleanup) and
-         Process.alive?(session.config.event_sink.pid) do
-      finalize_abort(session, reason, cleanup)
-    else
-      prefer_cleanup_error(:ok, cleanup)
+    case ReplSessionOwner.close_provider_session(session.owner_pid, session.owner_token) do
+      {:ok, cleanup, terminal_failure} ->
+        if state_result == :ok and cleanup_result?(cleanup) and
+             Process.alive?(session.config.event_sink.pid) do
+          finalize_abort(session, terminal_reason(terminal_failure, reason), cleanup)
+        else
+          prefer_cleanup_error(:ok, cleanup)
+        end
+
+      {:error, _reason} ->
+        :ok
     end
   end
+
+  defp terminal_reason(%{reason: reason}, _fallback), do: reason
+  defp terminal_reason(nil, fallback), do: fallback
 
   defp finalize_abort(session, reason, cleanup) do
     terminal_reason =
@@ -412,11 +563,9 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp prefer_cleanup_error(_result, {:error, :provider_cleanup_failed} = error), do: error
   defp prefer_cleanup_error(result, :ok), do: result
-  defp prefer_cleanup_error(result, _owner_failure), do: result
 
   defp cleanup_result?(:ok), do: true
   defp cleanup_result?({:error, :provider_cleanup_failed}), do: true
-  defp cleanup_result?(_result), do: false
 
   defp close_run_state(state) do
     RunState.close_and_drain(state)
@@ -425,28 +574,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     :exit, _reason -> {:error, :session_closed}
   end
 
-  defp config(nil) do
-    with {:ok, workflow} <- WorkflowEnvironment.new([]),
-         {:ok, mission} <- MissionEnvironment.new([]),
-         {:ok, limits} <- Limits.new(),
-         {:ok, sink} <- EventSink.start(:normal, limits) do
-      case RunConfig.new(
-             workflow_environment: workflow,
-             missions: %{"default" => mission},
-             input: %{},
-             limits: limits,
-             event_sink: sink,
-             labels: %{"name" => "ptc.repl"}
-           ) do
-        {:ok, _config} = success ->
-          success
-
-        {:error, _reason} = error ->
-          EventSink.stop(sink)
-          error
-      end
-    end
-  end
+  defp config(nil), do: config_with_limits(Limits.defaults())
 
   defp config(%RunConfig{} = config) do
     cond do
@@ -469,6 +597,28 @@ defmodule PtcRunner.Kernel.ReplSession do
   end
 
   defp config(_config), do: {:error, :invalid_repl_session}
+
+  defp config_with_limits(%Limits{} = limits) do
+    with {:ok, workflow} <- WorkflowEnvironment.new([]),
+         {:ok, mission} <- MissionEnvironment.new([]),
+         {:ok, sink} <- EventSink.start(:normal, limits) do
+      case RunConfig.new(
+             workflow_environment: workflow,
+             missions: %{"default" => mission},
+             input: %{},
+             limits: limits,
+             event_sink: sink,
+             labels: %{"name" => "ptc.repl"}
+           ) do
+        {:ok, _config} = success ->
+          success
+
+        {:error, _reason} = error ->
+          EventSink.stop(sink)
+          error
+      end
+    end
+  end
 
   defp inspection_alive?(nil), do: true
   defp inspection_alive?(sink), do: Process.alive?(sink.pid)
@@ -544,7 +694,7 @@ defmodule PtcRunner.Kernel.ReplSession do
          :ok <-
            RunConfig.bind_provider_session(config, owner, state.pid, state.provider_tracker),
          :ok <- ReplSessionOwner.adopt_direct(owner, token, config, state, trace_path) do
-      register_access(owner, token)
+      register_access(owner, token, :direct)
     else
       {:error, reason} -> reject_pending_session(config, state, owner, token, reason)
     end
@@ -661,37 +811,129 @@ defmodule PtcRunner.Kernel.ReplSession do
         link: true
       )
 
-    name_timeout_limit(result, limits, remaining_ms)
+    name_timeout_limit(result, session, remaining_ms)
   end
 
   # The sandbox reports the milliseconds still left when it killed the worker,
   # a number that matches no configured value and cannot be searched for. The
   # binding ceiling is known here, so say which one stopped the form and where
   # to raise it, through the same builder `ptc run` uses.
-  defp name_timeout_limit({:error, %Native{fail: fail} = step}, limits, remaining) do
+  defp name_timeout_limit({:error, %Native{fail: fail} = step}, session, remaining) do
+    limits = session.config.limits
+
     case named_timeout_message(fail.reason, Map.get(fail, :message), limits, remaining) do
-      {:ok, message} -> {:error, %{step | fail: %{fail | message: message}}}
-      :error -> {:error, step}
+      {:ok, message} ->
+        if run_deadline_bound_timeout?(fail.reason, Map.get(fail, :message), limits, remaining) and
+             record_run_deadline(session) do
+          deadline = %{fail | reason: :limit_exceeded, message: run_deadline_message(session)}
+          {:error, %{step | fail: deadline}}
+        else
+          {:error, %{step | fail: %{fail | message: message}}}
+        end
+
+      :error ->
+        {:error, step}
     end
   end
 
-  defp name_timeout_limit(result, _limits, _remaining), do: result
+  defp name_timeout_limit(result, _session, _remaining), do: result
 
   # A mission form is bounded by the same ceiling as a workflow one, and the
   # evaluator hands back only the milliseconds it had left. Name the limit here,
   # before `mission_result/2` copies the message onto the step.
   defp name_mission_timeout(
          %{kind: reason, details: %{message: message} = details} = result,
-         limits,
+         session,
          remaining
        ) do
+    limits = session.config.limits
+
     case named_timeout_message(reason, message, limits, remaining) do
-      {:ok, named} -> %{result | details: %{details | message: named}}
-      :error -> result
+      {:ok, named} ->
+        if run_deadline_bound_timeout?(reason, message, limits, remaining) and
+             record_run_deadline(session) do
+          result
+          |> Map.merge(%{
+            outcome: :limit_exceeded,
+            kind: :limit_exceeded,
+            reason: :deadline_expired
+          })
+          |> Map.put(:details, %{details | message: run_deadline_message(session)})
+        else
+          %{result | details: %{details | message: named}}
+        end
+
+      :error ->
+        result
     end
   end
 
-  defp name_mission_timeout(result, _limits, _remaining), do: result
+  defp name_mission_timeout(result, _session, _remaining), do: result
+
+  defp run_deadline_bound_timeout?(reason, message, limits, remaining) do
+    limits.evaluation_timeout_ms > remaining and
+      (reason == :compile_timeout or (reason == :timeout and not parallel_timeout?(message)))
+  end
+
+  defp record_run_deadline(session) do
+    case RunState.fail_once(session.state, :limit_exceeded, :deadline_expired) do
+      {:recorded, %{kind: :limit_exceeded, reason: :deadline_expired}} ->
+        _ =
+          EventSink.emit(session.config.event_sink, "limit-exceeded", %{reason: :deadline_expired})
+
+        true
+
+      {:existing, %{kind: :limit_exceeded, reason: :deadline_expired}} ->
+        true
+
+      _other ->
+        false
+    end
+  end
+
+  defp name_mission_session_failure(
+         %{outcome: :busy, reason: :evaluation_in_progress} = result,
+         _session
+       ),
+       do:
+         result
+         |> Map.put(:kind, :evaluation_in_progress)
+         |> Map.put(:details, %{message: "REPL evaluation in progress"})
+
+  defp name_mission_session_failure(
+         %{outcome: :limit_exceeded, reason: :subordinate_evaluations} = result,
+         session
+       ) do
+    :ok = RunState.fail(session.state, :limit_exceeded, :subordinate_evaluations)
+
+    result
+    |> Map.put(:kind, :limit_exceeded)
+    |> Map.put(:details, %{message: subordinate_evaluations_message(session)})
+  end
+
+  defp name_mission_session_failure(
+         %{outcome: :limit_exceeded, reason: :deadline_expired} = result,
+         session
+       ) do
+    :ok = RunState.fail(session.state, :limit_exceeded, :deadline_expired)
+
+    result
+    |> Map.put(:kind, :limit_exceeded)
+    |> Map.put(:details, %{message: run_deadline_message(session)})
+  end
+
+  defp name_mission_session_failure(
+         %{outcome: :limit_exceeded, reason: :run_closed} = result,
+         session
+       ) do
+    :ok = RunState.fail(session.state, :session_closed, :run_closed)
+
+    result
+    |> Map.put(:kind, :session_closed)
+    |> Map.put(:details, %{message: "REPL session is closed"})
+  end
+
+  defp name_mission_session_failure(result, _session), do: result
 
   # Compilation and execution are separated the way `ptc run` separates them, by
   # the reason the evaluator reported rather than by which sandbox stage was
@@ -1058,20 +1300,94 @@ defmodule PtcRunner.Kernel.ReplSession do
     {:error, step, increment_error(session)}
   end
 
-  defp evaluation_reservation_failure(session, reason) do
-    normalized =
-      case reason do
-        :limit_exceeded -> :subordinate_evaluations
-        :run_closed -> :run_deadline
-        other -> other
-      end
-
-    _ = EventSink.emit(session.config.event_sink, "limit-exceeded", %{reason: normalized})
-
+  defp evaluation_reservation_failure(session, :busy) do
     step =
-      Native.error(:limit_exceeded, "REPL evaluation limit exceeded", observed_memory(session))
+      Native.error(
+        :evaluation_in_progress,
+        "REPL evaluation in progress",
+        observed_memory(session)
+      )
 
     {:error, step, increment_error(session)}
+  end
+
+  defp evaluation_reservation_failure(session, :limit_exceeded) do
+    terminal_reservation_failure(
+      session,
+      :limit_exceeded,
+      :subordinate_evaluations,
+      subordinate_evaluations_message(session)
+    )
+  end
+
+  defp evaluation_reservation_failure(session, :deadline_expired) do
+    terminal_reservation_failure(
+      session,
+      :limit_exceeded,
+      :deadline_expired,
+      run_deadline_message(session)
+    )
+  end
+
+  defp evaluation_reservation_failure(session, :run_closed) do
+    terminal_reservation_failure(
+      session,
+      :session_closed,
+      :run_closed,
+      "REPL session is closed"
+    )
+  end
+
+  defp terminal_reservation_failure(session, public_reason, closed_reason, message) do
+    case EventSink.emit(session.config.event_sink, "limit-exceeded", %{reason: closed_reason}) do
+      :ok ->
+        :ok = RunState.fail(session.state, public_reason, closed_reason)
+        step = Native.error(public_reason, message, observed_memory(session))
+        {:error, step, increment_error(session)}
+
+      {:error, :event_sink_error} ->
+        event_sink_failure(session)
+    end
+  end
+
+  defp subordinate_evaluations_message(%{mode: :direct, config: config}) do
+    {:ok, message} =
+      RuntimeLimitDiagnostic.direct_subordinate_evaluations_message(
+        config.limits.subordinate_evaluations
+      )
+
+    message
+  end
+
+  defp subordinate_evaluations_message(%{config: config}) do
+    {:ok, message} =
+      RuntimeLimitDiagnostic.subordinate_evaluations_message(
+        config.limits.subordinate_evaluations
+      )
+
+    message
+  end
+
+  defp run_deadline_message(%{mode: :direct, config: config}) do
+    {:ok, message} =
+      RuntimeLimitDiagnostic.direct_live_timeout_message(
+        :run_duration_ms,
+        config.limits.run_duration_ms,
+        :execution
+      )
+
+    message
+  end
+
+  defp run_deadline_message(%{config: config}) do
+    {:ok, message} =
+      RuntimeLimitDiagnostic.live_timeout_message(
+        :run_duration_ms,
+        config.limits.run_duration_ms,
+        :execution
+      )
+
+    message
   end
 
   defp emit_evaluation_stopped(session, state, evaluation_id, started_ms, status, reason) do
@@ -1152,8 +1468,6 @@ defmodule PtcRunner.Kernel.ReplSession do
       end
   end
 
-  defp register_access(pid, token), do: register_access(pid, token, :workflow)
-
   defp register_access(pid, token, mode) do
     access = access_table()
     id = make_ref()
@@ -1227,7 +1541,8 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp observed_memory(session), do: Map.get(session, :memory, %{})
 
-  defp public_result({status, step, session}, :workflow) when status in [:ok, :error] do
+  defp public_result({status, step, session}, mode)
+       when status in [:ok, :error] and mode in [:direct, :workflow] do
     {public_status, public_step} = Lisp.project_native_result({status, step})
     {public_status, public_step, public_session(session)}
   end
@@ -1256,6 +1571,8 @@ defmodule PtcRunner.Kernel.ReplSession do
        do: %{kind: :workflow, declared_missions: missions |> Map.keys() |> Enum.sort()}
 
   defp owned_mode_info(%{mode: :workflow}), do: %{kind: :workflow, declared_missions: []}
+
+  defp owned_mode_info(%{mode: :direct}), do: %{kind: :workflow, declared_missions: []}
 
   defp owned_mode_info(%{mode: %{kind: :mission, name: name} = mode, config: config}) do
     inventory = Map.fetch!(config.missions, name).inventory

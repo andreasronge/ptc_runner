@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   @input_modes [:interactive, :eval, :load, :script, :stdin, :jsonl]
   @option_keys [
     :input_mode,
+    :interactive_loop,
     :mission,
     :private_terminal,
     :runtime,
@@ -66,7 +67,12 @@ defmodule PtcRunner.Kernel.ManifestRepl do
              is_list(opts) do
     with {:ok, options} <- options(opts),
          {:ok, preparation} <-
-           CommandAcquisition.prepare_repl(application, host_config, options.runtime) do
+           CommandAcquisition.prepare_repl(
+             application,
+             host_config,
+             options.runtime,
+             options.interactive_loop
+           ) do
       open_prepared(preparation, options)
     else
       {:error, reason} -> {:error, failure(reason, false)}
@@ -115,12 +121,14 @@ defmodule PtcRunner.Kernel.ManifestRepl do
          length(keys) == MapSet.size(MapSet.new(keys)) do
       runtime = Keyword.get(opts, :runtime, CommandRuntime.standalone())
       input_mode = Keyword.get(opts, :input_mode, :interactive)
+      interactive_loop = Keyword.get(opts, :interactive_loop, input_mode == :interactive)
       private_terminal = Keyword.get(opts, :private_terminal, false)
       terminal_attached = Keyword.get(opts, :terminal_attached, AnalysisTerminal.attached?())
       trace_path = Keyword.get(opts, :trace_path)
       mission = Keyword.get(opts, :mission)
 
       if CommandRuntime.valid?(runtime) and input_mode in @input_modes and
+           is_boolean(interactive_loop) and
            is_boolean(private_terminal) and is_boolean(terminal_attached) and
            (is_nil(trace_path) or is_binary(trace_path)) and
            (is_nil(mission) or (is_binary(mission) and mission != "")) do
@@ -128,6 +136,7 @@ defmodule PtcRunner.Kernel.ManifestRepl do
          %{
            runtime: runtime,
            input_mode: input_mode,
+           interactive_loop: interactive_loop,
            private_terminal: private_terminal,
            terminal_attached: terminal_attached,
            trace_path: trace_path,

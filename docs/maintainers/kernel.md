@@ -171,6 +171,16 @@ sink, and active-provider prefix as a one-shot run. It then transfers the
 opening and run state to `ReplSessionOwner`. `ReplSession` is process-affine;
 passing its public value does not transfer ownership.
 
+The frontend separately classifies whether it will enter the line loop. That
+classification is independent of TTY attachment and drives the REPL-only limit
+profile before the application package, event sink, provider session, and run
+state are sealed. Omitted manifest `run_duration_ms` and
+`subordinate_evaluations` rows and retained-event capacity then inherit their
+installed ceilings; explicit manifest values remain effective. The resulting
+deadline stays absolute for the whole session, including prompt time. An
+owner-side timer records deadline failure and closes provider resources even
+while the frontend is blocked reading the next line.
+
 An explicit manifest mission first derives an attested target from the inactive
 `PreparedRun` and its exact installation catalog. That target seals direct
 occurrences, dependency-closure declarations and aliases, and the closure's

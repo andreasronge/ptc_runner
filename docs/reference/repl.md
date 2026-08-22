@@ -77,6 +77,26 @@ A provider-bearing manifest requires `--host-config`. The session performs the
 same audited-local checks, acquires one provider session, and reuses it for
 every expression. Direct and profile modes reject host configuration.
 
+The interactive line loop has a dedicated bounded lifetime profile. Selection
+depends on the input grammar, never TTY detection: argumentless `ptc repl`
+uses it when lines arrive from a terminal or a pipe, and `--load SETUP.clj`
+uses it when the setup is followed by that loop. Direct interactive sessions
+set `run_duration_ms` and `subordinate_evaluations` to their catalog maxima and
+retain normal events up to the installed `normal_event_count` and
+`normal_event_bytes` ceilings. Per-form time, heap, source, memory, history,
+result, projection, and capability limits remain at their ordinary defaults.
+
+Interactive manifest and mission sessions use the installed host ceilings for
+omitted `run_duration_ms`, `subordinate_evaluations`, `normal_event_count`, and
+`normal_event_bytes`; an explicit manifest value remains effective when it is
+narrower than that ceiling. Their deadline is one finite absolute session
+deadline, so time at the prompt counts. The session owner marks deadline
+failure and closes provider resources at expiry without waiting for another
+form; the next line ends the frontend with the named deadline diagnostic. Repeated
+`--eval`, a positional script, explicit `-` stdin, and loads followed by one of
+those inputs retain the ordinary effective limits. `ReplSession.new/0` also
+retains the ordinary embedding defaults.
+
 Each form evaluates under the manifest's `evaluation_timeout_ms`, whose
 effective default is 30,000 ms. A form stopped by that ceiling names the
 limit and its configured value. Raise it in the manifest if a form needs
@@ -181,6 +201,14 @@ suffix and owner-only permissions.
 The session owner retains the continuation, event sink, and provider resources.
 Normal close, abort, caller death, worker failure, and deadline failure converge
 on bounded cleanup before final trace persistence.
+
+Evaluation-count and deadline exhaustion name `subordinate_evaluations` or
+`run_duration_ms` and the effective value. They are terminal: the frontend
+prints one diagnostic, closes the session with that exact canonical reason,
+and exits unsuccessfully instead of issuing another prompt. A concurrent
+evaluation reports `evaluation_in_progress` and remains retryable; an already
+closed run reports `session_closed`. Normal event capture remains bounded and
+records its existing explicit overflow summary without terminating the REPL.
 
 ## Query public traces
 
