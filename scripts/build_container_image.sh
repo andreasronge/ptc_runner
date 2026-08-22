@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
 #
-# Builds the local Linux container scaffolding and proves the release inside it.
+# Builds a local Linux container image and proves the release inside it.
 #
 #   scripts/build_container_image.sh [IMAGE_TAG]
 #
-# This is not a publication path. The container contract in
-# `docs/plans/lisp-kernel/stable-cli-contract.md` also requires the launcher
-# companion and per-architecture evidence; until those exist the image is a way
-# to exercise the assembled release on Linux, and nothing here tags, pushes, or
-# documents it as an install route.
+# This remains a local single-platform path. The container-release workflow
+# owns multi-platform publication, immutable version tags, and provenance.
 #
 # The build runs the standalone verification inside the image, so a failure
 # here is a failure of the release, not of the packaging.
@@ -20,7 +17,7 @@ image_tag="${1:-ptc:dev}"
 [ "$#" -gt 0 ] && shift
 
 command -v docker > /dev/null || {
-  echo 'docker is required to build the container scaffolding' >&2
+  echo 'docker is required to build the container image' >&2
   exit 69
 }
 
@@ -51,12 +48,13 @@ for argument in "$@"; do
   esac
 done
 
-# `--load` keeps the result in the local daemon, which only works for one
-# platform at a time. Multi-architecture manifests belong to the publication
-# increment, not to local scaffolding.
+# The explicit Docker exporter keeps this tag local to the daemon. Using the
+# global `--tag` option would also apply it to any extra registry exporter and
+# make a push-by-digest release build try to publish the local probe tag.
+# Loading still limits this helper to one platform at a time; the publication
+# workflow assembles the independently verified native results afterward.
 docker buildx build \
-  --tag "$image_tag" \
-  --load \
+  --output "type=docker,name=$image_tag" \
   "$@" \
   --target released \
   .
@@ -68,6 +66,11 @@ docker buildx build \
 # missing runtime library shows up as the broken output it would really be.
 probe_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptc-image-probe.XXXXXX")"
 viewer_containers=()
+mounted_run=(
+  --user "$(id -u):$(id -g)"
+  --env HOME=/tmp
+  --volume "$probe_dir:/work"
+)
 
 probe_cleanup() {
   if [ "${#viewer_containers[@]}" -gt 0 ]; then
@@ -96,12 +99,54 @@ cat > "$probe_dir/ptc.json" <<'EOF'
 }
 EOF
 
-docker run --rm --volume "$probe_dir:/work" "$image_tag" --version > "$probe_dir/version.stdout"
+cp test/support/mcp_stdio_source_fixture.sh "$probe_dir/mcp_stdio_source_fixture.sh"
+chmod 0755 "$probe_dir/mcp_stdio_source_fixture.sh"
+
+docker run --rm "${mounted_run[@]}" "$image_tag" --version > "$probe_dir/version.stdout"
 grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$probe_dir/version.stdout"
+
+# Exercise the target-native C launcher through the release's real stdio
+# transport. Finding the optional application in the release is not enough:
+# this proves its executable can start a child, frame an MCP exchange, and
+# close cleanly on the architecture being verified.
+docker run --rm "${mounted_run[@]}" \
+  --entrypoint /opt/ptc/bin/ptc_runner \
+  "$image_tag" eval '
+    alias PtcRunner.Kernel.MCPStdioTransport
+
+    [fixture, marker] = System.argv()
+    {:ok, launcher} = PtcRunnerLauncher.executable_path()
+    executable = "/bin/sh"
+
+    {:ok, transport} =
+      MCPStdioTransport.start(
+        launcher: launcher,
+        launcher_protocol_version: PtcRunnerLauncher.protocol_version(),
+        executable: executable,
+        executable_sha256: executable |> File.read!() |> then(&:crypto.hash(:sha256, &1)),
+        cwd: "/work",
+        args: [fixture, marker],
+        env: %{"HOME" => "/tmp", "PATH" => "/usr/bin:/bin"},
+        grace_ms: 50,
+        start_timeout_ms: 5_000
+      )
+
+    metadata = %{
+      "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+      "io.modelcontextprotocol/clientInfo" => %{"name" => "ptc_runner", "version" => "0.x"},
+      "io.modelcontextprotocol/clientCapabilities" => %{}
+    }
+
+    {:ok, %{"result" => %{"supportedVersions" => ["2026-07-28"]}}} =
+      MCPStdioTransport.request(transport, "server/discover", %{}, metadata, 8_192, 5_000)
+
+    :ok = MCPStdioTransport.close(transport)
+  ' /work/mcp_stdio_source_fixture.sh /work/launcher.marker
+grep -Eq '^[1-9][0-9]*:server/discover$' "$probe_dir/launcher.marker"
 
 # Standard output carries a machine contract: a runtime that writes a startup
 # warning there corrupts it, and only an untouched image can prove it does not.
-docker run --rm --volume "$probe_dir:/work" "$image_tag" run /work/ptc.json \
+docker run --rm "${mounted_run[@]}" "$image_tag" run /work/ptc.json \
   > "$probe_dir/run.stdout" 2> /dev/null
 printf '%s\n' '{"city":"Malmö"}' > "$probe_dir/run.expected"
 cmp "$probe_dir/run.expected" "$probe_dir/run.stdout"
@@ -112,8 +157,8 @@ test "$(docker run --rm --entrypoint id "$image_tag" --user)" != "0"
 # cannot check: it binds inside the container's own network namespace, and the
 # whole question is whether a published port reaches it from the host. Prove
 # both directions here, on the finished image.
-docker run --rm --volume "$probe_dir:/work" "$image_tag" init /work/app > /dev/null
-docker run --rm --volume "$probe_dir:/work" "$image_tag" run /work/app/ptc-project.json \
+docker run --rm "${mounted_run[@]}" "$image_tag" init /work/app > /dev/null
+docker run --rm "${mounted_run[@]}" "$image_tag" run /work/app/ptc-project.json \
   > /dev/null 2> /dev/null
 
 probe_run_ref="$(basename "$(find "$probe_dir/app/.ptc/traces" -maxdepth 1 -type f -name 'cmd-*.jsonl' -print -quit)" .jsonl)"
@@ -129,7 +174,7 @@ test -n "$probe_run_ref"
 # `viewer_containers` is lost and the EXIT trap has nothing to clean up after a
 # mid-probe failure.
 start_viewer() {
-  viewer_container="$(docker run --detach --volume "$probe_dir:/work" \
+  viewer_container="$(docker run --detach "${mounted_run[@]}" \
     --publish 127.0.0.1::4123 "$image_tag" viewer /work/app/ptc-project.json --port 4123 "$@")"
   viewer_containers+=("$viewer_container")
 }
@@ -191,6 +236,8 @@ viewer_containers=()
 echo
 echo "built $image_tag; the standalone verification passed inside it,"
 echo "and the finished image answers correctly with nothing added to it"
-echo "try: docker run --rm -it -v \"\$PWD:/work\" $image_tag repl"
-echo "     docker run --rm -p 127.0.0.1:4123:4123 -v \"\$PWD:/work\" $image_tag \\"
-echo "       viewer /work/ptc-project.json --listen 0.0.0.0"
+echo "try: docker run --rm -it --user \"\$(id -u):\$(id -g)\" --env HOME=/tmp \\"
+echo "       -v \"\$PWD:/work\" $image_tag repl"
+echo "     docker run --rm --user \"\$(id -u):\$(id -g)\" --env HOME=/tmp \\"
+echo "       -p 127.0.0.1:4123:4123 -v \"\$PWD:/work\" $image_tag \\"
+echo "       viewer /work/ptc-project.json --listen 0.0.0.0 --port 4123"

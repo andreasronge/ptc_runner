@@ -31,9 +31,9 @@ to stand up.
 
 Download the self-contained macOS arm64 archive and its checksum from [GitHub
 Releases](https://github.com/andreasronge/ptc_runner/releases), then follow the
-[standalone installation](docs/installation/standalone.md). The published
-container image is still planned; the Docker page documents the verified local
-image available today.
+[standalone installation](docs/installation/standalone.md). Starting with the
+next root release, Linux AMD64 and ARM64 users can instead use the image
+described in [Docker installation](docs/installation/docker.md).
 
 Once `ptc` is installed, create and run a project that needs no API key:
 

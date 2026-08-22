@@ -396,12 +396,13 @@ loopback, while a published port forwards to the container's external
 interface, so a loopback bind refuses every connection a <code class="inline">-p</code> mapping delivers.
 Binding <code class="inline">0.0.0.0</code> <em>inside the container's network namespace</em> is what makes the
 mapping reachable, and the host-side exposure decision moves to the publish
-rule:</p><pre><code class="console language-console">docker run --rm \
+rule:</p><pre><code class="console language-console">image=ghcr.io/andreasronge/ptc_runner:VERSION
+docker run --rm \
   --user &quot;$(id -u):$(id -g)&quot; \
   --env HOME=/tmp \
   -p 127.0.0.1:4123:4123 \
   -v &quot;$PWD:/work&quot; \
-  ptc:dev viewer /work/ptc-project.json --listen 0.0.0.0</code></pre><p>The <code class="inline">127.0.0.1:</code> prefix on <code class="inline">-p</code> is what keeps this equivalent to a loopback
+  &quot;$image&quot; viewer /work/ptc-project.json --listen 0.0.0.0 --port 4123</code></pre><p>The <code class="inline">127.0.0.1:</code> prefix on <code class="inline">-p</code> is what keeps this equivalent to a loopback
 bind. Writing <code class="inline">-p 4123:4123</code> instead publishes an unauthenticated trace browser
 to every host that can reach the machine. The command cannot enforce that
 prefix; you must write it. The user mapping preserves access to the

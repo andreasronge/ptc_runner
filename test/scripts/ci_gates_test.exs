@@ -155,6 +155,25 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     assert launcher =~ ~s(bash ptc_runner_launcher/scripts/verify_precompiled.sh)
   end
 
+  test "container publication is downstream of the canonical release gate" do
+    release = File.read!(Path.join(@root, ".github/workflows/release.yml"))
+    container = File.read!(Path.join(@root, ".github/workflows/container-release.yml"))
+
+    assert release =~
+             ~r/container:\n\s+needs: verify\n\s+uses: \.\/\.github\/workflows\/container-release\.yml/
+
+    assert release =~ "needs: [macos-artifact, container]"
+    assert container =~ "workflow_call:"
+    refute container =~ ~r/^  push:/m
+    assert container =~ "push-by-digest=true"
+    assert container =~ "--metadata-file \"$metadata\""
+    assert container =~ ~s(."containerimage.descriptor".digest)
+    assert container =~ ~s({"architecture":"amd64","os":"linux"})
+    assert container =~ ~s({"architecture":"arm64","os":"linux"})
+    assert container =~ "Publish the exact version tag"
+    refute container =~ "docker/build-push-action"
+  end
+
   test "the interactive REPL PTY check is a Nightly gate, not a PR core-release gate" do
     workflow = File.read!(Path.join(@root, ".github/workflows/test.yml"))
     nightly = File.read!(Path.join(@root, ".github/workflows/nightly.yml"))

@@ -171,7 +171,7 @@ while IFS= read -r path || [ -n "$path" ]; do
       launcher=true
       ;;
 
-    .github/workflows/release.yml)
+    .github/workflows/release.yml|.github/workflows/container-release.yml)
       core=true
       ;;
 

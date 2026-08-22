@@ -1,8 +1,8 @@
 # Standalone CLI distribution
 
-**Status:** active; the shared command engine, Mix frontend, assembled release,
-standalone REPL, envelope publication, human rendering, and package verification
-are complete. This plan retains only distribution work that has not landed.
+**Status:** active; macOS ARM64 packaging and the Linux AMD64/ARM64 publication
+machinery are complete. This plan retains the first container publication and
+macOS x86_64 evidence that have not landed.
 
 Implemented architecture belongs in the
 [Kernel maintainer guide](../../maintainers/kernel.md), current behavior in
@@ -86,47 +86,17 @@ The image is packaging, not an extra security or compatibility layer. It must
 not introduce wrapper-only option aliases, environment inference, or alternate
 machine output.
 
-## First increment
+## Remaining distribution work
 
-The four targets do not have to arrive together, and the macOS artifact is the
-one a local maintainer can produce and verify today. This increment delivers
-the machinery; later increments add the remaining architectures to the same
-machinery.
+The next root release tag must execute the container publication workflow,
+make the linked GHCR package public, and prove an unauthenticated pull plus
+signed-provenance verification for the published multi-platform digest. The
+workflow already builds the launcher-bearing finished image on native Linux
+AMD64 and ARM64 runners before it publishes that manifest.
 
-**Published in this increment — macOS arm64 only.**
-
-- A repository-owned packaging script that builds the release, closes its
-  runtime library set under the contract above, runs the existing standalone
-  verification against the *packaged* tree, and emits a compressed artifact
-  with an adjacent SHA-256 file. The same script runs locally and in CI, so a
-  maintainer can reproduce what CI published from the same commit and
-  toolchain. This increment makes no reproducible-build claim beyond that.
-- A tag-workflow job that runs that script on macOS arm64, records build
-  provenance for the artifact as the launcher workflow already does, and
-  attaches it to the draft release.
-- Installation documentation for that artifact, naming the minimum macOS
-  version and the ad-hoc signing status precisely.
-
-**Built but not published in this increment — the container.** The image
-contract above requires the launcher companion and per-architecture evidence,
-and neither is in this increment. A container definition therefore lands as
-local scaffolding: it builds the assembled release into a pinned base image,
-runs as a non-root user, sets a UTF-8 locale explicitly because the Erlang
-runtime needs one for terminal and filename handling, and is exercised by the
-existing standalone verification inside the container. It is not tagged, not
-pushed, and not attached to a release, and the documentation must not offer it
-as an installation route.
-
-Publication of that image requires its own increment, which must first fix
-what "publish" means for it: registry and image name, tag and immutable-digest
-scheme, the base image pinned by digest, the relationship between build and
-runtime architecture, and how provenance is attached and verified — the same
-questions `docs/maintainers/releasing.md` already answers for launcher assets.
-
-Remaining after this increment: macOS x86_64, both Linux architectures as
-published images, the launcher companion inside the image, and the
-per-architecture evidence matrix below. Publishing any of those without its
-own target evidence is out of contract.
+macOS x86_64 remains a separate target. It still needs its own packaging run,
+runtime-library closure evidence, standalone verification, and release asset.
+Publishing it without that target evidence is out of contract.
 
 ## Distribution evidence
 

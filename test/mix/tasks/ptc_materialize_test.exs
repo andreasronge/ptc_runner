@@ -386,7 +386,8 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
     assert output =~ "candidate passed 2 host-owned validation cases"
     # The checkout path may contain an issue number such as 1542; only a
     # standalone expected value would be a leaked validation answer.
-    refute output =~ ~r/(?<!\d)42(?!\d)/
+    output_without_tmp_dir = String.replace(output, dir, "<tmp_dir>")
+    refute output_without_tmp_dir =~ ~r/(?<!\d)42(?!\d)/
     assert File.read!(Path.join(out, "candidate.clj")) == @authored
 
     assert %{

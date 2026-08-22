@@ -6,12 +6,11 @@ Active implementation plan. Remove this file after the approved slices land and
 their durable contracts have moved into the documentation guidelines, retained
 references, schemas, module documentation, and executable examples.
 
-This branch implements the layer-owned paths, reference extraction, README and
-guide rewrite, package usage rules, terminology policy, and focused
-documentation checks. As approved for the imminent release, the documentation
-assumes a verified macOS arm64 archive is available from GitHub Releases. The
-published container image and generated first-agent scaffold remain
-distribution/product prerequisites and are not presented as available.
+The layer-owned paths, reference extraction, README and guide rewrite, package
+usage rules, terminology policy, and focused documentation checks are
+implemented. A verified macOS arm64 archive is available from GitHub Releases,
+and the next root tag owns the first GHCR publication. The generated first-agent
+scaffold remains a product prerequisite.
 
 ## Objective
 
@@ -45,9 +44,9 @@ blurred:
   contract is JSON, PTC-Lisp, a process command, or an immutable artifact;
 - model-selection guidance is mixed with adapter and source maintenance
   concerns;
-- the standalone artifact and local container scaffold exist, but the
-  one-command installer and published container route required by the desired
-  README journey are not complete public installation paths; and
+- the standalone archive and container publication workflow exist, but the
+  one-command installer and generated first-agent path required by the desired
+  README journey are not complete; and
 - the shipped package does not yet provide its own concise `usage-rules.md` for
   coding models integrating the public package API.
 
@@ -179,15 +178,10 @@ and release documentation.
 
 ### Published container image
 
-- Publish the verified runtime image to the chosen registry and target matrix.
-- Define immutable version tags and the policy for any moving convenience tag.
-- Verify the standalone command inside the final runtime image.
-- Run the exact README `docker run` commands in CI.
-- Keep volume, credential, user, result, trace, and Viewer exposure behavior
-  explicit in the Docker installation reference.
-
-Until publication is complete, documentation may show how maintainers build
-the local `ptc:dev` image but must not present it as an end-user installation.
+- Execute the first tag-triggered GHCR publication for Linux AMD64 and ARM64.
+- Make the linked package public and prove an unauthenticated pull.
+- Verify the signed provenance for the published multi-platform digest.
+- Keep the release commands under native target evidence as tags advance.
 
 ### Self-contained first-agent scaffold
 
