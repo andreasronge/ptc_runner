@@ -298,7 +298,8 @@ When direct endpoint acquisition does dial the server, `ptc run` and
 
 These diagnostics name only the installed provider occurrence. They never
 include the endpoint, DNS response, certificate, TLS alert text, Mint value, or
-operating-system error. Other connection failures retain the generic
+operating-system error. OTP may still write the handshake alert on stderr;
+stdout of `ptc doctor` remains one JSON document. Other connection failures retain the generic
 `provider_unavailable` code. OAuth discovery and token traffic retain their
 existing closed authorization transport errors rather than exposing endpoint
 causes through grant state.

@@ -1,6 +1,7 @@
 defmodule PtcRunner.StandaloneCLI do
   @moduledoc false
 
+  alias PtcRunner.CLILogger
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRouter
   alias PtcRunner.Kernel.CommandRuntime
@@ -36,6 +37,9 @@ defmodule PtcRunner.StandaloneCLI do
   @doc false
   @spec main([binary()]) :: no_return()
   def main(argv) do
+    # OTP's default handler writes to stdout. A TLS handshake alert during
+    # `ptc doctor --connect` would otherwise prefix the JSON report (#1583).
+    CLILogger.install_stderr_handler()
     presentation = execute(argv)
     # The dump is Logger reporting the writer's :terminated; removing the
     # default handler after the command has produced its presentation, and

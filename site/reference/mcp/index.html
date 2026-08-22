@@ -259,7 +259,8 @@ connection and is marked retryable;</li><li><code class="inline">provider_endpoi
 resolve; and</li><li><code class="inline">provider_endpoint_tls_failed</code> means an admitted TLS configuration or
 protocol alert prevented the handshake.</li></ul><p>These diagnostics name only the installed provider occurrence. They never
 include the endpoint, DNS response, certificate, TLS alert text, Mint value, or
-operating-system error. Other connection failures retain the generic
+operating-system error. OTP may still write the handshake alert on stderr;
+stdout of <code class="inline">ptc doctor</code> remains one JSON document. Other connection failures retain the generic
 <code class="inline">provider_unavailable</code> code. OAuth discovery and token traffic retain their
 existing closed authorization transport errors rather than exposing endpoint
 causes through grant state.</p><p>Supported static schemes are <code class="inline">bearer</code>, <code class="inline">basic</code>, and header-named <code class="inline">api_key</code>.
