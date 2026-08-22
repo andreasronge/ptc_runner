@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   # message has to land in one list or the other.
   @prose_rows [
     {:application, :contract_invalid},
+    {:application, :override_invalid},
     {:application, :required_property_missing},
     {:application, :schema_violation},
     {:bundle, :duplicate_definition},

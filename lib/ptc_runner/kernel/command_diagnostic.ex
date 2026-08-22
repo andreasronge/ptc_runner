@@ -3,21 +3,20 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   Closed privacy-safe command diagnostic.
 
   Construction accepts only a catalog pair, a catalog-authorized message, and
-  typed safe provenance.
-  Contract-authorized paths must also match the sealed contract authority bound
-  to their source classification. Rendering never inspects a lower-level
-  reason or rejected value. Catalog-authorized dynamic message shapes contain
-  only fixed literals plus bounded PTC-Lisp symbol names, a catalog-validated
-  runtime ceiling, a bounded agent turn ceiling, or an opaque replay request
-  hash. Compile messages require component-source provenance; a missing
-  capability message is rebuilt from the frozen bundle's sorted tool
-  requirements. A missing MCP tool message may retain only the validated,
-  declaration-owned upstream name and carries no provider catalog payload.
-  Kernel runtime and replay messages require fixed runtime
-  provenance. An agent turn-limit message and an out-of-range agent option
-  have no source because `max_turns` and the other bounded options belong to
-  one `agent.core` call rather than a host or manifest document.
-  Every other message is the catalog literal.
+  typed safe provenance. Contract-authorized paths must also match the sealed
+  contract authority bound to their source classification. Rendering never
+  inspects a lower-level reason or rejected value. Catalog-authorized dynamic
+  message shapes contain only fixed literals plus bounded PTC-Lisp symbol
+  names, a catalog-validated runtime ceiling, a bounded agent turn ceiling, an
+  opaque replay request hash, or a closed component-override field rule.
+  Compile messages require component-source provenance; a missing capability
+  message is rebuilt from the frozen bundle's sorted tool requirements. A
+  missing MCP tool message may retain only the validated, declaration-owned
+  upstream name and carries no provider catalog payload. Kernel runtime and
+  replay messages require fixed runtime provenance. An agent turn-limit
+  message and an out-of-range agent option have no source because `max_turns`
+  and the other bounded options belong to one `agent.core` call rather than a
+  host or manifest document. Every other message is the catalog literal.
 
   `notes` is reserved and always empty: the published V2 envelope schema pins
   it to `{"const": []}`, so a populated array would invalidate the envelope for
@@ -29,6 +28,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
@@ -382,6 +382,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        )
        when kind in [:input_contract, :result_contract],
        do: ContractSchemaDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :override_invalid},
+         %CommandSource{kind: :component_override}
+       ),
+       do: ComponentOverrideDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          _message,

@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -27,8 +28,9 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
     )
   end
 
-  # A rejected contract schema names its rule; every other reason keeps the
-  # catalog literal, including a rule this boundary has no message for.
+  # A rejected contract schema names its rule. A refused component override
+  # names the descriptor field it broke. Every other reason keeps the catalog
+  # literal, including a rule this boundary has no message for.
   defp message_option({:contract_schema_invalid, %{rule: rule}}) do
     case ContractSchemaDiagnostic.message(rule) do
       {:ok, message} -> [message: message]
@@ -47,6 +49,7 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   # for, and the ceiling that refused it. Saying so is what tells a reader how
   # far they overshot and which of the two documents to edit.
   defp message_option({:manifest_path, _path, reason}), do: message_option(reason)
+  defp message_option({:component_override_path, _path, reason}), do: message_option(reason)
 
   defp message_option({:installed_limit_exceeded, name, requested, ceiling}) do
     case RuntimeLimitDiagnostic.installed_ceiling_message(name, requested, ceiling) do
@@ -55,7 +58,12 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
     end
   end
 
-  defp message_option(_reason), do: []
+  defp message_option(reason) do
+    case ComponentOverrideDiagnostic.message(reason) do
+      {:ok, message} -> [message: message]
+      :error -> []
+    end
+  end
 
   defp source_role({:source_role, role, reason})
        when role in [:external_input, :component_override],
@@ -86,7 +94,12 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
        ),
        do: {:override_invalid, path}
 
-  defp projection(:component_override, _reason), do: {:override_invalid, nil}
+  defp projection(:component_override, reason) do
+    case ComponentOverrideDiagnostic.path(reason) do
+      nil -> {:override_invalid, nil}
+      path -> {:override_invalid, path}
+    end
+  end
 
   defp projection(role, {:manifest_path, path, reason}) do
     case projection(role, reason) do

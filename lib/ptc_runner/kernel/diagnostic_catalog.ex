@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.CompileDiagnostic
+  alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
@@ -393,6 +394,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :application, code: :contract_invalid, message: fallback}),
     do: ContractSchemaDiagnostic.message_schema(fallback)
 
+  def message_schema(%{phase: :application, code: :override_invalid, message: fallback}),
+    do: ComponentOverrideDiagnostic.message_schema(fallback)
+
   def message_schema(%{
         phase: :provider_acquisition,
         code: :provider_tool_missing,
@@ -457,6 +461,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:application, :contract_invalid, message),
     do: ContractSchemaDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:application, :override_invalid, message),
+    do: ComponentOverrideDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:provider_acquisition, :provider_tool_missing, message),
     do: MCPAcquisitionDiagnostic.valid_missing_tool_message?(message)

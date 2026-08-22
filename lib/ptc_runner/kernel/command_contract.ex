@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.DocumentationLibrary
@@ -1269,6 +1270,12 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp diagnostic_message_schema(%{phase: :application, code: :contract_invalid} = row, _source),
     do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
+         %{phase: :application, code: :override_invalid} = row,
+         %{"properties" => %{"kind" => %{"const" => "component_override"}}}
+       ),
+       do: ComponentOverrideDiagnostic.message_schema(row.message)
 
   defp diagnostic_message_schema(row, %{"type" => "null"}), do: %{"const" => row.message}
   defp diagnostic_message_schema(row, _source_schema), do: DiagnosticCatalog.message_schema(row)

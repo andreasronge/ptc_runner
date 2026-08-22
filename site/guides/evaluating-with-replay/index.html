@@ -135,7 +135,10 @@ the manifest. A transitively selected component is also eligible, so selecting
 override target.</p><p>The descriptor binds the candidate to the installed source it replaces and to
 the exact candidate bytes. It cannot add a component, change dependencies, or
 grant a provider. The replacement still passes compilation, dependency,
-signature, export, capability-requirement, and bundle checks. See the
+signature, export, capability-requirement, and bundle checks. A refused
+descriptor names the field it broke (<code class="inline">base_source_hash</code>, <code class="inline">source_hash</code>,
+<code class="inline">component_id</code>, or <code class="inline">path</code>) rather than collapsing every mistake into one
+sentence. See the
 <a href="/reference/component-contracts/#evaluate-one-replacement-component">component reference</a>
 for every descriptor field and validation rule.</p><p>Candidate creation is a trusted build step and is not currently exposed by the
 standalone executable. The source-checkout tool for maintainers is documented
