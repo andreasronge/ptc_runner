@@ -226,7 +226,7 @@ mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
 mix ptc run examples/llm-replay/ptc-project.json
 ```
 ```json
-{"content":"Frozen answer"}
+{"content":"Frozen answer","model":"frozen-model"}
 ```
 
 <!-- ptc-guide-e2e: id=quickstart-live-agent project=examples/kernel-tutorial/04-multi-turn-agent.ptc-project.json requires=OPENROUTER_API_KEY assert=two-turn-agent -->

@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
 
@@ -21,6 +22,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:bundle, :undefined_variable},
     {:bundle, :unknown_namespace},
     {:execution, :replay_fixture_missing},
+    {:execution, :model_output_truncated},
     {:host, :host_schema_invalid},
     {:local_preflight, :environment_unavailable},
     {:local_preflight, :fixtures_unreadable},
@@ -29,6 +31,27 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:provider_acquisition, :provider_tool_missing},
     {:result_cleanup, :result_contract_failed}
   ]
+
+  test "model output truncation messages retain tied bindings and reject suffixes" do
+    details = %{
+      limit: :max_tokens,
+      limit_value: 4_096,
+      limit_bindings: [:adapter_default, :model_output_limit],
+      alias: "hy3"
+    }
+
+    assert {:ok, message} = ModelOutputDiagnostic.message(details)
+    assert message =~ "adapter_default and model_output_limit max_tokens 4096"
+    assert message =~ "Select a model with a larger output limit"
+    assert ModelOutputDiagnostic.valid_message?(message)
+    refute ModelOutputDiagnostic.valid_message?(message <> "\n")
+  end
+
+  test "model output truncation uses the stable generic message without cap provenance" do
+    assert {:ok, message} = ModelOutputDiagnostic.message(%{alias: "hy3"})
+    assert message == "model output was truncated before producing a usable agent action"
+    assert ModelOutputDiagnostic.valid_message?(message)
+  end
 
   test "every breached setting names the setting, its configured value, and a remedy" do
     for row <- setting_rows() do

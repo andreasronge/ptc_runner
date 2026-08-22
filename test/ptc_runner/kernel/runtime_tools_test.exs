@@ -63,6 +63,52 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
     end
   end
 
+  test "a closed model-output truncation claim mints bounded terminal details", %{
+    callback: callback
+  } do
+    assert %TrustedError{
+             reason: :model_output_truncated,
+             details: %{
+               limit: :max_tokens,
+               limit_value: 4_096,
+               limit_bindings: [:configured],
+               alias: "hy3"
+             }
+           } =
+             callback.(%{
+               "max_tokens" => 4_096,
+               "bindings" => ["configured"],
+               "alias" => "hy3"
+             })
+  end
+
+  test "model-output truncation remains terminal without cap provenance", %{callback: callback} do
+    assert %TrustedError{
+             reason: :model_output_truncated,
+             details: %{alias: "hy3"}
+           } = callback.(%{"alias" => "hy3"})
+  end
+
+  test "model-output truncation rejects malformed provenance", %{callback: callback} do
+    invalid = [
+      %{"max_tokens" => 4_096, "bindings" => [], "alias" => "hy3"},
+      %{"max_tokens" => 4_096, "bindings" => ["unknown"], "alias" => "hy3"},
+      %{
+        "max_tokens" => 4_096,
+        "bindings" => ["model_output_limit", "adapter_default"],
+        "alias" => "hy3"
+      },
+      %{"max_tokens" => 0, "bindings" => ["configured"], "alias" => "hy3"},
+      %{"max_tokens" => 4_096, "bindings" => ["configured"], "alias" => "HY3"}
+    ]
+
+    for arguments <- invalid do
+      assert %{status: :error, kind: :protocol_error, reason: :invalid_runtime_limit_failure} =
+               callback.(arguments),
+             "accepted #{inspect(arguments)}"
+    end
+  end
+
   test "the reason is required, and so are the bounds on the turn count", %{callback: callback} do
     invalid = [
       %{"agent_turns" => 8},
