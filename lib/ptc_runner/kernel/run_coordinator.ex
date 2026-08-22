@@ -38,6 +38,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.Kernel.SelectionRulesDiagnostic
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.LiveStatus.Target
 
@@ -575,7 +576,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              occurrence
            ),
          {:ok, normalized} <-
-           SelectionRules.normalize(descriptor.selection_rules, config, request.package.limits) do
+           SelectionRules.explain(descriptor.selection_rules, config, request.package.limits) do
       declaration = %{
         name: name,
         destination: occurrence.destination,
@@ -595,9 +596,16 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:halt, {:error, diagnostic}}
 
-      {:error, :invalid_selection} ->
+      {:error, reason} ->
         {:ok, subject} = CommandSubject.provider(name, :selection, occurrence)
-        {:halt, {:error, diagnostic(:provider_declaration, :selection_invalid, subject: subject)}}
+
+        {:halt,
+         {:error,
+          diagnostic(
+            :provider_declaration,
+            :selection_invalid,
+            [subject: subject] ++ selection_invalid_message(reason)
+          )}}
     end
   end
 
@@ -751,4 +759,11 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   defp diagnostic(phase, code, opts \\ []),
     do: CommandDiagnostic.new!(phase, code, opts)
+
+  defp selection_invalid_message(reason) do
+    case SelectionRulesDiagnostic.message(reason) do
+      {:ok, message} -> [message: message]
+      :error -> []
+    end
+  end
 end

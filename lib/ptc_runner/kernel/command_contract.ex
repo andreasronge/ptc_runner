@@ -23,6 +23,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.SelectionRulesDiagnostic
 
   @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json"
   @envelope_root_key {__MODULE__, :envelope_root}
@@ -1276,6 +1277,12 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"properties" => %{"kind" => %{"const" => "component_override"}}}
        ),
        do: ComponentOverrideDiagnostic.message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :provider_declaration, code: :selection_invalid} = row,
+         %{"type" => "null"}
+       ),
+       do: SelectionRulesDiagnostic.message_schema(row.message)
 
   defp diagnostic_message_schema(row, %{"type" => "null"}), do: %{"const" => row.message}
   defp diagnostic_message_schema(row, _source_schema), do: DiagnosticCatalog.message_schema(row)

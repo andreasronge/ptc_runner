@@ -225,8 +225,10 @@ ceiling (catalog default 2048 when omitted). An alias cap binds only when it is
 stricter than the public <code class="inline">llm-request</code> per-name budget.</p><p>For MCP, <code class="inline">allow</code> selects installed public names without changing their
 effects declared in <code class="inline">ptc-host.json</code>. It may be omitted only when every installed mapping
 is read-only. If any mapping is a write, an explicit non-empty list is
-required. <code class="inline">model_visible</code> may narrow discovery within the authorized names;
-visibility never grants or denies call authority.</p><p>Native trace and inspection aliases derive three navigation capabilities:
+required. <code class="inline">model_visible</code> may name any subset of the authorized <code class="inline">allow</code> names,
+including mappings whose host <code class="inline">model_visible</code> flag is false. Omitted, it
+defaults to the authorized names the host already marked visible. Visibility
+never grants or denies call authority.</p><p>Native trace and inspection aliases derive three navigation capabilities:
 <code class="inline">runs</code>, <code class="inline">open</code>, and <code class="inline">read</code>. <code class="inline">open</code> advertises the named collections and their
 filters; <code class="inline">read</code> returns one native bounded page. Public trace sources provide
 the <code class="inline">activity</code> collection and return <code class="inline">evidence_unavailable</code> for private

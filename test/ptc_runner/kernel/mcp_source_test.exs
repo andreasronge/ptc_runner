@@ -2277,6 +2277,60 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "selection can reveal a host-hidden MCP capability in model discovery", %{tmp_dir: dir} do
+    parent = self()
+    fixture = fixture(parent)
+    on_exit(fixture.close)
+
+    tools =
+      Map.update!(mappings(), "text", &Map.put(&1, :model_visible, false))
+
+    {:ok, revealed} =
+      dir
+      |> manifest(~w(remote.structured remote.text),
+        timeout_ms: 5_000,
+        evaluation_timeout_ms: 5_000,
+        config_extra: %{"model_visible" => ["remote.text"]}
+      )
+      |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000, tools: tools))
+      |> RunLifecycle.build()
+
+    visibility =
+      Map.new(revealed.config.missions["default"].environment.capabilities, fn {_name, capability} ->
+        {capability.name, capability.model_visible}
+      end)
+
+    assert visibility == %{"remote.structured" => false, "remote.text" => true}
+    [revealed_snapshot] = revealed.config.connector_snapshots
+
+    assert [
+             %{"model_visible" => false, "description_hash" => nil},
+             %{"model_visible" => true, "description_hash" => visible_hash}
+           ] = revealed_snapshot["tools"]
+
+    assert is_binary(visible_hash)
+    assert :ok = RunBuilder.close(revealed)
+
+    {:ok, host_default} =
+      dir
+      |> manifest(~w(remote.structured remote.text),
+        timeout_ms: 5_000,
+        evaluation_timeout_ms: 5_000
+      )
+      |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000, tools: tools))
+      |> RunLifecycle.build()
+
+    host_default_visibility =
+      Map.new(host_default.config.missions["default"].environment.capabilities, fn {_name,
+                                                                                    capability} ->
+        {capability.name, capability.model_visible}
+      end)
+
+    assert host_default_visibility == %{"remote.structured" => true, "remote.text" => false}
+    assert :ok = RunBuilder.close(host_default)
+  end
+
+  @tag :tmp_dir
   test "snapshot hashes are stable and owner cleanup remains resource-free", %{
     tmp_dir: dir
   } do

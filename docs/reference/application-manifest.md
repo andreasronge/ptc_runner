@@ -223,8 +223,10 @@ stricter than the public `llm-request` per-name budget.
 For MCP, `allow` selects installed public names without changing their
 effects declared in `ptc-host.json`. It may be omitted only when every installed mapping
 is read-only. If any mapping is a write, an explicit non-empty list is
-required. `model_visible` may narrow discovery within the authorized names;
-visibility never grants or denies call authority.
+required. `model_visible` may name any subset of the authorized `allow` names,
+including mappings whose host `model_visible` flag is false. Omitted, it
+defaults to the authorized names the host already marked visible. Visibility
+never grants or denies call authority.
 
 Native trace and inspection aliases derive three navigation capabilities:
 `runs`, `open`, and `read`. `open` advertises the named collections and their

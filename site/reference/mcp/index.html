@@ -193,15 +193,19 @@ not see an unrestricted filesystem or the server command.</p><h2 id="install-and
 }</code></pre><p><code class="inline">read_text_file</code> is the upstream name. <code class="inline">workspace.read</code> is the stable public
 capability name exposed by PtcRunner. Change <code class="inline">installation_revision</code> whenever
 the transport, mapping, effect, snapshot policy, or server behavior changes.</p><p>The required <code class="inline">effect</code> declaration in <code class="inline">ptc-host.json</code> is authoritative; server
-annotations cannot change it. <code class="inline">model_visible</code> controls prompt discovery, not
-call authority. <code class="inline">error_feedback: &quot;bounded&quot;</code> may expose up to 1,024 bytes of
+annotations cannot change it. <code class="inline">model_visible</code> on a host mapping is the default
+for prompt discovery, not a ceiling: a selecting manifest may still list that
+name in <code class="inline">config.model_visible</code>. Visibility never grants or denies call
+authority. <code class="inline">error_feedback: &quot;bounded&quot;</code> may expose up to 1,024 bytes of
 validated server error text as untrusted model feedback, so enable it only when
 the server cannot return secrets, paths, or stack traces.</p><h2 id="select-less-authority-in-the-manifest">Select less authority in the manifest</h2><p>The application selects the installed alias in its mission provider list:</p><pre><code class="json language-json">&quot;providers&quot;: {
   &quot;mission&quot;: [
     {&quot;name&quot;: &quot;workspace&quot;, &quot;config&quot;: {&quot;allow&quot;: [&quot;workspace.read&quot;]}}
   ]
 }</code></pre><p>If an installation maps any write tool, every selecting manifest must provide a
-non-empty <code class="inline">allow</code> list, even when it selects only reads. A timed-out or
+non-empty <code class="inline">allow</code> list, even when it selects only reads. <code class="inline">model_visible</code> may
+list any authorized <code class="inline">allow</code> names, including mappings the host left hidden from
+prompt discovery. A timed-out or
 transport-failed write is never retried automatically and may report
 <code class="inline">mutation_state: &quot;indeterminate&quot;</code>; the external mutation may already have
 happened. A complete decoded refusal (<code class="inline">isError: true</code>) or JSON-RPC error is

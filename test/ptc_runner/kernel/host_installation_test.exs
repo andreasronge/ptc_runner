@@ -1331,7 +1331,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
-  test "selection can only narrow installed visibility and ceilings", %{tmp_dir: dir} do
+  test "selection can grant host-hidden visibility and must stay within installed names and ceilings",
+       %{tmp_dir: dir} do
     host = load_host(dir, http_config())
 
     assert {:ok, registry} =
@@ -1350,11 +1351,19 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
                context
              )
 
-    assert {:error, :invalid_mcp_selection} =
+    assert {:ok, _hidden_visible} =
              ProviderRegistry.prepare(
                registry,
                "remote",
                %{"model_visible" => ["remote.hidden"]},
+               context
+             )
+
+    assert {:error, :invalid_mcp_selection} =
+             ProviderRegistry.prepare(
+               registry,
+               "remote",
+               %{"model_visible" => ["remote.missing"]},
                context
              )
 

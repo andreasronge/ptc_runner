@@ -315,6 +315,9 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
 
     assert {:error, :invalid_selection} =
              SelectionRules.normalize(rules, %{"allow" => []}, Limits.installed_defaults())
+
+    assert {:error, {:field, "allow"}} =
+             SelectionRules.explain(rules, %{"allow" => []}, Limits.installed_defaults())
   end
 
   test "runtime normalization admits only the exact sealed canonical form" do
@@ -1726,6 +1729,107 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert outcome.exit_status == 3
     assert outcome.envelope["error"]["phase"] == "provider_declaration"
     assert outcome.envelope["error"]["code"] == "selection_invalid"
+
+    assert outcome.envelope["error"]["message"] ==
+             "the provider selection field allow is invalid"
+
+    omitted_manifest =
+      put_in(manifest(), ["providers"], %{
+        "workflow" => [],
+        "mission" => [%{"name" => "remote"}]
+      })
+
+    omitted_application =
+      write_application(directory, "omitted-write-allow", documents(omitted_manifest))
+
+    assert {:error, %CommandOutcome{} = omitted_outcome} =
+             CommandEngine.prepare(["validate", omitted_application, "--host-config", host_path])
+
+    assert omitted_outcome.envelope["error"]["message"] ==
+             "the provider selection field allow is required because the installation maps a write"
+  end
+
+  test "command validation accepts a model_visible subset of allow and names remaining selection rules",
+       %{tmp_dir: directory} do
+    host_document = %{
+      "install" => %{
+        "workspace" => %{
+          "source" => "mcp",
+          "installation_revision" => "workspace-v1",
+          "transport" => %{
+            "type" => "stdio",
+            "command" => "/bin/echo",
+            "args" => ["."]
+          },
+          "tools" => %{
+            "read_text_file" => %{"as" => "workspace.read", "effect" => "read"},
+            "write_file" => %{"as" => "workspace.write", "effect" => "write"}
+          }
+        }
+      }
+    }
+
+    host_path = Path.join(directory, "ptc-host.json")
+    File.write!(host_path, Jason.encode!(host_document))
+
+    selected = fn config ->
+      put_in(manifest(), ["providers"], %{
+        "workflow" => [],
+        "mission" => [%{"name" => "workspace", "config" => config}]
+      })
+    end
+
+    documented =
+      selected.(%{
+        "allow" => ["workspace.read", "workspace.write"],
+        "model_visible" => ["workspace.read"]
+      })
+
+    application = write_application(directory, "model-visible-documented", documents(documented))
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["validate", application, "--host-config", host_path])
+
+    assert outcome.exit_status == 0
+
+    uninstalled =
+      selected.(%{
+        "allow" => ["workspace.read", "workspace.write"],
+        "model_visible" => ["nope.x"]
+      })
+
+    uninstalled_path =
+      write_application(directory, "model-visible-uninstalled", documents(uninstalled))
+
+    assert {:error, %CommandOutcome{} = uninstalled_outcome} =
+             CommandEngine.prepare(["validate", uninstalled_path, "--host-config", host_path])
+
+    assert uninstalled_outcome.envelope["error"]["code"] == "selection_invalid"
+
+    assert uninstalled_outcome.envelope["error"]["message"] ==
+             "the provider selection field model_visible contains a name outside its allowed set"
+
+    assert uninstalled_outcome.envelope["error"]["subject"] == %{
+             "kind" => "provider",
+             "name" => "workspace",
+             "operation" => "selection",
+             "occurrence" => %{"destination" => "mission", "index" => 0}
+           }
+
+    outside_allow =
+      selected.(%{
+        "allow" => ["workspace.read"],
+        "model_visible" => ["workspace.write"]
+      })
+
+    outside_path =
+      write_application(directory, "model-visible-outside-allow", documents(outside_allow))
+
+    assert {:error, %CommandOutcome{} = outside_outcome} =
+             CommandEngine.prepare(["validate", outside_path, "--host-config", host_path])
+
+    assert outside_outcome.envelope["error"]["message"] ==
+             "the provider selection field model_visible must be a subset of allow"
   end
 
   test "successful validate returns the exact digest envelope without provider activity", %{

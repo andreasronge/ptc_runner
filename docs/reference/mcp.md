@@ -184,8 +184,10 @@ capability name exposed by PtcRunner. Change `installation_revision` whenever
 the transport, mapping, effect, snapshot policy, or server behavior changes.
 
 The required `effect` declaration in `ptc-host.json` is authoritative; server
-annotations cannot change it. `model_visible` controls prompt discovery, not
-call authority. `error_feedback: "bounded"` may expose up to 1,024 bytes of
+annotations cannot change it. `model_visible` on a host mapping is the default
+for prompt discovery, not a ceiling: a selecting manifest may still list that
+name in `config.model_visible`. Visibility never grants or denies call
+authority. `error_feedback: "bounded"` may expose up to 1,024 bytes of
 validated server error text as untrusted model feedback, so enable it only when
 the server cannot return secrets, paths, or stack traces.
 
@@ -202,7 +204,9 @@ The application selects the installed alias in its mission provider list:
 ```
 
 If an installation maps any write tool, every selecting manifest must provide a
-non-empty `allow` list, even when it selects only reads. A timed-out or
+non-empty `allow` list, even when it selects only reads. `model_visible` may
+list any authorized `allow` names, including mappings the host left hidden from
+prompt discovery. A timed-out or
 transport-failed write is never retried automatically and may report
 `mutation_state: "indeterminate"`; the external mutation may already have
 happened. A complete decoded refusal (`isError: true`) or JSON-RPC error is

@@ -7,16 +7,19 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   contract authority bound to their source classification. Rendering never
   inspects a lower-level reason or rejected value. Catalog-authorized dynamic
   message shapes contain only fixed literals plus bounded PTC-Lisp symbol
-  names, a catalog-validated runtime ceiling, a bounded agent turn ceiling, an
-  opaque replay request hash, or a closed component-override field rule.
-  Compile messages require component-source provenance; a missing capability
-  message is rebuilt from the frozen bundle's sorted tool requirements. A
-  missing MCP tool message may retain only the validated, declaration-owned
-  upstream name and carries no provider catalog payload. Kernel runtime and
-  replay messages require fixed runtime provenance. An agent turn-limit
-  message and an out-of-range agent option have no source because `max_turns`
-  and the other bounded options belong to one `agent.core` call rather than a
-  host or manifest document. Every other message is the catalog literal.
+  names, sealed provider-selection field names, a catalog-validated runtime
+  ceiling, a bounded agent turn ceiling, an opaque replay request hash, or a
+  closed component-override field rule. Compile messages require
+  component-source provenance; a missing capability message is rebuilt from
+  the frozen bundle's sorted tool requirements. A missing MCP tool message may
+  retain only the validated, declaration-owned upstream name and carries no
+  provider catalog payload. Kernel runtime and replay messages require fixed
+  runtime provenance. An agent turn-limit message and an out-of-range agent
+  option have no source because `max_turns` and the other bounded options
+  belong to one `agent.core` call rather than a host or manifest document. A
+  provider-selection message names sealed rule fields and a closed rule; it
+  has no source because the provider subject already locates the slot. Every
+  other message is the catalog literal.
 
   `notes` is reserved and always empty: the published V2 envelope schema pins
   it to `{"const": []}`, so a populated array would invalidate the envelope for
@@ -36,6 +39,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
+  alias PtcRunner.Kernel.SelectionRulesDiagnostic
 
   @enforce_keys [
     :phase,
@@ -483,6 +487,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_message_source?(message, %{phase: :local_preflight, code: code}, nil)
        when code in [:environment_unavailable, :fixtures_unreadable],
        do: LLMReplayFixtureDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :provider_declaration, code: :selection_invalid},
+         nil
+       ),
+       do: SelectionRulesDiagnostic.valid_message?(message)
 
   defp valid_message_source?(_message, _row, _source), do: false
 end
