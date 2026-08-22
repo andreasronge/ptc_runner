@@ -142,6 +142,39 @@ raising attestations remain private without preventing execution. Treat the
 callback as information-release policy because targets may contain private
 deployment data.
 
+## Select the opt-in PtcLlmHttp adapter
+
+`PtcRunner.LLM.ReqLLMAdapter` is the shipped default. A host that wants to
+trial `ptc_llm_http` `0.1.0` adds the exact optional dependency and names the
+adapter in trusted application configuration:
+
+```elixir
+# mix.exs
+{:ptc_llm_http, "== 0.1.0"}
+
+# config/config.exs
+config :ptc_runner, :llm_adapter, PtcRunner.LLM.PtcLlmHttpAdapter
+```
+
+PtcRunner supervises the PtcLlmHttp Runtime. Do not start unowned per-request
+processes, and do not configure a manifest adapter module. `ReqLLMAdapter`
+remains the shipped default and the control adapter. Treat the Mix command as
+a trial path, not a green end-user cutover, until deterministic loopback, live
+non-stream, and live streaming coverage have all succeeded against the exact
+published pin:
+
+```console
+mix ptc run examples/kernel-tutorial/02-deepseek-extract.ptc-project.json
+```
+
+Preparation accepts `openrouter:model` and `openai-compat:base_url|model`.
+OpenRouter uses `https://openrouter.ai/api/v1`. Direct OpenAI-compatible URLs
+must be a credential-free HTTP loopback IP or an HTTPS hostname. Other
+selectors, including `ollama:`, Anthropic, Bedrock, and credentialed HTTP
+loopback, are rejected rather than forwarded to ReqLLM. Ordinary PtcRunner
+builds without the optional dependency still compile; selecting this adapter
+without installing it fails during preparation.
+
 ## Install custom providers only for native authority
 
 `PtcRunner.Kernel.ProviderRegistry.new/2` accepts trusted staged builders keyed

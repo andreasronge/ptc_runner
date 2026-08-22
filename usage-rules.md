@@ -45,6 +45,13 @@ reference for its own version.
 - Keep credentials, endpoints, native handles, processes, and cleanup
   functions on the host side. Never project them into PTC-Lisp data, prompts,
   events, or inspection records.
+- The shipped LLM adapter is `PtcRunner.LLM.ReqLLMAdapter`. To trial
+  `ptc_llm_http` `0.1.0`, add `{:ptc_llm_http, "== 0.1.0"}` and set
+  `config :ptc_runner, :llm_adapter, PtcRunner.LLM.PtcLlmHttpAdapter`. Do not
+  select that adapter without the optional dependency, and do not author a
+  manifest adapter module. Keep ReqLLM as the control until deterministic
+  loopback, live non-stream, and live streaming coverage have all succeeded
+  against the exact published pin.
 - The process that opens a stateful REPL session must drive and close or abort
   it. Passing its public struct to another process does not transfer ownership.
 

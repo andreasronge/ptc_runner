@@ -162,6 +162,7 @@ defmodule PtcRunner.LLM.PtcLlmHttpSmokeTest do
 
   defp normalize_stream_result({:error, %Error{}} = error), do: error
 
+  # ex_dna:disable-for-next-line — independent PtcLlmHttp 0.1.0 smoke; must not import the adapter
   defp normalize_usage(nil), do: %{}
 
   defp normalize_usage(%Usage{} = usage) do

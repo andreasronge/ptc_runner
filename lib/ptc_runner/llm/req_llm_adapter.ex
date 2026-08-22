@@ -34,6 +34,7 @@ if Code.ensure_loaded?(ReqLLM) do
     @behaviour PtcRunner.LLM
 
     alias PtcRunner.Kernel.ProviderError
+    alias PtcRunner.LLM.HTTPStatus
     alias PtcRunner.LLM.ReqLLMPreparedModel
     alias ReqLLM.Message
     alias ReqLLM.Message.ContentPart
@@ -152,11 +153,14 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     @impl true
-    @spec stream(String.t() | ReqLLMPreparedModel.t(), map()) ::
-            {:ok, Enumerable.t()} | {:error, :streaming_not_supported | ProviderError.t()}
-    def stream(%ReqLLMPreparedModel{} = model, req), do: stream_req_llm(model, req)
+    @spec stream(String.t() | ReqLLMPreparedModel.t(), map(), (map() -> term())) ::
+            {:ok, map()}
+            | {:error, :streaming_not_supported | ProviderError.t() | {:stream_error, term()}}
+    def stream(%ReqLLMPreparedModel{} = model, req, on_delta) when is_function(on_delta, 1) do
+      consume_req_llm_stream(stream_req_llm(model, req), on_delta)
+    end
 
-    def stream(model, req) do
+    def stream(model, req, on_delta) when is_function(on_delta, 1) do
       case parse_provider(model) do
         {:ollama, _} ->
           {:error, :streaming_not_supported}
@@ -165,8 +169,9 @@ if Code.ensure_loaded?(ReqLLM) do
           {:error, :streaming_not_supported}
 
         {:req_llm, model_id} ->
-          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
-               do: stream_req_llm(prepared, req)
+          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id) do
+            consume_req_llm_stream(stream_req_llm(prepared, req), on_delta)
+          end
       end
     end
 
@@ -395,6 +400,27 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
+    defp consume_req_llm_stream({:ok, stream}, on_delta) do
+      {content, tokens} =
+        Enum.reduce(stream, {"", nil}, fn
+          %{delta: text}, {acc, tok} ->
+            on_delta.(%{delta: text})
+            {acc <> text, tok}
+
+          %{done: true, tokens: tokens}, {acc, _tok} ->
+            {acc, tokens}
+
+          _other, acc ->
+            acc
+        end)
+
+      {:ok, %{content: content, tokens: tokens || %{}}}
+    rescue
+      exception -> {:error, {:stream_error, exception}}
+    end
+
+    defp consume_req_llm_stream(result, _on_delta), do: result
+
     # --- Provider Implementations ---
 
     defp request_opts(req) do
@@ -613,7 +639,7 @@ if Code.ensure_loaded?(ReqLLM) do
     defp normalize_provider_error(%ReqLLM.Error.API.Request{status: status} = error)
          when is_integer(status) do
       ProviderError.new(
-        http_error_kind(status),
+        HTTPStatus.error_kind(status),
         http_error_details(status, error.reason),
         retryable?: http_retryable?(status, error.retryable)
       )
@@ -630,7 +656,7 @@ if Code.ensure_loaded?(ReqLLM) do
     defp normalize_provider_error(%ReqLLM.Error.API.Response{status: status} = error)
          when is_integer(status) do
       ProviderError.new(
-        http_error_kind(status),
+        HTTPStatus.error_kind(status),
         http_error_details(status, error.reason),
         retryable?: http_retryable?(status, nil)
       )
@@ -645,7 +671,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp normalize_provider_error(%{status: status} = error) when is_integer(status) do
       ProviderError.new(
-        http_error_kind(status),
+        HTTPStatus.error_kind(status),
         direct_http_error_details(status, Map.get(error, :body)),
         retryable?: http_retryable?(status, nil)
       )
@@ -668,20 +694,8 @@ if Code.ensure_loaded?(ReqLLM) do
     defp normalize_provider_error(_reason),
       do: ProviderError.new(:unavailable, "LLM provider unavailable", retryable?: true)
 
-    defp http_error_kind(401), do: :authentication_failed
-    defp http_error_kind(402), do: :payment_required
-    defp http_error_kind(403), do: :denied
-    defp http_error_kind(404), do: :not_found
-    defp http_error_kind(408), do: :timeout
-    defp http_error_kind(429), do: :rate_limited
-    defp http_error_kind(status) when status in 400..499, do: :invalid_request
-    defp http_error_kind(status) when status in 500..599, do: :unavailable
-    defp http_error_kind(_status), do: :unavailable
-
     defp http_retryable?(_status, retryable?) when is_boolean(retryable?), do: retryable?
-    defp http_retryable?(status, _retryable?) when status in [408, 409, 425, 429], do: true
-    defp http_retryable?(status, _retryable?) when status in 500..599, do: true
-    defp http_retryable?(_status, _retryable?), do: false
+    defp http_retryable?(status, _retryable?), do: HTTPStatus.retryable?(status)
 
     defp http_error_details(status, reason) when is_binary(reason),
       do: safe_error_details("HTTP #{status}: #{reason}", "HTTP #{status}")

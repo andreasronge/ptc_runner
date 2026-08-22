@@ -17,14 +17,10 @@ defmodule PtcRunner.LLMTest do
     end
 
     @impl true
-    def stream(_model, _req) do
-      stream =
-        Stream.concat(
-          [%{delta: "hello "}, %{delta: "world"}],
-          [%{done: true, tokens: %{input: 5, output: 2}}]
-        )
-
-      {:ok, stream}
+    def stream(_model, _req, on_chunk) do
+      on_chunk.(%{delta: "hello "})
+      on_chunk.(%{delta: "world"})
+      {:ok, %{content: "hello world", tokens: %{input: 5, output: 2}}}
     end
   end
 
@@ -68,7 +64,7 @@ defmodule PtcRunner.LLMTest do
     end
 
     @impl true
-    def stream({:prepared, model}, request) do
+    def stream({:prepared, model}, request, _on_chunk) do
       send(self(), {:streamed_prepared_model, model, request})
       {:error, :streaming_not_supported}
     end
@@ -278,7 +274,7 @@ defmodule PtcRunner.LLMTest do
       assert :atomics.get(stream_called, 1) == 0
     end
 
-    test "falls back to call/2 when adapter has no stream/2" do
+    test "falls back to call/2 when adapter has no stream/3" do
       defmodule NoStreamAdapter2 do
         @behaviour PtcRunner.LLM
 

@@ -280,18 +280,24 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
     end
   end
 
-  describe "stream/2" do
+  describe "stream/3" do
     test "returns error for ollama" do
       assert {:error, :streaming_not_supported} =
-               ReqLLMAdapter.stream("ollama:model", %{system: "test", messages: []})
+               ReqLLMAdapter.stream("ollama:model", %{system: "test", messages: []}, fn _ ->
+                 :ok
+               end)
     end
 
     test "returns error for openai-compat" do
       assert {:error, :streaming_not_supported} =
-               ReqLLMAdapter.stream("openai-compat:http://localhost|model", %{
-                 system: "test",
-                 messages: []
-               })
+               ReqLLMAdapter.stream(
+                 "openai-compat:http://localhost|model",
+                 %{
+                   system: "test",
+                   messages: []
+                 },
+                 fn _ -> :ok end
+               )
     end
   end
 

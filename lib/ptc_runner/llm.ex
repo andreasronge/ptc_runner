@@ -32,7 +32,7 @@ defmodule PtcRunner.LLM do
           tokens: tokens()
         }
 
-  @type chunk :: %{delta: String.t()} | %{done: true, tokens: tokens()}
+  @type chunk :: %{delta: String.t()}
   @type catalog_status :: :cataloged | :uncataloged | :unavailable
 
   @doc """
@@ -50,14 +50,16 @@ defmodule PtcRunner.LLM do
   @callback call(model :: term(), request :: map()) :: {:ok, map()} | {:error, term()}
 
   @doc """
-  Stream an LLM response.
+  Stream an LLM response through a synchronous callback.
 
-  Returns `{:ok, stream}` where stream is an `Enumerable` of chunk maps:
-  - `%{delta: "text"}` for content chunks
-  - `%{done: true, tokens: %{...}}` for the final chunk
+  The callback is invoked with `%{delta: text}` for each content chunk, in the
+  adapter's consumption process, before the next chunk is read. The adapter
+  returns the final normalized `%{content: ..., tokens: ...}` response or a
+  classified error. Adapters that cannot stream return
+  `{:error, :streaming_not_supported}` so `callback/2` can fall back to `call/2`.
   """
-  @callback stream(model :: term(), request :: map()) ::
-              {:ok, Enumerable.t()} | {:error, term()}
+  @callback stream(model :: term(), request :: map(), on_delta :: (map() -> term())) ::
+              {:ok, map()} | {:error, term()}
 
   @doc """
   Prepares an adapter-owned request target and reports its catalog status.
@@ -108,7 +110,7 @@ defmodule PtcRunner.LLM do
   @callback public_model(model :: String.t()) :: {:ok, String.t()} | :private
 
   @optional_callbacks [
-    stream: 2,
+    stream: 3,
     prepare_model: 1,
     ensure_ready: 0,
     provider_application: 1,
@@ -197,16 +199,13 @@ defmodule PtcRunner.LLM do
          final_req = if merged_opts == %{}, do: clean_req, else: Map.merge(clean_req, merged_opts)
 
          if stream_fn && not tool_request?(final_req) &&
-              function_exported?(prepared.adapter, :stream, 2) do
-           case prepared.adapter.stream(prepared.target, final_req) do
-             {:ok, stream} ->
-               consume_stream(stream, stream_fn)
-
+              function_exported?(prepared.adapter, :stream, 3) do
+           case prepared.adapter.stream(prepared.target, final_req, stream_fn) do
              {:error, :streaming_not_supported} ->
                prepared.adapter.call(prepared.target, final_req)
 
-             error ->
-               error
+             result ->
+               result
            end
          else
            prepared.adapter.call(prepared.target, final_req)
@@ -251,25 +250,6 @@ defmodule PtcRunner.LLM do
   defp tool_request?(%{tools: tools}) when is_list(tools), do: tools != []
   defp tool_request?(_request), do: false
 
-  defp consume_stream(stream, on_chunk) do
-    {content, tokens} =
-      Enum.reduce(stream, {"", nil}, fn
-        %{delta: text}, {acc, tok} ->
-          on_chunk.(%{delta: text})
-          {acc <> text, tok}
-
-        %{done: true, tokens: tokens}, {acc, _tok} ->
-          {acc, tokens}
-
-        _other, acc ->
-          acc
-      end)
-
-    {:ok, %{content: content, tokens: tokens || %{}}}
-  rescue
-    e -> {:error, {:stream_error, e}}
-  end
-
   @doc """
   Make a direct LLM call using the configured adapter.
 
@@ -302,12 +282,7 @@ defmodule PtcRunner.LLM do
       mod ->
         if Code.ensure_loaded?(mod),
           do: mod,
-          else:
-            raise(
-              "LLM adapter #{inspect(mod)} could not be loaded. " <>
-                "If you intended to use the built-in adapter, add {:req_llm, \"~> 1.8\"} to your deps; " <>
-                "otherwise verify that #{inspect(mod)} exists and is compiled, or set config :ptc_runner, :llm_adapter to a valid module."
-            )
+          else: raise(unloaded_adapter_message(mod))
     end
   end
 
@@ -319,5 +294,17 @@ defmodule PtcRunner.LLM do
     1. Add {:req_llm, "~> 1.8"} to your deps for the built-in adapter
     2. Set config :ptc_runner, :llm_adapter, YourAdapter
     """
+  end
+
+  defp unloaded_adapter_message(PtcRunner.LLM.PtcLlmHttpAdapter) do
+    "LLM adapter PtcRunner.LLM.PtcLlmHttpAdapter could not be loaded. " <>
+      "Add {:ptc_llm_http, \"== 0.1.0\"} to your deps and keep " <>
+      "config :ptc_runner, :llm_adapter, PtcRunner.LLM.PtcLlmHttpAdapter."
+  end
+
+  defp unloaded_adapter_message(mod) do
+    "LLM adapter #{inspect(mod)} could not be loaded. " <>
+      "If you intended to use the built-in adapter, add {:req_llm, \"~> 1.8\"} to your deps; " <>
+      "otherwise verify that #{inspect(mod)} exists and is compiled, or set config :ptc_runner, :llm_adapter to a valid module."
   end
 end

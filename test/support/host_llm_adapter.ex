@@ -25,7 +25,7 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
   end
 
   @impl true
-  def stream(_model, _request), do: {:error, :streaming_not_supported}
+  def stream(_model, _request, _on_delta), do: {:error, :streaming_not_supported}
 
   # Defaults to nil so every other test keeps the unclassified transport path.
   @impl true
