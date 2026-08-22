@@ -18,8 +18,8 @@ expertise.
 | --- | --- | --- | --- |
 | P1 | Model protocol | Host-installed LLMs freeze bounded sampling options, but structured-output schema, reasoning controls, an explicit provider timeout, and enforceable token or cost ceilings remain outside the public configuration surface. | Deployments cannot yet express richer model contracts or complete operational budgets. |
 | P1 | Trace operation | A malformed, duplicate, or oversized trace can make a directory source fail as a whole, and trace persistence remains post-run. | One damaged file can hide healthy runs and a crash can lose buffered events. |
-| P1 | Distribution | The assembled standalone release is verified locally and now carries the Viewer, but macOS artifacts and multi-architecture container images are not published. | Installation and deployment still require local release assembly or a source checkout. |
-| P1 | End-to-end evidence | Packaged-install, private-sink/loss, real multi-page Viewer, and complete shell-driven application journeys remain absent. | Large-artifact, packaging, and cross-command regressions can escape normal gates. |
+| P1 | Distribution | The macOS arm64 archive is published and carries the Viewer, but macOS x86_64 and multi-architecture container images are not published. | Intel Mac and container deployments still require local release assembly or a source checkout. |
+| P1 | End-to-end evidence | Cross-target packaged-install, private-sink/loss, real multi-page Viewer, and complete shell-driven application journeys remain absent. | Large-artifact, packaging, and cross-command regressions can escape normal gates. |
 | P2 | Viewer pagination | Cursor APIs, accumulation, and partial labeling have focused tests, but no valid run above 100 events has been exercised through repeated browser pagination. | Ordering, duplication, or final-cursor defects can remain despite API coverage. |
 | P2 | Source diagnostics | Parser, compiler, and runtime failures do not consistently retain precise source spans across every boundary. | Larger bundles take longer to repair. |
 | P2 | Language expectations | PTC-Lisp is Clojure-oriented rather than a full Clojure implementation. | Familiar-looking programs can encounter unsupported functions or intentional recoverable-signal differences. |
@@ -149,15 +149,14 @@ The Kernel is ready for its intended non-Elixir product boundary when:
 Streaming responses, multi-model routing, chat lifecycle management,
 concurrent mission evaluation, live bundle mutation, broad Clojure coverage,
 MCP Tasks, shared catalog caching, authenticated host IAM, and inbound service
-frontends require demonstrated demand and separate plans. Remote MCP OAuth has
-demonstrated demand and is tracked in the
-[MCP OAuth authorization plan](../mcp-oauth.md).
+frontends require demonstrated demand and separate plans. Remote MCP OAuth is
+implemented; its current installation and authorization contract lives in the
+[host installation reference](../../reference/host-installation.md).
 
 ## Related documents
 
-- [Stable CLI and application-source contract](stable-cli-contract.md) —
-  implementation plan for the machine protocol, validation order, commands,
-  and filesystem-independent application packages.
+- [Standalone CLI distribution](stable-cli-contract.md) — remaining target
+  packaging, distribution evidence, and final acceptance work.
 - [Kernel maintainer guide](../../maintainers/kernel.md) — implemented
   authority, lifecycle, ownership, and code map.
 - [Manifests and capabilities](../../guides/manifests-and-capabilities.md) —
