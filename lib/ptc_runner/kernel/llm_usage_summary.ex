@@ -18,13 +18,18 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
           required(String.t()) => [map()] | non_neg_integer()
         }
 
+  # Terminal accounting pairs `llm-request` starts and stops by
+  # `capability_id`. An unmatched start is an observed call with unknown
+  # usage; it is not synthesized into a stop event.
   @spec terminal([map()]) :: {:ok, summary()} | {:error, :invalid_event_batch}
   def terminal(events) when is_list(events) do
     with true <- length(events) <= @max_terminal_events,
          {:ok, normalized} <- normalize_events(events),
          true <- JSONValue.value?(normalized),
          :ok <- validate_terminal_batch(normalized),
-         summary <- summarize(normalized),
+         :ok <- validate_accounting_retention(normalized),
+         {:ok, calls} <- reconcile_llm_calls(normalized),
+         summary <- summarize_calls(calls, normalized),
          true <- length(summary["llm_usage"]) <= @max_rows,
          true <- length(summary["llm_usage_by_model"]) <= @max_rows,
          :ok <- ResultLimit.validate(summary, @max_result_bytes) do
@@ -41,14 +46,11 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
   @spec summarize([map()], [map()] | nil) :: summary()
   def summarize(events, attribution_events \\ nil) when is_list(events) do
     attribution_events = attribution_events || events
-    model_lookup = model_lookup(attribution_events)
-    {alias_counters, model_counters, unattributed} = reduce(events, model_lookup)
 
-    %{
-      "llm_usage" => rows(alias_counters),
-      "llm_usage_by_model" => rows(model_counters),
-      "unattributed_model_calls" => unattributed
-    }
+    events
+    |> Enum.filter(&llm_usage_event?/1)
+    |> Enum.map(&call_from_stop/1)
+    |> summarize_calls(attribution_events)
   end
 
   @doc """
@@ -86,8 +88,12 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
         "alias" => alias_name,
         "installation_revision" => revision
       }),
-      usage,
-      stringify(status) == "ok"
+      %{
+        alias: alias_name,
+        revision: revision,
+        outcome: if(stringify(status) == "ok", do: :ok, else: :error),
+        usage: usage
+      }
     )
   end
 
@@ -159,29 +165,226 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
     end)
   end
 
-  defp reduce(events, model_lookup) do
-    events
-    |> Enum.filter(&llm_usage_event?/1)
-    |> Enum.reduce({%{}, %{}, 0}, fn event, {aliases, models, unattributed} ->
-      alias_name = field(event, "data", "alias")
-      revision = field(event, "data", "installation_revision")
-      success? = stringify(field(event, "data", "status")) == "ok"
-      usage = field(event, "data", "usage")
-      alias_key = {alias_name, revision}
+  defp summarize_calls(calls, attribution_events) do
+    {alias_counters, model_counters, unattributed} =
+      reduce_calls(calls, model_lookup(attribution_events))
+
+    %{
+      "llm_usage" => rows(alias_counters),
+      "llm_usage_by_model" => rows(model_counters),
+      "unattributed_model_calls" => unattributed
+    }
+  end
+
+  # Dropped start or stop events can hide an in-flight LLM request. Named
+  # drop buckets are authoritative; `$overflow` means further types were
+  # dropped and those types are unknown, so accounting fails closed.
+  defp validate_accounting_retention(events) do
+    dropped? =
+      Enum.any?(events, fn event ->
+        field(event, "type") == "events-dropped" and
+          accounting_relevant_drop?(field(event, "data", "counts"))
+      end)
+
+    if dropped?, do: {:error, :invalid_event_batch}, else: :ok
+  end
+
+  defp accounting_relevant_drop?(counts) when is_map(counts) do
+    positive_count?(counts, "capability-started") or
+      positive_count?(counts, "capability-stopped") or
+      positive_count?(counts, "$overflow")
+  end
+
+  defp accounting_relevant_drop?(_counts), do: false
+
+  defp positive_count?(counts, key) do
+    case field(counts, key) do
+      count when is_integer(count) and count > 0 -> true
+      _absent -> false
+    end
+  end
+
+  defp reconcile_llm_calls(events) do
+    case Enum.reduce_while(
+           events,
+           %{open: %{}, seen: MapSet.new(), calls: []},
+           &reconcile_event/2
+         ) do
+      {:error, :invalid_event_batch} = error ->
+        error
+
+      state ->
+        unmatched =
+          Enum.flat_map(state.open, fn
+            {_id, %{llm?: true} = start} -> [%{start | outcome: :unknown, usage: nil}]
+            {_id, _foreign} -> []
+          end)
+
+        {:ok, Enum.reverse(state.calls, unmatched)}
+    end
+  end
+
+  defp reconcile_event(event, state) do
+    case llm_accounting_event(event) do
+      :ignore ->
+        {:cont, state}
+
+      {:error, :invalid_event_batch} = error ->
+        {:halt, error}
+
+      {:start, id, record} ->
+        occupy(state, id, record)
+
+      {:occupy, id} ->
+        occupy(state, id, %{llm?: false})
+
+      {:stop, id, stop} ->
+        reconcile_llm_stop(state, id, stop)
+
+      {:foreign_stop, id} ->
+        reconcile_foreign_stop(state, id)
+    end
+  end
+
+  defp occupy(state, id, record) do
+    if occupied?(state, id) do
+      {:halt, {:error, :invalid_event_batch}}
+    else
+      {:cont, %{state | open: Map.put(state.open, id, record)}}
+    end
+  end
+
+  defp reconcile_llm_stop(state, id, stop) do
+    case Map.pop(state.open, id) do
+      {nil, _open} ->
+        {:halt, {:error, :invalid_event_batch}}
+
+      {%{llm?: false}, _open} ->
+        {:halt, {:error, :invalid_event_batch}}
+
+      {start, open} ->
+        if start.alias == stop.alias and start.revision == stop.revision and
+             start.environment == stop.environment and
+             start.mission_name == stop.mission_name do
+          call = %{start | outcome: stop.outcome, usage: stop.usage}
+
+          {:cont,
+           %{
+             state
+             | open: open,
+               seen: MapSet.put(state.seen, id),
+               calls: [call | state.calls]
+           }}
+        else
+          {:halt, {:error, :invalid_event_batch}}
+        end
+    end
+  end
+
+  defp reconcile_foreign_stop(state, id) do
+    cond do
+      MapSet.member?(state.seen, id) ->
+        {:halt, {:error, :invalid_event_batch}}
+
+      match?(%{llm?: true}, Map.get(state.open, id)) ->
+        {:halt, {:error, :invalid_event_batch}}
+
+      true ->
+        {_record, open} = Map.pop(state.open, id)
+        {:cont, %{state | open: open, seen: MapSet.put(state.seen, id)}}
+    end
+  end
+
+  defp occupied?(state, id),
+    do: Map.has_key?(state.open, id) or MapSet.member?(state.seen, id)
+
+  defp llm_accounting_event(event) do
+    type = field(event, "type")
+    name = stringify(field(event, "data", "name"))
+
+    cond do
+      type == "capability-started" and name == "llm-request" ->
+        parse_llm_identity(event, :start)
+
+      type == "capability-stopped" and name == "llm-request" ->
+        parse_llm_identity(event, :stop)
+
+      type == "capability-started" ->
+        occupy_foreign_id(event)
+
+      type == "capability-stopped" ->
+        foreign_stop_id(event)
+
+      true ->
+        :ignore
+    end
+  end
+
+  defp occupy_foreign_id(event) do
+    id = field(event, "data", "capability_id")
+    if valid_id?(id), do: {:occupy, id}, else: :ignore
+  end
+
+  defp foreign_stop_id(event) do
+    id = field(event, "data", "capability_id")
+    if valid_id?(id), do: {:foreign_stop, id}, else: :ignore
+  end
+
+  defp parse_llm_identity(event, kind) do
+    id = field(event, "data", "capability_id")
+    alias_name = field(event, "data", "alias")
+    revision = field(event, "data", "installation_revision")
+
+    if valid_id?(id) and valid_llm_name?(alias_name) and valid_llm_name?(revision) do
+      record = %{
+        llm?: true,
+        run_id: field(event, "run_id"),
+        alias: alias_name,
+        revision: revision,
+        environment: stringify(field(event, "data", "environment")),
+        mission_name: stringify(field(event, "data", "mission_name")),
+        outcome: stop_outcome(event),
+        usage: field(event, "data", "usage")
+      }
+
+      {kind, id, record}
+    else
+      {:error, :invalid_event_batch}
+    end
+  end
+
+  defp valid_llm_name?(value), do: is_binary(value) and value =~ @name
+
+  defp stop_outcome(event) do
+    if stringify(field(event, "data", "status")) == "ok", do: :ok, else: :error
+  end
+
+  defp call_from_stop(event) do
+    %{
+      run_id: field(event, "run_id"),
+      alias: field(event, "data", "alias"),
+      revision: field(event, "data", "installation_revision"),
+      outcome: stop_outcome(event),
+      usage: field(event, "data", "usage")
+    }
+  end
+
+  defp reduce_calls(calls, model_lookup) do
+    Enum.reduce(calls, {%{}, %{}, 0}, fn call, {aliases, models, unattributed} ->
+      alias_key = {call.alias, call.revision}
 
       aliases =
         update_counter(
           aliases,
           alias_key,
           Map.merge(empty_row(), %{
-            "alias" => alias_name,
-            "installation_revision" => revision
+            "alias" => call.alias,
+            "installation_revision" => call.revision
           }),
-          usage,
-          success?
+          call
         )
 
-      lookup_key = {field(event, "run_id"), alias_name, revision}
+      lookup_key = {call.run_id, call.alias, call.revision}
 
       case Map.get(model_lookup, lookup_key) do
         {model, 1} ->
@@ -190,8 +393,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
               models,
               model,
               Map.put(empty_row(), "resolved_model", model),
-              usage,
-              success?
+              call
             )
 
           {aliases, models, unattributed}
@@ -229,18 +431,18 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
     }
   end
 
-  defp update_counter(counters, key, initial, usage, success?) do
+  defp update_counter(counters, key, initial, call) do
     {current, cost_complete?} = Map.get(counters, key, {initial, true})
 
     row =
       current
       |> Map.update!("calls", &(&1 + 1))
-      |> Map.update!("successful_calls", &(&1 + if(success?, do: 1, else: 0)))
+      |> Map.update!("successful_calls", &(&1 + if(call.outcome == :ok, do: 1, else: 0)))
 
-    Map.put(counters, key, update_usage(row, cost_complete?, usage, success?))
+    Map.put(counters, key, update_usage(row, cost_complete?, call))
   end
 
-  defp update_usage(row, cost_complete?, usage, true) when is_map(usage) do
+  defp update_usage(row, cost_complete?, %{outcome: :ok, usage: usage}) when is_map(usage) do
     case LLMUsage.normalize(usage) do
       {:ok, normalized} ->
         row =
@@ -255,10 +457,11 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
     end
   end
 
-  defp update_usage(row, _cost_complete?, _usage, true),
-    do: {Map.update!(row, "missing_usage_calls", &(&1 + 1)), false}
+  defp update_usage(row, _cost_complete?, %{outcome: outcome})
+       when outcome in [:ok, :unknown],
+       do: {Map.update!(row, "missing_usage_calls", &(&1 + 1)), false}
 
-  defp update_usage(row, cost_complete?, _usage, false), do: {row, cost_complete?}
+  defp update_usage(row, cost_complete?, %{outcome: :error}), do: {row, cost_complete?}
 
   defp sum_usage(left, right),
     do: Map.merge(left, right, fn _key, first, second -> first + second end)

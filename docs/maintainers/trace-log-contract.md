@@ -457,10 +457,13 @@ Snapshot lookup uses all events from the run-filter-selected runs before a
 mission filter narrows counted calls. Capability events continue to carry only
 alias/revision routing identity; they do not duplicate model identity. The
 additional rows remain subject to the existing aggregate result-byte limit.
-The command envelope additionally publishes `llm_usage_state`; unavailable or
-invalid terminal evidence produces `"unavailable"` with null aggregate fields,
-whereas a validated run with no calls produces `"available"`, empty arrays,
-and zero unattributed calls.
+The command envelope additionally publishes `llm_usage_state`. Terminal
+accounting pairs `llm-request` start and stop events by `capability_id`; an
+unmatched start is an observed call with unknown usage (`missing_usage_calls`
+increments even when `successful_calls` does not). Dropped
+`capability-started` or `capability-stopped` events, or a malformed pairing,
+produce `"unavailable"` with null aggregate fields. A validated run with no
+calls produces `"available"`, empty arrays, and zero unattributed calls.
 
 ## Pagination, ordering, and bounds
 

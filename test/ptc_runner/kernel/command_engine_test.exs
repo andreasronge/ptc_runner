@@ -4464,12 +4464,23 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "usage" => %{"input" => 4}
     }
 
+    unmatched_row = %{
+      "alias" => "writer",
+      "installation_revision" => "stable-v1",
+      "calls" => 1,
+      "successful_calls" => 0,
+      "usage_calls" => 0,
+      "missing_usage_calls" => 1,
+      "usage" => %{}
+    }
+
     with_llm =
       classified
       |> put_in(["execution", "usage", "llm_usage"], [llm_row])
       |> put_in(["execution", "usage", "unattributed_model_calls"], 1)
 
     assert_schema_valid(with_llm)
+    assert_schema_valid(put_in(with_llm, ["execution", "usage", "llm_usage"], [unmatched_row]))
 
     for invalid <- [
           put_in(with_llm, ["execution", "usage", "llm_usage", Access.at(0), "extra"], true),

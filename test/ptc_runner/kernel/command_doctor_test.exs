@@ -175,6 +175,16 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
       "usage" => %{"input" => 12}
     }
 
+    unmatched = %{
+      "alias" => "model",
+      "installation_revision" => "model-v1",
+      "calls" => 1,
+      "successful_calls" => 0,
+      "usage_calls" => 0,
+      "missing_usage_calls" => 1,
+      "usage" => %{}
+    }
+
     selected = %{
       "alias" => "model",
       "source" => "llm",
@@ -190,6 +200,12 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
 
     assert CommandContract.valid_doctor_failure_result?(valid, primary, [])
 
+    unmatched_valid =
+      valid
+      |> put_in(["usage"], %{"llm_usage_state" => "available", "llm_usage" => [unmatched]})
+
+    assert CommandContract.valid_doctor_failure_result?(unmatched_valid, primary, [])
+
     tampered = [
       # Spend attributed to a declaration the same report does not list.
       put_in(valid, ["usage", "llm_usage", Access.at(0), "alias"], "other"),
@@ -198,8 +214,7 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
       |> put_in(["model_aliases", Access.at(0), "default"], nil),
       # Counters that no measurement could have produced.
       put_in(valid, ["usage", "llm_usage", Access.at(0), "calls"], 0),
-      put_in(valid, ["usage", "llm_usage", Access.at(0), "successful_calls"], 1),
-      put_in(valid, ["usage", "llm_usage", Access.at(0), "usage_calls"], 0),
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "usage_calls"], 2),
       put_in(valid, ["usage", "llm_usage", Access.at(0), "missing_usage_calls"], 0),
       # Tokens summed from calls that reported none.
       valid
