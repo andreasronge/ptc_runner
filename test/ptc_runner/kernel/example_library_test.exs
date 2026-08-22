@@ -97,7 +97,7 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     assert readme =~ "ptc run debug-a-failed-run/target.ptc-project.json"
     assert readme =~ "ptc run debug-a-failed-run/repair-agent.ptc-project.json"
     assert readme =~ "--component-override-descriptor"
-    assert readme =~ "skips the host-owned suite"
+    assert readme =~ "does not prove the candidate"
     assert readme =~ "ptc docs debugging-a-failed-run"
   end
 

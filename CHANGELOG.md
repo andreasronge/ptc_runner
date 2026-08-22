@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from `--traces` and `--inspection`. The CLI and REPL references match.
 - The materialized `debug-a-failed-run` README walks the standalone path:
   `ptc run` for every arm, and a documented `--component-override-descriptor`
-  recipe that states it skips the host-owned G1–G4 gate. Checkout-only Mix
-  commands and `examples/` paths are gone from that README.
+  recipe. Checkout-only Mix commands and `examples/` paths are gone from that
+  README.
 - `ptc docs designing-agent-workflows` now says `returned-value` and
   `quarantined` are local helpers in the support-triage example, not shipped
   built-ins.

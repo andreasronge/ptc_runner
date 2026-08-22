@@ -122,12 +122,11 @@ its docstring states, citing the contradiction between the implementation and
 its own contract. The proposal is model-authored and untrusted; nothing has
 been executed or changed yet.
 
-The standalone executable does not host the G1–G4 / held-out validation gate.
-Promotion is still a separate, explicit decision: write the proposal's
+Promotion is a separate, explicit decision. Write the proposal's
 `candidate_source` next to a `--component-override-descriptor` that binds it
-to the installed component. That path skips the host-owned suite a source
-checkout would have run. The descriptor fields are defined in
-`ptc docs components`.
+to the installed component. The descriptor fields are defined in
+`ptc docs components`. That path re-runs the original case; it does not
+prove the candidate against extra cases the model never saw.
 
 Write the proposal's `candidate_source` to
 `debug-a-failed-run/candidate/pricing.rule.clj` with no extra bytes — a
@@ -156,10 +155,7 @@ ptc run debug-a-failed-run/target.ptc-project.json \
 ```
 
 The run that exited 5 now exits 0 with `{"total":120}`. Passing this one
-observed case does not prove the candidate unique or correct beyond it. The
-host-owned G1–G4 gate and held-out suite (`repair-agent/suite.json`) are a
-source-checkout Mix task, documented in the repository's maintainer guide on
-embedding; they are not part of the standalone executable.
+observed case does not prove the candidate unique or correct beyond it.
 
 ### The abstain arm
 
@@ -233,10 +229,10 @@ ptc run debug-a-failed-run/target-workflow-control.ptc-project.json \
 | `repair-agent/preloaded.clj` | host workflow that acquires the incident packet before model turn one |
 | `repair-agent/case.clj`, `repair-agent/workspace.clj` | the packet projection and the derived frozen working set |
 | `repair-agent/repair.terminal.clj` | the two typed terminal actions: propose a replacement, or abstain |
-| `repair-agent/suite.json` | host-owned validation cases, including held-out inputs the model never saw |
+| `repair-agent/suite.json` | extra validation cases the model never saw |
 | `target-ambiguous/` | the underdetermined variant whose evidence supports no single repair |
 | `target-workflow-control/` | the variant whose defect is workflow value routing between two correct missions |
-| `repair-agent/workflow-control-suite.json` | host-owned cases for the workflow repair, including held-out identifier shapes |
+| `repair-agent/workflow-control-suite.json` | extra cases for the workflow repair, including identifier shapes the model never saw |
 
 The inspection snapshot provider must be selected under the alias `debug.nav`,
 because the shipped prelude binds `<alias>.runs`, `<alias>.open`, and

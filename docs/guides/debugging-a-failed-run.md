@@ -41,13 +41,10 @@ ptc run debug-a-failed-run/target.ptc-project.json
 ptc run debug-a-failed-run/debugger.ptc-project.json
 ```
 
-The same example optionally closes the loop: a phased repair agent proposes a
-complete component replacement or abstains, and a later `ptc run` can evaluate
-that candidate through `--component-override-descriptor` without editing a
-file. Hand-authoring the descriptor skips the host-owned G1–G4 gate and
-held-out suite; those remain a source-checkout Mix task documented in the
-repository's maintainer guide on embedding. The README materialized beside
-the example walks the release path.
+The same example optionally closes the loop: a repair agent proposes a
+complete replacement or abstains, and a later `ptc run` can try that
+candidate through `--component-override-descriptor` without editing a
+file. The README materialized beside the example walks the path.
 
 ## Where is the complete evidence contract?
 
