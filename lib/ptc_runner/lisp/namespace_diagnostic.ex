@@ -60,6 +60,7 @@ defmodule PtcRunner.Lisp.NamespaceDiagnostic do
 
   @data_not_callable_prefix "not callable: data/"
   @missing_data_grant_infix " is not a granted data name. Granted: "
+  @rejected_data_symbol ~r{\A(?:[a-z_]+: )?data/\S+\z}
   @max_granted_data_names 32
 
   @doc """
@@ -90,23 +91,20 @@ defmodule PtcRunner.Lisp.NamespaceDiagnostic do
 
   It shares a home with the message it recognizes so the two cannot drift; the
   REPL frontend reads it to decide whether a workflow session should be told
-  which switch opens a mission. The message is matched wherever it starts,
-  because callers render it both bare and behind a `reason: ` prefix.
+  which switch opens a mission. The rejected half must be the entire prefix --
+  a bare `data/<name>`, optionally behind one `reason: ` tag -- so another
+  diagnostic that merely quotes this text, such as `not callable: "data/x is
+  not a granted data name. …"`, is not mistaken for it.
   """
   @spec missing_data_grant?(binary()) :: boolean()
   def missing_data_grant?(message) when is_binary(message) do
     case String.split(message, @missing_data_grant_infix, parts: 2) do
-      [rejected, _granted] -> data_symbol?(rejected |> String.split() |> List.last())
+      [rejected, _granted] -> Regex.match?(@rejected_data_symbol, rejected)
       _no_infix -> false
     end
   end
 
   def missing_data_grant?(_message), do: false
-
-  defp data_symbol?(token) when is_binary(token),
-    do: String.starts_with?(token, "data/") and byte_size(token) > byte_size("data/")
-
-  defp data_symbol?(_token), do: false
 
   defp format_granted_names([]), do: "(none)"
 

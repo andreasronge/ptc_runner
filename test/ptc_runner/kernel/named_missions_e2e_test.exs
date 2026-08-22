@@ -99,20 +99,8 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
 
     {:ok, bundle} = shipped_loop_bundle()
 
-    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm_capability])
-    {:ok, default_mission} = MissionEnvironment.new([])
-    {:ok, research} = MissionEnvironment.new(bundle: mission_bundle("res", @research_source))
-    {:ok, review} = MissionEnvironment.new(bundle: mission_bundle("rev", @review_source))
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: "named-missions-shipped")
-
-    {:ok, config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        missions: %{"default" => default_mission, "research" => research, "review" => review},
-        input: %{},
-        limits: limits,
-        event_sink: sink
-      )
+    {:ok, config, sink} =
+      research_review_config(bundle, llm_capability, limits, "named-missions-shipped")
 
     assert {:ok, %{value: value}} = Kernel.run("(spike.shipped/run data/input)", config)
 
@@ -170,20 +158,8 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
     {:ok, components} = Library.resolve_components([par, {:library, "agent.core"}])
     {:ok, bundle} = Kernel.compile_bundle(components)
 
-    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm_capability])
-    {:ok, default_mission} = MissionEnvironment.new([])
-    {:ok, research} = MissionEnvironment.new(bundle: mission_bundle("res", @research_source))
-    {:ok, review} = MissionEnvironment.new(bundle: mission_bundle("rev", @review_source))
-    {:ok, sink} = EventSink.start(:normal, limits, run_id: "named-missions-parallel")
-
-    {:ok, config} =
-      RunConfig.new(
-        workflow_environment: workflow,
-        missions: %{"default" => default_mission, "research" => research, "review" => review},
-        input: %{},
-        limits: limits,
-        event_sink: sink
-      )
+    {:ok, config, sink} =
+      research_review_config(bundle, llm_capability, limits, "named-missions-parallel")
 
     assert {:ok, %{value: values}} = Kernel.run("(spike.par/run data/input)", config)
     assert length(values) == 4
@@ -252,5 +228,27 @@ defmodule PtcRunner.Kernel.NamedMissionsE2ETest do
       limits: limits,
       installed_limits: host.limits
     })
+  end
+
+  # Both live walks stand up the same three-mission run over their own bundle.
+  # The entry call is `(entry data/input)`, exactly what `RunBuilder` emits, so
+  # the context must bind `data/input` the way a manifest run does.
+  defp research_review_config(bundle, llm_capability, limits, run_id) do
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm_capability])
+    {:ok, default_mission} = MissionEnvironment.new([])
+    {:ok, research} = MissionEnvironment.new(bundle: mission_bundle("res", @research_source))
+    {:ok, review} = MissionEnvironment.new(bundle: mission_bundle("rev", @review_source))
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => default_mission, "research" => research, "review" => review},
+        input: %{"input" => %{}},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, config, sink}
   end
 end

@@ -417,6 +417,25 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "a workflow session does not hint --mission for an error that merely quotes the grant diagnostic",
+       %{tmp_dir: directory} do
+    manifest_path = write_workflow_repl_manifest(directory)
+
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl([
+          "--manifest",
+          manifest_path,
+          "-e",
+          ~S|(let [x "data/foo is not a granted data name. Granted: x"] (x))|
+        ])
+      end
+
+    assert error.message =~ "not callable:"
+    refute error.message =~ "--mission NAME"
+  end
+
+  @tag :tmp_dir
   test "a bare misspelled data name in a workflow session is rejected instead of answering nil",
        %{
          tmp_dir: directory

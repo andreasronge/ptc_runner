@@ -123,8 +123,10 @@ application, host configuration, and lazy environment-file paths, while
 duplicated in `ptc-project.json`. The manifest form is the equivalent low-level
 command. Omitting `--mission` keeps the workflow REPL behavior — which carries
 no mission namespaces, so a mission's own namespace is rejected as unknown.
-Calling `data/<name>` in that session is `not_callable` rather than an unknown
-namespace, because `data/` is a language namespace. Both answers name
+A `data/<name>` form in that session answers from the language rather than as
+an unknown namespace, because `data/` is a language namespace the workflow
+environment carries: an ungranted name is a missing-grant runtime error, and
+calling the granted `data/input` is `not_callable`. All three answers name
 `--mission` and list the missions the manifest declares.
 
 A mission session starts with a fresh continuation and evaluates through the
