@@ -176,8 +176,9 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
     }
   end
 
-  # Dropped start or stop events can hide an in-flight LLM request, so a
-  # retained batch is not enough to reconstruct terminal accounting.
+  # Dropped start or stop events can hide an in-flight LLM request. Named
+  # drop buckets are authoritative; `$overflow` means further types were
+  # dropped and those types are unknown, so accounting fails closed.
   defp validate_accounting_retention(events) do
     dropped? =
       Enum.any?(events, fn event ->
@@ -190,7 +191,8 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
 
   defp accounting_relevant_drop?(counts) when is_map(counts) do
     positive_count?(counts, "capability-started") or
-      positive_count?(counts, "capability-stopped")
+      positive_count?(counts, "capability-stopped") or
+      positive_count?(counts, "$overflow")
   end
 
   defp accounting_relevant_drop?(_counts), do: false
@@ -213,8 +215,9 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
 
       state ->
         unmatched =
-          Enum.map(state.open, fn {_id, start} ->
-            %{start | outcome: :unknown, usage: nil}
+          Enum.flat_map(state.open, fn
+            {_id, %{llm?: true} = start} -> [%{start | outcome: :unknown, usage: nil}]
+            {_id, _foreign} -> []
           end)
 
         {:ok, Enum.reverse(state.calls, unmatched)}
@@ -230,34 +233,69 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
         {:halt, error}
 
       {:start, id, record} ->
-        if Map.has_key?(state.open, id) or MapSet.member?(state.seen, id) do
-          {:halt, {:error, :invalid_event_batch}}
-        else
-          {:cont, %{state | open: Map.put(state.open, id, record)}}
-        end
+        occupy(state, id, record)
+
+      {:occupy, id} ->
+        occupy(state, id, %{llm?: false})
 
       {:stop, id, stop} ->
-        case Map.pop(state.open, id) do
-          {nil, _open} ->
-            {:halt, {:error, :invalid_event_batch}}
+        reconcile_llm_stop(state, id, stop)
 
-          {start, open} ->
-            if start.alias == stop.alias and start.revision == stop.revision do
-              call = %{start | outcome: stop.outcome, usage: stop.usage}
+      {:foreign_stop, id} ->
+        reconcile_foreign_stop(state, id)
+    end
+  end
 
-              {:cont,
-               %{
-                 state
-                 | open: open,
-                   seen: MapSet.put(state.seen, id),
-                   calls: [call | state.calls]
-               }}
-            else
-              {:halt, {:error, :invalid_event_batch}}
-            end
+  defp occupy(state, id, record) do
+    if occupied?(state, id) do
+      {:halt, {:error, :invalid_event_batch}}
+    else
+      {:cont, %{state | open: Map.put(state.open, id, record)}}
+    end
+  end
+
+  defp reconcile_llm_stop(state, id, stop) do
+    case Map.pop(state.open, id) do
+      {nil, _open} ->
+        {:halt, {:error, :invalid_event_batch}}
+
+      {%{llm?: false}, _open} ->
+        {:halt, {:error, :invalid_event_batch}}
+
+      {start, open} ->
+        if start.alias == stop.alias and start.revision == stop.revision and
+             start.environment == stop.environment do
+          call = %{start | outcome: stop.outcome, usage: stop.usage}
+
+          {:cont,
+           %{
+             state
+             | open: open,
+               seen: MapSet.put(state.seen, id),
+               calls: [call | state.calls]
+           }}
+        else
+          {:halt, {:error, :invalid_event_batch}}
         end
     end
   end
+
+  defp reconcile_foreign_stop(state, id) do
+    cond do
+      MapSet.member?(state.seen, id) ->
+        {:halt, {:error, :invalid_event_batch}}
+
+      match?(%{llm?: true}, Map.get(state.open, id)) ->
+        {:halt, {:error, :invalid_event_batch}}
+
+      true ->
+        {_record, open} = Map.pop(state.open, id)
+        {:cont, %{state | open: open, seen: MapSet.put(state.seen, id)}}
+    end
+  end
+
+  defp occupied?(state, id),
+    do: Map.has_key?(state.open, id) or MapSet.member?(state.seen, id)
 
   defp llm_accounting_event(event) do
     type = field(event, "type")
@@ -270,9 +308,25 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
       type == "capability-stopped" and name == "llm-request" ->
         parse_llm_identity(event, :stop)
 
+      type == "capability-started" ->
+        occupy_foreign_id(event)
+
+      type == "capability-stopped" ->
+        foreign_stop_id(event)
+
       true ->
         :ignore
     end
+  end
+
+  defp occupy_foreign_id(event) do
+    id = field(event, "data", "capability_id")
+    if valid_id?(id), do: {:occupy, id}, else: :ignore
+  end
+
+  defp foreign_stop_id(event) do
+    id = field(event, "data", "capability_id")
+    if valid_id?(id), do: {:foreign_stop, id}, else: :ignore
   end
 
   defp parse_llm_identity(event, kind) do
@@ -282,9 +336,11 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
 
     if valid_id?(id) and valid_llm_name?(alias_name) and valid_llm_name?(revision) do
       record = %{
+        llm?: true,
         run_id: field(event, "run_id"),
         alias: alias_name,
         revision: revision,
+        environment: stringify(field(event, "data", "environment")),
         outcome: stop_outcome(event),
         usage: field(event, "data", "usage")
       }

@@ -412,6 +412,39 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
         llm_started_event(2, "capability-open"),
         event(3, "events-dropped", %{"counts" => %{"capability-stopped" => 1}}),
         event(4, "run-stopped", %{"outcome" => "timeout"})
+      ],
+      [
+        started,
+        llm_started_event(2, "capability-open"),
+        event(3, "events-dropped", %{"counts" => %{"$overflow" => 1}}),
+        event(4, "run-stopped", %{"outcome" => "timeout"})
+      ],
+      [
+        started,
+        llm_started_event(2, "capability-name"),
+        event(3, "capability-stopped", %{
+          "environment" => "workflow",
+          "name" => "http-request",
+          "capability_id" => "capability-name",
+          "status" => "error"
+        }),
+        stopped
+      ],
+      [
+        started,
+        llm_started_event(2, "capability-env"),
+        llm_stopped_event(3, "capability-env", %{"input" => 1}, %{"environment" => "mission"}),
+        stopped
+      ],
+      [
+        started,
+        event(2, "capability-started", %{
+          "environment" => "workflow",
+          "name" => "http-request",
+          "capability_id" => "capability-shared"
+        }),
+        llm_started_event(3, "capability-shared"),
+        stopped
       ]
     ]
 
@@ -432,6 +465,30 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
     ]
 
     assert {:ok, %{"llm_usage" => [%{"calls" => 1, "usage_calls" => 1}]}} =
+             LLMUsageSummary.terminal(events)
+  end
+
+  test "an unmatched LLM start next to a completed non-LLM capability stays available" do
+    snapshot = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:writer/model")
+
+    events = [
+      event(1, "run-started", %{"missions" => %{}, "connector_snapshots" => [snapshot]}),
+      event(2, "capability-started", %{
+        "environment" => "workflow",
+        "name" => "http-request",
+        "capability_id" => "capability-http"
+      }),
+      event(3, "capability-stopped", %{
+        "environment" => "workflow",
+        "name" => "http-request",
+        "capability_id" => "capability-http",
+        "status" => "ok"
+      }),
+      llm_started_event(4, "capability-open"),
+      event(5, "run-stopped", %{"outcome" => "timeout"})
+    ]
+
+    assert {:ok, %{"llm_usage" => [%{"calls" => 1, "missing_usage_calls" => 1}]}} =
              LLMUsageSummary.terminal(events)
   end
 
