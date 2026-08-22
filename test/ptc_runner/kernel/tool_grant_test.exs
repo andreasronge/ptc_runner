@@ -158,17 +158,29 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
         dispatch_context(
           validation_heap_words: 100_000_000,
           evaluation_lease: lease,
-          validation_deadline_ms: System.monotonic_time(:millisecond) + 30
+          # The dispatcher reserves a fixed handoff window (25 ms) out of the
+          # deadline so a refusal can still persist terminal host provenance.
+          # A deadline inside that window therefore leaves a non-positive
+          # validation budget and is refused before the validator is entered.
+          # The deadline is still in the FUTURE: what is being asserted is the
+          # reserve, not expiry. Do not raise this past the handoff window -
+          # a deadline of +30 ms grants validation the ~5 ms difference and
+          # turns the assertion into a race against how fast the validator
+          # happens to be on the machine (issue #1472).
+          validation_deadline_ms: System.monotonic_time(:millisecond) + 5
         ),
         nil,
         nil
       )
 
+    # Every row violates `minimum: 1`, so a validator that ran at all would
+    # report `:invalid_arguments`. Getting `:input_validation_unavailable`
+    # is what proves it was never entered.
     assert %{
              status: :error,
              kind: :capability_unavailable,
              reason: :input_validation_unavailable
-           } = grant["checked"].(%{"rows" => List.duplicate(0, 10_000)})
+           } = grant["checked"].(%{"rows" => [0, 0, 0]})
 
     assert {:ok, %{terminal_host_failure?: true}} =
              RunState.release_evaluation_status(state, lease)
