@@ -243,7 +243,8 @@ defmodule PtcRunner.Lisp do
     - `:tools` - Map of tool names to functions (default: %{})
     - `:signature` - Optional signature string for return value validation
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
-    - `:timeout` - Timeout in milliseconds for entire sandbox execution (default: 1000)
+    - `:timeout` - Timeout in milliseconds for entire sandbox execution (default:
+      1000, configurable via `config :ptc_runner, :default_timeout`)
     - `:compile_timeout` - Timeout in milliseconds for the compile phase (parse + analyze) (default: 5000)
     - `:compile_max_heap` - Compile-worker heap ceiling in words (default: the
       `:max_heap` value). No ambient application default is consulted, so a
@@ -257,7 +258,8 @@ defmodule PtcRunner.Lisp do
       operation started late in a run therefore cannot outlive the run.
     - `:pmap_max_concurrency` - Local pmap/pcalls scheduling window — max tasks one call keeps in flight (default: the build-time `System.schedulers_online() * 2`, frozen into the semantic revision). Reduce to avoid overflowing connection pools. The HARD aggregate cap is `:max_parallel_workers`.
     - `:max_heap` - Program heap budget in words ABOVE the measured
-      environment baseline (default: 1_250_000). Host-provided data
+      environment baseline (default: 1_250_000, configurable via
+      `config :ptc_runner, :default_max_heap`). Host-provided data
       (context, `:memory`, tool closures, the parsed program) is measured
       after spawn and excluded from this budget — see
       `PtcRunner.Sandbox` for the re-baseline semantics.
@@ -750,7 +752,7 @@ defmodule PtcRunner.Lisp do
 
   # Bundle the per-run options map consumed by the rest of the run pipeline.
   defp run_params(opts) do
-    max_heap = Keyword.get(opts, :max_heap, 1_250_000)
+    max_heap = Keyword.get(opts, :max_heap, PtcRunner.Sandbox.default_max_heap())
 
     %{
       ctx: Keyword.get(opts, :context, %{}),
@@ -759,7 +761,7 @@ defmodule PtcRunner.Lisp do
       signature_str: Keyword.get(opts, :signature),
       float_precision: Keyword.get(opts, :float_precision),
       preserve_runtime_callables: Keyword.get(opts, :preserve_runtime_callables, false),
-      timeout: Keyword.get(opts, :timeout, 1000),
+      timeout: Keyword.get(opts, :timeout, PtcRunner.Sandbox.default_timeout()),
       max_heap: max_heap,
       setup_max_heap: Keyword.get(opts, :setup_max_heap),
       # Security H1: every pmap/pcalls worker runs under this FIXED heap cap
