@@ -202,7 +202,9 @@ The application selects the installed alias in its mission provider list:
 ```
 
 If an installation maps any write tool, every selecting manifest must provide a
-non-empty `allow` list, even when it selects only reads. A timed-out or
+non-empty `allow` list, even when it selects only reads. `model_visible` may
+list any authorized `allow` names, including mappings the host left hidden from
+prompt discovery. A timed-out or
 transport-failed write is never retried automatically and may report
 `mutation_state: "indeterminate"`; the external mutation may already have
 happened. A complete decoded refusal (`isError: true`) or JSON-RPC error is

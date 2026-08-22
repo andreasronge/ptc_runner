@@ -171,10 +171,12 @@ defmodule PtcRunner.Kernel.MCPSource do
   Any installation containing a `:write` mapping requires an explicit,
   non-empty `"allow"` list, even when the list selects reads only. It also
   accepts an
-  optional `"model_visible"` subset (defaulting to the selected names whose
-  host mapping is model-visible), and optional lower `"timeout_ms"` and
-  `"max_result_bytes"` values; invalid selections return
-  `{:error, :invalid_mcp_selection}`. MCP sources are mission-only; direct
+  optional `"model_visible"` subset of `"allow"` (defaulting to the selected
+  names whose host mapping is model-visible), and optional lower `"timeout_ms"`
+  and `"max_result_bytes"` values; invalid selections return
+  `{:error, :invalid_mcp_selection}`. An explicit `"model_visible"` list may
+  name any authorized `"allow"` entry, including a mapping whose host
+  `model_visible` flag is false. MCP sources are mission-only; direct
   registry assembly rejects a workflow destination before credentials,
   transport acquisition, discovery, or RPC. Assembly returns
   `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or
@@ -814,7 +816,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          true <-
            Enum.all?(model_visible, &is_binary/1) and
              Enum.uniq(model_visible) == model_visible,
-         true <- Enum.all?(model_visible, &(&1 in installed_visible)),
+         true <- Enum.all?(model_visible, &(&1 in allow)),
          timeout_ms when is_integer(timeout_ms) and timeout_ms > 0 <-
            Map.get(
              selection,

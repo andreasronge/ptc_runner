@@ -468,7 +468,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
           type: {:unique_list, :string},
           input: true,
           default: {:intersection, "allow", "visible"},
-          members: "visible"
+          members: "all"
         },
         "timeout_ms" => %{
           type: :integer,

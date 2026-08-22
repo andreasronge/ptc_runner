@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
+  alias PtcRunner.Kernel.SelectionRulesDiagnostic
 
   # A refused replay fixture is reported through the environment code on a run
   # and the fixtures code in doctor, and both carry the same bounded message.
@@ -404,6 +405,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       }),
       do: MCPAcquisitionDiagnostic.missing_tool_message_schema(fallback)
 
+  def message_schema(%{
+        phase: :provider_declaration,
+        code: :selection_invalid,
+        message: fallback
+      }),
+      do: SelectionRulesDiagnostic.message_schema(fallback)
+
   def message_schema(%{code: code, message: fallback}),
     do: CompileDiagnostic.message_schema(code, fallback)
 
@@ -467,6 +475,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:provider_acquisition, :provider_tool_missing, message),
     do: MCPAcquisitionDiagnostic.valid_missing_tool_message?(message)
+
+  defp valid_dynamic_message?(:provider_declaration, :selection_invalid, message),
+    do: SelectionRulesDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(_phase, code, message),
     do: CompileDiagnostic.valid_message?(code, message)

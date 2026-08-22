@@ -50,7 +50,9 @@ defmodule PtcRunner.Kernel.Manifest do
   mapping requires an explicit, nonempty manifest `allow` list; omission is
   accepted only when every installed mapping is read-only. Installed MCP
   providers may accept a `model_visible` subset of their authorized `allow`
-  names. Visibility controls discovery and model context only, never authority.
+  names, including mappings whose host `model_visible` flag is false. Omitted,
+  it defaults to the authorized names the host already marked visible.
+  Visibility controls discovery and model context only, never authority.
   Limit names are the `:manifest_narrowable` rows in
   `PtcRunner.Kernel.LimitCatalog`; version 1 accepts values no greater than the
   host-supplied installed ceilings. Omitted values use the normal runtime

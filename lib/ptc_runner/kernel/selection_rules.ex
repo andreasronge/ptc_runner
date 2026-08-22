@@ -41,6 +41,16 @@ defmodule PtcRunner.Kernel.SelectionRules do
           {:subset_of, binary(), binary()}
           | {:required_when_set_nonempty, binary(), binary()}
           | {:ceiling_of_context_limit, binary(), atom()}
+  @type rejection ::
+          :invalid_shape
+          | :unknown_property
+          | :invalid_selection
+          | {:field, binary()}
+          | {:members, binary()}
+          | {:required, binary()}
+          | {:subset_of, binary(), binary()}
+          | {:required_when_set_nonempty, binary(), binary()}
+          | {:ceiling, binary()}
   @type t :: %__MODULE__{
           fields: %{binary() => field()},
           cross_rules: [cross_rule()],
@@ -83,22 +93,37 @@ defmodule PtcRunner.Kernel.SelectionRules do
   @spec normalize(t(), term(), Limits.t()) ::
           {:ok, map()} | {:error, :invalid_selection}
   @doc "Purely normalizes one provider selection under the effective limits."
-  def normalize(%__MODULE__{} = rules, value, %Limits{} = limits)
-      when is_map(value) and not is_struct(value) do
-    with true <- valid?(rules),
-         true <- Limits.valid?(limits),
-         true <- Enum.all?(Map.keys(value), &is_binary/1),
-         true <- Map.keys(value) -- input_fields(rules) == [],
-         :ok <- required_inputs(rules, value),
-         {:ok, normalized} <- normalize_fields(rules, value, limits),
-         :ok <- validate_cross_rules(rules, value, normalized, limits) do
-      {:ok, normalized}
-    else
-      _invalid -> {:error, :invalid_selection}
+  def normalize(rules, value, limits) do
+    case explain(rules, value, limits) do
+      {:ok, normalized} -> {:ok, normalized}
+      {:error, _reason} -> {:error, :invalid_selection}
     end
   end
 
-  def normalize(_rules, _value, _limits), do: {:error, :invalid_selection}
+  @spec explain(t(), term(), Limits.t()) :: {:ok, map()} | {:error, rejection()}
+  @doc "Normalizes a selection and names the closed rule that rejected it."
+  def explain(%__MODULE__{} = rules, value, %Limits{} = limits)
+      when is_map(value) and not is_struct(value) do
+    cond do
+      not valid?(rules) or not Limits.valid?(limits) ->
+        {:error, :invalid_selection}
+
+      not Enum.all?(Map.keys(value), &is_binary/1) ->
+        {:error, :invalid_shape}
+
+      Map.keys(value) -- input_fields(rules) != [] ->
+        {:error, :unknown_property}
+
+      true ->
+        with :ok <- required_inputs(rules, value),
+             {:ok, normalized} <- normalize_fields(rules, value, limits),
+             :ok <- validate_cross_rules(rules, value, normalized, limits) do
+          {:ok, normalized}
+        end
+    end
+  end
+
+  def explain(_rules, _value, _limits), do: {:error, :invalid_shape}
 
   @doc false
   @spec normalize_runtime(t(), term(), Limits.t()) ::
@@ -287,7 +312,7 @@ defmodule PtcRunner.Kernel.SelectionRules do
           not Map.has_key?(value, name),
           do: name
 
-    if required == [], do: :ok, else: {:error, :required_selection_missing}
+    if required == [], do: :ok, else: {:error, {:required, hd(required)}}
   end
 
   defp normalize_fields(rules, value, limits) do
@@ -303,18 +328,21 @@ defmodule PtcRunner.Kernel.SelectionRules do
             {:ok, field_value} ->
               {:cont, {:ok, Map.put(normalized, name, field_value)}}
 
-            :error ->
-              {:halt, {:error, :invalid_selection}}
+            {:error, reason} ->
+              {:halt, {:error, field_rejection(name, reason)}}
           end
 
         :omit ->
           {:cont, {:ok, normalized}}
 
         :error ->
-          {:halt, {:error, :invalid_selection}}
+          {:halt, {:error, {:field, name}}}
       end
     end)
   end
+
+  defp field_rejection(name, :members), do: {:members, name}
+  defp field_rejection(name, _reason), do: {:field, name}
 
   defp field_value(name, field, rules, value, normalized, limits) do
     case Map.fetch(value, name) do
@@ -366,7 +394,7 @@ defmodule PtcRunner.Kernel.SelectionRules do
 
   defp normalize_value(value, %{type: :string} = field, rules)
        when is_binary(value) do
-    if member?(value, field, rules), do: {:ok, value}, else: :error
+    if member?(value, field, rules), do: {:ok, value}, else: {:error, :members}
   end
 
   defp normalize_value(value, %{type: :integer} = field, _rules)
@@ -374,7 +402,7 @@ defmodule PtcRunner.Kernel.SelectionRules do
     minimum_valid? = not Map.has_key?(field, :minimum) or value >= field.minimum
     maximum_valid? = not Map.has_key?(field, :maximum) or value <= field.maximum
 
-    if minimum_valid? and maximum_valid?, do: {:ok, value}, else: :error
+    if minimum_valid? and maximum_valid?, do: {:ok, value}, else: {:error, :invalid}
   end
 
   defp normalize_value(value, %{type: :boolean}, _rules) when is_boolean(value),
@@ -384,15 +412,20 @@ defmodule PtcRunner.Kernel.SelectionRules do
        when is_list(value) and length(value) <= @max_set_items do
     minimum_items = Map.get(field, :minimum_items, 0)
 
-    if length(value) >= minimum_items and value == Enum.uniq(value) and
-         Enum.all?(value, &(is_binary(&1) and member?(&1, field, rules))) do
-      {:ok, Enum.sort(value)}
-    else
-      :error
+    cond do
+      length(value) < minimum_items or value != Enum.uniq(value) or
+          not Enum.all?(value, &is_binary/1) ->
+        {:error, :invalid}
+
+      Enum.all?(value, &member?(&1, field, rules)) ->
+        {:ok, Enum.sort(value)}
+
+      true ->
+        {:error, :members}
     end
   end
 
-  defp normalize_value(_value, _field, _rules), do: :error
+  defp normalize_value(_value, _field, _rules), do: {:error, :invalid}
 
   defp member?(value, %{members: set}, rules),
     do: value in Map.fetch!(rules.named_sets, set)
@@ -403,9 +436,16 @@ defmodule PtcRunner.Kernel.SelectionRules do
     Enum.reduce_while(rules.cross_rules, :ok, fn rule, :ok ->
       if cross_rule_satisfied?(rule, rules, original, normalized, limits),
         do: {:cont, :ok},
-        else: {:halt, {:error, :invalid_selection}}
+        else: {:halt, {:error, cross_rule_rejection(rule)}}
     end)
   end
+
+  defp cross_rule_rejection({:subset_of, child, parent}), do: {:subset_of, child, parent}
+
+  defp cross_rule_rejection({:required_when_set_nonempty, field, set}),
+    do: {:required_when_set_nonempty, field, set}
+
+  defp cross_rule_rejection({:ceiling_of_context_limit, field, _limit}), do: {:ceiling, field}
 
   defp cross_rule_satisfied?(
          {:subset_of, child, parent},
