@@ -19,7 +19,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideDiagnostic do
      "source_hash does not match the candidate bytes"},
     {:override_component_not_selected, "component_id",
      "component_id is not a selected component"},
-    {:invalid_override_source, "path", "path is not a confined candidate source"}
+    {:invalid_override_source, "path", "path is not a usable candidate source"}
   ]
 
   @messages Map.new(@reasons, fn {reason, _field, message} -> {reason, message} end)

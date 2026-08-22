@@ -164,7 +164,7 @@ bytes compiled.
 A refused descriptor keeps the `override_invalid` code and the logical source
 `component-override.json`. The message names the field and the rule — stale
 `base_source_hash`, mismatched `source_hash`, an unknown `component_id`, or a
-`path` that is not a confined candidate — and `path` points at that field.
+`path` that is not a usable candidate — and `path` points at that field.
 The descriptor's filesystem path and the rejected hash values stay out of the
 envelope.
 

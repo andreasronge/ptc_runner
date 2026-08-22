@@ -7292,7 +7292,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       )
 
     error = outcome.envelope["error"]
-    assert error["message"] == "path is not a confined candidate source"
+    assert error["message"] == "path is not a usable candidate source"
     assert error["path"] == "/path"
 
     assert error["source"] == %{
