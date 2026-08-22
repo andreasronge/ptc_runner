@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.RoutedCapability do
   @error_attribute_keys ~w(model)
   @event_attribute_bytes 65_536
   @event_attribute_keys ~w(alias installation_revision)
+  @result_attribute_keys ~w(model)
   @max_resolution_details 4_096
   @options ~w(name resolve routes validation_arguments description model_visible input_schema output_schema effect discovery)a
   @enforce_keys [
@@ -99,12 +100,14 @@ defmodule PtcRunner.Kernel.RoutedCapability do
          arguments: resolved_arguments,
          event_attributes: event_attributes,
          error_attributes: error_attributes,
+         result_attributes: result_attributes,
          usage_projection: usage_projection
        } = invocation}
       when is_binary(route_key) and is_map(resolved_arguments) and is_map(event_attributes) and
-             is_map(error_attributes) and usage_projection in [nil, :llm_tokens] ->
+             is_map(error_attributes) and is_map(result_attributes) and
+             usage_projection in [nil, :llm_tokens] ->
         if Map.get(routed.routes, route_key) == capability and
-             valid_attributes?(event_attributes, error_attributes),
+             valid_attributes?(event_attributes, error_attributes, result_attributes),
            do: {:ok, invocation},
            else: {:error, :resolver_unavailable}
 
@@ -157,14 +160,19 @@ defmodule PtcRunner.Kernel.RoutedCapability do
     end)
   end
 
-  defp valid_attributes?(event_attributes, error_attributes) do
+  defp valid_attributes?(event_attributes, error_attributes, result_attributes) do
     with {:ok, event_keys} <- normalized_attribute_keys(event_attributes),
-         {:ok, error_keys} <- normalized_attribute_keys(error_attributes) do
+         {:ok, error_keys} <- normalized_attribute_keys(error_attributes),
+         {:ok, result_keys} <- normalized_attribute_keys(result_attributes) do
       MapSet.disjoint?(event_keys, error_keys) and
+        MapSet.disjoint?(event_keys, result_keys) and
         MapSet.subset?(event_keys, MapSet.new(@event_attribute_keys)) and
         MapSet.subset?(error_keys, MapSet.new(@error_attribute_keys)) and
+        MapSet.subset?(result_keys, MapSet.new(@result_attribute_keys)) and
+        valid_result_attributes?(result_attributes) and
         EventSinkState.payload_within_limit?(event_attributes, @event_attribute_bytes) and
-        EventSinkState.payload_within_limit?(error_attributes, @event_attribute_bytes)
+        EventSinkState.payload_within_limit?(error_attributes, @event_attribute_bytes) and
+        EventSinkState.payload_within_limit?(result_attributes, @event_attribute_bytes)
     else
       _invalid -> false
     end
@@ -185,6 +193,14 @@ defmodule PtcRunner.Kernel.RoutedCapability do
   end
 
   defp normalized_attribute_keys(_attributes), do: {:error, :invalid_attributes}
+
+  defp valid_result_attributes?(%{} = attributes) when map_size(attributes) == 0, do: true
+
+  defp valid_result_attributes?(%{"model" => alias_name} = attributes)
+       when map_size(attributes) == 1,
+       do: is_binary(alias_name) and alias_name =~ @name
+
+  defp valid_result_attributes?(_attributes), do: false
 
   defp optional_schema(nil), do: {:ok, nil, nil}
   defp optional_schema(schema), do: JSONSchema.compile(schema)

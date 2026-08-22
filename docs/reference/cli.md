@@ -443,6 +443,7 @@ Every classified diagnostic and the status it exits with:
 | 5 | `execution` | `provider_failed` | no | a provider failed during execution |
 | 5 | `execution` | `replay_fixture_missing` | no | no replay fixture matches the workflow request |
 | 5 | `execution` | `workflow_failed` | no | the workflow failed |
+| 6 | `execution` | `model_output_truncated` | no | model output was truncated before producing a usable agent action |
 | 6 | `execution` | `run_timeout` | no | the run duration limit was exceeded |
 | 6 | `execution` | `runtime_limit_exceeded` | no | a runtime limit was exceeded |
 | 7 | `destination` | `destination_exists` | no | an artifact destination already exists |

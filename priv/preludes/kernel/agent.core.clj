@@ -667,6 +667,16 @@
                          (get next-state :closing?))
                   (turn-limit-failure :protocol-error total-max-turns)))
 
+              :model-output-truncated
+              (let [limit (get action :output-limit)]
+                (if (map? limit)
+                  (tool/kernel-runtime-limit-failure
+                    {"max_tokens" (get limit "value")
+                     "bindings" (get limit "bindings")
+                     "alias" (get action :model)})
+                  (tool/kernel-runtime-limit-failure
+                    {"alias" (get action :model)})))
+
               :max-calls
               (provider-failure
                 (get action :error)

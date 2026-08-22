@@ -6,11 +6,13 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMUsageSummary
+  alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ResultContractDiagnostic
@@ -356,6 +358,27 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
          provider_activity
        ),
        do: diagnostic(:execution, :run_timeout, provider_activity)
+
+  defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           reason: :model_output_truncated,
+           details: details
+         },
+         provider_activity
+       ) do
+    alias_name = Map.get(details, :alias)
+
+    with {:ok, message} <- ModelOutputDiagnostic.message(details),
+         {:ok, subject} <- CommandSubject.provider(alias_name, :execution) do
+      diagnostic(:execution, :model_output_truncated, provider_activity,
+        message: message,
+        subject: subject
+      )
+    else
+      _invalid -> diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
+    end
+  end
 
   defp failure_diagnostic(
          %Error{

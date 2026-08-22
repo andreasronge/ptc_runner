@@ -30,6 +30,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.LLM.OutputLimit
 
   # Matches the bound `PtcRunner.Kernel.AnalysisSession` already applies when
   # projecting `prints` into a caller-facing result.
@@ -726,6 +727,16 @@ defmodule PtcRunner.Kernel.Runner do
     })
   end
 
+  defp maybe_put_failure_taxonomy(
+         stopped_data,
+         {:error, %Error{reason: :model_output_truncated, details: details}}
+       ) do
+    case retain_model_output_truncation(details) do
+      {:ok, retained} -> Map.merge(stopped_data, retained)
+      :error -> stopped_data
+    end
+  end
+
   defp maybe_put_failure_taxonomy(stopped_data, _result), do: stopped_data
 
   defp put_result_usage({:ok, %Result{} = result}, usage), do: {:ok, %{result | usage: usage}}
@@ -902,14 +913,27 @@ defmodule PtcRunner.Kernel.Runner do
            "limit-exceeded",
            Map.merge(
              %{reason: reason},
-             Map.take(details, [:limit, :limit_ms, :limit_value, :phase])
+             Map.take(details, [
+               :limit,
+               :limit_ms,
+               :limit_value,
+               :limit_bindings,
+               :alias,
+               :phase
+             ])
            )
          )
 
   defp maybe_emit_workflow_limit(_state, _sink, _result), do: :ok
 
   defp workflow_error_kind(reason)
-       when reason in [:timeout, :compile_timeout, :memory_exceeded, :program_too_large],
+       when reason in [
+              :timeout,
+              :compile_timeout,
+              :memory_exceeded,
+              :program_too_large,
+              :model_output_truncated
+            ],
        do: :limit_exceeded
 
   defp workflow_error_kind(_reason), do: :workflow_failed
@@ -962,6 +986,18 @@ defmodule PtcRunner.Kernel.Runner do
           limit_ms: limit_ms,
           phase: phase
         }
+    end
+  end
+
+  defp workflow_error_details(
+         %{reason: :model_output_truncated, details: details},
+         _timeout_ms,
+         _limits,
+         _sink
+       ) do
+    case retain_model_output_truncation(details) do
+      {:ok, retained} -> retained
+      :error -> %{}
     end
   end
 
@@ -1072,6 +1108,33 @@ defmodule PtcRunner.Kernel.Runner do
     details
     |> Map.merge(SafeMetadata.retain_failure_taxonomy_fields(fail.details))
   end
+
+  defp retain_model_output_truncation(%{
+         limit: :max_tokens,
+         limit_value: value,
+         limit_bindings: bindings,
+         alias: alias_name
+       }) do
+    with {:ok, limit} <-
+           OutputLimit.normalize(%{name: :max_tokens, value: value, bindings: bindings}),
+         true <- OutputLimit.valid_alias?(alias_name) do
+      {:ok,
+       %{
+         limit: :max_tokens,
+         limit_value: limit.value,
+         limit_bindings: limit.bindings,
+         alias: alias_name
+       }}
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp retain_model_output_truncation(%{alias: alias_name}) do
+    if OutputLimit.valid_alias?(alias_name), do: {:ok, %{alias: alias_name}}, else: :error
+  end
+
+  defp retain_model_output_truncation(_details), do: :error
 
   # Both stable parallel messages are compared by suffix because the
   # evaluator prefixes messages with their reason.

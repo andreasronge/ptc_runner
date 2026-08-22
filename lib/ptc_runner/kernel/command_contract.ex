@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.DocumentationLibrary
   alias PtcRunner.Kernel.ExampleLibrary
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SafeMetadata
@@ -1227,6 +1228,12 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"type" => "null"}
        ),
        do: AgentConfigDiagnostic.message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :model_output_truncated} = row,
+         %{"type" => "null"}
+       ),
+       do: ModelOutputDiagnostic.message_schema(row.message)
 
   # Both dynamic messages above are admitted only against a null source, so the
   # sourced branches of the same rows must stay pinned to the catalog literal;

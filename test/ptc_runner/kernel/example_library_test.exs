@@ -147,7 +147,10 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     assert {:ok, %CommandOutcome{envelope: envelope}} =
              CommandEngine.dispatch(["run", Path.join(target, "ptc-project.json")])
 
-    assert envelope["result"]["value"] == %{"content" => "Frozen answer"}
+    assert envelope["result"]["value"] == %{
+             "content" => "Frozen answer",
+             "model" => "frozen-model"
+           }
   end
 
   @tag :tmp_dir

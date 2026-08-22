@@ -355,6 +355,97 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     end
   end
 
+  test "agent.native gives a complete tool call precedence over length truncation" do
+    {:ok, component} = Library.component("agent.native")
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    valid_call = %{
+      "id" => "complete",
+      "name" => "run_ptc_lisp",
+      "args" => %{"program" => "(return 42)"}
+    }
+
+    response =
+      truncated_response(%{"content" => "", "tool_calls" => [valid_call]})
+
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "native-length-valid-call")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{"response" => response},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: %{"kind" => "tool-call", "program" => "(return 42)"}}} =
+             Kernel.run("(return (agent.native/normalize data/response 64000))", config)
+  end
+
+  test "agent.native classifies an unusable length response separately from protocol errors" do
+    {:ok, component} = Library.component("agent.native")
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "native-length-unusable")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{"response" => truncated_response(%{"content" => ""})},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok,
+            %{
+              value: %{
+                "kind" => "model-output-truncated",
+                "model" => "hy3",
+                "output-limit" => %{
+                  "name" => "max_tokens",
+                  "value" => 4_096,
+                  "bindings" => ["configured"]
+                }
+              }
+            }} = Kernel.run("(return (agent.native/normalize data/response 64000))", config)
+  end
+
+  test "agent.native retains terminal truncation when request-cap provenance is unavailable" do
+    {:ok, component} = Library.component("agent.native")
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "native-length-no-cap")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{
+          "response" => %{
+            "content" => "",
+            "finish_reason" => "length",
+            "model" => "hy3"
+          }
+        },
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: %{"kind" => "model-output-truncated", "model" => "hy3"} = action}} =
+             Kernel.run("(return (agent.native/normalize data/response 64000))", config)
+
+    refute Map.has_key?(action, "output-limit")
+  end
+
   test "agent.core completes one strict model tool call through subordinate evaluation" do
     response = %{
       content: nil,
@@ -4544,6 +4635,18 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         }
       ]
     }
+  end
+
+  defp truncated_response(response) do
+    Map.merge(response, %{
+      "finish_reason" => "length",
+      "output_limit" => %{
+        "name" => "max_tokens",
+        "value" => 4_096,
+        "bindings" => ["configured"]
+      },
+      "model" => "hy3"
+    })
   end
 
   defp refute_kernel_text_in_assistant_turns(messages) do

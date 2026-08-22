@@ -5,7 +5,13 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
 
   describe "agent-action annotation vocabulary" do
     test "accepts exactly turn and kind with the closed action vocabulary" do
-      for kind <- ["tool-call", "protocol-error", "provider-error", "max-calls"] do
+      for kind <- [
+            "tool-call",
+            "protocol-error",
+            "provider-error",
+            "max-calls",
+            "model-output-truncated"
+          ] do
         assert SafeMetadata.annotation?("agent-action", %{"turn" => 0, "kind" => kind})
       end
 
@@ -21,7 +27,13 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
     end
 
     test "accepts the phased shape with phase, phase-turn, and mission" do
-      for kind <- ["tool-call", "protocol-error", "provider-error", "max-calls"] do
+      for kind <- [
+            "tool-call",
+            "protocol-error",
+            "provider-error",
+            "max-calls",
+            "model-output-truncated"
+          ] do
         assert SafeMetadata.annotation?("agent-action", %{
                  "turn" => 3,
                  "kind" => kind,
@@ -117,7 +129,9 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
       bounds = annotation_field_bounds(source)
 
       assert stages == ~w(started planning executing validating completed failed)
-      assert kinds == ~w(tool-call protocol-error provider-error max-calls)
+
+      assert kinds ==
+               ~w(tool-call protocol-error provider-error max-calls model-output-truncated)
 
       assert progress_row =~ ~s("progress")
       refute progress_row =~ "agent-action"

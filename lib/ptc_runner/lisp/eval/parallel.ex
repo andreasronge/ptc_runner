@@ -268,6 +268,14 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
        do: error
 
   defp classify_runner_error(
+         {:model_output_truncated, _message, details} = error,
+         _type,
+         _index
+       )
+       when is_map(details),
+       do: error
+
+  defp classify_runner_error(
          {:result_contract_failed, _message, details} = error,
          _type,
          _index
@@ -365,6 +373,14 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
 
   defp parallel_abort_error(
          {:runtime_limit_exceeded, _message, details} = error,
+         _type,
+         _index
+       )
+       when is_map(details),
+       do: error
+
+  defp parallel_abort_error(
+         {:model_output_truncated, _message, details} = error,
          _type,
          _index
        )

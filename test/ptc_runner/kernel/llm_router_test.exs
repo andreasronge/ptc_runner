@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
@@ -30,7 +31,13 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     parent = self()
 
     fast = capability(parent, :fast, %{content: "fast", tokens: %{input: 2, output: 1}})
-    strong = capability(parent, :strong, %{content: "strong", tokens: %{input: 7, output: 3}})
+
+    strong =
+      capability(parent, :strong, %{
+        content: "strong",
+        model: "adapter-spoof",
+        tokens: %{input: 7, output: 3}
+      })
 
     assert {:ok, router} =
              LLMRouter.new([
@@ -40,7 +47,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
     assert {:ok, explicit_config} = config(router, "routing-explicit")
 
-    assert {:ok, %{value: %{"content" => "strong"}}} =
+    assert {:ok, %{value: %{"content" => "strong", "model" => "strong"}}} =
              Kernel.run(
                ~S|(return (llm/request {"model" "strong" "messages" []}))|,
                explicit_config
@@ -50,10 +57,212 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
     assert {:ok, default_config} = config(router, "routing-default")
 
-    assert {:ok, %{value: %{"content" => "fast"}}} =
+    assert {:ok, %{value: %{"content" => "fast", "model" => "fast"}}} =
              Kernel.run(~S|(return (llm/request {"messages" []}))|, default_config)
 
     assert_receive {:fast, %{"messages" => []}}
+  end
+
+  test "agent executes a complete tool call even when the provider reports length" do
+    response =
+      truncated_response(%{
+        content: nil,
+        tool_calls: [
+          %{id: "complete", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ],
+        tokens: %{input: 10, output: 4_096}
+      })
+
+    leaf = capability(self(), :length_with_call, response)
+    assert {:ok, router} = LLMRouter.new([route("hy3", "llm", "hy3-v1", true, leaf)])
+    assert {:ok, config} = agent_router_config(router, "length-with-complete-call")
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 42}, usage: usage}} =
+             Kernel.run(~S|(agent.core/run "Task" {"max_turns" 2})|, config)
+
+    assert usage.protocol_errors == 0
+  end
+
+  test "agent fails an unusable length response with a branchable truncation diagnostic" do
+    run_id = "model-output-truncated"
+    run_ref = "cmd-00000000000000000000000000"
+
+    response =
+      truncated_response(%{
+        content: "",
+        tokens: %{input: 1_304, output: 4_096, total_cost: 0.002335}
+      })
+
+    leaf = capability(self(), :truncated, response)
+    assert {:ok, router} = LLMRouter.new([route("hy3", "llm", "hy3-v1", true, leaf)])
+
+    assert {:ok, inspection} =
+             InspectionSink.start(run_id: run_id, trace_id: "#{run_id}-inspection")
+
+    assert {:ok, config} = agent_router_config(router, run_id, inspection_sink: inspection)
+
+    assert {:error, command_outcome, counters, events} =
+             project_run(~S|(agent.core/run "Task" {"max_turns" 2})|, config, run_id, run_ref)
+
+    assert command_outcome.exit_status == 6
+    assert command_outcome.envelope["error"]["code"] == "model_output_truncated"
+    assert command_outcome.envelope["error"]["retryable"] == false
+
+    assert command_outcome.envelope["error"]["subject"] == %{
+             "kind" => "provider",
+             "name" => "hy3",
+             "operation" => "execution",
+             "occurrence" => nil
+           }
+
+    assert command_outcome.envelope["error"]["message"] =~
+             "the request used configured max_tokens 4096"
+
+    assert counters["llm_usage"] == [
+             %{
+               "alias" => "hy3",
+               "installation_revision" => "hy3-v1",
+               "calls" => 1,
+               "successful_calls" => 1,
+               "usage_calls" => 1,
+               "missing_usage_calls" => 0,
+               "usage" => %{"input" => 1_304, "output" => 4_096, "total_cost" => 0.002335}
+             }
+           ]
+
+    assert command_outcome.envelope["execution"]["usage"]["protocol_errors"] == 0
+
+    assert %{data: stopped_data} =
+             Enum.find(events, fn event ->
+               event.type == "capability-stopped" and event.data.name == "llm-request"
+             end)
+
+    assert stopped_data.finish_reason == :length
+
+    assert stopped_data.output_limit == %{
+             "name" => "max_tokens",
+             "value" => 4_096,
+             "bindings" => ["configured"]
+           }
+
+    assert %{data: run_stopped} = Enum.find(events, &(&1.type == "run-stopped"))
+    assert run_stopped.reason == :model_output_truncated
+    assert run_stopped.limit == :max_tokens
+    assert run_stopped.limit_value == 4_096
+    assert run_stopped.limit_bindings == [:configured]
+    assert run_stopped.alias == "hy3"
+
+    assert {:ok, records} = InspectionSink.records(inspection)
+
+    assert output =
+             Enum.find(records, fn record ->
+               record["record_type"] == "capability-output" and
+                 get_in(record, ["payload", "name"]) == "llm-request"
+             end)
+
+    assert get_in(output, ["payload", "result", "value", "model"]) == "hy3"
+    assert get_in(output, ["payload", "result", "value", "finish_reason"]) == "length"
+
+    assert get_in(output, ["payload", "result", "value", "output_limit"]) == %{
+             "name" => "max_tokens",
+             "value" => 4_096,
+             "bindings" => ["configured"]
+           }
+
+    assert error = Enum.find(records, &(&1["record_type"] == "execution-error"))
+
+    assert error["payload"]["details"] == %{
+             "limit" => "max_tokens",
+             "limit_value" => 4_096,
+             "limit_bindings" => ["configured"],
+             "alias" => "hy3"
+           }
+
+    assert :ok = InspectionSink.stop(inspection)
+  end
+
+  test "agent fails fast when length is proven but request-cap provenance is unavailable" do
+    run_id = "model-output-truncated-no-cap"
+
+    response = %{
+      content: "",
+      finish_reason: :length,
+      tokens: %{input: 1_304, output: 4_096, total_cost: 0.002335}
+    }
+
+    leaf = capability(self(), :truncated_without_cap, response)
+    assert {:ok, router} = LLMRouter.new([route("hy3", "llm", "hy3-v1", true, leaf)])
+
+    assert {:ok, inspection} =
+             InspectionSink.start(run_id: run_id, trace_id: "#{run_id}-inspection")
+
+    assert {:ok, config} = agent_router_config(router, run_id, inspection_sink: inspection)
+
+    assert {:error, command_outcome, counters, events} =
+             project_run(
+               ~S|(agent.core/run "Task" {"max_turns" 2})|,
+               config,
+               run_id,
+               "cmd-00000000000000000000000000"
+             )
+
+    assert command_outcome.exit_status == 6
+    assert command_outcome.envelope["error"]["code"] == "model_output_truncated"
+
+    assert command_outcome.envelope["error"]["message"] ==
+             "model output was truncated before producing a usable agent action"
+
+    assert command_outcome.envelope["error"]["subject"]["name"] == "hy3"
+    assert command_outcome.envelope["execution"]["usage"]["protocol_errors"] == 0
+    assert hd(counters["llm_usage"])["successful_calls"] == 1
+
+    assert %{data: stopped_data} =
+             Enum.find(events, fn event ->
+               event.type == "capability-stopped" and event.data.name == "llm-request"
+             end)
+
+    assert stopped_data.finish_reason == :length
+    refute Map.has_key?(stopped_data, :output_limit)
+
+    assert %{data: run_stopped} = Enum.find(events, &(&1.type == "run-stopped"))
+    assert run_stopped.reason == :model_output_truncated
+    assert run_stopped.alias == "hy3"
+    refute Map.has_key?(run_stopped, :limit)
+
+    assert {:ok, records} = InspectionSink.records(inspection)
+    assert error = Enum.find(records, &(&1["record_type"] == "execution-error"))
+    assert error["payload"]["details"] == %{"alias" => "hy3"}
+    assert :ok = InspectionSink.stop(inspection)
+  end
+
+  test "an oversized replay truncation cap cannot break command outcome sealing" do
+    run_id = "oversized-model-output-limit"
+
+    response = %{
+      content: "",
+      finish_reason: :length,
+      output_limit: %{
+        name: :max_tokens,
+        value: Integer.pow(10, 1_024),
+        bindings: [:configured]
+      },
+      tokens: %{input: 1, output: 1}
+    }
+
+    leaf = capability(self(), :oversized_truncation, response)
+    assert {:ok, router} = LLMRouter.new([route("hy3", "llm_replay", "hy3-v1", true, leaf)])
+    assert {:ok, config} = agent_router_config(router, run_id)
+
+    assert {:error, command_outcome, _counters, _events} =
+             project_run(
+               ~S|(agent.core/run "Task" {"max_turns" 1})|,
+               config,
+               run_id,
+               "cmd-00000000000000000000000000"
+             )
+
+    assert command_outcome.envelope["status"] == "error"
+    refute command_outcome.envelope["error"]["code"] == "model_output_truncated"
   end
 
   test "a per-alias max_calls cap leaves other aliases callable" do
@@ -1006,6 +1215,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
         outcome: :error
       },
       error_attributes: %{},
+      result_attributes: %{},
       usage_projection: nil
     }
 
@@ -1033,6 +1243,18 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              )
 
     assert {:error, :resolver_unavailable} = RoutedCapability.resolve(colliding, %{})
+
+    assert {:ok, forged_result} =
+             RoutedCapability.new(
+               name: "forged-result-route",
+               input_schema: %{"type" => "object"},
+               routes: %{"leaf" => leaf},
+               resolve: fn _arguments ->
+                 {:ok, %{invocation | event_attributes: %{}, result_attributes: %{model: "hy3"}}}
+               end
+             )
+
+    assert {:error, :resolver_unavailable} = RoutedCapability.resolve(forged_result, %{})
 
     assert {:ok, workflow} = WorkflowEnvironment.new(capabilities: [reserved])
     assert {:ok, limits} = Limits.new()
@@ -1349,18 +1571,29 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     }
   end
 
+  defp truncated_response(response) do
+    Map.merge(response, %{
+      finish_reason: :length,
+      output_limit: %{
+        name: :max_tokens,
+        value: 4_096,
+        bindings: [:configured]
+      }
+    })
+  end
+
   defp config(router, run_id, opts \\ []) do
     {:ok, components} = Library.resolve_components([{:library, "llm"}, {:library, "cap"}])
     run_config(router, run_id, components, opts)
   end
 
-  defp agent_router_config(router, run_id) do
+  defp agent_router_config(router, run_id, opts \\ []) do
     {:ok, components} =
       Library.components(
         ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
       )
 
-    run_config(router, run_id, components, [])
+    run_config(router, run_id, components, opts)
   end
 
   defp run_config(router, run_id, components, opts) do
@@ -1386,6 +1619,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
       input: %{},
       limits: limits,
       event_sink: sink,
+      inspection_sink: Keyword.get(opts, :inspection_sink),
       connector_snapshots: Keyword.get(opts, :connector_snapshots, [])
     )
   end
