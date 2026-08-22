@@ -71,6 +71,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Metadata
+  alias PtcRunner.Lisp.NamespaceDiagnostic
   alias PtcRunner.Lisp.PreludeClosure
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.UntrustedRenderer
@@ -1772,8 +1773,6 @@ defmodule PtcRunner.Lisp.Eval do
   # Strict-data lookup helpers (used by `do_eval({:data, key}, ...)`)
   # ============================================================
 
-  @max_granted_data_names 32
-
   # Public SymbolRef context keys internalize to `{:symbol_ref, name}` while
   # `data/'name` carries the display spelling. Preserve normal flexible lookup
   # precedence, then bridge that display spelling to the internal key.
@@ -1815,23 +1814,8 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp params_key?(key), do: data_key_name(key) == "params"
 
-  defp missing_grant_error(key, grants) do
-    data_symbol(key) <>
-      " is not a granted data name. Granted: " <> format_granted_names(grants)
-  end
-
-  defp format_granted_names([]), do: "(none)"
-
-  defp format_granted_names(names) do
-    shown = Enum.take(names, @max_granted_data_names)
-    formatted = Enum.join(shown, ", ")
-
-    if length(names) > @max_granted_data_names do
-      formatted <> ", …"
-    else
-      formatted
-    end
-  end
+  defp missing_grant_error(key, grants),
+    do: NamespaceDiagnostic.missing_data_grant_message(data_symbol(key), grants)
 
   # ============================================================
   # Sequential evaluation helpers

@@ -85,7 +85,7 @@ defmodule PtcRunner.Kernel.NamedMissionsParallelTest do
       RunConfig.new(
         workflow_environment: workflow,
         missions: %{"default" => default_mission, "one" => one, "two" => two},
-        input: %{},
+        input: %{"input" => %{}},
         limits: limits,
         event_sink: sink
       )

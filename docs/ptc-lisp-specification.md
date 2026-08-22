@@ -1355,9 +1355,11 @@ is distinct from an evaluator error returned under the outer `:error` tag.
 
 ```clojure
 ;; Signal failure when a required condition isn't met.
-;; Valid at the workflow boundary and in `PtcRunner.Lisp.run/2`, where a
-;; missing `data/<name>` is `nil`. Mission-scoped evaluation is strict: name
-;; the granted keys or let a missing grant fail instead of testing `nil?`.
+;; This tests whether the granted value is `nil`, which is a different question
+;; from whether the name was granted at all. Under the Kernel -- a workflow
+;; entry, a mission run, or either REPL -- an ungranted `data/<name>` is a
+;; runtime error, not `nil`, so `nil?` cannot be used to probe for one.
+;; `PtcRunner.Lisp.run/2` stays permissive and answers `nil` for both.
 (if (nil? data/input)
   (fail "No input data provided")
   (process data/input))
@@ -3306,13 +3308,17 @@ Context is **per-request** data passed by the host. It does not persist across t
      (sum-by :amount))
 ```
 
-At the generic `PtcRunner.Lisp.run/2` embedding API and at the Kernel workflow
-boundary, a missing `data/<name>` evaluates to `nil`. Mission-scoped evaluation
-— a normal mission run and `ptc repl --mission` — is strict: a missing grant is
-a `:runtime_error` that names the rejected symbol and lists the mission's
-granted `data/<name>` forms. Calling a granted data value, as in
-`(data/tickets)`, is `:not_callable` and names the symbol rather than rendering
-the value.
+Every Kernel boundary looks up `data/<name>` strictly — a workflow entry, a
+normal mission run, and both `ptc repl` session kinds. A missing grant is a
+`:runtime_error` that names the rejected symbol and lists the granted
+`data/<name>` forms available at that boundary. Calling a granted data value,
+as in `(data/tickets)`, is `:not_callable` and names the symbol rather than
+rendering the value. Only the generic `PtcRunner.Lisp.run/2` embedding API is
+permissive, where a missing `data/<name>` still evaluates to `nil`.
+
+A manifest binds exactly one workflow name, `data/input`, from its `input`
+declaration, so a misspelled workflow reference is rejected against that single
+granted form.
 
 `data/params` is injected only by `kernel/eval-with` and
 `kernel/eval-source-with`. Referencing it when this evaluation supplied no

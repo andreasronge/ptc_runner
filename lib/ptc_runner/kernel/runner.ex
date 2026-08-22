@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.TerminalResultLimit
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.DataKeys
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.Lisp.RetainedSize
@@ -237,7 +238,9 @@ defmodule PtcRunner.Kernel.Runner do
       max_program_bytes: config.limits.entry_source_bytes,
       filter_context: false,
       caller: :kernel,
-      telemetry_run: state.pid
+      telemetry_run: state.pid,
+      strict_data: true,
+      data_grants: DataKeys.source_referenceable_forms(config.input)
     ]
 
     case Lisp.run_native(entry_source, opts) do

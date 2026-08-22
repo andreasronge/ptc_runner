@@ -136,12 +136,13 @@ start applications, request authorization or credentials, or acquire
 resources. Dependency-only providers support the session without contributing
 task capabilities.
 
-A mission session looks up `data/<name>` strictly: a granted name resolves to
+Both session kinds look up `data/<name>` strictly: a granted name resolves to
 its value, a missing name is a runtime error that lists the granted
 `data/<name>` forms, and calling a granted value as in `(data/tickets)` is
-`not_callable` naming the symbol. Discover those names with `:context`. The
-workflow session and the generic embedding API keep the permissive `nil`
-default.
+`not_callable` naming the symbol. A mission session grants the mission's data;
+discover those names with `:context`. A workflow session grants the single
+`data/input` the manifest declares. Only the generic embedding API,
+`PtcRunner.Lisp.run/2`, keeps the permissive `nil` default.
 
 The interactive banner names the selected mission, components, and direct
 provider aliases. Mission sessions add one meta-command:

@@ -59,6 +59,8 @@ defmodule PtcRunner.Lisp.NamespaceDiagnostic do
   def unknown_namespace?(_message), do: false
 
   @data_not_callable_prefix "not callable: data/"
+  @missing_data_grant_infix " is not a granted data name. Granted: "
+  @max_granted_data_names 32
 
   @doc """
   Answers whether a rendered message is a `not_callable` diagnostic for a
@@ -69,6 +71,55 @@ defmodule PtcRunner.Lisp.NamespaceDiagnostic do
     do: String.starts_with?(message, @data_not_callable_prefix)
 
   def data_not_callable?(_message), do: false
+
+  @doc """
+  Builds the strict missing-grant diagnostic for `symbol`, listing `granted`.
+
+  The list is sorted by the caller and truncated here at #{@max_granted_data_names}
+  names, so a large grant set cannot push the rejected symbol out of a bounded
+  renderer.
+  """
+  @spec missing_data_grant_message(binary(), [binary()]) :: binary()
+  def missing_data_grant_message(symbol, granted)
+      when is_binary(symbol) and is_list(granted) do
+    symbol <> @missing_data_grant_infix <> format_granted_names(granted)
+  end
+
+  @doc """
+  Answers whether a rendered message is the strict missing-grant diagnostic.
+
+  It shares a home with the message it recognizes so the two cannot drift; the
+  REPL frontend reads it to decide whether a workflow session should be told
+  which switch opens a mission. The message is matched wherever it starts,
+  because callers render it both bare and behind a `reason: ` prefix.
+  """
+  @spec missing_data_grant?(binary()) :: boolean()
+  def missing_data_grant?(message) when is_binary(message) do
+    case String.split(message, @missing_data_grant_infix, parts: 2) do
+      [rejected, _granted] -> data_symbol?(rejected |> String.split() |> List.last())
+      _no_infix -> false
+    end
+  end
+
+  def missing_data_grant?(_message), do: false
+
+  defp data_symbol?(token) when is_binary(token),
+    do: String.starts_with?(token, "data/") and byte_size(token) > byte_size("data/")
+
+  defp data_symbol?(_token), do: false
+
+  defp format_granted_names([]), do: "(none)"
+
+  defp format_granted_names(names) do
+    shown = Enum.take(names, @max_granted_data_names)
+    formatted = Enum.join(shown, ", ")
+
+    if length(names) > @max_granted_data_names do
+      formatted <> ", …"
+    else
+      formatted
+    end
+  end
 
   @doc false
   @spec rejected_namespace(binary()) :: {:ok, binary()} | :error

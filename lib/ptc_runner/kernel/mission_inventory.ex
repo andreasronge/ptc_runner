@@ -28,7 +28,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ModelContract
-  alias PtcRunner.Lisp.Parser
+  alias PtcRunner.Lisp.DataKeys
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
 
@@ -105,32 +105,10 @@ defmodule PtcRunner.Kernel.MissionInventory do
   def grant_summary(data, bundle, provider_names)
       when is_map(data) and not is_struct(data) and is_list(provider_names) do
     %{
-      "data" => source_referenceable_forms(data),
+      "data" => DataKeys.source_referenceable_forms(data),
       "exports" => public_export_refs(bundle),
       "providers" => provider_names
     }
-  end
-
-  @doc """
-  Returns the sorted `data/<name>` source forms for keys that can be written as
-  a `data/<name>` reference.
-
-  Names that cannot be parsed as that form are omitted. Inventory data entries
-  and missing-grant diagnostics both consume this list rather than selecting
-  forms independently. The Kernel mission evaluator prints it rather than
-  deriving names from the evaluation context.
-  """
-  @spec source_referenceable_forms(map()) :: [binary()]
-  def source_referenceable_forms(data) when is_map(data) and not is_struct(data) do
-    data
-    |> Map.keys()
-    |> Enum.sort()
-    |> Enum.flat_map(fn name ->
-      case source_referenceable_form(name) do
-        {:ok, form} -> [form]
-        :skip -> []
-      end
-    end)
   end
 
   defp public_export_refs(nil), do: []
@@ -231,7 +209,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
   defp data_entries(%{data: data}) when is_map(data) and not is_struct(data) do
     if JSONValue.map?(data) do
       data
-      |> source_referenceable_forms()
+      |> DataKeys.source_referenceable_forms()
       |> Enum.reduce_while({:ok, []}, fn form, {:ok, entries} ->
         "data/" <> name = form
         value = Map.fetch!(data, name)
@@ -258,18 +236,6 @@ defmodule PtcRunner.Kernel.MissionInventory do
       "Mission data supplied by the application manifest."
     )
   end
-
-  defp source_referenceable_form(name) when is_binary(name) do
-    case Parser.parse("data/" <> name) do
-      {:ok, {:ns_symbol, :data, parsed}} ->
-        if to_string(parsed) == name, do: {:ok, "data/" <> name}, else: :skip
-
-      _not_a_source_reference ->
-        :skip
-    end
-  end
-
-  defp source_referenceable_form(_name), do: :skip
 
   defp model_exports(%{bundle: %{prelude: prelude}} = mission) do
     prelude

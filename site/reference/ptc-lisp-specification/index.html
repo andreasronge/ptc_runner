@@ -548,9 +548,11 @@ roll back a multi-turn run. Direct <code class="inline">PtcRunner.Lisp.run/2</co
 successful evaluation whose <code class="inline">Result.return</code> is <code class="inline">{:__ptc_fail__, value}</code>; this
 is distinct from an evaluator error returned under the outer <code class="inline">:error</code> tag.</p><p><strong>Syntax:</strong></p><pre><code class="clojure language-clojure">(fail error)</code></pre><p><strong>Semantics:</strong></p><ul><li>Immediately terminates the current program execution</li><li>The outer call to <code class="inline">PtcRunner.Lisp.run/2</code> succeeds and <code class="inline">Result.return</code> contains
 <code class="inline">{:__ptc_fail__, value}</code></li><li>Cannot be used inside <code class="inline">pmap</code> or <code class="inline">pcalls</code> (raises an error)</li></ul><pre><code class="clojure language-clojure">;; Signal failure when a required condition isn't met.
-;; Valid at the workflow boundary and in `PtcRunner.Lisp.run/2`, where a
-;; missing `data/&lt;name&gt;` is `nil`. Mission-scoped evaluation is strict: name
-;; the granted keys or let a missing grant fail instead of testing `nil?`.
+;; This tests whether the granted value is `nil`, which is a different question
+;; from whether the name was granted at all. Under the Kernel -- a workflow
+;; entry, a mission run, or either REPL -- an ungranted `data/&lt;name&gt;` is a
+;; runtime error, not `nil`, so `nil?` cannot be used to probe for one.
+;; `PtcRunner.Lisp.run/2` stays permissive and answers `nil` for both.
 (if (nil? data/input)
   (fail &quot;No input data provided&quot;)
   (process data/input))</code></pre><hr class="thin"><h2 id="6-threading-macros">6. Threading Macros</h2><p>Threading macros transform nested function calls into linear pipelines.</p><h3 id="6-1-thread-last">6.1 <code class="inline">-&gt;&gt;</code> — Thread Last</h3><p>Threads the value as the <strong>last argument</strong> to each form:</p><pre><code class="clojure language-clojure">(-&gt;&gt; value
@@ -1311,13 +1313,15 @@ query-count</code></pre><h3 id="9-3-context-access-data">9.3 Context Access — 
 data/user-id              ; get :user-id from context
 data/request-id           ; get :request-id from context</code></pre><p>Context is <strong>per-request</strong> data passed by the host. It does not persist across turns.</p><pre><code class="clojure language-clojure">(-&gt;&gt; data/expenses
      (filter (fn [e] (= (:category e) &quot;travel&quot;)))
-     (sum-by :amount))</code></pre><p>At the generic <code class="inline">PtcRunner.Lisp.run/2</code> embedding API and at the Kernel workflow
-boundary, a missing <code class="inline">data/&lt;name&gt;</code> evaluates to <code class="inline">nil</code>. Mission-scoped evaluation
-— a normal mission run and <code class="inline">ptc repl --mission</code> — is strict: a missing grant is
-a <code class="inline">:runtime_error</code> that names the rejected symbol and lists the mission's
-granted <code class="inline">data/&lt;name&gt;</code> forms. Calling a granted data value, as in
-<code class="inline">(data/tickets)</code>, is <code class="inline">:not_callable</code> and names the symbol rather than rendering
-the value.</p><p><code class="inline">data/params</code> is injected only by <code class="inline">kernel/eval-with</code> and
+     (sum-by :amount))</code></pre><p>Every Kernel boundary looks up <code class="inline">data/&lt;name&gt;</code> strictly — a workflow entry, a
+normal mission run, and both <code class="inline">ptc repl</code> session kinds. A missing grant is a
+<code class="inline">:runtime_error</code> that names the rejected symbol and lists the granted
+<code class="inline">data/&lt;name&gt;</code> forms available at that boundary. Calling a granted data value,
+as in <code class="inline">(data/tickets)</code>, is <code class="inline">:not_callable</code> and names the symbol rather than
+rendering the value. Only the generic <code class="inline">PtcRunner.Lisp.run/2</code> embedding API is
+permissive, where a missing <code class="inline">data/&lt;name&gt;</code> still evaluates to <code class="inline">nil</code>.</p><p>A manifest binds exactly one workflow name, <code class="inline">data/input</code>, from its <code class="inline">input</code>
+declaration, so a misspelled workflow reference is rejected against that single
+granted form.</p><p><code class="inline">data/params</code> is injected only by <code class="inline">kernel/eval-with</code> and
 <code class="inline">kernel/eval-source-with</code>. Referencing it when this evaluation supplied no
 params is a distinct error, not a missing-grant diagnostic. Discover granted
 names from the mission inventory (<code class="inline">:context</code> in a mission REPL), not from
