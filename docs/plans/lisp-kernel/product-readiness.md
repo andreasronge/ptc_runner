@@ -97,6 +97,16 @@ command is verified serving a trace by the standalone release gate. Remaining
 here: operational health checks for the packaged runtime and its optional
 launcher.
 
+Complete the one-command installer: select a supported artifact, verify its
+adjacent checksum, fail clearly on unsupported targets, document upgrades and
+removal, and exercise that exact installation path on a clean runner.
+
+Add a self-contained first-agent scaffold that uses the shipped agent library,
+needs no external MCP process or language runtime, records a trace and command
+envelope, keeps private inspection disabled by default, and asks for only one
+credential or model choice. Cover it with deterministic command tests and a
+scheduled real-model probe.
+
 A service frontend may add job submission, cancellation, concurrency control,
 tenant isolation, and durable results only when deployments require it; it is
 not a prerequisite for the standalone product. The transport-neutral
@@ -148,15 +158,14 @@ The Kernel is ready for its intended non-Elixir product boundary when:
 Streaming responses, multi-model routing, chat lifecycle management,
 concurrent mission evaluation, live bundle mutation, broad Clojure coverage,
 MCP Tasks, shared catalog caching, authenticated host IAM, and inbound service
-frontends require demonstrated demand and separate plans. Remote MCP OAuth has
-demonstrated demand and is tracked in the
-[MCP OAuth authorization plan](../mcp-oauth.md).
+frontends require demonstrated demand and separate plans. Remote MCP OAuth is
+implemented; its current installation and authorization contract lives in the
+[host installation reference](../../reference/host-installation.md).
 
 ## Related documents
 
-- [Stable CLI and application-source contract](stable-cli-contract.md) —
-  implementation plan for the machine protocol, validation order, commands,
-  and filesystem-independent application packages.
+- [Standalone CLI distribution](stable-cli-contract.md) — remaining target
+  packaging, distribution evidence, and final acceptance work.
 - [Kernel maintainer guide](../../maintainers/kernel.md) — implemented
   authority, lifecycle, ownership, and code map.
 - [Manifests and capabilities](../../guides/manifests-and-capabilities.md) —

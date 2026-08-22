@@ -17,18 +17,16 @@ belongs in guides or retained specifications.
 
 ## Remaining Kernel product work
 
-- [`lisp-kernel/promote-authored-component.md`](lisp-kernel/promote-authored-component.md)
-  closes the loop from model-authored runtime source to an attested component:
-  host-side materialization, descriptor provenance, and a promotion gate.
 - [`lisp-kernel/stable-cli-contract.md`](lisp-kernel/stable-cli-contract.md)
   retains only the first GHCR publication, macOS x86_64 evidence, and final
   acceptance work for the completed standalone command.
 - [`lisp-kernel/product-readiness.md`](lisp-kernel/product-readiness.md)
-  tracks the remaining command-line, diagnostics, model-boundary,
-  distribution, and release work.
+  tracks the remaining diagnostics, model-boundary, distribution, and release
+  work.
 - [`lisp-kernel/real-flow-e2e-hardening.md`](lisp-kernel/real-flow-e2e-hardening.md)
   tracks the unfinished private-sink, overflow, real-pagination, and
   cache-usage journeys.
+
 ## Future, trigger-gated
 
 - [`future/incident-evidence-compiler.md`](future/incident-evidence-compiler.md)
@@ -67,11 +65,3 @@ Plans are disposable staging contracts, not API references. When a slice
 lands, move its durable behavior into module documentation and the relevant
 guide or specification, update any remaining plan status, and delete a plan
 that has no approved work left.
-
-## Active documentation work
-
-- [`documentation-product-onboarding.md`](documentation-product-onboarding.md)
-  restructures the README and published documentation around executable and
-  container onboarding, short end-user guides, retained references, explicit
-  maintainer boundaries, package usage rules, and controlled improvement from
-  run evidence.
