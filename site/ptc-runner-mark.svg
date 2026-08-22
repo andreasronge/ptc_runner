@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <style>
+    .parenthesis {
+      fill: none;
+      stroke: #1c1a17;
+      stroke-linecap: round;
+      stroke-width: 10;
+    }
+
+    .arrow {
+      fill: none;
+      stroke: #9a4a1e;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-width: 9;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .parenthesis { stroke: #fbfaf8; }
+      .arrow { stroke: #e08a55; }
+    }
+  </style>
+  <path class="parenthesis" d="M34 16C23 25 18 37 18 50s5 25 16 34"/>
+  <path class="parenthesis" d="M66 16c11 9 16 21 16 34s-5 25-16 34"/>
+  <path class="arrow" d="M35 50h33M58 40l10 10-10 10"/>
+</svg>

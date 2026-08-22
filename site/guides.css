@@ -63,6 +63,16 @@
 
 /* The landing page shares the shell; keep its measure comfortable. */
 .guide-main.landing { max-width: 48rem; }
+.landing-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.landing-header .landing-mark {
+  width: 3.5rem;
+  height: 3.5rem;
+  flex: 0 0 auto;
+}
 
 .mobile-crumb { display: none; }
 
