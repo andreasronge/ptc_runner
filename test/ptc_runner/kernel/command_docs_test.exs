@@ -44,6 +44,25 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert guide =~ "ptc repl"
   end
 
+  test "the debug page names both transcript destination rules before they can be violated" do
+    assert {:ok, content} = DocumentationLibrary.fetch("debug")
+    assert content =~ "symbolic link"
+    assert content =~ "physically separate"
+    assert content =~ "/tmp"
+    assert content =~ "mkdir -p out"
+    assert content =~ "--private-output"
+  end
+
+  test "designing-agent-workflows locates returned-value and quarantined in the example" do
+    assert {:ok, content} = DocumentationLibrary.fetch("designing-agent-workflows")
+    assert content =~ "returned-value"
+    assert content =~ "quarantined"
+    assert content =~ "03-specialists/workflow.clj"
+    assert content =~ "not shipped"
+    assert content =~ "built-ins"
+    assert content =~ "ptc init support-triage --example support-triage"
+  end
+
   test "an unknown page is rejected without echoing the requested name" do
     assert {:error, %CommandOutcome{envelope: envelope}} =
              CommandEngine.dispatch(["docs", "sensitive-page-name"])

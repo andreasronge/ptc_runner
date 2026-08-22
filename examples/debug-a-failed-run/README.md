@@ -109,16 +109,12 @@ only exports are the two terminal actions. So the mission evaluations you see
 in a trace are one host-authored packet build plus one per model turn:
 evidence flows down into the prompt, and authority never flows with it.
 
-This leg uses `mix ptc.repair`, a maintainers surface that runs from a source
-checkout rather than the standalone executable, so the commands below use
-`mix ptc` from the repository root against `examples/debug-a-failed-run/`.
-
 Capture the failure, then let the model propose:
 
 ```console
-mix ptc run examples/debug-a-failed-run/target.ptc-project.json
-mix ptc run examples/debug-a-failed-run/repair-agent.ptc-project.json --env-file .env
-cat examples/debug-a-failed-run/repair-agent/.ptc/results/*.private.json
+ptc run debug-a-failed-run/target.ptc-project.json
+ptc run debug-a-failed-run/repair-agent.ptc-project.json --env-file .env
+cat debug-a-failed-run/repair-agent/.ptc/results/*.private.json
 ```
 
 A verified live run proposed replacing `pricing.rule` with the 20-unit charge
@@ -126,36 +122,40 @@ its docstring states, citing the contradiction between the implementation and
 its own contract. The proposal is model-authored and untrusted; nothing has
 been executed or changed yet.
 
-Validation is host policy, and in this example it makes no model call because
-the target installs no model provider. In general, `--allow-live-validation`
-is an explicit acknowledgement that trial runs execute with the target's
-installed providers and can exercise their existing effects — including model
-dispatch, when the target installs one. `mix ptc.repair` binds the
-report to the currently installed component by source hash, materializes the
-candidate through the static G1–G4 gate, and runs the host-owned suite —
-`repair-agent/suite.json` holds the observed order plus two held-out cases the
-model never saw:
+Promotion is a separate, explicit decision. Write the proposal's
+`candidate_source` next to a `--component-override-descriptor` that binds it
+to the installed component. The descriptor fields are defined in
+`ptc docs components`. That path re-runs the original case; it does not
+prove the candidate against extra cases the model never saw.
 
-```console
-mix ptc.repair examples/debug-a-failed-run/target/ptc.json \
-  --report examples/debug-a-failed-run/repair-agent/.ptc/results/*.private.json \
-  --out examples/debug-a-failed-run/repair-agent/.ptc/candidate \
-  --validation-suite examples/debug-a-failed-run/repair-agent/suite.json \
-  --validation-out examples/debug-a-failed-run/repair-agent/.ptc/trial \
-  --allow-live-validation
+Write the proposal's `candidate_source` to
+`debug-a-failed-run/candidate/pricing.rule.clj` with no extra bytes — a
+trailing newline that was not in the field fails the `source_hash` check.
+Hash those file bytes as `sha256:` followed by 64 lowercase hex digits
+(`shasum -a 256` on macOS, `sha256sum` on Linux). Copy `base_source_hash`,
+`component_id`, and the mission name from the proposal into a sibling
+descriptor:
+
+```json
+{
+  "target": {"environment": "mission", "mission": "pricing"},
+  "component_id": "pricing.rule",
+  "base_source_hash": "sha256:<from the proposal>",
+  "source_hash": "sha256:<digest of pricing.rule.clj>",
+  "path": "pricing.rule.clj"
+}
 ```
 
-Promotion stays a separate, explicit decision. Run the same failing target
-under the validated candidate without editing any file:
+Then run the same failing target under that override without editing any
+installed file:
 
 ```console
-mix ptc run examples/debug-a-failed-run/target.ptc-project.json \
-  --component-override-descriptor examples/debug-a-failed-run/repair-agent/.ptc/candidate/descriptor.json
+ptc run debug-a-failed-run/target.ptc-project.json \
+  --component-override-descriptor debug-a-failed-run/candidate/descriptor.json
 ```
 
-The run that exited 5 now exits 0 with `{"total":120}`. Passing cases prove
-only the named inputs; they do not prove the candidate unique or correct
-beyond them.
+The run that exited 5 now exits 0 with `{"total":120}`. Passing this one
+observed case does not prove the candidate unique or correct beyond it.
 
 ### The abstain arm
 
@@ -165,15 +165,15 @@ The same repair agent — same manifest, same prompt, only the snapshot install
 differs — must refuse to guess:
 
 ```console
-mix ptc run examples/debug-a-failed-run/target-ambiguous.ptc-project.json
-mix ptc run examples/debug-a-failed-run/repair-agent-ambiguous.ptc-project.json --env-file .env
-cat examples/debug-a-failed-run/repair-agent-ambiguous/.ptc/results/*.private.json
+ptc run debug-a-failed-run/target-ambiguous.ptc-project.json
+ptc run debug-a-failed-run/repair-agent-ambiguous.ptc-project.json --env-file .env
+cat debug-a-failed-run/repair-agent-ambiguous/.ptc/results/*.private.json
 ```
 
 A verified live run returned `insufficient-evidence`, naming exactly the
 ambiguity: either component could absorb the difference, and one observed case
-cannot distinguish them. `mix ptc.repair` refuses an abstention
-(`repair_not_proposed`) — nothing is materialized from insufficient evidence.
+cannot distinguish them. Do not promote an abstention: there is no candidate
+to override with.
 
 ### The workflow-control arm
 
@@ -192,28 +192,27 @@ source is faulty. A repair must target the workflow `main` component — omittin
 correct mission components unchanged:
 
 ```console
-mix ptc run examples/debug-a-failed-run/target-workflow-control.ptc-project.json
-mix ptc run examples/debug-a-failed-run/repair-agent-workflow-control.ptc-project.json --env-file .env
-cat examples/debug-a-failed-run/repair-agent-workflow-control/.ptc/results/*.private.json
+ptc run debug-a-failed-run/target-workflow-control.ptc-project.json
+ptc run debug-a-failed-run/repair-agent-workflow-control.ptc-project.json --env-file .env
+cat debug-a-failed-run/repair-agent-workflow-control/.ptc/results/*.private.json
 ```
 
-Validate a proposed workflow replacement against the observed order and two
-held-out identifier shapes:
+Promotion again uses a hand-authored override rather than editing the example.
+A workflow descriptor names only the workflow bundle:
 
-```console
-mix ptc.repair examples/debug-a-failed-run/target-workflow-control/ptc.json \
-  --report examples/debug-a-failed-run/repair-agent-workflow-control/.ptc/results/*.private.json \
-  --out examples/debug-a-failed-run/repair-agent-workflow-control/.ptc/candidate \
-  --validation-suite examples/debug-a-failed-run/repair-agent/workflow-control-suite.json \
-  --validation-out examples/debug-a-failed-run/repair-agent-workflow-control/.ptc/trial \
-  --allow-live-validation
+```json
+{
+  "target": {"environment": "workflow"},
+  "component_id": "main",
+  "base_source_hash": "sha256:<from the proposal>",
+  "source_hash": "sha256:<digest of main.clj>",
+  "path": "main.clj"
+}
 ```
 
-Promotion again uses the validated override rather than editing the example:
-
 ```console
-mix ptc run examples/debug-a-failed-run/target-workflow-control.ptc-project.json \
-  --component-override-descriptor examples/debug-a-failed-run/repair-agent-workflow-control/.ptc/candidate/descriptor.json
+ptc run debug-a-failed-run/target-workflow-control.ptc-project.json \
+  --component-override-descriptor debug-a-failed-run/candidate/descriptor.json
 ```
 
 ## What each file does
@@ -230,10 +229,10 @@ mix ptc run examples/debug-a-failed-run/target-workflow-control.ptc-project.json
 | `repair-agent/preloaded.clj` | host workflow that acquires the incident packet before model turn one |
 | `repair-agent/case.clj`, `repair-agent/workspace.clj` | the packet projection and the derived frozen working set |
 | `repair-agent/repair.terminal.clj` | the two typed terminal actions: propose a replacement, or abstain |
-| `repair-agent/suite.json` | host-owned validation cases, including held-out inputs the model never saw |
+| `repair-agent/suite.json` | extra validation cases the model never saw |
 | `target-ambiguous/` | the underdetermined variant whose evidence supports no single repair |
 | `target-workflow-control/` | the variant whose defect is workflow value routing between two correct missions |
-| `repair-agent/workflow-control-suite.json` | host-owned cases for the workflow repair, including held-out identifier shapes |
+| `repair-agent/workflow-control-suite.json` | extra cases for the workflow repair, including identifier shapes the model never saw |
 
 The inspection snapshot provider must be selected under the alias `debug.nav`,
 because the shipped prelude binds `<alias>.runs`, `<alias>.open`, and
@@ -241,5 +240,4 @@ because the shipped prelude binds `<alias>.runs`, `<alias>.open`, and
 
 Inspection artifacts hold generated source, capability payloads, and frozen
 component sources. They are not sanitized traces and should not be shared as
-such. The complete walkthrough is in
-[Debug a failed run](../../docs/guides/debugging-a-failed-run.md).
+such. The complete walkthrough is in `ptc docs debugging-a-failed-run`.

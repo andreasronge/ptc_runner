@@ -125,7 +125,20 @@ redacted. Read the artifact only through an authorized private sink, and never
 publish it alongside a normal trace.</p><p>A project document captures both:</p><pre><code class="json language-json">&quot;artifacts&quot;: {&quot;root&quot;: &quot;target/.ptc&quot;, &quot;trace&quot;: true, &quot;inspection&quot;: true, &quot;result&quot;: true, &quot;envelope&quot;: true}</code></pre><p>The equivalent low-level form is <code class="inline">--trace-dir</code> plus <code class="inline">--inspect</code>. See
 <a href="/reference/cli/">Running and debugging</a> for every switch and
 <a href="/reference/project-files/">Project configuration</a> for the artifact layout.</p><p>Inspection requires a trace, because every private record is validated against
-the run it claims to describe.</p><h2 id="give-the-debugger-bounded-navigation-authority">Give the debugger bounded navigation authority</h2><p>The debugger is an ordinary application. Its host document installs the failed
+the run it claims to describe.</p><h3 id="publish-one-conversation-with-ptc-transcript">Publish one conversation with ptc transcript</h3><p>For one certified conversation, avoid a REPL. Create a sibling directory
+first; do not write into <code class="inline">/tmp</code> or into the project that holds the traces:</p><pre><code class="console language-console">mkdir -p out
+ptc transcript RUN_ID \
+  --traces .ptc/traces \
+  --inspection .ptc/inspection \
+  --private-unattended \
+  --private-output out/conversation.private.json</code></pre><p><code class="inline">--private-output</code> names a new owner-only file. Its parent must already exist
+and be reached without a symbolic link — on macOS <code class="inline">/tmp</code> is a symlink, so
+<code class="inline">/tmp/out.json</code> is refused. The parent must also be physically separate from
+<code class="inline">--traces</code> and <code class="inline">--inspection</code>: no directory may equal, contain, or be
+contained by either of the others. A file in the current directory fails when
+that directory contains <code class="inline">--traces</code>. A sibling directory, as above, satisfies
+both rules. A rejection names the two conflicting switches and their physical
+relationship, and discloses no path.</p><h2 id="give-the-debugger-bounded-navigation-authority">Give the debugger bounded navigation authority</h2><p>The debugger is an ordinary application. Its host document installs the failed
 run's two directories as snapshot providers:</p><pre><code class="json language-json">{
   &quot;install&quot;: {
     &quot;failed-run-traces&quot;: {

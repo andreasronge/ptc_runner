@@ -147,8 +147,10 @@ different grants:</p><pre><code class="json language-json">&quot;missions&quot;:
   }
 }</code></pre><p>The trusted workflow runs one loop in each mission, passing only the triage
 result forward, and validates the final report against the manifest's
-<code class="inline">result_schema</code> contract:</p><pre><code class="clojure language-clojure">(defn run [input]
-  (let [ranked (returned-value
+<code class="inline">result_schema</code> contract. <code class="inline">returned-value</code> and <code class="inline">quarantined</code> are local
+<code class="inline">defn-</code> helpers in this example's <code class="inline">03-specialists/workflow.clj</code> — not shipped
+built-ins. Materialize them with <code class="inline">ptc init support-triage --example support-triage</code>.</p><pre><code class="clojure language-clojure">(defn run [input]
+  (let [ranked (returned-value)
                  (agent.core/run-outcome (get input &quot;triage_task&quot;)
                                          {&quot;mission&quot; &quot;triage&quot; &quot;max_turns&quot; 4})
                  &quot;triage&quot;)]
