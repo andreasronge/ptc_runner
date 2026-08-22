@@ -1,12 +1,11 @@
 # syntax=docker/dockerfile:1
 #
-# Local container scaffolding for the standalone `ptc` command.
+# Linux container image for the standalone `ptc` command.
 #
-# This image is NOT a published distribution route: the container contract in
-# `docs/plans/lisp-kernel/stable-cli-contract.md` also requires the launcher
-# companion and per-architecture evidence, and neither is in place. Build it to
-# exercise the assembled release on Linux; do not tag, push, or document it as
-# an install path until that contract is met.
+# The tag-triggered container-release workflow verifies the finished image on
+# native AMD64 and ARM64 runners before publishing a multi-platform manifest.
+# `scripts/build_container_image.sh` provides the same finished-image probes
+# for a local single-platform build.
 #
 # Both bases are pinned by digest, so a rebuild resolves the same runtime
 # library set rather than whatever the tag points at today.

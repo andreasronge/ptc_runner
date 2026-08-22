@@ -101,8 +101,20 @@ jobs:
           path: ${{ runner.temp }}/artifacts/*
           if-no-files-found: error
 
+  container:
+    needs: verify
+    uses: ./.github/workflows/container-release.yml
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    with:
+      publish: ${{ github.ref_type == 'tag' }}
+
   draft-release:
-    needs: macos-artifact
+    needs: [macos-artifact, container]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     name: Attach standalone artifacts to a draft release

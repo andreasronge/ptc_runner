@@ -719,12 +719,13 @@ mapping reachable, and the host-side exposure decision moves to the publish
 rule:
 
 ```console
+image=ghcr.io/andreasronge/ptc_runner:VERSION
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp \
   -p 127.0.0.1:4123:4123 \
   -v "$PWD:/work" \
-  ptc:dev viewer /work/ptc-project.json --listen 0.0.0.0
+  "$image" viewer /work/ptc-project.json --listen 0.0.0.0 --port 4123
 ```
 
 The `127.0.0.1:` prefix on `-p` is what keeps this equivalent to a loopback

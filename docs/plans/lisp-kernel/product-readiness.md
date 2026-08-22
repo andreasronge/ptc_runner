@@ -18,7 +18,7 @@ expertise.
 | --- | --- | --- | --- |
 | P1 | Model protocol | Host-installed LLMs freeze bounded sampling options, but structured-output schema, reasoning controls, an explicit provider timeout, and enforceable token or cost ceilings remain outside the public configuration surface. | Deployments cannot yet express richer model contracts or complete operational budgets. |
 | P1 | Trace operation | A malformed, duplicate, or oversized trace can make a directory source fail as a whole, and trace persistence remains post-run. | One damaged file can hide healthy runs and a crash can lose buffered events. |
-| P1 | Distribution | The assembled standalone release is verified locally and now carries the Viewer, but macOS artifacts and multi-architecture container images are not published. | Installation and deployment still require local release assembly or a source checkout. |
+| P1 | Distribution | macOS ARM64 is published and Linux AMD64/ARM64 publication is automated, but the first public container release and macOS x86_64 evidence remain. | Container users still need the next root release tag; Intel Mac users have no artifact. |
 | P1 | End-to-end evidence | Packaged-install, private-sink/loss, real multi-page Viewer, and complete shell-driven application journeys remain absent. | Large-artifact, packaging, and cross-command regressions can escape normal gates. |
 | P2 | Viewer pagination | Cursor APIs, accumulation, and partial labeling have focused tests, but no valid run above 100 events has been exercised through repeated browser pagination. | Ordering, duplication, or final-cursor defects can remain despite API coverage. |
 | P2 | Source diagnostics | Parser, compiler, and runtime failures do not consistently retain precise source spans across every boundary. | Larger bundles take longer to repair. |
@@ -33,10 +33,9 @@ The remaining target and acceptance work is tracked in
 The shared parser, command engine, Mix frontend, standalone release, REPL,
 human rendering, caller-named V2 envelope publication, exit statuses, and
 package verification are implemented. Retain one contract across those
-frontends while adding target-native evidence for:
-
-- macOS arm64 and x86_64 artifacts; and
-- Linux amd64 and arm64 container images.
+frontends while adding the remaining macOS x86_64 target evidence. macOS ARM64
+and the native Linux AMD64/ARM64 container gates are implemented; the first
+container tag still has to prove the public-registry boundary.
 
 **Exit gate:** all four architectures build and run the packaged verification
 journey, documentation states the unsigned macOS limitation, and no packaging

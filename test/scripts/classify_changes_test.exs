@@ -93,6 +93,7 @@ defmodule PtcRunner.Scripts.ClassifyChangesTest do
           {".github/workflows/pages.yml", all_false()},
           {".github/dependabot.yml", all_false()},
           {".github/workflows/launcher-release.yml", only(["launcher"])},
+          {".github/workflows/container-release.yml", core},
           {".github/workflows/release.yml", core},
           {"scripts/ci/docs.sh", docs},
           {"scripts/build_site.sh", docs},

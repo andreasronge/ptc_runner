@@ -3,9 +3,14 @@ set -euo pipefail
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 package_tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptc-runner-core-package.XXXXXX")"
+dependency_build=""
 
 cleanup() {
   rm -rf "$package_tmp_dir"
+
+  if [[ -n "$dependency_build" ]]; then
+    rm -rf "$dependency_build"
+  fi
 }
 trap cleanup EXIT
 
@@ -94,18 +99,17 @@ done
 cp "$project_root/mix.lock" "$package_tmp_dir/source/mix.lock"
 mkdir -p "$package_tmp_dir/build/lib"
 
-# The packaged source is compiled at `prod` below, so its dependency beams
-# must come from the project's own `prod` build — and this script has to build
-# that itself. Ambient MIX_ENV must not choose it: `mix precommit` runs at
-# `test` and `mix cmd` exports no MIX_ENV, so `_build/${MIX_ENV:-dev}` checked
-# whichever environment the caller's shell happened to have compiled, and in a
-# worktree that had only ever run the gate it failed with no diagnosis.
-# `verify_standalone_release.sh` builds the same tree next, so this is paid
-# once.
+# The packaged source is compiled at `prod` below, so this script builds its
+# dependency beams in an isolated path. Reusing `_build/prod` is incorrect: an
+# earlier `mix release` activates the local Viewer and leaves Plug there, while
+# an ordinary production dependency graph excludes both. Req can then observe
+# Plug during conditional compilation just before Mix removes the stale app,
+# producing a checkout-history-dependent compile failure.
 build_env=prod
-MIX_ENV="$build_env" mix deps.compile
+dependency_build="$(mktemp -d "$project_root/_build/ptc-core-package-deps.XXXXXX")"
+MIX_ENV="$build_env" MIX_BUILD_PATH="$dependency_build" mix deps.compile
 
-active_build_lib="$project_root/_build/$build_env/lib"
+active_build_lib="$dependency_build/lib"
 
 if [[ ! -d "$active_build_lib/jason" ]]; then
   echo "no compiled $build_env dependencies at $active_build_lib" >&2

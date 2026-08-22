@@ -21,7 +21,7 @@ belongs in guides or retained specifications.
   closes the loop from model-authored runtime source to an attested component:
   host-side materialization, descriptor provenance, and a promotion gate.
 - [`lisp-kernel/stable-cli-contract.md`](lisp-kernel/stable-cli-contract.md)
-  retains only the unfinished macOS/container distribution and final
+  retains only the first GHCR publication, macOS x86_64 evidence, and final
   acceptance work for the completed standalone command.
 - [`lisp-kernel/product-readiness.md`](lisp-kernel/product-readiness.md)
   tracks the remaining command-line, diagnostics, model-boundary,

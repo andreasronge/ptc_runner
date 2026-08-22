@@ -4,9 +4,10 @@ Install `ptc`, verify it without an API key, then run a model-authored program
 without writing PTC-Lisp yourself.
 
 Download the executable as described under
-[Standalone installation](../installation/standalone.md). For the local image,
-use the complete commands in [Docker installation](../installation/docker.md),
-which account for mounted-file ownership.
+[Standalone installation](../installation/standalone.md). Starting with the
+next root release, the [Docker image](../installation/docker.md) provides the
+same command interface; its installation page gives the complete mounted-file
+and ownership form.
 
 ## Run without a credential
 
