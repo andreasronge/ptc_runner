@@ -281,21 +281,7 @@ defmodule PtcRunner.ReplFrontendTest do
   test "an unknown namespace in a workflow session names the switch that opens a mission", %{
     tmp_dir: directory
   } do
-    manifest_path = Path.join(directory, "ptc.json")
-    File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [x] (return x))")
-
-    File.write!(
-      manifest_path,
-      Jason.encode!(%{
-        "version" => 1,
-        "workflow" => %{
-          "components" => [%{"id" => "app", "path" => "main.clj"}],
-          "entry" => "app/run"
-        },
-        "missions" => %{"writing" => %{}, "review" => %{}},
-        "input" => %{"value" => %{}}
-      })
-    )
+    manifest_path = write_workflow_repl_manifest(directory)
 
     # The analyzer lists thirty-odd language namespaces and names no mission,
     # because a workflow session carries none. Which switch would add them is a
@@ -308,6 +294,101 @@ defmodule PtcRunner.ReplFrontendTest do
     assert error.message =~ "unknown namespace review/"
     assert error.message =~ "--mission NAME"
     assert error.message =~ "declared: review, writing"
+  end
+
+  @tag :tmp_dir
+  test "calling data/ in a workflow session still names the switch that opens a mission", %{
+    tmp_dir: directory
+  } do
+    manifest_path = write_workflow_repl_manifest(directory)
+
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl(["--manifest", manifest_path, "-e", "(data/tickets)"])
+      end
+
+    assert error.message =~ "not callable: data/tickets"
+    assert error.message =~ "--mission NAME"
+    assert error.message =~ "declared: review, writing"
+  end
+
+  @tag :tmp_dir
+  test "a mission session resolves data grants, rejects misses, and does not render called values",
+       %{
+         tmp_dir: directory
+       } do
+    manifest_path = Path.join(directory, "ptc.json")
+    sentinel = "SECRET_TICKET_SENTINEL"
+    File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [x] (return x))")
+
+    File.write!(
+      Path.join(directory, "review.clj"),
+      "(ns review) (defn answer [] data/tickets)"
+    )
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "main.clj"}],
+          "entry" => "app/run"
+        },
+        "missions" => %{
+          "review" => %{
+            "components" => [%{"id" => "review", "path" => "review.clj"}],
+            "data" => %{"tickets" => [sentinel], "orders" => []}
+          }
+        },
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    output =
+      capture_io(fn ->
+        run_repl([
+          "--manifest",
+          manifest_path,
+          "--mission",
+          "review",
+          "-e",
+          "data/tickets"
+        ])
+      end)
+
+    assert output =~ sentinel
+
+    missing =
+      assert_raise Mix.Error, fn ->
+        run_repl([
+          "--manifest",
+          manifest_path,
+          "--mission",
+          "review",
+          "-e",
+          "data/nosuch"
+        ])
+      end
+
+    assert missing.message =~ "data/nosuch is not a granted data name"
+    assert missing.message =~ "data/orders"
+    assert missing.message =~ "data/tickets"
+    refute missing.message =~ sentinel
+
+    called =
+      assert_raise Mix.Error, fn ->
+        run_repl([
+          "--manifest",
+          manifest_path,
+          "--mission",
+          "review",
+          "-e",
+          "(data/tickets)"
+        ])
+      end
+
+    assert called.message =~ "not callable: data/tickets"
+    refute called.message =~ sentinel
   end
 
   @tag :tmp_dir
@@ -1623,6 +1704,26 @@ defmodule PtcRunner.ReplFrontendTest do
     file = Path.join(directory, name)
     File.write!(file, contents)
     file
+  end
+
+  defp write_workflow_repl_manifest(directory) do
+    File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [x] (return x))")
+    manifest_path = Path.join(directory, "ptc.json")
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "main.clj"}],
+          "entry" => "app/run"
+        },
+        "missions" => %{"writing" => %{}, "review" => %{}},
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    manifest_path
   end
 
   # ex_dna:disable-for-next-line — boundary test keeps its trace fixture local and explicit

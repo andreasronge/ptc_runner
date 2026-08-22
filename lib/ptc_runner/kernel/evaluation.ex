@@ -26,10 +26,17 @@ defmodule PtcRunner.Kernel.Evaluation do
   ambiguous collections. Code-owned analysis sessions opt into the preserving
   `:public` projection because their trusted frontend formats an Elixir
   observation rather than returning JSON to workflow Lisp.
+
+  Mission-scoped evaluation is strict for `data/<name>`: a missing grant is a
+  runtime error that lists the names `PtcRunner.Kernel.MissionInventory` would
+  publish, calling a granted value is `not_callable` naming the symbol, and
+  `data/params` without a supplied params map names `kernel/eval-with` and
+  `kernel/eval-source-with`. `PtcRunner.Lisp.run/2` stays permissive.
   """
 
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
@@ -37,6 +44,9 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.TrustedTool
+
+  @missing_data_params_message "data/params is not available because this evaluation supplied no params. " <>
+                                 "Pass a params map through kernel/eval-with or kernel/eval-source-with."
 
   @doc "Evaluates bounded subordinate source for an explicitly named mission."
   @spec evaluate_source(
@@ -383,7 +393,10 @@ defmodule PtcRunner.Kernel.Evaluation do
       filter_context: false,
       caller: :kernel,
       preserve_runtime_callables: true,
-      link: true
+      link: true,
+      strict_data: true,
+      data_grants: MissionInventory.source_referenceable_forms(environment.data),
+      missing_data_params_message: @missing_data_params_message
     ]
 
     mission_calls_before = mission_capability_calls(state)

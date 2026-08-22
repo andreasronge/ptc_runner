@@ -105,18 +105,28 @@ defmodule PtcRunner.Kernel.MissionInventory do
   def grant_summary(data, bundle, provider_names)
       when is_map(data) and not is_struct(data) and is_list(provider_names) do
     %{
-      "data" => data_grant_forms(data),
+      "data" => source_referenceable_forms(data),
       "exports" => public_export_refs(bundle),
       "providers" => provider_names
     }
   end
 
-  defp data_grant_forms(data) do
+  @doc """
+  Returns the sorted `data/<name>` source forms for keys that can be written as
+  a `data/<name>` reference.
+
+  Names that cannot be parsed as that form are omitted, matching the inventory's
+  published grant list. The Kernel mission evaluator prints this same list in
+  missing-grant diagnostics rather than deriving names from the evaluation
+  context.
+  """
+  @spec source_referenceable_forms(map()) :: [binary()]
+  def source_referenceable_forms(data) when is_map(data) and not is_struct(data) do
     data
     |> Map.keys()
     |> Enum.sort()
     |> Enum.flat_map(fn name ->
-      case data_form(name) do
+      case source_referenceable_form(name) do
         {:ok, form} -> [form]
         :skip -> []
       end
@@ -223,7 +233,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
       data
       |> Enum.sort_by(&elem(&1, 0))
       |> Enum.reduce_while({:ok, []}, fn {name, value}, {:ok, entries} ->
-        with {:ok, form} <- data_form(name),
+        with {:ok, form} <- source_referenceable_form(name),
              {:ok, contract} <- ModelContract.json_value(value) do
           entry = data_entry(form, contract)
 
@@ -251,7 +261,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
     )
   end
 
-  defp data_form(name) when is_binary(name) do
+  defp source_referenceable_form(name) when is_binary(name) do
     case Parser.parse("data/" <> name) do
       {:ok, {:ns_symbol, :data, parsed}} ->
         if to_string(parsed) == name, do: {:ok, "data/" <> name}, else: :skip
@@ -261,7 +271,7 @@ defmodule PtcRunner.Kernel.MissionInventory do
     end
   end
 
-  defp data_form(_name), do: :skip
+  defp source_referenceable_form(_name), do: :skip
 
   defp model_exports(%{bundle: %{prelude: prelude}} = mission) do
     prelude

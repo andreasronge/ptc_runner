@@ -1354,7 +1354,10 @@ is distinct from an evaluator error returned under the outer `:error` tag.
 - Cannot be used inside `pmap` or `pcalls` (raises an error)
 
 ```clojure
-;; Signal failure when a required condition isn't met
+;; Signal failure when a required condition isn't met.
+;; Valid at the workflow boundary and in `PtcRunner.Lisp.run/2`, where a
+;; missing `data/<name>` is `nil`. Mission-scoped evaluation is strict: name
+;; the granted keys or let a missing grant fail instead of testing `nil?`.
 (if (nil? data/input)
   (fail "No input data provided")
   (process data/input))
@@ -3303,6 +3306,20 @@ Context is **per-request** data passed by the host. It does not persist across t
      (sum-by :amount))
 ```
 
+At the generic `PtcRunner.Lisp.run/2` embedding API and at the Kernel workflow
+boundary, a missing `data/<name>` evaluates to `nil`. Mission-scoped evaluation
+— a normal mission run and `ptc repl --mission` — is strict: a missing grant is
+a `:runtime_error` that names the rejected symbol and lists the mission's
+granted `data/<name>` forms. Calling a granted data value, as in
+`(data/tickets)`, is `:not_callable` and names the symbol rather than rendering
+the value.
+
+`data/params` is injected only by `kernel/eval-with` and
+`kernel/eval-source-with`. Referencing it when this evaluation supplied no
+params is a distinct error, not a missing-grant diagnostic. Discover granted
+names from the mission inventory (`:context` in a mission REPL), not from
+`apropos` or `doc`.
+
 ### 9.4 Turn History — `*1`, `*2`, `*3`
 
 Access results from previous turns using the turn history symbols:
@@ -4327,7 +4344,9 @@ After the mission name, `(program ...)` supplies opaque static source to
 argument must project to a JSON value and is available only for that mission
 evaluation as `data/params`. It replaces any mission data already stored at
 the `"params"` key for that evaluation; `kernel/eval` and `kernel/eval-source`
-leave mission data unchanged.
+leave mission data unchanged. Referencing `data/params` when this evaluation
+supplied none is a runtime error that names those two entry points; it is not
+reported as a missing mission grant.
 
 Use this boundary for evidence identifiers, paths, queries, and other runtime
 values. Building source strings from those values changes the program identity

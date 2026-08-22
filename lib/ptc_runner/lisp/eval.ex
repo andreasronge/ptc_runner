@@ -308,16 +308,15 @@ defmodule PtcRunner.Lisp.Eval do
   #
   # When `strict_data: true`, accessing a key that was not supplied raises a
   # runtime error naming the binding. In permissive mode the lookup returns
-  # `nil` for unknown keys.
+  # `nil` for unknown keys. The Kernel mission boundary passes the granted-name
+  # list in; Eval never derives it from `Map.keys(ctx)`.
   defp do_eval({:data, key}, %EvalContext{ctx: ctx, strict_data: true} = eval_ctx) do
     case data_fetch(ctx, key) do
       {:ok, value} ->
         {:ok, value, eval_ctx}
 
       :error ->
-        {:error,
-         {:runtime_error,
-          "data/#{key} is not bound: the `context` object did not provide a `#{key}` key", nil}}
+        {:error, {:runtime_error, strict_data_error(key, eval_ctx), nil}}
     end
   end
 
@@ -554,6 +553,16 @@ defmodule PtcRunner.Lisp.Eval do
           Apply.apply_fun(take_fun, [n, range_val], eval_ctx5, &do_eval/2)
         end
       end
+    end
+  end
+
+  # Calling `data/<name>` resolves the grant first (so a miss is a missing-grant
+  # error under strict data), then reports `not_callable` with the symbol
+  # rather than rendering the value into the diagnostic or the trace.
+  defp do_eval({:call, {:data, key}, arg_asts}, %EvalContext{} = eval_ctx) do
+    with {:ok, _value, eval_ctx1} <- do_eval({:data, key}, eval_ctx),
+         {:ok, _args, _eval_ctx2} <- eval_all(arg_asts, eval_ctx1) do
+      {:error, {:not_callable, {:data_ref, data_symbol(key)}}}
     end
   end
 
@@ -1763,6 +1772,8 @@ defmodule PtcRunner.Lisp.Eval do
   # Strict-data lookup helpers (used by `do_eval({:data, key}, ...)`)
   # ============================================================
 
+  @max_granted_data_names 32
+
   # Public SymbolRef context keys internalize to `{:symbol_ref, name}` while
   # `data/'name` carries the display spelling. Preserve normal flexible lookup
   # precedence, then bridge that display spelling to the internal key.
@@ -1782,6 +1793,45 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp fetch_symbol_ref_data_key(_ctx, _key), do: :error
+
+  defp data_symbol(key), do: "data/" <> data_key_name(key)
+
+  defp data_key_name(key) when is_atom(key), do: Atom.to_string(key)
+  defp data_key_name(key) when is_binary(key), do: key
+  defp data_key_name(key), do: to_string(key)
+
+  defp strict_data_error(key, %EvalContext{} = eval_ctx) do
+    cond do
+      params_key?(key) and is_binary(eval_ctx.missing_data_params_message) ->
+        eval_ctx.missing_data_params_message
+
+      is_list(eval_ctx.data_grants) ->
+        missing_grant_error(key, eval_ctx.data_grants)
+
+      true ->
+        data_symbol(key) <> " is not bound"
+    end
+  end
+
+  defp params_key?(key), do: data_key_name(key) == "params"
+
+  defp missing_grant_error(key, grants) do
+    data_symbol(key) <>
+      " is not a granted data name. Granted: " <> format_granted_names(grants)
+  end
+
+  defp format_granted_names([]), do: "(none)"
+
+  defp format_granted_names(names) do
+    shown = Enum.take(names, @max_granted_data_names)
+    formatted = Enum.join(shown, ", ")
+
+    if length(names) > @max_granted_data_names do
+      formatted <> ", …"
+    else
+      formatted
+    end
+  end
 
   # ============================================================
   # Sequential evaluation helpers
