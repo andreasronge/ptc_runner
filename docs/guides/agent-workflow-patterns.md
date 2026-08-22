@@ -1,10 +1,10 @@
 # Choose a workflow shape
 
-> **Audience:** application authors deciding how to split a task between
-> missions, agent loops, and trusted workflow code.
+Choose how to split a task between missions, agent loops, and trusted workflow
+code.
 
-Most agent applications combine a few recurring shapes; this page names each
-one, says when to reach for it, and points at a runnable demonstration.
+This page names the recurring shapes, says when to use each one, and
+points to runnable demonstrations.
 
 The shapes compose — a real design usually combines two or three of them.
 
@@ -34,10 +34,9 @@ component contract.
 ## Specialists as missions
 
 When stages of a task need different data, tools, or rules, give each stage a
-named mission and let one trusted workflow drive a loop per stage. A mission
-boundary is an authority decision, not a prompt decision: a specialist can
-only see what its mission was granted, and the workflow chooses what crosses
-between stages. Use `agent.core/run-outcome` when the workflow must handle a
+named mission and let one trusted workflow drive a loop per stage. A mission's
+configuration decides what a specialist can see, while the workflow chooses
+what crosses between stages. Use `agent.core/run-outcome` when the workflow must handle a
 specialist's subject or provider failure as data. A provider failure is
 inspectable `kind` and `reason`; choosing another alias starts a new loop
 rather than resuming the previous transcript. Runnable forms:
@@ -51,8 +50,8 @@ rather than resuming the previous transcript. Runnable forms:
 When a task ends in an effect, split deciding from doing:
 `agent.core/run-phased-result-value` runs ordered phases in different
 missions while keeping one transcript. The planning phase's mission simply
-has no write tool — the plan cannot execute early because the authority to
-act does not exist yet — and the acting phase carries the plan forward. The
+has no write tool, so the plan cannot execute early. The acting phase carries
+the plan forward. The
 phase contract, including `terminal_only` for decision-only final phases, is
 specified in the [agent library reference](../agent-library-reference.md).
 

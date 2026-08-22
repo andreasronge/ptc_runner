@@ -4,14 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Quickstart · PtcRunner</title>
-<meta name="description" content="This guide uses an installed standalone executable. The public one-command
-installer is not published yet, so first build the verified executable as
-described …">
+<meta name="description" content="Install ptc, verify it without an API key, then run a model-authored program
+without writing PTC-Lisp yourself.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/quickstart/">
 <meta property="og:title" content="Quickstart · PtcRunner">
-<meta property="og:description" content="This guide uses an installed standalone executable. The public one-command
-installer is not published yet, so first build the verified executable as
-described …">
+<meta property="og:description" content="Install ptc, verify it without an API key, then run a model-authored program
+without writing PTC-Lisp yourself.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/quickstart/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +27,7 @@ described …">
 <ul>
 <li><a href="/guides/quickstart/" class="current" aria-current="page">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,15 +97,14 @@ described …">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="quickstart">Quickstart</h1><blockquote><p><strong>Audience:</strong> new users verifying the <code class="inline">ptc</code> executable and running a first
-model-authored program without writing PTC-Lisp.</p></blockquote><p>This guide uses an installed standalone executable. The public one-command
-installer is not published yet, so first build the verified executable as
-described under <a href="/installation/standalone/">Installation</a>. For the local
-image instead, use the complete commands in <a href="/installation/docker/">Docker installation</a>,
-which account for mounted-file ownership.</p><h2 id="run-without-a-credential">Run without a credential</h2><p>Create and run a provider-free project:</p><pre><code class="console language-console">ptc init hello-ptc
+<h1 id="quickstart">Quickstart</h1><p>Install <code class="inline">ptc</code>, verify it without an API key, then run a model-authored program
+without writing PTC-Lisp yourself.</p><p>Download the executable as described under
+<a href="/installation/standalone/">Standalone installation</a>. For the local image,
+use the complete commands in <a href="/installation/docker/">Docker installation</a>,
+which account for mounted-file ownership.</p><h2 id="run-without-a-credential">Run without a credential</h2><p>Create and run a project that needs no API key:</p><pre><code class="console language-console">ptc init hello-ptc
 ptc run hello-ptc/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;greeting&quot;:&quot;hello world&quot;}</code></pre><p><code class="inline">init</code> creates an application, a project document with local artifact settings,
 and ignore rules for public and private run artifacts. The first run contacts no
-model or external tool and records a canonical trace and command envelope under
+model or external tool and records a trace and command envelope under
 <code class="inline">hello-ptc/.ptc</code>.</p><h2 id="run-a-model-authored-program">Run a model-authored program</h2><p>Materialize the tutorial projects and create their owner-only environment file:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
 printf 'OPENROUTER_API_KEY=\n' &gt; kernel-tutorial/.env
 chmod 600 kernel-tutorial/.env</code></pre><p>Set <code class="inline">OPENROUTER_API_KEY</code> in that exact file, then run:</p><pre><code class="console language-console">ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;ok&quot;:true,&quot;value&quot;:42}</code></pre><p>The project selects the shipped agent loop. The model receives a task, writes a
@@ -114,9 +112,9 @@ bounded mission program, observes its result, and completes on the second turn.
 You configure the task, model alias, mission, tools, and limits; you do not need
 to read or edit the generated program. To read it anyway, open the Viewer:</p><pre><code class="console language-console">ptc viewer kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>The tutorial projects record private inspection and grant it to the Viewer, so
 each evaluation shows the PTC-Lisp the model wrote and each prelude component
-shows the source the run loaded.</p><p>Credentials belong to the operator-owned host configuration, never the
-application manifest, generated program, or canonical trace. The manifest can
-select the installed model alias but cannot name its endpoint or key.</p><h2 id="diagnose-readiness">Diagnose readiness</h2><p>Check configuration without contacting the provider:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>Probe credentials and connectivity only when remote work and possible cost are
+shows the source the run loaded.</p><p>Credentials belong in <code class="inline">ptc-host.json</code>, never in <code class="inline">ptc.json</code>, a generated
+program, or a trace. <code class="inline">ptc.json</code> can select the installed model alias but cannot
+name its endpoint or key.</p><h2 id="diagnose-readiness">Diagnose readiness</h2><p>Check configuration without contacting the provider:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>Probe credentials and connectivity only when remote work and possible cost are
 intended:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect</code></pre><p>Continue with <a href="/guides/getting-started/">Understand a generated project</a>, <a href="/guides/using-models/">Use a
 model</a>, or <a href="/guides/building-agents/">Customize an agent</a>. The
 <a href="/reference/cli/">command-line reference</a> owns the exact command and failure

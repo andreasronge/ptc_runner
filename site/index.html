@@ -26,6 +26,7 @@
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -129,21 +130,9 @@ the tools you approved, and nothing else. A sandbox works the other way round: i
 with a language that can do anything and takes the dangerous parts away one by one. Miss one
 and you have a breach. Here there is nothing to miss.</p>
 
-<figure class="diagram">
-  <img src="/authority-narrows.webp" width="1647" height="955"
-       alt="Authority only narrows. Three nested boxes. The outermost is OPERATOR,
-            ptc-host.json, holding credentials, endpoints, and outer ceilings; a padlock beside
-            credentials is captioned 'never travels down', and the part of this box not covered
-            by the one inside it is hatched and labelled 'not selected'. Inside it sits a
-            narrower AUTHOR box, ptc.json, holding aliases, missions, and limits. Inside that,
-            two boxes stand side by side with a gap between them, captioned 'splits, never
-            merges': WORKFLOW, trusted policy, holds the model; and MISSION, the model-written
-            program, holds the tools. An arrow down the left margin spans all three layers,
-            labelled 'selects from, never adds to'.">
-  <figcaption>Every layer selects from the one above it and can only narrow. The operator installs
-  authority, the author selects from it, and the model-written program runs inside what is
-  left.</figcaption>
-</figure>
+<p><code>ptc-host.json</code> installs providers, credentials, and outer ceilings.
+<code>ptc.json</code> selects from those installations and may narrow the limits. Workflow and
+mission code receive only the capabilities selected for that run.</p>
 
 <h2>Easy to change</h2>
 
@@ -233,9 +222,11 @@ hosts thousands of sandboxes at once, with no container per run.</p>
 
 <h2>Install</h2>
 
-<p>On macOS it is a one-command install, or a container image if you would rather have one.
-Installing directly needs neither a container nor any separate runtime — the executable carries
-its own. Once it is on your machine:</p>
+<p>Download the self-contained macOS arm64 archive and checksum from
+<a href="https://github.com/andreasronge/ptc_runner/releases">GitHub Releases</a>, then follow
+the <a href="/installation/standalone/">standalone installation guide</a>. No separate runtime
+is required. The <a href="/installation/docker/">Docker guide</a> covers the verified local
+image; a published container is still planned. Once <code>ptc</code> is on your machine:</p>
 
 <pre><code>ptc init hello-ptc
 ptc run hello-ptc/ptc-project.json</code></pre>
@@ -246,10 +237,9 @@ ptc run hello-ptc/ptc-project.json</code></pre>
 open in the viewer. The same <code>ptc run</code> drives agentic projects.</p>
 
 <div class="note">
-  <p><strong>0.x, under active development.</strong> Breaking changes are expected, and the
-  install routes above land with the next release. The
-  <a href="/installation/standalone/">installation pages</a> track exactly where each
-  route stands today.</p>
+  <p><strong>0.x, under active development.</strong> Breaking changes are expected. The
+  <a href="/installation/standalone/">standalone installation page</a> lists the supported
+  release archives and their system requirements.</p>
 </div>
 
 <h2>Guides</h2>

@@ -29,6 +29,7 @@ Building agents.">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -276,9 +277,9 @@ capped at 32,768 characters, then the whole request is checked against
 shipped <code class="inline">agent.core</code> prelude. It revalidates the final candidate against the
 host's frozen result contract and creates no additional candidate-bearing
 record. The candidate does not enter public errors, command envelopes,
-canonical events, or ordinary logs. Existing authorized private inspection can
-still contain the model response and generated source that produced it.</p><p>An outer <code class="inline">fail</code> value is not copied into the public Kernel error or canonical
-trace. Framework failure kinds remain readable; application-defined scalar
+trace events, or ordinary logs. Existing authorized private inspection can
+still contain the model response and generated source that produced it.</p><p>An outer <code class="inline">fail</code> value is not copied into the public Kernel error or trace.
+Framework failure kinds remain readable; application-defined scalar
 kinds become stable fingerprints. Exact failure values, prompts, generated
 source, and capability payloads require an authorized private inspection
 artifact. Built-in LLM adapters retain only a bounded provider status and

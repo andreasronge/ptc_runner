@@ -1,16 +1,33 @@
 # Use a model
 
-> **Audience:** application authors and operators selecting, verifying, and
-> observing a model without working on PtcRunner's provider implementation.
+Select, verify, and observe a model without working on PtcRunner's provider
+implementation.
 
-The operator installs a model under a stable alias in the host document. The
-application selects that alias for its trusted workflow. Generated mission code
-does not receive the model route. Two aliases share the public `llm-request`
-call budget; `config.max_calls` additionally caps an alias only when it is
-stricter than that shared budget.
+`ptc-host.json` installs a model under a stable alias, and
+`ptc.json` selects that alias for its trusted workflow. Generated mission code
+does not receive the model route.
+
+## What must the model support?
+
+An agent loop needs an endpoint that accepts tool-bearing requests. A model may
+accept ordinary completions while rejecting the agent's tool contract;
+PtcRunner reports that separately from a missing model or credential failure.
+
+## How do I choose one?
+
+Start with the model in the shipped examples: OpenRouter's
+[`deepseek/deepseek-v4-flash`](https://openrouter.ai/deepseek/deepseek-v4-flash).
+Model catalogs and routing change over time, so PtcRunner does not keep a static
+compatibility list. Choose a model advertised for tool use, install it under an
+alias, and confirm the exact route with `ptc doctor PROJECT.json --connect`.
+
+Two aliases share the public `llm-request` call budget. `config.max_calls`
+additionally caps an alias only when it is stricter than that shared budget.
+
+## Where do credentials belong?
 
 Bind credentials outside the application, preferably through a named environment
-variable or another operator-owned credential source. Then inspect the public
+variable or another credential source in `ptc-host.json`. Then inspect the public
 installation without revealing its credential or private endpoint:
 
 ```console
@@ -20,7 +37,9 @@ ptc doctor ptc-project.json
 
 `models` names the selector each LLM alias configured; an endpoint-bearing
 `openai-compat:` selector is withheld instead, because it carries the
-operator's own address.
+private address from `ptc-host.json`.
+
+## How do I check connectivity?
 
 Plain `doctor` is inert. Use the active connectivity probe only when a remote
 request is intended:
@@ -29,17 +48,14 @@ request is intended:
 ptc doctor ptc-project.json --connect
 ```
 
-An agent loop requires a model endpoint that supports tool-bearing requests.
-A provider may accept an ordinary completion while rejecting the agent's tool
-contract; PtcRunner reports that separately from a missing model or credential
-failure.
+## What does a run record?
 
-After a run, canonical evidence records attributable call counts, usage, timing,
-and a safe failure class. Prompts and responses are private and appear only when
-the operator explicitly enables private inspection.
+After a run, the trace records how many model calls were made, which alias they
+used, reported token usage and cost, timing, and a safe failure class. Prompts
+and responses are private and appear only when private inspection is enabled.
 
 Start with [Install models and tools](host-configuration.md) for one complete
-operator workflow. The [model and host reference](../reference/host-installation.md)
+workflow. The [model and host reference](../reference/host-installation.md)
 owns selector forms, credentials, cache policy, request parameters, ceilings,
 diagnostics, and connectivity behavior. See [Customize an
 agent](building-agents.md) for the model-neutral loop.

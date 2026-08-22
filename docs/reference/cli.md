@@ -1,9 +1,9 @@
 # Command-line reference
 
-> **Audience:** application authors and operators who need the complete `ptc`
-> command and process contract.
+This is the complete `ptc` command and process contract.
 
-Every installation exposes the same `ptc` command grammar and runtime path.
+Every installation
+exposes the same command grammar and runtime path.
 Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 
 ## Choose a command
@@ -108,8 +108,8 @@ workflow, name it at invocation time:
 ptc repl --project ptc-project.json --mission review
 ```
 
-The project document remains the only path/configuration file the operator
-normally supplies; mission declarations continue to live only in `ptc.json`.
+The project document remains the only path/configuration file normally supplied
+to a command; mission declarations continue to live only in `ptc.json`.
 
 The trace directory must already exist:
 
@@ -190,12 +190,12 @@ payloads, prints, and detailed failures. Do not publish it with normal traces.
 Use `--component-override-descriptor` to evaluate one already-selected
 component without installing it. A trusted build step creates the owner-only
 candidate and descriptor from model-authored source. The
-[replay evaluation guide](../guides/evaluating-with-replay.md) owns the complete workflow
-for holding model responses fixed, gating effect changes, and comparing a
-baseline with that candidate, and its descriptor reference defines every
-field. Candidate creation is not currently a standalone command; a source
-checkout provides `mix ptc.materialize` as documented in the
-[core-prompt replacement tutorial](../guides/components-and-preludes.md#trial-a-different-core-prompt).
+[replay evaluation guide](../guides/evaluating-with-replay.md) owns the workflow
+for holding model responses fixed and comparing a baseline with that candidate.
+The [component reference](component-contracts.md#evaluate-one-replacement-component)
+defines every descriptor field. Candidate creation is not currently a
+standalone command; a source checkout provides `mix ptc.materialize` as
+documented in the repository's maintainer guide on embedding.
 
 ## Read results and failures
 
@@ -461,8 +461,8 @@ Every classified diagnostic and the status it exits with:
 | 7 | `destination` | `trace_destination_unavailable` | no | the trace destination is unavailable |
 | 7 | `destination` | `trace_destination_unsafe` | no | the trace destination is unsafe |
 | 7 | `destination` | `trace_directory_missing` | no | --trace-dir must be an existing normal directory |
-| 7 | `execution` | `event_capture_limit_exceeded` | no | the canonical event capture limit was exceeded |
-| 7 | `execution` | `event_sink_unavailable` | no | the canonical event sink is unavailable |
+| 7 | `execution` | `event_capture_limit_exceeded` | no | the trace event capture limit was exceeded |
+| 7 | `execution` | `event_sink_unavailable` | no | the trace event sink is unavailable |
 | 7 | `execution` | `inspection_capture_limit_exceeded` | no | the private inspection capture limit was exceeded |
 | 7 | `execution` | `inspection_sink_unavailable` | no | the private inspection sink is unavailable |
 | 7 | `publication` | `destination_collision` | no | an artifact destination appeared before publication |
@@ -518,7 +518,7 @@ Each inspection artifact includes the frozen component sources. It adds
 execution prints and any provider-backed private activity that occurred. A
 failure can add detailed `execution-error` evidence. A raised capability
 callback additionally records its bounded exception class, message, and
-formatted stacktrace while the canonical trace retains only the closed
+formatted stacktrace while the trace retains only the closed
 `provider_error / exception` category. Exception text and stacktrace paths can
 contain sensitive data and are not reliably redactable; read the artifact only
 through an authorized private sink.
@@ -572,9 +572,9 @@ with it `Ctrl+D` as end of input; `:quit` works there too. Every
 non-interactive form — `-e`, a script argument, `-`, or redirected input —
 reads exactly as before.
 
-## Query canonical traces
+## Query traces
 
-Canonical traces contain bounded operational events, not prompts, model
+Traces contain bounded operational events, not prompts, model
 responses, capability payloads, or generated source. Query one immutable
 directory capture through the fixed public profile:
 
@@ -587,7 +587,7 @@ ptc repl \
 ```
 
 Public analysis supports `runs`, `open`, and `read`; the public `activity`
-collection contains canonical events. `open` advertises the private collections
+collection contains trace events. `open` advertises the private collections
 but they require a correlated inspection snapshot and private authority.
 `analysis/runs` defaults to a compact projection containing run ID, status,
 duration, LLM calls, evaluations, terminal reason, and completeness flags. Pass
@@ -711,7 +711,7 @@ docker run --rm \
 The `127.0.0.1:` prefix on `-p` is what keeps this equivalent to a loopback
 bind. Writing `-p 4123:4123` instead publishes an unauthenticated trace browser
 to every host that can reach the machine. The command cannot enforce that
-prefix; the operator must write it. The user mapping preserves access to the
+prefix; you must write it. The user mapping preserves access to the
 mounted project's owner-only artifacts; do not run this form from a root shell.
 
 ### Watch and launch live runs
@@ -724,7 +724,7 @@ PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run ptc.json
 
 The reporter is best-effort and does not alter the run result. Frames are
 correlated to their owning run, and the terminal frame is published only after
-provider cleanup and canonical event finalization establish the actual
+provider cleanup and trace-event finalization establish the actual
 outcome. A timeout failure names the binding limit, its configured duration,
 and the manifest key that raises it, in both the launch diagnostic and the
 ended Live card; for example, `parallel_timeout_ms limit 60000 ms was exceeded
@@ -734,7 +734,7 @@ sessions currently show their bounded command-output tail in the launch panel
 instead of streaming frames.
 
 An ended workflow card offers **View result**. That action captures a fresh,
-internally consistent trace snapshot, confirms that the canonical run exists,
+internally consistent trace snapshot, confirms that the matching run exists,
 and then opens its detail view in the Runs tab. The Viewer therefore does not
 need to be restarted after a run it launched.
 

@@ -6,12 +6,12 @@ Active implementation plan. Remove this file after the approved slices land and
 their durable contracts have moved into the documentation guidelines, retained
 references, schemas, module documentation, and executable examples.
 
-This branch implements the audience-owned paths, reference extraction, README
-and guide rewrite, package usage rules, terminology policy, and focused
-documentation checks. The one-command installer, published container image,
-and generated first-agent scaffold remain distribution/product prerequisites;
-public documentation continues to label them unavailable rather than publishing
-commands that cannot yet succeed.
+This branch implements the layer-owned paths, reference extraction, README and
+guide rewrite, package usage rules, terminology policy, and focused
+documentation checks. As approved for the imminent release, the documentation
+assumes a verified macOS arm64 archive is available from GitHub Releases. The
+published container image and generated first-agent scaffold remain
+distribution/product prerequisites and are not presented as available.
 
 ## Objective
 
@@ -22,9 +22,9 @@ improvement from run evidence.
 The ordinary user path starts with a one-command standalone installation or a
 published container image, creates and runs a useful agent without installing
 Python, Node.js, a language toolchain, or a separate sandbox, and does not ask
-the user to write PTC-Lisp. The model writes the bounded mission program;
-application authors normally configure the task, model, approved tools, data,
-limits, and shipped agent components.
+the user to write PTC-Lisp. The model writes the bounded mission program; you
+normally configure the task, model, approved tools, data, limits, and shipped
+agent components.
 
 User guides remain short and task-oriented. Exhaustive commands, fields,
 schemas, options, error taxonomies, state machines, and security contracts live
@@ -43,8 +43,8 @@ blurred:
   command, REPL, host-configuration, and failed-run pages;
 - public prose exposes implementation-language concepts even where the public
   contract is JSON, PTC-Lisp, a process command, or an immutable artifact;
-- model configuration for application authors is mixed with adapter and source
-  maintenance concerns;
+- model-selection guidance is mixed with adapter and source maintenance
+  concerns;
 - the standalone artifact and local container scaffold exist, but the
   one-command installer and published container route required by the desired
   README journey are not complete public installation paths; and
@@ -54,22 +54,23 @@ blurred:
 The latest documentation additions are useful evidence of implemented
 behavior. This plan relocates and edits that content; it does not discard it.
 
-## Audience contract
+## Documentation ownership contract
 
-Use concrete roles rather than the ambiguous word "developer":
+Use the files and documentation layers readers actually encounter instead of
+inventing reader categories:
 
-| Audience | Owns | Documentation home |
+| Surface | Owns | Documentation home |
 | --- | --- | --- |
-| Application author | Tasks, input, agent selection, prompts, components, and narrower limits | `docs/guides/` and `docs/reference/` |
-| Operator | Installed models and tools, credentials, outer policy, artifacts, and deployment | `docs/installation/`, `docs/guides/`, and `docs/reference/` |
-| PTC-Lisp author | Optional custom components, preludes, and complete agent loops | `docs/reference/ptc-lisp/` |
-| Package integrator | The published package API and host integration | API documentation and the distributed `usage-rules.md` |
-| PtcRunner maintainer | Runtime implementation, architecture, gates, conformance work, and releases | `docs/maintainers/` and `AGENTS.md` |
-| Runtime model | The task-specific prompt, mission inventory, signatures, and capability descriptions assembled for a run | Shipped or application-selected components, not repository documentation |
+| `ptc.json` | Tasks, input, agent selection, prompts, components, and narrower limits | `docs/guides/` and `docs/reference/` |
+| `ptc-host.json` | Installed models and tools, credentials, outer policy, and deployment settings | `docs/installation/`, `docs/guides/`, and `docs/reference/` |
+| PTC-Lisp | Optional custom components, preludes, and complete agent loops | Language and component references |
+| Published package API | Host integration | API documentation and the distributed `usage-rules.md` |
+| Repository checkout | Runtime implementation, architecture, gates, conformance work, and releases | `docs/maintainers/` and `AGENTS.md` |
+| A running model | The frozen prompt, mission inventory, signatures, and capability descriptions assembled for one run | Shipped or application-selected components, not repository documentation |
 
-Every hand-written guide, reference, installation page, and maintainer page
-starts with a visible `Audience:` statement. Generated references identify
-their owning catalog or schema instead.
+Every hand-written guide and installation page starts with a short outcome
+summary. Reference pages start with a scope statement. Generated references
+identify their owning catalog or schema instead.
 
 ## Documentation structure
 
@@ -125,7 +126,7 @@ AGENTS.md
 
 The final filenames may reuse current stable names where doing so keeps a
 generated owner or a normative specification clearer. The directory and
-audience boundaries are the contract; the illustrative filenames are not a
+content boundaries are the contract; the illustrative filenames are not a
 reason to duplicate an existing retained reference.
 
 ## Public terminology
@@ -204,17 +205,17 @@ The scaffold:
   generating and evaluating a mission program;
 - needs no external MCP process and therefore no Python, Node.js, or additional
   runtime for the first run;
-- records a canonical trace and a command envelope under the project artifact
+- records a trace and a command envelope under the project artifact
   root;
 - keeps private inspection disabled by default and explains how to opt in;
 - names the one credential or model choice the user must supply; and
 - is covered by deterministic command tests plus a scheduled real-model probe.
 
 The generated project may contain PTC-Lisp components, but the README does not
-display or require the user to edit them. Later documentation explains that
-advanced authors may inspect or replace those components.
+display or require the user to edit them. Later documentation explains how to
+inspect or replace those components.
 
-## Slice 1: establish audience-owned paths
+## Slice 1: establish purpose-owned paths
 
 Perform the path migration before rewriting prose so links and ExDoc groups
 have one stable destination.
@@ -316,7 +317,7 @@ in the initial walkthrough.
 - **Constrain** — explicit capabilities and enforced execution limits.
 - **Compose** — replace prompts, loops, tools, policies, or the whole agent
   framework without changing the enforcement Kernel.
-- **Observe** — canonical structured traces plus explicit private inspection
+- **Observe** — structured traces plus explicit private inspection
   for sensitive model, source, and tool records.
 - **Improve** — analyze run evidence, replay fixed model responses, compare
   candidate preludes, and promote deliberately.
@@ -325,7 +326,7 @@ in the initial walkthrough.
 
 Say precisely that generated mission code has no ambient filesystem, network,
 process, shell, package, or host-language access. It can reach an external
-effect only through a capability explicitly installed by the operator and
+effect only through a capability explicitly installed in `ptc-host.json` and
 selected for the mission. A granted filesystem or network tool still performs
 the granted effect; do not turn "no ambient access" into an absolute claim that
 configured capabilities cannot access the operating environment.
@@ -340,7 +341,7 @@ runtime behavior. Most users select and configure it. Advanced users can
 replace prompts, retry and continuation policy, completion rules, specialist
 composition, or the entire loop.
 
-Say that every run produces a structured canonical trace. Sensitive prompts,
+Say that every run produces a structured trace. Sensitive prompts,
 responses, generated source, and tool payloads are retained only through
 explicit private inspection. PtcRunner can analyze its own immutable evidence
 and replay recorded model responses. Call these the foundations for controlled
@@ -355,7 +356,7 @@ references. Keep source development behind one maintainer link.
 
 Use this shape for every guide:
 
-1. audience and promised outcome;
+1. a short promised outcome;
 2. prerequisites;
 3. one complete copy-and-paste workflow;
 4. the result and how to inspect it;
@@ -381,7 +382,7 @@ Merge the useful parts of the current getting-started page into the Quickstart
 and first-agent journeys rather than retaining two introductions with different
 assumptions.
 
-The model guide is strictly application-facing: model alias selection,
+The model guide covers only application configuration: model alias selection,
 credential binding, connectivity checks, tool-call support, cache choice,
 usage evidence, and common failures. Adapter boundaries and source maintenance
 belong in API or maintainer documentation.
@@ -391,7 +392,7 @@ belong in API or maintainer documentation.
 Create a concise root `usage-rules.md` and include it in the published package.
 It serves coding models helping package integrators use the public API. It may
 link to API documentation and describe implementation-language calls because
-that is its explicit audience. It does not contain repository worktree, CI,
+that is its explicit scope. It does not contain repository worktree, CI,
 release, or internal architecture procedures.
 
 Keep `AGENTS.md` as the canonical source-maintenance instruction file. Improve
@@ -411,8 +412,8 @@ Add focused checks rather than relying only on review:
 
 - reject implementation-language mentions in `README.md`, `docs/guides/`, and
   `docs/reference/`, with deliberate exceptions kept outside those paths;
-- ensure each hand-written page under the audience-owned directories has an
-  audience declaration;
+- ensure each hand-written published page opens with a complete summary and
+  avoids invented reader categories;
 - keep every visible install and primary workflow command in an executable
   documentation test where practical;
 - run the standalone installer probe on clean supported targets;
@@ -449,7 +450,7 @@ Keep reviews bounded with four coherent changes:
 
 1. **Distribution and first-agent prerequisites** — installer, published
    container, scaffold, and clean-environment probes.
-2. **Audience structure and reference extraction** — moves, navigation,
+2. **Documentation structure and reference extraction** — moves, navigation,
    generated owners, and exhaustive contract relocation without deleting
    behavior documentation.
 3. **README and guide rewrite** — hands-on product journey and short user
@@ -479,7 +480,7 @@ The redesign is complete when:
 - end-user model guidance contains no adapter or repository-maintenance view;
 - package integrators receive a useful `usage-rules.md`, while source agents
   continue to receive repository instructions through `AGENTS.md`;
-- sensitive logging claims distinguish canonical traces from opt-in private
+- sensitive logging claims distinguish traces from opt-in private
   inspection;
 - improvement language distinguishes evaluation and evidence from explicit
   promotion;

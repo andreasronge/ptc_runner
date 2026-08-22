@@ -4,14 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Drive ptc as an agent · PtcRunner</title>
-<meta name="description" content="You do not need network access or a remembered API to use PtcRunner. The
-executable you are running carries its own command grammar and documentation,
-so both …">
+<meta name="description" content="Use the executable's own help and embedded documentation when a coding agent
+drives ptc.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/agent-cli-usage/">
 <meta property="og:title" content="Drive ptc as an agent · PtcRunner">
-<meta property="og:description" content="You do not need network access or a remembered API to use PtcRunner. The
-executable you are running carries its own command grammar and documentation,
-so both …">
+<meta property="og:description" content="Use the executable's own help and embedded documentation when a coding agent
+drives ptc.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/agent-cli-usage/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +27,7 @@ so both …">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/" class="current" aria-current="page">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,8 +97,8 @@ so both …">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="drive-ptc-as-an-agent">Drive ptc as an agent</h1><blockquote><p><strong>Audience:</strong> LLMs and coding agents that run the <code class="inline">ptc</code> executable directly,
-and the people configuring them.</p></blockquote><p>You do not need network access or a remembered API to use PtcRunner. The
+<h1 id="drive-ptc-as-an-agent">Drive ptc as an agent</h1><p>Use the executable's own help and embedded documentation when a coding agent
+drives <code class="inline">ptc</code>.</p><p>You do not need network access or a remembered API. The
 executable you are running carries its own command grammar and documentation,
 so both always describe the version you actually invoke.</p><h2 id="ask-the-binary-instead-of-guessing">Ask the binary instead of guessing</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Question</th><th style="text-align: left;">Command</th></tr></thead><tbody><tr><td style="text-align: left;">Which commands and switches exist?</td><td style="text-align: left;"><code class="inline">ptc help</code>, then <code class="inline">ptc help COMMAND</code></td></tr><tr><td style="text-align: left;">Which documentation ships here?</td><td style="text-align: left;"><code class="inline">ptc docs</code></td></tr><tr><td style="text-align: left;">How does the language or a contract work?</td><td style="text-align: left;"><code class="inline">ptc docs PAGE</code></td></tr><tr><td style="text-align: left;">What does one function do?</td><td style="text-align: left;"><code class="inline">ptc repl --project PROJECT.json -e '(doc &quot;name&quot;)'</code></td></tr></tbody></table></div><p>Help output is generated from the same declarations as the strict parser, and
 <code class="inline">ptc docs</code> prints pages embedded at build time. Neither can drift from the
@@ -131,19 +130,19 @@ when envelope publication itself fails. <code class="inline">ptc docs cli</code>
 contract.</p><h2 id="expect-a-bounded-failure-report">Expect a bounded failure report</h2><p>A failed run reports a closed phase and code pair. Deliberate <code class="inline">fail</code> values are
 deliberately not copied into the command diagnostic, and private detail never
 reaches public evidence, so do not expect a stack trace or a model transcript
-in normal output. To debug, read the canonical trace the run recorded, then
+in normal output. To debug, read the trace the run recorded, then
 <code class="inline">ptc docs debug</code> for the query surface and <code class="inline">ptc docs traces</code> for the record
 contract. <code class="inline">ptc viewer PROJECT.json</code> browses the same evidence when a human is
 present.</p><p>When you need the exact private records — model exchanges, generated source,
 capability payloads — they require explicit private authorization; see
-<code class="inline">ptc docs repl</code> and <code class="inline">ptc docs cli</code>.</p><h2 id="respect-the-authority-boundary">Respect the authority boundary</h2><p>An application document selects only what the operator already installed. It
+<code class="inline">ptc docs repl</code> and <code class="inline">ptc docs cli</code>.</p><h2 id="respect-what-each-file-can-configure">Respect what each file can configure</h2><p>An application document selects only what <code class="inline">ptc-host.json</code> already installed. It
 cannot add credentials, endpoints, commands, or wider limits, and no prompt or
 generated program can escalate that. If a provider or tool is missing, the fix
 belongs in the host configuration a person controls (<code class="inline">ptc docs host</code>), not in
 the manifest or in a retry. Report the gap instead of working around it.</p><p>Keep credentials in the exact environment file passed with <code class="inline">--env-file</code>; never
 inline a secret into a manifest, a component, or a prompt.</p>
 </article>
-<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/getting-started/">&larr; Understand a generated project</a><a class="pager-next" href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp &rarr;</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/concepts/">&larr; PtcRunner concepts</a><a class="pager-next" href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp &rarr;</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/agent-cli-usage.md">Edit this
   page on GitHub</a>.

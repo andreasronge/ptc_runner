@@ -1,7 +1,7 @@
 # Signature reference
 
-> **Audience:** application and PTC-Lisp authors declaring compact input and
-> output contracts for components and model-visible tools.
+Use signatures to describe component and model-visible tool inputs and outputs,
+then validate both sides of each call.
 
 Signatures tell a model what a function accepts and returns, and let PtcRunner
 validate both sides of the call. They are compact enough to include in model
@@ -147,9 +147,9 @@ only the declared shape:
     (if cursor {"path" path "cursor" cursor} {"path" path})))
 ```
 
-A signature documents and validates a capability; it does not grant one. The
-operator must still install the tool and the application must select it for the
-mission.
+A signature documents and validates a capability; it does not grant one.
+`ptc-host.json` must still install the tool, and `ptc.json` must select it for
+the mission.
 
 ## Prompt schemas
 

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Choose a workflow shape · PtcRunner</title>
-<meta name="description" content="Most agent applications combine a few recurring shapes; this page names each
-one, says when to reach for it, and points at a runnable demonstration.">
+<meta name="description" content="Choose how to split a task between missions, agent loops, and trusted workflow
+code.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/agent-workflow-patterns/">
 <meta property="og:title" content="Choose a workflow shape · PtcRunner">
-<meta property="og:description" content="Most agent applications combine a few recurring shapes; this page names each
-one, says when to reach for it, and points at a runnable demonstration.">
+<meta property="og:description" content="Choose how to split a task between missions, agent loops, and trusted workflow
+code.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/agent-workflow-patterns/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -27,6 +27,7 @@ one, says when to reach for it, and points at a runnable demonstration.">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -96,9 +97,9 @@ one, says when to reach for it, and points at a runnable demonstration.">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="choose-a-workflow-shape">Choose a workflow shape</h1><blockquote><p><strong>Audience:</strong> application authors deciding how to split a task between
-missions, agent loops, and trusted workflow code.</p></blockquote><p>Most agent applications combine a few recurring shapes; this page names each
-one, says when to reach for it, and points at a runnable demonstration.</p><p>The shapes compose — a real design usually combines two or three of them.</p><h2 id="one-bounded-question">One bounded question</h2><p>Grant the data, ask the question, read the answer. One mission, one
+<h1 id="choose-a-workflow-shape">Choose a workflow shape</h1><p>Choose how to split a task between missions, agent loops, and trusted workflow
+code.</p><p>This page names the recurring shapes, says when to use each one, and
+points to runnable demonstrations.</p><p>The shapes compose — a real design usually combines two or three of them.</p><h2 id="one-bounded-question">One bounded question</h2><p>Grant the data, ask the question, read the answer. One mission, one
 <code class="inline">agent.core/run</code>, no tools. Reach for this first: if a task is a single
 read-only question over data you already hold, connecting tools or adding
 stages only adds surface. The
@@ -114,10 +115,9 @@ context. See step 2 of the
 <a href="/guides/designing-agent-workflows/#step-2-move-the-rules-into-mission-code">tutorial</a>,
 and <a href="/guides/components-and-preludes/">Customize agent components</a> for the
 component contract.</p><h2 id="specialists-as-missions">Specialists as missions</h2><p>When stages of a task need different data, tools, or rules, give each stage a
-named mission and let one trusted workflow drive a loop per stage. A mission
-boundary is an authority decision, not a prompt decision: a specialist can
-only see what its mission was granted, and the workflow chooses what crosses
-between stages. Use <code class="inline">agent.core/run-outcome</code> when the workflow must handle a
+named mission and let one trusted workflow drive a loop per stage. A mission's
+configuration decides what a specialist can see, while the workflow chooses
+what crosses between stages. Use <code class="inline">agent.core/run-outcome</code> when the workflow must handle a
 specialist's subject or provider failure as data. A provider failure is
 inspectable <code class="inline">kind</code> and <code class="inline">reason</code>; choosing another alias starts a new loop
 rather than resuming the previous transcript. Runnable forms:
@@ -127,8 +127,8 @@ rather than resuming the previous transcript. Runnable forms:
 (different tool grants per specialist).</p><h2 id="plan-then-act">Plan, then act</h2><p>When a task ends in an effect, split deciding from doing:
 <code class="inline">agent.core/run-phased-result-value</code> runs ordered phases in different
 missions while keeping one transcript. The planning phase's mission simply
-has no write tool — the plan cannot execute early because the authority to
-act does not exist yet — and the acting phase carries the plan forward. The
+has no write tool, so the plan cannot execute early. The acting phase carries
+the plan forward. The
 phase contract, including <code class="inline">terminal_only</code> for decision-only final phases, is
 specified in the <a href="/reference/agent-library-reference/">agent library reference</a>.</p><h2 id="parallel-fan-out">Parallel fan-out</h2><p>When items are independent — one specialist call per document, per ticket,
 per case — fan out with <code class="inline">pmap</code> or <code class="inline">pcalls</code> from the trusted workflow instead

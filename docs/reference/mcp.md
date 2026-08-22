@@ -1,10 +1,10 @@
 # MCP reference
 
-> **Audience:** operators and application authors who need the complete MCP
-> installation, mapping, effect, authentication, and lifecycle contract.
+This is the complete MCP installation, mapping, effect, authentication, and
+lifecycle contract.
 
-MCP is the only way to add an external tool to a PtcRunner application. The
-operator fixes the server, transport, credentials, public names, and read/write
+MCP is the only way to add an external tool to a PtcRunner
+application. `ptc-host.json` fixes the server, transport, credentials, public names, and read/write
 effects in the host document. The application manifest may select and narrow
 that installation but cannot invent or widen it.
 
@@ -183,7 +183,7 @@ An MCP installation belongs in `ptc-host.json`:
 capability name exposed by PtcRunner. Change `installation_revision` whenever
 the transport, mapping, effect, snapshot policy, or server behavior changes.
 
-The operator's required `effect` declaration is authoritative; server
+The required `effect` declaration in `ptc-host.json` is authoritative; server
 annotations cannot change it. `model_visible` controls prompt discovery, not
 call authority. `error_feedback: "bounded"` may expose up to 1,024 bytes of
 validated server error text as untrusted model feedback, so enable it only when

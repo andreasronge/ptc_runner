@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Customize agent components · PtcRunner</title>
-<meta name="description" content="Most applications select shipped libraries and do not copy their source:">
+<meta name="description" content="Replace shipped prompts, policies, libraries, or complete agent loops when the
+shipped behavior no longer fits.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/components-and-preludes/">
 <meta property="og:title" content="Customize agent components · PtcRunner">
-<meta property="og:description" content="Most applications select shipped libraries and do not copy their source:">
+<meta property="og:description" content="Replace shipped prompts, policies, libraries, or complete agent loops when the
+shipped behavior no longer fits.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/components-and-preludes/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -25,6 +27,7 @@
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -94,8 +97,9 @@
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="customize-agent-components">Customize agent components</h1><blockquote><p><strong>Audience:</strong> advanced application authors replacing shipped prompts,
-policies, libraries, or complete agent loops.</p></blockquote><p>Most applications select shipped libraries and do not copy their source:</p><pre><code class="json language-json">{
+<h1 id="customize-agent-components">Customize agent components</h1><p>Replace shipped prompts, policies, libraries, or complete agent loops when the
+shipped behavior no longer fits.</p><p>Most applications select shipped libraries
+and do not copy their source:</p><pre><code class="json language-json">{
   &quot;workflow&quot;: {
     &quot;components&quot;: [
       {&quot;id&quot;: &quot;app.agent&quot;, &quot;path&quot;: &quot;agent.clj&quot;, &quot;dependencies&quot;: [&quot;agent.core&quot;]},
@@ -106,40 +110,20 @@ policies, libraries, or complete agent loops.</p></blockquote><p>Most applicatio
 }</code></pre><p>The shipped <code class="inline">agent.core</code> loop is a replaceable library, not Kernel behavior.
 Start with it, then introduce a custom component under a new ID when the
 application needs different prompts, feedback, retry policy, continuation, or
-completion rules.</p><h2 id="trial-a-different-core-prompt">Trial a different core prompt</h2><p>Selecting <code class="inline">agent.core</code> also selects its <code class="inline">agent.prompt</code> dependency. A component
-override can therefore trial a replacement prompt without changing the
-application manifest. The replacement keeps the installed component ID and
-dependencies and must provide the three functions <code class="inline">agent.core</code> calls:</p><pre><code class="clojure language-clojure">(ns agent.prompt &quot;Application prompt policy.&quot; {:visibility :discoverable})
-
-(defn initial-state [cfg]
-  {:turns-remaining (get cfg &quot;max_turns&quot;)})
-
-(defn render {:effect :read} [_state]
-  &quot;Use run_ptc_lisp to solve the task. Return the completed value; do not answer in prose.&quot;)
-
-(defn transition [state event]
-  (assoc state :turns-remaining (get event :turns-remaining)))</code></pre><p>In a source checkout, save that source as <code class="inline">custom-agent-prompt.clj</code>, then
-materialize and run the candidate:</p><pre><code class="console language-console">mkdir -p private
-mix ptc.materialize ptc.json \
-  --workflow \
-  --component agent.prompt \
-  --source custom-agent-prompt.clj \
-  --out private/agent-prompt-candidate
-
-mix ptc run ptc.json \
-  --component-override-descriptor private/agent-prompt-candidate/descriptor.json</code></pre><p>The descriptor binds the candidate bytes to the exact installed
-<code class="inline">agent.prompt</code> source they replace. The override applies to this invocation
-only; project files do not store component overrides. See <a href="/guides/evaluating-with-replay/#evaluate-the-candidate-without-installing-it">Evaluate changes
-with replay</a>
-for the descriptor fields and replay comparison.</p><p>The active bundle cannot be replaced during its run. A workflow may return
-candidate source as its result, but materialization and execution happen in a
-later host invocation so the replacement is compiled, hashed, and validated
-before it becomes active.</p><p>Each component declares its direct namespace dependencies. Selecting a library
-installs its immutable dependency closure, but does not grant tool authority.
-Mission tools still come only from providers installed by the operator and
-selected for that mission.</p><p>Keep reusable components narrow:</p><ul><li>expose a small documented public surface;</li><li>declare signatures where model-written calls benefit from validation;</li><li>keep prompt-visible helpers focused on the task contract;</li><li>separate workflow policy from mission-only task functions; and</li><li>use a new component ID for a permanently customized prompt or loop.</li></ul><p>Use the <a href="/reference/component-contracts/">components-and-preludes reference</a>
+completion rules.</p><h2 id="trial-a-replacement-safely">Trial a replacement safely</h2><p>Selecting <code class="inline">agent.core</code> also selects its <code class="inline">agent.prompt</code> dependency. A verified
+component override can trial another prompt for one invocation without changing
+<code class="inline">ptc.json</code>. The active bundle remains immutable throughout the run; a later
+invocation compiles and checks the candidate before it can become active.</p><p>The standalone executable can run a prepared override descriptor but does not
+create one. Candidate creation is currently a source-checkout workflow. Use
+<a href="/guides/evaluating-with-replay/#evaluate-the-candidate-without-installing-it">Evaluate changes with replay</a>
+to compare a prepared candidate, and use the repository's
+<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/embedding.md#materialize-candidate-source">embedding guide</a>
+when creating the descriptor.</p><p>Each component declares its direct namespace dependencies. Selecting a library
+installs its immutable dependency closure, but does not add tools. Mission tools
+still come only from providers installed in <code class="inline">ptc-host.json</code> and selected for
+that mission in <code class="inline">ptc.json</code>.</p><p>Keep reusable components narrow:</p><ul><li>expose a small documented public surface;</li><li>declare signatures where model-written calls benefit from validation;</li><li>keep prompt-visible helpers focused on the task contract;</li><li>separate workflow policy from mission-only task functions; and</li><li>use a new component ID for a permanently customized prompt or loop.</li></ul><p>Use the <a href="/reference/component-contracts/">components-and-preludes reference</a>
 for namespaces, dependency rules, visibility, signatures, shipped library
-selection, compilation, and authority boundaries. The
+selection, compilation, and provider-selection boundaries. The
 <a href="/reference/agent-library-reference/">agent library reference</a> documents the exact
 shipped loop entries and options.</p>
 </article>

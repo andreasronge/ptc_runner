@@ -1,9 +1,10 @@
 # Customize agent components
 
-> **Audience:** advanced application authors replacing shipped prompts,
-> policies, libraries, or complete agent loops.
+Replace shipped prompts, policies, libraries, or complete agent loops when the
+shipped behavior no longer fits.
 
-Most applications select shipped libraries and do not copy their source:
+Most applications select shipped libraries
+and do not copy their source:
 
 ```json
 {
@@ -22,56 +23,24 @@ Start with it, then introduce a custom component under a new ID when the
 application needs different prompts, feedback, retry policy, continuation, or
 completion rules.
 
-## Trial a different core prompt
+## Trial a replacement safely
 
-Selecting `agent.core` also selects its `agent.prompt` dependency. A component
-override can therefore trial a replacement prompt without changing the
-application manifest. The replacement keeps the installed component ID and
-dependencies and must provide the three functions `agent.core` calls:
+Selecting `agent.core` also selects its `agent.prompt` dependency. A verified
+component override can trial another prompt for one invocation without changing
+`ptc.json`. The active bundle remains immutable throughout the run; a later
+invocation compiles and checks the candidate before it can become active.
 
-```clojure
-(ns agent.prompt "Application prompt policy." {:visibility :discoverable})
-
-(defn initial-state [cfg]
-  {:turns-remaining (get cfg "max_turns")})
-
-(defn render {:effect :read} [_state]
-  "Use run_ptc_lisp to solve the task. Return the completed value; do not answer in prose.")
-
-(defn transition [state event]
-  (assoc state :turns-remaining (get event :turns-remaining)))
-```
-
-In a source checkout, save that source as `custom-agent-prompt.clj`, then
-materialize and run the candidate:
-
-```console
-mkdir -p private
-mix ptc.materialize ptc.json \
-  --workflow \
-  --component agent.prompt \
-  --source custom-agent-prompt.clj \
-  --out private/agent-prompt-candidate
-
-mix ptc run ptc.json \
-  --component-override-descriptor private/agent-prompt-candidate/descriptor.json
-```
-
-The descriptor binds the candidate bytes to the exact installed
-`agent.prompt` source they replace. The override applies to this invocation
-only; project files do not store component overrides. See [Evaluate changes
-with replay](evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
-for the descriptor fields and replay comparison.
-
-The active bundle cannot be replaced during its run. A workflow may return
-candidate source as its result, but materialization and execution happen in a
-later host invocation so the replacement is compiled, hashed, and validated
-before it becomes active.
+The standalone executable can run a prepared override descriptor but does not
+create one. Candidate creation is currently a source-checkout workflow. Use
+[Evaluate changes with replay](evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
+to compare a prepared candidate, and use the repository's
+[embedding guide](https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/embedding.md#materialize-candidate-source)
+when creating the descriptor.
 
 Each component declares its direct namespace dependencies. Selecting a library
-installs its immutable dependency closure, but does not grant tool authority.
-Mission tools still come only from providers installed by the operator and
-selected for that mission.
+installs its immutable dependency closure, but does not add tools. Mission tools
+still come only from providers installed in `ptc-host.json` and selected for
+that mission in `ptc.json`.
 
 Keep reusable components narrow:
 
@@ -83,6 +52,6 @@ Keep reusable components narrow:
 
 Use the [components-and-preludes reference](../reference/component-contracts.md)
 for namespaces, dependency rules, visibility, signatures, shipped library
-selection, compilation, and authority boundaries. The
+selection, compilation, and provider-selection boundaries. The
 [agent library reference](../agent-library-reference.md) documents the exact
 shipped loop entries and options.

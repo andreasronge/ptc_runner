@@ -1,18 +1,18 @@
 # Quickstart
 
-> **Audience:** new users verifying the `ptc` executable and running a first
-> model-authored program without writing PTC-Lisp.
+Install `ptc`, verify it without an API key, then run a model-authored program
+without writing PTC-Lisp yourself.
 
-This guide uses an installed standalone executable. The public one-command
-installer is not published yet, so first build the verified executable as
-described under [Installation](../installation/standalone.md). For the local
-image instead, use the complete commands in [Docker installation](../installation/docker.md),
+Download the executable as described under
+[Standalone installation](../installation/standalone.md). For the local image,
+use the complete commands in [Docker installation](../installation/docker.md),
 which account for mounted-file ownership.
 
 ## Run without a credential
 
-Create and run a provider-free project:
+Create and run a project that needs no API key:
 
+<!-- ptc-guide-e2e: id=quickstart-no-api-key frontend=mix scratch=hello-ptc -->
 ```console
 ptc init hello-ptc
 ptc run hello-ptc/ptc-project.json
@@ -24,7 +24,7 @@ ptc run hello-ptc/ptc-project.json
 
 `init` creates an application, a project document with local artifact settings,
 and ignore rules for public and private run artifacts. The first run contacts no
-model or external tool and records a canonical trace and command envelope under
+model or external tool and records a trace and command envelope under
 `hello-ptc/.ptc`.
 
 ## Run a model-authored program
@@ -60,9 +60,9 @@ The tutorial projects record private inspection and grant it to the Viewer, so
 each evaluation shows the PTC-Lisp the model wrote and each prelude component
 shows the source the run loaded.
 
-Credentials belong to the operator-owned host configuration, never the
-application manifest, generated program, or canonical trace. The manifest can
-select the installed model alias but cannot name its endpoint or key.
+Credentials belong in `ptc-host.json`, never in `ptc.json`, a generated
+program, or a trace. `ptc.json` can select the installed model alias but cannot
+name its endpoint or key.
 
 ## Diagnose readiness
 

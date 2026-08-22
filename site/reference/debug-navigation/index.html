@@ -4,14 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Debug-navigation reference · PtcRunner</title>
-<meta name="description" content="A failed run leaves an immutable capture. A second, ordinary PTC run can
-navigate that capture: the boundary failure, the programs the run generated,
-their res…">
+<meta name="description" content="This is the complete frozen-evidence graph and debug.nav contract.">
 <link rel="canonical" href="https://ptc-runner.dev/reference/debug-navigation/">
 <meta property="og:title" content="Debug-navigation reference · PtcRunner">
-<meta property="og:description" content="A failed run leaves an immutable capture. A second, ordinary PTC run can
-navigate that capture: the boundary failure, the programs the run generated,
-their res…">
+<meta property="og:description" content="This is the complete frozen-evidence graph and debug.nav contract.">
 <meta property="og:url" content="https://ptc-runner.dev/reference/debug-navigation/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +25,7 @@ their res…">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,8 +95,8 @@ their res…">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="debug-navigation-reference">Debug-navigation reference</h1><blockquote><p><strong>Audience:</strong> application authors and operators who need the complete frozen
-evidence graph and <code class="inline">debug.nav</code> contract.</p></blockquote><p>A failed run leaves an immutable capture. A second, ordinary PTC run can
+<h1 id="debug-navigation-reference">Debug-navigation reference</h1><p>This is the complete frozen-evidence graph and <code class="inline">debug.nav</code> contract.</p><p>A failed
+run leaves an immutable capture. A second PTC run can
 navigate that capture: the boundary failure, the programs the run generated,
 their results, the prelude source those programs reached, and that source's
 frozen dependencies.</p><p>The substrate is structural. It exposes evidence and typed links; it never
@@ -111,7 +108,7 @@ deterministic walk or a model.</p><h2 id="what-the-evidence-path-looks-like">Wha
   -&gt; referenced prelude source
   -&gt; dependency prelude source
   -&gt; supported diagnosis, or insufficient evidence</code></pre><p>Each arrow is a typed relationship carried on the evidence item itself, so a
-walker never has to guess a filter or reconstruct an identity by hand.</p><h2 id="capture-the-evidence-a-debugger-can-read">Capture the evidence a debugger can read</h2><p>Two artifacts matter, and they carry different authority.</p><p>A <strong>canonical trace</strong> is bounded operational evidence: run and evaluation
+walker never has to guess a filter or reconstruct an identity by hand.</p><h2 id="capture-the-evidence-a-debugger-can-read">Capture the evidence a debugger can read</h2><p>Two artifacts matter, and they carry different authority.</p><p>A <strong>trace</strong> is bounded operational evidence: run and evaluation
 lifecycle, capability names and outcomes, counts, and a sanitized failure
 taxonomy. It contains no prompts, model responses, capability payloads, or
 generated source.</p><p>A failed capability attempt records its closed envelope <code class="inline">kind</code> and <code class="inline">reason</code>
@@ -122,13 +119,13 @@ unrecognized <code class="inline">fail</code> kind is retained only as a one-way
 authority. It adds the frozen component sources, the exact generated programs,
 capability arguments and results, model exchanges, prints, and detailed
 failures. Raised capability callbacks can include their bounded exception
-message and formatted stacktrace here, but never in the correlated canonical
-trace. Those strings may contain secrets or local paths and cannot be reliably
+message and formatted stacktrace here, but never in the correlated trace.
+Those strings may contain secrets or local paths and cannot be reliably
 redacted. Read the artifact only through an authorized private sink, and never
 publish it alongside a normal trace.</p><p>A project document captures both:</p><pre><code class="json language-json">&quot;artifacts&quot;: {&quot;root&quot;: &quot;target/.ptc&quot;, &quot;trace&quot;: true, &quot;inspection&quot;: true, &quot;result&quot;: true, &quot;envelope&quot;: true}</code></pre><p>The equivalent low-level form is <code class="inline">--trace-dir</code> plus <code class="inline">--inspect</code>. See
 <a href="/reference/cli/">Running and debugging</a> for every switch and
 <a href="/reference/project-files/">Project configuration</a> for the artifact layout.</p><p>Inspection requires a trace, because every private record is validated against
-the canonical run it claims to describe.</p><h2 id="give-the-debugger-bounded-navigation-authority">Give the debugger bounded navigation authority</h2><p>The debugger is an ordinary application. Its host document installs the failed
+the run it claims to describe.</p><h2 id="give-the-debugger-bounded-navigation-authority">Give the debugger bounded navigation authority</h2><p>The debugger is an ordinary application. Its host document installs the failed
 run's two directories as snapshot providers:</p><pre><code class="json language-json">{
   &quot;install&quot;: {
     &quot;failed-run-traces&quot;: {
@@ -196,7 +193,7 @@ frozen prelude graph that satisfies its complete positional contract, so a
 malformed or absent graph produces one <code class="inline">incomplete</code> relation rather than a
 guessed edge.</p><h2 id="read-the-evidence-state-honestly">Read the evidence state honestly</h2><p>Every relationship carries one of four states, and a walker that ignores them
 will report confident nonsense:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">State</th><th style="text-align: left;">Meaning</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">complete</code></td><td style="text-align: left;">the host proved this edge; the filters are exact</td></tr><tr><td style="text-align: left;"><code class="inline">incomplete</code></td><td style="text-align: left;">the capture cannot answer, so no claim is made</td></tr><tr><td style="text-align: left;"><code class="inline">ambiguous</code></td><td style="text-align: left;">the target is not uniquely determined; see below</td></tr><tr><td style="text-align: left;"><code class="inline">unavailable</code></td><td style="text-align: left;">a complete search proved there is no such target</td></tr></tbody></table></div><p><code class="inline">incomplete</code> is the honest catch-all for &quot;not established&quot;: a non-terminal or
-truncated canonical run, producer evidence that was cut off, an absent or
+truncated run, producer evidence that was cut off, an absent or
 malformed frozen prelude graph, or a program whose prelude-call analysis was
 never captured. It does not distinguish those causes, and a null-filtered
 <code class="inline">incomplete</code> relation cannot be followed at all.</p><p><code class="inline">unavailable</code> is a finding rather than a gap: the evidence exists and contains
@@ -211,7 +208,7 @@ add an <code class="inline">evidence</code> block reporting canonical completene
 exchanges, and ambiguity counts.</p><p>A diagnosis is supported when every edge it rests on is <code class="inline">complete</code> and the
 pages it read were not truncated. Otherwise the honest report is insufficient
 evidence, naming which edge was missing.</p><h3 id="what-the-completeness-fields-do-and-do-not-claim">What the completeness fields do and do not claim</h3><p>A conversation's <code class="inline">complete?</code> is the conjunction of three specific facts: the
-canonical run reached a terminal event with no dropped events, no expected
+run reached a terminal event with no dropped events, no expected
 model exchange is missing, and no turn or generated-source association is
 ambiguous. It is a statement about the reconstruction, not a promise that every
 field of every record is present. <code class="inline">ptc transcript</code> refuses to write a file at
@@ -219,10 +216,10 @@ all unless <code class="inline">complete?</code> holds, so that field is always 
 transcript; read it over <code class="inline">/api/analysis/runs/{id}/conversation</code>, which applies
 no such gate, when you need it to be able to say no.</p><p>The refusal names which of the three facts failed and by how much, because they
 have different next actions. <code class="inline">transcript/ambiguous_evidence</code> means nothing is
-missing: the canonical run is complete and every expected exchange was
+missing: the run is complete and every expected exchange was
 captured, but some turn or generated-source association resolves to more than
 one predecessor. Re-running does not help; read the ungated route instead.
-<code class="inline">transcript/incomplete_evidence</code> means the canonical trace is not terminal or
+<code class="inline">transcript/incomplete_evidence</code> means the trace is not terminal or
 dropped events, or the inspection artifact does not carry every exchange the
 trace expects — both facts about the capture rather than the reconstruction.</p><h3 id="reaching-the-ungated-reconstruction">Reaching the ungated reconstruction</h3><p><code class="inline">/api/analysis/runs/{id}/conversation</code> is served by <code class="inline">ptc viewer</code> and needs the
 project's private grant. Four separate decisions withhold it — two about the
@@ -234,10 +231,10 @@ the failure it is rather than as a setting the reader could change.
 return. It never reports evidence withheld by policy. A source grant that
 withheld trace files of the other kind reports that separately, as
 <code class="inline">excluded_private_trace_files</code> or <code class="inline">excluded_sanitized_trace_files</code> on a run
-listing or counters query.</p><h3 id="join-on-correlation-ids-never-on-sequence-numbers">Join on correlation ids, never on sequence numbers</h3><p>A transcript turn and a canonical trace event live in different sequence
+listing or counters query.</p><h3 id="join-on-correlation-ids-never-on-sequence-numbers">Join on correlation ids, never on sequence numbers</h3><p>A transcript turn and a trace event live in different sequence
 spaces. Turn <code class="inline">request_sequence</code> orders records inside the inspection snapshot;
 canonical <code class="inline">sequence</code> orders the run's event stream. Turn 1 reporting request
-sequence 12 says nothing about canonical event 12, which is an unrelated
+sequence 12 says nothing about trace event 12, which is an unrelated
 record. Correlation identifiers — <code class="inline">capability-5</code>, <code class="inline">mission-evaluation-9</code> — are
 the same in both artifacts and are the only sound join key.</p><h2 id="run-the-credential-free-example">Run the credential-free example</h2><p>The checked-in example needs no credential or network access. <code class="inline">target/</code> prices
 an order through <code class="inline">orders</code> → <code class="inline">pricing.tax</code>, which branches to <code class="inline">pricing.base</code> and
@@ -286,9 +283,9 @@ the workflow:</p><pre><code class="json language-json">&quot;workflow&quot;: {&q
   &quot;mission&quot;: [{&quot;name&quot;: &quot;debug.nav&quot;}, {&quot;name&quot;: &quot;failed-run-traces&quot;, &quot;config&quot;: {&quot;expose&quot;: false}}]
 }</code></pre><p>Selecting an inspection snapshot fixes the run's class to <code class="inline">private_inspection</code>,
 so the model installation must declare
-<code class="inline">&quot;accepts_data&quot;: [&quot;normal&quot;, &quot;private_inspection&quot;]</code>. That declaration is the
-operator deciding to send captured private evidence — generated source, frozen
-component source, failure detail — to a model vendor. Make it deliberately.</p><p>Name the mission that holds the evidence, and require a result contract with an
+<code class="inline">&quot;accepts_data&quot;: [&quot;normal&quot;, &quot;private_inspection&quot;]</code>. That declaration permits
+captured private evidence, including generated source, frozen component source,
+and failure detail, to be sent to a model vendor. Enable it only when intended.</p><p>Name the mission that holds the evidence, and require a result contract with an
 explicit decision so an abstention is a first-class answer rather than an empty
 diagnosis slot:</p><pre><code class="json language-json">&quot;input&quot;: {&quot;value&quot;: {&quot;task&quot;: &quot;...&quot;, &quot;agent&quot;: {&quot;max_turns&quot;: 14, &quot;mission&quot;: &quot;evidence&quot;}}},
 &quot;contracts&quot;: {&quot;result_schema&quot;: {&quot;path&quot;: &quot;report.schema.json&quot;}}</code></pre><p>The agent loop runs inside one workflow evaluation, so <code class="inline">workflow_timeout_ms</code>

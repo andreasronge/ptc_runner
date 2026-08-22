@@ -1,5 +1,8 @@
 # PTC-Lisp Language Specification
 
+PTC-Lisp is a bounded Clojure-like language for data processing and tool
+calling through explicitly granted capabilities.
+
 **Related docs:**
 - [Clojure Conformance Gaps](clojure-conformance-gaps.md) — tracked deviations from Clojure (bugs, missing features, intentional divergences)
 - [Function Reference](function-reference.md) — supported PTC-Lisp functions and special forms
@@ -4019,7 +4022,7 @@ subset of Java-named methods, constructors, static members, and constants; see
 the [Java Interop Reference](java-interop.md).
 
 **Note:** `println` IS supported — see §8.13. It appends to the evaluation
-result's bounded `prints` list, not stdout or a canonical trace.
+result's bounded `prints` list, not stdout or a trace.
 
 ### 13.1 Anonymous Functions (Supported, With Restrictions)
 
@@ -4583,7 +4586,7 @@ Tool results retained in `tool_calls` are bounded by
 `max_tool_call_result_bytes`; oversized entries retain a preview and truncation
 metadata without changing the value delivered to the program.
 
-A Kernel host additionally emits canonical trace events through its configured
+A Kernel host additionally emits trace events through its configured
 event/inspection sinks. Direct `Lisp.run/2` does not create a persistent log by
 itself; persistence and redaction are host responsibilities.
 

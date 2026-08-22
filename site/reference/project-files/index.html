@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Project-configuration reference · PtcRunner</title>
-<meta name="description" content="Use one explicitly named ptc-project.json to remember stable local paths and
-development preferences:">
+<meta name="description" content="This is the complete local path, artifact, override, and Viewer-preference
+contract.">
 <link rel="canonical" href="https://ptc-runner.dev/reference/project-files/">
 <meta property="og:title" content="Project-configuration reference · PtcRunner">
-<meta property="og:description" content="Use one explicitly named ptc-project.json to remember stable local paths and
-development preferences:">
+<meta property="og:description" content="This is the complete local path, artifact, override, and Viewer-preference
+contract.">
 <meta property="og:url" content="https://ptc-runner.dev/reference/project-files/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -27,6 +27,7 @@ development preferences:">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -96,8 +97,8 @@ development preferences:">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="project-configuration-reference">Project-configuration reference</h1><blockquote><p><strong>Audience:</strong> application authors and operators who need the complete local
-path, artifact, override, and Viewer-preference contract.</p></blockquote><p>Use one explicitly named <code class="inline">ptc-project.json</code> to remember stable local paths and
+<h1 id="project-configuration-reference">Project-configuration reference</h1><p>This is the complete local path, artifact, override, and Viewer-preference
+contract.</p><p>Use one explicitly named <code class="inline">ptc-project.json</code> to remember stable local paths and
 development preferences:</p><pre><code class="console language-console">ptc run ptc-project.json
 ptc doctor ptc-project.json
 ptc doctor ptc-project.json --connect
@@ -112,7 +113,7 @@ ptc run kernel-tutorial/01-orders.ptc-project.json
 ptc viewer kernel-tutorial/01-orders.ptc-project.json</code></pre><p>The provider-backed examples additionally reference the shared host document
 and <code class="inline">kernel-tutorial/.env</code> from their project files. After creating
 that explicitly named environment file, their run commands have the same
-single-argument shape:</p><pre><code class="console language-console">ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><h2 id="keep-the-three-roles-separate">Keep the three roles separate</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">File</th><th style="text-align: left;">Owner</th><th style="text-align: left;">Purpose</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">ptc.json</code></td><td style="text-align: left;">application author or model</td><td style="text-align: left;">workflow, components, input, provider selections, narrower limits</td></tr><tr><td style="text-align: left;"><code class="inline">ptc-host.json</code></td><td style="text-align: left;">operator</td><td style="text-align: left;">installed providers, credential references, commands, endpoints, outer limits</td></tr><tr><td style="text-align: left;"><code class="inline">ptc-project.json</code></td><td style="text-align: left;">operator or project checkout</td><td style="text-align: left;">paths to those files, local artifact policy, Viewer preferences</td></tr></tbody></table></div><p>Credential values and provider declarations do not belong in the project
+single-argument shape:</p><pre><code class="console language-console">ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><h2 id="keep-the-three-files-separate">Keep the three files separate</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">File</th><th style="text-align: left;">What it holds</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">ptc.json</code></td><td style="text-align: left;">workflow, components, input, provider selections, and narrower limits</td></tr><tr><td style="text-align: left;"><code class="inline">ptc-host.json</code></td><td style="text-align: left;">installed providers, credential references, commands, endpoints, and outer limits</td></tr><tr><td style="text-align: left;"><code class="inline">ptc-project.json</code></td><td style="text-align: left;">paths to those files, local artifact policy, and Viewer preferences</td></tr></tbody></table></div><p>Credential values and provider declarations do not belong in the project
 file. Project choices do not become part of application content identity.</p><h2 id="document-shape">Document shape</h2><pre><code class="json language-json">{
   &quot;$schema&quot;: &quot;https://ptc-runner.dev/schemas/ptc-project-config.schema.json&quot;,
   &quot;kind&quot;: &quot;ptc-project&quot;,
@@ -148,7 +149,7 @@ paths resolved beneath the project document's directory; absolute paths and
 <code class="inline">..</code> traversal are rejected. The generated schema is served as <code class="inline">ptc docs schema-project</code>
 (<a href="https://github.com/andreasronge/ptc_runner/blob/main/priv/schemas/ptc-project-config.schema.json"><code class="inline">priv/schemas/ptc-project-config.schema.json</code></a>
 in the repository).</p><p>Inspection requires traces because private records must correlate with a
-canonical run. <code class="inline">viewer.private</code> is a separate explicit local grant: creating a
+matching run. <code class="inline">viewer.private</code> is a separate explicit local grant: creating a
 private artifact does not automatically expose it to Viewer. <code class="inline">viewer.repl</code>
 independently enables the browser REPL, including when <code class="inline">viewer.private</code> is
 <code class="inline">true</code>. REPL evaluations remain fixed to the public <code class="inline">run-analysis-v1</code> profile
@@ -176,7 +177,7 @@ invocation-only. Mission names stay in the application manifest rather than
 being duplicated as project defaults. A project environment file is loaded
 only when inert preparation proves that a selected mission provider or its
 dependency uses an environment-backed credential. Unrelated providers do not
-cause environment-backed credentials to be read. Provider-free runs, passive
+cause environment-backed credentials to be read. Runs without providers, passive
 doctor, Viewer startup, and file- or literal-backed credentials do not read it.
 Viewer-started workflows and missions read the selected file lazily through
 their ordinary command preparation.</p><p>Direct manifest invocation remains the low-level form for automation:</p><pre><code class="console language-console">ptc run ptc.json \

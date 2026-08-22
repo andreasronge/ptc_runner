@@ -1,9 +1,9 @@
 # Debug-navigation reference
 
-> **Audience:** application authors and operators who need the complete frozen
-> evidence graph and `debug.nav` contract.
+This is the complete frozen-evidence graph and `debug.nav` contract.
 
-A failed run leaves an immutable capture. A second, ordinary PTC run can
+A failed
+run leaves an immutable capture. A second PTC run can
 navigate that capture: the boundary failure, the programs the run generated,
 their results, the prelude source those programs reached, and that source's
 frozen dependencies.
@@ -31,7 +31,7 @@ walker never has to guess a filter or reconstruct an identity by hand.
 
 Two artifacts matter, and they carry different authority.
 
-A **canonical trace** is bounded operational evidence: run and evaluation
+A **trace** is bounded operational evidence: run and evaluation
 lifecycle, capability names and outcomes, counts, and a sanitized failure
 taxonomy. It contains no prompts, model responses, capability payloads, or
 generated source.
@@ -48,8 +48,8 @@ A **private inspection artifact** is an explicit `0600` host development
 authority. It adds the frozen component sources, the exact generated programs,
 capability arguments and results, model exchanges, prints, and detailed
 failures. Raised capability callbacks can include their bounded exception
-message and formatted stacktrace here, but never in the correlated canonical
-trace. Those strings may contain secrets or local paths and cannot be reliably
+message and formatted stacktrace here, but never in the correlated trace.
+Those strings may contain secrets or local paths and cannot be reliably
 redacted. Read the artifact only through an authorized private sink, and never
 publish it alongside a normal trace.
 
@@ -64,7 +64,7 @@ The equivalent low-level form is `--trace-dir` plus `--inspect`. See
 [Project configuration](project-files.md) for the artifact layout.
 
 Inspection requires a trace, because every private record is validated against
-the canonical run it claims to describe.
+the run it claims to describe.
 
 ## Give the debugger bounded navigation authority
 
@@ -210,7 +210,7 @@ will report confident nonsense:
 | `unavailable` | a complete search proved there is no such target |
 
 `incomplete` is the honest catch-all for "not established": a non-terminal or
-truncated canonical run, producer evidence that was cut off, an absent or
+truncated run, producer evidence that was cut off, an absent or
 malformed frozen prelude graph, or a program whose prelude-call analysis was
 never captured. It does not distinguish those causes, and a null-filtered
 `incomplete` relation cannot be followed at all.
@@ -239,7 +239,7 @@ evidence, naming which edge was missing.
 ### What the completeness fields do and do not claim
 
 A conversation's `complete?` is the conjunction of three specific facts: the
-canonical run reached a terminal event with no dropped events, no expected
+run reached a terminal event with no dropped events, no expected
 model exchange is missing, and no turn or generated-source association is
 ambiguous. It is a statement about the reconstruction, not a promise that every
 field of every record is present. `ptc transcript` refuses to write a file at
@@ -249,10 +249,10 @@ no such gate, when you need it to be able to say no.
 
 The refusal names which of the three facts failed and by how much, because they
 have different next actions. `transcript/ambiguous_evidence` means nothing is
-missing: the canonical run is complete and every expected exchange was
+missing: the run is complete and every expected exchange was
 captured, but some turn or generated-source association resolves to more than
 one predecessor. Re-running does not help; read the ungated route instead.
-`transcript/incomplete_evidence` means the canonical trace is not terminal or
+`transcript/incomplete_evidence` means the trace is not terminal or
 dropped events, or the inspection artifact does not carry every exchange the
 trace expects — both facts about the capture rather than the reconstruction.
 
@@ -283,10 +283,10 @@ listing or counters query.
 
 ### Join on correlation ids, never on sequence numbers
 
-A transcript turn and a canonical trace event live in different sequence
+A transcript turn and a trace event live in different sequence
 spaces. Turn `request_sequence` orders records inside the inspection snapshot;
 canonical `sequence` orders the run's event stream. Turn 1 reporting request
-sequence 12 says nothing about canonical event 12, which is an unrelated
+sequence 12 says nothing about trace event 12, which is an unrelated
 record. Correlation identifiers — `capability-5`, `mission-evaluation-9` — are
 the same in both artifacts and are the only sound join key.
 
@@ -389,9 +389,9 @@ the workflow:
 
 Selecting an inspection snapshot fixes the run's class to `private_inspection`,
 so the model installation must declare
-`"accepts_data": ["normal", "private_inspection"]`. That declaration is the
-operator deciding to send captured private evidence — generated source, frozen
-component source, failure detail — to a model vendor. Make it deliberately.
+`"accepts_data": ["normal", "private_inspection"]`. That declaration permits
+captured private evidence, including generated source, frozen component source,
+and failure detail, to be sent to a model vendor. Enable it only when intended.
 
 Name the mission that holds the evidence, and require a result contract with an
 explicit decision so an abstention is a first-class answer rather than an empty

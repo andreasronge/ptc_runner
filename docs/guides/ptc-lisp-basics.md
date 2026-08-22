@@ -1,8 +1,7 @@
 # Read and write PTC-Lisp
 
-> **Audience:** anyone meeting PTC-Lisp for the first time: to read what a
-> model wrote in a trace, or to try the language by hand before building
-> anything.
+Read what a model wrote in a trace, or try the language by hand before building
+anything.
 
 PTC-Lisp is the small, bounded, Clojure-like language the model writes its
 mission programs in. You can learn to read it in ten minutes, and the fastest

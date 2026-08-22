@@ -92,11 +92,6 @@ p code, li code, td code, .schema code {
 }
 .schema h3 a { text-decoration: none; }
 .schema h3 a:hover { text-decoration: underline; }
-.schema .role {
-  display: inline-block; font-size: .72rem; text-transform: uppercase;
-  letter-spacing: .07em; color: var(--muted); border: 1px solid var(--border);
-  border-radius: 999px; padding: .1rem .55rem; margin-bottom: .55rem;
-}
 .schema p { margin: 0; font-size: .93rem; color: var(--muted); }
 .schema .url {
   display: block; margin-top: .5rem; font-size: .8rem;

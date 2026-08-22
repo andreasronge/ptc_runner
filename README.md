@@ -12,7 +12,7 @@ act.
 
 Here the loop is an ordinary library, written in the same bounded language the
 model writes its own programs in. Everything about the agent is replaceable,
-and nothing replaceable carries authority. You can change what the agent does
+and replacing it does not add permissions. You can change what the agent does
 without expanding what it may do.
 
 That language is also how tools get called: the model writes one small program
@@ -29,12 +29,13 @@ to stand up.
 
 ## Try it
 
-The public one-command installer and published container image are not
-available yet. The command interface is stable enough to try today through a
-locally built standalone executable or the verified local container. See
-[Installation](docs/installation/standalone.md) for where each route stands.
+Download the self-contained macOS arm64 archive and its checksum from [GitHub
+Releases](https://github.com/andreasronge/ptc_runner/releases), then follow the
+[standalone installation](docs/installation/standalone.md). The published
+container image is still planned; the Docker page documents the verified local
+image available today.
 
-Once `ptc` is installed, create and run a credential-free project:
+Once `ptc` is installed, create and run a project that needs no API key:
 
 ```console
 ptc init hello-ptc

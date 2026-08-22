@@ -1,11 +1,13 @@
 # Install models and tools
 
-> **Audience:** operators installing credentials, model routes, MCP tools, and
-> outer policy independently of an application.
+Use `ptc-host.json` to install credentials, model routes, MCP tools, and outer
+limits separately from an application.
 
-The host document is the authority boundary. An application may select and
-narrow an installed alias, but it cannot create one or change its credentials,
-endpoint, command, effects, or ceilings.
+`ptc.json` may select an installed alias
+and ask for less, but it cannot create one or change its credentials, endpoint,
+command, effects, or ceilings.
+
+## How do I install a model?
 
 Install one model alias with a credential read from the process environment:
 
@@ -39,6 +41,8 @@ Plain `doctor` validates configuration without loading credentials or dialing
 providers. `--connect` is an explicit connectivity probe and may consume remote
 resources.
 
+## How do I install an MCP server?
+
 Install MCP tools with the same separation: the host fixes the transport and
 public tool mapping, while the application selects the alias and may narrow a
 write-bearing tool set. The `workspace` alias selected in
@@ -63,10 +67,12 @@ second entry under the same `install` object:
 }
 ```
 
-The upstream operation name and server command belong to the server you run;
-the public `as` name and its `read` or `write` effect are the operator's
-choice. Follow [Connect an MCP tool](connecting-tools-with-mcp.md) for one
-complete workflow against a checked-in server.
+The upstream operation name and server command belong to the server you run.
+You choose the public `as` name and its `read` or `write` effect. Follow
+[Connect an MCP tool](connecting-tools-with-mcp.md) for one complete workflow
+against a checked-in server.
+
+## Where is the complete contract?
 
 The [host-configuration reference](../reference/host-installation.md) owns the
 complete credential forms, provider sources, transport rules, OAuth behavior,

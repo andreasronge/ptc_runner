@@ -1,9 +1,6 @@
 # Design an agent workflow
 
-> **Audience:** application authors turning a real task into their first
-> multi-stage agent design.
-
-Design a small support-inbox agent in three runnable steps: grant the data,
+Design a small support-inbox agent in three runnable steps: provide the data,
 move the rules into code, then split the work between specialists.
 
 Each step answers one design question — where does the data live, where do
@@ -100,7 +97,7 @@ the core of code-mode design: judgment in the model, policy in reviewable
 code. [Customize agent components](components-and-preludes.md) covers the
 component and signature rules this step relies on.
 
-## Step 3: split authority between specialists
+## Step 3: give each specialist only what it needs
 
 The final step routes each breached ticket to a team. Classification is
 model judgment, but routing is policy — and the routing stage needs none of

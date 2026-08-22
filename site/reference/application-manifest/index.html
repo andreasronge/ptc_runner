@@ -4,14 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Application-manifest reference · PtcRunner</title>
-<meta name="description" content="A manifest declares one runnable PTC-Lisp application: code, input, provider
-selections, limits, events, and optional trace labels. Loading is strict,
-path-con…">
+<meta name="description" content="This is the complete contract for ptc.json.">
 <link rel="canonical" href="https://ptc-runner.dev/reference/application-manifest/">
 <meta property="og:title" content="Application-manifest reference · PtcRunner">
-<meta property="og:description" content="A manifest declares one runnable PTC-Lisp application: code, input, provider
-selections, limits, events, and optional trace labels. Loading is strict,
-path-con…">
+<meta property="og:description" content="This is the complete contract for ptc.json.">
 <meta property="og:url" content="https://ptc-runner.dev/reference/application-manifest/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +25,7 @@ path-con…">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,7 +95,8 @@ path-con…">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="application-manifest-reference">Application-manifest reference</h1><blockquote><p><strong>Audience:</strong> application authors who need the complete manifest contract.</p></blockquote><p>A manifest declares one runnable PTC-Lisp application: code, input, provider
+<h1 id="application-manifest-reference">Application-manifest reference</h1><p>This is the complete contract for <code class="inline">ptc.json</code>.</p><p>A manifest declares one runnable
+PTC-Lisp application: code, input, provider
 selections, limits, events, and optional trace labels. Loading is strict,
 path-confined, and inert; it executes no workflow or provider callback.</p><p>The JSON Schema served as <code class="inline">ptc docs schema-manifest</code>
 (<code class="inline">priv/schemas/ptc-application-manifest.schema.json</code> in the repository) is the
@@ -225,7 +223,7 @@ falls back implicitly. Each selected alias may set <code class="inline">config.m
 requests to that model; the host install's <code class="inline">ceilings.max_calls</code> is the outer
 ceiling (catalog default 2048 when omitted). An alias cap binds only when it is
 stricter than the public <code class="inline">llm-request</code> per-name budget.</p><p>For MCP, <code class="inline">allow</code> selects installed public names without changing their
-operator-declared effects. It may be omitted only when every installed mapping
+effects declared in <code class="inline">ptc-host.json</code>. It may be omitted only when every installed mapping
 is read-only. If any mapping is a write, an explicit non-empty list is
 required. <code class="inline">model_visible</code> may narrow discovery within the authorized names;
 visibility never grants or denies call authority.</p><p>Native trace and inspection aliases derive three navigation capabilities:
@@ -233,7 +231,7 @@ visibility never grants or denies call authority.</p><p>Native trace and inspect
 filters; <code class="inline">read</code> returns one native bounded page. Public trace sources provide
 the <code class="inline">activity</code> collection and return <code class="inline">evidence_unavailable</code> for private
 collections. An inspection alias composes its
-required canonical trace snapshot with authorized private records. Set the
+required trace snapshot with authorized private records. Set the
 trace dependency's config to <code class="inline">{&quot;expose&quot;: false}</code> when only the aggregate
 inspection namespace should be callable.</p><p>Snapshot acquisition is fail closed and immutable: malformed, duplicate,
 orphaned, or oversized evidence rejects the capture rather than exposing a
@@ -241,7 +239,7 @@ partial catalog. Private inspection also requires every selected provider to
 accept the <code class="inline">private_inspection</code> data class before any directory opens.</p><p>Treat the workflow bundle and manifest as application code. Treat
 model-generated source, mission input, file content, and provider output as
 untrusted data. <a href="/reference/host-installation/">Host configuration</a> documents the
-operator side of every provider source.</p><h2 id="narrow-installed-limits">Narrow installed limits</h2><p>Manifest limits are positive hard ceilings:</p><pre><code class="json language-json">&quot;limits&quot;: {
+installed side of every provider source.</p><h2 id="narrow-installed-limits">Narrow installed limits</h2><p>Manifest limits are positive hard ceilings:</p><pre><code class="json language-json">&quot;limits&quot;: {
   &quot;run_duration_ms&quot;: 30000,
   &quot;workflow_capability_calls&quot;: 16,
   &quot;workflow_capability_calls_per_name&quot;: 8,
@@ -252,9 +250,9 @@ operator side of every provider source.</p><h2 id="narrow-installed-limits">Narr
 }</code></pre><p>The host installs maximums. A manifest may request a lower or equal value;
 omission uses the normal runtime default capped by a lower installed ceiling.
 Limits also bound time, heaps, concurrency, retained definitions/history,
-source, capability values, and canonical events.</p><p>Installed-only operational timeouts cannot appear in a manifest. The generated
+source, capability values, and trace events.</p><p>Installed-only operational timeouts cannot appear in a manifest. The generated
 <a href="/reference/kernel-limits-reference/">Kernel limits reference</a> lists every name,
-meaning, unit, default, range, and scope.</p><h2 id="choose-event-privacy-and-labels">Choose event privacy and labels</h2><p>Normal canonical events are sanitized and bounded:</p><pre><code class="json language-json">&quot;events&quot;: {&quot;policy&quot;: &quot;normal&quot;}</code></pre><p><code class="inline">&quot;private&quot;</code> changes canonical trace discovery and sink requirements. It does
+meaning, unit, default, range, and scope.</p><h2 id="choose-event-privacy-and-labels">Choose event privacy and labels</h2><p>Trace events are sanitized and bounded:</p><pre><code class="json language-json">&quot;events&quot;: {&quot;policy&quot;: &quot;normal&quot;}</code></pre><p><code class="inline">&quot;private&quot;</code> changes trace discovery and sink requirements. It does
 not create a prompt/response transcript. Exact model exchanges, generated
 programs, connector payloads, and prints require the separate host-selected
 inspection artifact; a manifest cannot enable or choose that destination.</p><p>Optional labels support trace grouping:</p><pre><code class="json language-json">&quot;labels&quot;: {

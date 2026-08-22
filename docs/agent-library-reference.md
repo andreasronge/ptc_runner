@@ -376,11 +376,11 @@ The terminal exhaustion transition is fail-only and available only to the
 shipped `agent.core` prelude. It revalidates the final candidate against the
 host's frozen result contract and creates no additional candidate-bearing
 record. The candidate does not enter public errors, command envelopes,
-canonical events, or ordinary logs. Existing authorized private inspection can
+trace events, or ordinary logs. Existing authorized private inspection can
 still contain the model response and generated source that produced it.
 
-An outer `fail` value is not copied into the public Kernel error or canonical
-trace. Framework failure kinds remain readable; application-defined scalar
+An outer `fail` value is not copied into the public Kernel error or trace.
+Framework failure kinds remain readable; application-defined scalar
 kinds become stable fingerprints. Exact failure values, prompts, generated
 source, and capability payloads require an authorized private inspection
 artifact. Built-in LLM adapters retain only a bounded provider status and

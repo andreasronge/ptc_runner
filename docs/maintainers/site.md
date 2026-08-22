@@ -104,64 +104,11 @@ carried a token, which is what a renamed or deleted placeholder looks like, and
 when any `@BUILD_*@` token survives into the artifact. Without those two checks
 a page could publish a footer that quietly lost half its stamp.
 
-## The diagrams
+## The diagram
 
-Both are image-model output, not hand-drawn assets, so the prompts below are
-their source. Keep them together: without the prompt a diagram can only be
-replaced, never amended.
-
-They are a pair and must stay stylistically identical — same palette, same flat
-vector treatment, same title placement. A replacement for one that does not
-match the other reads as a mistake on the page.
-
-### `site/authority-narrows.webp`
-
-> A clean flat vector technical diagram, wide landscape, no 3D, no gradients,
-> no shadows, no photorealism. Warm off-white background (#F8F5EF). Title, upper
-> left, bold geometric sans, deep navy (#1B2A4A): "Authority only narrows".
-> THREE NESTED ROUNDED RECTANGLES, each visibly smaller and inset within the
-> previous one, showing containment. 1. Outermost, near full width, navy 2px
-> outline, label centred at its top: "OPERATOR" in bold sans, beneath it
-> "ptc-host.json" in monospace, beneath that a row of three small pill chips:
-> "credentials", "endpoints", "outer ceilings". A small padlock glyph beside
-> "credentials" with tiny italic caption: "never travels down". 2. Inset inside
-> it, roughly 70% of its width, navy outline: "AUTHOR", "ptc.json" in monospace,
-> three chips: "aliases", "missions", "limits". The area of the outer rectangle
-> NOT covered by this one is filled with light grey diagonal hatching, labelled
-> once in small grey italic: "not selected". 3. Inside the AUTHOR rectangle, two
-> separate rounded rectangles side by side with a clear vertical gap between
-> them, never touching: left — "WORKFLOW", "trusted policy", "holds the model";
-> right — "MISSION", "model-written program", "holds the tools". In the gap, a
-> short vertical burnt-orange rule with small italic label: "splits, never
-> merges". Down the left margin, one slim burnt-orange (#C4562A) arrow running
-> top to bottom across all three layers, with vertical italic label: "selects
-> from, never adds to". Typography: bold geometric sans for layer names and
-> title, monospace for filenames, small grey italic for annotations. Palette
-> limited to navy, burnt orange, warm off-white, and one grey for the hatching.
-> Generous white space, crisp thin strokes, everything aligned to a grid.
-
-The generated PNG was 1647x955 and 1.2 MB. What ships is
-`cwebp -q 92 <original>.png -o site/authority-narrows.webp` — 104 KB, verified
-free of ringing on the smallest text at 2x. Re-encode from an original rather
-than from the WebP if the diagram is ever regenerated.
-
-Two things to check on any replacement, because both are load-bearing rather
-than cosmetic:
-
-- **Every label must be spelled exactly.** The filenames `ptc-host.json` and
-  `ptc.json` are the whole point; a dropped hyphen is wrong on a page about
-  exact documents.
-- **The nesting and the hatching are the argument.** Each layer sits inside the
-  one above it, and the hatched band left around the author box is the authority
-  that was not selected. Drop the remainder and the picture asserts narrowing
-  instead of showing it. The two innermost boxes may span the full width of the
-  author box: the split divides selected authority into two disjoint halves, it
-  does not shrink it again.
-
-The image carries a light background in both themes. A dark-mode variant would
-need a second render with the background at `#16150F` and text at `#ECE7DD`,
-served through `<picture>` with `prefers-color-scheme`. The same applies to the
-second diagram.
+The diagram is image-model output, not a hand-drawn asset, so the prompt below
+is its source. Without the prompt, the diagram can only be replaced, never
+amended.
 
 ### `site/loop-is-a-library.webp`
 

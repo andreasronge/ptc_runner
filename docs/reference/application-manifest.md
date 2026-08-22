@@ -1,8 +1,9 @@
 # Application-manifest reference
 
-> **Audience:** application authors who need the complete manifest contract.
+This is the complete contract for `ptc.json`.
 
-A manifest declares one runnable PTC-Lisp application: code, input, provider
+A manifest declares one runnable
+PTC-Lisp application: code, input, provider
 selections, limits, events, and optional trace labels. Loading is strict,
 path-confined, and inert; it executes no workflow or provider callback.
 
@@ -220,7 +221,7 @@ ceiling (catalog default 2048 when omitted). An alias cap binds only when it is
 stricter than the public `llm-request` per-name budget.
 
 For MCP, `allow` selects installed public names without changing their
-operator-declared effects. It may be omitted only when every installed mapping
+effects declared in `ptc-host.json`. It may be omitted only when every installed mapping
 is read-only. If any mapping is a write, an explicit non-empty list is
 required. `model_visible` may narrow discovery within the authorized names;
 visibility never grants or denies call authority.
@@ -230,7 +231,7 @@ Native trace and inspection aliases derive three navigation capabilities:
 filters; `read` returns one native bounded page. Public trace sources provide
 the `activity` collection and return `evidence_unavailable` for private
 collections. An inspection alias composes its
-required canonical trace snapshot with authorized private records. Set the
+required trace snapshot with authorized private records. Set the
 trace dependency's config to `{"expose": false}` when only the aggregate
 inspection namespace should be callable.
 
@@ -242,7 +243,7 @@ accept the `private_inspection` data class before any directory opens.
 Treat the workflow bundle and manifest as application code. Treat
 model-generated source, mission input, file content, and provider output as
 untrusted data. [Host configuration](host-installation.md) documents the
-operator side of every provider source.
+installed side of every provider source.
 
 ## Narrow installed limits
 
@@ -263,7 +264,7 @@ Manifest limits are positive hard ceilings:
 The host installs maximums. A manifest may request a lower or equal value;
 omission uses the normal runtime default capped by a lower installed ceiling.
 Limits also bound time, heaps, concurrency, retained definitions/history,
-source, capability values, and canonical events.
+source, capability values, and trace events.
 
 Installed-only operational timeouts cannot appear in a manifest. The generated
 [Kernel limits reference](../kernel-limits-reference.md) lists every name,
@@ -271,13 +272,13 @@ meaning, unit, default, range, and scope.
 
 ## Choose event privacy and labels
 
-Normal canonical events are sanitized and bounded:
+Trace events are sanitized and bounded:
 
 ```json
 "events": {"policy": "normal"}
 ```
 
-`"private"` changes canonical trace discovery and sink requirements. It does
+`"private"` changes trace discovery and sink requirements. It does
 not create a prompt/response transcript. Exact model exchanges, generated
 programs, connector payloads, and prints require the separate host-selected
 inspection artifact; a manifest cannot enable or choose that destination.

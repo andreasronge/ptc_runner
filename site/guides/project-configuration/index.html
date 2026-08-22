@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Keep a runnable project together · PtcRunner</title>
-<meta name="description" content="ptc-project.json remembers paths and local artifact preferences. It is not an
-application manifest and cannot grant model or tool authority.">
+<meta name="description" content="Use ptc-project.json as one stable command target for local runs, traces,
+results, and the Viewer.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/project-configuration/">
 <meta property="og:title" content="Keep a runnable project together · PtcRunner">
-<meta property="og:description" content="ptc-project.json remembers paths and local artifact preferences. It is not an
-application manifest and cannot grant model or tool authority.">
+<meta property="og:description" content="Use ptc-project.json as one stable command target for local runs, traces,
+results, and the Viewer.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/project-configuration/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -27,6 +27,7 @@ application manifest and cannot grant model or tool authority.">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -96,17 +97,18 @@ application manifest and cannot grant model or tool authority.">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="keep-a-runnable-project-together">Keep a runnable project together</h1><blockquote><p><strong>Audience:</strong> application authors and operators who want one stable command
-for local runs, traces, results, and the Viewer.</p></blockquote><p><code class="inline">ptc-project.json</code> remembers paths and local artifact preferences. It is not an
-application manifest and cannot grant model or tool authority.</p><p>Create and run one:</p><pre><code class="console language-console">ptc init my-project
+<h1 id="keep-a-runnable-project-together">Keep a runnable project together</h1><p>Use <code class="inline">ptc-project.json</code> as one stable command target for local runs, traces,
+results, and the Viewer.</p><p>It remembers paths and local artifact preferences but
+cannot add a model or tool.</p><h2 id="how-do-i-create-a-project">How do I create a project?</h2><p>Create and run one:</p><pre><code class="console language-console">ptc init my-project
 ptc run my-project/ptc-project.json
-ptc viewer my-project/ptc-project.json</code></pre><p>The project document keeps three responsibilities separate:</p><ul><li><code class="inline">application.path</code> points to the application manifest;</li><li><code class="inline">host.path</code> and an optional environment-file path belong to the operator;</li><li><code class="inline">artifacts</code> and <code class="inline">viewer</code> describe local outputs and inspection preferences.</li></ul><p>Paths resolve from the project document rather than from the caller's current
+ptc viewer my-project/ptc-project.json</code></pre><p>The project document keeps three responsibilities separate:</p><ul><li><code class="inline">application.path</code> points to the application manifest;</li><li><code class="inline">host.path</code> points to installed providers, and <code class="inline">host.env_file</code> may name one
+exact environment file;</li><li><code class="inline">artifacts</code> and <code class="inline">viewer</code> describe local outputs and inspection preferences.</li></ul><p>Paths resolve from the project document rather than from the caller's current
 directory, so the same command works from another directory. Command-line
 overrides remain invocation choices and do not rewrite the project.
 <code class="inline">ptc viewer PROJECT.json --env-file FILE</code> overrides <code class="inline">host.env_file</code> for work
 launched from the Live tab; no <code class="inline">.env</code> path is discovered implicitly.</p><p>Commit the project and application configuration when they contain no secrets.
 Keep credential values and private run artifacts outside version control. New
-projects include the required artifact ignore patterns.</p><p>Use the <a href="/reference/project-files/">project-configuration reference</a>
+projects include the required artifact ignore patterns.</p><h2 id="where-is-the-complete-contract">Where is the complete contract?</h2><p>Use the <a href="/reference/project-files/">project-configuration reference</a>
 for the complete document shape, path resolution, override precedence,
 artifact layout, and Viewer settings.</p>
 </article>

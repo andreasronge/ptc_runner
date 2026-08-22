@@ -4,14 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Standalone installation · PtcRunner</title>
-<meta name="description" content="The standalone release contains its runtime. A target machine does not need
-Elixir, Erlang, Python, Node.js, or a separately installed sandbox to run a
-provide…">
+<meta name="description" content="Install the self-contained ptc executable from GitHub Releases.">
 <link rel="canonical" href="https://ptc-runner.dev/installation/standalone/">
 <meta property="og:title" content="Standalone installation · PtcRunner">
-<meta property="og:description" content="The standalone release contains its runtime. A target machine does not need
-Elixir, Erlang, Python, Node.js, or a separately installed sandbox to run a
-provide…">
+<meta property="og:description" content="Install the self-contained ptc executable from GitHub Releases.">
 <meta property="og:url" content="https://ptc-runner.dev/installation/standalone/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +25,7 @@ provide…">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,25 +95,23 @@ provide…">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="standalone-installation">Standalone installation</h1><blockquote><p><strong>Audience:</strong> operators installing the self-contained <code class="inline">ptc</code> executable on a
-supported machine.</p></blockquote><p>The standalone release contains its runtime. A target machine does not need
-Elixir, Erlang, Python, Node.js, or a separately installed sandbox to run a
-provider-free application or an agent whose external tools are remote.</p><h2 id="current-availability">Current availability</h2><p>The repository builds and verifies a relocatable macOS arm64 archive, but the
-current public release predates that packaging path and does not contain the
-archive. A one-command installer must not be advertised until a published
-release carries the verified asset and adjacent checksum.</p><p>For now, build the archive from a source checkout as described in
-<a href="/installation/source/">Source installation</a>, or use the local <a href="/installation/docker/">Docker image</a>.
-A one-command installer will become the default only after a public release
-contains the verified asset it downloads.</p><h2 id="artifact-contract">Artifact contract</h2><p>A packaged archive is named <code class="inline">ptc-VERSION-macos-ARCH.tar.gz</code> and ships with an
+<h1 id="standalone-installation">Standalone installation</h1><p>Install the self-contained <code class="inline">ptc</code> executable from GitHub Releases.</p><p>A target machine does not need Elixir, Erlang, Python, Node.js, or a separately
+installed sandbox to run an application that needs no API key or an agent
+whose external tools are remote.</p><h2 id="download-the-release">Download the release</h2><p>Open <a href="https://github.com/andreasronge/ptc_runner/releases">GitHub Releases</a> and
+download the macOS arm64 archive together with its adjacent <code class="inline">.sha256</code> file.
+Release archives use this name:</p><pre><code class="text language-text">ptc-VERSION-macos-arm64.tar.gz</code></pre><p>Verify the checksum before extracting the archive:</p><pre><code class="console language-console">shasum -a 256 -c ptc-VERSION-macos-arm64.tar.gz.sha256
+tar -xzf ptc-VERSION-macos-arm64.tar.gz
+./ptc/bin/ptc --version</code></pre><p>Move the complete extracted <code class="inline">ptc</code> directory to a stable location and add its
+<code class="inline">bin</code> directory to your <code class="inline">PATH</code>. Keep the release tree together; the launcher
+uses the runtime and libraries beside it.</p><h2 id="artifact-contract">Artifact contract</h2><p>A packaged archive is named <code class="inline">ptc-VERSION-macos-arm64.tar.gz</code> and ships with an
 adjacent SHA-256 file. It records its minimum supported macOS version in
 <code class="inline">MINIMUM_MACOS</code>.</p><p>macOS archives are ad-hoc signed. They are not Developer ID signed and are not
-notarized. Verify the adjacent checksum before extracting an archive. A browser
-download carrying a quarantine flag may require the operator to remove that
-flag before the first run.</p><p>After extraction, verify the executable before using credentials:</p><pre><code class="console language-console">ptc --version
+notarized. A browser download carrying a quarantine flag may require you to
+remove that flag before the first run.</p><p>After extraction, verify the executable before using credentials:</p><pre><code class="console language-console">ptc --version
 ptc init hello-ptc
 ptc run hello-ptc/ptc-project.json</code></pre><p>External MCP servers retain their own runtime and installation requirements.
 The standalone executable removes PtcRunner's toolchain requirement; it does
-not silently bundle every server an operator may choose to grant.</p>
+not silently bundle every server you may choose to connect.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/evaluating-with-replay/">&larr; Evaluate changes with replay</a><a class="pager-next" href="/installation/docker/">Docker installation &rarr;</a></nav>
 <footer>

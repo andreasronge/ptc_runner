@@ -1,9 +1,9 @@
 # Docker installation
 
-> **Audience:** operators building or running the self-contained PtcRunner
-> container image.
+Build and run the self-contained PtcRunner container image.
 
-Linux is currently verified through a local container scaffold. A public image
+Linux is currently
+verified through a local container scaffold. A public image
 and multi-architecture publication contract are still pending, so there is no
 registry name that the documentation can truthfully present as an installation
 today.

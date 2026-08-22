@@ -4,14 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Configure an application · PtcRunner</title>
-<meta name="description" content="A PtcRunner application declares code, input, selected providers, missions,
-and narrower limits in ptc.json. The document can select only names that the
-operat…">
+<meta name="description" content="Use ptc.json to declare code, input, selected providers, missions, and limits.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/manifests-and-capabilities/">
 <meta property="og:title" content="Configure an application · PtcRunner">
-<meta property="og:description" content="A PtcRunner application declares code, input, selected providers, missions,
-and narrower limits in ptc.json. The document can select only names that the
-operat…">
+<meta property="og:description" content="Use ptc.json to declare code, input, selected providers, missions, and limits.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/manifests-and-capabilities/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -29,6 +25,7 @@ operat…">
 <ul>
 <li><a href="/guides/quickstart/">Quickstart</a></li>
 <li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
 <li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
 </ul>
 
@@ -98,11 +95,8 @@ operat…">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="configure-an-application">Configure an application</h1><blockquote><p><strong>Audience:</strong> application authors assembling a PtcRunner workflow and its
-bounded mission environments.</p></blockquote><p>A PtcRunner application declares code, input, selected providers, missions,
-and narrower limits in <code class="inline">ptc.json</code>. The document can select only names that the
-operator installed. It cannot add credentials, endpoints, commands, or wider
-authority.</p><p>Start with a generated project:</p><pre><code class="console language-console">ptc init my-application
+<h1 id="configure-an-application">Configure an application</h1><p>Use <code class="inline">ptc.json</code> to declare code, input, selected providers, missions, and limits.</p><p>The document can select only names installed by <code class="inline">ptc-host.json</code>. It cannot add
+credentials, endpoints, commands, or permissions.</p><h2 id="how-do-i-start-an-application">How do I start an application?</h2><p>Start with a generated project:</p><pre><code class="console language-console">ptc init my-application
 ptc run my-application/ptc-project.json</code></pre><p>The generated application is deliberately small:</p><pre><code class="json language-json">{
   &quot;version&quot;: 1,
   &quot;workflow&quot;: {
@@ -110,7 +104,11 @@ ptc run my-application/ptc-project.json</code></pre><p>The generated application
     &quot;entry&quot;: &quot;main/run&quot;
   },
   &quot;input&quot;: {&quot;value&quot;: {&quot;name&quot;: &quot;world&quot;}}
-}</code></pre><p>Add a provider only after the operator has installed its alias. Every provider
+}</code></pre><h2 id="how-do-i-run-the-same-application-on-new-data">How do I run the same application on new data?</h2><p>Keep stable default input in <code class="inline">ptc.json</code>. For one run, put another JSON object in
+a file such as <code class="inline">input.json</code>:</p><pre><code class="json language-json">{&quot;name&quot;:&quot;Ada&quot;}</code></pre><p>Pass it with <code class="inline">--input</code>. The path resolves relative to <code class="inline">ptc.json</code> first, so this
+works even when the command runs from another directory:</p><pre><code class="console language-console">ptc run my-application/ptc-project.json --input input.json</code></pre><p>Use <code class="inline">--private-input</code> instead when the input must not appear in ordinary output
+or traces. Private input also requires private output handling; see the
+<a href="/reference/cli/#run-a-manifest">command-line reference</a>.</p><h2 id="how-do-i-select-a-provider">How do I select a provider?</h2><p>Add a provider only after <code class="inline">ptc-host.json</code> has installed its alias. Every provider
 the application uses is selected at the top level, under <code class="inline">providers.workflow</code>
 for model access the trusted workflow holds, and under <code class="inline">providers.mission</code> for
 the task tools that missions running model-authored programs may hold. Add both
@@ -128,7 +126,19 @@ scopes to the manifest above:</p><pre><code class="json language-json">{
 }</code></pre><p>A mission's own <code class="inline">providers</code> list can only narrow what <code class="inline">providers.mission</code>
 already selected; naming an alias there does not introduce it, and a name
 absent from <code class="inline">providers.mission</code> is rejected. Omitting a name is the point: the
-grant is then absent from that mission's environment.</p><p>Install the aliases first, then validate. Both commands resolve the selected
+grant is then absent from that mission's environment.</p><h2 id="how-do-i-stop-a-long-or-expensive-run">How do I stop a long or expensive run?</h2><p>Set runtime ceilings under <code class="inline">limits</code> and cap model calls on the selected alias:</p><pre><code class="json language-json">{
+  &quot;providers&quot;: {
+    &quot;workflow&quot;: [{&quot;name&quot;: &quot;model&quot;, &quot;config&quot;: {&quot;max_calls&quot;: 6}}]
+  },
+  &quot;limits&quot;: {
+    &quot;run_duration_ms&quot;: 60000,
+    &quot;workflow_capability_calls&quot;: 12
+  }
+}</code></pre><p><code class="inline">run_duration_ms</code> bounds the whole run. <code class="inline">max_calls</code> bounds calls to that model
+alias, while <code class="inline">workflow_capability_calls</code> covers all workflow capability calls.
+The installed ceilings in <code class="inline">ptc-host.json</code> remain the maximum values <code class="inline">ptc.json</code>
+may request. See the <a href="/reference/kernel-limits-reference/">limits reference</a> for every
+ceiling and its default.</p><h2 id="how-do-i-check-the-configuration">How do I check the configuration?</h2><p>Install the aliases first, then validate. Both commands resolve the selected
 providers against the host document, so they report the selected provider as
 not installed until <a href="/guides/host-configuration/">host configuration</a> declares
 <code class="inline">model</code> and <code class="inline">workspace</code>:</p><pre><code class="console language-console">ptc validate my-application/ptc-project.json

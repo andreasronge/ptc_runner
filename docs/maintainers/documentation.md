@@ -50,9 +50,19 @@ Implementation-language guidance belongs in installation pages when a source
 build requires it, API/module documentation, the package `usage-rules.md`, or
 `docs/maintainers/`.
 
-Every hand-written installation page, guide, reference, and maintainer page
-starts with a visible audience statement. Generated references instead name
-their owning catalog or schema and warn against direct edits.
+Every hand-written guide and installation page starts with a plain summary of
+one or two sentences after its title. The site uses the first paragraph for
+cards and metadata, so it must describe the outcome instead of opening with a
+prerequisite, command fragment, or internal audience label. Reference pages
+start with a short scope statement. Maintainer pages may keep a visible
+audience statement when it helps distinguish repository work from product use.
+
+Published product prose addresses the reader as `you` when needed and names
+the file that owns a decision. Prefer `ptc-host.json installs` and `ptc.json
+selects` over invented roles such as "operator" or "application author". Team
+ownership varies; the two-file boundary does not. Security references may use
+`authority` when it describes a precise permission contract, but guides should
+name the model, tool, data, or limit that is actually available.
 
 Code documentation must not link to `docs/plans/` or other disposable planning
 records. Before implementation lands, move durable contracts into owning module
@@ -131,7 +141,10 @@ mix ptc run examples/kernel-tutorial/01-orders.ptc-project.json
 ```
 ````
 
-Add `requires=ENVIRONMENT_VARIABLE` when the command needs a credential. The
+Add `requires=ENVIRONMENT_VARIABLE` when the command needs a credential. Add
+`frontend=mix` to an end-user `ptc` block when the test should run the same
+arguments through the source-checkout `mix ptc` frontend; standalone packaging
+is verified by the release gate. The
 helper in `test/support/guide_examples.ex` turns each annotation into an ExUnit
 test after the guide path is added to
 `test/support/executable_guides.txt`. That registry is shared by the test,
@@ -159,7 +172,7 @@ reader uses.
 
 ## Style and tone
 
-- Write for the API user or maintainer, leading with what the component does.
+- Lead with what the reader can accomplish or what the component does.
 - Use plain language, active voice, and present tense for implemented behavior.
 - Use `must` for normative requirements, `may` for permitted choices, and
   explicit future tense for plans.
@@ -170,6 +183,10 @@ reader uses.
 - Keep examples domain-neutral unless the API itself is domain-specific.
 - State security, bounds, side effects, ownership, and failure behavior where
   users need them; do not bury important constraints in implementation notes.
+- Give every guide enough `##` headings to make its tasks visible when skimmed.
+- Define a term on first use when the reader needs it to complete the page.
+  Link to the concepts or reference page for the complete vocabulary instead
+  of front-loading it before the first runnable workflow.
 
 ## Update and verify documentation
 
