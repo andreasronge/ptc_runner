@@ -86,13 +86,26 @@ defmodule PtcRunner.Kernel.SelectionRulesDiagnostic do
       "oneOf" => [
         %{"const" => fallback},
         %{"const" => @unknown_property},
-        pattern(@prefix <> @field <> @field_invalid_suffix),
-        pattern(@prefix <> @field <> @members_suffix),
-        pattern(@prefix <> @field <> @subset_middle <> @field),
-        pattern(@prefix <> @field <> @write_required_suffix),
-        pattern(@prefix <> @field <> @required_when_middle <> @field <> @required_when_suffix),
-        pattern(@prefix <> @field <> @required_suffix),
-        pattern(@prefix <> @field <> @ceiling_suffix)
+        field_pattern(@field_invalid_suffix),
+        field_pattern(@members_suffix),
+        pattern(
+          DiagnosticPattern.exact(
+            DiagnosticPattern.escape(@prefix) <>
+              @field <>
+              DiagnosticPattern.escape(@subset_middle) <> @field
+          )
+        ),
+        field_pattern(@write_required_suffix),
+        pattern(
+          DiagnosticPattern.exact(
+            DiagnosticPattern.escape(@prefix) <>
+              @field <>
+              DiagnosticPattern.escape(@required_when_middle) <>
+              @field <> DiagnosticPattern.escape(@required_when_suffix)
+          )
+        ),
+        field_pattern(@required_suffix),
+        field_pattern(@ceiling_suffix)
       ]
     }
   end
@@ -176,13 +189,22 @@ defmodule PtcRunner.Kernel.SelectionRulesDiagnostic do
     end
   end
 
-  defp pattern(body) do
+  defp pattern(body) when is_binary(body) do
     %{
       "type" => "string",
+      "minLength" => 1,
       "maxLength" => @max_message_bytes,
-      "pattern" => DiagnosticPattern.exact(body)
+      "pattern" => body
     }
   end
 
-  defp valid_name?(name), do: is_binary(name) and name =~ @field_name
+  defp field_pattern(suffix) when is_binary(suffix) do
+    pattern(
+      DiagnosticPattern.exact(
+        DiagnosticPattern.escape(@prefix) <> @field <> DiagnosticPattern.escape(suffix)
+      )
+    )
+  end
+
+  defp valid_name?(name), do: name =~ @field_name
 end

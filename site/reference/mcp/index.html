@@ -193,8 +193,10 @@ not see an unrestricted filesystem or the server command.</p><h2 id="install-and
 }</code></pre><p><code class="inline">read_text_file</code> is the upstream name. <code class="inline">workspace.read</code> is the stable public
 capability name exposed by PtcRunner. Change <code class="inline">installation_revision</code> whenever
 the transport, mapping, effect, snapshot policy, or server behavior changes.</p><p>The required <code class="inline">effect</code> declaration in <code class="inline">ptc-host.json</code> is authoritative; server
-annotations cannot change it. <code class="inline">model_visible</code> controls prompt discovery, not
-call authority. <code class="inline">error_feedback: &quot;bounded&quot;</code> may expose up to 1,024 bytes of
+annotations cannot change it. <code class="inline">model_visible</code> on a host mapping is the default
+for prompt discovery, not a ceiling: a selecting manifest may still list that
+name in <code class="inline">config.model_visible</code>. Visibility never grants or denies call
+authority. <code class="inline">error_feedback: &quot;bounded&quot;</code> may expose up to 1,024 bytes of
 validated server error text as untrusted model feedback, so enable it only when
 the server cannot return secrets, paths, or stack traces.</p><h2 id="select-less-authority-in-the-manifest">Select less authority in the manifest</h2><p>The application selects the installed alias in its mission provider list:</p><pre><code class="json language-json">&quot;providers&quot;: {
   &quot;mission&quot;: [
