@@ -27,6 +27,40 @@ artifact and attaches it, with its `.sha256`, to a draft GitHub release. That
 release stays a draft until a maintainer publishes it, exactly as the launcher
 release does.
 
+After the canonical verification job passes, the root release workflow calls
+`.github/workflows/container-release.yml`. That reusable workflow builds and
+drives the finished image on native Linux AMD64 and ARM64 runners. For a root
+`vX.Y.Z` tag, each runner pushes its tested image by digest. The workflow
+assembles those exact digests into one multi-platform manifest, attests and
+verifies it, and only then creates the exact version tag under
+`ghcr.io/andreasronge/ptc_runner`. It adds signed GitHub build provenance for
+the manifest digest. A direct manual dispatch runs both native verification
+jobs without logging in or publishing.
+
+Only three-part release versions are accepted, and the only supported image
+tag is the exact version. The workflow treats that tag as non-moving, refuses
+to replace one, and creates no moving aliases. GHCR does not enforce this as
+registry-level tag immutability, so deployments should pin the repository digest
+and verify its attestation. Run-scoped `staging-*` references are publication
+internals, not release names, and consumers must not use them. The first package
+publication under the repository owner defaults to private in GHCR; before
+publishing the GitHub release, change that package to public once and confirm
+an unauthenticated pull. Public visibility cannot later be reversed.
+
+After the container workflow is green, verify the signed subject from an
+authenticated GitHub CLI and GHCR session:
+
+```bash
+release_tag=vX.Y.Z
+image="ghcr.io/andreasronge/ptc_runner:${release_tag#v}"
+gh attestation verify "oci://$image" \
+  --repo andreasronge/ptc_runner \
+  --signer-workflow \
+    andreasronge/ptc_runner/.github/workflows/container-release.yml \
+  --source-ref "refs/tags/$release_tag" \
+  --deny-self-hosted-runners
+```
+
 The assembled release and the container image carry the `ptc_viewer`
 companion, so the packaged `ptc viewer` command works from an extracted tarball
 with no toolchain beside it. The Hex package does not: `ptc_viewer` is
@@ -38,11 +72,11 @@ sources still compile at `prod` with the companion absent. Do not turn that
 into an optional Hex requirement without publishing the package first; Hex
 cannot resolve a requirement naming a package that does not exist.
 
-Those artifacts are ad-hoc signed — not Developer ID signed, not notarized —
+The macOS artifacts are ad-hoc signed — not Developer ID signed, not notarized —
 and the installation documentation must say so in those words. macOS arm64 is
-the only published target: macOS x86_64 and the Linux container images require
-their own target evidence first, and publishing one without it is out of
-contract.
+the only standalone target; the published Linux container covers AMD64 and
+ARM64. macOS x86_64 still requires its own target evidence, and publishing it
+without that evidence is out of contract.
 
 Hex and HexDocs publication is a separate, explicit maintainer action performed
 from the tagged `main` commit. Publish the package with

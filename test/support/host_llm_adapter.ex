@@ -17,6 +17,12 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
       raise ArgumentError, "unknown registry: FakeAdapter.Finch"
     end
 
+    if Application.get_env(:ptc_runner, :host_llm_test_block, false) do
+      receive do
+        :host_llm_test_unblock -> :ok
+      end
+    end
+
     Application.get_env(
       :ptc_runner,
       :host_llm_test_result,

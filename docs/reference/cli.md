@@ -67,7 +67,9 @@ it spent nothing. A failure that did activate one reports
 `"llm_usage_state": "unavailable"` and a null list rather than claiming zero:
 the request may have been billed with no result left to account for it. As in a
 run, `total_cost` is omitted when any call could not be priced, and
-`missing_usage_calls` counts the calls a provider reported no tokens for.
+`missing_usage_calls` counts calls whose usage may exist but was not observed,
+including an in-flight request stopped by the run clock. It is not limited to
+successful completions.
 
 ## Read the embedded documentation
 
@@ -168,13 +170,20 @@ For runs that produce a validated terminal event batch, `execution.usage`
 includes `llm_usage` grouped by alias and installation revision,
 `llm_usage_by_model` grouped by an attested public resolved model, and
 `unattributed_model_calls`. Rows report call counts, usage-presence counts, and
-summed token and `total_cost` values. A row includes `total_cost` only when
-every successful call has valid usage that reports cost; otherwise the
-aggregate cost remains unknown and is omitted, not reported as zero.
+summed token and `total_cost` values. Terminal accounting pairs each
+`llm-request` `capability-started` with its `capability-stopped` by
+`capability_id`. An unmatched start is one observed call with unknown usage:
+`calls` increments, `successful_calls` does not, and `missing_usage_calls`
+increments. A row includes `total_cost` only when every call that could carry
+usage has valid priced usage; an unmatched or unpriced call leaves the
+aggregate cost unknown and omitted, not reported as zero, while measured
+input/output totals are retained. `llm_usage_state: "available"` means the
+terminal batch could be reconstructed, not that every call supplied usage.
 `llm_usage_state: "unavailable"` pairs all three
-aggregate fields with `null` when terminal evidence cannot be validated, while
-preserving other known usage. Non-empty `events_dropped` means an available
-summary covers retained evidence and may not be complete.
+aggregate fields with `null` when terminal evidence cannot be validated,
+including dropped `capability-started` or `capability-stopped` events, while
+preserving other known usage. Non-empty `events_dropped` for other event types
+means an available summary covers retained evidence and may not be complete.
 
 Artifact publication currently requires a Unix host with POSIX-compatible
 `mkdir` and `id`; trace append also needs `sh` and either `lockf` or `flock`.
@@ -710,12 +719,13 @@ mapping reachable, and the host-side exposure decision moves to the publish
 rule:
 
 ```console
+image=ghcr.io/andreasronge/ptc_runner:VERSION
 docker run --rm \
   --user "$(id -u):$(id -g)" \
   --env HOME=/tmp \
   -p 127.0.0.1:4123:4123 \
   -v "$PWD:/work" \
-  ptc:dev viewer /work/ptc-project.json --listen 0.0.0.0
+  "$image" viewer /work/ptc-project.json --listen 0.0.0.0 --port 4123
 ```
 
 The `127.0.0.1:` prefix on `-p` is what keeps this equivalent to a loopback

@@ -18,8 +18,8 @@ belongs in guides or retained specifications.
 ## Remaining Kernel product work
 
 - [`lisp-kernel/stable-cli-contract.md`](lisp-kernel/stable-cli-contract.md)
-  retains only the unfinished macOS x86_64 and container distribution evidence
-  and final acceptance work for the completed standalone command.
+  retains only the first GHCR publication, macOS x86_64 evidence, and final
+  acceptance work for the completed standalone command.
 - [`lisp-kernel/product-readiness.md`](lisp-kernel/product-readiness.md)
   tracks the remaining diagnostics, model-boundary, distribution, and release
   work.

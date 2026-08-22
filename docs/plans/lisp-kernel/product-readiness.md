@@ -18,8 +18,8 @@ expertise.
 | --- | --- | --- | --- |
 | P1 | Model protocol | Host-installed LLMs freeze bounded sampling options, but structured-output schema, reasoning controls, an explicit provider timeout, and enforceable token or cost ceilings remain outside the public configuration surface. | Deployments cannot yet express richer model contracts or complete operational budgets. |
 | P1 | Trace operation | A malformed, duplicate, or oversized trace can make a directory source fail as a whole, and trace persistence remains post-run. | One damaged file can hide healthy runs and a crash can lose buffered events. |
-| P1 | Distribution | The macOS arm64 archive is published and carries the Viewer, but macOS x86_64 and multi-architecture container images are not published. | Intel Mac and container deployments still require local release assembly or a source checkout. |
-| P1 | End-to-end evidence | Cross-target packaged-install, private-sink/loss, real multi-page Viewer, and complete shell-driven application journeys remain absent. | Large-artifact, packaging, and cross-command regressions can escape normal gates. |
+| P1 | Distribution | macOS ARM64 is published and Linux AMD64/ARM64 publication is automated, but the first public container release and macOS x86_64 evidence remain. | Container users still need the next root release tag; Intel Mac users have no artifact. |
+| P1 | End-to-end evidence | Packaged-install, private-sink/loss, real multi-page Viewer, and complete shell-driven application journeys remain absent. | Large-artifact, packaging, and cross-command regressions can escape normal gates. |
 | P2 | Viewer pagination | Cursor APIs, accumulation, and partial labeling have focused tests, but no valid run above 100 events has been exercised through repeated browser pagination. | Ordering, duplication, or final-cursor defects can remain despite API coverage. |
 | P2 | Source diagnostics | Parser, compiler, and runtime failures do not consistently retain precise source spans across every boundary. | Larger bundles take longer to repair. |
 | P2 | Language expectations | PTC-Lisp is Clojure-oriented rather than a full Clojure implementation. | Familiar-looking programs can encounter unsupported functions or intentional recoverable-signal differences. |
@@ -33,10 +33,9 @@ The remaining target and acceptance work is tracked in
 The shared parser, command engine, Mix frontend, standalone release, REPL,
 human rendering, caller-named V2 envelope publication, exit statuses, and
 package verification are implemented. Retain one contract across those
-frontends while adding target-native evidence for:
-
-- macOS arm64 and x86_64 artifacts; and
-- Linux amd64 and arm64 container images.
+frontends while adding the remaining macOS x86_64 target evidence. macOS ARM64
+and the native Linux AMD64/ARM64 container gates are implemented; the first
+container tag still has to prove the public-registry boundary.
 
 **Exit gate:** all four architectures build and run the packaged verification
 journey, documentation states the unsigned macOS limitation, and no packaging
@@ -97,6 +96,16 @@ ships in the assembled release and the container image, and the packaged
 command is verified serving a trace by the standalone release gate. Remaining
 here: operational health checks for the packaged runtime and its optional
 launcher.
+
+Complete the one-command installer: select a supported artifact, verify its
+adjacent checksum, fail clearly on unsupported targets, document upgrades and
+removal, and exercise that exact installation path on a clean runner.
+
+Add a self-contained first-agent scaffold that uses the shipped agent library,
+needs no external MCP process or language runtime, records a trace and command
+envelope, keeps private inspection disabled by default, and asks for only one
+credential or model choice. Cover it with deterministic command tests and a
+scheduled real-model probe.
 
 A service frontend may add job submission, cancellation, concurrency control,
 tenant isolation, and durable results only when deployments require it; it is

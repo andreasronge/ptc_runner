@@ -668,4 +668,111 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     assert outcome.envelope["error"]["code"] == "internal_error"
     assert MapSet.difference(host_installation_owners(), owners_before) == MapSet.new()
   end
+
+  @tag :tmp_dir
+  @tag timeout: 30_000
+  test "an in-flight LLM call cancelled by a timeout reports missing usage", %{tmp_dir: directory} do
+    keys = [:llm_adapter, :host_llm_test_owner, :host_llm_test_block, :host_llm_test_result]
+
+    previous = Map.new(keys, &{&1, Application.fetch_env(:ptc_runner, &1)})
+
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+    Application.put_env(:ptc_runner, :host_llm_test_block, true)
+
+    on_exit(fn ->
+      Enum.each(previous, fn
+        {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
+        {key, :error} -> Application.delete_env(:ptc_runner, key)
+      end)
+    end)
+
+    host_path =
+      write_host_config(directory, "timeout-inflight", %{
+        "credentials" => %{"key" => %{"literal" => "test-key"}},
+        "install" => %{
+          "model" => %{
+            "source" => "llm",
+            "installation_revision" => "model-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          }
+        }
+      })
+
+    manifest =
+      valid_manifest(%{
+        "workflow" => %{
+          "components" => [
+            %{"id" => "app", "path" => "main.clj", "dependencies" => ["llm"]},
+            %{"library" => "llm"}
+          ],
+          "entry" => "app/run"
+        },
+        "providers" => %{
+          "workflow" => [%{"name" => "model", "config" => %{}}],
+          "mission" => []
+        },
+        "limits" => %{
+          "evaluation_timeout_ms" => 15_000,
+          "workflow_timeout_ms" => 1_000,
+          "run_duration_ms" => 30_000
+        }
+      })
+
+    application =
+      write_application(directory, "timeout-inflight", manifest, %{
+        "main.clj" => ~S|(ns app) (defn run [_input] (llm/request {"messages" []}))|
+      })
+
+    # Dispatcher emits `capability-started` before invoking the adapter, so
+    # receiving the blocked request is the synchronization that the start is
+    # already in the terminal batch. The evaluation is then killed while the
+    # provider worker is still blocked, leaving no matching stop. The workflow
+    # clock is the binding limit so that kill wins against the dispatcher's
+    # provider-await timer: when `run_duration_ms` is the tighter bound, that
+    # timer can emit a matched failed stop (`missing_usage_calls` stays 0).
+    # No sleep.
+    task =
+      Task.async(fn ->
+        CommandEngine.dispatch(["run", application, "--host-config", host_path])
+      end)
+
+    receive do
+      {:host_llm_ensure_ready, _pid} ->
+        assert_receive {:host_llm_request, _model, _request}, 10_000
+
+      {:host_llm_request, _model, _request} ->
+        :ok
+    after
+      10_000 ->
+        flunk("did not observe the in-flight LLM request after capability-started")
+    end
+
+    assert {:error, %CommandOutcome{} = outcome} = Task.await(task, 15_000)
+    assert outcome.envelope["error"]["code"] in ["run_timeout", "runtime_limit_exceeded"]
+
+    usage = outcome.envelope["execution"]["usage"]
+    assert usage["llm_usage_state"] == "available"
+
+    expected_counters = %{
+      "calls" => 1,
+      "successful_calls" => 0,
+      "usage_calls" => 0,
+      "missing_usage_calls" => 1,
+      "usage" => %{}
+    }
+
+    assert [row] = usage["llm_usage"]
+    assert Map.take(row, Map.keys(expected_counters)) == expected_counters
+    assert row["alias"] == "model"
+    assert row["installation_revision"] == "model-v1"
+    refute Map.has_key?(row["usage"], "total_cost")
+
+    alias_calls = Enum.reduce(usage["llm_usage"], 0, &(&2 + &1["calls"]))
+    model_calls = Enum.reduce(usage["llm_usage_by_model"], 0, &(&2 + &1["calls"]))
+    assert model_calls + usage["unattributed_model_calls"] == alias_calls
+
+    assert_schema_valid(outcome.envelope)
+  end
 end

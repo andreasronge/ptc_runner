@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Docker installation · PtcRunner</title>
-<meta name="description" content="Build and run the self-contained PtcRunner container image.">
+<meta name="description" content="Install the self-contained Linux AMD64 or ARM64 image and run the PtcRunner CLI,
+Viewer, and stdio launcher without a build toolchain.">
 <link rel="canonical" href="https://ptc-runner.dev/installation/docker/">
 <meta property="og:title" content="Docker installation · PtcRunner">
-<meta property="og:description" content="Build and run the self-contained PtcRunner container image.">
+<meta property="og:description" content="Install the self-contained Linux AMD64 or ARM64 image and run the PtcRunner CLI,
+Viewer, and stdio launcher without a build toolchain.">
 <meta property="og:url" content="https://ptc-runner.dev/installation/docker/">
 <meta property="og:type" content="article">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#9883;</text></svg>">
@@ -95,24 +97,62 @@
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="docker-installation">Docker installation</h1><p>Build and run the self-contained PtcRunner container image.</p><p>Linux is currently
-verified through a local container scaffold. A public image
-and multi-architecture publication contract are still pending, so there is no
-registry name that the documentation can truthfully present as an installation
-today.</p><p>Build and verify the local image from a source checkout:</p><pre><code class="console language-console">scripts/build_container_image.sh</code></pre><p>The script produces <code class="inline">ptc:dev</code>, runs the standalone verification inside the
-finished image, probes that image without adding packages, and confirms it runs
-as a non-root user.</p><p>Run an application through an explicit mount. Match the container process to
-the host user so owner-only credentials remain readable and project artifacts
-remain writable; use a writable container home for runtime-local files:</p><pre><code class="console language-console">docker run --rm \
+<h1 id="docker-installation">Docker installation</h1><p>Install the self-contained Linux AMD64 or ARM64 image and run the PtcRunner CLI,
+Viewer, and stdio launcher without a build toolchain.</p><p>Images are published as <code class="inline">ghcr.io/andreasronge/ptc_runner</code> starting with the
+first root release after the container publication workflow lands. Older
+releases are not backfilled. The image does not contain runtimes used by
+external MCP servers.</p><h2 id="pull-and-verify-the-image">Pull and verify the image</h2><p>Use an exact version tag for deployments:</p><pre><code class="console language-console">version=VERSION
+image=&quot;ghcr.io/andreasronge/ptc_runner:$version&quot;
+docker pull &quot;$image&quot;
+docker run --rm &quot;$image&quot; --version</code></pre><p>Replace <code class="inline">VERSION</code> with a three-part release version such as <code class="inline">0.14.0</code>. The release
+workflow creates each exact version tag once and refuses to replace one. GHCR
+does not enforce that policy as registry-level tag immutability, so pin the
+pulled repository digest and verify its attestation in automated deployments.
+There are no moving <code class="inline">latest</code> or <code class="inline">MAJOR.MINOR</code> tags; PtcRunner is 0.x and breaking
+changes are expected.</p><p>Each image has signed GitHub build provenance. Verification requires GitHub CLI
+authentication and a registry login, including for a public image:</p><pre><code class="console language-console">gh auth refresh --scopes read:packages
+gh auth token | docker login ghcr.io \
+  --username &quot;$(gh api user --jq .login)&quot; --password-stdin
+gh attestation verify &quot;oci://$image&quot; \
+  --repo andreasronge/ptc_runner \
+  --signer-workflow \
+    andreasronge/ptc_runner/.github/workflows/container-release.yml \
+  --source-ref &quot;refs/tags/v$version&quot; \
+  --deny-self-hosted-runners</code></pre><p>The added <code class="inline">read:packages</code> scope allows Docker to authenticate to GHCR. A classic
+personal access token carrying <code class="inline">read:packages</code> can be used instead.</p><h2 id="run-a-project">Run a project</h2><p>Map the container process to the host user so owner-only credentials remain
+readable and project artifacts remain writable. Supply a writable home for
+runtime-local files:</p><pre><code class="console language-console">docker run --rm \
   --user &quot;$(id -u):$(id -g)&quot; \
   --env HOME=/tmp \
   --volume &quot;$PWD:/work&quot; \
-  ptc:dev run /work/ptc-project.json</code></pre><p>Do not run this form from a root shell. A root host UID would also select root
-inside the container and discard the image's non-root default.</p><p>Open an interactive REPL:</p><pre><code class="console language-console">docker run --rm -it \
+  &quot;$image&quot; init /work/hello-ptc
+
+docker run --rm \
   --user &quot;$(id -u):$(id -g)&quot; \
   --env HOME=/tmp \
   --volume &quot;$PWD:/work&quot; \
-  ptc:dev repl</code></pre><p>The Viewer binds to the container's loopback unless explicitly told otherwise,
+  &quot;$image&quot; run /work/hello-ptc/ptc-project.json</code></pre><p>The generated project keeps traces and command envelopes under its mounted
+<code class="inline">.ptc</code> directory, so <code class="inline">--rm</code> does not discard them. Do not run this form from a
+root shell: a root host UID would also select root inside the container and
+discard the image's non-root default. Without <code class="inline">--user</code>, the image runs as its
+built-in <code class="inline">ptc</code> user with UID and GID 10001.</p><p>Mount host configuration and dotenv files only where the project expects them.
+PTC's <code class="inline">--env-file</code> appears after the image name and is distinct from Docker's
+option of the same name:</p><pre><code class="console language-console">docker run --rm \
+  --user &quot;$(id -u):$(id -g)&quot; \
+  --env HOME=/tmp \
+  --volume &quot;$PWD:/work&quot; \
+  &quot;$image&quot; run /work/hello-ptc/ptc-project.json \
+    --env-file /work/hello-ptc/.env</code></pre><p>Remote model and credential-based MCP providers work normally. A stdio MCP
+server runs inside the container namespace: its executable and runtime must be
+Linux-compatible and present in the image or an explicit mount. In particular,
+the published image does not add Node.js or <code class="inline">npx</code>. Build a derived image when a
+local MCP server needs another runtime. The runtime-included frontend also does
+not initiate interactive MCP OAuth authorization; authorize through a
+supported embedding host or use a provider that can execute non-interactively.</p><h2 id="open-a-repl">Open a REPL</h2><p>Allocate a terminal for interactive editing and history:</p><pre><code class="console language-console">docker run --rm -it \
+  --user &quot;$(id -u):$(id -g)&quot; \
+  --env HOME=/tmp \
+  --volume &quot;$PWD:/work&quot; \
+  &quot;$image&quot; repl</code></pre><h2 id="open-the-viewer">Open the Viewer</h2><p>The Viewer binds to the container's loopback unless explicitly told otherwise,
 which a published port cannot reach. Bind the wildcard only inside the
 container and keep the host publication on loopback:</p><pre><code class="console language-console">viewer_token=&quot;$(openssl rand -hex 32)&quot;
 docker run --rm \
@@ -121,11 +161,13 @@ docker run --rm \
   --env PTC_VIEWER_TOKEN=&quot;$viewer_token&quot; \
   -p 127.0.0.1:4123:4123 \
   -v &quot;$PWD:/work&quot; \
-  ptc:dev viewer /work/ptc-project.json --listen 0.0.0.0</code></pre><p>Open <code class="inline">http://localhost:4123/?live_token=$viewer_token#/live</code>. The page removes
-the token from the visible URL after bootstrapping and uses it for Live
-mutations. The Runs trace browser itself remains unauthenticated.</p><p>Writing <code class="inline">-p 4123:4123</code> instead exposes an unauthenticated trace browser to the
-network. The <code class="inline">127.0.0.1:</code> prefix is the host-side security decision.</p><p>The published-image route will become the default only after the target matrix
-and immutable image tags have release evidence.</p>
+  &quot;$image&quot; viewer /work/hello-ptc/ptc-project.json \
+    --listen 0.0.0.0 --port 4123</code></pre><p>Open <code class="inline">http://localhost:4123/?live_token=$viewer_token#/live</code>. The page removes
+the token from the visible URL after bootstrapping and uses it for Live reads
+and mutations. The Runs trace browser itself remains unauthenticated.</p><p>Writing <code class="inline">-p 4123:4123</code> instead exposes that unauthenticated trace browser to the
+network. The <code class="inline">127.0.0.1:</code> prefix is the host-side security decision.</p><h2 id="build-from-a-checkout">Build from a checkout</h2><p>Maintainers can build and verify one local platform without publishing it:</p><pre><code class="console language-console">scripts/build_container_image.sh</code></pre><p>The script produces <code class="inline">ptc:dev</code>, runs the standalone verification inside the
+image, probes the finished image without adding packages, and confirms it runs
+as a non-root user.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/installation/standalone/">&larr; Standalone installation</a><a class="pager-next" href="/installation/source/">Source installation &rarr;</a></nav>
 <footer>

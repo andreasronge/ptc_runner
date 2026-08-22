@@ -99,9 +99,10 @@ without writing PTC-Lisp yourself.">
 <article>
 <h1 id="quickstart">Quickstart</h1><p>Install <code class="inline">ptc</code>, verify it without an API key, then run a model-authored program
 without writing PTC-Lisp yourself.</p><p>Download the executable as described under
-<a href="/installation/standalone/">Standalone installation</a>. For the local image,
-use the complete commands in <a href="/installation/docker/">Docker installation</a>,
-which account for mounted-file ownership.</p><h2 id="run-without-a-credential">Run without a credential</h2><p>Create and run a project that needs no API key:</p><pre><code class="console language-console">ptc init hello-ptc
+<a href="/installation/standalone/">Standalone installation</a>. Starting with the
+next root release, the <a href="/installation/docker/">Docker image</a> provides the
+same command interface; its installation page gives the complete mounted-file
+and ownership form.</p><h2 id="run-without-a-credential">Run without a credential</h2><p>Create and run a project that needs no API key:</p><pre><code class="console language-console">ptc init hello-ptc
 ptc run hello-ptc/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;greeting&quot;:&quot;hello world&quot;}</code></pre><p><code class="inline">init</code> creates an application, a project document with local artifact settings,
 and ignore rules for public and private run artifacts. The first run contacts no
 model or external tool and records a trace and command envelope under
