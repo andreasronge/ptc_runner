@@ -4,6 +4,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
   import ExUnit.CaptureIO
 
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.LLM.ReqLLMPreparedModel
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.MCPHTTPFixture
 
@@ -37,6 +38,134 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
              )
 
     assert_receive {:request_body, %{"max_tokens" => 4_096}}
+  end
+
+  test "carries normalized truncation and the configured effective request cap", %{test: test} do
+    expect_request(test, "x-ai/grok-4.3", finish_reason: "length", content: "")
+
+    assert {:ok,
+            %{
+              content: "",
+              finish_reason: :length,
+              output_limit: %{
+                name: :max_tokens,
+                value: 4_096,
+                bindings: [:configured]
+              }
+            }} =
+             ReqLLMAdapter.generate_with_tools(
+               "openrouter:x-ai/grok-4.3",
+               [%{role: :user, content: "hi"}],
+               [tool_schema()],
+               api_key: "test",
+               max_tokens: 4_096,
+               req_http_options: [plug: {Req.Test, test}]
+             )
+
+    assert_receive {:request_body, %{"max_tokens" => 4_096}}
+  end
+
+  test "records every binding tied for the computed effective request cap" do
+    model =
+      LLMDB.Model.new!(%{
+        id: "binding-test",
+        provider: :openrouter,
+        limits: %{output: 4_096, context: 100_000}
+      })
+
+    assert {4_096, [:adapter_default, :model_output_limit]} =
+             ReqLLMAdapter.effective_output_limit([], model, [%{role: :user, content: "hi"}])
+  end
+
+  test "treats a namespaced provider output budget as configured truncation provenance", %{
+    test: test
+  } do
+    expect_request(test, "Qwen/Qwen3-30B-A3B-Instruct-2507",
+      finish_reason: "length",
+      content: ""
+    )
+
+    assert {:ok,
+            %{
+              finish_reason: :length,
+              output_limit: %{value: 8_192, bindings: [:configured]}
+            }} =
+             ReqLLMAdapter.generate_with_tools(
+               "nearai:Qwen/Qwen3-30B-A3B-Instruct-2507",
+               [%{role: :user, content: "hi"}],
+               [tool_schema()],
+               api_key: "test",
+               provider_options: [nearai: [max_completion_tokens: 8_192]],
+               req_http_options: [plug: {Req.Test, test}]
+             )
+
+    assert_receive {:request_body, %{"max_tokens" => 8_192}}
+  end
+
+  test "does not invent provenance when a provider rewrites the request cap", %{test: test} do
+    model =
+      LLMDB.Model.new!(%{
+        id: "accounts/fireworks/models/test-model",
+        provider: :fireworks_ai,
+        limits: %{output: 32_768, context: 128_000}
+      })
+
+    prepared = %ReqLLMPreparedModel{
+      selector: "fireworks_ai:accounts/fireworks/models/test-model",
+      model: model
+    }
+
+    expect_request(test, model.id, finish_reason: "length", content: "")
+
+    assert {:ok, %{finish_reason: :length} = response} =
+             ReqLLMAdapter.generate_with_tools(
+               prepared,
+               [%{role: :user, content: "hi"}],
+               [tool_schema()],
+               api_key: "test",
+               max_tokens: 8_192,
+               req_http_options: [plug: {Req.Test, test}]
+             )
+
+    refute Map.has_key?(response, :output_limit)
+    assert_receive {:request_body, %{"max_tokens" => 4_096}}
+  end
+
+  test "does not invent provenance for conflicting configured limits", %{test: test} do
+    expect_request(test, "Qwen/Qwen3-30B-A3B-Instruct-2507",
+      finish_reason: "length",
+      content: ""
+    )
+
+    assert {:ok, %{finish_reason: :length} = response} =
+             ReqLLMAdapter.generate_with_tools(
+               "nearai:Qwen/Qwen3-30B-A3B-Instruct-2507",
+               [%{role: :user, content: "hi"}],
+               [tool_schema()],
+               api_key: "test",
+               max_tokens: 8_192,
+               provider_options: [nearai: [max_completion_tokens: 4_096]],
+               req_http_options: [plug: {Req.Test, test}]
+             )
+
+    refute Map.has_key?(response, :output_limit)
+    assert_receive {:request_body, %{"max_tokens" => 8_192}}
+  end
+
+  test "does not claim a wire cap for the OpenAI Codex transport" do
+    model =
+      LLMDB.Model.new!(%{
+        id: "future-chat-1408",
+        provider: :openai_codex,
+        limits: %{output: 32_768, context: 128_000}
+      })
+
+    assert :unknown =
+             ReqLLMAdapter.effective_output_limit(
+               [max_tokens: 4_096],
+               model,
+               [%{role: :user, content: "hi"}]
+             )
   end
 
   test "does not raise the default above a smaller cataloged output limit", %{test: test} do
@@ -242,15 +371,15 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     refute warnings =~ "req_llm.ex"
   end
 
-  defp expect_request(test, response_model) do
-    Req.Test.expect(test, request_handler(self(), response_model))
+  defp expect_request(test, response_model, opts \\ []) do
+    Req.Test.expect(test, request_handler(self(), response_model, opts))
   end
 
   defp stub_requests(test, response_model) do
-    Req.Test.stub(test, request_handler(self(), response_model))
+    Req.Test.stub(test, request_handler(self(), response_model, []))
   end
 
-  defp request_handler(test_pid, response_model) do
+  defp request_handler(test_pid, response_model, opts) do
     fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       send(test_pid, {:request_body, Jason.decode!(body)})
@@ -261,13 +390,30 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
         "choices" => [
           %{
             "index" => 0,
-            "finish_reason" => "stop",
-            "message" => %{"role" => "assistant", "content" => "ok"}
+            "finish_reason" => Keyword.get(opts, :finish_reason, "stop"),
+            "message" => %{
+              "role" => "assistant",
+              "content" => Keyword.get(opts, :content, "ok")
+            }
           }
         ],
         "usage" => %{"prompt_tokens" => 1, "completion_tokens" => 1, "total_tokens" => 2}
       })
     end
+  end
+
+  defp tool_schema do
+    %{
+      "type" => "function",
+      "function" => %{
+        "name" => "run_ptc_lisp",
+        "description" => "Run a program",
+        "parameters" => %{
+          "type" => "object",
+          "properties" => %{"program" => %{"type" => "string"}}
+        }
+      }
+    }
   end
 
   defp set_bedrock_region(region) do

@@ -533,6 +533,24 @@ only as a one-way fingerprint (`kind_fingerprint` / `reason_fingerprint`).
 Arguments, results, details, and messages stay off this event. Successful
 stops omit these fields.
 
+A successful routed `llm-request` stop carries the router-owned installation
+`alias` and `installation_revision`, plus normalized usage when supplied. For
+non-streaming tool responses it may also carry the normalized `finish_reason`.
+When that reason is `length` and the adapter can authenticate the cap after
+provider request normalization, `output_limit` records `name: "max_tokens"`,
+the positive effective request value, and the canonically ordered binding
+list. This is the cap PtcRunner sent, not an assertion about a provider's
+private ceiling. A rewritten, removed, or ambiguously resolved cap is omitted.
+
+When proven truncation prevents a usable shipped-agent action, the failed
+`run-stopped` records `reason: "model_output_truncated"` and the authenticated
+alias. It also records `limit: "max_tokens"`, `limit_value`, and
+`limit_bindings` when that provenance is available. Private
+`capability-output` records contain the same normalized response and alias; the
+private `execution-error` contains only the authenticated alias plus any
+available bounded cap details. Raw provider responses and raw stop reasons are
+not retained.
+
 The implemented private event policy stores the same canonical event
 vocabulary as the normal policy. It changes sink failure behavior, file
 permissions, and discovery; it does not capture prompts, responses, capability
@@ -816,7 +834,7 @@ to the caller and does not fail the evaluation:
 | `annotation_type` | accepted `data` |
 | --- | --- |
 | `"progress"` | `{"stage": started \| planning \| executing \| validating \| completed \| failed}` — that key and no other |
-| `"agent-action"` | `{"turn": 0..127, "kind": tool-call \| protocol-error \| provider-error \| max-calls}`, or that plus `{"phase": 0..7, "phase_turn": 0..127, "mission": <name>}` — exactly two keys or exactly five |
+| `"agent-action"` | `{"turn": 0..127, "kind": tool-call \| protocol-error \| provider-error \| max-calls \| model-output-truncated}`, or that plus `{"phase": 0..7, "phase_turn": 0..127, "mission": <name>}` — exactly two keys or exactly five |
 
 Keyword types and keys normalize (`:phase-turn` → `"phase_turn"`). A phased
 `agent-action` takes all three extra keys or none. `mission` is the phase's
@@ -880,4 +898,3 @@ as workflow failure.
 - live prelude mutation or trace rewriting;
 - benchmark/oracle/report semantics;
 - provider-specific query APIs.
-

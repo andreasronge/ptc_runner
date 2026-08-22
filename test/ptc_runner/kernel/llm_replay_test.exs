@@ -857,7 +857,10 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
                |> RunLifecycle.build(registry)
                |> RunLifecycle.execute()
 
-      assert result.value == %{"first" => %{"content" => "a"}, "second" => %{"content" => "b"}}
+      assert result.value == %{
+               "first" => %{"content" => "a", "model" => "replay-llm"},
+               "second" => %{"content" => "b", "model" => "replay-llm"}
+             }
     end
 
     @tag :tmp_dir
@@ -923,7 +926,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
                |> RunLifecycle.build(registry)
                |> RunLifecycle.execute()
 
-      assert result.value == %{"content" => "second"}
+      assert result.value == %{"content" => "second", "model" => "second-replay"}
     end
 
     @tag :tmp_dir

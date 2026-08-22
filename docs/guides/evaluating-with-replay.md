@@ -22,7 +22,7 @@ ptc run replay-example/ptc-project.json
 ```
 
 ```json
-{"content":"Frozen answer"}
+{"content":"Frozen answer","model":"frozen-model"}
 ```
 
 The project records private inspection and grants it to the Viewer:

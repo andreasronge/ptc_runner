@@ -22,7 +22,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   @identifier ~r/\A[A-Za-z0-9][A-Za-z0-9._:\/@+-]{0,255}\z/
   @fingerprint ~r/\Asha256:[0-9a-f]{64}\z/
   @progress_stages ~w(started planning executing validating completed failed)
-  @agent_action_kinds ~w(tool-call protocol-error provider-error max-calls)
+  @agent_action_kinds ~w(tool-call protocol-error provider-error max-calls model-output-truncated)
   @failure_kinds ~w(
     invalid-agent-config
     invalid-input
@@ -150,7 +150,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   the shipped agent loop's coarse per-turn record: exactly the keys `turn`
   (an integer from 0 through 127, matching the loop's maximum turn count)
   and `kind` (one of `tool-call`, `protocol-error`, `provider-error`, or
-  `max-calls`).
+  `max-calls`, or `model-output-truncated`).
   A phased agent run adds exactly `phase` (0 through 7), `phase_turn`
   (0 through 127), and `mission` (the phase's mission name) — all three or
   none, so a partial shape stays out of the vocabulary. It never carries

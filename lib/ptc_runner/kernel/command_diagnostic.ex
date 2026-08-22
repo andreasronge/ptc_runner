@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
+  alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
@@ -432,6 +433,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        do:
          RuntimeLimitDiagnostic.agent_turns_message?(message) or
            RuntimeLimitDiagnostic.transcript_chars_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :model_output_truncated},
+         nil
+       ),
+       do: ModelOutputDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          message,

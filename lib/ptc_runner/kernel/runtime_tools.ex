@@ -30,6 +30,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Lisp.TrustedError
   alias PtcRunner.Lisp.TrustedTool
+  alias PtcRunner.LLM.OutputLimit
 
   @mission_contract_version 1
   @mission_routes [
@@ -209,6 +210,13 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             details: %{limit: :max_transcript_chars, limit_value: limit}
           }
 
+        %{"max_tokens" => value, "bindings" => bindings, "alias" => alias_name}
+        when map_size(arguments) == 3 ->
+          model_output_truncation_failure(value, bindings, alias_name)
+
+        %{"alias" => alias_name} when map_size(arguments) == 1 ->
+          model_output_truncation_failure(alias_name)
+
         _invalid ->
           invalid_runtime_limit_failure()
       end
@@ -229,6 +237,37 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
       :error ->
         invalid_runtime_limit_failure()
+    end
+  end
+
+  defp model_output_truncation_failure(value, bindings, alias_name) do
+    with {:ok, limit} <-
+           OutputLimit.normalize(%{name: :max_tokens, value: value, bindings: bindings}),
+         true <- OutputLimit.valid_alias?(alias_name) do
+      %TrustedError{
+        reason: :model_output_truncated,
+        message: "model output was truncated before a usable agent action",
+        details: %{
+          limit: :max_tokens,
+          limit_value: limit.value,
+          limit_bindings: limit.bindings,
+          alias: alias_name
+        }
+      }
+    else
+      _invalid -> invalid_runtime_limit_failure()
+    end
+  end
+
+  defp model_output_truncation_failure(alias_name) do
+    if OutputLimit.valid_alias?(alias_name) do
+      %TrustedError{
+        reason: :model_output_truncated,
+        message: "model output was truncated before a usable agent action",
+        details: %{alias: alias_name}
+      }
+    else
+      invalid_runtime_limit_failure()
     end
   end
 

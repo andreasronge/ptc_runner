@@ -100,6 +100,24 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert_schema_valid(help.envelope)
 
+    assert {:ok, %CommandOutcome{} = transcript_help} =
+             CommandEngine.prepare(["help", "transcript"])
+
+    private_output =
+      Enum.find(transcript_help.envelope["result"]["options"], fn option ->
+        "--private-output TRANSCRIPT.json" in option["switches"]
+      end)
+
+    assert private_output["description"] =~ "symlink"
+    assert private_output["description"] =~ "physically separate"
+    assert private_output["description"] =~ "/tmp"
+
+    assert {:stdout, text} = CommandRenderer.render(transcript_help)
+    assert text =~ "--private-output TRANSCRIPT.json"
+    assert text =~ "symlink"
+    assert text =~ "physically separate"
+    assert_schema_valid(transcript_help.envelope)
+
     assert {:ok, %CommandOutcome{} = version} =
              CommandEngine.prepare(["--version"])
 

@@ -262,10 +262,14 @@ ptc transcript RUN_ID \
   --inspection tmp/tutorial-inspection \
   --private-unattended \
   --private-output tmp/tutorial-transcript/conversation.private.json</code></pre><p>The destination is reserved at owner-only mode before capture. Incomplete or
-ambiguous evidence fails without publication. The trace, inspection, and
-output directories must be pairwise physically separate: none may equal or
-contain another. A rejection names the two conflicting switches and how they
-overlap, without disclosing any path:</p><pre><code class="text language-text">directories for --traces and --inspection must be physically separate;
+ambiguous evidence fails without publication. The parent of
+<code class="inline">--private-output</code> must already exist and be reached without a symbolic link
+— on macOS <code class="inline">/tmp</code> is a symlink, so <code class="inline">/tmp/out.json</code> is refused. The trace,
+inspection, and output directories must be pairwise physically separate: none
+may equal or contain another. A file in the current directory fails when that
+directory contains <code class="inline">--traces</code>; create a sibling directory instead, as above.
+A rejection names the two conflicting switches and how they overlap, without
+disclosing any path:</p><pre><code class="text language-text">directories for --traces and --inspection must be physically separate;
 --traces contains --inspection</code></pre><h3 id="private-analysis-without-a-terminal">Private analysis without a terminal</h3><p><code class="inline">--private-unattended</code> authorizes the command's own streams as the private
 sink. It admits expressions, setup files, scripts, stdin, and JSON Lines and is
 mutually exclusive with <code class="inline">--private-terminal</code>:</p><pre><code class="console language-console">ptc repl \

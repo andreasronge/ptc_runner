@@ -66,6 +66,29 @@ The equivalent low-level form is `--trace-dir` plus `--inspect`. See
 Inspection requires a trace, because every private record is validated against
 the run it claims to describe.
 
+### Publish one conversation with ptc transcript
+
+For one certified conversation, avoid a REPL. Create a sibling directory
+first; do not write into `/tmp` or into the project that holds the traces:
+
+```console
+mkdir -p out
+ptc transcript RUN_ID \
+  --traces .ptc/traces \
+  --inspection .ptc/inspection \
+  --private-unattended \
+  --private-output out/conversation.private.json
+```
+
+`--private-output` names a new owner-only file. Its parent must already exist
+and be reached without a symbolic link — on macOS `/tmp` is a symlink, so
+`/tmp/out.json` is refused. The parent must also be physically separate from
+`--traces` and `--inspection`: no directory may equal, contain, or be
+contained by either of the others. A file in the current directory fails when
+that directory contains `--traces`. A sibling directory, as above, satisfies
+both rules. A rejection names the two conflicting switches and their physical
+relationship, and discloses no path.
+
 ## Give the debugger bounded navigation authority
 
 The debugger is an ordinary application. Its host document installs the failed

@@ -1299,6 +1299,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       :loop_limit_exceeded,
       :tool_call_limit_exceeded,
       :runtime_limit_exceeded,
+      :model_output_truncated,
       :invalid_agent_config,
       :result_contract_failed,
       :llm_provider_failed

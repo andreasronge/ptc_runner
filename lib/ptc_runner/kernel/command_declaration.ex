@@ -225,7 +225,8 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :private_output,
           type: :string,
           syntax: ["--private-output TRANSCRIPT.json"],
-          description: "new owner-only private transcript artifact"
+          description:
+            "new owner-only file; parent must exist without a symlink (macOS /tmp is one) and be physically separate from --traces and --inspection"
         },
         @help_option
       ]

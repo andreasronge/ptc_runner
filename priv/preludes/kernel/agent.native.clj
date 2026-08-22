@@ -85,8 +85,7 @@
                 (string? (get details :alias))
                 (string? (get details :name)))))))
 
-(defn normalize
-  "Normalizes one provider response into a tool call, provider error, max-calls refusal, or protocol error."
+(defn- normalize-action
   [response max-program-chars]
   (let [max-program-chars (if (and (integer? max-program-chars)
                                    (pos? max-program-chars)
@@ -159,3 +158,39 @@
                    :rationale (when narrating? prose)
                    :tool-call-id (get call "id")
                    :public-tool-call call})))))))
+
+(defn- valid-output-limit? [limit]
+  (let [bindings (when (map? limit) (get limit "bindings"))
+        canonical ["configured" "adapter_default" "model_output_limit" "remaining_context"]]
+    (and (map? limit)
+         (= 3 (count limit))
+         (= "max_tokens" (get limit "name"))
+         (integer? (get limit "value"))
+         (pos? (get limit "value"))
+         (<= (get limit "value") 1000000)
+         (sequential? bindings)
+         (seq bindings)
+         (= bindings (filter #(some #{%} bindings) canonical)))))
+
+(defn- truncation-action [response]
+  (let [limit (get response "output_limit")
+        model (get response "model")]
+    (when (and (= "length" (get response "finish_reason"))
+               (or (nil? limit) (valid-output-limit? limit))
+               (string? model)
+               (not (blank? model)))
+      (if (map? limit)
+        {:kind :model-output-truncated
+         :model model
+         :output-limit limit}
+        {:kind :model-output-truncated
+         :model model}))))
+
+(defn normalize
+  "Normalizes one provider response into a usable tool call or a bounded terminal/recoverable action. A complete run_ptc_lisp call wins even when the provider reports output truncation."
+  [response max-program-chars]
+  (let [action (normalize-action response max-program-chars)]
+    (if (= :tool-call (get action :kind))
+      action
+      (or (when (map? response) (truncation-action response))
+          action))))

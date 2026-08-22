@@ -260,11 +260,24 @@ some of these endings are answered by buying more turns:
 | `evaluation_error` | a program that failed | raise `max_turns`, or simplify the work per turn |
 | `protocol_error` | no usable `run_ptc_lisp` call | check tool-calling support and any configured `max_tokens` first |
 
-A `max_tokens` too small for the model to emit a complete tool call produces
-`protocol_error` on every turn, so raising `max_turns` only buys more of the
-same failure. The remedy names the agent configuration rather than
-`agent.core/run`, because a manifest that declares `agent.main/run` never
-mentions the inner entry.
+Provider-reported output truncation is terminal when it prevents a usable
+action. A response ending in `length` still executes a complete, admissible
+`run_ptc_lisp` call. Without one, the shipped non-streaming tool loop fails
+immediately as `execution/model_output_truncated` (exit 6) without spending a
+protocol-error count or another model turn. The provider subject names the
+selected router alias. When the adapter can authenticate the effective
+`max_tokens` request cap after provider request normalization, the diagnostic
+also names that cap and its bindings. It describes the cap as request metadata:
+a provider may silently enforce a lower ceiling. If ReqLLM rewrites, removes,
+or ambiguously resolves the cap, the response and terminal diagnostic omit the
+unprovable cap metadata while preserving the terminal truncation result.
+
+The cap's `bindings` list is closed and canonically ordered:
+`configured`, `adapter_default`, `model_output_limit`, and
+`remaining_context`. Every tied constraint is retained. The remedy follows the
+binding: raise the host installation's `params.max_tokens` when configured,
+choose a model with a larger output/context limit when catalog metadata binds,
+or reduce the requested output or retained transcript.
 
 The canonical failed `run-stopped` event retains the bounded `agent_turns`
 limit name, its value, and the same `limit_reason`, so trace consumers can
@@ -440,12 +453,20 @@ becomes a `non-retryable-evaluation` subject failure.
 | `cache` | optional boolean preference; host-fixed policy wins |
 | `model` | optional manifest installation alias |
 
-Successful responses contain `content` and may contain `tool_calls` and
-`tokens`. Normalized tool calls use `id`, `name`, and `args`. Invalid provider
+Successful responses contain `content` and may contain `tool_calls`, `tokens`,
+`finish_reason`, `output_limit`, and the router-authenticated `model` alias.
+Normalized tool calls use `id`, `name`, and `args`. Invalid provider
 arguments may include a bounded `args_error` classification. Token usage may
 include `input`, `output`, `cache_creation`, `cache_read`, and `total_cost`.
 When provider pricing is unavailable, `total_cost` is absent; a present zero is
 a measured zero-cost response.
+
+For non-streaming ReqLLM tool calls, `finish_reason` uses ReqLLM's normalized
+vocabulary rather than raw provider stop metadata. A `length` response carries
+the effective request `output_limit` when the adapter can authenticate it after
+provider normalization; it never claims the provider's actual internal
+ceiling. Text, structured-output, and streaming responses do not inherit the
+shipped agent loop's fail-fast truncation policy.
 
 Provider failures remain bounded capability error envelopes so workflow policy
 can decide whether to fail or recover. After alias resolution, those envelopes

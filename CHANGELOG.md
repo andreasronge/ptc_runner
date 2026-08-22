@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `ptc help transcript` and `ptc docs debug` now state both `--private-output`
+  destination rules before they can be violated: the parent must exist without
+  a symbolic link (macOS `/tmp` is one), and it must be physically separate
+  from `--traces` and `--inspection`. The CLI and REPL references match.
+- The materialized `debug-a-failed-run` README walks the standalone path:
+  `ptc run` for every arm, and a documented `--component-override-descriptor`
+  recipe. Checkout-only Mix commands and `examples/` paths are gone from that
+  README.
+- `ptc docs designing-agent-workflows` now says `returned-value` and
+  `quarantined` are local helpers in the support-triage example, not shipped
+  built-ins.
+
 - `mix precommit` is nested fetch plus the quality scripts. The suite, Viewer,
   launcher package, and release verification run on `git push` (and in GitHub
   Actions), so an agent that already ran `mix precommit` should not follow it

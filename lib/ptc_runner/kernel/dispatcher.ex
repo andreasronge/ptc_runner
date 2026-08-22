@@ -48,6 +48,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.LLM.OutputLimit
 
   @validation_handoff_ms 25
 
@@ -426,6 +427,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
           )
 
         result =
+          merge_result_attributes(
+            state,
+            environment,
+            capability,
+            result,
+            invocation.result_attributes
+          )
+
+        result =
           if output_allowed? do
             case inspection_output(
                    inspection_sink,
@@ -460,6 +470,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
           invocation.event_attributes
           |> maybe_merge_error_attributes(result, invocation.error_attributes)
           |> maybe_put_usage(result, invocation.usage_projection)
+          |> maybe_put_llm_result_metadata(result, invocation.usage_projection)
           |> Map.merge(%{
             capability_id: capability_id,
             environment: environment,
@@ -1140,6 +1151,61 @@ defmodule PtcRunner.Kernel.Dispatcher do
   end
 
   defp maybe_put_usage(data, _result, nil), do: data
+
+  defp merge_result_attributes(
+         state,
+         environment,
+         capability,
+         %{status: :ok, value: value},
+         attributes
+       )
+       when is_map(value) and is_map(attributes) do
+    normalize_result(state, environment, capability, {:ok, Map.merge(value, attributes)})
+  end
+
+  defp merge_result_attributes(_state, _environment, _capability, result, _attributes),
+    do: result
+
+  defp maybe_put_llm_result_metadata(data, %{status: :ok, value: value}, :llm_tokens)
+       when is_map(value) do
+    data
+    |> maybe_put_finish_reason(value)
+    |> maybe_put_output_limit(value)
+  end
+
+  defp maybe_put_llm_result_metadata(data, _result, _projection), do: data
+
+  defp maybe_put_finish_reason(data, value) do
+    case Map.get(value, "finish_reason", Map.get(value, :finish_reason)) do
+      reason when reason in ["stop", "length", "tool_calls", "content_filter", "error"] ->
+        Map.put(data, :finish_reason, String.to_existing_atom(reason))
+
+      reason when reason in [:stop, :length, :tool_calls, :content_filter, :error] ->
+        Map.put(data, :finish_reason, reason)
+
+      _unknown ->
+        data
+    end
+  end
+
+  defp maybe_put_output_limit(data, value) do
+    if Map.get(data, :finish_reason) == :length do
+      case OutputLimit.normalize(Map.get(value, "output_limit", Map.get(value, :output_limit))) do
+        {:ok, limit} -> Map.put(data, :output_limit, stringify_output_limit(limit))
+        :error -> data
+      end
+    else
+      data
+    end
+  end
+
+  defp stringify_output_limit(limit) do
+    %{
+      "name" => Atom.to_string(limit.name),
+      "value" => limit.value,
+      "bindings" => Enum.map(limit.bindings, &Atom.to_string/1)
+    }
+  end
 
   defp maybe_record_llm_usage(state, data) when is_map(data) do
     name = Map.get(data, :name) || Map.get(data, "name")

@@ -261,8 +261,9 @@ decision — run the target with `--component-override-descriptor` to execute
 the validated candidate without editing any file. Passing cases prove only
 those host-selected inputs and installed providers; include held-out cases
 when semantic generalization matters. The checked-in `debug-a-failed-run`
-example closes this loop end to end, including the abstention arm; its README
-walks every command.
+example closes this loop end to end, including the abstention arm. The README
+materialized by the binary walks `ptc run` and a hand-authored override; this
+Mix task is the gated checkout path.
 
 ## Next steps
 

@@ -148,6 +148,7 @@ defmodule PtcRunner.Kernel.LLMRouter do
          installation_revision: route.installation_revision
        },
        error_attributes: %{model: route.alias},
+       result_attributes: %{"model" => route.alias},
        usage_projection: :llm_tokens
      }}
   end
