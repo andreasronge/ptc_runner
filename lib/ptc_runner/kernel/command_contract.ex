@@ -594,10 +594,12 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp doctor_usage_valid?(_usage, _activity, _aliases), do: false
 
-  # The counter relationships `LLMUsageSummary` produces: a row exists because
-  # calls happened, a probed call that failed leaves no result to report at all,
-  # each success either reported usage or did not, and one that did not leaves
-  # the total cost incomplete.
+  # The counter relationships `LLMUsageSummary` produces. A row exists because
+  # calls happened. Each success is either measured or missing usage, unmatched
+  # in-flight starts are missing even though they are not successes, and a
+  # known failed completion does not become missing merely because it carries
+  # no usage. `missing_usage_calls` may therefore exceed `successful_calls`.
+  # Any missing call leaves the aggregate cost incomplete.
   defp usage_row_coherent?(%{
          "calls" => calls,
          "successful_calls" => successful,
@@ -606,7 +608,8 @@ defmodule PtcRunner.Kernel.CommandContract do
          "usage" => usage
        })
        when is_map(usage) do
-    calls >= 1 and successful == calls and measured + missing == calls and
+    calls >= 1 and successful <= calls and measured <= successful and
+      successful <= measured + missing and measured + missing <= calls and
       (measured > 0 or usage == %{}) and
       (missing == 0 or not Map.has_key?(usage, "total_cost"))
   end

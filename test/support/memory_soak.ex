@@ -68,6 +68,11 @@ defmodule PtcRunner.TestSupport.MemorySoak do
   Crank `PTC_SOAK_ITERATIONS` to ~10k+ for real soak runs locally.
   """
 
+  # `:recon` is a `runtime: false` test/dev dependency. Mix does not load it
+  # into the compiler, so the optional calls below warn without this.
+  @compile {:no_warn_undefined,
+            [{:recon, :proc_count, 2}, {:recon, :bin_leak, 1}, {:recon_alloc, :memory, 1}]}
+
   @type snapshot :: %{
           mem: keyword(),
           atoms: non_neg_integer(),
