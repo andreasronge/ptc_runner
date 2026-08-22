@@ -34,9 +34,11 @@ if Code.ensure_loaded?(ReqLLM) do
     @behaviour PtcRunner.LLM
 
     alias PtcRunner.Kernel.ProviderError
+    alias PtcRunner.LLM.OutputLimit
     alias PtcRunner.LLM.ReqLLMPreparedModel
     alias ReqLLM.Message
     alias ReqLLM.Message.ContentPart
+    alias ReqLLM.Provider.Options
 
     require Logger
 
@@ -560,7 +562,8 @@ if Code.ensure_loaded?(ReqLLM) do
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
 
-      generation_opts = req_llm_generation_opts(opts, req_llm_model, {messages, tools})
+      request_payload = {messages, tools}
+      generation_opts = req_llm_generation_opts(opts, req_llm_model, request_payload)
 
       {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
       extra_opts = apply_bedrock_region(model, extra_opts)
@@ -572,6 +575,15 @@ if Code.ensure_loaded?(ReqLLM) do
         |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
 
+      output_limit =
+        effective_output_limit_metadata(
+          opts,
+          req_llm_model,
+          request_payload,
+          messages,
+          req_opts
+        )
+
       case ReqLLM.generate_text(req_llm_model, messages, req_opts) do
         {:ok, response} ->
           text = ReqLLM.Response.text(response)
@@ -579,12 +591,14 @@ if Code.ensure_loaded?(ReqLLM) do
           tokens = build_tokens_from_req_llm_response(usage, response.provider_meta)
           raw_tool_calls = ReqLLM.Response.tool_calls(response)
 
-          if raw_tool_calls != [] do
-            {:ok,
-             %{tool_calls: normalize_tool_calls(raw_tool_calls), content: text, tokens: tokens}}
-          else
-            {:ok, %{content: text || "", tokens: tokens}}
-          end
+          result =
+            if raw_tool_calls != [] do
+              %{tool_calls: normalize_tool_calls(raw_tool_calls), content: text, tokens: tokens}
+            else
+              %{content: text || "", tokens: tokens}
+            end
+
+          {:ok, put_finish_metadata(result, response, output_limit)}
 
         {:error, reason} ->
           {:error, reason}
@@ -1081,6 +1095,108 @@ if Code.ensure_loaded?(ReqLLM) do
       |> maybe_put_bounded_max_tokens(model, request_payload)
     end
 
+    @doc false
+    @spec effective_output_limit(keyword(), term(), term()) ::
+            {pos_integer(), [OutputLimit.binding()]} | :unknown
+    def effective_output_limit(opts, model, request_payload) when is_list(opts) do
+      if wire_output_limit_supported?(model_provider(model)) do
+        case configured_output_limit_values(opts, model) |> Enum.uniq() do
+          [value] ->
+            {value, [:configured]}
+
+          [] ->
+            computed_output_limit(model, request_payload)
+
+          _conflicting ->
+            :unknown
+        end
+      else
+        :unknown
+      end
+    end
+
+    defp effective_output_limit_metadata(
+           opts,
+           model,
+           request_payload,
+           messages,
+           request_opts
+         ) do
+      with {candidate, bindings} <- effective_output_limit(opts, model, request_payload),
+           {:ok, ^candidate} <- normalized_request_output_limit(model, messages, request_opts),
+           value = candidate,
+           true <- value in 1..1_000_000 do
+        %{
+          name: :max_tokens,
+          value: value,
+          bindings: bindings
+        }
+      else
+        _unknown_or_unbounded -> nil
+      end
+    end
+
+    # The Codex transport deliberately removes token-limit fields while encoding
+    # its final request body. A provider-reported length stop therefore cannot be
+    # attributed to the cap PtcRunner supplied to ReqLLM.
+    defp wire_output_limit_supported?(:openai_codex), do: false
+    defp wire_output_limit_supported?(provider), do: is_atom(provider)
+
+    defp configured_output_limit_values(opts, model) do
+      ([Keyword.get(opts, :max_tokens)] ++
+         provider_token_limit_values(
+           Keyword.get(opts, :provider_options, []),
+           model_provider(model)
+         ))
+      |> Enum.filter(&(is_integer(&1) and &1 in 1..1_000_000))
+    end
+
+    defp normalized_request_output_limit(model, messages, request_opts) do
+      with provider when is_atom(provider) <- model_provider(model),
+           {:ok, provider_module} <- ReqLLM.provider(provider),
+           {:ok, context} <- ReqLLM.Context.normalize(messages, request_opts),
+           {:ok, processed_opts} <-
+             Options.process(
+               provider_module,
+               :chat,
+               model,
+               request_opts
+               |> Keyword.put(:context, context)
+               |> Keyword.put(:on_unsupported, :ignore)
+             ),
+           [value] <-
+             processed_opts
+             |> processed_output_limit_values(provider)
+             |> Enum.uniq() do
+        {:ok, value}
+      else
+        _unknown_or_ambiguous -> :error
+      end
+    end
+
+    defp processed_output_limit_values(opts, provider) do
+      ([
+         Keyword.get(opts, :max_tokens),
+         Keyword.get(opts, :max_completion_tokens),
+         Keyword.get(opts, :max_output_tokens)
+       ] ++
+         provider_token_limit_values(Keyword.get(opts, :provider_options, []), provider))
+      |> Enum.filter(&(is_integer(&1) and &1 > 0))
+    end
+
+    defp put_finish_metadata(result, response, output_limit) do
+      reason = ReqLLM.Response.finish_reason(response)
+
+      result
+      |> Map.put(:finish_reason, reason)
+      |> maybe_put_output_limit(reason, output_limit)
+    end
+
+    defp maybe_put_output_limit(result, :length, output_limit) when is_map(output_limit),
+      do: Map.put(result, :output_limit, output_limit)
+
+    defp maybe_put_output_limit(result, _reason, _output_limit), do: result
+
     defp maybe_put_bounded_max_tokens(opts, model, request_payload) do
       if token_limit_present?(opts, model) do
         opts
@@ -1089,17 +1205,19 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp bounded_max_tokens(%LLMDB.Model{limits: limits}, request_payload) do
-      [
-        @default_max_tokens,
-        model_output_limit(limits),
-        remaining_context_tokens(limits, request_payload)
-      ]
-      |> Enum.filter(&(is_integer(&1) and &1 > 0))
-      |> Enum.min()
+    defp bounded_max_tokens(model, request_payload),
+      do: model |> computed_output_limit(request_payload) |> elem(0)
+
+    defp computed_output_limit(%LLMDB.Model{limits: limits}, request_payload) do
+      OutputLimit.select([
+        {:adapter_default, @default_max_tokens},
+        {:model_output_limit, model_output_limit(limits)},
+        {:remaining_context, remaining_context_tokens(limits, request_payload)}
+      ])
     end
 
-    defp bounded_max_tokens(_model, _request_payload), do: @default_max_tokens
+    defp computed_output_limit(_model, _request_payload),
+      do: {@default_max_tokens, [:adapter_default]}
 
     defp model_output_limit(limits) when is_map(limits),
       do: limits[:output] || limits["output"]
@@ -1204,6 +1322,26 @@ if Code.ensure_loaded?(ReqLLM) do
         |> provider_namespace(provider)
         |> token_limit_in?()
     end
+
+    defp provider_token_limit_values(provider_options, provider) do
+      token_limit_values(provider_options) ++
+        token_limit_values(provider_namespace(provider_options, provider))
+    end
+
+    defp token_limit_values(options) when is_list(options) do
+      if Keyword.keyword?(options),
+        do: Keyword.values(Keyword.take(options, @token_limit_options)),
+        else: []
+    end
+
+    defp token_limit_values(options) when is_map(options),
+      do:
+        Enum.map(
+          @token_limit_options,
+          &(Map.get(options, &1) || Map.get(options, Atom.to_string(&1)))
+        )
+
+    defp token_limit_values(_options), do: []
 
     defp provider_namespace(provider_options, provider)
          when is_list(provider_options) and is_atom(provider) do

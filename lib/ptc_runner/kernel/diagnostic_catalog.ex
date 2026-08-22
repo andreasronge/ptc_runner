@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
+  alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
@@ -230,6 +231,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:execution, :llm_provider_failed, 5, false, "the LLM provider request failed"},
     {:execution, :mission_failed, 5, false, "a subordinate mission failed"},
     {:execution, :runtime_limit_exceeded, 6, false, "a runtime limit was exceeded"},
+    {:execution, :model_output_truncated, 6, false,
+     "model output was truncated before producing a usable agent action"},
     {:execution, :run_timeout, 6, false, "the run duration limit was exceeded"},
     {:execution, :provider_failed, 5, false, "a provider failed during execution"},
     {:execution, :replay_fixture_missing, 5, false,
@@ -333,6 +336,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :runtime_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.message_schema(fallback)
 
+  def message_schema(%{phase: :execution, code: :model_output_truncated, message: fallback}),
+    do: ModelOutputDiagnostic.message_schema(fallback)
+
   def message_schema(%{phase: :execution, code: :run_timeout, message: fallback}),
     do: RuntimeLimitDiagnostic.run_duration_message_schema(fallback)
 
@@ -399,6 +405,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:execution, :runtime_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:execution, :model_output_truncated, message),
+    do: ModelOutputDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:execution, :run_timeout, message),
     do: RuntimeLimitDiagnostic.run_duration_message?(message)
@@ -587,7 +596,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       phase in [:provider_declaration, :local_preflight, :active_preflight, :provider_acquisition] ->
         :required
 
-      phase == :execution and code == :provider_failed ->
+      phase == :execution and code in [:provider_failed, :model_output_truncated] ->
         :required
 
       phase == :result_cleanup and
@@ -650,6 +659,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def subject_operations(:active_preflight, _code), do: [:connectivity]
   def subject_operations(:provider_acquisition, _code), do: [:acquisition]
   def subject_operations(:execution, :provider_failed), do: [:execution]
+  def subject_operations(:execution, :model_output_truncated), do: [:execution]
 
   def subject_operations(:result_cleanup, code)
       when code in [:provider_cleanup_failed, :provider_cleanup_timeout],
@@ -891,6 +901,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def subject_occurrence_policy(:active_preflight, _code, :authorization), do: :optional
   def subject_occurrence_policy(:provider_acquisition, _code, _operation), do: :required
   def subject_occurrence_policy(:execution, :provider_failed, _operation), do: :required
+  def subject_occurrence_policy(:execution, :model_output_truncated, _operation), do: :forbidden
 
   def subject_occurrence_policy(:result_cleanup, code, _operation)
       when code in [:provider_cleanup_failed, :provider_cleanup_timeout],

@@ -26,10 +26,20 @@ defmodule PtcRunner.LLM do
           tokens: tokens()
         }
 
+  @type output_limit_binding ::
+          :configured | :adapter_default | :model_output_limit | :remaining_context
+  @type output_limit :: %{
+          name: :max_tokens,
+          value: pos_integer(),
+          bindings: [output_limit_binding()]
+        }
+
   @type tool_call_response :: %{
-          tool_calls: [map()],
-          content: String.t() | nil,
-          tokens: tokens()
+          required(:tool_calls) => [map()],
+          required(:content) => String.t() | nil,
+          required(:tokens) => tokens(),
+          optional(:finish_reason) => atom(),
+          optional(:output_limit) => output_limit()
         }
 
   @type chunk :: %{delta: String.t()} | %{done: true, tokens: tokens()}

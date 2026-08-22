@@ -22,6 +22,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.SpecialBuiltin
+  alias PtcRunner.LLM.OutputLimit
 
   @stable_parallel_errors [:memory_exceeded, :timeout, :parallel_capacity_exceeded]
   @result_contract_constraints [
@@ -372,6 +373,30 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
       )
       when limit in 1..1_000_000,
       do: reason
+
+  def sanitize_private_error(
+        {:model_output_truncated, _message,
+         %{
+           limit: :max_tokens,
+           limit_value: value,
+           limit_bindings: bindings,
+           alias: alias_name
+         }} = reason
+      ) do
+    with {:ok, _limit} <-
+           OutputLimit.normalize(%{name: :max_tokens, value: value, bindings: bindings}),
+         true <- OutputLimit.valid_alias?(alias_name) do
+      reason
+    else
+      _invalid -> {:private_prelude_error, "private prelude evaluation failed"}
+    end
+  end
+
+  def sanitize_private_error({:model_output_truncated, _message, %{alias: alias_name}} = reason) do
+    if OutputLimit.valid_alias?(alias_name),
+      do: reason,
+      else: {:private_prelude_error, "private prelude evaluation failed"}
+  end
 
   def sanitize_private_error(
         {:llm_provider_failed, _message, %{failure_kind: "llm-provider-error"} = details}

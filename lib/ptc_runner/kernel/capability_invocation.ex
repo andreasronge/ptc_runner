@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
     :route_key,
     :event_attributes,
     :error_attributes,
+    :result_attributes,
     :usage_projection
   ]
   defstruct @enforce_keys ++ [max_calls: nil]
@@ -20,6 +21,7 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
           max_calls: pos_integer() | nil,
           event_attributes: map(),
           error_attributes: map(),
+          result_attributes: map(),
           usage_projection: nil | :llm_tokens
         }
 
@@ -32,6 +34,7 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
       route_key: nil,
       event_attributes: %{},
       error_attributes: %{},
+      result_attributes: %{},
       usage_projection: nil
     }
   end
