@@ -1,6 +1,7 @@
 defmodule PtcRunner.MixCommandAdapter do
   @moduledoc false
 
+  alias PtcRunner.CLILogger
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRouter
   alias PtcRunner.Kernel.CommandRuntime
@@ -40,6 +41,10 @@ defmodule PtcRunner.MixCommandAdapter do
   @doc false
   @spec run_task([binary()], keyword()) :: CommandPresentation.t() | no_return()
   def run_task(args, frontend_opts) when is_list(args) and is_list(frontend_opts) do
+    # Mix starts Logger before project config is applied, and logger_std_h
+    # cannot change `type` on a running handler. Reinstall so `mix ptc`
+    # matches the packaged CLI (#1583).
+    CLILogger.install_stderr_handler()
     presentation = execute(args, frontend_opts)
 
     case presentation do

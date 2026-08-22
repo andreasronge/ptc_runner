@@ -17,7 +17,8 @@ defmodule Mix.Tasks.Ptc do
   Complete doctor readiness reports, including `readiness: "failed"`, are
   written to standard output. A failed readiness report retains its nonzero
   exit status; failures without a complete report are written to standard
-  error.
+  error. Runtime logger output, including TLS handshake alerts, is written
+  to standard error so standard output remains one JSON document.
   """
   use Mix.Task
 

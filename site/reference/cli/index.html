@@ -109,7 +109,9 @@ manifest or package rejected during application validation is likewise
 reported as a failed <code class="inline">application</code> check instead of an internal command error.
 Complete readiness reports, including <code class="inline">readiness: &quot;failed&quot;</code>, are written to
 stdout. Failed reports retain their nonzero exit status; failures that cannot
-produce a complete report are written to stderr.
+produce a complete report are written to stderr. Runtime logger output,
+including TLS handshake alerts, is written to stderr so stdout remains one
+JSON document.
 <code class="inline">--show-model-selectors</code> adds only safe selectors.</p><p>Every readiness report carries <code class="inline">usage</code>, on the LLM rows a run reports. Each
 probed model alias contributes one call with the tokens and cost the provider
 attributed to it, so a CI step can account for what the check spent:</p><pre><code class="json language-json">{&quot;usage&quot;: {&quot;llm_usage_state&quot;: &quot;available&quot;,

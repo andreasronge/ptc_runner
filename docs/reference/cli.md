@@ -44,7 +44,9 @@ manifest or package rejected during application validation is likewise
 reported as a failed `application` check instead of an internal command error.
 Complete readiness reports, including `readiness: "failed"`, are written to
 stdout. Failed reports retain their nonzero exit status; failures that cannot
-produce a complete report are written to stderr.
+produce a complete report are written to stderr. Runtime logger output,
+including TLS handshake alerts, is written to stderr so stdout remains one
+JSON document.
 `--show-model-selectors` adds only safe selectors.
 
 Every readiness report carries `usage`, on the LLM rows a run reports. Each
