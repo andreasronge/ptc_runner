@@ -495,9 +495,13 @@ defmodule PtcRunner.Kernel.HostConfig do
       installed = Map.from_struct(Limits.installed_defaults())
 
       schema_limits =
-        Map.new(limits, fn {name, _value} ->
-          {:ok, field} = Limits.name(name)
-          {name, Map.fetch!(installed, field)}
+        Map.new(limits, fn {name, value} ->
+          if schema_minimum_violation?(name, value) do
+            {name, value}
+          else
+            {:ok, field} = Limits.name(name)
+            {name, Map.fetch!(installed, field)}
+          end
         end)
 
       Map.put(value, "limits", schema_limits)
@@ -507,6 +511,13 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp command_schema_value(value), do: value
+
+  defp schema_minimum_violation?("normal_event_count", value) when is_integer(value) do
+    {:ok, row} = LimitCatalog.fetch(:normal_event_count)
+    value < row.minimum
+  end
+
+  defp schema_minimum_violation?(_name, _value), do: false
 
   defp safe_host_path(path), do: SchemaPath.explained_prefix(path, schema())
 

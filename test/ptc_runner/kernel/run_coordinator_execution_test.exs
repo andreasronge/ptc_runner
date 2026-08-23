@@ -348,19 +348,6 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert :ok = InstallationCatalog.close(catalog)
   end
 
-  test "sink-open failure releases the consumed prepared activity" do
-    {prepared, catalog} = prepared_run("(return 1)", normal_event_bytes: 1)
-    activity = prepared.provider_activity.owner
-    activity_ref = Process.monitor(activity)
-    assert {:ok, authority} = PublicationAuthority.new([])
-
-    assert {:error, %OwnerFailure{} = failure} = RunCoordinator.execute(prepared, authority)
-    assert {:ok, :invalid_event_sink, false, :not_started} = OwnerFailure.evidence(failure)
-    assert_receive {:DOWN, ^activity_ref, :process, ^activity, :normal}, 5_000
-
-    assert :ok = InstallationCatalog.close(catalog)
-  end
-
   @tag :tmp_dir
   test "owned execution preserves inspection and cross-artifact preflight", %{tmp_dir: directory} do
     occupied = Path.join(directory, "occupied.inspection.jsonl")
@@ -675,8 +662,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       "input" => %{"value" => %{}}
     }
 
-    {limit_opts, request_opts} =
-      Keyword.split(opts, [:normal_event_bytes, :evaluation_timeout_ms])
+    {limit_opts, request_opts} = Keyword.split(opts, [:evaluation_timeout_ms])
 
     limits =
       Map.new(limit_opts, fn {name, value} -> {Atom.to_string(name), value} end)

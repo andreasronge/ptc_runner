@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
@@ -70,6 +71,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the application manifest does not satisfy its schema"},
     {:application, :installed_limit_exceeded, 3, false,
      "an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling"},
+    {:application, :limit_configuration_invalid, 3, false,
+     "normal_event_bytes effective limit 4000000 is below the required 12002301 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes"},
     {:application, :required_property_missing, 3, false,
      "the application manifest is missing a required property"},
     {:application, :reference_missing, 3, false,
@@ -369,6 +372,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :application, code: :installed_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.installed_ceiling_message_schema(fallback)
 
+  def message_schema(%{
+        phase: :application,
+        code: :limit_configuration_invalid,
+        message: fallback
+      }),
+      do: LimitConfigurationDiagnostic.message_schema(fallback)
+
   def message_schema(%{phase: :host, code: :host_schema_invalid, message: fallback}),
     do:
       SchemaViolationDiagnostic.message_schema(
@@ -461,6 +471,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:application, :installed_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.installed_ceiling_message?(message)
+
+  defp valid_dynamic_message?(:application, :limit_configuration_invalid, message),
+    do: LimitConfigurationDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:host, :host_schema_invalid, message),
     do:
@@ -780,6 +793,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
              :application_not_found,
              :schema_violation,
              :installed_limit_exceeded,
+             :limit_configuration_invalid,
              :required_property_missing,
              :event_identity_conflict
            ],

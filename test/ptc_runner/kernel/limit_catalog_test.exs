@@ -1,8 +1,12 @@
 defmodule PtcRunner.Kernel.LimitCatalogTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.EventBudget
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.LimitConfiguration
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.SchemaViolation
@@ -73,7 +77,12 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                            scope: :manifest_narrowable,
                            compiled_default: compiled_default,
                            installed_default: installed_default,
-                           minimum: 1,
+                           minimum:
+                             case name do
+                               "event_payload_bytes" -> EventBudget.minimum_normal_payload_bytes()
+                               "normal_event_count" -> 3
+                               _other -> 1
+                             end,
                            maximum: 2_592_000_000,
                            identity: true
                          }}
@@ -238,11 +247,24 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                  "/tmp"
                )
 
-      assert {:error, {:installed_limit_invalid, [{:property, "limits"}, {:property, ^name}]}} =
-               HostConfig.decode_command(
-                 host_config(%{row.name => row.minimum - 1}),
-                 "/tmp"
-               )
+      if row.name == "normal_event_count" do
+        assert {:error,
+                {:host_schema_invalid,
+                 %SchemaViolation{
+                   rule: :minimum,
+                   path: [{:property, "limits"}, {:property, ^name}]
+                 }}} =
+                 HostConfig.decode_command(
+                   host_config(%{row.name => row.minimum - 1}),
+                   "/tmp"
+                 )
+      else
+        assert {:error, {:installed_limit_invalid, [{:property, "limits"}, {:property, ^name}]}} =
+                 HostConfig.decode_command(
+                   host_config(%{row.name => row.minimum - 1}),
+                   "/tmp"
+                 )
+      end
 
       assert {:error, :invalid_host_config} =
                HostConfig.decode(
@@ -258,6 +280,70 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     end
   end
 
+  test "normal traces require three retained event slots" do
+    assert {:ok, row} = LimitCatalog.fetch(:normal_event_count)
+    assert row.minimum == 3
+
+    for schema <- [HostConfig.schema(), Manifest.schema()] do
+      assert get_in(schema, [
+               "properties",
+               "limits",
+               "properties",
+               "normal_event_count",
+               "minimum"
+             ]) ==
+               3
+    end
+  end
+
+  test "the event payload minimum admits every normal terminal payload" do
+    minimum = EventBudget.minimum_normal_payload_bytes()
+    assert {:ok, row} = LimitCatalog.fetch(:event_payload_bytes)
+    assert row.minimum == minimum
+    refute EventBudget.normal_terminal_payload_capacity?(minimum - 1)
+    assert EventBudget.normal_terminal_payload_capacity?(minimum)
+
+    for schema <- [HostConfig.schema(), Manifest.schema()] do
+      assert get_in(schema, [
+               "properties",
+               "limits",
+               "properties",
+               "event_payload_bytes",
+               "minimum"
+             ]) == minimum
+    end
+  end
+
+  test "effective normal trace bytes retain one ordinary event and terminal reserve" do
+    payload_bytes = 7_000
+    {:ok, base} = Limits.new(event_payload_bytes: payload_bytes)
+    required_bytes = EventSink.terminal_reserve(:normal, base).bytes + payload_bytes
+
+    {:ok, invalid} =
+      Limits.new(event_payload_bytes: payload_bytes, normal_event_bytes: required_bytes - 1)
+
+    assert {:error,
+            {:limit_configuration_invalid, configured_bytes, ^required_bytes, ^payload_bytes}} =
+             LimitConfiguration.validate_effective(invalid, :normal)
+
+    assert {:ok, message} =
+             LimitConfigurationDiagnostic.message(
+               configured_bytes,
+               required_bytes,
+               payload_bytes
+             )
+
+    assert LimitConfigurationDiagnostic.valid_message?(message)
+    refute LimitConfigurationDiagnostic.valid_message?(message <> "\n")
+
+    assert :ok = LimitConfiguration.validate_effective(invalid, :private)
+
+    assert {:ok, valid} =
+             Limits.new(event_payload_bytes: payload_bytes, normal_event_bytes: required_bytes)
+
+    assert :ok = LimitConfiguration.validate_effective(valid, :normal)
+  end
+
   test "installed-only limits cannot be declared by an application" do
     for name <- Map.keys(@installed_only) do
       manifest = valid_manifest(%{"limits" => %{name => 100}})
@@ -270,6 +356,12 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   end
 
   test "manifest narrowing consumes only scoped rows and preserves installed-only values" do
+    minimum_payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, minimum_payload_limits} = Limits.new(event_payload_bytes: minimum_payload_bytes)
+
+    minimum_normal_event_bytes =
+      EventSink.terminal_reserve(:normal, minimum_payload_limits).bytes + minimum_payload_bytes
+
     installed_overrides =
       Map.new(LimitCatalog.rows(), fn row ->
         value =
@@ -288,7 +380,14 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     for requested_value <- [:minimum, :maximum] do
       requested =
         Map.new(LimitCatalog.rows(:manifest_narrowable), fn row ->
-          {row.name, Map.fetch!(row, requested_value)}
+          value =
+            case {requested_value, row.name} do
+              {:minimum, "normal_event_bytes"} -> minimum_normal_event_bytes
+              {:maximum, "event_payload_bytes"} -> 863_999_233
+              _other -> Map.fetch!(row, requested_value)
+            end
+
+          {row.name, value}
         end)
 
       manifest = valid_manifest(%{"limits" => requested})
@@ -297,7 +396,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                Manifest.load_memory("ptc.json", documents(manifest), installed)
 
       for row <- LimitCatalog.rows(:manifest_narrowable) do
-        assert Map.fetch!(loaded.limits, row.field) == Map.fetch!(row, requested_value)
+        assert Map.fetch!(loaded.limits, row.field) == Map.fetch!(requested, row.name)
       end
 
       assert loaded.limits.provider_cleanup_timeout_ms == 100

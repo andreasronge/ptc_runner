@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.Error
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.FrozenBundle
@@ -32,6 +33,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderRegistry
@@ -2803,15 +2805,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "an internal failure before the marker reports no provider activity", %{
+  test "an impossible trace budget fails doctor admission before the activity marker", %{
     tmp_dir: directory
   } do
-    # The mirror of the case below, and the reason the answer is asked rather
-    # than assumed. The execution owner opens its sinks before any provider
-    # work, and a manifest may narrow `normal_event_bytes` below the reserve
-    # that opening requires, so the operation can fail with a bare reason having
-    # contacted nothing. Reporting `provider_activity: true` for it would claim
-    # a cost the command never incurred.
     marker = Path.join(directory, "pre-marker-methods")
     host_path = write_host_config(directory, "connect-pre-marker", connect_host_config(marker))
 
@@ -2831,15 +2827,15 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              ])
 
     assert outcome.command_mode == {:doctor, :connect}
-    assert outcome.envelope["error"]["phase"] == "internal"
-    assert outcome.envelope["error"]["code"] == "internal_error"
+    assert outcome.envelope["error"]["phase"] == "application"
+    assert outcome.envelope["error"]["code"] == "limit_configuration_invalid"
     assert outcome.envelope["error"]["provider_activity"] == false
     refute File.exists?(marker)
     assert_schema_valid(outcome.envelope)
   end
 
   @tag :tmp_dir
-  test "run sink-opening failures preserve not-started activity evidence", %{
+  test "run rejects impossible trace budgets with not-started activity evidence", %{
     tmp_dir: directory
   } do
     limits = %{"evaluation_timeout_ms" => 5_000, "normal_event_bytes" => 1}
@@ -2867,8 +2863,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ["run", provider_backed, "--host-config", host_path]
         ] do
       assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(argv)
-      assert outcome.envelope["error"]["phase"] == "internal"
-      assert outcome.envelope["error"]["code"] == "internal_error"
+      assert outcome.envelope["error"]["phase"] == "application"
+      assert outcome.envelope["error"]["code"] == "limit_configuration_invalid"
       assert outcome.envelope["error"]["provider_activity"] == false
       assert outcome.envelope["execution"] == %{"state" => "not_started"}
       assert_schema_valid(outcome.envelope)
@@ -5296,6 +5292,102 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       refute encoded =~ directory
       assert outcome.envelope["error"]["provider_activity"] == false
       assert_schema_valid(outcome.envelope)
+    end
+  end
+
+  @tag :tmp_dir
+  test "impossible normal trace budgets are rejected identically before execution", %{
+    tmp_dir: directory
+  } do
+    payload_bytes = 7_000
+    {:ok, base_limits} = Limits.new(event_payload_bytes: payload_bytes)
+    required_bytes = EventSink.terminal_reserve(:normal, base_limits).bytes + payload_bytes
+    configured_bytes = required_bytes - 1
+
+    application =
+      write_application(
+        directory,
+        "invalid-normal-trace-budget",
+        valid_manifest(%{
+          "limits" => %{
+            "event_payload_bytes" => payload_bytes,
+            "normal_event_bytes" => configured_bytes,
+            "normal_event_count" => 3
+          }
+        })
+      )
+
+    expected_message =
+      "normal_event_bytes effective limit #{configured_bytes} is below the required " <>
+        "#{required_bytes} bytes for event_payload_bytes #{payload_bytes}; raise " <>
+        "limits.normal_event_bytes, and its installed host ceiling if it is lower, or " <>
+        "lower limits.event_payload_bytes"
+
+    errors =
+      for argv <- [
+            ["validate", application],
+            ["run", application],
+            ["doctor", application]
+          ] do
+        outcome = assert_error(argv, "application", "limit_configuration_invalid")
+
+        if hd(argv) == "run",
+          do: assert(outcome.envelope["execution"] == %{"state" => "not_started"})
+
+        assert outcome.envelope["error"]["message"] == expected_message
+        assert outcome.envelope["error"]["path"] == nil
+        outcome.envelope["error"]
+      end
+
+    assert Enum.uniq(errors) |> length() == 1
+
+    admitted =
+      write_application(
+        directory,
+        "valid-minimum-normal-trace-budget",
+        valid_manifest(%{
+          "limits" => %{
+            "event_payload_bytes" => payload_bytes,
+            "normal_event_bytes" => required_bytes,
+            "normal_event_count" => 3
+          }
+        })
+      )
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.prepare(["validate", admitted])
+  end
+
+  @tag :tmp_dir
+  test "normal trace count values below three use schema diagnostics", %{tmp_dir: directory} do
+    for count <- [1, 2] do
+      application =
+        write_application(
+          directory,
+          "invalid-normal-event-count-#{count}",
+          valid_manifest(%{"limits" => %{"normal_event_count" => count}})
+        )
+
+      for command <- ["validate", "run", "doctor"] do
+        outcome = assert_error([command, application], "application", "schema_violation")
+        assert outcome.envelope["error"]["path"] == "/limits/normal_event_count"
+        assert outcome.envelope["error"]["message"] =~ "minimum"
+      end
+
+      host =
+        write_host_config(directory, "invalid-normal-event-count-#{count}", %{
+          "install" => %{},
+          "limits" => %{"normal_event_count" => count}
+        })
+
+      outcome =
+        assert_error(
+          ["validate", application, "--host-config", host],
+          "host",
+          "host_schema_invalid"
+        )
+
+      assert outcome.envelope["error"]["path"] == "/limits/normal_event_count"
+      assert outcome.envelope["error"]["message"] =~ "minimum"
     end
   end
 

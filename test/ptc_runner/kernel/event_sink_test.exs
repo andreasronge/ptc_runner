@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.EventSinkTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.EventSinkState
   alias PtcRunner.Kernel.Limits
@@ -36,12 +37,12 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   end
 
   test "drop accounting has fixed type buckets and one saturating overflow bucket" do
-    {:ok, limits} =
-      Limits.new(
-        normal_event_count: 2,
+    limits = %{
+      Limits.defaults()
+      | normal_event_count: 3,
         normal_event_bytes: 2_000,
         event_payload_bytes: 100
-      )
+    }
 
     {:ok, sink} =
       EventSink.start(:normal, limits,
@@ -51,6 +52,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
 
     assert :ok = EventSink.emit(sink, "seed-one", %{})
     assert :ok = EventSink.emit(sink, "seed-two", %{})
+    assert :ok = EventSink.emit(sink, "seed-three", %{})
 
     for index <- 1..40 do
       assert :ok = EventSink.emit(sink, "custom-#{index}", %{})
@@ -95,6 +97,29 @@ defmodule PtcRunner.Kernel.EventSinkTest do
              ["run-started", "evaluation-started", "events-dropped", "run-stopped"]
 
     assert List.last(events).data.outcome == :ok
+  end
+
+  test "the minimum admitted normal budget retains run-started and both terminal events" do
+    payload_bytes = 5_000
+    {:ok, base} = Limits.new(event_payload_bytes: payload_bytes)
+    reserve = EventSink.terminal_reserve(:normal, base)
+
+    {:ok, limits} =
+      Limits.new(
+        event_payload_bytes: payload_bytes,
+        normal_event_bytes: reserve.bytes + payload_bytes,
+        normal_event_count: 3
+      )
+
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "minimum-normal-budget")
+    assert :ok = EventSink.emit(sink, "run-started", %{})
+    assert :ok = EventSink.emit(sink, "evaluation-started", %{})
+    assert %{"evaluation-started" => 1} = EventSink.dropped(sink)
+
+    assert {:ok, %{events: events}} =
+             EventSink.finalize_and_events(sink, %{outcome: :ok, usage: %{}})
+
+    assert Enum.map(events, & &1.type) == ["run-started", "events-dropped", "run-stopped"]
   end
 
   test "terminal reserve remains available after the ordinary byte budget is saturated" do
@@ -199,13 +224,14 @@ defmodule PtcRunner.Kernel.EventSinkTest do
 
     minimum =
       Enum.find(1..20_000, fn payload_bytes ->
-        {:ok, limits} = Limits.new(event_payload_bytes: payload_bytes)
+        limits = %{Limits.defaults() | event_payload_bytes: payload_bytes}
         match?({:ok, _state, _handle}, EventSink.prepare(:normal, limits, []))
       end)
 
+    assert minimum == EventBudget.minimum_normal_payload_bytes()
     assert minimum > RetainedSize.bytes(legacy_payload)
 
-    {:ok, too_tight} = Limits.new(event_payload_bytes: minimum - 1)
+    too_tight = %{Limits.defaults() | event_payload_bytes: minimum - 1}
     assert {:error, :invalid_event_sink} = EventSink.prepare(:normal, too_tight, [])
 
     {:ok, exact} = Limits.new(event_payload_bytes: minimum)
@@ -226,7 +252,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
         EventSinkState.payload_within_limit?(former_payload, payload_bytes)
       end)
 
-    {:ok, limits} = Limits.new(event_payload_bytes: former_minimum)
+    limits = %{Limits.defaults() | event_payload_bytes: former_minimum}
     {:ok, sink} = EventSink.start(:private, limits)
 
     assert EventSinkState.payload_within_limit?(former_payload, former_minimum)

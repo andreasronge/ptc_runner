@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
@@ -454,6 +455,15 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
             2_048
           )
         end
+      },
+      %{
+        phase: :application,
+        code: :limit_configuration_invalid,
+        source: :application,
+        setting: "normal_event_bytes",
+        value: "23300",
+        remedy: "raise limits.normal_event_bytes",
+        build: fn -> LimitConfigurationDiagnostic.message(23_300, 23_301, 7_000) end
       }
     ]
   end

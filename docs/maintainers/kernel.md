@@ -344,6 +344,19 @@ finalization. `TraceLog` owns canonical persistence and queries.
 `RunAnalysis` and the Viewer consume those snapshots rather than define another
 event model.
 
+Normal trace admission validates structural headroom after host ceilings and
+application requests have been resolved. `normal_event_count` must be at least
+three: one ordinary `run-started` event plus the `events-dropped` and
+`run-stopped` terminal reserve. `normal_event_bytes` must be at least the
+measured normal terminal reserve plus `event_payload_bytes`, preserving one
+maximum-size ordinary payload in addition to the terminal envelopes.
+`EventBudget` owns the bounded terminal payload shapes and the catalog minimum
+that admits them; `LimitConfiguration` owns the cross-field check
+for manifest-backed validate, doctor, run, and REPL paths; a refusal is the
+pre-execution `application/limit_configuration_invalid` diagnostic. Private
+trace policy still uses a zero terminal reserve and is not subject to this
+normal-trace byte relationship.
+
 The Lisp execution Telemetry prefix is `[:ptc_runner, :lisp, :execute]`. Its
 closed `caller` values are `:direct`, `:kernel`, and `:repl`. Stop metadata
 carries the semantic `outcome` while measurements carry duration, program and

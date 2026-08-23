@@ -14,6 +14,12 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   """
 
   @generic_maximum 2_592_000_000
+  @minimums %{
+    # EventBudget derives the same boundary from every bounded terminal shape;
+    # the catalog test keeps this schema authority synchronized with that code.
+    event_payload_bytes: 4_817,
+    normal_event_count: 3
+  }
 
   # `{field, effective default, installed ceiling}`.
   #
@@ -177,7 +183,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
              scope: :manifest_narrowable,
              compiled_default: compiled_default,
              installed_default: installed_default,
-             minimum: 1,
+             minimum: Map.get(@minimums, field, 1),
              maximum: @generic_maximum,
              identity: true,
              unit: Map.fetch!(@units, field),

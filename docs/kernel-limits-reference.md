@@ -20,6 +20,8 @@ Only when the application needs a value above the installed ceiling — here, ab
 
 The four heap and concurrency rows are the exception: their installed default equals their effective default because live memory is `live_provider_tasks` multiplied by a heap ceiling. Raising them is a resource decision, so it requires both a host ceiling above the compiled default and a matching manifest request. A limits-only host document — `{"install": {}, "limits": {...}}` — is enough; it does not need a fabricated provider.
 
+Normal trace limits also have structural rules. `event_payload_bytes` is large enough for every bounded terminal payload, and `normal_event_count` is at least 3: one ordinary `run-started` event plus the two-event terminal reserve. After host/application resolution, `normal_event_bytes` must be at least `EventSink.terminal_reserve(:normal, effective_limits).bytes + event_payload_bytes`, preserving one maximum-size ordinary payload in addition to the complete `events-dropped` and `run-stopped` envelopes. Invalid combinations are refused before execution as `application/limit_configuration_invalid`. Private trace policy keeps its zero terminal reserve and does not use this normal-trace byte relationship.
+
 A breached ceiling names itself, its configured value, and the manifest key that raises it, so the error at the point of failure carries this rule too. A request above the ceiling is refused by name, with both numbers.
 
 Time values are milliseconds. Heap values are BEAM process heap words, not bytes. The catalog range is the accepted structural range; practical installations should choose ceilings appropriate to their resources and trust boundary.
@@ -36,12 +38,12 @@ Time values are milliseconds. Heap values are BEAM process heap words, not bytes
 | `evaluation_history_bytes` | Each value and the aggregate exact three-value continuation history. | bytes | 1,000,000 | 16,000,000 | 1–2,592,000,000 |
 | `evaluation_memory_bytes` | Retained mission definitions across successful turns. | bytes | 2,000,000 | 32,000,000 | 1–2,592,000,000 |
 | `evaluation_timeout_ms` | One subordinate mission evaluation, and one interactive REPL form. | milliseconds | 30,000 | 600,000 | 1–2,592,000,000 |
-| `event_payload_bytes` | One trace event payload. | bytes | 262,144 | 4,000,000 | 1–2,592,000,000 |
+| `event_payload_bytes` | One trace event payload. | bytes | 262,144 | 4,000,000 | 4,817–2,592,000,000 |
 | `live_provider_tasks` | Concurrent provider callback processes and Kernel-owned parallel Lisp workers. | count | 8 | 8 | 1–2,592,000,000 |
 | `mission_capability_calls` | Total mission capability calls in one run. | count | 256 | 4,096 | 1–2,592,000,000 |
 | `mission_capability_calls_per_name` | Mission capability calls to any one public name in one run. | count | 128 | 2,048 | 1–2,592,000,000 |
 | `normal_event_bytes` | Aggregate encoded trace events retained under the normal policy. | bytes | 4,000,000 | 64,000,000 | 1–2,592,000,000 |
-| `normal_event_count` | Trace events retained under the normal policy. | count | 256 | 4,096 | 1–2,592,000,000 |
+| `normal_event_count` | Trace events retained under the normal policy. | count | 256 | 4,096 | 3–2,592,000,000 |
 | `parallel_timeout_ms` | One pmap or pcalls operation, clamped by the run deadline. | milliseconds | 60,000 | 600,000 | 1–2,592,000,000 |
 | `protocol_errors` | Recoverable agent protocol errors in one run. | count | 64 | 512 | 1–2,592,000,000 |
 | `provider_heap_words` | Heap of each provider callback process. | BEAM heap words | 5,000,000 | 5,000,000 | 1–2,592,000,000 |

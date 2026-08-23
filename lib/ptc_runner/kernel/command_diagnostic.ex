@@ -34,6 +34,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
@@ -490,6 +491,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: :application}
        ),
        do: RuntimeLimitDiagnostic.installed_ceiling_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :limit_configuration_invalid},
+         %CommandSource{kind: :application}
+       ),
+       do: LimitConfigurationDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          _message,

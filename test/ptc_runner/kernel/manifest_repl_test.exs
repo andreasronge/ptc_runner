@@ -8,7 +8,9 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.HostRuntimePayload
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.ManifestReplOpening
@@ -231,9 +233,65 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
                terminal_attached: true
              )
 
-    assert %{code: code, provider_activity: false} = failure
-    assert is_atom(code)
-    assert Enum.sort(Map.keys(failure)) == [:code, :provider_activity]
+    assert %{
+             code: :limit_configuration_invalid,
+             diagnostic: %CommandDiagnostic{code: :limit_configuration_invalid},
+             provider_activity: false
+           } = failure
+
+    assert Enum.sort(Map.keys(failure)) == [:code, :diagnostic, :provider_activity]
+  end
+
+  @tag :tmp_dir
+  test "manifest REPL rejects impossible effective normal trace budgets before opening", %{
+    tmp_dir: directory
+  } do
+    write_component(directory)
+    manifest = Path.join(directory, "invalid-trace-budget.json")
+    payload_bytes = 7_000
+    {:ok, base_limits} = Limits.new(event_payload_bytes: payload_bytes)
+    required_bytes = EventSink.terminal_reserve(:normal, base_limits).bytes + payload_bytes
+
+    document =
+      :normal
+      |> manifest_document(%{})
+      |> Map.put("limits", %{
+        "event_payload_bytes" => payload_bytes,
+        "normal_event_bytes" => required_bytes - 1,
+        "normal_event_count" => 3
+      })
+
+    File.write!(manifest, Jason.encode!(document))
+    {:ok, runtime} = CommandRuntime.new(provider_application_mode: :host_owned)
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             CommandAcquisition.prepare_repl(manifest, nil, runtime, true)
+
+    assert diagnostic.phase == :application
+    assert diagnostic.code == :limit_configuration_invalid
+    assert diagnostic.provider_activity == false
+
+    diagnostic_message = diagnostic.message
+
+    assert {:ok, ^diagnostic_message} =
+             LimitConfigurationDiagnostic.message(
+               required_bytes - 1,
+               required_bytes,
+               payload_bytes
+             )
+
+    for count <- [1, 2] do
+      File.write!(
+        manifest,
+        Jason.encode!(Map.put(document, "limits", %{"normal_event_count" => count}))
+      )
+
+      assert {:error, %CommandDiagnostic{} = count_diagnostic} =
+               CommandAcquisition.prepare_repl(manifest, nil, runtime, true)
+
+      assert count_diagnostic.code == :schema_violation
+      assert CommandDiagnostic.to_map(count_diagnostic)["path"] == "/limits/normal_event_count"
+    end
   end
 
   @tag :tmp_dir

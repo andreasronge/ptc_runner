@@ -25,14 +25,11 @@ defmodule PtcRunner.Kernel.EventSink do
   """
   use GenServer
 
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.EventSinkState
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.OwnerHandoff
-  alias PtcRunner.Lisp.RetainedSize
 
-  @drop_count_limit 4_294_967_295
-  @max_drop_type String.duplicate("e", 128)
-  @maximum_terminal_reason String.duplicate("r", 1_020)
   @stop_timeout_ms 5_000
 
   @enforce_keys [:pid, :token, :policy]
@@ -148,12 +145,12 @@ defmodule PtcRunner.Kernel.EventSink do
         usage
       )
       when policy in [:normal, :private] and is_map(usage) do
-    dropped = if policy == :normal, do: maximum_dropped(), else: %{}
+    dropped = if policy == :normal, do: EventBudget.maximum_dropped(), else: %{}
 
     usage = Map.put(usage, :events_dropped, dropped)
 
     [
-      %{outcome: :error, reason: @maximum_terminal_reason, usage: usage},
+      %{outcome: :error, reason: EventBudget.maximum_terminal_reason(), usage: usage},
       %{
         outcome: :ok,
         reason: nil,
@@ -312,50 +309,10 @@ defmodule PtcRunner.Kernel.EventSink do
   defp terminal_payload_capacity?(:private, _limits, _reserve), do: true
 
   defp terminal_payload_capacity?(:normal, limits, _reserve) do
-    dropped = maximum_dropped()
-
-    terminal_payloads = [
-      %{"counts" => dropped},
-      %{
-        "outcome" => "error",
-        "reason" => @maximum_terminal_reason,
-        "usage" => %{"events_dropped" => dropped}
-      },
-      %{
-        "outcome" => "ok",
-        "reason" => nil,
-        "result_hash" => "sha256:" <> String.duplicate("f", 64),
-        "usage" => %{"events_dropped" => dropped}
-      }
-    ]
-
-    Enum.all?(terminal_payloads, fn payload ->
-      case RetainedSize.bytes_with_cap(payload, limits.event_payload_bytes) do
-        bytes when is_integer(bytes) -> bytes <= limits.event_payload_bytes
-        :oversized -> false
-      end
-    end)
+    EventBudget.normal_terminal_payload_capacity?(limits.event_payload_bytes)
   end
 
-  defp maximum_dropped do
-    1..16
-    |> Map.new(&{"#{@max_drop_type}#{&1}", @drop_count_limit})
-    |> Map.put("$overflow", @drop_count_limit)
-  end
-
-  defp terminal_envelope_bytes(type) do
-    envelope = %{
-      schema_version: 2,
-      run_id: String.duplicate("r", 256),
-      trace_id: String.duplicate("t", 256),
-      sequence: @drop_count_limit,
-      timestamp: ~U[9999-12-31 23:59:59.999999Z],
-      type: type,
-      data: nil
-    }
-
-    RetainedSize.bytes(envelope)
-  end
+  defp terminal_envelope_bytes(type), do: EventBudget.terminal_envelope_bytes(type)
 
   defp valid_id?(value),
     do: is_binary(value) and byte_size(value) in 1..256 and String.valid?(value)
