@@ -44,7 +44,17 @@ for tool in otool install_name_tool codesign shasum; do
 done
 
 cd "$project_root"
-MIX_ENV=prod mix release ptc_runner --overwrite --path "$release_root"
+
+# One `mix do` invocation, for the reason the Dockerfile states: `mix.exs`
+# activates the Viewer companion and the launcher's path dependency only when
+# the environment is dev/test or `release` appears in the arguments. A separate
+# `deps.get` -- such as the one `.github/actions/setup-elixir` runs -- resolves
+# prod without the Viewer, so `bandit` and `plug` are never fetched and the
+# release fails with "the dependency is not available". A machine that has run
+# a dev or test `deps.get` already has them, which is why this only appeared on
+# a fresh CI runner.
+MIX_ENV=prod mix do deps.get --only prod --check-locked \
+  + release ptc_runner --overwrite --path "$release_root"
 
 version="$("$release_root/bin/ptc" --version)"
 architecture="$(uname -m)"
