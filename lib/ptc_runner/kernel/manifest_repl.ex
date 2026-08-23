@@ -48,6 +48,7 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   @type failure :: %{
           required(:code) => atom(),
           required(:provider_activity) => boolean(),
+          optional(:diagnostic) => CommandDiagnostic.t(),
           optional(:declared) => [binary()]
         }
 
@@ -208,7 +209,7 @@ defmodule PtcRunner.Kernel.ManifestRepl do
   end
 
   defp maybe_setup_environment(%{environment_setup_required: true}, runtime, :workflow),
-    do: CommandRuntime.setup_environment(runtime)
+    do: CommandRuntime.setup_environment_diagnostic(runtime)
 
   defp maybe_setup_environment(
          %{environment_setup_aliases: aliases},
@@ -216,14 +217,23 @@ defmodule PtcRunner.Kernel.ManifestRepl do
          %MissionReplTarget{} = target
        ) do
     if Enum.any?(target.aliases, &(&1 in aliases)),
-      do: CommandRuntime.setup_environment(runtime),
+      do: CommandRuntime.setup_environment_diagnostic(runtime),
       else: :ok
   end
 
   defp maybe_setup_environment(_preparation, _runtime, _target), do: :ok
 
-  defp failure(%CommandDiagnostic{} = diagnostic, _activity),
-    do: %{code: diagnostic.code, provider_activity: diagnostic.provider_activity}
+  defp failure(%CommandDiagnostic{} = diagnostic, activity) do
+    if CommandDiagnostic.valid?(diagnostic) do
+      %{
+        code: diagnostic.code,
+        diagnostic: diagnostic,
+        provider_activity: diagnostic.provider_activity
+      }
+    else
+      %{code: :invalid_manifest_repl, provider_activity: activity == true}
+    end
+  end
 
   defp failure(reason, activity) when is_atom(reason),
     do: %{code: reason, provider_activity: activity == true}
