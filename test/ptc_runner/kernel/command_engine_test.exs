@@ -88,6 +88,17 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   test "help and version are exact phase-1 successes" do
+    assert {:ok, %CommandOutcome{} = init_help} =
+             CommandEngine.prepare(["help", "init"])
+
+    assert init_help.envelope["result"]["notices"] == [
+             "DIRECTORY must not already exist",
+             "init assembles the complete scaffold or selected example tree and publishes it atomically without replacing anything",
+             "to add PtcRunner to an existing repository, initialize a new sibling or subdirectory and deliberately copy or move the generated files the repository wants"
+           ]
+
+    assert_schema_valid(init_help.envelope)
+
     assert {:ok, %CommandOutcome{} = help} =
              CommandEngine.prepare(["doctor", "--help"])
 

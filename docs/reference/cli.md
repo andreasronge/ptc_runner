@@ -159,6 +159,12 @@ completed reservation can contain private prompts, responses, source, or a
 result, ignore both patterns as well as the configured artifact root. New
 projects created by `ptc init` include all three patterns in `.gitignore`.
 
+`ptc init` requires a `DIRECTORY` that does not already exist. It assembles the
+complete scaffold or selected example tree and publishes it atomically without
+replacing anything. To add PtcRunner to an existing repository, initialize a
+new sibling or subdirectory, then deliberately copy or move the generated
+files the repository wants.
+
 `ptc init DIRECTORY --example NAME` publishes one of the walkthrough projects
 this executable embeds instead of the scaffold, under the same no-replace
 commit. Run `ptc init` with an unknown example name to have the embedded
@@ -485,7 +491,7 @@ Every classified diagnostic and the status it exits with:
 | 7 | `publication` | `initialization_failed` | no | project initialization failed |
 | 7 | `publication` | `initialization_parent_missing` | no | the initialization target's parent directory does not exist |
 | 7 | `publication` | `initialization_parent_unusable` | no | the initialization target's parent directory is unusable |
-| 7 | `publication` | `initialization_target_exists` | no | the initialization target already exists |
+| 7 | `publication` | `initialization_target_exists` | no | ptc init publishes only to a new directory; choose a target that does not already exist |
 | 7 | `publication` | `inspection_publication_failed` | no | inspection publication failed |
 | 7 | `publication` | `recovery_cleanup_failed` | no | private result recovery cleanup failed |
 | 7 | `publication` | `result_publication_failed` | no | result publication failed |
