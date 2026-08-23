@@ -15,14 +15,14 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   whose bytes must match. It rejects symlinks,
   changed files, content above 16 MB, any record above 2,000,000 encoded bytes,
   excessive structural depth, malformed lines, mixed identities, non-contiguous
-  sequences, and records outside the exact V7 vocabulary. Private records use
+  sequences, and records outside the exact V8 vocabulary. Private records use
   a required `mission_name` on mission-owned source and capability
   records while forbidding it on workflow-owned records. Effective prelude
   source is proven, not asserted: the `prelude-source` records of an
   environment must name exactly the components the canonical `run-started`
   projection lists, and their source hashes must reduce back to the bundle
   identity that projection committed to. Self-consistent source a caller
-  computed for itself therefore cannot pass as the source that compiled. V7
+  computed for itself therefore cannot pass as the source that compiled. V8
   joins at most one
   static prelude-call analysis to each subordinate evaluation source and also
   admits at most one strictly JSON terminal result whose self-hash must match
@@ -58,7 +58,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   @bundle_hash ~r/\A[0-9a-f]{64}\z/
   @max_bytes 16_000_000
   @max_record_bytes 2_000_000
-  @schema_version 7
+  @schema_version 8
   @suffix ".inspection.jsonl"
   @envelope_keys ~w(schema_version run_id trace_id sequence timestamp record_type correlation payload)
 
@@ -586,7 +586,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => correlation,
            "payload" => payload
          },
-         7
+         8
        ) do
     correlation == %{} and exact_keys?(payload, ~w(result_hash value)) and
       ResultIdentity.valid_hash?(payload["result_hash"]) and
@@ -599,7 +599,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"capability_id" => id},
            "payload" => payload
          },
-         7
+         8
        )
        when record_type in ["capability-input", "capability-output"] do
     value_key = if record_type == "capability-input", do: "arguments", else: "result"
@@ -618,7 +618,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"capability_id" => id},
            "payload" => payload
          },
-         7
+         8
        ),
        do: InspectionRecordTypes.valid_capability_exception?(id, payload)
 
@@ -628,7 +628,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => correlation,
            "payload" => payload
          },
-         7
+         8
        )
        when record_type in ["mcp-request", "mcp-response"] do
     request_id = correlation["request_id"]
@@ -648,7 +648,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => correlation,
            "payload" => payload
          },
-         7
+         8
        ),
        do: InspectionRecordTypes.valid_mcp_stderr?(correlation, payload)
 
@@ -658,7 +658,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"component_id" => id},
            "payload" => payload
          },
-         7
+         8
        ) do
     valid_id?(id) and is_binary(payload["source"]) and
       payload["source_bytes"] == byte_size(payload["source"]) and
@@ -675,7 +675,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"evaluation_id" => id},
            "payload" => payload
          },
-         7
+         8
        ) do
     exact_keys?(
       payload,
@@ -692,7 +692,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"evaluation_id" => id},
            "payload" => payload
          },
-         7
+         8
        ) do
     exact_keys?(payload, ~w(environment mission_name prelude_calls)) and valid_id?(id) and
       valid_id?(payload["mission_name"]) and payload["environment"] == "mission" and
@@ -705,7 +705,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"evaluation_id" => id},
            "payload" => payload
          },
-         7
+         8
        ) do
     exact_keys?(payload, ~w(environment prints truncated)) and
       valid_id?(id) and payload["environment"] == "workflow" and
@@ -719,7 +719,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"evaluation_id" => id},
            "payload" => payload
          },
-         7
+         8
        ) do
     exact_keys?(payload, ~w(environment kind reason details)) and
       valid_id?(id) and payload["environment"] == "workflow" and
@@ -734,13 +734,13 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
            "correlation" => %{"evaluation_id" => id},
            "payload" => payload
          },
-         7
+         8
        ) do
     exact_keys?(payload, ~w(environment value)) and valid_id?(id) and
       payload["environment"] == "workflow" and JSONValue.value?(payload["value"])
   end
 
-  defp valid_shape?(_record, 7), do: false
+  defp valid_shape?(_record, 8), do: false
 
   defp valid_prelude_calls?(calls) when is_list(calls) do
     Enum.all?(calls, fn call ->
@@ -1442,7 +1442,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
     do: match?({:ok, _datetime, 0}, DateTime.from_iso8601(timestamp))
 
   defp valid_timestamp?(_timestamp), do: false
-  defp record_types(7), do: InspectionRecordTypes.all()
+  defp record_types(8), do: InspectionRecordTypes.all()
   defp valid_request_id?(id), do: is_integer(id) and id > 0
   defp valid_id?(id), do: is_binary(id) and byte_size(id) in 1..256 and String.valid?(id)
   defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)

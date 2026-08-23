@@ -57,7 +57,39 @@ defmodule PtcRunner.Kernel.ProjectViewerAdapter do
 
   def preludes(_source, _run_id), do: {:error, :invalid_inspection_query}
 
-  @spec collect(InspectionSnapshot.t(), :turns | :effective_preludes, binary()) ::
+  @spec execution_errors(
+          {:inspection_snapshot, InspectionSnapshot.t()}
+          | {:viewer_snapshot_store, ViewerSnapshotStore.t()},
+          binary()
+        ) ::
+          {:ok, map()} | {:error, atom()}
+  def execution_errors({:inspection_snapshot, snapshot}, run_id),
+    do: collect(snapshot, :execution_errors, run_id)
+
+  def execution_errors({:viewer_snapshot_store, store}, run_id),
+    do: ViewerSnapshotStore.execution_errors(store, run_id)
+
+  def execution_errors(_source, _run_id), do: {:error, :invalid_inspection_query}
+
+  @spec explicit_failure_values(
+          {:inspection_snapshot, InspectionSnapshot.t()}
+          | {:viewer_snapshot_store, ViewerSnapshotStore.t()},
+          binary()
+        ) ::
+          {:ok, map()} | {:error, atom()}
+  def explicit_failure_values({:inspection_snapshot, snapshot}, run_id),
+    do: collect(snapshot, :explicit_failure_values, run_id)
+
+  def explicit_failure_values({:viewer_snapshot_store, store}, run_id),
+    do: ViewerSnapshotStore.explicit_failure_values(store, run_id)
+
+  def explicit_failure_values(_source, _run_id), do: {:error, :invalid_inspection_query}
+
+  @spec collect(
+          InspectionSnapshot.t(),
+          :turns | :effective_preludes | :execution_errors | :explicit_failure_values,
+          binary()
+        ) ::
           {:ok, map()} | {:error, atom()}
   defp collect(snapshot, operation, run_id) do
     query = &InspectionSnapshot.query(snapshot, operation, &1)

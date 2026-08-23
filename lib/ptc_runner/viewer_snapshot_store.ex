@@ -63,6 +63,18 @@ defmodule PtcRunner.ViewerSnapshotStore do
 
   def preludes(_store, _run_id), do: {:error, :invalid_inspection_query}
 
+  @spec execution_errors(t(), binary()) :: {:ok, map()} | {:error, atom()}
+  def execution_errors(%__MODULE__{} = store, run_id) when is_binary(run_id),
+    do: call(store, {:execution_errors, run_id})
+
+  def execution_errors(_store, _run_id), do: {:error, :invalid_inspection_query}
+
+  @spec explicit_failure_values(t(), binary()) :: {:ok, map()} | {:error, atom()}
+  def explicit_failure_values(%__MODULE__{} = store, run_id) when is_binary(run_id),
+    do: call(store, {:explicit_failure_values, run_id})
+
+  def explicit_failure_values(_store, _run_id), do: {:error, :invalid_inspection_query}
+
   @spec refresh(t(), binary()) :: :ok | {:error, atom()}
   def refresh(%__MODULE__{} = store, run_id)
       when is_binary(run_id) and byte_size(run_id) in 1..256,
@@ -129,6 +141,14 @@ defmodule PtcRunner.ViewerSnapshotStore do
 
   def handle_call({token, {:preludes, run_id}}, _from, %{token: token} = state) do
     {:reply, inspect_snapshot(state.inspection, :preludes, run_id), state}
+  end
+
+  def handle_call({token, {:execution_errors, run_id}}, _from, %{token: token} = state) do
+    {:reply, inspect_snapshot(state.inspection, :execution_errors, run_id), state}
+  end
+
+  def handle_call({token, {:explicit_failure_values, run_id}}, _from, %{token: token} = state) do
+    {:reply, inspect_snapshot(state.inspection, :explicit_failure_values, run_id), state}
   end
 
   def handle_call({token, {:refresh, run_id}}, _from, %{token: token} = state) do
@@ -220,6 +240,12 @@ defmodule PtcRunner.ViewerSnapshotStore do
 
   defp inspect_snapshot(snapshot, :preludes, run_id),
     do: ProjectViewerAdapter.preludes({:inspection_snapshot, snapshot}, run_id)
+
+  defp inspect_snapshot(snapshot, :execution_errors, run_id),
+    do: ProjectViewerAdapter.execution_errors({:inspection_snapshot, snapshot}, run_id)
+
+  defp inspect_snapshot(snapshot, :explicit_failure_values, run_id),
+    do: ProjectViewerAdapter.explicit_failure_values({:inspection_snapshot, snapshot}, run_id)
 
   defp cleanup(trace, inspection) do
     InspectionSnapshot.stop(inspection)

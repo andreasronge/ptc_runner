@@ -3,11 +3,13 @@ defmodule PtcViewer.TestInspectionAdapter do
 
   def pin_inspection(_path, _trace_source) do
     {:error,
-     {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 7}}}
+     {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 8}}}
   end
 
   def conversation(_source, _run_id), do: {:error, :not_called}
   def preludes(_source, _run_id), do: {:error, :not_called}
+  def execution_errors(_source, _run_id), do: {:error, :not_called}
+  def explicit_failure_values(_source, _run_id), do: {:error, :not_called}
 end
 
 defmodule PtcViewer.PinningInspectionTestAdapter do
@@ -19,5 +21,11 @@ defmodule PtcViewer.PinningInspectionTestAdapter do
     do: {:ok, %{"source" => inspect(source), "run_id" => run_id, "streams" => []}}
 
   def preludes(source, run_id),
+    do: {:ok, %{"source" => inspect(source), "run_id" => run_id, "items" => []}}
+
+  def execution_errors(source, run_id),
+    do: {:ok, %{"source" => inspect(source), "run_id" => run_id, "items" => []}}
+
+  def explicit_failure_values(source, run_id),
     do: {:ok, %{"source" => inspect(source), "run_id" => run_id, "items" => []}}
 end

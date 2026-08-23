@@ -23,6 +23,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.HostContext
   alias PtcRunner.Lisp.Eval.ParallelCall
   alias PtcRunner.Lisp.Eval.Patterns
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.Introspection
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Condition, as: JavaCondition
@@ -1304,6 +1305,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       :invalid_agent_config,
       :result_contract_failed,
       :llm_provider_failed
+      | EvaluatorErrorCatalog.kinds()
     ]
   end
 
@@ -1353,35 +1355,37 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp count_prelude_entry_metadata(_metadata, eval_context), do: eval_context
 
-  # Stable nested-parallel failures cross the host callback via the evaluator's
-  # single abort carrier. Other closure errors keep the public HOF type-error
-  # classification by using the existing RuntimeError adapter.
+  # Catalogued evaluator reasons and stable nested-parallel failures cross the
+  # host callback via the evaluator's single abort carrier. Other closure
+  # errors keep the public HOF type-error classification.
   @spec raise_closure_error(term()) :: no_return()
-  defp raise_closure_error({atom, _} = reason)
-       when atom in [:memory_exceeded, :timeout, :parallel_capacity_exceeded] do
-    HostContext.error!(reason)
-  end
-
-  defp raise_closure_error({atom, _, _} = reason)
-       when atom in [:memory_exceeded, :timeout, :parallel_capacity_exceeded] do
-    HostContext.error!(reason)
-  end
-
   defp raise_closure_error(reason) do
-    HostContext.error!({@hof_callback_error, Helpers.format_closure_error(reason)})
+    if passthrough_hof_error?(reason) do
+      HostContext.error!(reason)
+    else
+      HostContext.error!({@hof_callback_error, Helpers.format_closure_error(reason)})
+    end
   end
 
   @spec reraise_hof_callback_error(Abort.t(), [term()], Exception.stacktrace()) :: no_return()
   defp reraise_hof_callback_error(
-         %Abort{outcome: {:error, {@hof_callback_error, message}, %EvalContext{} = context}},
+         %Abort{outcome: {:error, {@hof_callback_error, reason}, %EvalContext{} = context}},
          args,
          _stacktrace
        ) do
-    Abort.error!({:type_error, message, args}, context)
+    if passthrough_hof_error?(reason) do
+      Abort.error!(reason, context)
+    else
+      Abort.error!({:type_error, hof_callback_type_error_message(reason), args}, context)
+    end
   end
 
   defp reraise_hof_callback_error(%Abort{} = error, _args, stacktrace),
     do: reraise(error, stacktrace)
+
+  defp hof_callback_type_error_message(message) when is_binary(message), do: message
+
+  defp hof_callback_type_error_message(reason), do: Helpers.format_closure_error(reason)
 
   defp with_side_effect_stash(%EvalContext{} = eval_ctx, do_eval_fn, fun)
        when is_function(do_eval_fn, 2) and is_function(fun, 0) do

@@ -519,6 +519,91 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "a higher-order callback arithmetic failure publishes evaluation_failed", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "hof-arithmetic", valid_manifest())
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return (map (fn [x] (/ 1 x)) [1 0])))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["code"] == "evaluation_failed"
+
+    assert outcome.envelope["execution"]["last_evaluation_error"] == %{
+             "kind" => "arithmetic_error",
+             "message" => "division by zero"
+           }
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a private not-callable failure still writes an execution-error record", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "private-not-callable", valid_manifest())
+    input = Path.join(Path.dirname(application), "private-input.json")
+    output = Path.join(directory, "private-result.json")
+    inspection = Path.join(directory, "run.inspection.jsonl")
+    File.write!(input, ~s({}))
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return (1 2 3)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--private-input",
+               "private-input.json",
+               "--private-output",
+               output,
+               "--inspect",
+               inspection
+             ])
+
+    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    assert_schema_valid(outcome.envelope)
+
+    assert {:ok, records} = InspectionArtifact.load(inspection)
+    error_record = Enum.find(records, &(&1["record_type"] == "execution-error"))
+    assert error_record["payload"]["kind"] == "workflow_failed"
+    assert error_record["payload"]["reason"] == "not_callable"
+    assert is_map(error_record["payload"]["details"])
+  end
+
+  @tag :tmp_dir
+  test "fail nil retains a dedicated inspection record", %{tmp_dir: directory} do
+    application = write_application(directory, "explicit-fail-nil", valid_manifest())
+    inspection = Path.join(directory, "run.inspection.jsonl")
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (fail nil))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    assert_schema_valid(outcome.envelope)
+
+    assert {:ok, records} = InspectionArtifact.load(inspection)
+    fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
+    assert fail_record["payload"]["environment"] == "workflow"
+    assert fail_record["payload"]["value"] == nil
+  end
+
+  @tag :tmp_dir
   test "V3 success and error envelopes retain evaluations by mission", %{tmp_dir: directory} do
     manifest =
       valid_manifest(%{

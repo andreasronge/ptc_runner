@@ -474,6 +474,9 @@ defmodule PtcRunner.Kernel.Evaluation do
         |> put_terminal_host_failure(step)
 
       {:error, step} ->
+        # Every completed evaluation owns the slot. Clear first so a later
+        # unadmitted kind cannot leave a previous catalogued failure attached
+        # to a subsequent turn-limit publication.
         maybe_record_evaluator_failure(state, evaluation_id, step)
 
         release_failure(state, environment, lease, step, mission_calls_before)
@@ -483,6 +486,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   end
 
   defp maybe_record_evaluator_failure(state, evaluation_id, step) do
+    :ok = RunState.clear_last_evaluator_failure(state)
     reason = step.fail.reason
     details = step.fail.details || %{}
 

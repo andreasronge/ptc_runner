@@ -598,7 +598,7 @@ JSON object with this exact envelope:
 
 ```json
 {
-  "schema_version": 7,
+  "schema_version": 8,
   "run_id": "run-id",
   "trace_id": "trace-id",
   "sequence": 1,
@@ -633,6 +633,7 @@ The current record types and payloads are:
 | `mcp-stderr` | `capability_id`, `request_id` | `transport`, `text`, `truncated` |
 | `execution-prints` | `evaluation_id` | `environment`, `prints`, `truncated` |
 | `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
+| `explicit-failure-value` | `evaluation_id` | `environment`, `value` |
 
 Named-mission ownership is explicit. Mission `capability-input`,
 `capability-exception`, `capability-output`, `evaluation-source`, `evaluation-analysis`,
@@ -642,8 +643,8 @@ Prelude uniqueness is `(environment, mission_name, component_id)`, so the same
 component ID can be inspected independently in multiple missions. Every
 mission-owned query result preserves `mission_name`.
 
-V7 retains the successful terminal-result record introduced in V6, at most one
-per run:
+V8 retains the successful terminal-result record introduced in V6, at most one
+per run, and adds the dedicated `explicit-failure-value` record:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
@@ -812,7 +813,7 @@ JSONL.
 
 A host-installed inspection snapshot composes its correlated canonical trace
 through the three navigation operations. `analysis/open` includes an eligible
-immutable V7 result value and canonical `result_hash`; an unknown run and a
+immutable V8 result value and canonical `result_hash`; an unknown run and a
 known run without an eligible result remain distinct internally. Both encoded
 and retained sizes must fit the snapshot result ceiling. Possessing a private
 canonical event source, local Viewer access, or the active run does not imply

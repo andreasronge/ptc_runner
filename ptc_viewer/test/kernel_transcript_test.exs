@@ -226,6 +226,42 @@ defmodule PtcViewer.KernelTranscriptTest do
     assert rendered =~ "evaluation: arithmetic_error: division by zero"
   end
 
+  test "renders authorized inspection evaluator evidence as distinct facts", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "inspect-evidence-run", "status" => "error"},
+        "execution_errors" => %{
+          "items" => [
+            %{
+              "evaluation_id" => "workflow-eval-1",
+              "kind" => "workflow_failed",
+              "reason" => "not_callable",
+              "details" => %{}
+            }
+          ]
+        },
+        "explicit_failure_values" => %{
+          "items" => [
+            %{
+              "evaluation_id" => "workflow-eval-1",
+              "value" => nil
+            }
+          ]
+        },
+        "turns" => %{
+          "items" => [
+            event(1, "run-started", %{}),
+            event(2, "run-stopped", %{"outcome" => "error", "failure_kind" => "workflow-failed"})
+          ]
+        }
+      })
+
+    assert rendered =~ "Authorized execution error"
+    assert rendered =~ "workflow_failed: not_callable"
+    assert rendered =~ "Explicit failure value"
+    assert rendered =~ "null"
+  end
+
   test "does not invent an evaluation fact without authenticated evidence", %{tmp_dir: directory} do
     rendered =
       render(directory, %{

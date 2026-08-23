@@ -151,6 +151,16 @@ defmodule PtcRunner.Kernel.RunAnalysis do
       order: "sequence_asc",
       sequence_domain: "private_inspection",
       identifier_locations: %{"evaluation_id" => "evaluation_id", "sequence" => "sequence"}
+    },
+    %{
+      name: "explicit_failure_values",
+      authority: :private,
+      snapshot: :inspection,
+      operation: :explicit_failure_values,
+      filters: ~w(evaluation_id),
+      order: "sequence_asc",
+      sequence_domain: "private_inspection",
+      identifier_locations: %{"evaluation_id" => "evaluation_id", "sequence" => "sequence"}
     }
   ]
 

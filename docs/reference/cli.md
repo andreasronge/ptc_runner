@@ -144,7 +144,7 @@ Useful run switches are:
   `<run_ref>.private.jsonl` according to the run's artifact class.
 - `--inspect FILE` writes sensitive execution evidence to an owner-only
   `.inspection.jsonl` file.
-- `--envelope FILE` atomically publishes a convenience copy of the stable V2
+- `--envelope FILE` atomically publishes a convenience copy of the stable V3
   command envelope. When a project enables `artifacts.envelope`, the project's
   `.ptc/envelopes/<run_ref>.json` ledger entry is still written for that run.
 
@@ -211,7 +211,7 @@ documented in the repository's maintainer guide on embedding.
 ## Read results and failures
 
 A successful normal run prints the compact JSON result value. A private run
-does not print its value. The V2 envelope records the result class, artifact
+does not print its value. The V3 envelope records the result class, artifact
 states, bounded usage, retained-memory counts, and the closed diagnostic when
 one exists.
 

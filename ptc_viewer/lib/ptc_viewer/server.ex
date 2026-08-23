@@ -322,9 +322,18 @@ defmodule PtcViewer.Server do
 
   defp valid_inspection_adapter?(adapter) do
     Code.ensure_loaded?(adapter) and
-      Enum.all?([:pin_inspection, :conversation, :preludes], fn operation ->
-        function_exported?(adapter, operation, 2)
-      end)
+      Enum.all?(
+        [
+          :pin_inspection,
+          :conversation,
+          :preludes,
+          :execution_errors,
+          :explicit_failure_values
+        ],
+        fn operation ->
+          function_exported?(adapter, operation, 2)
+        end
+      )
   end
 
   defp normalize_pin_result({:ok, source}) when not is_nil(source), do: {:ok, source}

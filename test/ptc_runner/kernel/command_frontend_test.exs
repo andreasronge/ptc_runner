@@ -16,7 +16,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
   @run_ref "cmd-00000000000000000000000001"
 
-  @human_fixtures Path.expand("../../fixtures/command-human-v2.json", __DIR__)
+  @human_fixtures Path.expand("../../fixtures/command-human-v3.json", __DIR__)
                   |> File.read!()
                   |> Jason.decode!()
 

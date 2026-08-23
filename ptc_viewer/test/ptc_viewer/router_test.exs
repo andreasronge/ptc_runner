@@ -274,5 +274,40 @@ defmodule PtcViewer.RouterTest do
            }
   end
 
+  test "execution-error and explicit-failure-value routes delegate the pinned grant", %{
+    trace_dir: trace_dir
+  } do
+    source = {:pinned, "fixed.inspection.jsonl"}
+    {:ok, store} = PtcViewer.InspectionStore.start(source)
+    on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
+
+    errors =
+      conn(:get, "/api/analysis/runs/run-1/execution-errors")
+      |> call_router(
+        trace_dir: trace_dir,
+        inspection_store: store,
+        inspection_adapter: PtcViewer.PinningInspectionTestAdapter
+      )
+
+    failures =
+      conn(:get, "/api/analysis/runs/run-1/explicit-failure-values")
+      |> call_router(
+        trace_dir: trace_dir,
+        inspection_store: store,
+        inspection_adapter: PtcViewer.PinningInspectionTestAdapter
+      )
+
+    expected = %{
+      "source" => inspect(source),
+      "run_id" => "run-1",
+      "items" => []
+    }
+
+    assert errors.status == 200
+    assert failures.status == 200
+    assert Jason.decode!(errors.resp_body) == expected
+    assert Jason.decode!(failures.resp_body) == expected
+  end
+
   defp call_router(conn, opts), do: PtcViewer.Router.call(conn, PtcViewer.Router.init(opts))
 end

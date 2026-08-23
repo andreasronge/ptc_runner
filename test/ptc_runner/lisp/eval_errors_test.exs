@@ -289,16 +289,22 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       assert msg =~ "expected an integer"
     end
 
-    test "ordinary HOF callback errors retain the outer callback arguments" do
+    test "ordinary HOF callback errors keep catalogued not_callable reasons" do
       env = Env.initial()
       closure = {:fn, [{:var, :x}], {:call, {:var, :x}, [1]}}
       ast = {:call, {:var, :map}, [closure, {:vector, [nil]}]}
 
-      assert {:error, {:type_error, msg, [callback, [nil]]}} =
+      assert {:error, {:not_callable, %{}}} =
                Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+    end
 
-      assert is_function(callback, 1)
-      assert msg =~ "not_callable"
+    test "higher-order division by zero keeps catalogued arithmetic_error" do
+      env = Env.initial()
+      closure = {:fn, [{:var, :x}], {:call, {:var, :/}, [1, {:var, :x}]}}
+      ast = {:call, {:var, :map}, [closure, {:vector, [1, 0]}]}
+
+      assert {:error, {:arithmetic_error, :division_by_zero}} =
+               Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "runtime callable errors retain their trailing data element" do
@@ -345,7 +351,7 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
                "sort-by key function failed for item nil: >: expected number arguments, got nil, number"
     end
 
-    test "sort-by contextualizes ordinary closure failures from its key function" do
+    test "sort-by keeps catalogued not_callable reasons from its key function" do
       env = Env.initial()
 
       closure =
@@ -353,13 +359,8 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
 
       ast = {:call, {:var, :"sort-by"}, [closure, {:vector, [nil]}]}
 
-      assert {:error, {:type_error, msg, [callback, [nil]]}} =
+      assert {:error, {:not_callable, %{}}} =
                Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
-
-      assert is_function(callback, 1)
-
-      assert msg ==
-               "sort-by key function failed for item nil: closure error: {:not_callable, %{}}"
     end
 
     test "division with nil operand returns type_error" do

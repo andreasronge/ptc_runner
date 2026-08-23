@@ -1,17 +1,18 @@
 // Canonical Kernel TraceLog transcript view.
 //
 // This is intentionally a projection of the shared sanitized event vocabulary,
-// not the private evaluator transcript format. Authorized conversation and
-// prelude projections may enrich the view, but raw inspection records never
-// reach this renderer.
+// not the private evaluator transcript format. Authorized conversation, prelude,
+// execution-error, and explicit-failure-value projections may enrich the view;
+// raw inspection records never reach this renderer.
 //
 // Rendering is Preact. The span derivations below stay pure functions over
 // canonical events so they remain independently testable, and the view is
-// a component tree over their output. Two properties matter here and are the
-// reason the string/`innerHTML` renderer was replaced: a re-render (loading a
-// further event page) diffs instead of rebuilding, so open disclosures and the
-// scroll position survive it, and every interpolated value is escaped by the
-// `html` tag rather than by remembering `escapeHtml` at each site.
+// a component tree over their output. Two properties matter here
+// and are the reason the string/`innerHTML` renderer was replaced: a re-render
+// (loading a further event page) diffs instead of rebuilding, so open
+// disclosures and the scroll position survive it, and every interpolated value
+// is escaped by the `html` tag rather than by remembering `escapeHtml` at each
+// site.
 
 import { html, mount, rawHtml, toMarkup } from './preact.js';
 import { highlightLisp } from './highlight.js';
@@ -48,6 +49,7 @@ export function renderKernelTranscriptMarkup(data) {
 
 function KernelTranscript({
   metadata = {}, turns = {}, conversation = null, preludes = null,
+  execution_errors = null, explicit_failure_values = null,
   last_evaluation_error = null, options = {}
 }) {
   const events = [...(turns.items || [])].sort((left, right) => left.sequence - right.sequence);
@@ -93,7 +95,9 @@ function KernelTranscript({
     <section class="kernel-transcript">
       <${Hero} metadata=${metadata} transcript=${transcript} title=${options.title}
                eventCount=${events.length} truncatedPage=${partial}
-               lastEvaluationError=${last_evaluation_error} />
+               lastEvaluationError=${last_evaluation_error}
+               executionErrors=${execution_errors}
+               explicitFailureValues=${explicit_failure_values} />
       <${Provenance} />
       <${Reference} metadata=${metadata} transcript=${transcript}
                     preludeIndex=${preludeIndex} options=${options} />
@@ -110,7 +114,7 @@ function KernelTranscript({
 
 function Hero({
   metadata, transcript, title: displayTitle, eventCount, truncatedPage,
-  lastEvaluationError
+  lastEvaluationError, executionErrors, explicitFailureValues
 }) {
   const status = metadata.status || (metadata.complete ? 'complete' : 'incomplete');
   const bundle = metadata.workflow_prelude?.hash;
@@ -151,6 +155,8 @@ function Hero({
       <${Tags} tags=${metadata.tags || metadata.labels?.tags} />
     </div>
     <${TerminalCause} event=${transcript.terminal} lastEvaluationError=${lastEvaluationError} />
+    <${AuthorizedEvaluatorEvidence} executionErrors=${executionErrors}
+                                    explicitFailureValues=${explicitFailureValues} />
     <div class="kt-metrics" aria-label="Run summary">
       <${Metric} value=${transcript.evaluations.length} label="evaluations" />
       <${Metric} value=${transcript.capabilities.length} label="capability calls" />
@@ -206,6 +212,49 @@ function evaluationCause(error) {
       <span>${presentation}</span>
     </div>
   `;
+}
+
+function AuthorizedEvaluatorEvidence({ executionErrors, explicitFailureValues }) {
+  const errorItems = inspectionItems(executionErrors);
+  const failItems = inspectionItems(explicitFailureValues);
+  if (errorItems.length === 0 && failItems.length === 0) return null;
+
+  return html`
+    <div class="kt-inspection-facts" role="status">
+      ${errorItems.map((item, index) => html`
+        <div class="kt-terminal-cause" key=${`execution-error-${item.evaluation_id || index}`}>
+          <strong>Authorized execution error</strong>
+          <span>${executionErrorFact(item)}</span>
+        </div>`)}
+      ${failItems.map((item, index) => html`
+        <div class="kt-terminal-cause" key=${`explicit-failure-${item.evaluation_id || index}`}>
+          <strong>Explicit failure value</strong>
+          <span>${explicitFailureFact(item)}</span>
+        </div>`)}
+    </div>
+  `;
+}
+
+function inspectionItems(collection) {
+  if (!collection || collection['available?'] === false) return [];
+  return Array.isArray(collection.items) ? collection.items : [];
+}
+
+function executionErrorFact(item) {
+  const kind = typeof item?.kind === 'string' ? item.kind : '';
+  const reason = typeof item?.reason === 'string' ? item.reason : '';
+  if (kind && reason) return `${kind}: ${reason}`;
+  if (kind) return kind;
+  if (reason) return reason;
+  return 'execution-error';
+}
+
+function explicitFailureFact(item) {
+  try {
+    return JSON.stringify(item?.value);
+  } catch (_error) {
+    return 'explicit-failure-value';
+  }
 }
 
 function Provenance() {

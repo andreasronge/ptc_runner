@@ -121,6 +121,14 @@ defmodule PtcViewer.Router do
     send_analysis(conn, PtcViewer.Api.preludes(viewer_config(conn), run_id))
   end
 
+  get "/api/analysis/runs/:run_id/execution-errors" do
+    send_analysis(conn, PtcViewer.Api.execution_errors(viewer_config(conn), run_id))
+  end
+
+  get "/api/analysis/runs/:run_id/explicit-failure-values" do
+    send_analysis(conn, PtcViewer.Api.explicit_failure_values(viewer_config(conn), run_id))
+  end
+
   post "/api/live/runs/:run_id" do
     with :ok <- valid_reporter_security(conn),
          {:ok, store} <- live_store(conn),

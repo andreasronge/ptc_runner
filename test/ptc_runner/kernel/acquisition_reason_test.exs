@@ -202,7 +202,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
 
   test "an unsupported inspection schema tuple remains a local environment failure" do
     reason =
-      {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 7}}
+      {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 8}}
 
     diagnostic = AcquisitionReason.diagnostic(reason, @occurrence)
 

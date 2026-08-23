@@ -152,6 +152,12 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
                "collection" => "execution_errors"
              })
 
+    assert {:ok, %{"items" => [%{"value" => nil}]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => run_id,
+               "collection" => "explicit_failure_values"
+             })
+
     assert %{"filters" => nil, "state" => "incomplete"} =
              Enum.find(
                execution_error["relationships"],
