@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [0.1.0] - 2026-08-23
 
 ### Added
 
@@ -27,3 +27,5 @@
 - Added a protected publication path that uploads the exact verified package
   tarball without rebuilding it after checking both build and release
   attestations.
+
+[0.1.0]: https://github.com/andreasronge/ptc_runner/releases/tag/ptc_runner_launcher-v0.1.0
