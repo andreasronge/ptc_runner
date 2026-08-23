@@ -41,7 +41,9 @@ APIs and commands have no compatibility facades.
   snapshot carries the matching `installation_config_digest`. The map is a
   required field on the V3 validate result. This is configuration identity
   for the decoded `install.<alias>` declaration, not application identity and
-  not live-scope attestation.
+  not live-scope attestation. Set-valued declaration fields are ordered
+  canonically before hashing, and validate alias keys use the hardened
+  identifier pattern.
 
 ## [0.13.0] - 2026-06-24
 

@@ -300,7 +300,8 @@ Keep these identities distinct:
   limits, and semantic revision.
 - `installation_config_digest` covers one decoded host `install.<alias>`
   declaration after schema defaults, excluding `installation_revision`,
-  secrets, and machine-local resolved paths. Selected aliases are published as
+  secrets, and machine-local resolved paths. Set-valued declaration fields are
+  ordered canonically before hashing. Selected aliases are published as
   `installation_config_digests` from `ptc validate` and `run-started`. This
   stays a sibling of the application digests; host configuration is not folded
   into them.

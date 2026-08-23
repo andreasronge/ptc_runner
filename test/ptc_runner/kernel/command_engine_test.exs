@@ -4868,6 +4868,18 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         ] do
       assert_schema_invalid(put_in(validate.envelope, ["result", field], result[field] <> "\n"))
     end
+
+    assert CommandContract.valid_success_result?(:validate, result)
+
+    newline_alias =
+      validate_success_result(%{
+        "installation_config_digests" => %{
+          "safe\n" => "sha256:" <> String.duplicate("3", 64)
+        }
+      })
+
+    refute CommandContract.valid_success_result?(:validate, newline_alias)
+    assert_schema_invalid(%{validate.envelope | "result" => newline_alias})
   end
 
   test "validate mission_grants schema admits producer-scale data and export refs" do

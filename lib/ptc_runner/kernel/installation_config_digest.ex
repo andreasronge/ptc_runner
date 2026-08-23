@@ -14,7 +14,10 @@ defmodule PtcRunner.Kernel.InstallationConfigDigest do
   includes the alias name, resolved credential bytes, ambient environment
   values, remote or discovered server state, or machine-local resolved paths.
   Credential *binding names* and environment *variable names* remain. Unknown
-  structs fail closed.
+  structs fail closed. Set-valued declaration fields such as `accepts_data`
+  and OAuth `redirect_uris` are ordered canonically before encoding, so author
+  order is not configuration drift. Ordered lists such as transport `args`
+  and HTTP `auth` keep their written sequence.
   """
 
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -22,6 +25,15 @@ defmodule PtcRunner.Kernel.InstallationConfigDigest do
 
   @domain <<"ptc.installation-config.v1", 0>>
   @digest ~r/\Asha256:[0-9a-f]{64}\z/
+  @data_class_rank %{"normal" => 0, "private_inspection" => 1}
+  @set_valued_keys ~w(
+    additional_origins
+    default_scopes
+    grant_types
+    private_network_origins
+    redirect_uris
+    scope_ceiling
+  )
 
   @doc false
   @spec compute(map()) :: {:ok, binary()} | {:error, :invalid_installation_config}
@@ -93,7 +105,8 @@ defmodule PtcRunner.Kernel.InstallationConfigDigest do
 
   def valid_map?(_digests, _names), do: false
 
-  defp json_safe(%Authority{} = authority), do: {:ok, Authority.declared_projection(authority)}
+  defp json_safe(%Authority{} = authority),
+    do: json_safe(Authority.declared_projection(authority))
 
   defp json_safe(value) when is_atom(value) and not is_boolean(value) and value != nil,
     do: {:ok, Atom.to_string(value)}
@@ -119,7 +132,7 @@ defmodule PtcRunner.Kernel.InstallationConfigDigest do
     Enum.reduce_while(value, {:ok, %{}}, fn {key, item}, {:ok, acc} ->
       with {:ok, json_key} <- json_key(key),
            {:ok, json_item} <- json_safe(item) do
-        {:cont, {:ok, Map.put(acc, json_key, json_item)}}
+        {:cont, {:ok, Map.put(acc, json_key, canonicalize_field(json_key, json_item))}}
       else
         {:error, reason} -> {:halt, {:error, reason}}
       end
@@ -131,4 +144,15 @@ defmodule PtcRunner.Kernel.InstallationConfigDigest do
   defp json_key(key) when is_binary(key), do: {:ok, key}
   defp json_key(key) when is_atom(key), do: {:ok, Atom.to_string(key)}
   defp json_key(_key), do: {:error, :invalid_installation_config}
+
+  defp canonicalize_field("accepts_data", values) when is_list(values) do
+    Enum.sort_by(values, &Map.get(@data_class_rank, &1, &1))
+  end
+
+  defp canonicalize_field(key, values)
+       when is_list(values) and key in @set_valued_keys do
+    Enum.sort(values)
+  end
+
+  defp canonicalize_field(_key, value), do: value
 end

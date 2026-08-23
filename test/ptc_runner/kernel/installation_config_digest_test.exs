@@ -96,6 +96,24 @@ defmodule PtcRunner.Kernel.InstallationConfigDigestTest do
     assert digest(base, "workspace") == digest(reordered, "workspace")
   end
 
+  test "set-valued declared fields hash independently of author order" do
+    first =
+      llm_host("openrouter:deepseek/deepseek-v4-flash-0731")
+      |> put_in(["install", "deepseek", "accepts_data"], ["normal", "private_inspection"])
+
+    reversed =
+      put_in(first, ["install", "deepseek", "accepts_data"], ["private_inspection", "normal"])
+
+    assert digest(first, "deepseek") == digest(reversed, "deepseek")
+
+    left = oauth_host(["https://app.example/a", "https://app.example/b"])
+    right = oauth_host(["https://app.example/b", "https://app.example/a"])
+    assert digest(left, "github") == digest(right, "github")
+
+    refute digest(mcp_host(["--root", "apps/web"]), "workspace") ==
+             digest(mcp_host(["apps/web", "--root"]), "workspace")
+  end
+
   test "omitted schema defaults match explicit defaults except for live LLM params" do
     omitted = mcp_host(["server.js"])
 
@@ -338,6 +356,37 @@ defmodule PtcRunner.Kernel.InstallationConfigDigestTest do
             "auth" => [%{"scheme" => "bearer", "binding" => "issues_token"}]
           },
           "tools" => %{"search" => %{"as" => "issues.search", "effect" => "read"}}
+        }
+      }
+    }
+  end
+
+  defp oauth_host(redirect_uris) do
+    %{
+      "credentials" => %{
+        "oauth_secret" => %{"literal" => "oauth-secret"}
+      },
+      "install" => %{
+        "github" => %{
+          "source" => "mcp",
+          "installation_revision" => "github-v1",
+          "transport" => %{
+            "type" => "streamable_http",
+            "endpoint" => "https://mcp.example/mcp",
+            "oauth" => %{
+              "installation_id" => "github-primary",
+              "issuer" => "https://auth.example",
+              "scope_ceiling" => ["repo:read"],
+              "client" => %{
+                "registration" => "pre_registered",
+                "client_id" => "public-client",
+                "token_endpoint_auth_method" => "none",
+                "grant_types" => ["authorization_code"],
+                "redirect_uris" => redirect_uris
+              }
+            }
+          },
+          "tools" => %{"get_file" => %{"as" => "github.get-file", "effect" => "read"}}
         }
       }
     }

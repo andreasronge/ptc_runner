@@ -79,7 +79,10 @@ launcher builds.
 
 `installation_config_digest` is computed evidence for that same declaration. It
 hashes the normalized `install.<alias>` configuration after ordinary host
-decoding, with a distinct TJCS domain from application identity. Matching
+decoding, with a distinct TJCS domain from application identity. Set-valued
+declaration fields such as `accepts_data` and OAuth `redirect_uris` are ordered
+canonically before hashing, so reversing them is not configuration drift;
+ordered lists such as transport `args` keep their written sequence. Matching
 digests mean the same declared installation was selected. They do not prove
 that a local process, remote endpoint, credential, filesystem path, or server
 still grants the same effective authority.

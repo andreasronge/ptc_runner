@@ -1671,7 +1671,7 @@ defmodule PtcRunner.Kernel.CommandContract do
         "effective_application_digest" => %{"type" => "string", "pattern" => @digest},
         "installation_config_digests" => %{
           "type" => "object",
-          "propertyNames" => %{"pattern" => "^[a-z][a-z0-9._-]{0,127}$"},
+          "propertyNames" => %{"pattern" => @alias},
           "additionalProperties" => %{"type" => "string", "pattern" => @digest},
           "maxProperties" => 128
         },
