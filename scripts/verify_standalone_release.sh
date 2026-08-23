@@ -131,6 +131,9 @@ else
 fi
 find "$release_root/lib" -maxdepth 1 -type d -name 'req_llm-*' -print -quit | grep -q .
 find "$release_root/lib" -maxdepth 1 -type d -name 'ptc_viewer-*' -print -quit | grep -q .
+cmp "$project_root/THIRD_PARTY_NOTICES.md" "$release_root/THIRD_PARTY_NOTICES.md"
+cmp "$project_root/LICENSES/Apache-2.0.txt" "$release_root/LICENSES/Apache-2.0.txt"
+cmp "$project_root/LICENSES/MIT.txt" "$release_root/LICENSES/MIT.txt"
 "$release_root/bin/ptc_runner" eval '
   true = PtcRunner.Kernel.SemanticRevision.runtime_dependency_artifacts_verified?()
 '
@@ -160,6 +163,8 @@ grep -q '^  agent-guide ' "$release_tmp_dir/docs.stdout"
 grep -qx '# Drive ptc as an agent' "$release_tmp_dir/docs-agent-guide.stdout"
 "$command_bin" docs schema-project > "$release_tmp_dir/docs-schema-project.stdout"
 grep -q 'ptc-project-config.schema.json' "$release_tmp_dir/docs-schema-project.stdout"
+"$command_bin" docs schema-mcp > "$release_tmp_dir/docs-schema-mcp.stdout"
+cmp "$project_root/site/schemas/mcp-2026-07-28.schema.json" "$release_tmp_dir/docs-schema-mcp.stdout"
 if "$command_bin" docs no-such-page > "$release_tmp_dir/docs-unknown.stdout" 2>&1; then
   echo "expected 'ptc docs no-such-page' to fail" >&2
   exit 1

@@ -417,6 +417,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        do: true
 
   defp valid_message_source?(
+         _message,
+         %{phase: :provider_acquisition, code: :provider_protocol_version_unsupported},
+         nil
+       ),
+       do: true
+
+  defp valid_message_source?(
          message,
          %{phase: :execution, code: :runtime_limit_exceeded},
          %CommandSource{kind: :runtime}

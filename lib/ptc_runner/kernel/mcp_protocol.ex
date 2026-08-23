@@ -73,12 +73,11 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   @rfc3339_datetime ~r/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\z/i
   @max_schema_depth 16
   @input_required_methods ~w(tools/call prompts/get resources/read)
-  # A legacy server answers an unknown pre-`initialize` request with an
-  # implementation-defined error; the stdio backward-compatibility rules name
-  # `-32601` and `-32602` as the common pair. `-32022` is the modern
-  # `UnsupportedProtocolVersionError`. All three mean the endpoint does not
-  # serve the pinned profile, which is the only distinction this client draws.
-  @unsupported_protocol_version_codes [-32_601, -32_602, -32_022]
+  # Only JSON-RPC's standard method-not-found code proves that the endpoint
+  # rejected the required discovery method. Invalid params and a remote
+  # version-error code make different claims and retain their ordinary remote
+  # or HTTP protocol classifications.
+  @method_not_found -32_601
   # A maximum-depth schema in tools/list occupies four envelope containers,
   # `2 * depth - 1` schema containers, and `depth` const/enum instance
   # containers: 4 + 31 + 16 = 51 at the configured limits.
@@ -297,6 +296,7 @@ defmodule PtcRunner.Kernel.MCPProtocol do
           {:ok, map()}
           | {:error,
              :mcp_capability_negotiation_error
+             | :mcp_discovery_method_unsupported
              | :mcp_input_required_refused
              | :mcp_protocol_error
              | :mcp_protocol_version_unsupported
@@ -318,16 +318,15 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   def outcome(_body, _method), do: {:error, :mcp_protocol_error}
 
   @doc false
-  @spec unsupported_protocol_version_error?(map(), binary(), integer()) :: boolean()
-  def unsupported_protocol_version_error?(body, "server/discover", expected_code)
-      when is_map(body) and expected_code in @unsupported_protocol_version_codes do
+  @spec discovery_method_unsupported_error?(map(), binary()) :: boolean()
+  def discovery_method_unsupported_error?(body, "server/discover") when is_map(body) do
     case {Map.fetch(body, "result"), Map.fetch(body, "error")} do
-      {:error, {:ok, %{"code" => ^expected_code} = error}} -> valid_rpc_error?(error)
+      {:error, {:ok, %{"code" => @method_not_found} = error}} -> valid_rpc_error?(error)
       _other -> false
     end
   end
 
-  def unsupported_protocol_version_error?(_body, _method, _expected_code), do: false
+  def discovery_method_unsupported_error?(_body, _method), do: false
 
   @spec discover_result(map(), binary()) ::
           {:ok, map()} | {:error, :mcp_protocol_error | :mcp_protocol_version_unsupported}
@@ -558,8 +557,8 @@ defmodule PtcRunner.Kernel.MCPProtocol do
       not valid_rpc_error?(error) ->
         {:error, :mcp_protocol_error}
 
-      method == "server/discover" and error["code"] in @unsupported_protocol_version_codes ->
-        {:error, :mcp_protocol_version_unsupported}
+      method == "server/discover" and error["code"] == @method_not_found ->
+        {:error, :mcp_discovery_method_unsupported}
 
       true ->
         {:error, :mcp_remote_error}

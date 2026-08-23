@@ -115,13 +115,19 @@ in <code class="inline">supportedVersions</code> and implement the tools surface
 <code class="inline">provider_protocol_version_unsupported</code>. This diagnosis is intentionally
 closed: it publishes the required PtcRunner-owned revision, but not the remote
 error message, response data, endpoint, process stderr, or launch arguments.
-Upgrade or replace the MCP server rather than adding a fallback handshake.</p><p>As of 2026-08-17, the official
+A correlated JSON-RPC <code class="inline">-32601</code> response to <code class="inline">server/discover</code> reports that the
+endpoint rejected the required method. A valid discovery result whose
+<code class="inline">supportedVersions</code> omits <code class="inline">2026-07-28</code> instead reports that the endpoint did not
+advertise support for the revision. Other JSON-RPC errors do not become version
+diagnostics. Upgrade or replace the MCP server rather than adding a fallback
+handshake.</p><p>As of 2026-08-17, the official
 <code class="inline">@modelcontextprotocol/server-filesystem@2026.7.10</code> package negotiates
 <code class="inline">2025-11-25</code> through <code class="inline">initialize</code> and answers <code class="inline">server/discover</code> with JSON-RPC
 <code class="inline">-32601 Method not found</code>. It is therefore not compatible with this PtcRunner
 profile, despite starting and serving legacy clients normally.
 <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a> implements the
-required profile and is the deterministic baseline for this reference.</p><h3 id="implement-the-wire-profile">Implement the wire profile</h3><p>The pinned protocol definitions are published as
+required profile and is the deterministic baseline for this reference.</p><h3 id="implement-the-wire-profile">Implement the wire profile</h3><p>The executable serves the pinned protocol definitions offline as
+<code class="inline">ptc docs schema-mcp</code>. The same bytes are published as
 <a href="https://ptc-runner.dev/schemas/mcp-2026-07-28.schema.json"><code class="inline">mcp-2026-07-28.schema.json</code></a>.
 That document is the final upstream 2026-07-28 schema plus the two corrections
 PtcRunner maintains and upstream does not publish: <code class="inline">JSONValue</code> accepts JSON

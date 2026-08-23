@@ -205,7 +205,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:provider_acquisition, :provider_protocol_error, 4, false,
      "the selected provider returned an invalid acquisition response"},
     {:provider_acquisition, :provider_protocol_version_unsupported, 4, false,
-     "the installed endpoint does not support MCP protocol 2026-07-28"},
+     "the endpoint did not advertise support for MCP protocol 2026-07-28"},
     {:provider_acquisition, :provider_tool_missing, 4, false,
      "the installed endpoint does not expose a declared tool"},
     {:provider_acquisition, :provider_policy_changed, 4, false,
@@ -413,6 +413,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   def message_schema(%{
         phase: :provider_acquisition,
+        code: :provider_protocol_version_unsupported,
+        message: fallback
+      }),
+      do: MCPAcquisitionDiagnostic.protocol_version_message_schema(fallback)
+
+  def message_schema(%{
+        phase: :provider_acquisition,
         code: :provider_tool_missing,
         message: fallback
       }),
@@ -494,6 +501,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:provider_acquisition, :provider_tool_missing, message),
     do: MCPAcquisitionDiagnostic.valid_missing_tool_message?(message)
+
+  defp valid_dynamic_message?(
+         :provider_acquisition,
+         :provider_protocol_version_unsupported,
+         message
+       ),
+       do: MCPAcquisitionDiagnostic.valid_protocol_version_message?(message)
 
   defp valid_dynamic_message?(:provider_declaration, :selection_invalid, message),
     do: SelectionRulesDiagnostic.valid_message?(message)
