@@ -456,11 +456,15 @@ defmodule PtcRunner.GitHooks.PrePushTest do
              Path.join(path |> String.split(":") |> hd() |> Path.dirname(), "mix-called")},
             {"PATH", path},
             # The gate that runs these tests may itself have been invoked with
-            # PTC_PRE_PUSH_SERIAL set. Without clearing it, the ambient value
-            # decides whether the hook under test runs lanes or not, and the
-            # lane assertions quietly test serial execution instead. Cases that
-            # want a mode set it through extra_env, which wins by coming last.
-            {"PTC_PRE_PUSH_SERIAL", nil}
+            # PTC_PRE_PUSH_SERIAL or FORCE_FULL_PRE_PUSH set -- the release
+            # procedure runs `FORCE_FULL_PRE_PUSH=1 .githooks/pre-push`, which
+            # exports both down into this suite. Without clearing them, the
+            # ambient values decide whether the hook under test runs lanes and
+            # which gates it selects, so the classification assertions quietly
+            # test a forced full run instead. Cases that want a mode set it
+            # through extra_env, which wins by coming last.
+            {"PTC_PRE_PUSH_SERIAL", nil},
+            {"FORCE_FULL_PRE_PUSH", nil}
           ] ++ extra_env,
       stderr_to_stdout: true
     )
