@@ -9,6 +9,7 @@ mix xref graph --format cycles --label compile-connected --fail-above 0
 mix format --check-formatted
 mix credo --strict
 scripts/duplication_gate.sh check
+scripts/guide_budget.sh check
 mix ptc.validate_spec
 mix ptc.gen_docs --check
 mix ptc.conformance_report --check-inventory

@@ -43,17 +43,10 @@ the workflow surface.
 
 ## Budget turns and time separately
 
-`max_turns` bounds the agent protocol: it limits how many model-and-program
-turns the loop may attempt. It does not reserve enough elapsed time to finish
-those turns. The complete run, including active preflight, every provider wait,
-and the loop, must fit inside `limits.run_duration_ms`; the workflow evaluation
-that owns the loop must also fit inside `limits.workflow_timeout_ms`.
-
-For a live agent, request explicit values for both Kernel clocks based on the
-expected turn count and model latency. Raising only `run_duration_ms` leaves
-the workflow clock as a separate boundary. The multi-turn tutorial requests
-120 seconds for each clock as a bounded teaching allowance, not a guarantee
-that the provider will complete in that time.
+`max_turns` limits how many turns the loop may attempt. It buys no time. A live
+agent also has to fit inside two Kernel clocks, so raise them together — the
+multi-turn tutorial asks for 120 seconds of each. See the
+[Kernel limits reference](../kernel-limits-reference.md).
 
 ## Replace policy without replacing enforcement
 

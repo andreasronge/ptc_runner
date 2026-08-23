@@ -147,6 +147,10 @@ Useful run switches are:
 - `--envelope FILE` atomically publishes a convenience copy of the stable V3
   command envelope. When a project enables `artifacts.envelope`, the project's
   `.ptc/envelopes/<run_ref>.json` ledger entry is still written for that run.
+  `run`, `validate`, `doctor`, `models`, and `init` all accept the flag; the
+  document it publishes carries status, run reference, result or classified
+  error, and artifact state. Parse it rather than scraping stdout, which is a
+  human presentation channel that may also carry application output.
 
 The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.

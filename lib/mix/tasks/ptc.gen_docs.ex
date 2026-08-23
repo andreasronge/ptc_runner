@@ -212,6 +212,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     A breached ceiling names itself, its configured value, and the manifest key that raises it, so the error at the point of failure carries this rule too. A request above the ceiling is refused by name, with both numbers.
 
+    An agent loop spends two budgets at once, and only one of them is a clock. `max_turns` bounds the agent protocol: it limits how many model-and-program turns the loop may attempt, and reserves no elapsed time to finish them. The complete run, including active preflight and every provider wait, must fit inside `run_duration_ms`; the workflow evaluation that owns the loop must also fit inside `workflow_timeout_ms`. Raising only `run_duration_ms` leaves the workflow clock as a separate boundary, so a live agent requests explicit values for both from its expected turn count and model latency.
+
     Time values are milliseconds. Heap values are BEAM process heap words, not bytes. The catalog range is the accepted structural range; practical installations should choose ceilings appropriate to their resources and trust boundary.
 
     ## Application-narrowable limits
