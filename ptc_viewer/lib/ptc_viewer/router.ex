@@ -268,8 +268,27 @@ defmodule PtcViewer.Router do
     end
   end
 
-  match _ do
+  get "/" do
     send_entry_document(conn)
+  end
+
+  get "/run/:run_id" do
+    if valid_browser_run_id?(run_id) do
+      encoded = URI.encode(run_id, &URI.char_unreserved?/1)
+
+      conn
+      |> security_headers()
+      |> put_resp_header("cache-control", "no-store")
+      |> put_resp_header("location", "/#/run/" <> encoded)
+      |> send_resp(302, "")
+      |> scrub_bandit_response()
+    else
+      send_resp(conn, 404, "Not found")
+    end
+  end
+
+  match _ do
+    send_resp(conn, 404, "Not found")
   end
 
   defp repl_store(conn) do
@@ -626,6 +645,9 @@ defmodule PtcViewer.Router do
         send_resp(conn, 404, "Not found")
     end
   end
+
+  defp valid_browser_run_id?(run_id),
+    do: is_binary(run_id) and String.valid?(run_id) and byte_size(run_id) in 1..512
 
   defp security_headers(conn) do
     conn
