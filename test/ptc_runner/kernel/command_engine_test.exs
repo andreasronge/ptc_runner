@@ -439,7 +439,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       {~S|(ns app) (defn run [_input] (return (count)))|, "arity_error"},
       {~S|(ns app) (defn run [_input] (return (1 2 3)))|, "not_callable"},
       {~S|(ns app) (defn run [_input] (loop [i 0] (if (< i 999999) (recur (inc i)) i)))|,
-       "loop_limit_exceeded"}
+       "loop_limit_exceeded"},
+      {~S|(ns app) (defn run [_input] (return (Math/round 1)))|, "java_type_error"}
     ]
 
     Enum.with_index(cases, fn {source, kind}, index ->

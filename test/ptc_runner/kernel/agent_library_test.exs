@@ -2666,6 +2666,31 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   # A loop that never received a usable tool call is not a loop that ran out of
   # room to work, and #1475 showed both being reported as "raise max_turns".
+  test "a catalogued evaluator failure authenticates turn-limit evidence" do
+    failing = %{
+      content: nil,
+      tool_calls: [
+        %{id: "eval-bad", name: "run_ptc_lisp", args: %{"program" => "(/ 1 0)"}}
+      ]
+    }
+
+    {:ok, config} = agent_config([failing])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :runtime_limit_exceeded,
+              details: %{
+                limit: :agent_turns,
+                limit_value: 1,
+                limit_reason: :evaluation_error,
+                last_evaluator_failure: %{kind: :arithmetic_error, details: details}
+              }
+            }} = Kernel.run(~S|(agent.core/run-value "Exhaust" {"max_turns" 1})|, config)
+
+    assert is_map(details)
+  end
+
   test "each way a bounded loop ends carries its own turn-limit reason" do
     prose_only = %{content: "I will explain instead of calling", tool_calls: []}
 
