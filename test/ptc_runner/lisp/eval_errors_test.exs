@@ -298,7 +298,7 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
                Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
 
       assert is_function(callback, 1)
-      assert msg =~ "not callable"
+      assert msg =~ "not_callable"
     end
 
     test "runtime callable errors retain their trailing data element" do

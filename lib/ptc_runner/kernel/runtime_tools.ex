@@ -230,29 +230,9 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp agent_turn_limit_failure(state, limit, reason) do
     case RuntimeLimitDiagnostic.agent_turns_reason(reason) do
       {:ok, reason} ->
-        details = %{limit: :agent_turns, limit_value: limit, limit_reason: reason}
-
         details =
-          if reason == :evaluation_error do
-            case RunState.last_evaluator_failure(state) do
-              {:ok, %{kind: kind, details: eval_details} = evidence} ->
-                if EvaluatorErrorCatalog.kind?(kind) and is_map(eval_details) do
-                  Map.put(details, :last_evaluator_failure, %{
-                    kind: kind,
-                    details: eval_details,
-                    evaluation_id: Map.get(evidence, :evaluation_id),
-                    environment: Map.get(evidence, :environment)
-                  })
-                else
-                  details
-                end
-
-              :error ->
-                details
-            end
-          else
-            details
-          end
+          %{limit: :agent_turns, limit_value: limit, limit_reason: reason}
+          |> attach_authenticated_evaluator_failure(state, reason)
 
         %TrustedError{
           reason: :runtime_limit_exceeded,
@@ -264,6 +244,27 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         invalid_runtime_limit_failure()
     end
   end
+
+  defp attach_authenticated_evaluator_failure(details, state, :evaluation_error) do
+    case RunState.last_evaluator_failure(state) do
+      {:ok, %{kind: kind, details: eval_details} = evidence} ->
+        if EvaluatorErrorCatalog.kind?(kind) and is_map(eval_details) do
+          Map.put(details, :last_evaluator_failure, %{
+            kind: kind,
+            details: eval_details,
+            evaluation_id: Map.get(evidence, :evaluation_id),
+            environment: Map.get(evidence, :environment)
+          })
+        else
+          details
+        end
+
+      :error ->
+        details
+    end
+  end
+
+  defp attach_authenticated_evaluator_failure(details, _state, _reason), do: details
 
   defp model_output_truncation_failure(value, bindings, alias_name) do
     with {:ok, limit} <-

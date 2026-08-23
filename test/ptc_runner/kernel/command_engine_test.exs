@@ -723,7 +723,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["execution"] == %{
              "state" => "incomplete",
              "usage" => nil,
-             "evaluation_memory" => nil
+             "evaluation_memory" => nil,
+             "last_evaluation_error" => nil
            }
 
     assert outcome.envelope["error"]["provider_activity"] == true
@@ -740,7 +741,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert fallback.envelope["execution"] == %{
              "state" => "incomplete",
              "usage" => nil,
-             "evaluation_memory" => nil
+             "evaluation_memory" => nil,
+             "last_evaluation_error" => nil
            }
 
     assert fallback.envelope["error"]["provider_activity"] == true
@@ -2718,7 +2720,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["execution"] == %{
              "state" => "incomplete",
              "usage" => nil,
-             "evaluation_memory" => nil
+             "evaluation_memory" => nil,
+             "last_evaluation_error" => nil
            }
 
     assert_schema_valid(outcome.envelope)

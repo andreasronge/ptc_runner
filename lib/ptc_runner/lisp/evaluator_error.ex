@@ -89,6 +89,117 @@ defmodule PtcRunner.Lisp.EvaluatorError do
     end
   end
 
+  @doc false
+  @spec retain_reason(term()) :: {:ok, term()} | :error
+  def retain_reason({:arithmetic_error, token})
+      when token in [:division_by_zero, :integer_overflow, :bad_argument],
+      do: {:ok, {:arithmetic_error, token}}
+
+  def retain_reason({:loop_limit_exceeded, limit})
+      when is_integer(limit) and limit > 0 and limit <= 1_000_000,
+      do: {:ok, {:loop_limit_exceeded, limit}}
+
+  def retain_reason({:not_callable, {:data_ref, symbol}}) when is_binary(symbol),
+    do: {:ok, {:not_callable, {:data_ref, symbol}}}
+
+  def retain_reason({:not_callable, details}) when is_map(details) do
+    case admitted_public_name(details) do
+      {:ok, name} -> {:ok, {:not_callable, %{name: name}}}
+      :error -> {:ok, {:not_callable, %{}}}
+    end
+  end
+
+  def retain_reason({:not_callable, _value}), do: {:ok, {:not_callable, %{}}}
+
+  def retain_reason({:arity_error, details}) when is_map(details) do
+    retained = retain_arity_details(details)
+
+    case public_evidence(:arity_error, retained) do
+      {:ok, _} -> {:ok, {:arity_error, retained}}
+      :error -> :error
+    end
+  end
+
+  def retain_reason({kind, details}) when is_map(details) do
+    retain_catalogued(kind, details)
+  end
+
+  def retain_reason({kind, _message, details}) when is_atom(kind) and is_map(details) do
+    case retain_catalogued(kind, details) do
+      {:ok, {^kind, retained_details}} ->
+        case public_evidence(kind, retained_details) do
+          {:ok, %{message: message}} -> {:ok, {kind, message, retained_details}}
+          :error -> :error
+        end
+
+      :error ->
+        :error
+    end
+  end
+
+  def retain_reason(_reason), do: :error
+
+  defp retain_catalogued(kind, details) when is_map(details) do
+    cond do
+      not EvaluatorErrorCatalog.kind?(kind) ->
+        :error
+
+      match?({:ok, _}, public_evidence(kind, details)) ->
+        {:ok, {kind, retain_public_details(kind, details)}}
+
+      match?({:ok, _}, public_evidence(kind, %{})) ->
+        {:ok, {kind, %{}}}
+
+      true ->
+        :error
+    end
+  end
+
+  defp retain_public_details(:arithmetic_error, details) do
+    case admitted_token(details) do
+      token when token in [:division_by_zero, :integer_overflow, :bad_argument] ->
+        %{token: token}
+
+      _other ->
+        %{}
+    end
+  end
+
+  defp retain_public_details(:arity_error, details), do: retain_arity_details(details)
+
+  defp retain_public_details(:not_callable, details) do
+    case admitted_public_name(details) do
+      {:ok, name} -> %{name: name}
+      :error -> %{}
+    end
+  end
+
+  defp retain_public_details(:loop_limit_exceeded, details) do
+    case admitted_positive_integer(Map.get(details, :limit) || Map.get(details, "limit")) do
+      {:ok, limit} -> %{limit: limit}
+      :error -> %{}
+    end
+  end
+
+  defp retain_public_details(_kind, _details), do: %{}
+
+  defp retain_arity_details(details) when is_map(details) do
+    %{}
+    |> maybe_put_arity_name(details)
+    |> maybe_put(:expected, Map.get(details, :expected) || Map.get(details, "expected"))
+    |> maybe_put(:actual, Map.get(details, :actual) || Map.get(details, "actual"))
+  end
+
+  defp maybe_put_arity_name(map, details) do
+    case admitted_public_name(details) do
+      {:ok, name} -> Map.put(map, :name, name)
+      :error -> map
+    end
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
   defp lisp_prefix(:arity_error), do: "arity error: "
   defp lisp_prefix(_reason), do: ""
 

@@ -72,4 +72,26 @@ defmodule PtcRunner.Lisp.EvaluatorErrorTest do
     assert EvaluatorError.public_evidence(:unbound_var, %{name: "x"}) == :error
     assert :timeout not in EvaluatorErrorCatalog.kinds()
   end
+
+  test "retain_reason keeps catalogued evaluator tuples and drops unadmitted payloads" do
+    assert {:ok, {:arithmetic_error, :division_by_zero}} =
+             EvaluatorError.retain_reason({:arithmetic_error, :division_by_zero})
+
+    assert {:ok, {:arity_error, %{name: "count", expected: 1, actual: 0}}} =
+             EvaluatorError.retain_reason(
+               {:arity_error, %{name: "count", expected: 1, actual: 0, secret: "nope"}}
+             )
+
+    assert {:ok, {:not_callable, %{}}} =
+             EvaluatorError.retain_reason({:not_callable, ["SECRET"]})
+
+    assert {:ok,
+            {:java_type_error, "Java member argument does not match an admitted overload", %{}}} =
+             EvaluatorError.retain_reason(
+               {:java_type_error, "overload_3 SECRET",
+                %{reference_id: :r, overload_id: :overload_3}}
+             )
+
+    assert EvaluatorError.retain_reason({:explicit_failure, %{"secret" => true}}) == :error
+  end
 end

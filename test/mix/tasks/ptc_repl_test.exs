@@ -406,7 +406,7 @@ defmodule PtcRunner.ReplFrontendTest do
         run_repl(["--manifest", manifest_path, "-e", "(data/input)"])
       end
 
-    assert error.message =~ "not callable: data/input"
+    assert error.message =~ "data/input is not callable"
     assert error.message =~ "--mission NAME"
     assert error.message =~ "declared: review, writing"
   end
@@ -444,7 +444,7 @@ defmodule PtcRunner.ReplFrontendTest do
         ])
       end
 
-    assert error.message =~ "not callable:"
+    assert error.message =~ "value is not callable"
     refute error.message =~ "--mission NAME"
   end
 
@@ -480,7 +480,7 @@ defmodule PtcRunner.ReplFrontendTest do
         ])
       end
 
-    assert error.message =~ "not callable:"
+    assert error.message =~ "value is not callable"
     refute error.message =~ "--mission NAME"
   end
 
@@ -559,7 +559,7 @@ defmodule PtcRunner.ReplFrontendTest do
         ])
       end
 
-    assert called.message =~ "not callable: data/tickets"
+    assert called.message =~ "data/tickets is not callable"
     refute called.message =~ sentinel
   end
 

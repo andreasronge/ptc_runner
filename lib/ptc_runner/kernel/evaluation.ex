@@ -42,8 +42,8 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.TerminalResultLimit
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
-  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.DataKeys
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.TrustedTool
 
   @missing_data_params_message "data/params is not available because this evaluation supplied no params. " <>
@@ -412,17 +412,13 @@ defmodule PtcRunner.Kernel.Evaluation do
            mission_name
          ) do
       :ok ->
-        classify_evaluation_result(
-          result,
-          state,
-          environment,
-          lease,
-          history,
-          mission_calls_before,
-          projection_boundary,
-          result_limit_bytes,
-          evaluation_id
-        )
+        classify_evaluation_result(result, state, environment, lease, %{
+          history: history,
+          mission_calls_before: mission_calls_before,
+          projection_boundary: projection_boundary,
+          result_limit_bytes: result_limit_bytes,
+          evaluation_id: evaluation_id
+        })
 
       {:error, :inspection_sink_error} ->
         :ok = RunState.release_evaluation(state, lease)
@@ -436,11 +432,13 @@ defmodule PtcRunner.Kernel.Evaluation do
          state,
          environment,
          lease,
-         history,
-         mission_calls_before,
-         projection_boundary,
-         result_limit_bytes,
-         evaluation_id
+         %{
+           history: history,
+           mission_calls_before: mission_calls_before,
+           projection_boundary: projection_boundary,
+           result_limit_bytes: result_limit_bytes,
+           evaluation_id: evaluation_id
+         }
        ) do
     case result do
       {:ok, %{return: {:__ptc_fail__, value}} = step} ->

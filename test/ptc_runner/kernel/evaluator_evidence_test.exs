@@ -8,7 +8,8 @@ defmodule PtcRunner.Kernel.EvaluatorEvidenceTest do
     error = %Error{
       kind: :evaluation_failed,
       reason: :arithmetic_error,
-      details: %{token: :division_by_zero}
+      details: %{token: :division_by_zero},
+      usage: %{}
     }
 
     assert EvaluatorEvidence.envelope_value(:normal, error) == %{
@@ -33,7 +34,8 @@ defmodule PtcRunner.Kernel.EvaluatorEvidenceTest do
         limit_value: 4,
         limit_reason: :evaluation_error,
         last_evaluator_failure: %{kind: :java_type_error, details: %{}}
-      }
+      },
+      usage: %{}
     }
 
     assert %{"kind" => "java_type_error", "message" => message} =
@@ -49,7 +51,8 @@ defmodule PtcRunner.Kernel.EvaluatorEvidenceTest do
     explicit = %Error{
       kind: :workflow_failed,
       reason: :explicit_failure,
-      details: %{value: %{"secret" => "must-not-escape"}}
+      details: %{value: %{"secret" => "must-not-escape"}},
+      usage: %{}
     }
 
     assert EvaluatorEvidence.envelope_value(:normal, explicit) == nil

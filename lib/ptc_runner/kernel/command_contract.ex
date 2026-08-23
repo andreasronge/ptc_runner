@@ -16,7 +16,6 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
-  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Kernel.DocumentationLibrary
   alias PtcRunner.Kernel.ExampleLibrary
   alias PtcRunner.Kernel.JSONValue
@@ -25,6 +24,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SelectionRulesDiagnostic
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
 
   @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v3.schema.json"
   @envelope_root_key {__MODULE__, :envelope_root}
@@ -1086,15 +1086,7 @@ defmodule PtcRunner.Kernel.CommandContract do
         "secondary_errors" => %{"const" => []},
         "artifact_state" => success_artifact_state(artifact_class),
         "artifact_class" => %{"const" => artifact_class},
-        "execution" =>
-          closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
-            "state" => %{"const" => "finished"},
-            "outcome" => %{"const" => "ok"},
-            "diagnostic" => %{"type" => "null"},
-            "usage" => ref("usage"),
-            "evaluation_memory" => ref("evaluation_memory"),
-            "last_evaluation_error" => last_evaluation_error_schema()
-          })
+        "execution" => finished_ok_execution_schema()
       })
     )
   end
@@ -1428,14 +1420,7 @@ defmodule PtcRunner.Kernel.CommandContract do
           "evaluation_memory" => nullable_ref("evaluation_memory"),
           "last_evaluation_error" => last_evaluation_error_schema()
         }),
-        closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
-          "state" => %{"const" => "finished"},
-          "outcome" => %{"const" => "ok"},
-          "diagnostic" => %{"type" => "null"},
-          "usage" => ref("usage"),
-          "evaluation_memory" => ref("evaluation_memory"),
-          "last_evaluation_error" => last_evaluation_error_schema()
-        }),
+        finished_ok_execution_schema(),
         closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
           "state" => %{"const" => "finished"},
           "outcome" => %{"const" => "error"},
@@ -1462,6 +1447,17 @@ defmodule PtcRunner.Kernel.CommandContract do
         })
       ]
     }
+  end
+
+  defp finished_ok_execution_schema do
+    closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
+      "state" => %{"const" => "finished"},
+      "outcome" => %{"const" => "ok"},
+      "diagnostic" => %{"type" => "null"},
+      "usage" => ref("usage"),
+      "evaluation_memory" => ref("evaluation_memory"),
+      "last_evaluation_error" => last_evaluation_error_schema()
+    })
   end
 
   defp usage_schema do

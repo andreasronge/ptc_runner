@@ -52,10 +52,5 @@ defmodule PtcRunner.Lisp.EvaluatorErrorCatalog do
   def wire_name(_kind), do: :error
 
   @spec description(atom()) :: {:ok, binary()} | :error
-  def description(kind) do
-    case Map.fetch(@descriptions, kind) do
-      {:ok, description} -> {:ok, description}
-      :error -> :error
-    end
-  end
+  def description(kind), do: Map.fetch(@descriptions, kind)
 end

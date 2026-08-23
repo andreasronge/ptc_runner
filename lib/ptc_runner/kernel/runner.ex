@@ -9,12 +9,12 @@ defmodule PtcRunner.Kernel.Runner do
 
   alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.BoundedPrints
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONValue
-  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.Result
@@ -29,9 +29,9 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.TerminalResultLimit
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
-  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.DataKeys
   alias PtcRunner.Lisp.Eval.Helpers
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.LLM.OutputLimit

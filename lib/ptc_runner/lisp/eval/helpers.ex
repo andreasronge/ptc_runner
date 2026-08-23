@@ -13,6 +13,7 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Env.Builtin
+  alias PtcRunner.Lisp.EvaluatorError
   alias PtcRunner.Lisp.Format.SymbolRef
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
@@ -503,8 +504,12 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   def sanitize_private_error({:private_prelude_error, _private_message}),
     do: {:private_prelude_error, "private prelude evaluation failed"}
 
-  def sanitize_private_error(_reason),
-    do: {:private_prelude_error, "private prelude evaluation failed"}
+  def sanitize_private_error(reason) do
+    case EvaluatorError.retain_reason(reason) do
+      {:ok, retained} -> retained
+      :error -> {:private_prelude_error, "private prelude evaluation failed"}
+    end
+  end
 
   defp result_contract_violations?([], :json_value), do: true
 

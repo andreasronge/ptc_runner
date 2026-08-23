@@ -1119,7 +1119,12 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
         "inspection" => "not_requested",
         "result" => "not_requested"
       },
-      %{"state" => "incomplete", "usage" => nil, "evaluation_memory" => nil}
+      %{
+        "state" => "incomplete",
+        "usage" => nil,
+        "evaluation_memory" => nil,
+        "last_evaluation_error" => nil
+      }
     )
   rescue
     ArgumentError -> false
