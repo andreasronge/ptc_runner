@@ -60,13 +60,10 @@ editing a component, revalidating, or spending a provider call.
 
 ## Read outcomes as data
 
-`run`, `validate`, `doctor`, `models`, and `init` accept `--envelope FILE`,
-which atomically publishes one JSON document describing the outcome: status,
-run reference, result or classified error, and artifact state. For `run` on a
-project with `artifacts.envelope` enabled, that flag is an extra copy — the
-project's `.ptc/envelopes/<run_ref>.json` ledger entry is still written. Parse
-the envelope rather than scraping stdout, which is a human presentation
-channel that may also carry application output.
+Pass `--envelope FILE` and parse that JSON document. Do not scrape stdout — it
+is a human channel and may carry application output too. The
+[CLI reference](../reference/cli.md#run-a-manifest) lists which commands accept
+the flag and what the document contains.
 
 Exit status is part of the contract: `0` on success, the diagnostic catalog's
 status for a classified failure, `70` for a caught internal failure, and `74`

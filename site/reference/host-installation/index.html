@@ -235,7 +235,15 @@ the adapter attests that the resolved model is safe public identity, provider
 snapshots and model-grouped usage include it. Endpoint-bearing or otherwise
 private targets remain absent, while alias/revision usage stays attributable.</p><p>Use <code class="inline">source: &quot;llm_replay&quot;</code> when responses must be deterministic. The
 <a href="/guides/evaluating-with-replay/">replay evaluation guide</a> owns fixture authoring, the
-network-free example, candidate materialization, and component overrides.</p><p><code class="inline">doctor --connect</code> performs a real minimal completion for each selected live
+network-free example, candidate materialization, and component overrides.</p><p>Fixture matching is exact: changed messages, tools, or provider-neutral
+parameters produce another <code class="inline">request_hash</code> rather than silently consuming
+unrelated evidence. A miss is a provider error — <code class="inline">kind</code> <code class="inline">provider_error</code>,
+<code class="inline">reason</code> <code class="inline">not_found</code> — and <code class="inline">llm/request</code> returns that envelope as a value with
+<code class="inline">:status :error</code> rather than failing the evaluation, so a workflow that wants a
+miss to be fatal calls <code class="inline">cap/unwrap!</code> on the raw <code class="inline">tool/llm-request</code> envelope. The
+run envelope records the miss in usage: that alias's <code class="inline">successful_calls</code> stays 0
+while <code class="inline">calls</code> increments, and <code class="inline">capability_refusals</code> records
+<code class="inline">workflow/provider_error/not_found</code>.</p><p><code class="inline">doctor --connect</code> performs a real minimal completion for each selected live
 model and may incur provider cost; the readiness report's <code class="inline">usage</code> field
 attributes what each probe spent, on the rows a run reports. <code class="inline">--show-model-selectors</code> adds only safe
 selectors; endpoint-bearing <code class="inline">openai-compat:</code> selectors remain hidden. <code class="inline">ptc models</code> reports the same <code class="inline">model_selector</code> field under the same rule, without a

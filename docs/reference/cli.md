@@ -147,6 +147,10 @@ Useful run switches are:
 - `--envelope FILE` atomically publishes a convenience copy of the stable V3
   command envelope. When a project enables `artifacts.envelope`, the project's
   `.ptc/envelopes/<run_ref>.json` ledger entry is still written for that run.
+  `run`, `validate`, `doctor`, `models`, and `init` all accept the flag; the
+  document it publishes carries status, run reference, result or classified
+  error, and artifact state. Parse it rather than scraping stdout, which is a
+  human presentation channel that may also carry application output.
 
 The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.
@@ -173,9 +177,14 @@ guides print work from wherever the copy was created rather than from one
 checkout directory.
 
 For runs that produce a validated terminal event batch, `execution.usage`
-includes `llm_usage` grouped by alias and installation revision,
+includes the required aggregate `llm_spend` projection, `llm_usage` grouped by
+alias and installation revision,
 `llm_usage_by_model` grouped by an attested public resolved model, and
-`unattributed_model_calls`. Rows report call counts, usage-presence counts, and
+`unattributed_model_calls`. `llm_spend` is byte-equivalent to the value in the
+canonical `run-stopped` usage: `empty` and `incomplete` contain only `state`,
+`unpriced` also contains non-negative `input` and `output`, and `available`
+adds a non-negative `total_cost`. Only `available` can report a measured zero
+cost; the other states never substitute zero for absent pricing. Rows report call counts, usage-presence counts, and
 summed token and `total_cost` values. Terminal accounting pairs each
 `llm-request` `capability-started` with its `capability-stopped` by
 `capability_id`. An unmatched start is one observed call with unknown usage:
@@ -189,7 +198,9 @@ terminal batch could be reconstructed, not that every call supplied usage.
 aggregate fields with `null` when terminal evidence cannot be validated,
 including dropped `capability-started` or `capability-stopped` events, while
 preserving other known usage. Non-empty `events_dropped` for other event types
-means an available summary covers retained evidence and may not be complete.
+means an available detailed summary covers retained evidence and may not be
+complete. `llm_usage_state` describes reconstruction of those detailed rows;
+it does not replace the independently sealed four-state `llm_spend` value.
 
 Artifact publication currently requires a Unix host with POSIX-compatible
 `mkdir` and `id`; trace append also needs `sh` and either `lockf` or `flock`.

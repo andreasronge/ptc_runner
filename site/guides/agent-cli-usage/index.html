@@ -118,13 +118,10 @@ ptc repl --project PROJECT.json -e '(doc &quot;reduce&quot;)'     # print one fu
 ptc repl --project PROJECT.json -e '(dir)'              # list the attached prelude API</code></pre><p>Repeat <code class="inline">-e</code> to build up a session in order. <code class="inline">--project PROJECT.json</code> evaluates
 against the real workflow environment, capabilities, and model routes instead
 of a bare scratchpad. This answers &quot;does this expression work&quot; without
-editing a component, revalidating, or spending a provider call.</p><h2 id="read-outcomes-as-data">Read outcomes as data</h2><p><code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, and <code class="inline">init</code> accept <code class="inline">--envelope FILE</code>,
-which atomically publishes one JSON document describing the outcome: status,
-run reference, result or classified error, and artifact state. For <code class="inline">run</code> on a
-project with <code class="inline">artifacts.envelope</code> enabled, that flag is an extra copy — the
-project's <code class="inline">.ptc/envelopes/&lt;run_ref&gt;.json</code> ledger entry is still written. Parse
-the envelope rather than scraping stdout, which is a human presentation
-channel that may also carry application output.</p><p>Exit status is part of the contract: <code class="inline">0</code> on success, the diagnostic catalog's
+editing a component, revalidating, or spending a provider call.</p><h2 id="read-outcomes-as-data">Read outcomes as data</h2><p>Pass <code class="inline">--envelope FILE</code> and parse that JSON document. Do not scrape stdout — it
+is a human channel and may carry application output too. The
+<a href="/reference/cli/#run-a-manifest">CLI reference</a> lists which commands accept
+the flag and what the document contains.</p><p>Exit status is part of the contract: <code class="inline">0</code> on success, the diagnostic catalog's
 status for a classified failure, <code class="inline">70</code> for a caught internal failure, and <code class="inline">74</code>
 when envelope publication itself fails. <code class="inline">ptc docs cli</code> has the complete process
 contract.</p><h2 id="expect-a-bounded-failure-report">Expect a bounded failure report</h2><p>A failed run reports a closed phase and code pair. Deliberate <code class="inline">fail</code> values are

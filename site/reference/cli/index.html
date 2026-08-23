@@ -157,7 +157,11 @@ and keeps it off stdout.</li><li><code class="inline">--trace-dir DIR</code> wri
 <code class="inline">&lt;run_ref&gt;.private.jsonl</code> according to the run's artifact class.</li><li><code class="inline">--inspect FILE</code> writes sensitive execution evidence to an owner-only
 <code class="inline">.inspection.jsonl</code> file.</li><li><code class="inline">--envelope FILE</code> atomically publishes a convenience copy of the stable V3
 command envelope. When a project enables <code class="inline">artifacts.envelope</code>, the project's
-<code class="inline">.ptc/envelopes/&lt;run_ref&gt;.json</code> ledger entry is still written for that run.</li></ul><p>The command envelope reports the run reference and artifact class, not artifact
+<code class="inline">.ptc/envelopes/&lt;run_ref&gt;.json</code> ledger entry is still written for that run.
+<code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, and <code class="inline">init</code> all accept the flag; the
+document it publishes carries status, run reference, result or classified
+error, and artifact state. Parse it rather than scraping stdout, which is a
+human presentation channel that may also carry application output.</li></ul><p>The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.
 All publications are no-replace and recheck their destination at commit time.</p><p>Atomic publication may reserve owner-only sibling paths named
 <code class="inline">.ptc-private-*</code> or <code class="inline">.ptc-private-result-*</code>. They normally disappear at commit
@@ -174,9 +178,14 @@ commit. Run <code class="inline">ptc init</code> with an unknown example name to
 names listed. The trees are byte-identical to the repository's, so the commands the
 guides print work from wherever the copy was created rather than from one
 checkout directory.</p><p>For runs that produce a validated terminal event batch, <code class="inline">execution.usage</code>
-includes <code class="inline">llm_usage</code> grouped by alias and installation revision,
+includes the required aggregate <code class="inline">llm_spend</code> projection, <code class="inline">llm_usage</code> grouped by
+alias and installation revision,
 <code class="inline">llm_usage_by_model</code> grouped by an attested public resolved model, and
-<code class="inline">unattributed_model_calls</code>. Rows report call counts, usage-presence counts, and
+<code class="inline">unattributed_model_calls</code>. <code class="inline">llm_spend</code> is byte-equivalent to the value in the
+canonical <code class="inline">run-stopped</code> usage: <code class="inline">empty</code> and <code class="inline">incomplete</code> contain only <code class="inline">state</code>,
+<code class="inline">unpriced</code> also contains non-negative <code class="inline">input</code> and <code class="inline">output</code>, and <code class="inline">available</code>
+adds a non-negative <code class="inline">total_cost</code>. Only <code class="inline">available</code> can report a measured zero
+cost; the other states never substitute zero for absent pricing. Rows report call counts, usage-presence counts, and
 summed token and <code class="inline">total_cost</code> values. Terminal accounting pairs each
 <code class="inline">llm-request</code> <code class="inline">capability-started</code> with its <code class="inline">capability-stopped</code> by
 <code class="inline">capability_id</code>. An unmatched start is one observed call with unknown usage:
@@ -190,7 +199,9 @@ terminal batch could be reconstructed, not that every call supplied usage.
 aggregate fields with <code class="inline">null</code> when terminal evidence cannot be validated,
 including dropped <code class="inline">capability-started</code> or <code class="inline">capability-stopped</code> events, while
 preserving other known usage. Non-empty <code class="inline">events_dropped</code> for other event types
-means an available summary covers retained evidence and may not be complete.</p><p>Artifact publication currently requires a Unix host with POSIX-compatible
+means an available detailed summary covers retained evidence and may not be
+complete. <code class="inline">llm_usage_state</code> describes reconstruction of those detailed rows;
+it does not replace the independently sealed four-state <code class="inline">llm_spend</code> value.</p><p>Artifact publication currently requires a Unix host with POSIX-compatible
 <code class="inline">mkdir</code> and <code class="inline">id</code>; trace append also needs <code class="inline">sh</code> and either <code class="inline">lockf</code> or <code class="inline">flock</code>.
 Private artifacts and newly created traces require trusted ancestry, safe
 ownership, and restrictive modes. Preflight refuses unsafe or unwritable

@@ -245,6 +245,16 @@ Use `source: "llm_replay"` when responses must be deterministic. The
 [replay evaluation guide](../guides/evaluating-with-replay.md) owns fixture authoring, the
 network-free example, candidate materialization, and component overrides.
 
+Fixture matching is exact: changed messages, tools, or provider-neutral
+parameters produce another `request_hash` rather than silently consuming
+unrelated evidence. A miss is a provider error — `kind` `provider_error`,
+`reason` `not_found` — and `llm/request` returns that envelope as a value with
+`:status :error` rather than failing the evaluation, so a workflow that wants a
+miss to be fatal calls `cap/unwrap!` on the raw `tool/llm-request` envelope. The
+run envelope records the miss in usage: that alias's `successful_calls` stays 0
+while `calls` increments, and `capability_refusals` records
+`workflow/provider_error/not_found`.
+
 `doctor --connect` performs a real minimal completion for each selected live
 model and may incur provider cost; the readiness report's `usage` field
 attributes what each probe spent, on the rows a run reports. `--show-model-selectors` adds only safe

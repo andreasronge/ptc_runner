@@ -2594,11 +2594,8 @@ defmodule PtcRunner.Kernel.TraceLog do
         :ok
 
       {:ok, usage} when is_map(usage) ->
-        case Map.fetch(usage, "subordinate_source_checks") do
-          :error -> :ok
-          {:ok, count} when is_integer(count) and count >= 0 -> :ok
-          _invalid_count -> {:error, :malformed_source}
-        end
+        with :ok <- validate_subordinate_source_checks(usage),
+             do: validate_terminal_llm_spend(usage)
 
       _invalid_usage ->
         {:error, :malformed_source}
@@ -2606,6 +2603,27 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_run_stopped_usage(_type, _data), do: :ok
+
+  defp validate_subordinate_source_checks(usage) do
+    case Map.fetch(usage, "subordinate_source_checks") do
+      :error -> :ok
+      {:ok, count} when is_integer(count) and count >= 0 -> :ok
+      _invalid_count -> {:error, :malformed_source}
+    end
+  end
+
+  defp validate_terminal_llm_spend(usage) do
+    case Map.fetch(usage, "llm_spend") do
+      :error ->
+        :ok
+
+      {:ok, spend} ->
+        case LLMUsageSummary.validate_spend(spend) do
+          {:ok, _spend} -> :ok
+          {:error, :invalid_llm_spend} -> {:error, :malformed_source}
+        end
+    end
+  end
 
   defp runs(events, source_kind) do
     events
@@ -2651,7 +2669,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       "workflow_capability_calls" => workflow_calls,
       "mission_capability_calls" => mission_calls,
       "llm_calls" => capability_name_count(events, "llm-request"),
-      "llm_usage_total" => LLMUsageSummary.totals(events),
+      "llm_spend" => terminal_llm_spend(stopped),
       "error_count" => Enum.count(events, &error_event?/1),
       "duration_ms" => duration_ms(started, stopped),
       "workflow_prelude" => event_data(started, "workflow_prelude", empty_prelude()),
@@ -2666,6 +2684,13 @@ defmodule PtcRunner.Kernel.TraceLog do
       "schema_version" => 2,
       "source" => Atom.to_string(source_kind)
     }
+  end
+
+  defp terminal_llm_spend(stopped) do
+    case LLMUsageSummary.validate_spend(event_data(stopped, "usage", %{})["llm_spend"]) do
+      {:ok, spend} -> spend
+      {:error, :invalid_llm_spend} -> nil
+    end
   end
 
   # Absent prelude data projects to an empty graph.
