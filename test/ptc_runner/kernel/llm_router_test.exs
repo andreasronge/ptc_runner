@@ -1420,7 +1420,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     snapshot = TestHelpers.llm_snapshot("metered", "metered-v3", "openrouter:metered/model")
     assert {:ok, config} = config(router, run_id, connector_snapshots: [snapshot])
 
-    assert {:ok, command_outcome, counters, _events} =
+    assert {:ok, command_outcome, counters, events} =
              project_run(~S|(return (llm/request {"messages" []}))|, config, run_id, run_ref)
 
     envelope_usage = command_outcome.envelope["execution"]["usage"]
@@ -1461,6 +1461,13 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
            ]
 
     assert envelope_usage["unattributed_model_calls"] == 0
+
+    assert_spend_matches(events, envelope_usage, %{
+      "state" => "available",
+      "input" => 11,
+      "output" => 5,
+      "total_cost" => 0.0042
+    })
   end
 
   test "a failed run envelope retains LLM usage completed before the execution error" do
@@ -1474,7 +1481,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
     source = ~S|(do (llm/request {"messages" []}) (fail "after paid call"))|
 
-    assert {:error, command_outcome, counters, _events} =
+    assert {:error, command_outcome, counters, events} =
              project_run(source, config, run_id, run_ref)
 
     assert command_outcome.envelope["error"]["code"] == "workflow_failed"
@@ -1484,6 +1491,34 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert usage["llm_usage_by_model"] == counters["llm_usage_by_model"]
     assert usage["unattributed_model_calls"] == 0
     assert get_in(usage, ["llm_usage", Access.at(0), "usage", "input"]) == 7
+    assert_spend_matches(events, usage, %{"state" => "incomplete"})
+  end
+
+  test "an unpriced run envelope retains tokens without inventing zero cost" do
+    run_id = "routing-envelope-unpriced"
+    run_ref = "cmd-00000000000000000000000000"
+
+    leaf =
+      capability(self(), :unpriced_envelope, %{
+        content: "answer",
+        tokens: %{input: 13, output: 8}
+      })
+
+    assert {:ok, router} = LLMRouter.new([route("writer", "llm", "writer-v1", false, leaf)])
+    assert {:ok, config} = config(router, run_id)
+
+    assert {:ok, command_outcome, _counters, events} =
+             project_run(~S|(return (llm/request {"messages" []}))|, config, run_id, run_ref)
+
+    usage = command_outcome.envelope["execution"]["usage"]
+
+    assert_spend_matches(events, usage, %{
+      "state" => "unpriced",
+      "input" => 13,
+      "output" => 8
+    })
+
+    refute Map.has_key?(usage["llm_spend"], "total_cost")
   end
 
   test "a sealed run without LLM calls publishes an available empty summary" do
@@ -1493,7 +1528,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:ok, router} = LLMRouter.new([route("unused", "llm", "unused-v1", false, leaf)])
     assert {:ok, config} = config(router, run_id)
 
-    assert {:ok, command_outcome, counters, _events} =
+    assert {:ok, command_outcome, counters, events} =
              project_run(~S|(return 42)|, config, run_id, run_ref)
 
     usage = command_outcome.envelope["execution"]["usage"]
@@ -1504,6 +1539,8 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
     assert Map.take(usage, ~w(llm_usage llm_usage_by_model unattributed_model_calls)) ==
              Map.take(counters, ~w(llm_usage llm_usage_by_model unattributed_model_calls))
+
+    assert_spend_matches(events, usage, %{"state" => "empty"})
   end
 
   test "capability discovery names aliases and the default" do
@@ -1648,5 +1685,13 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     :ok = PublicationAuthority.close(authority)
     :ok = EventSink.stop(config.event_sink)
     {status, command_outcome, counters, events}
+  end
+
+  defp assert_spend_matches(events, envelope_usage, expected) do
+    stopped = Enum.find(events, &(&1.type == "run-stopped"))
+    trace_spend = stopped.data.usage.llm_spend
+    assert trace_spend == expected
+    assert envelope_usage["llm_spend"] == expected
+    assert DeterministicJSON.encode(trace_spend) == DeterministicJSON.encode(expected)
   end
 end

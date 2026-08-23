@@ -1506,7 +1506,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       )
 
     required =
-      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors agent_protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped capability_refusals llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
+      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors agent_protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped capability_refusals llm_spend llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
 
     common = %{
       "remaining_ms" => nonnegative_integer(),
@@ -1519,7 +1519,8 @@ defmodule PtcRunner.Kernel.CommandContract do
       "evaluation_history_bytes" => nonnegative_integer(),
       "evaluation_continuation_bytes" => nonnegative_integer(),
       "events_dropped" => event_counts,
-      "capability_refusals" => refusal_counts
+      "capability_refusals" => refusal_counts,
+      "llm_spend" => llm_spend_schema()
     }
 
     %{
@@ -1542,6 +1543,26 @@ defmodule PtcRunner.Kernel.CommandContract do
             "unattributed_model_calls" => %{"type" => "null"}
           })
         )
+      ]
+    }
+  end
+
+  defp llm_spend_schema do
+    %{
+      "oneOf" => [
+        closed(["state"], %{"state" => %{"const" => "empty"}}),
+        closed(["state"], %{"state" => %{"const" => "incomplete"}}),
+        closed(~w(state input output), %{
+          "state" => %{"const" => "unpriced"},
+          "input" => nonnegative_integer(),
+          "output" => nonnegative_integer()
+        }),
+        closed(~w(state input output total_cost), %{
+          "state" => %{"const" => "available"},
+          "input" => nonnegative_integer(),
+          "output" => nonnegative_integer(),
+          "total_cost" => %{"type" => "number", "minimum" => 0}
+        })
       ]
     }
   end

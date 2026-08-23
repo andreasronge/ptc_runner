@@ -147,15 +147,20 @@ assert.equal(evaluationPresentation({ kind: 'arithmetic_error', message: '' }), 
 
 assert.deepEqual(formatLiveSpend(null), { state: 'empty', value: '–', fields: [] });
 assert.deepEqual(formatLiveSpend({ state: 'empty' }), { state: 'empty', value: '–', fields: [] });
-assert.deepEqual(formatLiveSpend({ state: 'incomplete', input: 0, output: 0, total_cost: 0 }), {
+assert.deepEqual(formatLiveSpend({ state: 'incomplete' }), {
   state: 'incomplete',
   value: 'incomplete',
   fields: []
 });
+assert.deepEqual(formatLiveSpend({ state: 'incomplete', total_cost: 0 }), {
+  state: 'empty',
+  value: '–',
+  fields: []
+});
 assert.deepEqual(formatLiveSpend({ state: 'unpriced', input: 3, output: 2 }), {
   state: 'unpriced',
-  value: '3 in · 2 out',
-  fields: ['3 in', '2 out']
+  value: '3 in · 2 out · cost unavailable',
+  fields: ['3 in', '2 out', 'cost unavailable']
 });
 assert.deepEqual(
   formatLiveSpend({ state: 'available', input: 12345, output: 678, total_cost: 0.0042 }),
@@ -163,6 +168,19 @@ assert.deepEqual(
     state: 'available',
     value: '12,345 in · 678 out · cost 0.0042',
     fields: ['12,345 in', '678 out', 'cost 0.0042']
+  }
+);
+assert.deepEqual(
+  formatLiveSpend({
+    state: 'available',
+    input: 18_014_398_509_481_981,
+    output: 18_014_398_509_481_982,
+    total_cost: 2e12
+  }),
+  {
+    state: 'overflow',
+    value: 'usage exceeds display range',
+    fields: ['usage exceeds display range']
   }
 );
 

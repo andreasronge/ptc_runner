@@ -1224,7 +1224,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
              TraceLog.query_loaded(events, "models", :counters, %{}, 100, :sanitized)
   end
 
-  test "run summaries expose complete per-run LLM usage totals" do
+  test "run summaries expose the canonical terminal LLM spend projection" do
     events = [
       decoded_event("usage-total", 1, "run-started"),
       decoded_event("usage-total", 2, "capability-stopped", %{
@@ -1235,7 +1235,17 @@ defmodule PtcRunner.Kernel.TraceLogTest do
         "status" => "ok",
         "usage" => %{"input" => 120, "output" => 30, "total_cost" => 0.0042}
       }),
-      decoded_event("usage-total", 3, "run-stopped", %{"outcome" => "ok"})
+      decoded_event("usage-total", 3, "run-stopped", %{
+        "outcome" => "ok",
+        "usage" => %{
+          "llm_spend" => %{
+            "state" => "available",
+            "input" => 120,
+            "output" => 30,
+            "total_cost" => 0.0042
+          }
+        }
+      })
     ]
 
     assert {:ok, %{"items" => [run]}} =
@@ -1248,7 +1258,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                :sanitized
              )
 
-    assert run["llm_usage_total"] == %{
+    assert run["llm_spend"] == %{
+             "state" => "available",
              "input" => 120,
              "output" => 30,
              "total_cost" => 0.0042
@@ -1308,6 +1319,25 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
       assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
     end
+  end
+
+  @tag :tmp_dir
+  test "canonical validation rejects malformed terminal LLM spend", %{tmp_dir: directory} do
+    path = Path.join(directory, "invalid-llm-spend.jsonl")
+
+    events = [
+      decoded_event("invalid-llm-spend", 1, "run-started"),
+      decoded_event("invalid-llm-spend", 2, "run-stopped", %{
+        "usage" => %{
+          "llm_spend" => %{"state" => "available", "input" => 1, "output" => 2}
+        }
+      })
+    ]
+
+    File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+    {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
   end
 
   @tag :tmp_dir

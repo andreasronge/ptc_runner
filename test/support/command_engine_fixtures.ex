@@ -99,7 +99,8 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
       evaluation_history_bytes: 0,
       evaluation_continuation_bytes: 0,
       events_dropped: %{},
-      capability_refusals: %{}
+      capability_refusals: %{},
+      llm_spend: %{"state" => "empty"}
     }
 
     evidence = %{
@@ -147,6 +148,7 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
       "evaluation_continuation_bytes" => 0,
       "events_dropped" => %{"provider-call" => 2},
       "capability_refusals" => %{},
+      "llm_spend" => %{"state" => "empty"},
       "llm_usage_state" => "available",
       "llm_usage" => [],
       "llm_usage_by_model" => [],

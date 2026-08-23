@@ -973,7 +973,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       evaluation_memory_bytes: 0,
       evaluation_history_bytes: 0,
       evaluation_continuation_bytes: 0,
-      events_dropped: %{}
+      events_dropped: %{},
+      llm_spend: %{"state" => "empty"}
     }
 
     evidence = %{
@@ -1040,6 +1041,60 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                )
 
       assert_schema_invalid(put_in(outcome.envelope, ["error", "message"], invalid_message))
+    end
+  end
+
+  test "missing or malformed sealed LLM spend invalidates the command outcome" do
+    base_usage = %{
+      remaining_ms: 0,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 0,
+      evaluations_by_mission: %{},
+      protocol_errors: 0,
+      agent_protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{}
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: %{
+           "trace" => "not_requested",
+           "inspection" => "not_requested",
+           "result" => "not_requested"
+         },
+         error: nil,
+         secondary_errors: []
+       }}
+
+    for usage <- [base_usage, Map.put(base_usage, :llm_spend, %{"state" => "available"})] do
+      evidence = %{
+        result:
+          {:error,
+           %Error{
+             kind: :workflow_failed,
+             reason: :explicit_failure,
+             details: %{},
+             usage: usage
+           }}
+      }
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandRunOutcome.project(
+                 evidence,
+                 settlement,
+                 CommandRunRef.encode(@zero_entropy),
+                 true
+               )
+
+      assert outcome.envelope["error"]["code"] == "internal_error"
+      assert outcome.envelope["execution"]["state"] == "incomplete"
+      assert outcome.envelope["execution"]["usage"] == nil
+      assert_schema_valid(outcome.envelope)
     end
   end
 
@@ -1188,7 +1243,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       evaluation_memory_bytes: 0,
       evaluation_history_bytes: 0,
       evaluation_continuation_bytes: 0,
-      events_dropped: %{}
+      events_dropped: %{},
+      llm_spend: %{"state" => "empty"}
     }
 
     evidence = %{
@@ -1464,7 +1520,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       evaluation_memory_bytes: 0,
       evaluation_history_bytes: 0,
       evaluation_continuation_bytes: 0,
-      events_dropped: %{}
+      events_dropped: %{},
+      llm_spend: %{"state" => "empty"}
     }
 
     evidence = %{
@@ -4772,6 +4829,31 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     }
 
     assert_schema_valid(classified)
+
+    for spend <- [
+          %{"state" => "empty"},
+          %{"state" => "incomplete"},
+          %{"state" => "unpriced", "input" => 1, "output" => 2},
+          %{"state" => "available", "input" => 1, "output" => 2, "total_cost" => 0}
+        ] do
+      assert_schema_valid(put_in(classified, ["execution", "usage", "llm_spend"], spend))
+    end
+
+    for invalid_spend <- [
+          nil,
+          %{"state" => "empty", "total_cost" => 0},
+          %{"state" => "unpriced", "input" => 1},
+          %{"state" => "unpriced", "input" => 1, "output" => 2, "total_cost" => 0},
+          %{"state" => "available", "input" => 1, "output" => 2}
+        ] do
+      assert_schema_invalid(
+        put_in(classified, ["execution", "usage", "llm_spend"], invalid_spend)
+      )
+    end
+
+    assert_schema_invalid(
+      update_in(classified, ["execution", "usage"], &Map.delete(&1, "llm_spend"))
+    )
 
     preclassification = CommandDiagnostic.new!(:arguments, :invalid_arguments)
 

@@ -110,19 +110,21 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
   """
   @spec spend(map()) :: map()
   def spend(counters) when is_map(counters) do
-    {successful, missing, cost_complete?, usage} =
-      Enum.reduce(counters, {0, 0, true, %{}}, fn {_key, {row, row_complete?}},
-                                                  {successful, missing, complete?, usage} ->
-        {successful + Map.fetch!(row, "successful_calls"),
-         missing + Map.fetch!(row, "missing_usage_calls"), complete? and row_complete?,
-         sum_usage(usage, Map.fetch!(row, "usage"))}
+    {successful, missing, tokens_complete?, cost_complete?, usage} =
+      Enum.reduce(counters, {0, 0, true, true, %{}}, fn
+        {_key, {row, row_tokens_complete?, row_cost_complete?}},
+        {successful, missing, tokens_complete?, cost_complete?, usage} ->
+          {successful + Map.fetch!(row, "successful_calls"),
+           missing + Map.fetch!(row, "missing_usage_calls"),
+           tokens_complete? and row_tokens_complete?, cost_complete? and row_cost_complete?,
+           sum_usage(usage, Map.fetch!(row, "usage"))}
       end)
 
     cond do
       successful == 0 ->
         %{"state" => "empty"}
 
-      missing > 0 ->
+      missing > 0 or not tokens_complete? ->
         %{"state" => "incomplete"}
 
       cost_complete? ->
@@ -133,37 +135,34 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
     end
   end
 
-  @spec totals([map()]) :: map()
-  def totals(events) when is_list(events) do
-    terminal? = Enum.any?(events, &(field(&1, "type") == "run-stopped"))
-    dropped? = Enum.any?(events, &(field(&1, "type") == "events-dropped"))
+  @doc false
+  @spec validate_spend(term()) :: {:ok, map()} | {:error, :invalid_llm_spend}
+  def validate_spend(%{"state" => state} = spend)
+      when state in ["empty", "incomplete"] and map_size(spend) == 1,
+      do: {:ok, spend}
 
-    if not terminal? or dropped? do
-      %{}
-    else
-      successful =
-        Enum.filter(events, fn event ->
-          llm_usage_event?(event) and stringify(field(event, "data", "status")) == "ok"
-        end)
-
-      Map.new(@total_keys, fn key -> {key, complete_total(successful, key)} end)
-      |> Map.reject(fn {_key, value} -> is_nil(value) end)
-    end
+  def validate_spend(%{"state" => "unpriced", "input" => input, "output" => output} = spend)
+      when map_size(spend) == 3 do
+    validate_spend_usage(spend, %{"input" => input, "output" => output})
   end
 
-  defp complete_total([], _key), do: nil
-
-  defp complete_total(events, key) do
-    Enum.reduce_while(events, 0, fn event, total ->
-      with usage when is_map(usage) <- field(event, "data", "usage"),
-           {:ok, normalized} <- LLMUsage.normalize(usage),
-           {:ok, value} <- Map.fetch(normalized, key) do
-        {:cont, total + value}
-      else
-        _missing_or_invalid -> {:halt, nil}
-      end
-    end)
+  def validate_spend(
+        %{
+          "state" => "available",
+          "input" => input,
+          "output" => output,
+          "total_cost" => total_cost
+        } = spend
+      )
+      when map_size(spend) == 4 do
+    validate_spend_usage(spend, %{
+      "input" => input,
+      "output" => output,
+      "total_cost" => total_cost
+    })
   end
+
+  def validate_spend(_spend), do: {:error, :invalid_llm_spend}
 
   defp summarize_calls(calls, attribution_events) do
     {alias_counters, model_counters, unattributed} =
@@ -407,7 +406,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
   defp rows(counters) do
     counters
     |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.map(fn {_key, {row, cost_complete?}} ->
+    |> Enum.map(fn {_key, {row, _tokens_complete?, cost_complete?}} ->
       if cost_complete?,
         do: row,
         else: update_in(row, ["usage"], &Map.delete(&1, "total_cost"))
@@ -432,36 +431,64 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
   end
 
   defp update_counter(counters, key, initial, call) do
-    {current, cost_complete?} = Map.get(counters, key, {initial, true})
+    {current, tokens_complete?, cost_complete?} =
+      Map.get(counters, key, {initial, true, true})
 
     row =
       current
       |> Map.update!("calls", &(&1 + 1))
       |> Map.update!("successful_calls", &(&1 + if(call.outcome == :ok, do: 1, else: 0)))
 
-    Map.put(counters, key, update_usage(row, cost_complete?, call))
+    Map.put(counters, key, update_usage(row, tokens_complete?, cost_complete?, call))
   end
 
-  defp update_usage(row, cost_complete?, %{outcome: :ok, usage: usage}) when is_map(usage) do
+  defp update_usage(row, tokens_complete?, cost_complete?, %{outcome: :ok, usage: usage})
+       when is_map(usage) do
     case LLMUsage.normalize(usage) do
       {:ok, normalized} ->
+        normalized = drop_nil_cost(normalized)
+
         row =
           row
           |> Map.update!("usage_calls", &(&1 + 1))
           |> Map.update!("usage", &sum_usage(&1, normalized))
 
-        {row, cost_complete? and Map.has_key?(normalized, "total_cost")}
+        {row, tokens_complete? and Enum.all?(~w(input output), &Map.has_key?(normalized, &1)),
+         cost_complete? and Map.has_key?(normalized, "total_cost")}
 
       {:error, :invalid_llm_usage} ->
-        {Map.update!(row, "missing_usage_calls", &(&1 + 1)), false}
+        {Map.update!(row, "missing_usage_calls", &(&1 + 1)), false, false}
     end
   end
 
-  defp update_usage(row, _cost_complete?, %{outcome: outcome})
+  defp update_usage(row, _tokens_complete?, _cost_complete?, %{outcome: outcome})
        when outcome in [:ok, :unknown],
-       do: {Map.update!(row, "missing_usage_calls", &(&1 + 1)), false}
+       do: {Map.update!(row, "missing_usage_calls", &(&1 + 1)), false, false}
 
-  defp update_usage(row, cost_complete?, %{outcome: :error}), do: {row, cost_complete?}
+  defp update_usage(row, tokens_complete?, cost_complete?, %{outcome: :error}),
+    do: {row, tokens_complete?, cost_complete?}
+
+  defp validate_spend_usage(spend, usage) do
+    if Enum.all?(usage, fn
+         {key, value} when key in ["input", "output"] -> is_integer(value) and value >= 0
+         {"total_cost", value} -> valid_aggregate_cost?(value)
+       end) do
+      {:ok, spend}
+    else
+      {:error, :invalid_llm_spend}
+    end
+  end
+
+  defp valid_aggregate_cost?(value) when is_integer(value), do: value >= 0
+
+  defp valid_aggregate_cost?(value) when is_float(value) and value >= 0.0 do
+    :erlang.float_to_binary(value, [:short]) not in ["nan", "inf", "-inf"]
+  end
+
+  defp valid_aggregate_cost?(_value), do: false
+
+  defp drop_nil_cost(%{"total_cost" => nil} = usage), do: Map.delete(usage, "total_cost")
+  defp drop_nil_cost(usage), do: usage
 
   defp sum_usage(left, right),
     do: Map.merge(left, right, fn _key, first, second -> first + second end)

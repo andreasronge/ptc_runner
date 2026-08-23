@@ -9,16 +9,57 @@ export function displayRunName(run, project) {
   return run?.run_id || 'Unknown run';
 }
 
-export function formatRunUsage(usage) {
-  if (!usage || typeof usage !== 'object') return [];
+export function formatRunSpend(spend) {
+  if (spendExceedsDisplayRange(spend)) return ['usage exceeds display range'];
+  if (!validSpend(spend)) return [];
+  if (spend.state === 'empty') return [];
+  if (spend.state === 'incomplete') return ['usage incomplete'];
 
   const fields = [];
-  if (Number.isSafeInteger(usage.input) && usage.input >= 0) fields.push(`${usage.input.toLocaleString('en-US')} in`);
-  if (Number.isSafeInteger(usage.output) && usage.output >= 0) fields.push(`${usage.output.toLocaleString('en-US')} out`);
-  if (typeof usage.total_cost === 'number' && Number.isFinite(usage.total_cost) && usage.total_cost >= 0) {
-    fields.push(`cost ${usage.total_cost.toLocaleString('en-US', { maximumSignificantDigits: 6 })}`);
+  fields.push(`${spend.input.toLocaleString('en-US')} in`);
+  fields.push(`${spend.output.toLocaleString('en-US')} out`);
+
+  if (spend.state === 'available') {
+    fields.push(`cost ${spend.total_cost.toLocaleString('en-US', { maximumSignificantDigits: 6 })}`);
+  } else {
+    fields.push('cost unavailable');
   }
+
   return fields;
+}
+
+export function validSpend(spend) {
+  if (!spend || typeof spend !== 'object' || Array.isArray(spend)) return false;
+  const keys = Object.keys(spend).sort();
+
+  if (spend.state === 'empty' || spend.state === 'incomplete') {
+    return keys.length === 1 && keys[0] === 'state';
+  }
+
+  if (!Number.isSafeInteger(spend.input) || spend.input < 0 ||
+      !Number.isSafeInteger(spend.output) || spend.output < 0) return false;
+
+  if (spend.state === 'unpriced') {
+    return keys.join(',') === 'input,output,state';
+  }
+
+  return spend.state === 'available' &&
+    keys.join(',') === 'input,output,state,total_cost' &&
+    typeof spend.total_cost === 'number' && Number.isFinite(spend.total_cost) && spend.total_cost >= 0;
+}
+
+function spendExceedsDisplayRange(spend) {
+  if (!spend || typeof spend !== 'object' || Array.isArray(spend)) return false;
+  const keys = Object.keys(spend).sort().join(',');
+  const tokens = [spend.input, spend.output];
+  const integerTokens = tokens.every(value => Number.isInteger(value) && value >= 0);
+  const unsafeTokens = tokens.some(value => !Number.isSafeInteger(value));
+
+  if (!integerTokens || !unsafeTokens) return false;
+  if (spend.state === 'unpriced') return keys === 'input,output,state';
+
+  return spend.state === 'available' && keys === 'input,output,state,total_cost' &&
+    typeof spend.total_cost === 'number' && Number.isFinite(spend.total_cost) && spend.total_cost >= 0;
 }
 
 export function searchableRunFields(run, project) {
