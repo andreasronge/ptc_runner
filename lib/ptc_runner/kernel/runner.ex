@@ -687,9 +687,15 @@ defmodule PtcRunner.Kernel.Runner do
   defp live_terminal_outcome({:error, %Error{details: details, reason: reason}}) do
     case RuntimeLimitDiagnostic.details_message(details) do
       {:ok, limit, message} -> {message, limit}
-      :error -> {reason, nil}
+      :error -> {live_failure_reason(reason, details), nil}
     end
   end
+
+  defp live_failure_reason(_reason, %{message: message})
+       when is_binary(message) and message != "",
+       do: message
+
+  defp live_failure_reason(reason, _details), do: reason
 
   defp live_evaluation_error({:error, %Error{} = error}, sink) do
     result_class =

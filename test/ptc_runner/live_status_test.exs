@@ -509,7 +509,10 @@ defmodule PtcRunner.LiveStatusTest do
                Kernel.run(~S[(return (/ 1 0))], config)
              end)
 
-    assert_receive {:live_frame, %{phase: "error", last_evaluation_error: nil}}, 2_000
+    assert_receive {:live_frame, %{phase: "error", last_evaluation_error: nil} = frame}, 2_000
+    assert frame.outcome_reason == "private workflow failed"
+    refute inspect(frame) =~ "arithmetic_error"
+    refute inspect(frame) =~ "division by zero"
   end
 
   test "a real run deadline reports the configured run-duration ceiling" do
