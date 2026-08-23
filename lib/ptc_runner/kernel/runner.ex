@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.BoundedPrints
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Error
+  alias PtcRunner.Kernel.EvaluatorEvidence
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
@@ -145,7 +146,8 @@ defmodule PtcRunner.Kernel.Runner do
               reporter,
               outcome(final_result),
               live_reason,
-              live_limit
+              live_limit,
+              live_evaluation_error(final_result, config.event_sink)
             )
 
           finalized
@@ -678,6 +680,18 @@ defmodule PtcRunner.Kernel.Runner do
       :error -> {reason, nil}
     end
   end
+
+  defp live_evaluation_error({:error, %Error{} = error}, sink) do
+    result_class =
+      case EventSink.policy(sink) do
+        :normal -> :normal
+        _private_or_unavailable -> :private
+      end
+
+    EvaluatorEvidence.envelope_value(result_class, error)
+  end
+
+  defp live_evaluation_error(_result, _sink), do: nil
 
   defp maybe_put_result_hash(stopped_data, {:ok, %Result{value: value}}) do
     case ResultIdentity.hash(value) do

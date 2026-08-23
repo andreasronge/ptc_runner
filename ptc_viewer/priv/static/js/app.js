@@ -318,7 +318,8 @@ async function loadRun(runId, routeGeneration) {
           metadata: await runResponse.json(),
           turns: turnsResult.turns,
           conversation,
-          preludes
+          preludes,
+          last_evaluation_error: state.live?.lastEvaluationError?.(runId) || null
         }
       };
     },
@@ -385,6 +386,7 @@ function renderRun(data, { fresh = false, routeGeneration = state.routeGeneratio
             metadata,
             conversation,
             preludes: data.preludes,
+            last_evaluation_error: data.last_evaluation_error || null,
             turns: {
               ...result.nextPage,
               items: [...(turns.items || []), ...(result.nextPage.items || [])]

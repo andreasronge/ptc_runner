@@ -2195,7 +2195,9 @@ button:focus-visible, textarea:focus-visible, summary:focus-visible {
   font-size: 11px;
   line-height: 1.45;
 }
-.live-failure[hidden] { display: none; }
+.live-failure [data-role="failure-evaluation"] { margin-top: 4px; }
+.live-failure[hidden],
+.live-failure [hidden] { display: none; }
 
 .live-badge {
   display: inline-flex; align-items: center; gap: 6px;

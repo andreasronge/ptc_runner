@@ -12,6 +12,9 @@
 //    the max_heap check runs only at GC, so kills can occur far below ceiling.
 
 import { formatRunUsage } from './run-display.js';
+import { evaluationPresentation } from './evaluation-evidence.js';
+
+export { evaluationPresentation };
 
 const WORD_BYTES = 8;
 
@@ -232,7 +235,11 @@ export function createLiveController({ onInspectRun, onLiveCount, onProject, mut
     // keeping state current makes tab switches instant.
   }
 
-  return { setActive };
+  function lastEvaluationError(runId) {
+    return cards.get(runId)?.frame?.last_evaluation_error ?? null;
+  }
+
+  return { setActive, lastEvaluationError };
 }
 
 function mutationHeaders(mutationNonce, liveToken, extra = {}) {
@@ -777,7 +784,10 @@ function createCard(runId) {
       </div>
     </header>
 
-    <div class="live-failure" data-role="failure" role="status" hidden></div>
+    <div class="live-failure" data-role="failure" role="status" hidden>
+      <div data-role="failure-terminal" hidden></div>
+      <div data-role="failure-evaluation" hidden></div>
+    </div>
 
     <div class="live-kpis">
       <div class="live-kpi"><span class="live-kpi-value" data-role="kpi-calls">–</span><span class="live-kpi-label">tool calls</span></div>
@@ -877,9 +887,19 @@ export function failurePresentation(frame) {
 }
 
 function updateFailure(element, frame) {
-  const presentation = failurePresentation(frame);
-  element.hidden = presentation == null;
-  element.textContent = presentation || '';
+  const terminal = failurePresentation(frame);
+  const evaluation = evaluationPresentation(frame?.last_evaluation_error);
+  const terminalNode = element.querySelector('[data-role="failure-terminal"]');
+  const evaluationNode = element.querySelector('[data-role="failure-evaluation"]');
+  if (terminalNode) {
+    terminalNode.hidden = terminal == null;
+    terminalNode.textContent = terminal || '';
+  }
+  if (evaluationNode) {
+    evaluationNode.hidden = evaluation == null;
+    evaluationNode.textContent = evaluation || '';
+  }
+  element.hidden = terminal == null && evaluation == null;
 }
 
 function updateBadge(card, frame) {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   fmtLimit,
   formatLiveSpend,
+  evaluationPresentation,
   failurePresentation,
   launchPollDelay,
   launchStatusPresentation,
@@ -134,6 +135,15 @@ assert.equal(
   'Limit exceeded: run_duration_ms limit 60000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower'
 );
 assert.equal(failurePresentation({ phase: 'ok', outcome_reason: null }), null);
+
+assert.equal(
+  evaluationPresentation({ kind: 'arithmetic_error', message: 'division by zero' }),
+  'evaluation: arithmetic_error: division by zero'
+);
+assert.equal(evaluationPresentation(null), null);
+assert.equal(evaluationPresentation({ kind: 'arithmetic_error' }), null);
+assert.equal(evaluationPresentation({ kind: '', message: 'division by zero' }), null);
+assert.equal(evaluationPresentation({ kind: 'arithmetic_error', message: '' }), null);
 
 assert.deepEqual(formatLiveSpend(null), { state: 'empty', value: '–', fields: [] });
 assert.deepEqual(formatLiveSpend({ state: 'empty' }), { state: 'empty', value: '–', fields: [] });

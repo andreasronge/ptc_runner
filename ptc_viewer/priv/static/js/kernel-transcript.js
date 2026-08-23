@@ -16,6 +16,7 @@
 import { html, mount, rawHtml, toMarkup } from './preact.js';
 import { highlightLisp } from './highlight.js';
 import { privateEvidenceAbsence } from './private-evidence.js';
+import { evaluationPresentation } from './evaluation-evidence.js';
 
 const SUCCESS = new Set(['ok', 'continued', 'returned', 'completed', 'success']);
 const FAILURE = new Set([
@@ -46,7 +47,8 @@ export function renderKernelTranscriptMarkup(data) {
 }
 
 function KernelTranscript({
-  metadata = {}, turns = {}, conversation = null, preludes = null, options = {}
+  metadata = {}, turns = {}, conversation = null, preludes = null,
+  last_evaluation_error = null, options = {}
 }) {
   const events = [...(turns.items || [])].sort((left, right) => left.sequence - right.sequence);
   const transcript = buildTranscript(events);
@@ -90,7 +92,8 @@ function KernelTranscript({
   return html`
     <section class="kernel-transcript">
       <${Hero} metadata=${metadata} transcript=${transcript} title=${options.title}
-               eventCount=${events.length} truncatedPage=${partial} />
+               eventCount=${events.length} truncatedPage=${partial}
+               lastEvaluationError=${last_evaluation_error} />
       <${Provenance} />
       <${Reference} metadata=${metadata} transcript=${transcript}
                     preludeIndex=${preludeIndex} options=${options} />
@@ -105,7 +108,10 @@ function KernelTranscript({
 
 // --- Identity and summary -------------------------------------------------
 
-function Hero({ metadata, transcript, title: displayTitle, eventCount, truncatedPage }) {
+function Hero({
+  metadata, transcript, title: displayTitle, eventCount, truncatedPage,
+  lastEvaluationError
+}) {
   const status = metadata.status || (metadata.complete ? 'complete' : 'incomplete');
   const bundle = metadata.workflow_prelude?.hash;
   // A host-supplied display label can replace the cryptic run ID as the title;
@@ -144,7 +150,7 @@ function Hero({ metadata, transcript, title: displayTitle, eventCount, truncated
       </div>
       <${Tags} tags=${metadata.tags || metadata.labels?.tags} />
     </div>
-    <${TerminalCause} event=${transcript.terminal} />
+    <${TerminalCause} event=${transcript.terminal} lastEvaluationError=${lastEvaluationError} />
     <div class="kt-metrics" aria-label="Run summary">
       <${Metric} value=${transcript.evaluations.length} label="evaluations" />
       <${Metric} value=${transcript.capabilities.length} label="capability calls" />
@@ -156,9 +162,10 @@ function Hero({ metadata, transcript, title: displayTitle, eventCount, truncated
   `;
 }
 
-function TerminalCause({ event }) {
+function TerminalCause({ event, lastEvaluationError }) {
   const data = event?.data;
-  if (!data || data.outcome === 'ok') return null;
+  const evaluation = evaluationCause(lastEvaluationError);
+  if (!data || data.outcome === 'ok') return evaluation;
 
   if (
     data.failure_kind === 'turn-limit' &&
@@ -172,18 +179,31 @@ function TerminalCause({ event }) {
         <strong>Agent turn limit reached</strong>
         <span>max_turns was ${data.limit_value}. Raise it for this agent.core/run call, or reduce the work per turn.</span>
       </div>
+      ${evaluation}
     `;
   }
 
   const failureKind = data.failure_kind;
   if (typeof failureKind !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(failureKind)) {
-    return null;
+    return evaluation;
   }
 
   return html`
     <div class="kt-terminal-cause" role="status">
       <strong>Run stopped</strong>
       <span>${failureKind.replaceAll('-', ' ')}</span>
+    </div>
+    ${evaluation}
+  `;
+}
+
+function evaluationCause(error) {
+  const presentation = evaluationPresentation(error);
+  if (!presentation) return null;
+  return html`
+    <div class="kt-terminal-cause" role="status">
+      <strong>Evaluation</strong>
+      <span>${presentation}</span>
     </div>
   `;
 }
