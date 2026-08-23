@@ -23,6 +23,39 @@ defmodule PtcViewer.RouterTest do
     assert conn.resp_body =~ "Canonical Kernel TraceLog transcript view"
   end
 
+  test "entry, run handoff, and unknown browser paths have distinct HTTP semantics", %{
+    router_opts: router_opts
+  } do
+    entry = conn(:get, "/") |> call_router(router_opts)
+    assert entry.status == 200
+    assert entry.resp_body =~ "ptc-viewer-config"
+
+    handoff = conn(:get, "/run/run%3Aone") |> call_router(router_opts)
+    assert handoff.status == 302
+    assert get_resp_header(handoff, "location") == ["/#/run/run%3Aone"]
+    refute handoff.resp_body =~ "ptc-viewer-config"
+
+    for request <- [
+          conn(:get, "/runs"),
+          conn(:get, "/runs/does-not-exist"),
+          conn(:get, "/totally/made/up"),
+          conn(:post, "/totally/made/up", "")
+        ] do
+      response = call_router(request, router_opts)
+      assert response.status == 404
+      assert response.resp_body == "Not found"
+      refute response.resp_body =~ "ptc-viewer-config"
+    end
+  end
+
+  test "path-form run handoff enforces the Viewer run ID bound", %{router_opts: router_opts} do
+    oversized = String.duplicate("a", 513)
+    response = conn(:get, "/run/#{oversized}") |> call_router(router_opts)
+
+    assert response.status == 404
+    assert response.resp_body == "Not found"
+  end
+
   test "GET /api/kernel/runs uses the shared host query adapter", %{trace_dir: trace_dir} do
     adapter = fn _source, operation, arguments ->
       {:ok, %{"operation" => Atom.to_string(operation), "arguments" => arguments}}

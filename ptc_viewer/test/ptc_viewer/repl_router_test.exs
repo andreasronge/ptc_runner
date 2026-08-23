@@ -184,7 +184,7 @@ defmodule PtcViewer.ReplRouterTest do
 
   test "enabled entry documents contain only the public bootstrap configuration" do
     %{opts: opts} = start_repl()
-    html = conn(:get, "/anything") |> call_router(opts)
+    html = conn(:get, "/") |> call_router(opts)
 
     assert html.status == 200
     assert html.resp_body =~ "ptc-viewer-config"
