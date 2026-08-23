@@ -51,6 +51,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -97,7 +98,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, catalog} <-
            InstallationCatalog.new(registrations,
              installed_limits: host.limits,
-             runtime_binding: binding
+             runtime_binding: binding,
+             installation_config_digests: InstallationConfigDigest.map(host.install)
            ) do
       {:ok, catalog}
     else
@@ -1567,7 +1569,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
         provider,
         string_keyed(selected),
         acquisition,
-        content_snapshot_hash
+        content_snapshot_hash,
+        Map.get(installation, :installation_config_digest)
       )
     else
       _invalid -> {:error, :invalid_provider_snapshot}

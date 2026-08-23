@@ -77,6 +77,41 @@ it whenever installed behavior or authority changes, including model routing,
 MCP mappings and effects, replay fixtures, snapshot policy, or adapter and
 launcher builds.
 
+`installation_config_digest` is computed evidence for that same declaration. It
+hashes the normalized `install.<alias>` configuration after ordinary host
+decoding, with a distinct TJCS domain from application identity. Matching
+digests mean the same declared installation was selected. They do not prove
+that a local process, remote endpoint, credential, filesystem path, or server
+still grants the same effective authority.
+
+The digest is a sibling of `application_content_digest` and
+`effective_application_digest`. Host configuration stays out of those
+application hashes. `ptc validate` prints `installation_config_digests` for
+aliases selected by the effective application, without contacting providers.
+The same selected map is recorded on `run-started`, and each connector snapshot
+carries the singular digest used while loading the host document.
+
+Documented meaning by source:
+
+- MCP stdio: the same normalized command and configuration declaration, not
+  the resolved executable, working-directory target, symlink target, ambient
+  environment, or server-enforced scope.
+- MCP streamable HTTP: the same declared endpoint, authentication policy, tool
+  mappings, and limits; not the server implementation behind the URL.
+- LLM: the same declared model, parameters, limits, and credential binding
+  name; not the secret value, account permissions, or provider behavior.
+- Snapshot, replay, and other file-backed sources: the same declared path and
+  provider configuration; not the current file contents unless a separate
+  content hash attests them.
+
+Paths are hashed as written after ordinary configuration normalization. The
+digest does not expand them against the current directory, resolve symlinks, or
+bake machine-local real paths. Changing `installation_revision` alone leaves
+the digest stable; changing the declaration without bumping the revision still
+changes the digest. Rotating a credential value does not change it; renaming
+the binding does. Compare identifiers, not confidentiality: the digest never
+includes secrets.
+
 ## Declare credentials once
 
 Credentials have exactly one source:

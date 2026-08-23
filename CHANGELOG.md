@@ -34,6 +34,14 @@ APIs and commands have no compatibility facades.
   be materialized, statically gated, validated against host-owned trials, and
   supplied to a later run without granting a running program mutation authority.
 
+### Added
+
+- `ptc validate` and `run-started` now publish `installation_config_digests`
+  for host-backed aliases selected by the effective application. Each connector
+  snapshot carries the matching `installation_config_digest`. This is
+  configuration identity for the decoded `install.<alias>` declaration, not
+  application identity and not live-scope attestation.
+
 ## [0.13.0] - 2026-06-24
 
 ### Breaking Changes

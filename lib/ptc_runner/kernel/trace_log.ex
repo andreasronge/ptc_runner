@@ -2658,6 +2658,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       "missions" => missions,
       "component_overrides" => event_data(started, "component_overrides", []),
       "connector_snapshots" => event_data(started, "connector_snapshots", []),
+      "installation_config_digests" => event_data(started, "installation_config_digests", %{}),
       "session_profile" => event_data(started, "session_profile"),
       "positions" => event_positions(started),
       "complete" => not is_nil(stopped),

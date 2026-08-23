@@ -1397,6 +1397,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
         :effective_event_policy,
         :effective_application_projection,
         :effective_application_digest,
+        :installation_config_digests,
         :post_selection_context
       ])
       |> update_in([:provider_declarations, Access.at(0), :validation_state], fn _state ->
@@ -1849,6 +1850,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                outcome.envelope["result"]["application_content_digest"],
              "effective_application_digest" =>
                outcome.envelope["result"]["effective_application_digest"],
+             "installation_config_digests" => %{},
              "workflow_bundle_hash" => outcome.envelope["result"]["workflow_bundle_hash"],
              "mission_bundle_hashes" => %{},
              "mission_grants" => %{},
