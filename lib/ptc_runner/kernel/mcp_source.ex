@@ -183,7 +183,8 @@ defmodule PtcRunner.Kernel.MCPSource do
   one of these closed error reasons: `:mcp_authentication_failed`, `:mcp_timeout`,
   `:mcp_transport_error`, `:mcp_endpoint_connection_refused`,
   `:mcp_endpoint_name_unresolved`, `:mcp_endpoint_tls_failed`,
-  `:mcp_protocol_error`, `:mcp_protocol_version_unsupported`, `:mcp_remote_error`,
+  `:mcp_protocol_error`, `:mcp_discovery_method_unsupported`,
+  `:mcp_protocol_version_unsupported`, `:mcp_remote_error`,
   `:mcp_response_exceeded`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
   `:mcp_invalid_tool_schema`, `:mcp_capability_negotiation_error`,
   `:mcp_authorization_required`,
@@ -1686,7 +1687,7 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp classify_http_response({:ok, %{status: status} = response}, payload, _request)
        when status in [400, 404],
-       do: http_protocol_error(response, payload, status)
+       do: http_protocol_error(response, payload)
 
   defp classify_http_response(
          {:ok, %{status: status} = response},
@@ -1851,12 +1852,10 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp response_body(_response, _id), do: {:error, :mcp_response_exceeded}
 
-  defp http_protocol_error(response, %{"id" => id, "method" => method}, status) do
-    expected_code = if status == 400, do: -32_022, else: -32_601
-
+  defp http_protocol_error(response, %{"id" => id, "method" => method}) do
     with {:ok, body} <- response_body(response, id),
-         true <- MCPProtocol.unsupported_protocol_version_error?(body, method, expected_code) do
-      {:error, :mcp_protocol_version_unsupported}
+         true <- MCPProtocol.discovery_method_unsupported_error?(body, method) do
+      {:error, :mcp_discovery_method_unsupported}
     else
       _invalid -> {:error, :mcp_protocol_error}
     end

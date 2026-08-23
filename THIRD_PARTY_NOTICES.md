@@ -42,6 +42,7 @@ input-request file is the extracted closure of `InputRequest`. Each file's own
 `$comment` states its changes.
 
 The wire schema is published at
-<https://ptc-runner.dev/schemas/mcp-2026-07-28.schema.json> and is in neither
-the Hex package nor the standalone release. The input-request closure is
-compiled into the runtime and ships in both.
+<https://ptc-runner.dev/schemas/mcp-2026-07-28.schema.json>. Its source and
+these notices ship in the Hex package; the same schema bytes and notices ship
+in the standalone release. The input-request closure is compiled into the
+runtime and ships in both.

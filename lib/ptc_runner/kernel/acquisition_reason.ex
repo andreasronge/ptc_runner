@@ -48,6 +48,8 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   #     or a preparation/preflight/build that failed normalization.
   #   * `:provider_protocol_version_unsupported` — discovery definitively showed
   #     that the installed endpoint does not implement the pinned MCP profile.
+  #     A method-not-found response and a valid result missing the revision keep
+  #     separate fixed messages under that one public code.
   #   * `:provider_tool_missing` — the provider returned a valid tool catalog,
   #     but it did not contain one tool named by the sealed host declaration.
   #   * `:provider_policy_changed` — the preparation contradicted the sealed
@@ -184,6 +186,14 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
 
   def diagnostic(:mcp_timeout, occurrence),
     do: acquisition_diagnostic(:provider_acquisition_timeout, occurrence)
+
+  def diagnostic(:mcp_discovery_method_unsupported, occurrence),
+    do:
+      acquisition_diagnostic(
+        :provider_protocol_version_unsupported,
+        occurrence,
+        MCPAcquisitionDiagnostic.discovery_method_unsupported_message()
+      )
 
   def diagnostic(:mcp_protocol_version_unsupported, occurrence),
     do: acquisition_diagnostic(:provider_protocol_version_unsupported, occurrence)

@@ -15,7 +15,7 @@ if [ "$mode" = "mark-close" ]; then
 fi
 
 case "$mode" in
-  unsupported-protocol|unsupported-protocol-bare)
+  unsupported-protocol|unsupported-protocol-bare|unsupported-version)
     trap 'printf "%s\n" session-closed >> "$marker"' EXIT
     ;;
 esac
@@ -83,6 +83,8 @@ do
         # Byte shape of @modelcontextprotocol/server-filesystem answering the
         # pinned profile's first request: code and message, nothing else.
         printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"Method not found"}}\n' "$id"
+      elif [ "$mode" = "unsupported-version" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","supportedVersions":["PRIVATE_ADVERTISED_VERSION"],"capabilities":{"tools":{}},"ttlMs":0,"cacheScope":"private"}}\n' "$id"
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{"tools":{}},"_meta":{"io.modelcontextprotocol/serverInfo":{"name":"fixture","version":"1.0"}},"ttlMs":0,"cacheScope":"private"}}\n' "$id"
       fi

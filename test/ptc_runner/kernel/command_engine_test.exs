@@ -43,6 +43,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractClassification
   alias PtcRunner.StandaloneCLI
+  alias PtcRunner.TestSupport.MCPHTTPFixture
   alias PtcRunner.TestSupport.TestHelpers
 
   @zero_entropy <<0::128>>
@@ -333,7 +334,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     encoded = Jason.encode!(outcome.envelope)
     assert outcome.exit_status == 4
     assert outcome.envelope["error"]["code"] == "provider_protocol_version_unsupported"
-    assert outcome.envelope["error"]["message"] =~ "2026-07-28"
+
+    assert outcome.envelope["error"]["message"] ==
+             "the endpoint rejected the required server/discover method and does not support MCP protocol 2026-07-28"
+
     assert outcome.envelope["error"]["retryable"] == false
     refute encoded =~ "PRIVATE_REMOTE_MESSAGE"
     refute encoded =~ "PRIVATE_REMOTE_DATA"
@@ -350,6 +354,92 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert File.read!(marker) =~ "server/discover"
     refute File.read!(marker) =~ "tools/list"
     assert File.read!(marker) =~ "session-closed"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "run distinguishes a valid discovery result missing the required revision", %{
+    tmp_dir: directory
+  } do
+    marker = Path.join(directory, "unsupported-version-methods")
+
+    host_path =
+      write_host_config(
+        directory,
+        "unsupported-version-run",
+        connect_host_config(marker, "unsupported-version")
+      )
+
+    application =
+      doctor_application(directory, "run-unsupported-version",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["code"] == "provider_protocol_version_unsupported"
+
+    assert outcome.envelope["error"]["message"] ==
+             "the endpoint did not advertise support for MCP protocol 2026-07-28"
+
+    encoded = Jason.encode!(outcome.envelope)
+    refute encoded =~ "PRIVATE_ADVERTISED_VERSION"
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+    refute rendered =~ "PRIVATE_ADVERTISED_VERSION"
+    refute File.read!(marker) =~ "tools/list"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "HTTP method rejection withholds the endpoint URL and remote error payload", %{
+    tmp_dir: directory
+  } do
+    parent = self()
+
+    fixture =
+      MCPHTTPFixture.start(fn request ->
+        send(parent, {:mcp_request, request.body["method"]})
+
+        response = %{
+          "jsonrpc" => "2.0",
+          "id" => request.body["id"],
+          "error" => %{
+            "code" => -32_601,
+            "message" => "PRIVATE_REMOTE_MESSAGE",
+            "data" => %{"secret" => "PRIVATE_REMOTE_DATA"}
+          }
+        }
+
+        {404, [{"content-type", "application/json"}], Jason.encode!(response)}
+      end)
+
+    on_exit(fixture.close)
+    endpoint = fixture.endpoint <> "/PRIVATE_ENDPOINT_URL"
+    host_path = write_host_config(directory, "private-http-endpoint", http_mcp_host(endpoint))
+
+    application =
+      doctor_application(directory, "http-unsupported-profile",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["message"] ==
+             "the endpoint rejected the required server/discover method and does not support MCP protocol 2026-07-28"
+
+    for secret <- ["PRIVATE_ENDPOINT_URL", "PRIVATE_REMOTE_MESSAGE", "PRIVATE_REMOTE_DATA"] do
+      refute Jason.encode!(outcome.envelope) =~ secret
+      assert {:stderr, rendered} = CommandRenderer.render(outcome)
+      refute rendered =~ secret
+    end
+
+    assert_receive {:mcp_request, "server/discover"}
+    refute_receive {:mcp_request, "initialize"}
     assert_schema_valid(outcome.envelope)
   end
 
@@ -2590,6 +2680,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["code"] == "provider_protocol_version_unsupported"
     assert outcome.exit_status == 4
     assert outcome.envelope["error"]["retryable"] == false
+
+    assert outcome.envelope["error"]["message"] ==
+             "the endpoint rejected the required server/discover method and does not support MCP protocol 2026-07-28"
 
     assert %{"status" => "fail", "code" => "provider_protocol_version_unsupported"} =
              Enum.find(
@@ -7636,6 +7729,30 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     refute Jason.encode!(outcome.envelope) =~ "ov-escape"
     refute Jason.encode!(outcome.envelope) =~ "escape.clj"
+  end
+
+  defp http_mcp_host(endpoint) do
+    %{
+      "install" => %{
+        "workspace" => %{
+          "source" => "mcp",
+          "installation_revision" => "private-http-v1",
+          "transport" => %{
+            "type" => "streamable_http",
+            "endpoint" => endpoint,
+            "allow_insecure_loopback" => true
+          },
+          "tools" => %{
+            "structured" => %{
+              "as" => "workspace.structured",
+              "effect" => "write",
+              "model_visible" => true
+            }
+          },
+          "ceilings" => %{"timeout_ms" => 5_000}
+        }
+      }
+    }
   end
 
   defp manifest_error_path({:manifest_path, path, _reason}), do: path
