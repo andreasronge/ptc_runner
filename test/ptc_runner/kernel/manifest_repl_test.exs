@@ -545,6 +545,47 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   end
 
   @tag :tmp_dir
+  test "workflow and mission openings retain the sealed credential diagnostic", %{
+    tmp_dir: directory
+  } do
+    configure_host_llm()
+
+    for {policy, private_opts} <- [
+          {:normal, []},
+          {:private, [private_terminal: true]}
+        ],
+        target <- [:workflow, {:mission, "review"}] do
+      {manifest, host} = write_missing_credential_application(directory, policy, target)
+      mission_opts = if target == :workflow, do: [], else: [mission: elem(target, 1)]
+      owners_before = provider_activity_owners()
+
+      assert {:error,
+              %{
+                code: :credential_unavailable,
+                diagnostic: %CommandDiagnostic{} = diagnostic,
+                provider_activity: false
+              }} =
+               ManifestRepl.open(
+                 manifest,
+                 host,
+                 [input_mode: :interactive, terminal_attached: true] ++
+                   private_opts ++ mission_opts
+               )
+
+      assert CommandDiagnostic.valid?(diagnostic)
+      assert diagnostic.phase == :active_preflight
+      assert diagnostic.subject.name == "alpha"
+      assert diagnostic.subject.operation == :credentials
+      refute_received {:host_llm_ensure_ready, _worker}
+      refute_received {:host_llm_request, _model, _request}
+
+      assert_eventually(fn ->
+        MapSet.difference(provider_activity_owners(), owners_before) == MapSet.new()
+      end)
+    end
+  end
+
+  @tag :tmp_dir
   test "killing an adopted session owner also terminates its run state", %{tmp_dir: directory} do
     manifest = write_provider_free_application(directory, :normal)
     trace_path = Path.join(directory, "killed-owner.jsonl")
@@ -652,9 +693,10 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
 
     assert_receive {:manifest_repl_result, {:error, failure}}, 5_000
 
-    assert %{provider_activity: true, code: code} = failure
+    assert %{provider_activity: true, code: code, diagnostic: diagnostic} = failure
     assert is_atom(code)
-    assert Enum.sort(Map.keys(failure)) == [:code, :provider_activity]
+    assert CommandDiagnostic.valid?(diagnostic)
+    assert Enum.sort(Map.keys(failure)) == [:code, :diagnostic, :provider_activity]
     refute Process.alive?(opener)
 
     assert_eventually(fn -> File.exists?(trace_path) end)
@@ -819,6 +861,78 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     )
 
     {manifest, host}
+  end
+
+  defp write_missing_credential_application(directory, policy, target) do
+    suffix = "#{policy}-#{System.unique_integer([:positive])}"
+    write_component(directory)
+    File.write!(Path.join(directory, "review.clj"), "(ns review)")
+    manifest = Path.join(directory, "missing-credential-#{suffix}.json")
+    host = Path.join(directory, "missing-credential-host-#{suffix}.json")
+
+    declarations = [%{"name" => "alpha", "config" => %{}}, %{"name" => "omega", "config" => %{}}]
+
+    providers =
+      if target == :workflow,
+        do: %{"workflow" => declarations, "mission" => []},
+        else: %{"workflow" => [], "mission" => declarations}
+
+    mission_providers = if target == :workflow, do: [], else: ["alpha", "omega"]
+
+    document =
+      manifest_document(policy, providers)
+      |> Map.put("missions", %{
+        "review" => %{
+          "components" => [%{"id" => "review", "path" => "review.clj"}],
+          "data" => %{},
+          "providers" => mission_providers
+        }
+      })
+
+    File.write!(manifest, Jason.encode!(document))
+
+    installations =
+      if target == :workflow,
+        do: %{"alpha" => llm_installation("alpha-key"), "omega" => llm_installation("omega-key")},
+        else: %{
+          "alpha" => mcp_installation("alpha-key"),
+          "omega" => mcp_installation("omega-key")
+        }
+
+    File.write!(
+      host,
+      Jason.encode!(%{
+        "credentials" => %{
+          "alpha-key" => %{"env" => "PTC_REPL_ABSENT_ALPHA_KEY"},
+          "omega-key" => %{"env" => "PTC_REPL_ABSENT_OMEGA_KEY"}
+        },
+        "install" => installations
+      })
+    )
+
+    {manifest, host}
+  end
+
+  defp llm_installation(credential) do
+    %{
+      "source" => "llm",
+      "installation_revision" => "manifest-repl-missing-credential-v1",
+      "model" => "openrouter:test/model",
+      "credential" => credential
+    }
+  end
+
+  defp mcp_installation(credential) do
+    %{
+      "source" => "mcp",
+      "installation_revision" => "manifest-repl-missing-credential-v1",
+      "transport" => %{
+        "type" => "stdio",
+        "command" => System.find_executable("sh"),
+        "env" => %{"TOKEN" => %{"binding" => credential}}
+      },
+      "tools" => %{"read" => %{"as" => "#{credential}.read", "effect" => "read"}}
+    }
   end
 
   defp write_mcp_mission_application(directory, marker) do
