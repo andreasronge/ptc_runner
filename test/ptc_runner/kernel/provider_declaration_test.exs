@@ -2184,17 +2184,37 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     Path.join(root, "ptc.json")
   end
 
+  # Scanning `Process.list/0` for the authority marker alone reports every
+  # owner in the VM, and this case is `async: true` beside a dozen other files
+  # that build host installations. A concurrent case starting an owner between
+  # the two calls that bracket an assertion made it fail on an unrelated pid.
+  # `HostInstallationOwner.start/1` goes through `GenServer.start/3`, so
+  # `proc_lib` records the creating process in `$ancestors`; keeping only our
+  # own descendants makes the count a property of this test rather than of the
+  # whole suite.
   defp host_installation_owners do
     marker = {PtcRunner.Kernel.HostInstallationOwner, :authority}
+    creator = self()
 
     Process.list()
     |> Enum.filter(fn pid ->
       case Process.info(pid, :dictionary) do
-        {:dictionary, dictionary} -> List.keymember?(dictionary, marker, 0)
-        nil -> false
+        {:dictionary, dictionary} ->
+          List.keymember?(dictionary, marker, 0) and
+            creator in ancestors(dictionary)
+
+        nil ->
+          false
       end
     end)
     |> MapSet.new()
+  end
+
+  defp ancestors(dictionary) do
+    case List.keyfind(dictionary, :"$ancestors", 0) do
+      {_key, ancestors} when is_list(ancestors) -> ancestors
+      _other -> []
+    end
   end
 
   defp wait_until_expired(deadline) do
