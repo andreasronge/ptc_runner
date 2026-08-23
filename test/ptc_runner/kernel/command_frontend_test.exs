@@ -919,6 +919,110 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     end
   end
 
+  test "successful run envelopes reject evaluator failure evidence" do
+    usage = usage_fixture()
+
+    memory = %{
+      "defined_count" => 0,
+      "history_count" => 0,
+      "memory_bytes" => 0,
+      "history_bytes" => 0,
+      "bytes" => 0
+    }
+
+    for {result_class, artifact_state} <- [
+          {:normal,
+           %{
+             "trace" => "not_requested",
+             "inspection" => "not_requested",
+             "result" => "not_requested"
+           }},
+          {:private,
+           %{"trace" => "not_requested", "inspection" => "not_requested", "result" => "written"}}
+        ] do
+      outcome =
+        CommandOutcome.run_success(
+          @run_ref,
+          result_class,
+          nil,
+          artifact_state,
+          usage,
+          memory
+        )
+
+      assert CommandContract.valid_envelope?(outcome.envelope)
+
+      refute CommandContract.valid_envelope?(
+               put_in(outcome.envelope, ["execution", "last_evaluation_error"], %{
+                 "kind" => "arithmetic_error",
+                 "message" => "division by zero"
+               })
+             )
+    end
+  end
+
+  test "private classified errors reject evaluator failure evidence" do
+    diagnostic = CommandDiagnostic.new!(:execution, :workflow_failed)
+
+    artifact_state = %{
+      "trace" => "not_requested",
+      "inspection" => "not_requested",
+      "result" => "not_requested"
+    }
+
+    clean_execution = %{
+      "state" => "incomplete",
+      "usage" => nil,
+      "evaluation_memory" => nil,
+      "last_evaluation_error" => nil
+    }
+
+    private =
+      CommandOutcome.run_classified_error(
+        @run_ref,
+        :private,
+        diagnostic,
+        [],
+        artifact_state,
+        clean_execution
+      )
+
+    evidence_execution = %{
+      clean_execution
+      | "last_evaluation_error" => %{
+          "kind" => "arithmetic_error",
+          "message" => "division by zero"
+        }
+    }
+
+    refute CommandContract.valid_envelope?(
+             put_in(private.envelope, ["execution"], evidence_execution)
+           )
+
+    assert_raise ArgumentError, "invalid closed command outcome", fn ->
+      CommandOutcome.run_classified_error(
+        @run_ref,
+        :private,
+        diagnostic,
+        [],
+        artifact_state,
+        evidence_execution
+      )
+    end
+
+    normal =
+      CommandOutcome.run_classified_error(
+        @run_ref,
+        :normal,
+        diagnostic,
+        [],
+        artifact_state,
+        evidence_execution
+      )
+
+    assert CommandContract.valid_envelope?(normal.envelope)
+  end
+
   test "every catalog phase matches its byte-exact failure fixture" do
     phases = DiagnosticCatalog.rows() |> Enum.map(& &1.phase) |> Enum.uniq()
 

@@ -1340,7 +1340,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     application =
       write_application(directory, "run-duration-exhausted", manifest, [
-        {"slow.clj", "(ns slow) (defn run [input] (return (count (range 1 200000))))"}
+        {"slow.clj", "(ns slow) (defn run [input] (return (count (vec (range 2000000)))))"}
       ])
 
     assert {:error, %CommandOutcome{} = outcome} =

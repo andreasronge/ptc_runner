@@ -121,10 +121,8 @@ defmodule PtcRunner.Kernel.CommandContract do
               "unclassified_diagnostic",
               %{"const" => []}
             ),
-            run_error_envelope(
-              ~w(normal private),
+            run_classified_error_envelope(
               @artifact_states -- @recovery_artifact_states,
-              execution_schema(),
               "classified_diagnostic"
             ),
             run_recovery_error_envelope(
@@ -1039,35 +1037,54 @@ defmodule PtcRunner.Kernel.CommandContract do
         "error" => ref(diagnostic),
         "secondary_errors" => secondary_errors,
         "artifact_state" => artifact_state(states),
-        "artifact_class" => enum_or_const(artifact_class),
+        "artifact_class" => %{"const" => artifact_class},
         "execution" => execution
       })
     )
   end
 
+  defp run_classified_error_envelope(states, diagnostic) do
+    %{
+      "oneOf" =>
+        Enum.map(~w(normal private), fn artifact_class ->
+          run_error_envelope(
+            artifact_class,
+            states,
+            execution_schema(artifact_class),
+            diagnostic
+          )
+        end)
+    }
+  end
+
   defp run_recovery_error_envelope(state, diagnostic) do
-    ~w(normal private)
-    |> run_error_envelope(
-      @artifact_states,
-      execution_schema(),
-      "classified_diagnostic"
-    )
-    |> put_in(["properties", "artifact_state"], recovery_artifact_state(state))
-    |> Map.put("anyOf", [
-      %{
-        "properties" => %{
-          "error" => ref(diagnostic)
-        }
-      },
-      %{
-        "properties" => %{
-          "secondary_errors" => %{
-            "contains" => ref(diagnostic),
-            "minContains" => 1
-          }
-        }
-      }
-    ])
+    %{
+      "oneOf" =>
+        Enum.map(~w(normal private), fn artifact_class ->
+          artifact_class
+          |> run_error_envelope(
+            @artifact_states,
+            execution_schema(artifact_class),
+            "classified_diagnostic"
+          )
+          |> put_in(["properties", "artifact_state"], recovery_artifact_state(state))
+          |> Map.put("anyOf", [
+            %{
+              "properties" => %{
+                "error" => ref(diagnostic)
+              }
+            },
+            %{
+              "properties" => %{
+                "secondary_errors" => %{
+                  "contains" => ref(diagnostic),
+                  "minContains" => 1
+                }
+              }
+            }
+          ])
+        end)
+    }
   end
 
   defp recovery_diagnostic_schema(publication_codes) do
@@ -1425,7 +1442,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     })
   end
 
-  defp execution_schema do
+  defp execution_schema(artifact_class) when artifact_class in ~w(normal private) do
     %{
       "oneOf" => [
         closed(~w(state), %{"state" => %{"const" => "not_started"}}),
@@ -1433,7 +1450,7 @@ defmodule PtcRunner.Kernel.CommandContract do
           "state" => %{"const" => "incomplete"},
           "usage" => nullable_ref("usage"),
           "evaluation_memory" => nullable_ref("evaluation_memory"),
-          "last_evaluation_error" => last_evaluation_error_schema()
+          "last_evaluation_error" => last_evaluation_error_schema(artifact_class)
         }),
         finished_ok_execution_schema(),
         closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
@@ -1442,13 +1459,13 @@ defmodule PtcRunner.Kernel.CommandContract do
           "diagnostic" => ref("execution_diagnostic"),
           "usage" => ref("usage"),
           "evaluation_memory" => ref("evaluation_memory"),
-          "last_evaluation_error" => last_evaluation_error_schema()
+          "last_evaluation_error" => last_evaluation_error_schema(artifact_class)
         })
       ]
     }
   end
 
-  defp last_evaluation_error_schema do
+  defp last_evaluation_error_schema("normal") do
     %{
       "oneOf" => [
         %{"type" => "null"},
@@ -1464,6 +1481,8 @@ defmodule PtcRunner.Kernel.CommandContract do
     }
   end
 
+  defp last_evaluation_error_schema("private"), do: %{"type" => "null"}
+
   defp finished_ok_execution_schema do
     closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
       "state" => %{"const" => "finished"},
@@ -1471,7 +1490,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       "diagnostic" => %{"type" => "null"},
       "usage" => ref("usage"),
       "evaluation_memory" => ref("evaluation_memory"),
-      "last_evaluation_error" => last_evaluation_error_schema()
+      "last_evaluation_error" => %{"type" => "null"}
     })
   end
 
@@ -1952,9 +1971,6 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp ref(name), do: %{"$ref" => "#/$defs/#{name}"}
   defp nonnegative_integer, do: %{"type" => "integer", "minimum" => 0}
-
-  defp enum_or_const(value) when is_binary(value), do: %{"const" => value}
-  defp enum_or_const(values) when is_list(values), do: %{"enum" => values}
 
   defp const_object(map) do
     closed(Map.keys(map), Map.new(map, fn {key, value} -> {key, %{"const" => value}} end))
