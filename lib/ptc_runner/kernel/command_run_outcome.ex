@@ -222,8 +222,8 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        when result_class in [:normal, :private] do
     diagnostics = failure_diagnostics(evidence, report, result_class, provider_activity)
 
-    case diagnostics do
-      [primary | secondary] ->
+    case {diagnostics, execution_evidence(evidence, result_class)} do
+      {[primary | secondary], {:ok, execution}} ->
         {:error,
          CommandOutcome.run_classified_error(
            run_ref,
@@ -231,10 +231,10 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
            primary,
            secondary,
            artifact_state,
-           execution_evidence(evidence, result_class)
+           execution
          )}
 
-      [] ->
+      _invalid ->
         internal_failure(run_ref, provider_activity, result_class, artifact_state, :incomplete)
     end
   end
@@ -718,47 +718,40 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp execution_evidence(%{result: {:ok, %Result{} = result}} = evidence, _result_class) do
     with {:ok, usage} <- usage_projection(result.usage, Map.get(evidence, :terminal_batch)),
          {:ok, memory} <- evaluation_memory_projection(result.evaluation_memory) do
-      %{
-        "state" => "finished",
-        "outcome" => "ok",
-        "diagnostic" => nil,
-        "usage" => usage,
-        "evaluation_memory" => memory,
-        "last_evaluation_error" => nil
-      }
+      {:ok,
+       %{
+         "state" => "finished",
+         "outcome" => "ok",
+         "diagnostic" => nil,
+         "usage" => usage,
+         "evaluation_memory" => memory,
+         "last_evaluation_error" => nil
+       }}
     else
-      _invalid ->
-        %{
-          "state" => "incomplete",
-          "usage" => nil,
-          "evaluation_memory" => nil,
-          "last_evaluation_error" => nil
-        }
+      _invalid -> :error
     end
   end
 
   defp execution_evidence(%{result: {:error, %Error{} = error}} = evidence, result_class) do
-    usage =
-      case usage_projection(error.usage, Map.get(evidence, :terminal_batch)) do
-        {:ok, value} -> value
-        _invalid -> nil
-      end
-
-    %{
-      "state" => "incomplete",
-      "usage" => usage,
-      "evaluation_memory" => nil,
-      "last_evaluation_error" => EvaluatorEvidence.envelope_value(result_class, error)
-    }
+    with {:ok, usage} <- usage_projection(error.usage, Map.get(evidence, :terminal_batch)) do
+      {:ok,
+       %{
+         "state" => "incomplete",
+         "usage" => usage,
+         "evaluation_memory" => nil,
+         "last_evaluation_error" => EvaluatorEvidence.envelope_value(result_class, error)
+       }}
+    end
   end
 
-  defp execution_evidence(_report, _result_class), do: %{"state" => "not_started"}
+  defp execution_evidence(_report, _result_class), do: {:ok, %{"state" => "not_started"}}
 
   defp public_value(:private, _value), do: {:ok, nil}
   defp public_value(:normal, value), do: json_value(value)
 
   defp usage_projection(usage, terminal_batch) when is_map(usage) do
     with {:ok, capability_calls} <- capability_calls(Map.get(usage, :capability_calls)),
+         {:ok, llm_spend} <- LLMUsageSummary.validate_spend(Map.get(usage, :llm_spend)),
          {:ok, evaluations_by_mission} <-
            count_map(Map.get(usage, :evaluations_by_mission, %{})),
          {:ok, events_dropped} <- count_map(Map.get(usage, :events_dropped, %{})),
@@ -776,7 +769,8 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
              "evaluation_history_bytes" => Map.get(usage, :evaluation_history_bytes),
              "evaluation_continuation_bytes" => Map.get(usage, :evaluation_continuation_bytes),
              "events_dropped" => events_dropped,
-             "capability_refusals" => capability_refusals
+             "capability_refusals" => capability_refusals,
+             "llm_spend" => llm_spend
            }
            |> Map.merge(llm_usage_projection(terminal_batch)),
          true <-

@@ -214,9 +214,9 @@ sufficient to select a run without loading its activity:
 - total and subordinate-evaluation counts;
 - workflow and mission capability-call counts;
 - LLM-call summary derived from named `llm-request` events when applicable;
-- full-run `llm_usage_total` input, output, and provider-reported cost values,
-  with each field omitted unless every successful LLM call reports that field
-  and the canonical trace retained every event;
+- the exact closed `llm_spend` projection retained by `run-stopped`, so the
+  Viewer distinguishes empty, incomplete, unpriced, and available spend without
+  reconstructing or guessing pricing state;
 - error count and duration summary;
 - one-way fingerprints of caller-supplied name/model/provider labels, plus
   finite canonical tag keys and enumerated values;
@@ -425,7 +425,7 @@ follow evidence without an extra exact read to obtain the links.
 Provider response usage omits `total_cost` when pricing is unavailable. A
 present zero is therefore a measured zero-cost response, not an unknown cost.
 
-The canonical LLM usage summary is shared by trace counters and the V2 run
+The canonical LLM usage summary is shared by trace counters and the V3 run
 envelope's `execution.usage`. For routed `llm-request` calls, `llm_usage` groups
 stopped events by model alias and installation revision. Each row reports total
 and successful calls, calls with valid usage, successful calls missing usage,
@@ -457,6 +457,17 @@ Snapshot lookup uses all events from the run-filter-selected runs before a
 mission filter narrows counted calls. Capability events continue to carry only
 alias/revision routing identity; they do not duplicate model identity. The
 additional rows remain subject to the existing aggregate result-byte limit.
+Every finished V3 run envelope also publishes the sealed run-state
+`llm_spend` value that canonical `run-stopped.data.usage` retains. Its closed
+states are `empty`, `incomplete`, `unpriced`, and `available`. The first two
+contain only `state`; the latter two require complete non-negative input and
+output totals, and only `available` requires `total_cost`. Consequently an
+unknown cost never deserializes as measured zero. Command projection validates
+this value through `LLMUsageSummary`; absence or malformed shape invalidates the
+command outcome rather than triggering reconstruction from trace rows. The
+Viewer run catalog consumes this same terminal field and does not maintain a
+second totals vocabulary.
+
 The command envelope additionally publishes `llm_usage_state`. Terminal
 accounting pairs `llm-request` start and stop events by `capability_id`; an
 unmatched start is an observed call with unknown usage (`missing_usage_calls`

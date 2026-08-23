@@ -11,7 +11,7 @@
 //  - Heap is a high-water readout + sparkline, deliberately NOT a gauge:
 //    the max_heap check runs only at GC, so kills can occur far below ceiling.
 
-import { formatRunUsage } from './run-display.js';
+import { formatRunSpend, validSpend } from './run-display.js';
 import { evaluationPresentation } from './evaluation-evidence.js';
 
 export { evaluationPresentation };
@@ -747,12 +747,18 @@ export function fmtLimit(value, unit) {
 }
 
 export function formatLiveSpend(spend) {
+  const fields = formatRunSpend(spend);
+  if (!validSpend(spend)) {
+    return fields.length > 0
+      ? { state: 'overflow', value: fields.join(' · '), fields }
+      : { state: 'empty', value: '–', fields: [] };
+  }
+
   const state = spend?.state;
   if (state === 'incomplete') {
     return { state, value: 'incomplete', fields: [] };
   }
   if (state === 'available' || state === 'unpriced') {
-    const fields = formatRunUsage(spend);
     return {
       state,
       value: fields.join(' · ') || (state === 'unpriced' ? 'unpriced' : '–'),

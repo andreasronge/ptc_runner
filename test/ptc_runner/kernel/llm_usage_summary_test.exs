@@ -136,54 +136,6 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
     end
   end
 
-  test "run totals publish only metrics reported by every successful call" do
-    complete = [
-      llm_stopped_event(1, %{"input" => 3, "output" => 2, "total_cost" => 0.25}),
-      llm_stopped_event(2, %{"input" => 5, "output" => 4, "total_cost" => 0.5}),
-      event(3, "run-stopped", %{"outcome" => "ok"})
-    ]
-
-    assert LLMUsageSummary.totals(complete) == %{
-             "input" => 8,
-             "output" => 6,
-             "total_cost" => 0.75
-           }
-
-    partially_reported = [
-      llm_stopped_event(1, %{"input" => 3, "output" => 2, "total_cost" => 0.25}),
-      llm_stopped_event(2, %{"input" => 5}),
-      event(3, "run-stopped", %{"outcome" => "ok"})
-    ]
-
-    assert LLMUsageSummary.totals(partially_reported) == %{"input" => 8}
-  end
-
-  test "run totals are unavailable when usage or trace events are missing" do
-    missing_usage =
-      event(1, "capability-stopped", %{
-        "environment" => "workflow",
-        "name" => "llm-request",
-        "alias" => "writer",
-        "installation_revision" => "stable-v1",
-        "status" => "ok"
-      })
-
-    assert LLMUsageSummary.totals([
-             missing_usage,
-             event(2, "run-stopped", %{"outcome" => "ok"})
-           ]) == %{}
-
-    assert LLMUsageSummary.totals([llm_stopped_event(1, %{"input" => 3})]) == %{}
-
-    dropped = [
-      llm_stopped_event(1, %{"input" => 3, "output" => 2, "total_cost" => 0.25}),
-      event(2, "events-dropped", %{"counts" => %{"capability-stopped" => 1}}),
-      event(3, "run-stopped", %{"outcome" => "ok"})
-    ]
-
-    assert LLMUsageSummary.totals(dropped) == %{}
-  end
-
   test "the live accumulator names empty, unpriced, incomplete, and available spend" do
     empty = %{}
     assert LLMUsageSummary.spend(empty) == %{"state" => "empty"}
@@ -207,6 +159,11 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
              "input" => 3,
              "output" => 2
            }
+
+    partial_tokens =
+      LLMUsageSummary.accumulate(empty, "writer", "stable-v1", :ok, %{"input" => 3})
+
+    assert LLMUsageSummary.spend(partial_tokens) == %{"state" => "incomplete"}
 
     incomplete = LLMUsageSummary.accumulate(empty, "writer", "stable-v1", :ok, nil)
     assert LLMUsageSummary.spend(incomplete) == %{"state" => "incomplete"}
@@ -236,6 +193,83 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
              "output" => 6,
              "total_cost" => 0.75
            }
+  end
+
+  test "the spend projection validator accepts only the four exact public shapes" do
+    valid = [
+      %{"state" => "empty"},
+      %{"state" => "incomplete"},
+      %{"state" => "unpriced", "input" => 0, "output" => 2},
+      %{"state" => "available", "input" => 3, "output" => 4, "total_cost" => 0}
+    ]
+
+    for spend <- valid do
+      assert {:ok, ^spend} = LLMUsageSummary.validate_spend(spend)
+    end
+
+    for invalid <- [
+          nil,
+          %{},
+          %{"state" => "empty", "total_cost" => 0},
+          %{"state" => "unpriced", "input" => 1},
+          %{"state" => "unpriced", "input" => 1, "output" => 2, "total_cost" => 0},
+          %{"state" => "available", "input" => 1, "output" => 2},
+          %{"state" => "available", "input" => 1, "output" => 2, "total_cost" => nil},
+          %{"state" => "available", "input" => -1, "output" => 2, "total_cost" => 0},
+          %{"state" => "available", "input" => 1, "output" => 2, "total_cost" => -0.1},
+          %{state: "empty"}
+        ] do
+      assert {:error, :invalid_llm_spend} = LLMUsageSummary.validate_spend(invalid)
+    end
+  end
+
+  test "an explicit null cost is unpriced and remains safe to aggregate" do
+    counters =
+      %{}
+      |> LLMUsageSummary.accumulate("writer", "stable-v1", :ok, %{
+        "input" => 3,
+        "output" => 2,
+        "total_cost" => nil
+      })
+      |> LLMUsageSummary.accumulate("writer", "stable-v1", :ok, %{
+        "input" => 5,
+        "output" => 4,
+        "total_cost" => 0.25
+      })
+
+    assert LLMUsageSummary.spend(counters) == %{
+             "state" => "unpriced",
+             "input" => 8,
+             "output" => 6
+           }
+  end
+
+  test "aggregate spend may exceed the valid ceiling for one provider response" do
+    per_response_max = 9_007_199_254_740_991
+
+    counters =
+      %{}
+      |> LLMUsageSummary.accumulate("writer", "stable-v1", :ok, %{
+        "input" => per_response_max,
+        "output" => per_response_max,
+        "total_cost" => 1.0e12
+      })
+      |> LLMUsageSummary.accumulate("writer", "stable-v1", :ok, %{
+        "input" => per_response_max,
+        "output" => per_response_max,
+        "total_cost" => 1.0e12
+      })
+
+    spend = LLMUsageSummary.spend(counters)
+
+    assert spend == %{
+             "state" => "available",
+             "input" => per_response_max * 2,
+             "output" => per_response_max * 2,
+             "total_cost" => 2.0e12
+           }
+
+    assert {:ok, ^spend} = LLMUsageSummary.validate_spend(spend)
   end
 
   test "a missing successful usage withholds priced totals even when another call is priced" do
@@ -537,17 +571,6 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
         extra
       )
     )
-  end
-
-  defp llm_stopped_event(sequence, usage) when is_map(usage) do
-    event(sequence, "capability-stopped", %{
-      "environment" => "workflow",
-      "name" => "llm-request",
-      "alias" => "writer",
-      "installation_revision" => "stable-v1",
-      "status" => "ok",
-      "usage" => usage
-    })
   end
 
   defp llm_stopped_event(sequence, capability_id, usage, extra \\ %{})
