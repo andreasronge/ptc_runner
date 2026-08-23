@@ -126,6 +126,9 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   defp projection(_role, {:manifest_schema_invalid, %SchemaViolation{path: path}}),
     do: {:schema_violation, path}
 
+  defp projection(_role, {:schema_validation_unavailable, _cause}),
+    do: {:schema_validation_unavailable, nil}
+
   defp projection(_role, :reference_missing), do: {:reference_missing, nil}
   defp projection(_role, :invalid_logical_name), do: {:reference_missing, nil}
   defp projection(:application, :not_found), do: {:application_not_found, nil}

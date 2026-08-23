@@ -275,6 +275,7 @@ defmodule PtcRunner.Kernel.HostConfig do
              | :host_invalid
              | {:installation_revision_missing, binary()}
              | {:installation_endpoint_invalid, binary(), atom()}
+             | {:schema_validation_unavailable, SchemaViolation.unavailable_reason()}
              | {:host_schema_invalid, SchemaViolation.t()}
              | {:installed_limit_invalid, [PtcRunner.Kernel.CommandPath.segment()]}}
   def load_command(path) when is_binary(path) do
@@ -318,6 +319,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       {:error, {code, _detail}} = error
       when code in [
              :installation_revision_missing,
+             :schema_validation_unavailable,
              :host_schema_invalid,
              :installed_limit_invalid
            ] ->
@@ -483,6 +485,7 @@ defmodule PtcRunner.Kernel.HostConfig do
     case SchemaViolation.validate(command_schema_value(value), schema) do
       :ok -> :ok
       {:error, violation} -> {:error, {:host_schema_invalid, violation}}
+      {:unavailable, reason} -> {:error, {:schema_validation_unavailable, reason}}
     end
   end
 

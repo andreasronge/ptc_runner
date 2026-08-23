@@ -61,7 +61,8 @@ defmodule PtcRunner.Kernel.Manifest do
   IDs. Labels use the closed `name`, `model`, `provider`, and flat `tags`
   safe-metadata profile. Identifier fields become SHA-256 fingerprints and tags
   use finite enumerated values, so arbitrary text and secrets are never copied
-  into traces.
+  into traces. Schema-validation timeouts and heap exhaustion are reported as
+  unavailable work rather than as manifest violations.
 
   The loader resolves paths relative to the canonical manifest directory and
   rejects absolute paths, traversal, devices, non-regular files, and symlink
@@ -275,6 +276,7 @@ defmodule PtcRunner.Kernel.Manifest do
     case SchemaViolation.validate(manifest, schema) do
       :ok -> :ok
       {:error, violation} -> {:error, {:manifest_schema_invalid, violation}}
+      {:unavailable, reason} -> {:error, {:schema_validation_unavailable, reason}}
     end
   end
 

@@ -73,6 +73,9 @@ defmodule PtcRunner.Kernel.ProjectResolver do
       {:error, {:project_schema_invalid, _violation} = reason} ->
         {:document_error, [command, path | rest], reason}
 
+      {:error, {:schema_validation_unavailable, _cause} = reason} ->
+        {:document_error, [command, path | rest], reason}
+
       {:error, _reason} ->
         {:error, CommandRejection.generic(command_atom(command), :invalid_arguments)}
     end

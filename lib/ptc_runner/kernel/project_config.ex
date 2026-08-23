@@ -13,7 +13,8 @@ defmodule PtcRunner.Kernel.ProjectConfig do
   implicitly; callers must name its JSON document. Schema failures retain a
   bounded `PtcRunner.Kernel.SchemaViolation` so command admission can publish
   the rule and a project-schema-authorized path without retaining rejected
-  values or filesystem names.
+  values or filesystem names. A schema worker that times out or exceeds its
+  heap bound is reported as unavailable, never as a schema violation.
   """
 
   alias PtcRunner.Kernel.ConfinedFile
@@ -104,6 +105,7 @@ defmodule PtcRunner.Kernel.ProjectConfig do
   @type failure ::
           :project_unavailable
           | :project_invalid
+          | {:schema_validation_unavailable, SchemaViolation.unavailable_reason()}
           | {:project_schema_invalid, SchemaViolation.t()}
 
   @spec load(binary()) :: {:ok, t()} | {:error, failure()}
@@ -140,6 +142,7 @@ defmodule PtcRunner.Kernel.ProjectConfig do
       {:ok, project}
     else
       {:error, {:project_schema_invalid, %SchemaViolation{}}} = error -> error
+      {:error, {:schema_validation_unavailable, _reason}} = error -> error
       _invalid -> generic_schema_failure()
     end
   end
@@ -282,6 +285,7 @@ defmodule PtcRunner.Kernel.ProjectConfig do
       case SchemaViolation.validate(document, schema()) do
         :ok -> :ok
         {:error, violation} -> {:error, {:project_schema_invalid, violation}}
+        {:unavailable, reason} -> {:error, {:schema_validation_unavailable, reason}}
       end
     end
   end

@@ -104,13 +104,19 @@ defmodule PtcRunner.ViewerFrontend do
       when is_binary(project_path) and is_map(overrides) and is_list(opts) do
     with :ok <- companion_available(),
          {:ok, callbacks} <- callbacks(opts),
-         {:ok, project} <- ProjectConfig.load(project_path),
+         {:ok, project} <- invoke_project_loader(callbacks.project_loader, project_path),
          :ok <- require_trace(project),
          :ok <- ProjectArtifactRoot.ensure(project.artifact_root) do
       start_captured(project, overrides, callbacks)
     else
-      {:error, {:project_schema_invalid, _violation}} -> {:error, :project_invalid}
-      {:error, _reason} = error -> error
+      {:error, {:project_schema_invalid, _violation}} ->
+        {:error, :project_invalid}
+
+      {:error, {:schema_validation_unavailable, _cause}} ->
+        {:error, :schema_validation_unavailable}
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
@@ -263,18 +269,23 @@ defmodule PtcRunner.ViewerFrontend do
       keys = Keyword.keys(opts)
       capture = Keyword.get(opts, :capture_inspection, &capture_inspection/3)
       listener = Keyword.get_lazy(opts, :listener_info, &default_listener_info/0)
+      project_loader = Keyword.get(opts, :project_loader, &ProjectConfig.load/1)
       frontend = Keyword.get(opts, :frontend, :mix)
       env_file = Keyword.get(opts, :env_file)
 
-      if keys -- [:capture_inspection, :listener_info, :device, :frontend, :env_file] == [] and
+      if keys --
+           [:capture_inspection, :listener_info, :project_loader, :device, :frontend, :env_file] ==
+           [] and
            length(keys) == MapSet.size(MapSet.new(keys)) and is_function(capture, 3) and
-           is_function(listener, 1) and frontend in [:mix, :standalone] and
+           is_function(listener, 1) and is_function(project_loader, 1) and
+           frontend in [:mix, :standalone] and
            valid_env_file?(env_file),
          do:
            {:ok,
             %{
               capture_inspection: capture,
               listener_info: listener,
+              project_loader: project_loader,
               frontend: frontend,
               env_file: env_file
             }},
@@ -287,6 +298,18 @@ defmodule PtcRunner.ViewerFrontend do
   defp default_listener_info do
     # credo:disable-for-next-line Credo.Check.Refactor.Apply
     fn pid -> apply(@viewer, :listener_info, [pid]) end
+  end
+
+  defp invoke_project_loader(callback, path) do
+    case callback.(path) do
+      {:ok, %ProjectConfig{}} = success -> success
+      {:error, _reason} = error -> error
+      _invalid -> {:error, :project_invalid}
+    end
+  rescue
+    _exception -> {:error, :project_invalid}
+  catch
+    _kind, _reason -> {:error, :project_invalid}
   end
 
   defp invoke_capture(callback, project, trace, capture_deadline_ms) do
