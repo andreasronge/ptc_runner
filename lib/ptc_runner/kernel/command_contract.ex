@@ -1674,10 +1674,16 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp validate_result do
     closed(
-      ~w(application_content_digest effective_application_digest workflow_bundle_hash mission_bundle_hashes mission_grants provider_activity),
+      ~w(application_content_digest effective_application_digest installation_config_digests workflow_bundle_hash mission_bundle_hashes mission_grants provider_activity),
       %{
         "application_content_digest" => %{"type" => "string", "pattern" => @digest},
         "effective_application_digest" => %{"type" => "string", "pattern" => @digest},
+        "installation_config_digests" => %{
+          "type" => "object",
+          "propertyNames" => %{"pattern" => @alias},
+          "additionalProperties" => %{"type" => "string", "pattern" => @digest},
+          "maxProperties" => 128
+        },
         "workflow_bundle_hash" => %{"type" => "string", "pattern" => @hash},
         "mission_bundle_hashes" => %{
           "type" => "object",

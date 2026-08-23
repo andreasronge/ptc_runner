@@ -72,6 +72,12 @@ You choose the public `as` name and its `read` or `write` effect. Follow
 [Connect an MCP tool](connecting-tools-with-mcp.md) for one complete workflow
 against a checked-in server.
 
+`ptc validate` reports `installation_config_digests` for the selected aliases so
+you can compare the host declaration you reviewed with the one a later
+validation or run actually named. The digest is configuration identity, not
+proof of live server scope; see the
+[host-configuration reference](../reference/host-installation.md).
+
 ## Where is the complete contract?
 
 The [host-configuration reference](../reference/host-installation.md) owns the

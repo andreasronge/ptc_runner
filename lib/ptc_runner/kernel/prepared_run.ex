@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
   alias PtcRunner.Kernel.EffectiveApplication
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ProviderPlan
@@ -27,6 +28,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
     :entry_source,
     :catalog_attestation,
     :provider_declarations,
+    :installation_config_digests,
     :effective_data_class,
     :effective_flow,
     :effective_event_policy,
@@ -45,6 +47,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
           entry_source: binary(),
           catalog_attestation: binary(),
           provider_declarations: [map()],
+          installation_config_digests: %{binary() => binary()},
           effective_data_class: :normal | :private_inspection,
           effective_flow: :normal | :private,
           effective_event_policy: :normal | :private,
@@ -88,6 +91,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
         entry_source: entry_source,
         catalog_attestation: catalog.attestation,
         provider_declarations: metadata.provider_declarations,
+        installation_config_digests: metadata.installation_config_digests,
         effective_data_class: metadata.effective_data_class,
         effective_flow: metadata.effective_flow,
         effective_event_policy: metadata.effective_event_policy,
@@ -167,6 +171,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
         prepared.mission_bundles,
         Map.take(prepared, [
           :provider_declarations,
+          :installation_config_digests,
           :effective_data_class,
           :effective_flow,
           :effective_event_policy,
@@ -305,6 +310,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
                :effective_data_class,
                :effective_event_policy,
                :effective_flow,
+               :installation_config_digests,
                :post_selection_context,
                :provider_declarations
              ],
@@ -316,7 +322,15 @@ defmodule PtcRunner.Kernel.PreparedRun do
            ),
          {:ok, expected} <-
            ProviderPlan.derive(request, workflow_bundle, mission_bundles, declarations),
-         true <- Map.drop(metadata, [:provider_declarations]) == expected,
+         true <-
+           Map.drop(metadata, [:provider_declarations, :installation_config_digests]) ==
+             expected,
+         true <-
+           metadata.installation_config_digests ==
+             InstallationConfigDigest.selected(
+               catalog.installation_config_digests,
+               declarations
+             ),
          true <-
            selection_contexts_valid?(
              declarations,
@@ -344,6 +358,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
                :effective_data_class,
                :effective_event_policy,
                :effective_flow,
+               :installation_config_digests,
                :post_selection_context,
                :provider_declarations
              ],
@@ -352,6 +367,11 @@ defmodule PtcRunner.Kernel.PreparedRun do
          true <- metadata.effective_event_policy in [:normal, :private],
          true <-
            sealed_declarations_valid?(metadata.provider_declarations, request.package.providers),
+         true <-
+           InstallationConfigDigest.valid_map?(
+             metadata.installation_config_digests,
+             metadata.provider_declarations
+           ),
          providers <- provider_projection(metadata.provider_declarations),
          {:ok, identity} <-
            EffectiveApplication.build(
@@ -591,6 +611,7 @@ defmodule PtcRunner.Kernel.PreparedRun do
       prepared.entry_source,
       prepared.catalog_attestation,
       prepared.provider_declarations,
+      prepared.installation_config_digests,
       prepared.effective_data_class,
       prepared.effective_flow,
       prepared.effective_event_policy,

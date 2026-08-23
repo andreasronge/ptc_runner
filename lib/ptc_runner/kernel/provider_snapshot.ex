@@ -29,24 +29,34 @@ defmodule PtcRunner.Kernel.ProviderSnapshot do
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @hash ~r/\A[0-9a-f]{64}\z/
 
-  @spec build(ProviderDescriptor.t(), binary(), map(), map(), binary() | nil) ::
+  @spec build(ProviderDescriptor.t(), binary(), map(), map(), binary() | nil, binary() | nil) ::
           {:ok, map()} | {:error, :invalid_provider_snapshot}
-  def build(descriptor, name, config, acquisition, content_snapshot_hash \\ nil)
+  def build(
+        descriptor,
+        name,
+        config,
+        acquisition,
+        content_snapshot_hash \\ nil,
+        installation_config_digest \\ nil
+      )
 
   def build(
         %ProviderDescriptor{} = descriptor,
         name,
         config,
         acquisition,
-        content_snapshot_hash
+        content_snapshot_hash,
+        installation_config_digest
       )
       when is_binary(name) and is_map(config) and is_map(acquisition) and
-             (is_nil(content_snapshot_hash) or is_binary(content_snapshot_hash)) do
+             (is_nil(content_snapshot_hash) or is_binary(content_snapshot_hash)) and
+             (is_nil(installation_config_digest) or is_binary(installation_config_digest)) do
     declaration = ProviderDescriptor.public_projection(descriptor, name, config)
 
     with true <- ProviderDescriptor.valid?(descriptor),
          true <- json_map?(acquisition),
          true <- valid_content_hash?(content_snapshot_hash),
+         true <- valid_installation_config_digest?(installation_config_digest),
          acquisition <- maybe_put_content_hash(acquisition, content_snapshot_hash),
          {:ok, acquisition_bytes} <- DeterministicJSON.encode(acquisition),
          acquisition_hash = sha256(acquisition_bytes),
@@ -56,6 +66,7 @@ defmodule PtcRunner.Kernel.ProviderSnapshot do
            "acquisition_identity_hash" => acquisition_hash
          },
          identity <- maybe_put_content_hash(identity, content_snapshot_hash),
+         identity <- maybe_put_installation_config_digest(identity, installation_config_digest),
          {:ok, identity_bytes} <- DeterministicJSON.encode(identity) do
       snapshot =
         identity
@@ -68,8 +79,15 @@ defmodule PtcRunner.Kernel.ProviderSnapshot do
     end
   end
 
-  def build(_descriptor, _name, _config, _acquisition, _content_snapshot_hash),
-    do: {:error, :invalid_provider_snapshot}
+  def build(
+        _descriptor,
+        _name,
+        _config,
+        _acquisition,
+        _content_snapshot_hash,
+        _installation_config_digest
+      ),
+      do: {:error, :invalid_provider_snapshot}
 
   @doc """
   Extracts `{alias, installation revision, resolved model}` from one valid
@@ -83,7 +101,7 @@ defmodule PtcRunner.Kernel.ProviderSnapshot do
           {:ok, %{alias: binary(), installation_revision: binary(), resolved_model: binary()}}
           | :error
   def llm_identity(snapshot) when is_map(snapshot) do
-    with true <- exact_keys?(snapshot, @llm_snapshot_keys),
+    with true <- llm_snapshot_keys?(snapshot),
          %{} = declaration <- snapshot["declaration"],
          %{} = acquisition <- snapshot["acquisition"],
          true <- exact_keys?(declaration, @llm_declaration_keys),
@@ -98,9 +116,10 @@ defmodule PtcRunner.Kernel.ProviderSnapshot do
          true <- acquisition["source"] == "llm",
          true <- valid_hash?(snapshot["acquisition_identity_hash"]),
          true <- valid_hash?(snapshot["snapshot_hash"]),
+         true <- valid_installation_config_digest?(snapshot["installation_config_digest"]),
          {:ok, acquisition_bytes} <- DeterministicJSON.encode(acquisition),
          true <- sha256(acquisition_bytes) == snapshot["acquisition_identity_hash"],
-         identity = Map.take(snapshot, ~w(acquisition acquisition_identity_hash declaration)),
+         identity = Map.take(snapshot, llm_identity_keys(snapshot)),
          {:ok, identity_bytes} <- DeterministicJSON.encode(identity),
          true <- sha256(identity_bytes) == snapshot["snapshot_hash"] do
       {:ok,
@@ -126,6 +145,21 @@ defmodule PtcRunner.Kernel.ProviderSnapshot do
   end
 
   defp exact_keys?(map, keys), do: Enum.sort(Map.keys(map)) == keys
+
+  defp llm_snapshot_keys?(snapshot) do
+    keys = Enum.sort(Map.keys(snapshot))
+
+    keys == @llm_snapshot_keys or
+      keys == Enum.sort(["installation_config_digest" | @llm_snapshot_keys])
+  end
+
+  defp llm_identity_keys(snapshot) do
+    if Map.has_key?(snapshot, "installation_config_digest") do
+      ~w(acquisition acquisition_identity_hash declaration installation_config_digest)
+    else
+      ~w(acquisition acquisition_identity_hash declaration)
+    end
+  end
 
   defp valid_llm_declaration?(declaration) do
     declaration["source"] == "llm" and
@@ -192,6 +226,18 @@ defmodule PtcRunner.Kernel.ProviderSnapshot do
 
   defp maybe_put_content_hash(snapshot, content_snapshot_hash),
     do: Map.put(snapshot, "content_snapshot_hash", content_snapshot_hash)
+
+  defp valid_installation_config_digest?(nil), do: true
+
+  defp valid_installation_config_digest?("sha256:" <> <<hash::binary-size(64)>>),
+    do: hash =~ ~r/\A[0-9a-f]{64}\z/
+
+  defp valid_installation_config_digest?(_digest), do: false
+
+  defp maybe_put_installation_config_digest(identity, nil), do: identity
+
+  defp maybe_put_installation_config_digest(identity, digest),
+    do: Map.put(identity, "installation_config_digest", digest)
 
   defp sha256(bytes),
     do: :crypto.hash(:sha256, bytes) |> Base.encode16(case: :lower)

@@ -144,7 +144,32 @@ structural vocabulary, defaults, bounds, and editor completion. Runtime
 validation remains authoritative for semantic checks.</p><p>Every installation needs a public, non-secret <code class="inline">installation_revision</code>. Change
 it whenever installed behavior or authority changes, including model routing,
 MCP mappings and effects, replay fixtures, snapshot policy, or adapter and
-launcher builds.</p><h2 id="declare-credentials-once">Declare credentials once</h2><p>Credentials have exactly one source:</p><pre><code class="json language-json">&quot;credentials&quot;: {
+launcher builds.</p><p><code class="inline">installation_config_digest</code> is computed evidence for that same declaration. It
+hashes the normalized <code class="inline">install.&lt;alias&gt;</code> configuration after ordinary host
+decoding, with a distinct TJCS domain from application identity. Set-valued
+declaration fields such as <code class="inline">accepts_data</code> and OAuth <code class="inline">redirect_uris</code> are ordered
+canonically before hashing, so reversing them is not configuration drift;
+ordered lists such as transport <code class="inline">args</code> keep their written sequence. Matching
+digests mean the same declared installation was selected. They do not prove
+that a local process, remote endpoint, credential, filesystem path, or server
+still grants the same effective authority.</p><p>The digest is a sibling of <code class="inline">application_content_digest</code> and
+<code class="inline">effective_application_digest</code>. Host configuration stays out of those
+application hashes. <code class="inline">ptc validate</code> prints <code class="inline">installation_config_digests</code> for
+aliases selected by the effective application, without contacting providers.
+The same selected map is recorded on <code class="inline">run-started</code>, and each connector snapshot
+carries the singular digest used while loading the host document.</p><p>Documented meaning by source:</p><ul><li>MCP stdio: the same normalized command and configuration declaration, not
+the resolved executable, working-directory target, symlink target, ambient
+environment, or server-enforced scope.</li><li>MCP streamable HTTP: the same declared endpoint, authentication policy, tool
+mappings, and limits; not the server implementation behind the URL.</li><li>LLM: the same declared model, parameters, limits, and credential binding
+name; not the secret value, account permissions, or provider behavior.</li><li>Snapshot, replay, and other file-backed sources: the same declared path and
+provider configuration; not the current file contents unless a separate
+content hash attests them.</li></ul><p>Paths are hashed as written after ordinary configuration normalization. The
+digest does not expand them against the current directory, resolve symlinks, or
+bake machine-local real paths. Changing <code class="inline">installation_revision</code> alone leaves
+the digest stable; changing the declaration without bumping the revision still
+changes the digest. Rotating a credential value does not change it; renaming
+the binding does. Compare identifiers, not confidentiality: the digest never
+includes secrets.</p><h2 id="declare-credentials-once">Declare credentials once</h2><p>Credentials have exactly one source:</p><pre><code class="json language-json">&quot;credentials&quot;: {
   &quot;openrouter_key&quot;: {&quot;env&quot;: &quot;OPENROUTER_API_KEY&quot;},
   &quot;vendor_token&quot;: {&quot;file&quot;: &quot;secrets/vendor.token&quot;},
   &quot;development_key&quot;: {&quot;literal&quot;: &quot;not-a-real-key&quot;}

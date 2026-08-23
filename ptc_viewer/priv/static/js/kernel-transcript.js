@@ -478,6 +478,10 @@ function Fingerprints({ metadata }) {
             <div class="kt-hash" title=${String(connector.snapshot_hash || '')}>
               ${shorten(connector.snapshot_hash) || 'No snapshot hash'}
             </div>
+            ${connector.installation_config_digest ? html`
+              <div class="kt-hash" title=${String(connector.installation_config_digest)}>
+                ${shorten(connector.installation_config_digest)}
+              </div>` : ''}
           </article>
         `;
       })}

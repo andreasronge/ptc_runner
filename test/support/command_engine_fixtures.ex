@@ -385,8 +385,24 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
       :effective_event_policy,
       :effective_application_projection,
       :effective_application_digest,
+      :installation_config_digests,
       :post_selection_context
     ])
+  end
+
+  def validate_success_result(overrides \\ %{}) do
+    Map.merge(
+      %{
+        "application_content_digest" => "sha256:" <> String.duplicate("0", 64),
+        "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
+        "installation_config_digests" => %{},
+        "workflow_bundle_hash" => String.duplicate("2", 64),
+        "mission_bundle_hashes" => %{},
+        "mission_grants" => %{},
+        "provider_activity" => false
+      },
+      overrides
+    )
   end
 
   def host_installation_owners do

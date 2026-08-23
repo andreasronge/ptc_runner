@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.LocalPreflight
   alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.MissionReplTarget
@@ -84,7 +85,15 @@ defmodule PtcRunner.Kernel.RunCoordinator do
                "(#{request.package.entry} data/input)",
                activity,
                catalog,
-               Map.put(derived, :provider_declarations, prepared_declarations)
+               derived
+               |> Map.put(:provider_declarations, prepared_declarations)
+               |> Map.put(
+                 :installation_config_digests,
+                 InstallationConfigDigest.selected(
+                   catalog.installation_config_digests,
+                   prepared_declarations
+                 )
+               )
              )
            end) do
       {:ok, prepared}
@@ -716,6 +725,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
            "application_content_digest" =>
              "sha256:" <> prepared.request.package.application_content_digest,
            "effective_application_digest" => prepared.effective_application_digest,
+           "installation_config_digests" => prepared.installation_config_digests,
            "workflow_bundle_hash" => prepared.workflow_bundle.hash,
            "mission_bundle_hashes" => mission_bundle_hashes(prepared.mission_bundles),
            "mission_grants" => mission_grants(prepared),

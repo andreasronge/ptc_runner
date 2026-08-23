@@ -1011,6 +1011,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert built.snapshot["acquisition_identity_hash"] =~ ~r/\A[0-9a-f]{64}\z/
     assert built.snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+
+    assert built.snapshot["installation_config_digest"] ==
+             host.install["deepseek"].installation_config_digest
+
     refute inspect(built.snapshot) =~ "test-llm-secret"
 
     assert {:ok,
