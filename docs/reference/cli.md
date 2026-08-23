@@ -423,6 +423,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `application` | `input_invalid` | no | the selected input is not an admissible JSON object |
 | 3 | `application` | `installed_limit_exceeded` | no | an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling |
 | 3 | `application` | `invalid_json` | no | an application document is not valid JSON |
+| 3 | `application` | `limit_configuration_invalid` | no | normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes |
 | 3 | `application` | `limit_unavailable` | no | an optional application budget is unavailable because the host has not enabled it |
 | 3 | `application` | `override_invalid` | no | the component override is invalid |
 | 3 | `application` | `reference_missing` | no | a referenced document is unavailable; for --input/--private-input try an application-relative name or an absolute/working-directory path |
