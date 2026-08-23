@@ -73,6 +73,7 @@ defmodule PtcRunner.Kernel.SchemaViolation do
           | :unknown_property
 
   @type t :: %__MODULE__{rule: rule(), path: [CommandPath.segment()]}
+  @type unavailable_reason :: :timeout | :cancelled | :heap_exceeded | :worker_failed
 
   @doc "Projects one JSV error list through the schema that rejected it."
   @spec from_jsv([term()], map()) :: t()
@@ -88,20 +89,25 @@ defmodule PtcRunner.Kernel.SchemaViolation do
 
   def from_jsv(_errors, _schema), do: new(:schema, [])
 
-  @doc "Validates one value and projects any failure inside a bounded worker."
-  @spec validate(term(), map()) :: :ok | {:error, t()}
+  @doc "Validates one value, retries one timeout, and distinguishes unavailable bounded work."
+  @spec validate(term(), map()) :: :ok | {:error, t()} | {:unavailable, unavailable_reason()}
   def validate(value, schema) when is_map(schema) do
+    validate_bounded(value, schema, true)
+  end
+
+  def validate(_value, _schema), do: {:error, new(:schema, [])}
+
+  defp validate_bounded(value, schema, retry_timeout?) do
     case BoundedWorker.run(
            fn -> validate_unbounded(value, schema) end,
            timeout_ms: @validation_timeout_ms,
            max_heap_words: @validation_max_heap_words
          ) do
       {:ok, result} -> result
-      {:error, _reason} -> {:error, new(:schema, [])}
+      {:error, :timeout} when retry_timeout? -> validate_bounded(value, schema, false)
+      {:error, reason} -> {:unavailable, reason}
     end
   end
-
-  def validate(_value, _schema), do: {:error, new(:schema, [])}
 
   @doc "Builds a bounded violation from an already schema-authorized path."
   @spec new(rule(), [CommandPath.segment()]) :: t()

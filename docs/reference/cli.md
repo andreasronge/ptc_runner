@@ -390,6 +390,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `application` | `override_invalid` | no | the component override is invalid |
 | 3 | `application` | `reference_missing` | no | a referenced document is unavailable; for --input/--private-input try an application-relative name or an absolute/working-directory path |
 | 3 | `application` | `required_property_missing` | no | the application manifest is missing a required property |
+| 3 | `application` | `schema_validation_unavailable` | yes | application schema validation timed out or exceeded its resource bound; retry the command |
 | 3 | `application` | `schema_violation` | no | the application manifest does not satisfy its schema |
 | 3 | `bundle` | `bundle_invalid` | no | the component bundle is invalid |
 | 3 | `bundle` | `bundle_limit_exceeded` | no | the component bundle exceeds a compile limit |
@@ -410,7 +411,9 @@ Every classified diagnostic and the status it exits with:
 | 3 | `host` | `installation_endpoint_literal_loopback_required` | no | allow_insecure_loopback requires a literal 127.0.0.1 or [::1] address |
 | 3 | `host` | `installation_revision_missing` | no | an installed provider is missing its behavior revision |
 | 3 | `host` | `installed_limit_invalid` | no | an installed limit is invalid |
+| 3 | `host` | `schema_validation_unavailable` | yes | host schema validation timed out or exceeded its resource bound; retry the command |
 | 3 | `project` | `project_schema_invalid` | no | the project configuration does not satisfy its schema |
+| 3 | `project` | `schema_validation_unavailable` | yes | project schema validation timed out or exceeded its resource bound; retry the command |
 | 3 | `provider_declaration` | `data_policy_denied` | no | the selected providers do not admit the effective data class |
 | 3 | `provider_declaration` | `dependency_invalid` | no | the selected provider dependency graph is invalid |
 | 3 | `provider_declaration` | `placement_denied` | no | the provider is not allowed in this destination |

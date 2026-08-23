@@ -45,9 +45,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:arguments, :example_unknown, 2, false, "no example is embedded under that name"},
     {:project, :project_schema_invalid, 3, false,
      "the project configuration does not satisfy its schema"},
+    {:project, :schema_validation_unavailable, 3, true,
+     "project schema validation timed out or exceeded its resource bound; retry the command"},
     {:host, :host_unavailable, 3, false, "the host configuration is unavailable"},
     {:host, :host_invalid, 3, false, "the host configuration is invalid"},
     {:host, :host_schema_invalid, 3, false, "the host configuration does not satisfy its schema"},
+    {:host, :schema_validation_unavailable, 3, true,
+     "host schema validation timed out or exceeded its resource bound; retry the command"},
     {:host, :installed_limit_invalid, 3, false, "an installed limit is invalid"},
     {:host, :installation_revision_missing, 3, false,
      "an installed provider is missing its behavior revision"},
@@ -68,6 +72,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "an application document contains a duplicate property"},
     {:application, :schema_violation, 3, false,
      "the application manifest does not satisfy its schema"},
+    {:application, :schema_validation_unavailable, 3, true,
+     "application schema validation timed out or exceeded its resource bound; retry the command"},
     {:application, :installed_limit_exceeded, 3, false,
      "an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling"},
     {:application, :required_property_missing, 3, false,
@@ -769,7 +775,10 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   defp doctor_report_operation(operation), do: operation
 
   @spec source_kinds(phase(), atom()) :: [atom()]
-  def source_kinds(:project, :project_schema_invalid), do: [:project]
+  def source_kinds(:project, code)
+      when code in [:project_schema_invalid, :schema_validation_unavailable],
+      do: [:project]
+
   def source_kinds(:host, :installation_revision_missing), do: []
   def source_kinds(:host, code) when code in @endpoint_codes, do: []
   def source_kinds(:host, _code), do: [:host]
@@ -778,6 +787,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       when code in [
              :application_unavailable,
              :application_not_found,
+             :schema_validation_unavailable,
              :schema_violation,
              :installed_limit_exceeded,
              :required_property_missing,

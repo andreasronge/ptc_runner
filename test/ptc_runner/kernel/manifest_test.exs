@@ -70,7 +70,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
              |> RunLifecycle.execute()
   end
 
-  test "wide invalid manifests keep schema validation time and heap bounded" do
+  test "wide manifests report bounded schema validation as unavailable" do
     components =
       for index <- 1..10_000 do
         %{"invalid-#{index}" => true}
@@ -85,10 +85,10 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     task = Task.async(fn -> Manifest.load_memory("ptc.json", %{"ptc.json" => raw}) end)
 
-    assert {:ok, {:error, {:manifest_schema_invalid, %SchemaViolation{rule: rule}}}} =
+    assert {:ok, {:error, {:schema_validation_unavailable, reason}}} =
              Task.yield(task, 3_000)
 
-    assert rule in SchemaViolation.rules()
+    assert reason in [:timeout, :heap_exceeded, :worker_failed]
   end
 
   @tag :tmp_dir

@@ -458,6 +458,29 @@ defmodule PtcRunner.ViewerFrontendTest do
              ViewerFrontend.run(arguments, CommandRuntime.standalone())
   end
 
+  test "unavailable project validation retains the atomic Viewer error contract" do
+    project_path = "ptc-project.json"
+    project_loader = fn ^project_path -> {:error, {:schema_validation_unavailable, :timeout}} end
+
+    assert {:error, :schema_validation_unavailable} =
+             ViewerFrontend.start(project_path, %{}, project_loader: project_loader)
+
+    arguments = %CommandArguments{
+      command: :viewer,
+      application: project_path,
+      directory: nil,
+      options: %{},
+      ordered_options: [],
+      frontend: :standalone,
+      frontend_options: []
+    }
+
+    assert {:error, :schema_validation_unavailable, "could not start PTC Viewer"} =
+             ViewerFrontend.run(arguments, CommandRuntime.standalone(),
+               project_loader: project_loader
+             )
+  end
+
   defp announce(address, port) do
     ViewerFrontend.announce(address, port, :stdio)
   end

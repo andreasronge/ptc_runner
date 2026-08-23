@@ -112,6 +112,9 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
       {:error, {:host_schema_invalid, %SchemaViolation{} = violation}} ->
         {:error, host_schema_diagnostic(violation)}
 
+      {:error, {:schema_validation_unavailable, _cause}} ->
+        {:error, diagnostic(:host, :schema_validation_unavailable)}
+
       {:error, {:installed_limit_invalid, segments}} ->
         {:error, host_path_diagnostic(:installed_limit_invalid, segments)}
     end

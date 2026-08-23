@@ -141,7 +141,10 @@ file. Project choices do not become part of application content identity.</p><h2
 then fails this schema reports <code class="inline">project/project_schema_invalid</code>. The diagnostic
 names a bounded schema rule and the deepest project-schema-authorized JSON
 Pointer; it does not retain the rejected value, an unknown property name, or
-the filesystem path. A syntactically valid <code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, or
+the filesystem path. If bounded schema validation times out or exceeds its
+resource bound, the retryable <code class="inline">project/schema_validation_unavailable</code>
+diagnostic reports the unavailable validation instead of claiming that the
+document is invalid. A syntactically valid <code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, or
 <code class="inline">models</code> invocation still publishes a requested <code class="inline">--envelope</code> before any project
 reference or provider is opened. Malformed command syntax remains an argument
 rejection and publishes no envelope.</p><p>Every object rejects unknown and duplicate keys. Paths are portable relative
