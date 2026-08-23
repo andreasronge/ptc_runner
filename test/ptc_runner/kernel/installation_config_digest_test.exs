@@ -5,9 +5,14 @@ defmodule PtcRunner.Kernel.InstallationConfigDigestTest do
 
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationConfigDigest
+  alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.RunConfig
+  alias PtcRunner.Kernel.WorkflowEnvironment
 
   @tag :tmp_dir
   test "widening an MCP root argument changes the installation digest and leaves application identity unchanged",
@@ -261,6 +266,41 @@ defmodule PtcRunner.Kernel.InstallationConfigDigestTest do
 
     assert catalog.installation_config_digests["workspace"] ==
              loaded.install["workspace"].installation_config_digest
+  end
+
+  test "run-started metadata publishes selected host-backed installation digests from connector snapshots" do
+    digest = "sha256:" <> String.duplicate("ab", 32)
+
+    snapshots = [
+      %{
+        "provider" => "workspace",
+        "snapshot_hash" => String.duplicate("1", 64),
+        "installation_config_digest" => digest
+      },
+      %{
+        "provider" => "custom",
+        "snapshot_hash" => String.duplicate("2", 64)
+      }
+    ]
+
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    assert {:ok, config} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               missions: %{"default" => mission},
+               input: %{},
+               limits: limits,
+               event_sink: sink,
+               connector_snapshots: snapshots
+             )
+
+    assert config.run_started_metadata.installation_config_digests == %{"workspace" => digest}
+
+    EventSink.stop(sink)
   end
 
   defp digest(config, name) do

@@ -1563,14 +1563,15 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp public_snapshot(installation, provider, selected, acquisition, content_snapshot_hash) do
     with {:ok, rules} <- selection_rules(installation),
-         {:ok, descriptor} <- descriptor(installation, rules, authority(installation)) do
+         {:ok, descriptor} <- descriptor(installation, rules, authority(installation)),
+         digest when is_binary(digest) <- Map.get(installation, :installation_config_digest) do
       ProviderSnapshot.build(
         descriptor,
         provider,
         string_keyed(selected),
         acquisition,
         content_snapshot_hash,
-        Map.get(installation, :installation_config_digest)
+        digest
       )
     else
       _invalid -> {:error, :invalid_provider_snapshot}

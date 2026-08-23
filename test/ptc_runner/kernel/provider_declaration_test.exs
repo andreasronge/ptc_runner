@@ -382,6 +382,49 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
              :crypto.hash(:sha256, acquisition_bytes) |> Base.encode16(case: :lower)
   end
 
+  test "installation config digest changes snapshot identity without changing acquisition identity" do
+    assert {:ok, catalog} = custom_catalog()
+    descriptor = catalog.descriptors["selected"]
+    digest_a = "sha256:" <> String.duplicate("a", 64)
+    digest_b = "sha256:" <> String.duplicate("b", 64)
+
+    assert {:ok, first} =
+             ProviderSnapshot.build(
+               descriptor,
+               "selected",
+               %{"mode" => "a"},
+               %{"count" => 1},
+               nil,
+               digest_a
+             )
+
+    assert {:ok, second} =
+             ProviderSnapshot.build(
+               descriptor,
+               "selected",
+               %{"mode" => "a"},
+               %{"count" => 1},
+               nil,
+               digest_b
+             )
+
+    assert {:ok, omitted} =
+             ProviderSnapshot.build(
+               descriptor,
+               "selected",
+               %{"mode" => "a"},
+               %{"count" => 1}
+             )
+
+    assert first["acquisition_identity_hash"] == second["acquisition_identity_hash"]
+    assert first["acquisition_identity_hash"] == omitted["acquisition_identity_hash"]
+    refute first["snapshot_hash"] == second["snapshot_hash"]
+    refute first["snapshot_hash"] == omitted["snapshot_hash"]
+    assert first["installation_config_digest"] == digest_a
+    assert second["installation_config_digest"] == digest_b
+    refute Map.has_key?(omitted, "installation_config_digest")
+  end
+
   test "host authority follows its creator and transfers an explicit registry closer" do
     parent = self()
 
