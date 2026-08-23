@@ -337,7 +337,8 @@ defmodule PtcRunner.Kernel.RunConfig do
           labels: labels,
           workflow_prelude: workflow_prelude,
           missions: mission_metadata,
-          connector_snapshots: snapshots
+          connector_snapshots: snapshots,
+          installation_config_digests: installation_config_digests(snapshots)
         }
         |> maybe_put_session_profile(session_profile)
         |> maybe_put_component_overrides(component_overrides)
@@ -429,6 +430,12 @@ defmodule PtcRunner.Kernel.RunConfig do
     is_list(snapshots) and length(snapshots) <= 128 and
       Enum.all?(snapshots, &JSONValue.map?/1) and
       byte_size(:erlang.term_to_binary(snapshots)) <= 262_144
+  end
+
+  defp installation_config_digests(snapshots) do
+    snapshots
+    |> Enum.filter(&is_binary(&1["installation_config_digest"]))
+    |> Map.new(&{&1["provider"], &1["installation_config_digest"]})
   end
 
   defp maximum_terminal_usage(workflow, missions, limits) do

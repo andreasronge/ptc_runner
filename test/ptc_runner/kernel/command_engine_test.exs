@@ -4961,14 +4961,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert_schema_invalid(put_in(provider.envelope, ["error", "subject", "name"], "safe\n"))
 
-    result = %{
-      "application_content_digest" => "sha256:" <> String.duplicate("0", 64),
-      "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
-      "workflow_bundle_hash" => String.duplicate("2", 64),
-      "mission_bundle_hashes" => %{},
-      "mission_grants" => %{},
-      "provider_activity" => false
-    }
+    result = validate_success_result()
 
     validate = CommandOutcome.success(:validate, run_ref, result)
 
@@ -4979,6 +4972,18 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         ] do
       assert_schema_invalid(put_in(validate.envelope, ["result", field], result[field] <> "\n"))
     end
+
+    assert CommandContract.valid_success_result?(:validate, result)
+
+    newline_alias =
+      validate_success_result(%{
+        "installation_config_digests" => %{
+          "safe\n" => "sha256:" <> String.duplicate("3", 64)
+        }
+      })
+
+    refute CommandContract.valid_success_result?(:validate, newline_alias)
+    assert_schema_invalid(%{validate.envelope | "result" => newline_alias})
   end
 
   test "validate mission_grants schema admits producer-scale data and export refs" do
@@ -4988,20 +4993,17 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     long_export = String.duplicate("n", 200) <> "/" <> String.duplicate("s", 200)
     long_data_form = "data/" <> String.duplicate("k", 70_000)
 
-    result = %{
-      "application_content_digest" => "sha256:" <> String.duplicate("0", 64),
-      "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
-      "workflow_bundle_hash" => String.duplicate("2", 64),
-      "mission_bundle_hashes" => %{"intake" => String.duplicate("3", 64)},
-      "mission_grants" => %{
-        "intake" => %{
-          "data" => [long_data_form | data],
-          "exports" => [long_export],
-          "providers" => ["workspace.read"]
+    result =
+      validate_success_result(%{
+        "mission_bundle_hashes" => %{"intake" => String.duplicate("3", 64)},
+        "mission_grants" => %{
+          "intake" => %{
+            "data" => [long_data_form | data],
+            "exports" => [long_export],
+            "providers" => ["workspace.read"]
+          }
         }
-      },
-      "provider_activity" => false
-    }
+      })
 
     outcome = CommandOutcome.success(:validate, run_ref, result)
     assert_schema_valid(outcome.envelope)

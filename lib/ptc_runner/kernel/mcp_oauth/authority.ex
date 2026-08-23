@@ -529,6 +529,9 @@ defmodule PtcRunner.Kernel.MCPOAuth.Authority do
     }
   end
 
+  @doc false
+  def declared_projection(%__MODULE__{} = authority), do: authority_document(authority)
+
   defp authority_document(authority) do
     %{
       "installation_id" => authority.installation_id,

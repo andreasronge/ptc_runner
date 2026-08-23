@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Lisp.RetainedSize
 
   @tag :tmp_dir
@@ -26,7 +27,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              name: "DEFINITELY_MISSING_PTC_TOKEN"
            }
 
-    assert host.install["workspace"] == %{
+    assert without_digest(host.install["workspace"]) == %{
              source: :mcp,
              transport: %{
                type: :stdio,
@@ -58,6 +59,10 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              data_class: :normal,
              accepts_data: [:normal]
            }
+
+    assert InstallationConfigDigest.valid_digest?(
+             host.install["workspace"].installation_config_digest
+           )
   end
 
   @tag :tmp_dir
@@ -83,7 +88,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
 
-    assert host.install["deepseek"] == %{
+    assert without_digest(host.install["deepseek"]) == %{
              source: :llm,
              model: "openrouter:deepseek/deepseek-v4-flash-0731",
              credential: "openrouter_key",
@@ -98,6 +103,10 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              data_class: :normal,
              accepts_data: [:normal, :private_inspection]
            }
+
+    assert InstallationConfigDigest.valid_digest?(
+             host.install["deepseek"].installation_config_digest
+           )
   end
 
   @tag :tmp_dir
@@ -313,7 +322,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
 
-    assert host.install["history"] == %{
+    assert without_digest(host.install["history"]) == %{
              source: :ptc_trace_snapshot,
              directory: "traces",
              installation_revision: "history-v1",
@@ -322,6 +331,10 @@ defmodule PtcRunner.Kernel.HostConfigTest do
                max_result_bytes: 250_000
              }
            }
+
+    assert InstallationConfigDigest.valid_digest?(
+             host.install["history"].installation_config_digest
+           )
   end
 
   @tag :tmp_dir
@@ -343,7 +356,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
 
-    assert host.install["private-history"] == %{
+    assert without_digest(host.install["private-history"]) == %{
              source: :ptc_inspection_snapshot,
              directory: "inspection",
              installation_revision: "private-history-v1",
@@ -353,6 +366,10 @@ defmodule PtcRunner.Kernel.HostConfigTest do
                max_result_bytes: 500_000
              }
            }
+
+    assert InstallationConfigDigest.valid_digest?(
+             host.install["private-history"].installation_config_digest
+           )
   end
 
   @tag :tmp_dir
@@ -746,4 +763,6 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
   defp unique_name,
     do: "host-#{System.unique_integer([:positive, :monotonic])}.json"
+
+  defp without_digest(installation), do: Map.delete(installation, :installation_config_digest)
 end

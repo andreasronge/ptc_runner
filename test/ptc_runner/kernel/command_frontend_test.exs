@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.DiagnosticCatalog
+  import PtcRunner.TestSupport.CommandEngineFixtures, only: [validate_success_result: 0]
 
   @run_ref "cmd-00000000000000000000000001"
 
@@ -898,15 +899,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
           usage,
           memory
         ),
-      "validate" =>
-        CommandOutcome.success(:validate, @run_ref, %{
-          "application_content_digest" => "sha256:" <> String.duplicate("0", 64),
-          "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
-          "workflow_bundle_hash" => String.duplicate("2", 64),
-          "mission_bundle_hashes" => %{},
-          "mission_grants" => %{},
-          "provider_activity" => false
-        }),
+      "validate" => CommandOutcome.success(:validate, @run_ref, validate_success_result()),
       "doctor_default" => CommandOutcome.success(:doctor, @run_ref, doctor_default),
       "doctor_connect" => CommandOutcome.success({:doctor, :connect}, @run_ref, doctor_connect),
       "models" => CommandOutcome.success(:models, @run_ref, %{"installations" => []}),

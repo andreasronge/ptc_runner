@@ -54,7 +54,13 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
     assert snapshot["acquisition"]["launcher_sha256"] =~ ~r/\A[0-9a-f]{64}\z/
     assert snapshot["acquisition"]["server_executable_sha256"] =~ ~r/\A[0-9a-f]{64}\z/
     assert snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
+    assert snapshot["installation_config_digest"] =~ ~r/\Asha256:[0-9a-f]{64}\z/
     refute Map.has_key?(snapshot, "content_snapshot_hash")
+
+    assert built.config.run_started_metadata.installation_config_digests == %{
+             "workspace" => snapshot["installation_config_digest"]
+           }
+
     assert length(snapshot["acquisition"]["tools"]) == 4
 
     assert {:ok, result} =

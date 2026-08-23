@@ -54,6 +54,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   """
 
   alias PtcRunner.Kernel.ConfinedFile
+  alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPEndpoint
@@ -153,6 +154,7 @@ defmodule PtcRunner.Kernel.HostConfig do
             tools: %{binary() => tool()},
             snapshot_identity: %{tool: binary(), field: binary()} | nil,
             installation_revision: binary(),
+            installation_config_digest: binary(),
             ceilings: %{
               timeout_ms: pos_integer(),
               max_catalog_tools: pos_integer(),
@@ -172,6 +174,7 @@ defmodule PtcRunner.Kernel.HostConfig do
                 optional(:max_tokens) => pos_integer()
               },
               installation_revision: binary(),
+              installation_config_digest: binary(),
               ceilings: %{
                 max_request_bytes: pos_integer(),
                 max_response_bytes: pos_integer(),
@@ -184,6 +187,7 @@ defmodule PtcRunner.Kernel.HostConfig do
               source: :llm_replay,
               fixtures: binary(),
               installation_revision: binary(),
+              installation_config_digest: binary(),
               ceilings: %{
                 max_entries: pos_integer(),
                 max_result_bytes: pos_integer(),
@@ -196,6 +200,7 @@ defmodule PtcRunner.Kernel.HostConfig do
               source: :ptc_trace_snapshot,
               directory: binary(),
               installation_revision: binary(),
+              installation_config_digest: binary(),
               ceilings: %{
                 max_source_bytes: pos_integer(),
                 max_result_bytes: pos_integer()
@@ -205,6 +210,7 @@ defmodule PtcRunner.Kernel.HostConfig do
               source: :ptc_private_trace_snapshot,
               directory: binary(),
               installation_revision: binary(),
+              installation_config_digest: binary(),
               ceilings: %{
                 max_source_bytes: pos_integer(),
                 max_result_bytes: pos_integer()
@@ -214,6 +220,7 @@ defmodule PtcRunner.Kernel.HostConfig do
               source: :ptc_inspection_snapshot,
               directory: binary(),
               installation_revision: binary(),
+              installation_config_digest: binary(),
               ceilings: %{
                 max_files: pos_integer(),
                 max_source_bytes: pos_integer(),
@@ -633,7 +640,8 @@ defmodule PtcRunner.Kernel.HostConfig do
                installations,
              do: oauth.installation_id
            ),
-         true <- ids == Enum.uniq(ids) do
+         true <- ids == Enum.uniq(ids),
+         {:ok, installations} <- InstallationConfigDigest.attach_all(installations) do
       {:ok, installations}
     else
       _invalid -> {:error, :invalid_installations}
