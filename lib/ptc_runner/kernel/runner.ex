@@ -41,7 +41,6 @@ defmodule PtcRunner.Kernel.Runner do
   # projecting `prints` into a caller-facing result.
   @execution_prints_count 128
   @execution_prints_bytes 65_536
-  @no_explicit_failure :__ptc_no_explicit_failure__
 
   @spec run(binary(), RunConfig.t()) :: {:ok, Result.t()} | {:error, Error.t()}
   @doc "Executes one validated run configuration and always tears down run state."
@@ -369,8 +368,7 @@ defmodule PtcRunner.Kernel.Runner do
          private_details
        )
        when is_map(private_details) do
-    {explicit_value, private_details} =
-      Map.pop(private_details, :explicit_failure_value, @no_explicit_failure)
+    {explicit_value, private_details} = take_explicit_failure_value(private_details)
 
     private_details = Map.merge(private_details, boundary_producer_details(step))
     private_error = %{public_error | details: Map.merge(public_error.details, private_details)}
@@ -493,10 +491,22 @@ defmodule PtcRunner.Kernel.Runner do
     )
   end
 
-  defp emit_explicit_failure_value(_config, _evaluation_id, @no_explicit_failure), do: :ok
-  defp emit_explicit_failure_value(%{inspection_sink: nil}, _evaluation_id, _value), do: :ok
+  # Presence is tagged so a Lisp fail value cannot collide with a sentinel.
+  defp take_explicit_failure_value(private_details) do
+    if Map.has_key?(private_details, :explicit_failure_value) do
+      {value, rest} = Map.pop!(private_details, :explicit_failure_value)
+      {{:present, value}, rest}
+    else
+      {:absent, private_details}
+    end
+  end
 
-  defp emit_explicit_failure_value(config, evaluation_id, value) do
+  defp emit_explicit_failure_value(_config, _evaluation_id, :absent), do: :ok
+
+  defp emit_explicit_failure_value(%{inspection_sink: nil}, _evaluation_id, {:present, _value}),
+    do: :ok
+
+  defp emit_explicit_failure_value(config, evaluation_id, {:present, value}) do
     case admitted_explicit_failure_json(value, config.limits.terminal_result_bytes) do
       {:ok, json} ->
         InspectionSink.emit(
@@ -512,7 +522,8 @@ defmodule PtcRunner.Kernel.Runner do
   end
 
   defp admitted_explicit_failure_json(value, max_bytes) do
-    with {:ok, json} <- JSONValue.normalize(value),
+    with {:ok, projected} <- Lisp.project_boundary_value(value, :kernel_json),
+         {:ok, json} <- JSONValue.normalize(projected),
          {:ok, encoded} <- DeterministicJSON.encode(json),
          true <- byte_size(encoded) <= max_bytes do
       {:ok, json}

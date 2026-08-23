@@ -605,6 +605,32 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "fail of the former presence sentinel still writes a dedicated inspection record", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "explicit-fail-sentinel", valid_manifest())
+    inspection = Path.join(directory, "run.inspection.jsonl")
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (fail :__ptc_no_explicit_failure__))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    refute Jason.encode!(outcome.envelope) =~ "__ptc_no_explicit_failure__"
+    assert_schema_valid(outcome.envelope)
+
+    assert {:ok, records} = InspectionArtifact.load(inspection)
+    fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
+    assert fail_record["payload"]["environment"] == "workflow"
+    assert fail_record["payload"]["value"] == "__ptc_no_explicit_failure__"
+  end
+
+  @tag :tmp_dir
   test "V3 success and error envelopes retain evaluations by mission", %{tmp_dir: directory} do
     manifest =
       valid_manifest(%{
