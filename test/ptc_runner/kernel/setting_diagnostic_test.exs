@@ -29,6 +29,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:local_preflight, :fixtures_unreadable},
     {:project, :project_schema_invalid},
     {:provider_acquisition, :capability_requirement_missing},
+    {:provider_acquisition, :provider_protocol_version_unsupported},
     {:provider_acquisition, :provider_tool_missing},
     {:provider_declaration, :selection_invalid},
     {:result_cleanup, :result_contract_failed}

@@ -32,7 +32,12 @@ An incompatible but responsive endpoint fails with
 `provider_protocol_version_unsupported`. This diagnosis is intentionally
 closed: it publishes the required PtcRunner-owned revision, but not the remote
 error message, response data, endpoint, process stderr, or launch arguments.
-Upgrade or replace the MCP server rather than adding a fallback handshake.
+A correlated JSON-RPC `-32601` response to `server/discover` reports that the
+endpoint rejected the required method. A valid discovery result whose
+`supportedVersions` omits `2026-07-28` instead reports that the endpoint did not
+advertise support for the revision. Other JSON-RPC errors do not become version
+diagnostics. Upgrade or replace the MCP server rather than adding a fallback
+handshake.
 
 As of 2026-08-17, the official
 `@modelcontextprotocol/server-filesystem@2026.7.10` package negotiates
@@ -44,7 +49,8 @@ required profile and is the deterministic baseline for this reference.
 
 ### Implement the wire profile
 
-The pinned protocol definitions are published as
+The executable serves the pinned protocol definitions offline as
+`ptc docs schema-mcp`. The same bytes are published as
 [`mcp-2026-07-28.schema.json`](https://ptc-runner.dev/schemas/mcp-2026-07-28.schema.json).
 That document is the final upstream 2026-07-28 schema plus the two corrections
 PtcRunner maintains and upstream does not publish: `JSONValue` accepts JSON

@@ -222,27 +222,27 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
              )
   end
 
-  test "classifies only discovery's standard unsupported-profile errors specially" do
-    for code <- [-32_601, -32_602, -32_022] do
-      response = %{
-        "error" => %{
-          "code" => code,
-          "message" => "PRIVATE_REMOTE_MESSAGE",
-          "data" => %{"secret" => "PRIVATE_REMOTE_DATA"}
-        }
+  test "classifies only discovery's correlated method-not-found error specially" do
+    response = %{
+      "error" => %{
+        "code" => -32_601,
+        "message" => "PRIVATE_REMOTE_MESSAGE",
+        "data" => %{"secret" => "PRIVATE_REMOTE_DATA"}
       }
+    }
 
-      assert {:error, :mcp_protocol_version_unsupported} =
-               MCPProtocol.outcome(response, "server/discover")
+    assert {:error, :mcp_discovery_method_unsupported} =
+             MCPProtocol.outcome(response, "server/discover")
 
-      assert {:error, :mcp_remote_error} = MCPProtocol.outcome(response, "tools/list")
+    assert {:error, :mcp_remote_error} = MCPProtocol.outcome(response, "tools/list")
+
+    for code <- [-32_602, -32_022, -32_603] do
+      assert {:error, :mcp_remote_error} =
+               MCPProtocol.outcome(
+                 %{"error" => %{"code" => code, "message" => "PRIVATE_REMOTE_MESSAGE"}},
+                 "server/discover"
+               )
     end
-
-    assert {:error, :mcp_remote_error} =
-             MCPProtocol.outcome(
-               %{"error" => %{"code" => -32_603, "message" => "Method not found"}},
-               "server/discover"
-             )
 
     assert {:error, :mcp_protocol_error} =
              MCPProtocol.outcome(
@@ -1067,10 +1067,8 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
     end
   end
 
-  # The wire schema is published, not shipped: it addresses ptc-runner.dev and
-  # reaches server authors from there. What has to stay true locally is that
-  # the document PtcRunner publishes still describes the bytes PtcRunner
-  # sends, so this validates real requests against the served definitions.
+  # The wire schema is both published and embedded in `ptc docs`. This validates
+  # real requests against the one source document used by both distributions.
   test "published wire schema accepts the exchanges PtcRunner actually sends" do
     schema = @wire_schema_path |> File.read!() |> Jason.decode!()
 

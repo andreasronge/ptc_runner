@@ -899,7 +899,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     marker = Path.join(dir, "unsupported-protocol-bare")
     registry = stdio_registry(dir, marker, "unsupported-protocol-bare")
 
-    assert {:error, :mcp_protocol_version_unsupported} =
+    assert {:error, :mcp_discovery_method_unsupported} =
              dir
              |> manifest(~w(remote.structured),
                timeout_ms: 5_000,
@@ -1907,15 +1907,20 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "classifies only the exact HTTP unsupported-profile status/code pairs", %{tmp_dir: dir} do
+  test "classifies only correlated HTTP method-not-found discovery responses specially", %{
+    tmp_dir: dir
+  } do
     for {status, code, expected} <- [
-          {200, -32_601, :mcp_protocol_version_unsupported},
-          {200, -32_022, :mcp_protocol_version_unsupported},
+          {200, -32_601, :mcp_discovery_method_unsupported},
+          {200, -32_022, :mcp_remote_error},
+          {200, -32_602, :mcp_remote_error},
           {200, -32_603, :mcp_remote_error},
-          {400, -32_022, :mcp_protocol_version_unsupported},
-          {404, -32_601, :mcp_protocol_version_unsupported},
-          {400, -32_601, :mcp_protocol_error},
+          {400, -32_601, :mcp_discovery_method_unsupported},
+          {404, -32_601, :mcp_discovery_method_unsupported},
+          {400, -32_022, :mcp_protocol_error},
           {404, -32_022, :mcp_protocol_error},
+          {400, -32_602, :mcp_protocol_error},
+          {404, -32_602, :mcp_protocol_error},
           {400, -32_603, :mcp_protocol_error},
           {404, -32_603, :mcp_protocol_error}
         ] do

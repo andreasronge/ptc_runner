@@ -296,9 +296,26 @@ defmodule PtcRunner.MixProject do
         # release at all. `:load` keeps them out of the boot start phase; the
         # provider activity boundary and `ptc viewer` start them explicitly.
         applications: [req_llm: :load, ptc_viewer: :load],
-        overlays: ["rel/overlays"]
+        overlays: ["rel/overlays"],
+        steps: [:assemble, &copy_release_notices/1]
       ]
     ]
+  end
+
+  defp copy_release_notices(%Mix.Release{path: release_path} = release) do
+    licenses_path = Path.join(release_path, "LICENSES")
+    File.mkdir_p!(licenses_path)
+
+    File.cp!(
+      Path.join(__DIR__, "THIRD_PARTY_NOTICES.md"),
+      Path.join(release_path, "THIRD_PARTY_NOTICES.md")
+    )
+
+    for license <- ["Apache-2.0.txt", "MIT.txt"] do
+      File.cp!(Path.join([__DIR__, "LICENSES", license]), Path.join(licenses_path, license))
+    end
+
+    release
   end
 
   # Mermaid renders natively on GitHub. HexDocs needs the renderer injected;
@@ -511,7 +528,7 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run examples/support-triage .formatter.exs mix.exs README.md usage-rules.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run examples/support-triage site/schemas/mcp-2026-07-28.schema.json .formatter.exs mix.exs README.md usage-rules.md LICENSE LICENSES THIRD_PARTY_NOTICES.md CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

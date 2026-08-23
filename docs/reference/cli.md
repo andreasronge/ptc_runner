@@ -443,7 +443,7 @@ Every classified diagnostic and the status it exits with:
 | 4 | `provider_acquisition` | `provider_endpoint_tls_failed` | no | the installed endpoint did not complete a TLS handshake |
 | 4 | `provider_acquisition` | `provider_policy_changed` | no | the selected provider policy changed during acquisition |
 | 4 | `provider_acquisition` | `provider_protocol_error` | no | the selected provider returned an invalid acquisition response |
-| 4 | `provider_acquisition` | `provider_protocol_version_unsupported` | no | the installed endpoint does not support MCP protocol 2026-07-28 |
+| 4 | `provider_acquisition` | `provider_protocol_version_unsupported` | no | the endpoint did not advertise support for MCP protocol 2026-07-28 |
 | 4 | `provider_acquisition` | `provider_tool_missing` | no | the installed endpoint does not expose a declared tool |
 | 4 | `provider_acquisition` | `provider_unavailable` | no | the selected provider could not be acquired |
 | 5 | `execution` | `evaluation_failed` | no | the evaluation failed |

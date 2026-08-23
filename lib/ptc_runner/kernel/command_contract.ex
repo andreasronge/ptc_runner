@@ -1192,6 +1192,12 @@ defmodule PtcRunner.Kernel.CommandContract do
     do: DiagnosticCatalog.message_schema(row)
 
   defp diagnostic_message_schema(
+         %{code: :provider_protocol_version_unsupported} = row,
+         _source
+       ),
+       do: DiagnosticCatalog.message_schema(row)
+
+  defp diagnostic_message_schema(
          %{phase: :execution, code: :runtime_limit_exceeded} = row,
          %{"type" => "null"}
        ),

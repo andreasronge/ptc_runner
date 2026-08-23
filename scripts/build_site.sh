@@ -12,10 +12,11 @@
 # copy checked in under `site/` would drift silently.
 #
 # `site/schemas/mcp-2026-07-28.schema.json` is deliberately the other way
-# round. It is vendored from upstream MCP, nothing in the runtime reads it, and
-# so there is no second copy for it to drift from: the file under `site/` is
-# the source, and this page is its only distribution. It still passes the `$id`
-# check below, because it is served like any other schema.
+# round. It is vendored from upstream MCP and remains the single source for
+# both distributions: the site publishes that file directly, while
+# DocumentationLibrary compile-embeds those same bytes for `ptc docs
+# schema-mcp`. It still passes the `$id` check below, because it is served like
+# any other schema.
 #
 # Every published schema declares its own URL in `$id`, and the runtime hard
 # codes those URLs. A renamed or newly added schema would therefore publish to

@@ -22,6 +22,10 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
      :acquisition},
     {:mcp_transport_error, :provider_acquisition, :provider_unavailable, :acquisition},
     {:mcp_timeout, :provider_acquisition, :provider_acquisition_timeout, :acquisition},
+    {:mcp_discovery_method_unsupported, :provider_acquisition,
+     :provider_protocol_version_unsupported, :acquisition},
+    {:mcp_protocol_version_unsupported, :provider_acquisition,
+     :provider_protocol_version_unsupported, :acquisition},
     {:mcp_remote_error, :provider_acquisition, :provider_unavailable, :acquisition},
     {:invalid_mcp_transport, :provider_acquisition, :provider_unavailable, :acquisition},
     {:resource_registrar_unavailable, :provider_acquisition, :provider_unavailable, :acquisition},
@@ -103,6 +107,24 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
       assert diagnostic.message == message
       assert diagnostic.retryable == retryable?
       assert diagnostic.exit_status == 4
+    end
+  end
+
+  test "unsupported discovery reasons select the two fixed public messages" do
+    method = AcquisitionReason.diagnostic(:mcp_discovery_method_unsupported, @occurrence)
+    version = AcquisitionReason.diagnostic(:mcp_protocol_version_unsupported, @occurrence)
+
+    assert method.message ==
+             "the endpoint rejected the required server/discover method and does not support MCP protocol 2026-07-28"
+
+    assert version.message ==
+             "the endpoint did not advertise support for MCP protocol 2026-07-28"
+
+    for diagnostic <- [method, version] do
+      assert diagnostic.code == :provider_protocol_version_unsupported
+      assert diagnostic.source == nil
+      assert diagnostic.path == nil
+      assert diagnostic.notes == []
     end
   end
 

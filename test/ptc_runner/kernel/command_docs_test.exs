@@ -32,6 +32,22 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     end
   end
 
+  test "the packaged MCP schema is the exact site wire schema" do
+    wire_schema_path =
+      Path.expand("../../../site/schemas/mcp-2026-07-28.schema.json", __DIR__)
+
+    assert DocumentationLibrary.source_path("schema-mcp") ==
+             "site/schemas/mcp-2026-07-28.schema.json"
+
+    assert {:ok, embedded} = DocumentationLibrary.fetch("schema-mcp")
+    assert embedded == File.read!(wire_schema_path)
+
+    assert {:ok, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["docs", "schema-mcp"])
+
+    assert envelope["result"] == %{"page" => "schema-mcp", "content" => embedded}
+  end
+
   test "the agent guide is served and answers the questions it promises" do
     assert {:ok, %CommandOutcome{envelope: envelope}} =
              CommandEngine.dispatch(["docs", "agent-guide"])
@@ -88,7 +104,12 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
   test "docs outcomes satisfy the published envelope schema" do
     assert {:ok, root} = CommandContract.envelope_schema_root()
 
-    for argv <- [["docs"], ["docs", "agent-guide"], ["docs", "schema-project"]] do
+    for argv <- [
+          ["docs"],
+          ["docs", "agent-guide"],
+          ["docs", "schema-project"],
+          ["docs", "schema-mcp"]
+        ] do
       assert {:ok, %CommandOutcome{envelope: envelope}} = CommandEngine.dispatch(argv)
       assert {:ok, _validated} = JSV.validate(envelope, root, cast: false)
     end
