@@ -23,6 +23,17 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     end
   end
 
+  test "the materializable multi-turn tutorial carries its explicit run clocks" do
+    assert {:ok, files} = ExampleLibrary.fetch("kernel-tutorial")
+
+    manifest = files["04-multi-turn-agent/ptc.json"] |> Jason.decode!()
+
+    assert manifest["limits"] == %{
+             "run_duration_ms" => 120_000,
+             "workflow_timeout_ms" => 120_000
+           }
+  end
+
   test "run artifacts are not embedded and local .env files are not copied from the source tree" do
     for name <- ExampleLibrary.names(),
         {:ok, files} = ExampleLibrary.fetch(name),

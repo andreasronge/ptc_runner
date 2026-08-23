@@ -40,6 +40,13 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
     for example <- ["02-deepseek-extract", "03-file-agent", "04-multi-turn-agent"] do
       assert {:ok, manifest} = Manifest.load(path(example))
       assert manifest.entry =~ "/"
+
+      if example == "04-multi-turn-agent" do
+        assert manifest.limits.run_duration_ms == 120_000
+        assert manifest.limits.workflow_timeout_ms == 120_000
+        assert manifest.limits.run_duration_ms < manifest.installed_limits.run_duration_ms
+        assert manifest.limits.workflow_timeout_ms < manifest.installed_limits.workflow_timeout_ms
+      end
     end
   end
 

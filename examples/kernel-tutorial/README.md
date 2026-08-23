@@ -31,6 +31,13 @@ model alias. Follow `ptc docs quickstart` once before running them. Example 03
 launches `ptc-fs-mcp@0.1.0` through `npx`; the first run may download that
 package. Node.js and `npx` are required.
 
+Example 04 requests explicit 120-second `run_duration_ms` and
+`workflow_timeout_ms` limits for its live, two-turn model loop. Its
+`max_turns` setting bounds the agent protocol; it is not a time allowance.
+Every turn and provider wait must also finish within both Kernel clocks.
+Applications should choose an explicit bounded allowance for their expected
+turn count and model latency; this tutorial value is not a completion guarantee.
+
 Direct manifest invocation with explicit `--env-file` and `--host-config`
 switches remains available as the low-level automation form.
 

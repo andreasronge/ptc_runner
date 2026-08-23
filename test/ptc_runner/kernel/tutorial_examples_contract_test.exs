@@ -30,6 +30,15 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
     end
   end
 
+  test "the multi-turn tutorial declares both Kernel run clocks" do
+    manifest = decode!(Path.join([@examples, "04-multi-turn-agent", "ptc.json"]))
+
+    assert manifest["limits"] == %{
+             "run_duration_ms" => 120_000,
+             "workflow_timeout_ms" => 120_000
+           }
+  end
+
   test "support-triage labels report the model installed by the host" do
     model =
       @support_triage
