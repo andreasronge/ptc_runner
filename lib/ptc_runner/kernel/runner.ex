@@ -500,13 +500,15 @@ defmodule PtcRunner.Kernel.Runner do
   defp emit_explicit_failure_value(config, evaluation_id, value) do
     with {:ok, json} <- JSONValue.normalize(value),
          {:ok, encoded} <- DeterministicJSON.encode(json),
-         true <- byte_size(encoded) <= config.limits.terminal_result_bytes do
-      InspectionSink.emit(
-        config.inspection_sink,
-        "explicit-failure-value",
-        %{evaluation_id: evaluation_id},
-        %{environment: :workflow, value: json}
-      )
+         true <- byte_size(encoded) <= config.limits.terminal_result_bytes,
+         :ok <-
+           InspectionSink.emit(
+             config.inspection_sink,
+             "explicit-failure-value",
+             %{evaluation_id: evaluation_id},
+             %{environment: :workflow, value: json}
+           ) do
+      :ok
     else
       {:error, :inspection_sink_error} = error -> error
       _closed -> :ok
