@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.CommandContract do
   @moduledoc """
-  Generated-in-source JSON Schema for the V2 command envelope.
+  Generated-in-source JSON Schema for the V3 command envelope.
 
   The checked-in JSON artifact is produced from this module. Diagnostic
   phase/code/retryability/message rows come only from `DiagnosticCatalog`.
@@ -24,8 +24,9 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SelectionRulesDiagnostic
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
 
-  @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json"
+  @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v3.schema.json"
   @envelope_root_key {__MODULE__, :envelope_root}
   @non_run_schema_modes [
     {"help", :help, false, false},
@@ -101,7 +102,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     %{
       "$schema" => "https://json-schema.org/draft/2020-12/schema",
       "$id" => @id,
-      "title" => "PtcRunner command envelope V2",
+      "title" => "PtcRunner command envelope V3",
       "oneOf" =>
         Enum.map(@non_run_schema_modes, fn {command, mode, provider_activity, compound?} ->
           error_envelope(command, diagnostic_rows(mode), provider_activity, compound?)
@@ -1085,21 +1086,14 @@ defmodule PtcRunner.Kernel.CommandContract do
         "secondary_errors" => %{"const" => []},
         "artifact_state" => success_artifact_state(artifact_class),
         "artifact_class" => %{"const" => artifact_class},
-        "execution" =>
-          closed(~w(state outcome diagnostic usage evaluation_memory), %{
-            "state" => %{"const" => "finished"},
-            "outcome" => %{"const" => "ok"},
-            "diagnostic" => %{"type" => "null"},
-            "usage" => ref("usage"),
-            "evaluation_memory" => ref("evaluation_memory")
-          })
+        "execution" => finished_ok_execution_schema()
       })
     )
   end
 
   defp base_properties(commands, status) do
     %{
-      "schema_version" => %{"const" => 2},
+      "schema_version" => %{"const" => 3},
       "command" => %{"enum" => commands},
       "status" => %{"const" => status},
       "run_ref" => %{"type" => "string", "pattern" => @run_ref}
@@ -1420,27 +1414,50 @@ defmodule PtcRunner.Kernel.CommandContract do
     %{
       "oneOf" => [
         closed(~w(state), %{"state" => %{"const" => "not_started"}}),
-        closed(~w(state usage evaluation_memory), %{
+        closed(~w(state usage evaluation_memory last_evaluation_error), %{
           "state" => %{"const" => "incomplete"},
           "usage" => nullable_ref("usage"),
-          "evaluation_memory" => nullable_ref("evaluation_memory")
+          "evaluation_memory" => nullable_ref("evaluation_memory"),
+          "last_evaluation_error" => last_evaluation_error_schema()
         }),
-        closed(~w(state outcome diagnostic usage evaluation_memory), %{
-          "state" => %{"const" => "finished"},
-          "outcome" => %{"const" => "ok"},
-          "diagnostic" => %{"type" => "null"},
-          "usage" => ref("usage"),
-          "evaluation_memory" => ref("evaluation_memory")
-        }),
-        closed(~w(state outcome diagnostic usage evaluation_memory), %{
+        finished_ok_execution_schema(),
+        closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
           "state" => %{"const" => "finished"},
           "outcome" => %{"const" => "error"},
           "diagnostic" => ref("execution_diagnostic"),
           "usage" => ref("usage"),
-          "evaluation_memory" => ref("evaluation_memory")
+          "evaluation_memory" => ref("evaluation_memory"),
+          "last_evaluation_error" => last_evaluation_error_schema()
         })
       ]
     }
+  end
+
+  defp last_evaluation_error_schema do
+    %{
+      "oneOf" => [
+        %{"type" => "null"},
+        closed(~w(kind message), %{
+          "kind" => %{"enum" => EvaluatorErrorCatalog.wire_names()},
+          "message" => %{
+            "type" => "string",
+            "minLength" => 1,
+            "maxLength" => 1024
+          }
+        })
+      ]
+    }
+  end
+
+  defp finished_ok_execution_schema do
+    closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
+      "state" => %{"const" => "finished"},
+      "outcome" => %{"const" => "ok"},
+      "diagnostic" => %{"type" => "null"},
+      "usage" => ref("usage"),
+      "evaluation_memory" => ref("evaluation_memory"),
+      "last_evaluation_error" => last_evaluation_error_schema()
+    })
   end
 
   defp usage_schema do

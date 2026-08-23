@@ -554,6 +554,31 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
              Eval.Helpers.sanitize_private_error({:unexpected, "PRIVATE_UNKNOWN_SECRET"})
   end
 
+  test "private prelude sanitization retains catalogued evaluator evidence" do
+    assert {:arithmetic_error, :division_by_zero} =
+             Eval.Helpers.sanitize_private_error({:arithmetic_error, :division_by_zero})
+
+    assert {:arity_error, %{name: "count", expected: 1, actual: 0}} =
+             Eval.Helpers.sanitize_private_error(
+               {:arity_error, %{name: "count", expected: 1, actual: 0, beam: "&Runtime.count/1"}}
+             )
+
+    {:ok, prelude} =
+      Compiler.compile("""
+      (ns app "App" {:visibility :prompt})
+      (defn boom [] (/ 1 0))
+      (defn too-few [] (count))
+      """)
+
+    assert {:error, arithmetic} = Lisp.run("(app/boom)", prelude: prelude)
+    assert arithmetic.fail.reason == :arithmetic_error
+    assert arithmetic.fail.details == %{token: :division_by_zero}
+
+    assert {:error, arity} = Lisp.run("(app/too-few)", prelude: prelude)
+    assert arity.fail.reason == :arity_error
+    assert arity.fail.details.name == "count"
+  end
+
   test "private prelude type diagnostics fail closed for unrecognized safe detail" do
     reason =
       {:type_error, "PRIVATE_MESSAGE",

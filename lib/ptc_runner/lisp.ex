@@ -70,6 +70,7 @@ defmodule PtcRunner.Lisp do
   @default_max_parallel_workers 8
   alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
+  alias PtcRunner.Lisp.EvaluatorError
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Java.Project, as: JavaProject
   alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
@@ -1534,6 +1535,19 @@ defmodule PtcRunner.Lisp do
     {:error, step}
   end
 
+  defp error_details({:arithmetic_error, token})
+       when token in [:division_by_zero, :integer_overflow, :bad_argument],
+       do: %{token: token}
+
+  defp error_details({:arity_error, details}) when is_map(details), do: details
+
+  defp error_details({:not_callable, {:data_ref, symbol}}) when is_binary(symbol),
+    do: %{name: symbol}
+
+  defp error_details({:not_callable, details}) when is_map(details), do: details
+
+  defp error_details({:loop_limit_exceeded, n}) when is_integer(n), do: %{limit: n}
+
   defp error_details({:prelude_contract_error, _message, details}) when is_map(details),
     do: details
 
@@ -1612,8 +1626,12 @@ defmodule PtcRunner.Lisp do
              :java_domain_error,
              :invalid_java_string,
              :java_handler_contract_error
-           ] and is_binary(message) and is_map(details),
-      do: "Java interop error: #{message}"
+           ] and is_binary(message) and is_map(details) do
+    case EvaluatorError.lisp_message(category, details) do
+      {:ok, public_message} -> public_message
+      :error -> "Java interop error"
+    end
+  end
 
   # Handle Analyze errors: {:invalid_arity, atom, message}
   def format_error({:invalid_arity, _atom, msg}) when is_binary(msg), do: "Analysis error: #{msg}"
@@ -1639,8 +1657,52 @@ defmodule PtcRunner.Lisp do
   def format_error({:not_callable, {:data_ref, symbol}}) when is_binary(symbol),
     do: "not callable: #{symbol}"
 
-  def format_error({:not_callable, value}), do: "not callable: #{inspect(value, limit: 3)}"
-  def format_error({:arity_error, msg}), do: "arity error: #{msg}"
+  def format_error({:not_callable, details}) when is_map(details) do
+    case EvaluatorError.lisp_message(:not_callable, details) do
+      {:ok, message} -> message
+      :error -> "not callable: value"
+    end
+  end
+
+  def format_error({:not_callable, _value}) do
+    case EvaluatorError.lisp_message(:not_callable, %{}) do
+      {:ok, message} -> message
+      :error -> "not callable: value"
+    end
+  end
+
+  def format_error({:arity_error, details}) when is_map(details) do
+    case EvaluatorError.lisp_message(:arity_error, details) do
+      {:ok, message} -> message
+      :error -> "arity error"
+    end
+  end
+
+  def format_error({:arity_error, msg}) when is_binary(msg), do: "arity error: #{msg}"
+
+  def format_error({:arithmetic_error, token})
+      when token in [:division_by_zero, :integer_overflow, :bad_argument] do
+    case EvaluatorError.lisp_message(:arithmetic_error, %{token: token}) do
+      {:ok, message} -> message
+      :error -> "arithmetic error"
+    end
+  end
+
+  def format_error({:arithmetic_error, msg}) when is_binary(msg) do
+    token =
+      cond do
+        msg == "division by zero" or String.contains?(msg, "division by zero") ->
+          :division_by_zero
+
+        msg == "integer overflow" or String.contains?(msg, "integer overflow") ->
+          :integer_overflow
+
+        true ->
+          :bad_argument
+      end
+
+    format_error({:arithmetic_error, token})
+  end
 
   # Issue #878: dedicated formatter for unsupported interop methods.
   # Avoids the `:unbound_var` path which would treat the message as a
@@ -1653,7 +1715,10 @@ defmodule PtcRunner.Lisp do
   # Without this clause, the raw Elixir tuple {:loop_limit_exceeded, 1000}
   # leaks to the LLM via the generic inspect-based fallback.
   def format_error({:loop_limit_exceeded, n}) do
-    "Loop iteration limit exceeded (#{n} iterations). Use reduce/map over a finite sequence instead, or split work across smaller loops."
+    case EvaluatorError.lisp_message(:loop_limit_exceeded, %{limit: n}) do
+      {:ok, message} -> message
+      :error -> "loop limit exceeded"
+    end
   end
 
   # Handle tool errors

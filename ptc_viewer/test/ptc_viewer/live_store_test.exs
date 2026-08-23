@@ -160,21 +160,22 @@ defmodule PtcViewer.LiveStoreTest do
 
   test "stops when its owner goes down" do
     parent = self()
+    token = make_ref()
 
     owner =
       spawn(fn ->
         {:ok, store} = LiveStore.start(self())
-        send(parent, {:store, store})
+        send(parent, {:store, token, store})
 
         receive do
-          :finish -> :ok
+          {^token, :finish} -> :ok
         end
       end)
 
-    assert_receive {:store, store}
+    assert_receive {:store, ^token, store}
     store_ref = Process.monitor(store)
-    send(owner, :finish)
-    assert_receive {:DOWN, ^store_ref, :process, ^store, {:shutdown, :owner_down}}
+    send(owner, {token, :finish})
+    assert_receive {:DOWN, ^store_ref, :process, ^store, {:shutdown, :owner_down}}, 1_000
   end
 
   test "launch gate: single-flight, result captured from exit reason", %{store: store} do

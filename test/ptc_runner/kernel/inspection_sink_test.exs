@@ -125,7 +125,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
 
     assert Enum.all?(
              [input, exception, output, source, analysis, prelude],
-             &(&1["schema_version"] == 7)
+             &(&1["schema_version"] == 8)
            )
 
     assert input["payload"]["environment"] == "mission"
@@ -194,7 +194,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
 
     assert {:ok, [request_record, response_record]} = InspectionSink.records(sink)
-    assert request_record["schema_version"] == 7
+    assert request_record["schema_version"] == 8
     assert request_record["payload"]["body"] == request
     assert response_record["payload"]["body"] == response
   end
@@ -290,7 +290,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              )
 
     assert {:ok, [prints_record, error_record]} = InspectionSink.records(sink)
-    assert prints_record["schema_version"] == 7
+    assert prints_record["schema_version"] == 8
     assert prints_record["correlation"] == %{"evaluation_id" => "eval-1"}
 
     assert prints_record["payload"] == %{
@@ -444,7 +444,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
              InspectionSink.emit(sink, "run-result", %{}, %{result_hash: hash, value: value})
 
     assert {:ok, [record]} = InspectionSink.records(sink)
-    assert record["schema_version"] == 7
+    assert record["schema_version"] == 8
     assert record["correlation"] == %{}
     assert record["payload"] == %{"result_hash" => hash, "value" => value}
 
@@ -1000,7 +1000,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
       records
       |> hd()
       |> Jason.encode!()
-      |> String.replace_prefix("{", ~S|{"schema_version":7,|)
+      |> String.replace_prefix("{", ~S|{"schema_version":8,|)
 
     File.write!(duplicate, duplicate_line <> "\n")
     assert {:error, :malformed_inspection_artifact} = InspectionArtifact.load(duplicate)
@@ -1032,7 +1032,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     )
 
     assert {:error,
-            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 7}}} =
+            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 8}}} =
              InspectionArtifact.load(unsupported)
 
     mixed = Path.join(dir, "mixed-schema.inspection.jsonl")
@@ -1042,7 +1042,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(mixed)
 
     capability_input = %{
-      "schema_version" => 7,
+      "schema_version" => 8,
       "run_id" => "run-1",
       "trace_id" => "trace-1",
       "sequence" => 1,
@@ -1257,7 +1257,7 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
     nested = Enum.reduce(1..64, true, fn _level, value -> [value] end)
 
     record = %{
-      "schema_version" => 7,
+      "schema_version" => 8,
       "run_id" => "deep",
       "trace_id" => "deep",
       "sequence" => 1,

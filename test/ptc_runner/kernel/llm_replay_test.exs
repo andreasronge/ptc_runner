@@ -517,6 +517,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       assert exhausted.envelope["error"]["subject"] == nil
       assert exhausted.envelope["error"]["provider_activity"] == true
       assert CommandContract.valid_envelope?(exhausted.envelope)
+      assert exhausted.envelope["execution"]["last_evaluation_error"] == nil
 
       assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
 
@@ -530,6 +531,96 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       assert stopped["data"]["limit"] == "agent_turns"
       assert stopped["data"]["limit_value"] == 2
       assert stopped["data"]["limit_reason"] == "protocol_error"
+    end
+
+    @tag :tmp_dir
+    test "a turn limit after a failed evaluation carries authenticated evaluator evidence", %{
+      tmp_dir: dir
+    } do
+      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
+
+      paths = write_application(dir)
+      write_agent_application(paths, ~S|(agent.core/run-value "Return 42" {"max_turns" 1})|)
+
+      assert {:error, %CommandOutcome{} = miss} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      request_hash = replay_request_hash(miss)
+
+      write(dir, [
+        %{
+          "request_hash" => request_hash,
+          "response" => %{
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "eval-bad",
+                "name" => "run_ptc_lisp",
+                "args" => %{"program" => "(/ 1 0)"}
+              }
+            ]
+          }
+        }
+      ])
+
+      assert {:error, %CommandOutcome{} = exhausted} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      assert exhausted.envelope["error"]["code"] == "turn_limit_exceeded",
+             inspect(exhausted.envelope)
+
+      assert exhausted.envelope["execution"]["last_evaluation_error"] == %{
+               "kind" => "arithmetic_error",
+               "message" => "division by zero"
+             }
+
+      assert CommandContract.valid_envelope?(exhausted.envelope)
+
+      assert {:stderr, rendered} = CommandRenderer.render(exhausted)
+      assert rendered =~ "error: execution/turn_limit_exceeded:"
+      assert rendered =~ "evaluation: arithmetic_error: division by zero"
+    end
+
+    @tag :tmp_dir
+    test "a turn limit after an intermediate result keeps last_evaluation_error null", %{
+      tmp_dir: dir
+    } do
+      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
+
+      paths = write_application(dir)
+      write_agent_application(paths, ~S|(agent.core/run-value "Return 42" {"max_turns" 1})|)
+
+      assert {:error, %CommandOutcome{} = miss} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      request_hash = replay_request_hash(miss)
+
+      write(dir, [
+        %{
+          "request_hash" => request_hash,
+          "response" => %{
+            "content" => nil,
+            "tool_calls" => [
+              %{
+                "id" => "continue",
+                "name" => "run_ptc_lisp",
+                "args" => %{"program" => "(def committed 42)"}
+              }
+            ]
+          }
+        }
+      ])
+
+      assert {:error, %CommandOutcome{} = exhausted} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      assert exhausted.envelope["error"]["code"] == "turn_limit_exceeded",
+             inspect(exhausted.envelope)
+
+      assert exhausted.envelope["execution"]["last_evaluation_error"] == nil
+      assert CommandContract.valid_envelope?(exhausted.envelope)
     end
 
     @tag :tmp_dir

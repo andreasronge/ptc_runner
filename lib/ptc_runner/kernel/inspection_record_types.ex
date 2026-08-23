@@ -9,7 +9,7 @@ defmodule PtcRunner.Kernel.InspectionRecordTypes do
   divergence either module is free to make on its own.
   """
 
-  @record_types ~w(capability-input capability-exception capability-output evaluation-source evaluation-analysis prelude-source mcp-request mcp-response mcp-stderr execution-prints execution-error run-result)
+  @record_types ~w(capability-input capability-exception capability-output evaluation-source evaluation-analysis prelude-source mcp-request mcp-response mcp-stderr execution-prints execution-error explicit-failure-value run-result)
   @max_exception_class_bytes 1_024
   @max_exception_message_bytes 4_096
   @max_exception_stacktrace_bytes 65_536

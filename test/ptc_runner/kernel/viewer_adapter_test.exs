@@ -43,11 +43,36 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
     assert {:ok, ^expected_preludes} = ViewerAdapter.preludes(grant, fixture.run_id)
     assert {:error, :inspection_run_mismatch} = ViewerAdapter.preludes(grant, "another-run")
 
+    assert {:ok, expected_errors} =
+             InspectionSnapshot.query(inspection, :execution_errors, %{
+               "run_id" => fixture.run_id,
+               "limit" => 1_000
+             })
+
+    assert {:ok, expected_failures} =
+             InspectionSnapshot.query(inspection, :explicit_failure_values, %{
+               "run_id" => fixture.run_id,
+               "limit" => 1_000
+             })
+
+    assert {:ok, ^expected_errors} = ViewerAdapter.execution_errors(grant, fixture.run_id)
+
+    assert {:ok, ^expected_failures} =
+             ViewerAdapter.explicit_failure_values(grant, fixture.run_id)
+
+    assert expected_failures["items"] != []
+
     project_source = {:inspection_snapshot, inspection}
     assert {:ok, ^expected} = ProjectViewerAdapter.conversation(project_source, fixture.run_id)
 
     assert {:ok, ^expected_preludes} =
              ProjectViewerAdapter.preludes(project_source, fixture.run_id)
+
+    assert {:ok, ^expected_errors} =
+             ProjectViewerAdapter.execution_errors(project_source, fixture.run_id)
+
+    assert {:ok, ^expected_failures} =
+             ProjectViewerAdapter.explicit_failure_values(project_source, fixture.run_id)
   end
 
   @tag :tmp_dir

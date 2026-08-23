@@ -11,7 +11,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   4. `docs/java-interop.md` — bounded Java interop reference
   5. `priv/schemas/ptc-host-config.schema.json` — host-installation JSON Schema
   6. `priv/schemas/ptc-application-manifest.schema.json` — manifest JSON Schema
-  7. `priv/schemas/ptc-command-envelope-v2.schema.json` — command envelope JSON Schema
+  7. `priv/schemas/ptc-command-envelope-v3.schema.json` — command envelope JSON Schema
   8. `priv/schemas/ptc-project-config.schema.json` — project launch JSON Schema
   9. `docs/kernel-limits-reference.md` — Kernel run-limit meanings and metadata
   10. `docs/prelude-reference.md` — shipped PTC-Lisp component and export catalog
@@ -51,7 +51,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   @audit_index_path "docs/conformance/index.md"
   @host_schema_path "priv/schemas/ptc-host-config.schema.json"
   @manifest_schema_path "priv/schemas/ptc-application-manifest.schema.json"
-  @command_schema_path "priv/schemas/ptc-command-envelope-v2.schema.json"
+  @command_schema_path "priv/schemas/ptc-command-envelope-v3.schema.json"
   @project_schema_path "priv/schemas/ptc-project-config.schema.json"
   @generated_schema_paths [
     @host_schema_path,

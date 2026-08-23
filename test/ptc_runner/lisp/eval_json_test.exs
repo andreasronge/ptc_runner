@@ -50,7 +50,7 @@ defmodule PtcRunner.Lisp.EvalJsonTest do
       assert {:error, %{fail: %{message: msg}}} =
                Lisp.run(~S|(json/parse-lines "{}" {:strict true})|)
 
-      assert msg =~ "parse_lines"
+      assert msg =~ "json/parse-lines"
       assert msg =~ "expects 1 argument"
     end
   end

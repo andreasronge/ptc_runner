@@ -108,6 +108,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
+  alias PtcRunner.Lisp.EvaluatorError
   alias PtcRunner.Lisp.NamespaceDiagnostic
   alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.Lisp.ValuePreview
@@ -1592,13 +1593,20 @@ defmodule PtcRunner.ReplFrontend do
     info(preview.text)
   end
 
-  defp format_error(%{fail: %{reason: reason, message: message}} = step, session, render)
+  defp format_error(
+         %{fail: %{reason: reason, message: message, details: details}} = step,
+         session,
+         render
+       )
        when is_atom(reason) and is_binary(message) do
-    # Lisp.format_error/1 already renders "#{reason}: …". Strip that once so the
-    # REPL wrapper is the only kind spelling on the line.
-    body = String.replace_prefix(message, "#{reason}: ", "")
+    case EvaluatorError.public_evidence(reason, details || %{}) do
+      {:ok, %{kind: kind, message: public_message}} ->
+        "Error (#{kind}): " <> mission_hint(step, session, render) <> public_message
 
-    "Error (#{reason}): " <> mission_hint(step, session, render) <> body
+      :error ->
+        body = String.replace_prefix(message, "#{reason}: ", "")
+        "Error (#{reason}): " <> mission_hint(step, session, render) <> body
+    end
   end
 
   defp format_error(%{fail: %{reason: reason, message: message}} = step, session, render),

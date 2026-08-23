@@ -26,13 +26,15 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   trusted component-override descriptors, so an effective-prelude result can
   be copied into `base_source_hash` without reinterpretation.
 
-  Execution-phase diagnostics (`execution-prints`, `execution-error`) are
+  Execution-phase diagnostics (`execution-prints`, `execution-error`,
+  `explicit-failure-value`) are
   exposed as run-scoped collections alongside their counts in each `list_runs`
   row. Their items retain the correlated `evaluation_id`, sequence, timestamp,
   environment, and exact bounded diagnostic payload.
   Projections include `mission_name` on every mission-owned result so
   repeated component and capability names remain unambiguous.
-  V7 adds correlated private callback exception diagnostics to capability
+  V8 adds the dedicated `explicit-failure-value` collection. V7 added
+  correlated private callback exception diagnostics to capability
   attempts. V6 added one singular, non-paginated terminal `result` projection per run and
   joins static prelude-call analysis to generated source by `evaluation_id`.
   Generated source and reconstructed turns copy the canonical
@@ -60,6 +62,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     :provider_exchanges,
     :execution_prints,
     :execution_errors,
+    :explicit_failure_values,
     :result
   ]
 
@@ -74,6 +77,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
           | :provider_exchanges
           | :execution_prints
           | :execution_errors
+          | :explicit_failure_values
           | :result
 
   @spec compile([[map()]], binary(), map()) ::
@@ -152,6 +156,11 @@ defmodule PtcRunner.Kernel.InspectionQuery do
         |> records_of_type("execution-error")
         |> Enum.map(&execution_item/1)
 
+      explicit_failure_values =
+        records
+        |> records_of_type("explicit-failure-value")
+        |> Enum.map(&execution_item/1)
+
       result =
         records
         |> Enum.find(&(&1["record_type"] == "run-result"))
@@ -168,7 +177,8 @@ defmodule PtcRunner.Kernel.InspectionQuery do
         "effective_preludes" => length(effective_preludes),
         "provider_exchanges" => length(provider_pairs),
         "execution_prints" => length(execution_prints),
-        "execution_errors" => length(execution_errors)
+        "execution_errors" => length(execution_errors),
+        "explicit_failure_values" => length(explicit_failure_values)
       }
 
       {:ok,
@@ -189,6 +199,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
          provider_exchanges: provider_pairs,
          execution_prints: execution_prints,
          execution_errors: execution_errors,
+         explicit_failure_values: explicit_failure_values,
          result: result
        }}
     end
@@ -447,6 +458,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       provider_exchanges: merge_collection(compiled, :provider_exchanges),
       execution_prints: merge_collection(compiled, :execution_prints),
       execution_errors: merge_collection(compiled, :execution_errors),
+      explicit_failure_values: merge_collection(compiled, :explicit_failure_values),
       results: compiled |> Enum.map(& &1.result) |> Enum.reject(&is_nil/1)
     }
 
@@ -604,7 +616,8 @@ defmodule PtcRunner.Kernel.InspectionQuery do
               :effective_preludes,
               :provider_exchanges,
               :execution_prints,
-              :execution_errors
+              :execution_errors,
+              :explicit_failure_values
             ] do
     allowed = ~w(run_id limit cursor order) ++ collection_filters(operation)
 
@@ -666,8 +679,9 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   defp collection_filters(:effective_preludes),
     do: ~w(component_id environment mission_name)
 
-  defp collection_filters(operation) when operation in [:execution_prints, :execution_errors],
-    do: ["evaluation_id"]
+  defp collection_filters(operation)
+       when operation in [:execution_prints, :execution_errors, :explicit_failure_values],
+       do: ["evaluation_id"]
 
   defp validate_filter_values(arguments, filters) do
     valid? =

@@ -43,6 +43,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.DataKeys
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.TrustedTool
 
   @missing_data_params_message "data/params is not available because this evaluation supplied no params. " <>
@@ -411,16 +412,13 @@ defmodule PtcRunner.Kernel.Evaluation do
            mission_name
          ) do
       :ok ->
-        classify_evaluation_result(
-          result,
-          state,
-          environment,
-          lease,
-          history,
-          mission_calls_before,
-          projection_boundary,
-          result_limit_bytes
-        )
+        classify_evaluation_result(result, state, environment, lease, %{
+          history: history,
+          mission_calls_before: mission_calls_before,
+          projection_boundary: projection_boundary,
+          result_limit_bytes: result_limit_bytes,
+          evaluation_id: evaluation_id
+        })
 
       {:error, :inspection_sink_error} ->
         :ok = RunState.release_evaluation(state, lease)
@@ -434,13 +432,18 @@ defmodule PtcRunner.Kernel.Evaluation do
          state,
          environment,
          lease,
-         history,
-         mission_calls_before,
-         projection_boundary,
-         result_limit_bytes
+         %{
+           history: history,
+           mission_calls_before: mission_calls_before,
+           projection_boundary: projection_boundary,
+           result_limit_bytes: result_limit_bytes,
+           evaluation_id: evaluation_id
+         }
        ) do
     case result do
       {:ok, %{return: {:__ptc_fail__, value}} = step} ->
+        :ok = RunState.clear_last_evaluator_failure(state)
+
         release_explicit_failure(
           state,
           environment,
@@ -455,6 +458,8 @@ defmodule PtcRunner.Kernel.Evaluation do
         |> put_terminal_host_failure(step)
 
       {:ok, step} ->
+        :ok = RunState.clear_last_evaluator_failure(state)
+
         commit_result(
           state,
           environment,
@@ -469,9 +474,31 @@ defmodule PtcRunner.Kernel.Evaluation do
         |> put_terminal_host_failure(step)
 
       {:error, step} ->
+        # Every completed evaluation owns the slot. Clear first so a later
+        # unadmitted kind cannot leave a previous catalogued failure attached
+        # to a subsequent turn-limit publication.
+        maybe_record_evaluator_failure(state, evaluation_id, step)
+
         release_failure(state, environment, lease, step, mission_calls_before)
         |> put_terminal_provider_failure(step)
         |> put_terminal_host_failure(step)
+    end
+  end
+
+  defp maybe_record_evaluator_failure(state, evaluation_id, step) do
+    :ok = RunState.clear_last_evaluator_failure(state)
+    reason = step.fail.reason
+    details = step.fail.details || %{}
+
+    if EvaluatorErrorCatalog.kind?(reason) do
+      RunState.record_last_evaluator_failure(state, %{
+        evaluation_id: evaluation_id,
+        environment: :mission,
+        kind: reason,
+        details: details
+      })
+    else
+      :ok
     end
   end
 

@@ -67,8 +67,8 @@ defmodule PtcRunner.Kernel.CommandRenderer do
       } ->
         {:stdout, json_line(result)}
 
-      %{"status" => "error", "run_ref" => run_ref} ->
-        {:stderr, failure_line(outcome, run_ref, rejection)}
+      %{"status" => "error", "run_ref" => run_ref} = envelope ->
+        {:stderr, failure_line(outcome, run_ref, rejection) <> evaluation_line(envelope)}
     end
   rescue
     _exception ->
@@ -119,6 +119,16 @@ defmodule PtcRunner.Kernel.CommandRenderer do
     {:ok, rendered} = CommandDiagnosticRenderer.render_with_run_ref(diagnostic, run_ref)
     "error: " <> rendered <> rejection_suffix(rejection) <> "\n"
   end
+
+  defp evaluation_line(%{
+         "execution" => %{
+           "last_evaluation_error" => %{"kind" => kind, "message" => message}
+         }
+       })
+       when is_binary(kind) and is_binary(message) and kind != "" and message != "",
+       do: "evaluation: #{kind}: #{message}\n"
+
+  defp evaluation_line(_envelope), do: ""
 
   defp rejection_suffix(%CommandRejection{kind: :unknown_switch, accepted: accepted}),
     do: "; unknown switch; accepted: " <> Enum.join(accepted, ", ")

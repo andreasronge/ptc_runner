@@ -470,6 +470,51 @@ defmodule PtcRunner.LiveStatusTest do
     assert frame.outcome_reason == expected
   end
 
+  test "an evaluator failure reaches the card with typed last_evaluation_error" do
+    parent = self()
+    {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "live-eval-div-zero")
+    {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
+
+    assert {:error, %{kind: :evaluation_failed, reason: :arithmetic_error}} =
+             PtcRunner.LiveStatus.with_target(target, fn ->
+               Kernel.run(~S[(return (/ 1 0))], config)
+             end)
+
+    assert_receive {:live_frame,
+                    %{
+                      phase: "error",
+                      last_evaluation_error: %{
+                        "kind" => "arithmetic_error",
+                        "message" => "division by zero"
+                      }
+                    }},
+                   2_000
+  end
+
+  test "a private evaluator failure keeps last_evaluation_error null on the live frame" do
+    parent = self()
+    {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "live-eval-private")
+    {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
+
+    assert {:error, %{kind: :workflow_failed, details: %{message: "private workflow failed"}}} =
+             PtcRunner.LiveStatus.with_target(target, fn ->
+               Kernel.run(~S[(return (/ 1 0))], config)
+             end)
+
+    assert_receive {:live_frame, %{phase: "error", last_evaluation_error: nil} = frame}, 2_000
+    assert frame.outcome_reason == "private workflow failed"
+    refute inspect(frame) =~ "arithmetic_error"
+    refute inspect(frame) =~ "division by zero"
+  end
+
   test "a real run deadline reports the configured run-duration ceiling" do
     parent = self()
     {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)

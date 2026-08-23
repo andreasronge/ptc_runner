@@ -74,6 +74,16 @@ defmodule PtcRunner.Kernel.ViewerAdapter do
   @doc "Returns the pinned run's exact effective prelude sources."
   def preludes(grant, run_id), do: inspection_collection(grant, run_id, :effective_preludes)
 
+  @spec execution_errors(inspection_grant(), binary()) :: {:ok, map()} | {:error, atom()}
+  @doc "Returns the pinned run's authorized workflow execution-error records."
+  def execution_errors(grant, run_id),
+    do: inspection_collection(grant, run_id, :execution_errors)
+
+  @spec explicit_failure_values(inspection_grant(), binary()) :: {:ok, map()} | {:error, atom()}
+  @doc "Returns the pinned run's dedicated explicit-failure-value records."
+  def explicit_failure_values(grant, run_id),
+    do: inspection_collection(grant, run_id, :explicit_failure_values)
+
   defp inspection_collection({:inspection_v3, granted_run_id, compiled}, run_id, operation)
        when is_binary(granted_run_id) and is_map(compiled) and is_binary(run_id) do
     if granted_run_id == run_id do

@@ -184,7 +184,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       |> Enum.with_index(1)
       |> Enum.map(fn {mission_name, sequence} ->
         %{
-          "schema_version" => 7,
+          "schema_version" => 8,
           "run_id" => "qualified-preludes",
           "trace_id" => "trace-qualified-preludes",
           "sequence" => sequence,
@@ -310,7 +310,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:ok,
             %{
-              "items" => [%{"run_id" => "mcp-run", "schema_version" => 7}],
+              "items" => [%{"run_id" => "mcp-run", "schema_version" => 8}],
               "next_cursor" => nil,
               "snapshot_hash" => ^snapshot_hash
             }} =
@@ -626,6 +626,21 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
               "next_cursor" => nil
             }} =
              InspectionSnapshot.query(snapshot, :execution_errors, %{
+               "run_id" => "diagnostics-run"
+             })
+
+    assert {:ok,
+            %{
+              "items" => [
+                %{
+                  "evaluation_id" => "workflow-eval-diagnostics-run",
+                  "environment" => "workflow",
+                  "value" => nil
+                }
+              ],
+              "next_cursor" => nil
+            }} =
+             InspectionSnapshot.query(snapshot, :explicit_failure_values, %{
                "run_id" => "diagnostics-run"
              })
   end
@@ -957,7 +972,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
 
     assert {:error,
-            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 7}}} =
+            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 8}}} =
              InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
   end
 
@@ -1307,7 +1322,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
   defp inspection_record(run_id, trace_id, sequence, record_type, correlation, payload) do
     %{
-      "schema_version" => 7,
+      "schema_version" => 8,
       "run_id" => run_id,
       "trace_id" => trace_id,
       "sequence" => sequence,

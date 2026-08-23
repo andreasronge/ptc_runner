@@ -200,6 +200,88 @@ defmodule PtcViewer.KernelTranscriptTest do
     refute rendered =~ "explicit_failure"
   end
 
+  test "renders a second evaluation fact from live or envelope evidence", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "eval-evidence-run", "status" => "error"},
+        "last_evaluation_error" => %{
+          "kind" => "arithmetic_error",
+          "message" => "division by zero"
+        },
+        "turns" => %{
+          "items" => [
+            event(1, "run-started", %{}),
+            event(2, "run-stopped", %{
+              "outcome" => "error",
+              "reason" => "arithmetic_error",
+              "failure_kind" => "evaluation-unavailable"
+            })
+          ]
+        }
+      })
+
+    assert rendered =~ "Run stopped"
+    assert rendered =~ "evaluation unavailable"
+    assert rendered =~ "Evaluation"
+    assert rendered =~ "evaluation: arithmetic_error: division by zero"
+  end
+
+  test "renders authorized inspection evaluator evidence as distinct facts", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "inspect-evidence-run", "status" => "error"},
+        "execution_errors" => %{
+          "items" => [
+            %{
+              "evaluation_id" => "workflow-eval-1",
+              "kind" => "workflow_failed",
+              "reason" => "not_callable",
+              "details" => %{}
+            }
+          ]
+        },
+        "explicit_failure_values" => %{
+          "items" => [
+            %{
+              "evaluation_id" => "workflow-eval-1",
+              "value" => nil
+            }
+          ]
+        },
+        "turns" => %{
+          "items" => [
+            event(1, "run-started", %{}),
+            event(2, "run-stopped", %{"outcome" => "error", "failure_kind" => "workflow-failed"})
+          ]
+        }
+      })
+
+    assert rendered =~ "Authorized execution error"
+    assert rendered =~ "workflow_failed: not_callable"
+    assert rendered =~ "Explicit failure value"
+    assert rendered =~ "null"
+  end
+
+  test "does not invent an evaluation fact without authenticated evidence", %{tmp_dir: directory} do
+    rendered =
+      render(directory, %{
+        "metadata" => %{"run_id" => "no-eval-evidence-run", "status" => "error"},
+        "turns" => %{
+          "items" => [
+            event(1, "run-started", %{}),
+            event(2, "run-stopped", %{
+              "outcome" => "error",
+              "reason" => "arithmetic_error",
+              "failure_kind" => "evaluation-unavailable"
+            })
+          ]
+        }
+      })
+
+    assert rendered =~ "Run stopped"
+    refute rendered =~ "evaluation: arithmetic_error"
+  end
+
   test "counts the errored rows the transcript renders, not the run outcome", %{
     tmp_dir: directory
   } do

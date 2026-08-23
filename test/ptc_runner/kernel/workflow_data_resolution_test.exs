@@ -24,12 +24,11 @@ defmodule PtcRunner.Kernel.WorkflowDataResolutionTest do
     assert missing =~ "data/tickets"
     refute missing =~ @sentinel
 
-    assert {:error,
-            %{kind: :workflow_failed, reason: :not_callable, details: %{message: not_callable}}} =
+    assert {:error, %{kind: :evaluation_failed, reason: :not_callable, details: details}} =
              run_entry("(return (data/tickets))", input)
 
-    assert not_callable =~ "not callable: data/tickets"
-    refute not_callable =~ @sentinel
+    assert details[:name] == "data/tickets"
+    refute inspect(details) =~ @sentinel
   end
 
   test "a workflow entry names no params entry point in its missing-grant diagnostic" do

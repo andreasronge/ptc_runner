@@ -62,6 +62,19 @@ defmodule PtcRunner.ReplFrontendTest do
                "(first at line 1, column 8)\n"
   end
 
+  test "direct eval uses the public arithmetic renderer" do
+    output =
+      capture_io(:stderr, fn ->
+        error = assert_raise Mix.Error, fn -> run_repl(["-e", "(/ 1 0)"]) end
+
+        assert error.message =~ "Error (arithmetic_error): division by zero"
+        refute error.message =~ "PtcRunner.Lisp"
+      end)
+
+    assert output =~ "Error (arithmetic_error): division by zero"
+    refute output =~ "PtcRunner.Lisp"
+  end
+
   test "direct eval retains canonical unknown-namespace guidance" do
     expected =
       "Error (invalid_form): " <> NamespaceDiagnostic.message("kernel")
@@ -393,7 +406,7 @@ defmodule PtcRunner.ReplFrontendTest do
         run_repl(["--manifest", manifest_path, "-e", "(data/input)"])
       end
 
-    assert error.message =~ "not callable: data/input"
+    assert error.message =~ "data/input is not callable"
     assert error.message =~ "--mission NAME"
     assert error.message =~ "declared: review, writing"
   end
@@ -431,7 +444,7 @@ defmodule PtcRunner.ReplFrontendTest do
         ])
       end
 
-    assert error.message =~ "not callable:"
+    assert error.message =~ "value is not callable"
     refute error.message =~ "--mission NAME"
   end
 
@@ -467,7 +480,7 @@ defmodule PtcRunner.ReplFrontendTest do
         ])
       end
 
-    assert error.message =~ "not callable:"
+    assert error.message =~ "value is not callable"
     refute error.message =~ "--mission NAME"
   end
 
@@ -546,7 +559,7 @@ defmodule PtcRunner.ReplFrontendTest do
         ])
       end
 
-    assert called.message =~ "not callable: data/tickets"
+    assert called.message =~ "data/tickets is not callable"
     refute called.message =~ sentinel
   end
 
@@ -1011,7 +1024,7 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "inspection analysis recursively reads a private V7 trace and correlated result", %{
+  test "inspection analysis recursively reads a private V8 trace and correlated result", %{
     tmp_dir: directory
   } do
     value = %{"answer" => 42}
@@ -1116,6 +1129,7 @@ defmodule PtcRunner.ReplFrontendTest do
              "evaluation_analyses" => 0,
              "execution_errors" => 0,
              "execution_prints" => 0,
+             "explicit_failure_values" => 0,
              "generated_sources" => 0,
              "incomplete_capability_calls" => 1,
              "incomplete_model_exchanges" => 1,
@@ -1152,7 +1166,7 @@ defmodule PtcRunner.ReplFrontendTest do
     PrivateInspectionFixture.rewrite_schema!(fixture.inspection, 4)
 
     message =
-      ~r/ptc repl profile setup failed: an inspection artifact declares schema version 4; this build supports version 7/
+      ~r/ptc repl profile setup failed: an inspection artifact declares schema version 4; this build supports version 8/
 
     capture_io(fn ->
       assert_raise Mix.Error, message, fn ->

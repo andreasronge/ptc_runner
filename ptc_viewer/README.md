@@ -185,6 +185,8 @@ live ingestion and controls, not the trace browser as a whole.
 | `GET /api/kernel/counters` | `counters` |
 | `GET /api/analysis/runs/:run_id/conversation` | Presentation over the bounded `turns` collection |
 | `GET /api/analysis/runs/:run_id/preludes` | Bounded effective prelude sources from the pinned inspection projection |
+| `GET /api/analysis/runs/:run_id/execution-errors` | Authorized workflow execution-error records from the pinned inspection projection |
+| `GET /api/analysis/runs/:run_id/explicit-failure-values` | Dedicated explicit-failure-value records from the pinned inspection projection |
 | `GET /api/repl` | Bootstrap or refresh the server-owned analysis session |
 | `POST /api/repl/evaluations` | Evaluate one bounded PTC-Lisp form |
 | `POST /api/repl/templates` | Format an inert `analysis/open` or `analysis/read` editor template |

@@ -48,6 +48,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     :provider_exchanges,
     :execution_prints,
     :execution_errors,
+    :explicit_failure_values,
     :result
   ]
 

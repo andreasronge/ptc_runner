@@ -23,7 +23,7 @@ Four schemas declare an absolute `$id` under this origin:
 https://ptc-runner.dev/schemas/ptc-project-config.schema.json
 https://ptc-runner.dev/schemas/ptc-application-manifest.schema.json
 https://ptc-runner.dev/schemas/ptc-host-config.schema.json
-https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json
+https://ptc-runner.dev/schemas/ptc-command-envelope-v3.schema.json
 ```
 
 Those paths are a shipped contract. Every `*.ptc-project.json` under

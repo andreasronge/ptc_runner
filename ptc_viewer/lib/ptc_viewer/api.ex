@@ -23,6 +23,13 @@ defmodule PtcViewer.Api do
   @doc "Delegates private effective-prelude source retrieval to the configured host adapter."
   def preludes(config, run_id), do: inspection_query(config, :preludes, run_id)
 
+  @doc "Delegates authorized workflow execution-error records to the host adapter."
+  def execution_errors(config, run_id), do: inspection_query(config, :execution_errors, run_id)
+
+  @doc "Delegates dedicated explicit-failure-value records to the host adapter."
+  def explicit_failure_values(config, run_id),
+    do: inspection_query(config, :explicit_failure_values, run_id)
+
   defp inspection_query(config, operation, run_id)
        when is_list(config) and is_binary(run_id) do
     store = Keyword.get(config, :inspection_store)

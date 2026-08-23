@@ -567,6 +567,11 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       reason: :timeout,
       details: %{"limit" => "run_duration_ms", "limit_ms" => 1_000}
     })
+
+    emit!(sink, "explicit-failure-value", %{evaluation_id: "workflow-eval-#{run_id}"}, %{
+      environment: :workflow,
+      value: nil
+    })
   end
 
   def workflow_evaluation_event(run_id, sequence) do

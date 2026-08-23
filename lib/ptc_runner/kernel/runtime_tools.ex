@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractDiagnostic
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Lisp.TrustedError
@@ -197,7 +198,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
         %{"agent_turns" => limit, "reason" => reason}
         when map_size(arguments) == 2 and limit in 1..128 ->
-          agent_turn_limit_failure(limit, reason)
+          agent_turn_limit_failure(state, limit, reason)
 
         # The transcript ceiling is a bound the caller set in the input document
         # it just wrote, so it reports itself the way the turn limit does rather
@@ -226,19 +227,44 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   # The loop reports why it stopped, not only that it stopped. An unrecognised
   # reason is refused rather than collapsed into the ordinary exhaustion case:
   # a wrong explanation costs the reader more than a missing one.
-  defp agent_turn_limit_failure(limit, reason) do
+  defp agent_turn_limit_failure(state, limit, reason) do
     case RuntimeLimitDiagnostic.agent_turns_reason(reason) do
       {:ok, reason} ->
+        details =
+          %{limit: :agent_turns, limit_value: limit, limit_reason: reason}
+          |> attach_authenticated_evaluator_failure(state, reason)
+
         %TrustedError{
           reason: :runtime_limit_exceeded,
           message: "agent turn limit exceeded",
-          details: %{limit: :agent_turns, limit_value: limit, limit_reason: reason}
+          details: details
         }
 
       :error ->
         invalid_runtime_limit_failure()
     end
   end
+
+  defp attach_authenticated_evaluator_failure(details, state, :evaluation_error) do
+    case RunState.last_evaluator_failure(state) do
+      {:ok, %{kind: kind, details: eval_details} = evidence} ->
+        if EvaluatorErrorCatalog.kind?(kind) and is_map(eval_details) do
+          Map.put(details, :last_evaluator_failure, %{
+            kind: kind,
+            details: eval_details,
+            evaluation_id: Map.get(evidence, :evaluation_id),
+            environment: Map.get(evidence, :environment)
+          })
+        else
+          details
+        end
+
+      :error ->
+        details
+    end
+  end
+
+  defp attach_authenticated_evaluator_failure(details, _state, _reason), do: details
 
   defp model_output_truncation_failure(value, bindings, alias_name) do
     with {:ok, limit} <-

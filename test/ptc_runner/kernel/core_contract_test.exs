@@ -3497,6 +3497,22 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert %{subordinate_source_checks: 3, subordinate_evaluations: 3} = RunState.usage(state)
   end
 
+  test "a later unadmitted evaluation failure clears authenticated evaluator evidence" do
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(subordinate_evaluations: 4)
+    {:ok, state} = RunState.start(limits)
+
+    assert %{outcome: :evaluation_error, kind: :arithmetic_error} =
+             Evaluation.evaluate_source(state, "default", mission, "(/ 1 0)", 1_000)
+
+    assert {:ok, %{kind: :arithmetic_error}} = RunState.last_evaluator_failure(state)
+
+    assert %{outcome: :evaluation_error, kind: :type_error} =
+             Evaluation.evaluate_source(state, "default", mission, "(> nil 1)", 1_000)
+
+    assert :error = RunState.last_evaluator_failure(state)
+  end
+
   test "source-check diagnostics truncate multi-codepoint graphemes by bytes" do
     {:ok, mission} = MissionEnvironment.new([])
     limits = Limits.defaults()

@@ -57,11 +57,12 @@ application content identity.</p>
 </div>
 
 <div class="schema">
-  <h3><a href="/schemas/ptc-command-envelope-v2.schema.json">ptc-command-envelope-v2.schema.json</a></h3>
-  <p>The V2 command envelope written by <code>ptc run --envelope FILE</code>. An atomic,
+  <h3><a href="/schemas/ptc-command-envelope-v3.schema.json">ptc-command-envelope-v3.schema.json</a></h3>
+  <p>The V3 command envelope written by <code>ptc run --envelope FILE</code>. An atomic,
   no-replace file whose status and exit-code relationship is sealed by the command contract —
-  parse this instead of stdout.</p>
-  <span class="url mono">https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json</span>
+  parse this instead of stdout. Failed-run execution objects include
+  <code>last_evaluation_error</code>.</p>
+  <span class="url mono">https://ptc-runner.dev/schemas/ptc-command-envelope-v3.schema.json</span>
 </div>
 
 <p class="muted-note">Each schema above is published verbatim from <code>priv/schemas/</code> in

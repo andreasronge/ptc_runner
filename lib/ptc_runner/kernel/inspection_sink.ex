@@ -2,10 +2,11 @@ defmodule PtcRunner.Kernel.InspectionSink do
   @moduledoc """
   Required, bounded in-memory owner for sensitive developer inspection records.
 
-  Capture is host-enabled, fail-closed, and V7-only. The closed vocabulary
+  Capture is host-enabled, fail-closed, and V8-only. The closed vocabulary
   contains capability input/exception/output, subordinate evaluation source and static
   prelude-call analysis, effective prelude source, correlated exact MCP
-  request/response bodies, and workflow execution prints/errors, plus at most
+  request/response bodies, workflow execution prints/errors, one dedicated
+  explicit-failure-value record, plus at most
   one strictly JSON terminal result bound to its deterministic canonical hash.
   Mission-owned source, analysis, capability, prelude, and MCP records require
   `mission_name`; workflow-owned records forbid it. Other record types normalize
@@ -183,7 +184,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
        owner_transferable?: true,
        run_id: run_id,
        trace_id: trace_id,
-       schema_version: 7,
+       schema_version: 8,
        max_record_bytes: max_record_bytes,
        max_total_bytes: max_total_bytes,
        sequence: 0,
@@ -330,7 +331,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     end
   end
 
-  defp shape("run-result", correlation, payload, 7) do
+  defp shape("run-result", correlation, payload, 8) do
     valid? =
       if correlation == %{} and exact_payload(payload, ~w(result_hash value)) and
            ResultIdentity.valid_hash?(payload["result_hash"]) do
@@ -342,7 +343,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     ok_or_error(valid?)
   end
 
-  defp shape("capability-input", %{"capability_id" => id}, payload, 7) do
+  defp shape("capability-input", %{"capability_id" => id}, payload, 8) do
     valid? =
       valid_id?(id) and
         ((payload["environment"] == "workflow" and
@@ -355,10 +356,10 @@ defmodule PtcRunner.Kernel.InspectionSink do
     ok_or_error(valid?)
   end
 
-  defp shape("capability-exception", %{"capability_id" => id}, payload, 7),
+  defp shape("capability-exception", %{"capability_id" => id}, payload, 8),
     do: ok_or_error(InspectionRecordTypes.valid_capability_exception?(id, payload))
 
-  defp shape("capability-output", %{"capability_id" => id}, payload, 7) do
+  defp shape("capability-output", %{"capability_id" => id}, payload, 8) do
     valid? =
       valid_id?(id) and
         ((payload["environment"] == "workflow" and
@@ -371,7 +372,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     ok_or_error(valid?)
   end
 
-  defp shape("evaluation-source", %{"evaluation_id" => id}, payload, 7) do
+  defp shape("evaluation-source", %{"evaluation_id" => id}, payload, 8) do
     valid? =
       exact_payload(
         payload,
@@ -384,7 +385,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     ok_or_error(valid?)
   end
 
-  defp shape("evaluation-analysis", %{"evaluation_id" => id}, payload, 7) do
+  defp shape("evaluation-analysis", %{"evaluation_id" => id}, payload, 8) do
     valid? =
       exact_payload(payload, ~w(environment mission_name prelude_calls)) and valid_id?(id) and
         valid_id?(payload["mission_name"]) and payload["environment"] == "mission" and
@@ -393,7 +394,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     ok_or_error(valid?)
   end
 
-  defp shape("prelude-source", %{"component_id" => id}, payload, 7) do
+  defp shape("prelude-source", %{"component_id" => id}, payload, 8) do
     valid? =
       valid_id?(id) and
         ((payload["environment"] == "workflow" and
@@ -407,7 +408,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     ok_or_error(valid?)
   end
 
-  defp shape(record_type, correlation, payload, 7)
+  defp shape(record_type, correlation, payload, 8)
        when record_type in ["mcp-request", "mcp-response"] do
     request_id = correlation["request_id"]
 
@@ -423,10 +424,10 @@ defmodule PtcRunner.Kernel.InspectionSink do
     ok_or_error(valid?)
   end
 
-  defp shape("mcp-stderr", correlation, payload, 7),
+  defp shape("mcp-stderr", correlation, payload, 8),
     do: ok_or_error(InspectionRecordTypes.valid_mcp_stderr?(correlation, payload))
 
-  defp shape("execution-prints", %{"evaluation_id" => id}, payload, 7) do
+  defp shape("execution-prints", %{"evaluation_id" => id}, payload, 8) do
     valid? =
       exact_payload(payload, ~w(environment prints truncated)) and valid_id?(id) and
         payload["environment"] == "workflow" and
@@ -436,7 +437,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     ok_or_error(valid?)
   end
 
-  defp shape("execution-error", %{"evaluation_id" => id}, payload, 7) do
+  defp shape("execution-error", %{"evaluation_id" => id}, payload, 8) do
     valid? =
       exact_payload(payload, ~w(environment kind reason details)) and valid_id?(id) and
         payload["environment"] == "workflow" and
@@ -447,7 +448,15 @@ defmodule PtcRunner.Kernel.InspectionSink do
     ok_or_error(valid?)
   end
 
-  defp shape(_record_type, _correlation, _payload, 7), do: {:error, :invalid_record}
+  defp shape("explicit-failure-value", %{"evaluation_id" => id}, payload, 8) do
+    valid? =
+      exact_payload(payload, ~w(environment value)) and valid_id?(id) and
+        payload["environment"] == "workflow" and JSONValue.value?(payload["value"])
+
+    ok_or_error(valid?)
+  end
+
+  defp shape(_record_type, _correlation, _payload, 8), do: {:error, :invalid_record}
 
   # `normalize/1` recurses, so nesting is bounded before it runs. The retained
   # record wraps correlation and payload at exactly one level, so bounding that
@@ -473,7 +482,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     }
   end
 
-  defp validate_raw_result("run-result", payload, 7) when is_map(payload) do
+  defp validate_raw_result("run-result", payload, 8) when is_map(payload) do
     case {Map.fetch(payload, :value), Map.fetch(payload, "value")} do
       {{:ok, value}, :error} -> strict_json(value)
       {:error, {:ok, value}} -> strict_json(value)
@@ -481,7 +490,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     end
   end
 
-  defp validate_raw_result("run-result", _payload, 7), do: {:error, :invalid_record}
+  defp validate_raw_result("run-result", _payload, 8), do: {:error, :invalid_record}
   defp validate_raw_result(_record_type, _payload, _schema_version), do: :ok
 
   defp strict_json(value) do

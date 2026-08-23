@@ -279,11 +279,16 @@ async function fetchAllTurns(runId) {
 }
 
 async function loadRun(runId, routeGeneration) {
-  const [runResponse, turnsResult, conversationResponse, preludesResponse] = await Promise.all([
+  const [
+    runResponse, turnsResult, conversationResponse, preludesResponse,
+    executionErrorsResponse, explicitFailureValuesResponse
+  ] = await Promise.all([
     fetch(`/api/kernel/runs/${encodeURIComponent(runId)}`),
     fetchAllTurns(runId),
     fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/conversation`),
-    fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/preludes`)
+    fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/preludes`),
+    fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/execution-errors`),
+    fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/explicit-failure-values`)
   ]);
 
   await commitCurrentLoad(routeGeneration, {
@@ -312,13 +317,30 @@ async function loadRun(runId, routeGeneration) {
             status: preludesResponse.status,
             reason: await safeBodyText(preludesResponse)
           };
+      const execution_errors = executionErrorsResponse.ok
+        ? await executionErrorsResponse.json()
+        : {
+            'available?': false,
+            status: executionErrorsResponse.status,
+            reason: await safeBodyText(executionErrorsResponse)
+          };
+      const explicit_failure_values = explicitFailureValuesResponse.ok
+        ? await explicitFailureValuesResponse.json()
+        : {
+            'available?': false,
+            status: explicitFailureValuesResponse.status,
+            reason: await safeBodyText(explicitFailureValuesResponse)
+          };
 
       return {
         data: {
           metadata: await runResponse.json(),
           turns: turnsResult.turns,
           conversation,
-          preludes
+          preludes,
+          execution_errors,
+          explicit_failure_values,
+          last_evaluation_error: state.live?.lastEvaluationError?.(runId) || null
         }
       };
     },
@@ -385,6 +407,9 @@ function renderRun(data, { fresh = false, routeGeneration = state.routeGeneratio
             metadata,
             conversation,
             preludes: data.preludes,
+            execution_errors: data.execution_errors,
+            explicit_failure_values: data.explicit_failure_values,
+            last_evaluation_error: data.last_evaluation_error || null,
             turns: {
               ...result.nextPage,
               items: [...(turns.items || []), ...(result.nextPage.items || [])]
