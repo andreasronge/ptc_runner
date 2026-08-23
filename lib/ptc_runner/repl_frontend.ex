@@ -101,6 +101,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.AnalysisSessionBuilder
   alias PtcRunner.Kernel.AnalysisTerminal
   alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandDiagnosticRenderer
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.DirectorySeparation
@@ -1283,6 +1284,12 @@ defmodule PtcRunner.ReplFrontend do
     else
       {:error, %{code: :unknown_mission, declared: declared}} ->
         fail("unknown mission #{inspect(opts[:mission])}; declared: #{Enum.join(declared, ", ")}")
+
+      {:error, %{code: code, diagnostic: diagnostic}} ->
+        case CommandDiagnosticRenderer.render(diagnostic) do
+          {:ok, rendered} -> fail(rendered)
+          {:error, :invalid_command_diagnostic} -> fail(manifest_repl_error(code))
+        end
 
       {:error, %{code: code}} ->
         fail(manifest_repl_error(code))

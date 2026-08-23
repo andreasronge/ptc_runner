@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandDiagnosticRenderer
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandFrontend
@@ -949,6 +950,27 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
               "error: active_preflight/credential_unavailable: " <>
                 "provider/deepseek/credentials: a required provider credential is unavailable " <>
                 "(run_ref: #{@run_ref}); export it, pass --env-file PATH, or use a host file credential\n"}
+
+    assert CommandDiagnosticRenderer.render(credential_outcome.envelope["error"]) ==
+             {:error, :invalid_command_diagnostic}
+
+    credential_diagnostic =
+      CommandDiagnostic.new!(:active_preflight, :credential_unavailable,
+        subject: credential_subject
+      )
+
+    assert CommandDiagnosticRenderer.render(credential_diagnostic) ==
+             {:ok,
+              "active_preflight/credential_unavailable: " <>
+                "provider/deepseek/credentials: a required provider credential is unavailable; " <>
+                "export it, pass --env-file PATH, or use a host file credential"}
+
+    refute CommandDiagnostic.valid?(%{credential_diagnostic | message: "PRIVATE credential name"})
+
+    assert CommandDiagnosticRenderer.render(%{
+             credential_diagnostic
+             | message: "PRIVATE credential name"
+           }) == {:error, :invalid_command_diagnostic}
 
     {:ok, selection_subject} =
       CommandSubject.provider("workspace", :selection, %{destination: :mission, index: 2})

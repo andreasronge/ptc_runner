@@ -711,6 +711,39 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "a missing provider credential retains the run diagnostic and remedy", %{
+    tmp_dir: directory
+  } do
+    {manifest_path, host_path} = write_missing_credential_repl(directory)
+
+    for {mission_args, expected_subject} <- [
+          {[], "alpha"},
+          {["--mission", "review"], "workspace-alpha"}
+        ] do
+      error =
+        assert_raise Mix.Error, fn ->
+          run_repl(
+            [
+              "--manifest",
+              manifest_path,
+              "--host-config",
+              host_path,
+              "-e",
+              "(+ 1 2)"
+            ] ++ mission_args
+          )
+        end
+
+      assert error.message =~
+               "error: repl/command_failed: active_preflight/credential_unavailable: " <>
+                 "provider/#{expected_subject}/credentials: a required provider credential is unavailable; " <>
+                 "export it, pass --env-file PATH, or use a host file credential"
+
+      refute error.message =~ "PTC_REPL_ABSENT"
+    end
+  end
+
+  @tag :tmp_dir
   test "a private manifest rejects eval before authorizing its trace", %{tmp_dir: directory} do
     component_path = Path.join(directory, "helpers.clj")
     manifest_path = Path.join(directory, "private.json")
@@ -1896,6 +1929,85 @@ defmodule PtcRunner.ReplFrontendTest do
     )
 
     manifest_path
+  end
+
+  defp write_missing_credential_repl(directory) do
+    File.write!(Path.join(directory, "credential-main.clj"), "(ns app) (defn run [x] (return x))")
+    File.write!(Path.join(directory, "credential-review.clj"), "(ns review)")
+    manifest_path = Path.join(directory, "credential-repl.json")
+    host_path = Path.join(directory, "credential-repl-host.json")
+
+    workflow_declarations = [
+      %{"name" => "alpha"},
+      %{"name" => "omega"}
+    ]
+
+    mission_declarations = [
+      %{"name" => "workspace-alpha"},
+      %{"name" => "workspace-omega"}
+    ]
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "credential-main.clj"}],
+          "entry" => "app/run"
+        },
+        "missions" => %{
+          "review" => %{
+            "components" => [%{"id" => "review", "path" => "credential-review.clj"}],
+            "providers" => ["workspace-alpha", "workspace-omega"]
+          }
+        },
+        "input" => %{"value" => %{}},
+        "providers" => %{
+          "workflow" => workflow_declarations,
+          "mission" => mission_declarations
+        }
+      })
+    )
+
+    File.write!(
+      host_path,
+      Jason.encode!(%{
+        "credentials" => %{
+          "alpha-key" => %{"env" => "PTC_REPL_ABSENT_ALPHA_KEY"},
+          "omega-key" => %{"env" => "PTC_REPL_ABSENT_OMEGA_KEY"}
+        },
+        "install" => %{
+          "alpha" => repl_llm_installation("alpha-key"),
+          "omega" => repl_llm_installation("omega-key"),
+          "workspace-alpha" => repl_mcp_installation("alpha-key"),
+          "workspace-omega" => repl_mcp_installation("omega-key")
+        }
+      })
+    )
+
+    {manifest_path, host_path}
+  end
+
+  defp repl_llm_installation(credential) do
+    %{
+      "source" => "llm",
+      "installation_revision" => "repl-missing-credential-v1",
+      "model" => "openrouter:test/model",
+      "credential" => credential
+    }
+  end
+
+  defp repl_mcp_installation(credential) do
+    %{
+      "source" => "mcp",
+      "installation_revision" => "repl-missing-credential-v1",
+      "transport" => %{
+        "type" => "stdio",
+        "command" => System.find_executable("sh"),
+        "env" => %{"TOKEN" => %{"binding" => credential}}
+      },
+      "tools" => %{"read" => %{"as" => "#{credential}.read", "effect" => "read"}}
+    }
   end
 
   # ex_dna:disable-for-next-line — boundary test keeps its trace fixture local and explicit
