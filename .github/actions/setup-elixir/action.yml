@@ -53,6 +53,14 @@ runs:
         PTC_RUNNER_LAUNCHER_BUILD_FROM_SOURCE: '1'
       run: |
         rm -rf "_build/${MIX_ENV:-dev}/lib/ptc_runner_launcher"
+        # `mix deps.compile ptc_runner_launcher` refuses while the launcher's
+        # own dependencies are unbuilt for this MIX_ENV, and a cold cache is
+        # exactly that: "the dependency build is outdated". Jobs on a warm
+        # `_build` never saw it, so it first appeared on the release gate's
+        # `prod` macOS job. Build those two first -- naming them is narrow, but
+        # compiling every dependency instead costs ~25s of forced recompilation
+        # on every job that uses this action.
+        mix deps.compile elixir_make cc_precompiler
         mix deps.compile ptc_runner_launcher
       shell: bash
 
