@@ -13,6 +13,10 @@ and ownership form.
 
 Create and run a project that needs no API key:
 
+The `ptc init` target must not already exist. For an existing repository,
+initialize a new sibling or subdirectory and deliberately copy or move the
+generated files you want into the repository.
+
 <!-- ptc-guide-e2e: id=quickstart-no-api-key frontend=mix scratch=hello-ptc -->
 ```console
 ptc init hello-ptc
