@@ -530,6 +530,12 @@ defmodule PtcRunner.MixProject do
     [
       files:
         ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run examples/support-triage site/schemas/mcp-2026-07-28.schema.json .formatter.exs mix.exs README.md usage-rules.md LICENSE LICENSES THIRD_PARTY_NOTICES.md CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+      # Hex expands the directories above from the working tree, not from
+      # git, so anything ignored but present -- a `.ptc` run directory left by
+      # a tutorial walk, a `.env` beside an example -- is published. Ship no
+      # dot-entry the list does not name outright: run traces and private
+      # inspection records are local evidence, and a credential file is worse.
+      exclude_patterns: [~r{(^|/)\.(?!formatter\.exs$)}],
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

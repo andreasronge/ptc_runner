@@ -73,6 +73,24 @@ test -f "$package_tmp_dir/source/docs/kernel-limits-reference.md"
 test -f "$package_tmp_dir/source/docs/prelude-reference.md"
 test ! -e "$package_tmp_dir/source/dev"
 
+# Hex expands the packaged directories from the working tree rather than from
+# git, so an ignored-but-present entry publishes with the release: a `.ptc`
+# directory left by a tutorial walk carries run traces and private inspection
+# records, and a `.env` beside an example carries a credential. A clean CI
+# checkout has neither, so only a build from a working tree can catch this --
+# which is exactly the build that publishes. `.formatter.exs` is the sole
+# dot-entry the package names.
+unexpected_dot_entries="$(
+  cd "$package_tmp_dir/source" \
+    && find . -name '.*' -not -name '.' -not -path './.formatter.exs'
+)"
+
+if [[ -n "$unexpected_dot_entries" ]]; then
+  echo "packaged source carries dot-entries beyond .formatter.exs:" >&2
+  echo "$unexpected_dot_entries" >&2
+  exit 1
+fi
+
 for mix_env in dev test; do
   (
     cd "$package_tmp_dir/source"
