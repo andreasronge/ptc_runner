@@ -135,7 +135,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              CommandEngine.prepare(["--version"])
 
     assert version.envelope["command"] == "version"
-    assert version.envelope["result"]["version"] == "0.13.0"
+    assert version.envelope["result"]["version"] == "0.14.0"
     assert_schema_valid(version.envelope)
   end
 
@@ -3833,7 +3833,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end
     end
 
-    for result <- [%{}, %{"version" => self()}, %{version: "0.13.0"}, %{"version" => "9.9.9"}] do
+    for result <- [%{}, %{"version" => self()}, %{version: "0.14.0"}, %{"version" => "9.9.9"}] do
       assert_raise ArgumentError, fn ->
         CommandOutcome.success(:version, run_ref, result)
       end
