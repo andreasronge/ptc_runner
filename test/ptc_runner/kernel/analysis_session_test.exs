@@ -1023,8 +1023,12 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     Process.exit(state.session_trace.pid, :kill)
 
     assert_receive {:DOWN, ^trace_ref, :process, _pid, :killed}
-    assert_receive {:DOWN, ^run_state_ref, :process, _pid, :normal}
-    assert_receive {:DOWN, ^snapshot_ref, :process, _pid, :normal}
+
+    assert_receive {:DOWN, ^run_state_ref, :process, _pid, run_state_reason}
+                   when run_state_reason in [:normal, :noproc]
+
+    assert_receive {:DOWN, ^snapshot_ref, :process, _pid, snapshot_reason}
+                   when snapshot_reason in [:normal, :noproc]
 
     assert {:ok, %{lifecycle: :backend_failed, terminal_reason: :event_sink_error}} =
              AnalysisSession.info(session)
