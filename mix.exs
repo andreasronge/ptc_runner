@@ -479,6 +479,7 @@ defmodule PtcRunner.MixProject do
           "docs/maintainers/embedding.md",
           "docs/maintainers/coding-agent-review.md",
           "docs/maintainers/duplication-gate.md",
+          "docs/maintainers/guide-budget.md",
           "docs/maintainers/documentation.md",
           "docs/maintainers/signature-integration.md",
           "docs/maintainers/kernel.md",
@@ -520,7 +521,7 @@ defmodule PtcRunner.MixProject do
           ~r/docs\/(?:reference\/.+|(?:agent-library|ptc-lisp|clojure|function-reference|java-|kernel-limits|prelude-|signature-).+)\.md/,
         Conformance: ~r/docs\/conformance\/.+\.md/,
         Maintainers:
-          ~r/docs\/maintainers\/(coding-agent-review|documentation|duplication-gate|embedding|kernel|signature-integration|trace-log-contract)\.md/
+          ~r/docs\/maintainers\/(coding-agent-review|documentation|duplication-gate|embedding|guide-budget|kernel|signature-integration|trace-log-contract)\.md/
       ]
     ]
   end

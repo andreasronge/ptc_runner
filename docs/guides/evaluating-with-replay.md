@@ -88,15 +88,12 @@ Copy that hash into the fixture and rerun. For private-data requests, publish an
 owner-only inspection artifact and read the hash from its capability record;
 the public diagnostic intentionally omits the unsalted value.
 
-Matching is exact. Changed messages, tools, or provider-neutral parameters
-produce another hash rather than silently consuming unrelated evidence. A miss
-is a provider error (`kind` `provider_error`, `reason` `not_found`).
-`llm/request` returns that envelope as a value with `:status :error`; it does
-not fail the evaluation. The shipped `llm-replay` example calls `cap/unwrap!`
-on the raw `tool/llm-request` envelope so a miss exits non-zero. The run
-envelope also reports the miss in usage: that alias's `successful_calls` stays
-0 while `calls` increments, and `capability_refusals` records
-`workflow/provider_error/not_found`.
+Matching is exact, so an edited request misses rather than quietly reusing the
+wrong response. A miss is a provider error returned as a value, not a failed
+evaluation — the shipped `llm-replay` example calls `cap/unwrap!` so a miss
+still exits non-zero. The [host-configuration
+reference](../reference/host-installation.md#choose-a-provider-source) states
+what a miss records.
 
 An ordered `responses` sequence supports workflows that make the same request
 more than once.
