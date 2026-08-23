@@ -74,7 +74,16 @@ RUN apt-get update \
   && apt-get install --yes --no-install-recommends diffutils expect \
   && rm -rf /var/lib/apt/lists/*
 
+# `verify_standalone_release.sh` derives its project root from its own parent
+# directory and compares four checked-in files against the packaged tree, so
+# `/verify` has to mirror their repository layout and not just carry the
+# scripts. Copying only `scripts` left every one of those comparisons reading a
+# path that does not exist -- the first, `THIRD_PARTY_NOTICES.md`, failed the
+# stage with `cmp: /verify/THIRD_PARTY_NOTICES.md: No such file or directory`.
 COPY --from=builder /src/scripts /verify/scripts
+COPY --from=builder /src/THIRD_PARTY_NOTICES.md /verify/THIRD_PARTY_NOTICES.md
+COPY --from=builder /src/LICENSES /verify/LICENSES
+COPY --from=builder /src/site/schemas /verify/site/schemas
 
 RUN PTC_RELEASE_ROOT=/opt/ptc /verify/scripts/verify_standalone_release.sh \
   && touch /verify/passed
