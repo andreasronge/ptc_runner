@@ -298,7 +298,7 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
                Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
 
       assert is_function(callback, 1)
-      assert msg =~ "not_callable"
+      assert msg =~ "not callable"
     end
 
     test "runtime callable errors retain their trailing data element" do
@@ -359,7 +359,7 @@ defmodule PtcRunner.Lisp.EvalErrorsTest do
       assert is_function(callback, 1)
 
       assert msg ==
-               "sort-by key function failed for item nil: closure error: {:not_callable, nil}"
+               "sort-by key function failed for item nil: closure error: {:not_callable, %{}}"
     end
 
     test "division with nil operand returns type_error" do

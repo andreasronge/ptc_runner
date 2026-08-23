@@ -13,6 +13,8 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.Result
@@ -27,6 +29,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.TerminalResultLimit
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.DataKeys
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Result, as: LispResult
@@ -250,7 +253,8 @@ defmodule PtcRunner.Kernel.Runner do
           state,
           evaluation_id,
           step,
-          explicit_failure_error(value, state)
+          explicit_failure_error(value, state),
+          %{explicit_failure_value: value}
         )
 
       {:ok, step} ->
@@ -361,18 +365,25 @@ defmodule PtcRunner.Kernel.Runner do
          private_details
        )
        when is_map(private_details) do
+    {explicit_value, private_details} = Map.pop(private_details, :explicit_failure_value)
     private_details = Map.merge(private_details, boundary_producer_details(step))
     private_error = %{public_error | details: Map.merge(public_error.details, private_details)}
 
-    case emit_execution_diagnostics(
-           config.inspection_sink,
-           evaluation_id,
-           step.prints,
-           private_error
-         ) do
-      :ok ->
-        :ok
-
+    with :ok <-
+           emit_explicit_failure_value(
+             config,
+             evaluation_id,
+             explicit_value
+           ),
+         :ok <-
+           emit_execution_diagnostics(
+             config.inspection_sink,
+             evaluation_id,
+             step.prints,
+             private_error
+           ) do
+      :ok
+    else
       {:error, :inspection_sink_error} ->
         :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
     end
@@ -478,6 +489,25 @@ defmodule PtcRunner.Kernel.Runner do
         details: inspection_error_details(reason, details)
       }
     )
+  end
+
+  defp emit_explicit_failure_value(_config, _evaluation_id, nil), do: :ok
+  defp emit_explicit_failure_value(%{inspection_sink: nil}, _evaluation_id, _value), do: :ok
+
+  defp emit_explicit_failure_value(config, evaluation_id, value) do
+    with {:ok, json} <- JSONValue.normalize(value),
+         {:ok, encoded} <- DeterministicJSON.encode(json),
+         true <- byte_size(encoded) <= config.limits.terminal_result_bytes do
+      InspectionSink.emit(
+        config.inspection_sink,
+        "explicit-failure-value",
+        %{evaluation_id: evaluation_id},
+        %{environment: :workflow, value: json}
+      )
+    else
+      {:error, :inspection_sink_error} = error -> error
+      _closed -> :ok
+    end
   end
 
   # `capture_execution_failure/6` merges the private `boundary_producer` fact
@@ -940,7 +970,9 @@ defmodule PtcRunner.Kernel.Runner do
             ],
        do: :limit_exceeded
 
-  defp workflow_error_kind(_reason), do: :workflow_failed
+  defp workflow_error_kind(reason) do
+    if EvaluatorErrorCatalog.kind?(reason), do: :evaluation_failed, else: :workflow_failed
+  end
 
   defp workflow_error_details(%{reason: reason} = fail, timeout_ms, limits, _sink)
        when reason in [:timeout, :compile_timeout] do
@@ -1077,16 +1109,31 @@ defmodule PtcRunner.Kernel.Runner do
   defp workflow_error_details(
          %{
            reason: :runtime_limit_exceeded,
-           details: %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason}
+           details:
+             %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason} = details
          },
          _timeout_ms,
          _limits,
          _sink
        )
        when limit in 1..128 do
-    if RuntimeLimitDiagnostic.agent_turns_reason?(limit_reason),
-      do: %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason},
-      else: %{}
+    if RuntimeLimitDiagnostic.agent_turns_reason?(limit_reason) do
+      base = %{limit: :agent_turns, limit_value: limit, limit_reason: limit_reason}
+
+      case details do
+        %{last_evaluator_failure: %{kind: kind, details: eval_details}} ->
+          if EvaluatorErrorCatalog.kind?(kind) and is_map(eval_details) do
+            Map.put(base, :last_evaluator_failure, %{kind: kind, details: eval_details})
+          else
+            base
+          end
+
+        _other ->
+          base
+      end
+    else
+      %{}
+    end
   end
 
   defp workflow_error_details(
@@ -1116,14 +1163,18 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp workflow_error_details(fail, _timeout_ms, _limits, sink)
        when not is_nil(sink) do
-    details =
-      case EventSink.policy(sink) do
-        :normal -> workflow_error_details_for_class(:normal, fail)
-        _private_or_unavailable -> workflow_error_details_for_class(:private, fail)
-      end
+    if EvaluatorErrorCatalog.kind?(fail.reason) do
+      fail.details || %{}
+    else
+      details =
+        case EventSink.policy(sink) do
+          :normal -> workflow_error_details_for_class(:normal, fail)
+          _private_or_unavailable -> workflow_error_details_for_class(:private, fail)
+        end
 
-    details
-    |> Map.merge(SafeMetadata.retain_failure_taxonomy_fields(fail.details))
+      details
+      |> Map.merge(SafeMetadata.retain_failure_taxonomy_fields(fail.details))
+    end
   end
 
   defp retain_model_output_truncation(%{

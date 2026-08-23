@@ -30,6 +30,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
@@ -390,11 +391,135 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["execution"]["state"] == "incomplete"
     assert is_map(outcome.envelope["execution"]["usage"])
     refute Jason.encode!(outcome.envelope) =~ "must-not-escape"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    assert_schema_valid(outcome.envelope)
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+    assert rendered =~ "error: execution/workflow_failed:"
+    refute rendered =~ "evaluation:"
+  end
+
+  @tag :tmp_dir
+  test "an arithmetic evaluator failure publishes evaluation_failed with typed evidence", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "arithmetic-dispatch", valid_manifest())
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return (/ 1 0)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["phase"] == "execution"
+    assert outcome.envelope["error"]["code"] == "evaluation_failed"
+    assert outcome.envelope["error"]["retryable"] == false
+    assert outcome.exit_status == 5
+
+    assert outcome.envelope["execution"]["last_evaluation_error"] == %{
+             "kind" => "arithmetic_error",
+             "message" => "division by zero"
+           }
+
+    assert_schema_valid(outcome.envelope)
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+    assert rendered =~ "error: execution/evaluation_failed: the evaluation failed"
+    assert rendered =~ "evaluation: arithmetic_error: division by zero"
+    refute rendered =~ "PtcRunner.Lisp"
+  end
+
+  @tag :tmp_dir
+  test "arity, not_callable, and loop evaluator failures publish exact public kinds", %{
+    tmp_dir: directory
+  } do
+    cases = [
+      {~S|(ns app) (defn run [_input] (return (count)))|, "arity_error"},
+      {~S|(ns app) (defn run [_input] (return (1 2 3)))|, "not_callable"},
+      {~S|(ns app) (defn run [_input] (loop [i 0] (if (< i 999999) (recur (inc i)) i)))|,
+       "loop_limit_exceeded"}
+    ]
+
+    Enum.with_index(cases, fn {source, kind}, index ->
+      application = write_application(directory, "evaluator-kind-#{index}", valid_manifest())
+      File.write!(Path.join(Path.dirname(application), "main.clj"), source)
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.dispatch(["run", application])
+
+      assert outcome.envelope["error"]["code"] == "evaluation_failed"
+      assert outcome.envelope["execution"]["last_evaluation_error"]["kind"] == kind
+      refute Jason.encode!(outcome.envelope) =~ "PtcRunner.Lisp"
+      assert_schema_valid(outcome.envelope)
+    end)
+  end
+
+  @tag :tmp_dir
+  test "a private evaluator failure keeps last_evaluation_error null", %{tmp_dir: directory} do
+    application = write_application(directory, "private-arithmetic", valid_manifest())
+    input = Path.join(Path.dirname(application), "private-input.json")
+    output = Path.join(directory, "private-result.json")
+    File.write!(input, ~s({}))
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return (/ 1 0)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--private-input",
+               "private-input.json",
+               "--private-output",
+               output
+             ])
+
+    assert outcome.envelope["artifact_class"] == "private"
+    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    refute Jason.encode!(outcome.envelope) =~ "arithmetic_error"
+    refute Jason.encode!(outcome.envelope) =~ "division by zero"
     assert_schema_valid(outcome.envelope)
   end
 
   @tag :tmp_dir
-  test "V2 success and error envelopes retain evaluations by mission", %{tmp_dir: directory} do
+  test "an explicit fail value is retained only as a dedicated inspection record", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "explicit-fail-inspect", valid_manifest())
+    inspection = Path.join(directory, "run.inspection.jsonl")
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (fail {"secret" "must-not-escape"}))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    refute Jason.encode!(outcome.envelope) =~ "must-not-escape"
+    assert_schema_valid(outcome.envelope)
+
+    assert {:ok, records} = InspectionArtifact.load(inspection)
+    error_record = Enum.find(records, &(&1["record_type"] == "execution-error"))
+    fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
+
+    refute Jason.encode!(error_record) =~ "must-not-escape"
+    assert fail_record["payload"]["environment"] == "workflow"
+    assert fail_record["payload"]["value"] == %{"secret" => "must-not-escape"}
+
+    assert fail_record["correlation"]["evaluation_id"] ==
+             error_record["correlation"]["evaluation_id"]
+  end
+
+  @tag :tmp_dir
+  test "V3 success and error envelopes retain evaluations by mission", %{tmp_dir: directory} do
     manifest =
       valid_manifest(%{
         "workflow" => %{
@@ -2896,7 +3021,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                },
                %{
                  "switches" => ["--envelope ENVELOPE.json"],
-                 "description" => "atomically publish the V2 command envelope"
+                 "description" => "atomically publish the V3 command envelope"
                },
                %{
                  "switches" => ["--help"],
@@ -4407,11 +4532,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "outcome" => "ok",
       "diagnostic" => nil,
       "usage" => usage_fixture(),
-      "evaluation_memory" => evaluation_memory_fixture()
+      "evaluation_memory" => evaluation_memory_fixture(),
+      "last_evaluation_error" => nil
     }
 
     classified = %{
-      "schema_version" => 2,
+      "schema_version" => 3,
       "command" => "run",
       "status" => "error",
       "run_ref" => run_ref,
@@ -4562,7 +4688,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     result_publication = CommandDiagnostic.new!(:publication, :result_publication_failed)
 
     envelope = %{
-      "schema_version" => 2,
+      "schema_version" => 3,
       "command" => "run",
       "status" => "error",
       "run_ref" => run_ref,
@@ -4678,7 +4804,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.exit_status == 2
 
     assert outcome.envelope == %{
-             "schema_version" => 2,
+             "schema_version" => 3,
              "command" => "unknown",
              "status" => "error",
              "run_ref" => outcome.envelope["run_ref"],

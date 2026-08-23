@@ -159,10 +159,17 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       try do
         with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, args) end)
       rescue
-        e in Abort -> reraise_hof_callback_error(e, args, __STACKTRACE__)
-        FunctionClauseError -> {:error, Helpers.type_error_for_args(fun, args)}
-        e in BadArityError -> {:error, {:arity_error, Exception.message(e)}}
-        e in RuntimeError -> {:error, {:type_error, Exception.message(e), args}}
+        e in Abort ->
+          reraise_hof_callback_error(e, args, __STACKTRACE__)
+
+        FunctionClauseError ->
+          {:error, Helpers.type_error_for_args(fun, args)}
+
+        BadArityError ->
+          {:error, {:arity_error, %{actual: length(args)}}}
+
+        e in RuntimeError ->
+          {:error, {:type_error, Exception.message(e), args}}
       end
     end
   end
@@ -213,7 +220,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # nil is not callable: (nil x), (apply nil ...), and ((comp nil) x) raise
   # rather than treating nil as a keyword accessor (GAP-S109, GAP-S135).
   defp do_apply_fun(nil, _args, %EvalContext{}, _do_eval_fn) do
-    {:error, {:not_callable, nil}}
+    {:error, {:not_callable, %{}}}
   end
 
   # Keyword as function: (:key map) → Map.get(map, :key)
@@ -233,7 +240,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp do_apply_fun(set, args, %EvalContext{}, _do_eval_fn)
        when is_struct(set, MapSet) do
-    {:error, {:arity_error, "set expects 1 argument, got #{length(args)}"}}
+    {:error, {:arity_error, %{name: "set", expected: 1, actual: length(args)}}}
   end
 
   # Closure application (6-element tuple format with turn_history and metadata)
@@ -277,7 +284,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         end
 
       _ ->
-        {:error, {:arity_error, "apply expects at least 2 arguments, got #{length(args)}"}}
+        {:error, {:arity_error, %{name: "apply", expected: {:at_least, 2}, actual: length(args)}}}
     end
   end
 
@@ -322,27 +329,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # Provide a helpful error message for type mismatches
         {:error, Helpers.type_error_for_args(fun, converted_args)}
 
-      e in BadArityError ->
-        # Extract function name and format a cleaner message
-        msg = Exception.message(e)
-
-        clean_msg =
-          case Regex.run(~r/&[\w.]+\.(\w+)\/(\d+).*called with (\d+)/, msg) do
-            [_, func, expected, actual] ->
-              "#{func} expects #{expected} argument(s), got #{actual}"
-
-            _ ->
-              msg
-          end
-
-        {:error, {:arity_error, clean_msg}}
+      BadArityError ->
+        {:error, {:arity_error, %{actual: length(converted_args)}}}
 
       e in RuntimeError ->
         # Catch errors from closure evaluation (destructuring, arity, eval errors)
         {:error, {:type_error, Exception.message(e), converted_args}}
 
       e in ArithmeticError ->
-        {:error, {:arithmetic_error, Exception.message(e)}}
+        {:error, {:arithmetic_error, arithmetic_token(e)}}
 
       e in BadFunctionError ->
         # Catch attempts to use non-functions as functions (e.g., :keyword passed to map)
@@ -385,10 +380,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     e in Abort ->
       reraise_hof_callback_error(e, args, __STACKTRACE__)
 
-    ArithmeticError ->
+    e in ArithmeticError ->
       # Distinguish between type errors (nil/non-number) and arithmetic errors (e.g., overflow)
       if Enum.all?(args, &is_number/1) do
-        {:error, {:arithmetic_error, "bad argument in arithmetic expression"}}
+        {:error, {:arithmetic_error, arithmetic_token(e)}}
       else
         {:error, Helpers.type_error_for_args(fun2, args)}
       end
@@ -396,7 +391,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   # Variadic requiring at least one arg: {:variadic_nonempty, name, fun2}
   defp do_apply_fun({:variadic_nonempty, name, _fun2}, [], %EvalContext{}, _do_eval_fn) do
-    {:error, {:arity_error, "#{name} requires at least 1 argument, got 0"}}
+    {:error, {:arity_error, %{name: lisp_name(name), expected: {:at_least, 1}, actual: 0}}}
   end
 
   defp do_apply_fun(
@@ -421,22 +416,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     e in ArithmeticError ->
       # Distinguish between type errors (nil/non-number) and arithmetic errors
       if Enum.all?(args, &is_number/1) do
-        # Check for division by zero specifically. Either the inner function
-        # raised with a "division by zero" message (Math.divide / Math.quot /
-        # Math.remainder / Math.mod) or any divisor in the tail is integer 0.
-        msg =
+        token =
           cond do
-            String.contains?(Exception.message(e), "division by zero") ->
-              "division by zero"
-
-            Enum.any?(tl(args), &(&1 === 0)) ->
-              "division by zero"
-
-            true ->
-              "bad argument in arithmetic expression"
+            arithmetic_token(e) == :division_by_zero -> :division_by_zero
+            Enum.any?(tl(args), &(&1 === 0)) -> :division_by_zero
+            true -> :bad_argument
           end
 
-        {:error, {:arithmetic_error, msg}}
+        {:error, {:arithmetic_error, token}}
       else
         {:error, Helpers.type_error_for_args(fun2, args)}
       end
@@ -497,8 +484,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     else
       arities = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
 
-      {:error,
-       {:arity_error, "#{name} expects #{format_arities(arities)} argument(s), got #{arity}"}}
+      {:error, {:arity_error, %{name: lisp_name(name), expected: arities, actual: arity}}}
     end
   end
 
@@ -600,7 +586,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   # Fallback: not callable
   defp do_apply_fun(other, _args, %EvalContext{}, _do_eval_fn) do
-    {:error, {:not_callable, other}}
+    {:error, {:not_callable, not_callable_details(other)}}
   end
 
   defp prepare_builtin_arguments(%Builtin{name: name}, args) do
@@ -639,24 +625,39 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
-  defp maybe_validate_builtin_args(%Builtin{binding: {:normal, fun}} = builtin, args) do
-    if function_arity(fun) == length(args), do: validate_builtin_args(builtin, args), else: :ok
+  defp maybe_validate_builtin_args(%Builtin{name: name, binding: {:normal, fun}} = builtin, args) do
+    expected = function_arity(fun)
+    actual = length(args)
+
+    if expected == actual do
+      validate_builtin_args(builtin, args)
+    else
+      {:error, {:arity_error, %{name: lisp_name(name), expected: expected, actual: actual}}}
+    end
   end
 
-  defp maybe_validate_builtin_args(%Builtin{binding: {:multi_arity, _name, funs}} = builtin, args) do
-    arity = length(args)
+  defp maybe_validate_builtin_args(
+         %Builtin{name: name, binding: {:multi_arity, _binding_name, funs}} = builtin,
+         args
+       ) do
+    actual = length(args)
     min_arity = function_arity(elem(funs, 0))
-    idx = arity - min_arity
+    idx = actual - min_arity
+    expected = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
 
-    if idx >= 0 and idx < tuple_size(funs), do: validate_builtin_args(builtin, args), else: :ok
+    if idx >= 0 and idx < tuple_size(funs) do
+      validate_builtin_args(builtin, args)
+    else
+      {:error, {:arity_error, %{name: lisp_name(name), expected: expected, actual: actual}}}
+    end
   end
 
-  defp maybe_validate_builtin_args(%Builtin{binding: {:variadic_nonempty, _name, _fun}}, []) do
-    :ok
+  defp maybe_validate_builtin_args(%Builtin{name: name, binding: {:variadic_nonempty, _, _}}, []) do
+    {:error, {:arity_error, %{name: lisp_name(name), expected: {:at_least, 1}, actual: 0}}}
   end
 
   defp maybe_validate_builtin_args(%Builtin{name: :"merge-with"}, []) do
-    {:error, {:arity_error, "merge-with requires at least 1 argument, got 0"}}
+    {:error, {:arity_error, %{name: "merge-with", expected: {:at_least, 1}, actual: 0}}}
   end
 
   defp maybe_validate_builtin_args(%Builtin{} = builtin, args),
@@ -1850,8 +1851,22 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp preserve_capability_binding(bindings, _pattern, _result), do: bindings
 
-  # Format arities list for human-readable error messages
-  defp format_arities([n]), do: "#{n}"
-  defp format_arities([a, b]), do: "#{a} or #{b}"
-  defp format_arities(arities), do: Enum.join(arities, ", ")
+  defp arithmetic_token(%ArithmeticError{} = error) do
+    message = Exception.message(error)
+
+    cond do
+      message == "division by zero" -> :division_by_zero
+      String.contains?(message, "division by zero") -> :division_by_zero
+      message == "integer overflow" -> :integer_overflow
+      String.contains?(message, "integer overflow") -> :integer_overflow
+      true -> :bad_argument
+    end
+  end
+
+  defp lisp_name(name) when is_atom(name), do: Atom.to_string(name)
+  defp lisp_name(name) when is_binary(name), do: name
+
+  defp not_callable_details({:data_ref, name}) when is_binary(name), do: %{name: name}
+
+  defp not_callable_details(_other), do: %{}
 end

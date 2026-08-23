@@ -285,7 +285,7 @@ ptc run ptc.json --envelope command-envelope.json
 The standalone streams are human presentation channels and may also contain
 output from applications or children. The envelope is an atomic, no-replace
 file whose JSON Schema this executable serves as `ptc docs schema-envelope`
-(`priv/schemas/ptc-command-envelope-v2.schema.json` in the repository). Its
+(`priv/schemas/ptc-command-envelope-v3.schema.json` in the repository). Its
 status and exit-code relationship is sealed by the same command contract.
 
 After arguments parse, an ordinary or caught command outcome publishes one
@@ -440,6 +440,7 @@ Every classified diagnostic and the status it exits with:
 | 4 | `provider_acquisition` | `provider_protocol_version_unsupported` | no | the installed endpoint does not support MCP protocol 2026-07-28 |
 | 4 | `provider_acquisition` | `provider_tool_missing` | no | the installed endpoint does not expose a declared tool |
 | 4 | `provider_acquisition` | `provider_unavailable` | no | the selected provider could not be acquired |
+| 5 | `execution` | `evaluation_failed` | no | the evaluation failed |
 | 5 | `execution` | `invalid_agent_config` | no | an agent configuration option is outside its supported range |
 | 5 | `execution` | `llm_access_denied` | no | the LLM provider denied access to the configured model |
 | 5 | `execution` | `llm_authentication_failed` | no | the LLM provider rejected authentication; check the installed credential |

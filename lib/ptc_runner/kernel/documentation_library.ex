@@ -71,7 +71,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     {"schema-manifest", "priv/schemas/ptc-application-manifest.schema.json"},
     {"schema-project", "priv/schemas/ptc-project-config.schema.json"},
     {"schema-host", "priv/schemas/ptc-host-config.schema.json"},
-    {"schema-envelope", "priv/schemas/ptc-command-envelope-v2.schema.json"}
+    {"schema-envelope", "priv/schemas/ptc-command-envelope-v3.schema.json"}
   ]
 
   @names_by_path Map.new(@catalog, fn {name, path} -> {path, name} end)

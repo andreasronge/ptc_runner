@@ -42,6 +42,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.TerminalResultLimit
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.DataKeys
   alias PtcRunner.Lisp.TrustedTool
 
@@ -419,7 +420,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           history,
           mission_calls_before,
           projection_boundary,
-          result_limit_bytes
+          result_limit_bytes,
+          evaluation_id
         )
 
       {:error, :inspection_sink_error} ->
@@ -437,10 +439,13 @@ defmodule PtcRunner.Kernel.Evaluation do
          history,
          mission_calls_before,
          projection_boundary,
-         result_limit_bytes
+         result_limit_bytes,
+         evaluation_id
        ) do
     case result do
       {:ok, %{return: {:__ptc_fail__, value}} = step} ->
+        :ok = RunState.clear_last_evaluator_failure(state)
+
         release_explicit_failure(
           state,
           environment,
@@ -455,6 +460,8 @@ defmodule PtcRunner.Kernel.Evaluation do
         |> put_terminal_host_failure(step)
 
       {:ok, step} ->
+        :ok = RunState.clear_last_evaluator_failure(state)
+
         commit_result(
           state,
           environment,
@@ -469,9 +476,27 @@ defmodule PtcRunner.Kernel.Evaluation do
         |> put_terminal_host_failure(step)
 
       {:error, step} ->
+        maybe_record_evaluator_failure(state, evaluation_id, step)
+
         release_failure(state, environment, lease, step, mission_calls_before)
         |> put_terminal_provider_failure(step)
         |> put_terminal_host_failure(step)
+    end
+  end
+
+  defp maybe_record_evaluator_failure(state, evaluation_id, step) do
+    reason = step.fail.reason
+    details = step.fail.details || %{}
+
+    if EvaluatorErrorCatalog.kind?(reason) do
+      RunState.record_last_evaluator_failure(state, %{
+        evaluation_id: evaluation_id,
+        environment: :mission,
+        kind: reason,
+        details: details
+      })
+    else
+      :ok
     end
   end
 

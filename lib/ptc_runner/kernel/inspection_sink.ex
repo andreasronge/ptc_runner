@@ -447,6 +447,14 @@ defmodule PtcRunner.Kernel.InspectionSink do
     ok_or_error(valid?)
   end
 
+  defp shape("explicit-failure-value", %{"evaluation_id" => id}, payload, 7) do
+    valid? =
+      exact_payload(payload, ~w(environment value)) and valid_id?(id) and
+        payload["environment"] == "workflow" and JSONValue.value?(payload["value"])
+
+    ok_or_error(valid?)
+  end
+
   defp shape(_record_type, _correlation, _payload, 7), do: {:error, :invalid_record}
 
   # `normalize/1` recurses, so nesting is bounded before it runs. The retained

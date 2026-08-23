@@ -68,8 +68,8 @@ defmodule PtcRunner.Kernel.CommandRenderer do
       } ->
         {:stdout, json_line(result)}
 
-      %{"status" => "error", "error" => error, "run_ref" => run_ref} ->
-        {:stderr, failure_line(error, run_ref, rejection)}
+      %{"status" => "error", "error" => error, "run_ref" => run_ref} = envelope ->
+        {:stderr, failure_line(error, run_ref, rejection) <> evaluation_line(envelope)}
     end
   rescue
     _exception ->
@@ -134,6 +134,16 @@ defmodule PtcRunner.Kernel.CommandRenderer do
 
     base <> diagnostic_suffix(error) <> rejection_suffix(rejection) <> "\n"
   end
+
+  defp evaluation_line(%{
+         "execution" => %{
+           "last_evaluation_error" => %{"kind" => kind, "message" => message}
+         }
+       })
+       when is_binary(kind) and is_binary(message) and kind != "" and message != "",
+       do: "evaluation: #{kind}: #{message}\n"
+
+  defp evaluation_line(_envelope), do: ""
 
   defp diagnostic_suffix(%{
          "phase" => "active_preflight",

@@ -62,6 +62,19 @@ defmodule PtcRunner.ReplFrontendTest do
                "(first at line 1, column 8)\n"
   end
 
+  test "direct eval uses the public arithmetic renderer" do
+    output =
+      capture_io(:stderr, fn ->
+        error = assert_raise Mix.Error, fn -> run_repl(["-e", "(/ 1 0)"]) end
+
+        assert error.message =~ "Error (arithmetic_error): division by zero"
+        refute error.message =~ "PtcRunner.Lisp"
+      end)
+
+    assert output =~ "Error (arithmetic_error): division by zero"
+    refute output =~ "PtcRunner.Lisp"
+  end
+
   test "direct eval retains canonical unknown-namespace guidance" do
     expected =
       "Error (invalid_form): " <> NamespaceDiagnostic.message("kernel")

@@ -213,6 +213,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:provider_acquisition, :capability_requirement_missing, 4, false,
      "a component requires a capability that the selected providers did not supply"},
     {:execution, :workflow_failed, 5, false, "the workflow failed"},
+    {:execution, :evaluation_failed, 5, false, "the evaluation failed"},
     {:execution, :invalid_agent_config, 5, false,
      "an agent configuration option is outside its supported range"},
     {:execution, :llm_authentication_failed, 5, false,

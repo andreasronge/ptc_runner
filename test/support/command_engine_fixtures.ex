@@ -156,7 +156,7 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
 
   def run_success_fixture(artifact_class, result) do
     %{
-      "schema_version" => 2,
+      "schema_version" => 3,
       "command" => "run",
       "status" => "ok",
       "run_ref" => CommandRunRef.encode(@zero_entropy),
@@ -173,7 +173,8 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
         "outcome" => "ok",
         "diagnostic" => nil,
         "usage" => usage_fixture(),
-        "evaluation_memory" => evaluation_memory_fixture()
+        "evaluation_memory" => evaluation_memory_fixture(),
+        "last_evaluation_error" => nil
       }
     }
   end

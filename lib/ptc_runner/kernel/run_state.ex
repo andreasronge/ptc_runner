@@ -473,6 +473,16 @@ defmodule PtcRunner.Kernel.RunState do
   @doc "Returns the first terminal failure, if any."
   def terminal_failure(state), do: call(state, :terminal_failure)
 
+  @spec record_last_evaluator_failure(t(), map()) :: :ok
+  def record_last_evaluator_failure(state, evidence) when is_map(evidence),
+    do: call(state, {:record_last_evaluator_failure, evidence})
+
+  @spec last_evaluator_failure(t()) :: {:ok, map()} | :error
+  def last_evaluator_failure(state), do: call(state, :last_evaluator_failure)
+
+  @spec clear_last_evaluator_failure(t()) :: :ok
+  def clear_last_evaluator_failure(state), do: call(state, :clear_last_evaluator_failure)
+
   @spec close(t()) :: :ok
   @doc "Closes the run against further reservations and result commits."
   def close(state), do: call(state, :close)
@@ -599,6 +609,7 @@ defmodule PtcRunner.Kernel.RunState do
        replay_misses: MapSet.new(),
        llm_provider_failures: MapSet.new(),
        terminal_failure: nil,
+       last_evaluator_failure: nil,
        continuations: %{},
        evaluation_lease: nil,
        evaluation_mission: nil,
@@ -1086,6 +1097,25 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_call({token, :terminal_failure}, _from, %{token: token} = state),
     do: {:reply, state.terminal_failure, state}
+
+  def handle_call(
+        {token, {:record_last_evaluator_failure, evidence}},
+        _from,
+        %{token: token} = state
+      )
+      when is_map(evidence) do
+    {:reply, :ok, %{state | last_evaluator_failure: evidence}}
+  end
+
+  def handle_call({token, :last_evaluator_failure}, _from, %{token: token} = state) do
+    case state.last_evaluator_failure do
+      %{} = evidence -> {:reply, {:ok, evidence}, state}
+      nil -> {:reply, :error, state}
+    end
+  end
+
+  def handle_call({token, :clear_last_evaluator_failure}, _from, %{token: token} = state),
+    do: {:reply, :ok, %{state | last_evaluator_failure: nil}}
 
   def handle_call({token, :close}, _from, %{token: token} = state),
     do: {:reply, :ok, admit_from_queue(%{state | closed?: true})}

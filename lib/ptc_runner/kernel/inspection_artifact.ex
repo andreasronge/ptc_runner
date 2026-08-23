@@ -49,6 +49,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
   alias Jason.OrderedObject
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionRecordTypes
+  alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationHandle
@@ -375,6 +376,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       preludes: MapSet.new(),
       execution_prints: MapSet.new(),
       execution_errors: MapSet.new(),
+      explicit_failure_values: MapSet.new(),
       result?: false
     }
 
@@ -523,6 +525,12 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          state
        ),
        do: unique_record(state, :execution_errors, id)
+
+  defp validate_record_join(
+         %{"record_type" => "explicit-failure-value", "correlation" => %{"evaluation_id" => id}},
+         state
+       ),
+       do: unique_record(state, :explicit_failure_values, id)
 
   defp validate_record_join(%{"record_type" => "run-result"}, %{result?: false} = state),
     do: {:cont, {:ok, %{state | result?: true}}}
@@ -718,6 +726,18 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       valid_id?(payload["kind"]) and valid_id?(payload["reason"]) and
       is_map(payload["details"]) and
       InspectionRecordTypes.valid_boundary_producer_details?(payload["details"])
+  end
+
+  defp valid_shape?(
+         %{
+           "record_type" => "explicit-failure-value",
+           "correlation" => %{"evaluation_id" => id},
+           "payload" => payload
+         },
+         7
+       ) do
+    exact_keys?(payload, ~w(environment value)) and valid_id?(id) and
+      payload["environment"] == "workflow" and JSONValue.value?(payload["value"])
   end
 
   defp valid_shape?(_record, 7), do: false
@@ -1102,7 +1122,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          _prelude_components,
          missing
        )
-       when record_type in ["execution-prints", "execution-error"],
+       when record_type in ["execution-prints", "execution-error", "explicit-failure-value"],
        do: correlate_evaluation_or_mark_missing(evaluations, id, {"workflow", nil, :any}, missing)
 
   # Component-ID membership no longer decides a `prelude-source` record: the

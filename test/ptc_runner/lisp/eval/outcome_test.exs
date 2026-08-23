@@ -192,7 +192,7 @@ defmodule PtcRunner.Lisp.Eval.OutcomeTest do
 
     assert {:error, step} = Lisp.run(source)
     assert step.fail.reason == :pcalls_error
-    assert step.fail.message =~ "not_callable"
+    assert step.fail.message =~ "not callable"
     refute step.fail.message =~ "evaluator host callback aborted"
   end
 

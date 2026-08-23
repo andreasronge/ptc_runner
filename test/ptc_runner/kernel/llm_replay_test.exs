@@ -517,6 +517,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       assert exhausted.envelope["error"]["subject"] == nil
       assert exhausted.envelope["error"]["provider_activity"] == true
       assert CommandContract.valid_envelope?(exhausted.envelope)
+      assert exhausted.envelope["execution"]["last_evaluation_error"] == nil
 
       assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
 

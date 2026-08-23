@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.Error
+  alias PtcRunner.Kernel.EvaluatorEvidence
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMUsageSummary
@@ -174,7 +175,12 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp failure_execution(:not_started), do: %{"state" => "not_started"}
 
   defp failure_execution(:incomplete),
-    do: %{"state" => "incomplete", "usage" => nil, "evaluation_memory" => nil}
+    do: %{
+      "state" => "incomplete",
+      "usage" => nil,
+      "evaluation_memory" => nil,
+      "last_evaluation_error" => nil
+    }
 
   defp project_success(
          %{result: {:ok, %Result{} = result}} = evidence,
@@ -225,7 +231,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
            primary,
            secondary,
            artifact_state,
-           execution_evidence(evidence)
+           execution_evidence(evidence, result_class)
          )}
 
       [] ->
@@ -287,6 +293,16 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        )
        when reason in [:explicit_failure, :pmap_error, :pcalls_error, :llm_provider_failed],
        do: diagnostic(:execution, :workflow_failed, provider_activity)
+
+  defp failure_diagnostic(%Error{kind: :evaluation_failed} = error, provider_activity, :normal) do
+    case EvaluatorEvidence.envelope_value(:normal, error) do
+      %{"kind" => _kind} -> diagnostic(:execution, :evaluation_failed, provider_activity)
+      nil -> diagnostic(:execution, :workflow_failed, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(%Error{kind: :evaluation_failed}, provider_activity, :private),
+    do: diagnostic(:execution, :workflow_failed, provider_activity)
 
   defp failure_diagnostic(failure, provider_activity, _result_class),
     do: failure_diagnostic(failure, provider_activity)
@@ -699,7 +715,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     end
   end
 
-  defp execution_evidence(%{result: {:ok, %Result{} = result}} = evidence) do
+  defp execution_evidence(%{result: {:ok, %Result{} = result}} = evidence, _result_class) do
     with {:ok, usage} <- usage_projection(result.usage, Map.get(evidence, :terminal_batch)),
          {:ok, memory} <- evaluation_memory_projection(result.evaluation_memory) do
       %{
@@ -707,24 +723,36 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
         "outcome" => "ok",
         "diagnostic" => nil,
         "usage" => usage,
-        "evaluation_memory" => memory
+        "evaluation_memory" => memory,
+        "last_evaluation_error" => nil
       }
     else
-      _invalid -> %{"state" => "incomplete", "usage" => nil, "evaluation_memory" => nil}
+      _invalid ->
+        %{
+          "state" => "incomplete",
+          "usage" => nil,
+          "evaluation_memory" => nil,
+          "last_evaluation_error" => nil
+        }
     end
   end
 
-  defp execution_evidence(%{result: {:error, %Error{usage: usage}}} = evidence) do
+  defp execution_evidence(%{result: {:error, %Error{} = error}} = evidence, result_class) do
     usage =
-      case usage_projection(usage, Map.get(evidence, :terminal_batch)) do
+      case usage_projection(error.usage, Map.get(evidence, :terminal_batch)) do
         {:ok, value} -> value
         _invalid -> nil
       end
 
-    %{"state" => "incomplete", "usage" => usage, "evaluation_memory" => nil}
+    %{
+      "state" => "incomplete",
+      "usage" => usage,
+      "evaluation_memory" => nil,
+      "last_evaluation_error" => EvaluatorEvidence.envelope_value(result_class, error)
+    }
   end
 
-  defp execution_evidence(_report), do: %{"state" => "not_started"}
+  defp execution_evidence(_report, _result_class), do: %{"state" => "not_started"}
 
   defp public_value(:private, _value), do: {:ok, nil}
   defp public_value(:normal, value), do: json_value(value)

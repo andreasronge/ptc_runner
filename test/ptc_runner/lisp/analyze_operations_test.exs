@@ -67,12 +67,12 @@ defmodule PtcRunner.Lisp.AnalyzeOperationsTest do
     end
 
     test "thread-first nil step raises instead of returning nil" do
-      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: value"}}} =
                Lisp.run("(-> 1 nil)")
     end
 
     test "thread-last nil step raises instead of returning nil" do
-      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: value"}}} =
                Lisp.run("(->> 1 nil)")
     end
   end
