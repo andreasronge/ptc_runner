@@ -111,7 +111,15 @@ access to it.</p><h2 id="start-with-the-shipped-loop">Start with the shipped loo
   (agent.core/run (get input &quot;task&quot;) {&quot;max_turns&quot; 6}))</code></pre><p>Normally, generate this scaffold or start from an example. You do not write
 each mission program the model produces. Configure the loop
 through its documented options and keep the mission tool surface smaller than
-the workflow surface.</p><h2 id="replace-policy-without-replacing-enforcement">Replace policy without replacing enforcement</h2><p>The Kernel owns capabilities, limits, evaluation, cleanup, and evidence. Agent
+the workflow surface.</p><h2 id="budget-turns-and-time-separately">Budget turns and time separately</h2><p><code class="inline">max_turns</code> bounds the agent protocol: it limits how many model-and-program
+turns the loop may attempt. It does not reserve enough elapsed time to finish
+those turns. The complete run, including active preflight, every provider wait,
+and the loop, must fit inside <code class="inline">limits.run_duration_ms</code>; the workflow evaluation
+that owns the loop must also fit inside <code class="inline">limits.workflow_timeout_ms</code>.</p><p>For a live agent, request explicit values for both Kernel clocks based on the
+expected turn count and model latency. Raising only <code class="inline">run_duration_ms</code> leaves
+the workflow clock as a separate boundary. The multi-turn tutorial requests
+120 seconds for each clock as a bounded teaching allowance, not a guarantee
+that the provider will complete in that time.</p><h2 id="replace-policy-without-replacing-enforcement">Replace policy without replacing enforcement</h2><p>The Kernel owns capabilities, limits, evaluation, cleanup, and evidence. Agent
 behavior lives in ordinary replaceable components. After the default loop works,
 an application may introduce new component IDs for:</p><ul><li>system and correction prompts;</li><li>feedback formatting;</li><li>retry and continuation policy;</li><li>completion and failure rules;</li><li>specialist routing; or</li><li>a complete alternative loop.</li></ul><p>Changing those components cannot grant a new model, tool, credential, endpoint,
 or higher limit. <code class="inline">ptc.json</code> can still select only what <code class="inline">ptc-host.json</code> makes
