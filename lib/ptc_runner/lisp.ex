@@ -275,13 +275,15 @@ defmodule PtcRunner.Lisp do
     - `:max_print_length` - Max characters per `println` call (default: 2000)
     - `:filter_context` - Filter context to only include accessed data keys (default: true)
     - `:strict_data` - When true, a missing `data/<name>` is a runtime error
-      instead of `nil` (default: false). The Kernel enables this at the mission
-      boundary; `run/2` stays permissive.
+      instead of `nil` (default: false). The Kernel enables this at every one of
+      its boundaries -- the workflow entry, a mission evaluation, and both REPL
+      session kinds; `run/2` stays permissive.
     - `:data_grants` - Optional sorted `data/<name>` forms included in the
-      missing-grant diagnostic under `:strict_data`. The Kernel passes the same
-      list the mission inventory publishes rather than deriving it from context
-      keys. When omitted, the diagnostic names the missing key without a grant
-      list.
+      missing-grant diagnostic under `:strict_data`. The Kernel passes the list
+      `PtcRunner.Lisp.DataKeys.source_referenceable_forms/1` derives from the
+      granted data, the same one the mission inventory publishes, rather than
+      deriving it from context keys. When omitted, the diagnostic names the
+      missing key without a grant list.
     - `:missing_data_params_message` - Optional diagnostic used when `data/params`
       is missing under `:strict_data`. The Kernel sets this so a no-params
       evaluation is not reported as a missing grant.

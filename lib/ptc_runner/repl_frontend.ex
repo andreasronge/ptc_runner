@@ -1599,11 +1599,13 @@ defmodule PtcRunner.ReplFrontend do
 
   # The analyzer answers an unknown namespace with the language's own list,
   # thirty-odd entries that name no mission, because a workflow session cannot
-  # reach one. Calling `data/<name>` is `not_callable` rather than unknown
-  # namespace, because `data/` is a language namespace. Which switch would add
-  # mission names is a REPL fact rather than a language fact, so it is said
-  # here instead of in the shared diagnostic -- whose exact text is also
-  # reverse-parsed by `NamespaceDiagnostic.rejected_namespace/1`.
+  # reach one. A `data/<name>` form answers from the language instead: an
+  # ungranted name is the strict missing-grant error and a granted one called
+  # as a function is `not_callable`, because `data/` is a language namespace
+  # the workflow environment does carry. Which switch would add mission names
+  # is a REPL fact rather than a language fact, so it is said here instead of
+  # in the shared diagnostic -- whose exact text is also reverse-parsed by
+  # `NamespaceDiagnostic.rejected_namespace/1`.
   #
   # It leads, because the enumeration that follows is long enough to be
   # truncated by the one-shot renderer and is the least actionable part of the
@@ -1625,7 +1627,8 @@ defmodule PtcRunner.ReplFrontend do
 
   defp workflow_mission_hint?(message) do
     NamespaceDiagnostic.unknown_namespace?(message) or
-      NamespaceDiagnostic.data_not_callable?(message)
+      NamespaceDiagnostic.data_not_callable?(message) or
+      NamespaceDiagnostic.missing_data_grant?(message)
   end
 
   defp finish({:ok, session}, _render) do

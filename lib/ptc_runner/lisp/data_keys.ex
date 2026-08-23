@@ -19,6 +19,7 @@ defmodule PtcRunner.Lisp.DataKeys do
 
   alias PtcRunner.Lisp.Format.SymbolRef
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.Parser
 
   @doc """
   Extracts all data keys accessed by a program.
@@ -202,6 +203,50 @@ defmodule PtcRunner.Lisp.DataKeys do
 
   # Primitives and structs - no data access
   defp do_extract(_other, acc), do: acc
+
+  @doc """
+  Returns the sorted `data/<name>` source forms for the keys of `data` that can
+  be written as a `data/<name>` reference.
+
+  Names that cannot be parsed as that form are omitted. Every granted-name list
+  the runtime publishes or prints comes from here: mission inventory entries and
+  the mission and workflow missing-grant diagnostics all consume this rather
+  than selecting forms independently, so the list a user is shown always matches
+  the list that resolves.
+
+  ## Examples
+
+      iex> PtcRunner.Lisp.DataKeys.source_referenceable_forms(%{"b" => 1, "a" => 2})
+      ["data/a", "data/b"]
+
+      iex> PtcRunner.Lisp.DataKeys.source_referenceable_forms(%{"not a symbol" => 1})
+      []
+
+  """
+  @spec source_referenceable_forms(map()) :: [binary()]
+  def source_referenceable_forms(data) when is_map(data) and not is_struct(data) do
+    data
+    |> Map.keys()
+    |> Enum.sort()
+    |> Enum.flat_map(fn name ->
+      case source_referenceable_form(name) do
+        {:ok, form} -> [form]
+        :skip -> []
+      end
+    end)
+  end
+
+  defp source_referenceable_form(name) when is_binary(name) do
+    case Parser.parse("data/" <> name) do
+      {:ok, {:ns_symbol, :data, parsed}} ->
+        if to_string(parsed) == name, do: {:ok, "data/" <> name}, else: :skip
+
+      _not_a_source_reference ->
+        :skip
+    end
+  end
+
+  defp source_referenceable_form(_name), do: :skip
 
   defp existing_atom_or(key) do
     String.to_existing_atom(key)

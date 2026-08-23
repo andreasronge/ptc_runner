@@ -45,6 +45,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.DataKeys
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.Lisp.RetainedSize
@@ -808,7 +809,9 @@ defmodule PtcRunner.Kernel.ReplSession do
         max_tool_call_result_bytes: limits.capability_result_bytes,
         preserve_runtime_callables: true,
         filter_context: false,
-        link: true
+        link: true,
+        strict_data: true,
+        data_grants: DataKeys.source_referenceable_forms(session.config.input)
       )
 
     name_timeout_limit(result, session, remaining_ms)

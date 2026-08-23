@@ -123,8 +123,10 @@ application, host configuration, and lazy environment-file paths, while
 duplicated in `ptc-project.json`. The manifest form is the equivalent low-level
 command. Omitting `--mission` keeps the workflow REPL behavior — which carries
 no mission namespaces, so a mission's own namespace is rejected as unknown.
-Calling `data/<name>` in that session is `not_callable` rather than an unknown
-namespace, because `data/` is a language namespace. Both answers name
+A `data/<name>` form in that session answers from the language rather than as
+an unknown namespace, because `data/` is a language namespace the workflow
+environment carries: an ungranted name is a missing-grant runtime error, and
+calling the granted `data/input` is `not_callable`. All three answers name
 `--mission` and list the missions the manifest declares.
 
 A mission session starts with a fresh continuation and evaluates through the
@@ -136,12 +138,13 @@ start applications, request authorization or credentials, or acquire
 resources. Dependency-only providers support the session without contributing
 task capabilities.
 
-A mission session looks up `data/<name>` strictly: a granted name resolves to
+Both session kinds look up `data/<name>` strictly: a granted name resolves to
 its value, a missing name is a runtime error that lists the granted
 `data/<name>` forms, and calling a granted value as in `(data/tickets)` is
-`not_callable` naming the symbol. Discover those names with `:context`. The
-workflow session and the generic embedding API keep the permissive `nil`
-default.
+`not_callable` naming the symbol. A mission session grants the mission's data;
+discover those names with `:context`. A workflow session grants the single
+`data/input` the manifest declares. Only the generic embedding API,
+`PtcRunner.Lisp.run/2`, keeps the permissive `nil` default.
 
 The interactive banner names the selected mission, components, and direct
 provider aliases. Mission sessions add one meta-command:

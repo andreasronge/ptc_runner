@@ -384,19 +384,71 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
-  test "calling data/ in a workflow session still names the switch that opens a mission", %{
-    tmp_dir: directory
-  } do
+  test "calling the granted workflow input in a workflow session still names the switch that opens a mission",
+       %{tmp_dir: directory} do
     manifest_path = write_workflow_repl_manifest(directory)
 
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl(["--manifest", manifest_path, "-e", "(data/input)"])
+      end
+
+    assert error.message =~ "not callable: data/input"
+    assert error.message =~ "--mission NAME"
+    assert error.message =~ "declared: review, writing"
+  end
+
+  @tag :tmp_dir
+  test "an ungranted data name in a workflow session is rejected and still names the switch",
+       %{tmp_dir: directory} do
+    manifest_path = write_workflow_repl_manifest(directory)
+
+    # Strict workflow lookup answers before callability, so the miss -- not
+    # `not_callable` -- is what has to carry the hint.
     error =
       assert_raise Mix.Error, fn ->
         run_repl(["--manifest", manifest_path, "-e", "(data/tickets)"])
       end
 
-    assert error.message =~ "not callable: data/tickets"
+    assert error.message =~ "data/tickets is not a granted data name"
+    assert error.message =~ "Granted: data/input"
     assert error.message =~ "--mission NAME"
     assert error.message =~ "declared: review, writing"
+  end
+
+  @tag :tmp_dir
+  test "a workflow session does not hint --mission for an error that merely quotes the grant diagnostic",
+       %{tmp_dir: directory} do
+    manifest_path = write_workflow_repl_manifest(directory)
+
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl([
+          "--manifest",
+          manifest_path,
+          "-e",
+          ~S|(let [x "data/foo is not a granted data name. Granted: x"] (x))|
+        ])
+      end
+
+    assert error.message =~ "not callable:"
+    refute error.message =~ "--mission NAME"
+  end
+
+  @tag :tmp_dir
+  test "a bare misspelled data name in a workflow session is rejected instead of answering nil",
+       %{
+         tmp_dir: directory
+       } do
+    manifest_path = write_workflow_repl_manifest(directory)
+
+    error =
+      assert_raise Mix.Error, fn ->
+        run_repl(["--manifest", manifest_path, "-e", "data/inupt"])
+      end
+
+    assert error.message =~ "data/inupt is not a granted data name"
+    assert error.message =~ "Granted: data/input"
   end
 
   @tag :tmp_dir

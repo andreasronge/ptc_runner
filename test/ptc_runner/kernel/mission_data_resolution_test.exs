@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.MissionDataResolutionTest do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.Lisp.DataKeys
 
   @sentinel "SECRET_TICKET_SENTINEL"
 
@@ -19,7 +20,7 @@ defmodule PtcRunner.Kernel.MissionDataResolutionTest do
     {:ok, mission} = MissionEnvironment.new(data: data)
     {:ok, inventory} = MissionInventory.build(mission, Limits.defaults())
 
-    forms = MissionInventory.source_referenceable_forms(data)
+    forms = DataKeys.source_referenceable_forms(data)
 
     rendered_forms =
       inventory.rendered |> Jason.decode!() |> Map.fetch!("data") |> Enum.map(& &1["form"])

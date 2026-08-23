@@ -156,8 +156,10 @@ application, host configuration, and lazy environment-file paths, while
 duplicated in <code class="inline">ptc-project.json</code>. The manifest form is the equivalent low-level
 command. Omitting <code class="inline">--mission</code> keeps the workflow REPL behavior — which carries
 no mission namespaces, so a mission's own namespace is rejected as unknown.
-Calling <code class="inline">data/&lt;name&gt;</code> in that session is <code class="inline">not_callable</code> rather than an unknown
-namespace, because <code class="inline">data/</code> is a language namespace. Both answers name
+A <code class="inline">data/&lt;name&gt;</code> form in that session answers from the language rather than as
+an unknown namespace, because <code class="inline">data/</code> is a language namespace the workflow
+environment carries: an ungranted name is a missing-grant runtime error, and
+calling the granted <code class="inline">data/input</code> is <code class="inline">not_callable</code>. All three answers name
 <code class="inline">--mission</code> and list the missions the manifest declares.</p><p>A mission session starts with a fresh continuation and evaluates through the
 same strict JSON boundary as ordinary mission execution. It exposes that
 mission's components and data, but no workflow bundle, workflow capabilities,
@@ -165,12 +167,13 @@ model route, or other missions. Only the mission's direct providers and their
 dependency closure are opened; unrelated providers do not run local checks,
 start applications, request authorization or credentials, or acquire
 resources. Dependency-only providers support the session without contributing
-task capabilities.</p><p>A mission session looks up <code class="inline">data/&lt;name&gt;</code> strictly: a granted name resolves to
+task capabilities.</p><p>Both session kinds look up <code class="inline">data/&lt;name&gt;</code> strictly: a granted name resolves to
 its value, a missing name is a runtime error that lists the granted
 <code class="inline">data/&lt;name&gt;</code> forms, and calling a granted value as in <code class="inline">(data/tickets)</code> is
-<code class="inline">not_callable</code> naming the symbol. Discover those names with <code class="inline">:context</code>. The
-workflow session and the generic embedding API keep the permissive <code class="inline">nil</code>
-default.</p><p>The interactive banner names the selected mission, components, and direct
+<code class="inline">not_callable</code> naming the symbol. A mission session grants the mission's data;
+discover those names with <code class="inline">:context</code>. A workflow session grants the single
+<code class="inline">data/input</code> the manifest declares. Only the generic embedding API,
+<code class="inline">PtcRunner.Lisp.run/2</code>, keeps the permissive <code class="inline">nil</code> default.</p><p>The interactive banner names the selected mission, components, and direct
 provider aliases. Mission sessions add one meta-command:</p><pre><code class="text language-text">:context          Show the exact frozen model context and its SHA-256 hash</code></pre><p><code class="inline">--mission</code> requires a manifest (directly or after project expansion) and
 cannot be combined with <code class="inline">--profile</code> or <code class="inline">--describe-profile</code>. An unknown name
 lists declared missions in sorted order before sinks or provider activity.</p><p>Interactive meta-commands are deliberately small:</p><pre><code class="text language-text">:help             List session commands

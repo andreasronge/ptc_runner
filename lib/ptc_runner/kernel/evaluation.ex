@@ -28,21 +28,21 @@ defmodule PtcRunner.Kernel.Evaluation do
   observation rather than returning JSON to workflow Lisp.
 
   Mission-scoped evaluation is strict for `data/<name>`: a missing grant is a
-  runtime error that lists the names `PtcRunner.Kernel.MissionInventory` would
-  publish, calling a granted value is `not_callable` naming the symbol, and
+  runtime error that lists the same granted names the mission inventory
+  publishes, calling a granted value is `not_callable` naming the symbol, and
   `data/params` without a supplied params map names `kernel/eval-with` and
   `kernel/eval-source-with`. `PtcRunner.Lisp.run/2` stays permissive.
   """
 
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.TerminalResultLimit
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.DataKeys
   alias PtcRunner.Lisp.TrustedTool
 
   @missing_data_params_message "data/params is not available because this evaluation supplied no params. " <>
@@ -395,7 +395,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       preserve_runtime_callables: true,
       link: true,
       strict_data: true,
-      data_grants: MissionInventory.source_referenceable_forms(environment.data),
+      data_grants: DataKeys.source_referenceable_forms(environment.data),
       missing_data_params_message: @missing_data_params_message
     ]
 
