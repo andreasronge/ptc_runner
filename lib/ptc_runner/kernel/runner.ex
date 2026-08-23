@@ -331,7 +331,7 @@ defmodule PtcRunner.Kernel.Runner do
           evaluation_id,
           step,
           %Error{
-            kind: workflow_error_kind(step.fail.reason),
+            kind: workflow_error_kind(step.fail.reason, config.event_sink),
             reason: step.fail.reason,
             details:
               workflow_error_details(
@@ -343,7 +343,8 @@ defmodule PtcRunner.Kernel.Runner do
               |> Map.merge(authenticated_replay_metadata(step.fail.details, state)),
             usage: RunState.usage(state)
           }
-          |> maybe_promote_max_calls_error(step.fail.details, state)
+          |> maybe_promote_max_calls_error(step.fail.details, state),
+          workflow_inspection_details(step.fail, config.event_sink)
         )
     end
   end
@@ -973,7 +974,7 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp maybe_emit_workflow_limit(_state, _sink, _result), do: :ok
 
-  defp workflow_error_kind(reason)
+  defp workflow_error_kind(reason, _sink)
        when reason in [
               :timeout,
               :compile_timeout,
@@ -984,8 +985,12 @@ defmodule PtcRunner.Kernel.Runner do
             ],
        do: :limit_exceeded
 
-  defp workflow_error_kind(reason) do
-    if EvaluatorErrorCatalog.kind?(reason), do: :evaluation_failed, else: :workflow_failed
+  defp workflow_error_kind(reason, sink) do
+    if EvaluatorErrorCatalog.kind?(reason) and EventSink.policy(sink) == :normal do
+      :evaluation_failed
+    else
+      :workflow_failed
+    end
   end
 
   defp workflow_error_details(%{reason: reason} = fail, timeout_ms, limits, _sink)
@@ -1177,17 +1182,32 @@ defmodule PtcRunner.Kernel.Runner do
 
   defp workflow_error_details(fail, _timeout_ms, _limits, sink)
        when not is_nil(sink) do
-    if EvaluatorErrorCatalog.kind?(fail.reason) do
+    cond do
+      EvaluatorErrorCatalog.kind?(fail.reason) and EventSink.policy(sink) == :normal ->
+        fail.details || %{}
+
+      EvaluatorErrorCatalog.kind?(fail.reason) ->
+        workflow_error_details_for_class(:private, fail)
+
+      true ->
+        details =
+          case EventSink.policy(sink) do
+            :normal -> workflow_error_details_for_class(:normal, fail)
+            _private_or_unavailable -> workflow_error_details_for_class(:private, fail)
+          end
+
+        details
+        |> Map.merge(SafeMetadata.retain_failure_taxonomy_fields(fail.details))
+    end
+  end
+
+  # Public private-run Errors stay generic; the inspection record still gets
+  # the admitted evaluator details so authorized analysis can name the kind.
+  defp workflow_inspection_details(fail, sink) do
+    if EvaluatorErrorCatalog.kind?(fail.reason) and EventSink.policy(sink) != :normal do
       fail.details || %{}
     else
-      details =
-        case EventSink.policy(sink) do
-          :normal -> workflow_error_details_for_class(:normal, fail)
-          _private_or_unavailable -> workflow_error_details_for_class(:private, fail)
-        end
-
-      details
-      |> Map.merge(SafeMetadata.retain_failure_taxonomy_fields(fail.details))
+      %{}
     end
   end
 

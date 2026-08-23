@@ -504,7 +504,7 @@ defmodule PtcRunner.LiveStatusTest do
     {:ok, sink} = EventSink.start(:private, limits, run_id: "live-eval-private")
     {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
 
-    assert {:error, %{kind: :evaluation_failed}} =
+    assert {:error, %{kind: :workflow_failed, details: %{message: "private workflow failed"}}} =
              PtcRunner.LiveStatus.with_target(target, fn ->
                Kernel.run(~S[(return (/ 1 0))], config)
              end)
