@@ -5,6 +5,12 @@ an agent loop.
 
 Create a project that needs no API key if you do not already have one:
 
+`ptc init` requires a target directory that does not already exist. It
+assembles the complete scaffold and publishes it atomically without replacing
+anything. To add PtcRunner to an existing repository, initialize a new sibling
+or subdirectory, then deliberately copy or move the generated files the
+repository wants.
+
 ```console
 ptc init hello-ptc
 ```

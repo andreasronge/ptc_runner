@@ -262,7 +262,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:publication, :destination_collision, 7, false,
      "an artifact destination appeared before publication"},
     {:publication, :initialization_target_exists, 7, false,
-     "the initialization target already exists"},
+     "ptc init publishes only to a new directory; choose a target that does not already exist"},
     {:publication, :initialization_parent_missing, 7, false,
      "the initialization target's parent directory does not exist"},
     {:publication, :initialization_parent_unusable, 7, false,

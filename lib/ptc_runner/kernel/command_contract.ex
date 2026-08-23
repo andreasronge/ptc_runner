@@ -97,6 +97,11 @@ defmodule PtcRunner.Kernel.CommandContract do
                                     |> Enum.map(&Atom.to_string/1)
   @version Mix.Project.config() |> Keyword.fetch!(:version)
   @doctor_notice "doctor --connect may perform one or more real provider requests and may incur provider cost"
+  @init_notices [
+    "DIRECTORY must not already exist",
+    "init assembles the complete scaffold or selected example tree and publishes it atomically without replacing anything",
+    "to add PtcRunner to an existing repository, initialize a new sibling or subdirectory and deliberately copy or move the generated files the repository wants"
+  ]
   @spec schema() :: map()
   def schema do
     %{
@@ -815,12 +820,16 @@ defmodule PtcRunner.Kernel.CommandContract do
         "topic" => Atom.to_string(topic),
         "usage" => CommandDeclaration.usage(topic),
         "options" => CommandDeclaration.help_options(topic, frontend),
-        "notices" => if(topic == :doctor, do: [@doctor_notice], else: [])
+        "notices" => help_notices(topic)
       }
     else
       raise ArgumentError, "invalid help topic"
     end
   end
+
+  defp help_notices(:doctor), do: [@doctor_notice]
+  defp help_notices(:init), do: @init_notices
+  defp help_notices(_topic), do: []
 
   @spec version_result() :: map()
   def version_result, do: %{"version" => @version}

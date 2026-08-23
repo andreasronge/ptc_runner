@@ -909,6 +909,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
         }),
       "docs_listing" => CommandOutcome.success(:docs, @run_ref, CommandContract.docs_result(nil)),
       "help_root" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:root)),
+      "help_init" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:init)),
       "help_run" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:run)),
       "version" => CommandOutcome.success(:version, @run_ref, CommandContract.version_result())
     }

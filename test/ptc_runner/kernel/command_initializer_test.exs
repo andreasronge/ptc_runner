@@ -81,10 +81,25 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
     sentinel = Path.join(target, "keep.txt")
     File.write!(sentinel, "existing")
 
-    assert_initialization_error(
-      CommandEngine.dispatch(["init", target]),
-      "initialization_target_exists"
-    )
+    outcome =
+      assert_initialization_error(
+        CommandEngine.dispatch(["init", target]),
+        "initialization_target_exists"
+      )
+
+    assert outcome.envelope["error"] == %{
+             "phase" => "publication",
+             "code" => "initialization_target_exists",
+             "message" =>
+               "ptc init publishes only to a new directory; choose a target that does not already exist",
+             "source" => nil,
+             "path" => nil,
+             "span" => nil,
+             "subject" => nil,
+             "notes" => [],
+             "retryable" => false,
+             "provider_activity" => false
+           }
 
     assert File.read!(sentinel) == "existing"
     assert File.ls!(target) == ["keep.txt"]

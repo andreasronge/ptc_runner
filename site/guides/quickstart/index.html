@@ -102,7 +102,9 @@ without writing PTC-Lisp yourself.</p><p>Download the executable as described un
 <a href="/installation/standalone/">Standalone installation</a>. Starting with the
 next root release, the <a href="/installation/docker/">Docker image</a> provides the
 same command interface; its installation page gives the complete mounted-file
-and ownership form.</p><h2 id="run-without-a-credential">Run without a credential</h2><p>Create and run a project that needs no API key:</p><pre><code class="console language-console">ptc init hello-ptc
+and ownership form.</p><h2 id="run-without-a-credential">Run without a credential</h2><p>Create and run a project that needs no API key:</p><p>The <code class="inline">ptc init</code> target must not already exist. For an existing repository,
+initialize a new sibling or subdirectory and deliberately copy or move the
+generated files you want into the repository.</p><pre><code class="console language-console">ptc init hello-ptc
 ptc run hello-ptc/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;greeting&quot;:&quot;hello world&quot;}</code></pre><p><code class="inline">init</code> creates an application, a project document with local artifact settings,
 and ignore rules for public and private run artifacts. The first run contacts no
 model or external tool and records a trace and command envelope under
