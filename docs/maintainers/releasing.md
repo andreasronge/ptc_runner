@@ -5,27 +5,33 @@
 
 Root releases use `v*` tags and publish the single `ptc_runner` Hex package.
 
-From a clean branch merged to `main`, update the version in `mix.exs` and add a
-versioned `CHANGELOG.md` section. Run:
+## Release checklist
 
-```bash
-mix precommit
-FORCE_FULL_PRE_PUSH=1 .githooks/pre-push
-MIX_ENV=prod mix hex.build
-```
+1. On a clean `main`, update `mix.exs` and add a versioned `CHANGELOG.md`
+   section dated for the expected publication day. Run `mix regen`; if it
+   changes the semantic projection, commit and push it before continuing.
+2. Run the local preparation checks:
 
-Dispatch the release gate from the versioned commit on `main`. After it is
-green and release approval is explicit, create and push `vX.Y.Z`. The tag
-workflow re-runs the package and documentation gates; it does not publish to
-Hex.
+   ```bash
+   mix precommit
+   FORCE_FULL_PRE_PUSH=1 .githooks/pre-push
+   MIX_ENV=prod mix hex.build
+   ```
 
-The tag workflow additionally packages the standalone macOS arm64 artifact with
-`scripts/package_standalone_release.sh`, which closes the release's runtime
+3. Record `git rev-parse HEAD`, dispatch `Release Gate` from `main`, and confirm
+   that exact commit passes verification, macOS packaging, and both container
+   targets. Local checks do not replace this gate. Any fix creates a new
+   candidate and requires a fresh dispatch.
+4. After the gate is green and release approval is explicit, create and push
+   `vX.Y.Z` at the verified commit.
+
+The tag run repeats the gates and packages the standalone macOS arm64 artifact
+with `scripts/package_standalone_release.sh`, which closes the release's runtime
 library set, re-signs what it rewrote, and verifies the packaged tree with
 `scripts/verify_standalone_release.sh`. It records build provenance for the
 artifact and attaches it, with its `.sha256`, to a draft GitHub release. That
 release stays a draft until a maintainer publishes it, exactly as the launcher
-release does.
+release does. It does not publish to Hex.
 
 After the canonical verification job passes, the root release workflow calls
 `.github/workflows/container-release.yml`. That reusable workflow builds and
