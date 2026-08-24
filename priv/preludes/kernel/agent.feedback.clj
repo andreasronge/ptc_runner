@@ -30,19 +30,54 @@
              marker))))
 
 
-(defn- preview-guidance [evaluation]
-  (let [preview (get evaluation :preview)
-        caps (get preview :caps_hit [])]
-    (if (true? (get preview :truncated?))
-      (str "\nPreview truncated"
+(defn- committed-with-history? [evaluation]
+  (let [effect (get evaluation :continuation_effect)]
+    (or (= effect :committed_with_history)
+        (= effect "committed_with_history"))))
+
+(defn- committed-without-history? [evaluation]
+  (let [effect (get evaluation :continuation_effect)]
+    (or (= effect :committed_without_history)
+        (= effect "committed_without_history"))))
+
+(defn- value-preview-guidance [evaluation preview]
+  (if (true? (get preview :value_truncated?))
+    (let [caps (filter (fn [cap]
+                         (not (or (= cap :prints) (= cap "prints"))))
+                       (get preview :caps_hit []))]
+      (str "\nPreview truncated for the evaluation value"
            (if (seq caps) (str " by " (join ", " caps)) "")
-           ". The complete successful value remains available as *1. "
-           "Use (describe *1), take, select-keys, get-in, or reduce to inspect "
-           "a smaller shape or compute a compact summary.")
-      "")))
+           ". "
+           (cond
+             (committed-with-history? evaluation)
+             (str "The exact evaluation result is already available as *1; only its preview "
+                  "was truncated. The capability call should not be repeated solely to recover "
+                  "the displayed value. Use (describe *1), take, select-keys, get-in, or reduce "
+                  "to inspect a smaller shape or compute a compact summary.")
+
+             (committed-without-history? evaluation)
+             (str "The returned result was not added to *1 history; persisted definitions "
+                  "remain available. Bind important data before returning it when a later "
+                  "phase must reuse the exact value.")
+
+             :else
+             "Only the displayed value preview was truncated.")))
+    ""))
+
+(defn- print-truncation-guidance [preview]
+  (if (true? (get preview :prints_truncated?))
+    (str "\nSome println output was omitted from this bounded observation and is not stored "
+         "in *1. Recompute it from persisted definitions when possible. In future turns, "
+         "leave important data as the final expression or bind it before printing.")
+    ""))
+
+(defn- preview-guidance [evaluation]
+  (let [preview (get evaluation :preview)]
+    (str (value-preview-guidance evaluation preview)
+         (print-truncation-guidance preview))))
 
 (defn success
-  "Renders a bounded, explicitly untrusted observation from a successful evaluation."
+  "Renders a bounded, explicitly untrusted observation from a successful evaluation. Value-preview truncation names `*1` only for history-committing ordinary results; omitted println output is reported independently and is never attributed to `*1`."
   [evaluation max-chars]
   (let [raw-body (or (get evaluation :observation)
                      "user=> #<preview unavailable>")

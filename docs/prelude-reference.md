@@ -367,7 +367,7 @@ Renders bounded correction guidance for an invalid application result.
 (agent.feedback/success evaluation max-chars)
 ```
 
-Renders a bounded, explicitly untrusted observation from a successful evaluation.
+Renders a bounded, explicitly untrusted observation from a successful evaluation. Value-preview truncation names `*1` only for history-committing ordinary results; omitted println output is reported independently and is never attributed to `*1`.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`

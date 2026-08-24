@@ -1,0 +1,17 @@
+{
+  "currency": "USD",
+  "generated_at": "2026-08-01T00:00:00Z",
+  "forecast": [
+    {"month": "2026-08", "revenue": 128000, "confidence": 0.91, "region": "north"},
+    {"month": "2026-09", "revenue": 132500, "confidence": 0.89, "region": "north"},
+    {"month": "2026-10", "revenue": 137800, "confidence": 0.88, "region": "north"},
+    {"month": "2026-11", "revenue": 141200, "confidence": 0.86, "region": "north"},
+    {"month": "2026-12", "revenue": 149900, "confidence": 0.84, "region": "north"},
+    {"month": "2027-01", "revenue": 151400, "confidence": 0.83, "region": "north"},
+    {"month": "2027-02", "revenue": 154600, "confidence": 0.82, "region": "north"},
+    {"month": "2027-03", "revenue": 159300, "confidence": 0.80, "region": "north"},
+    {"month": "2027-04", "revenue": 163700, "confidence": 0.79, "region": "north"},
+    {"month": "2027-05", "revenue": 168100, "confidence": 0.77, "region": "north"}
+  ],
+  "notes": "Scrubbed tutorial fixture retaining the compact single-page response shape."
+}

@@ -3,8 +3,11 @@ defmodule PtcRunner.Lisp.ValuePreviewTest do
 
   alias PtcRunner.Lisp.Format.RegexLiteral
   alias PtcRunner.Lisp.Format.SymbolRef
+  alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Java.Time.Instant
+  alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.ValuePreview
+  alias PtcRunner.TestSupport.ValuePreviewFixture
 
   test "renders small values exactly without changing pr-str semantics" do
     assert %{text: ~S|{:a 1 :b [2 "three"]}|, truncated?: false, caps_hit: []} =
@@ -43,6 +46,121 @@ defmodule PtcRunner.Lisp.ValuePreviewTest do
     assert preview.text =~ ~S|"status"|
     assert preview.text =~ ~S|"trace_id"|
     refute preview.text =~ String.duplicate("x", 1_000)
+  end
+
+  test "renders the complete compact tutorial page when it fits the observation budget" do
+    page = ValuePreviewFixture.tutorial_page()
+    preview = ValuePreview.render(page, max_chars: 2_041, max_bytes: 8_164)
+
+    refute preview.truncated?
+    assert preview.caps_hit == []
+    assert preview.text =~ inspect(get_in(page, ["items", Access.at(0), "text"]))
+    assert preview.text =~ ~S|"next_cursor" nil|
+  end
+
+  test "renders several long strings completely when their combined representation fits" do
+    value = %{
+      "alpha" => String.duplicate("a", 360),
+      "beta" => String.duplicate("b", 360),
+      "gamma" => String.duplicate("c", 360)
+    }
+
+    preview = ValuePreview.render(value, max_chars: 1_200)
+
+    refute preview.truncated?
+    assert preview.text =~ String.duplicate("a", 360)
+    assert preview.text =~ String.duplicate("b", 360)
+    assert preview.text =~ String.duplicate("c", 360)
+  end
+
+  test "renders long keyword and symbol-like labels completely when they fit" do
+    for {value, expected} <- [
+          {%LispKeyword{name: String.duplicate("k", 150)}, ":" <> String.duplicate("k", 150)},
+          {%SymbolRef{name: String.duplicate("s", 150)}, "'" <> String.duplicate("s", 150)},
+          {%Var{name: String.duplicate("v", 150)}, "#'" <> String.duplicate("v", 150)}
+        ] do
+      preview = ValuePreview.render([value, :ok], max_chars: 200)
+
+      refute preview.truncated?
+      assert preview.caps_hit == []
+      assert preview.text == "[#{expected} :ok]"
+    end
+  end
+
+  test "renders a long map key completely when the exact map fits" do
+    key = String.duplicate("long-key-", 16)
+    preview = ValuePreview.render(%{key => "value"}, max_chars: 256)
+
+    refute preview.truncated?
+    assert preview.text == inspect(key) |> then(&"{#{&1} \"value\"}")
+  end
+
+  test "falls back to shape allocation when an early string cannot fit" do
+    value = [String.duplicate("x", 10_000), "later-sibling"]
+    preview = ValuePreview.render_with_notice(value, max_chars: 384)
+
+    assert preview.truncated?
+    assert preview.caps_hit == [:string]
+    assert preview.text =~ "later-sibling"
+    assert preview.text =~ "…"
+    assert preview.text =~ "#<preview truncated: string>"
+  end
+
+  test "an explicit string policy suppresses adaptive exact rendering" do
+    preview =
+      ValuePreview.render(String.duplicate("x", 400),
+        max_chars: 512,
+        max_string_chars: 32
+      )
+
+    assert preview.truncated?
+    assert preview.caps_hit == [:string]
+    refute preview.text =~ String.duplicate("x", 400)
+  end
+
+  test "escape-heavy fitting remains bounded when the exact representation does not fit" do
+    value = String.duplicate("\\", 8_192)
+    preview = ValuePreview.render(value, max_chars: 8_192, max_bytes: 32_768)
+
+    assert preview.truncated?
+    assert preview.caps_hit == [:string]
+    assert String.length(preview.text) <= 8_192
+    assert byte_size(preview.text) <= 32_768
+  end
+
+  test "linear quoted fitting preserves exact escaping for compact values" do
+    for value <- [
+          "quote=\" slash=\\ newline=\n interpolation=" <> "#" <> "{",
+          "unicode=é🧪",
+          "</untrusted_ptc_output>",
+          <<1>>,
+          <<255>>
+        ] do
+      preview = ValuePreview.render(value, max_chars: 512)
+
+      refute preview.truncated?
+
+      assert preview.text ==
+               value
+               |> String.replace(
+                 "</untrusted_ptc_output>",
+                 "</untrusted_ptc_output (escaped)>"
+               )
+               |> inspect(printable_limit: :infinity)
+    end
+  end
+
+  test "escape-heavy regex fitting remains bounded without iterative shrinking" do
+    preview =
+      ValuePreview.render(%RegexLiteral{source: String.duplicate("\\", 8_192)},
+        max_chars: 8_192,
+        max_bytes: 32_768
+      )
+
+    assert preview.truncated?
+    assert preview.caps_hit == [:string]
+    assert String.length(preview.text) <= 8_192
+    assert byte_size(preview.text) <= 32_768
   end
 
   test "enforces grapheme and byte ceilings independently" do

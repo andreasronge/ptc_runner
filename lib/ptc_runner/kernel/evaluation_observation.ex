@@ -4,8 +4,10 @@ defmodule PtcRunner.Kernel.EvaluationObservation do
 
   Continued values stay committed in subordinate history, but only the
   structural preview built here crosses into the outer workflow evaluator.
-  Preview generation cannot change the evaluation outcome or continuation
-  effect.
+  Value-preview truncation and observation-stage `println` omission are
+  reported independently so feedback never attributes printed bytes to the
+  retained value. Preview generation cannot change the evaluation outcome or
+  continuation effect.
   """
 
   alias PtcRunner.Lisp.ValuePreview
@@ -24,6 +26,7 @@ defmodule PtcRunner.Kernel.EvaluationObservation do
     |> Map.put(:observation, observation.text)
     |> Map.put(:preview, %{
       truncated?: observation.truncated?,
+      value_truncated?: observation.value_truncated?,
       caps_hit: observation.caps_hit,
       sampled_keys: observation.sampled_keys,
       prints_truncated?: observation.prints_truncated?
@@ -36,6 +39,7 @@ defmodule PtcRunner.Kernel.EvaluationObservation do
       |> Map.put(:observation, "user=> #<preview unavailable>")
       |> Map.put(:preview, %{
         truncated?: true,
+        value_truncated?: true,
         caps_hit: [:output],
         sampled_keys: [],
         prints_truncated?: Map.get(evaluation, :prints, []) != []
@@ -54,6 +58,7 @@ defmodule PtcRunner.Kernel.EvaluationObservation do
     |> Map.put(:observation, observation.text)
     |> Map.put(:preview, %{
       truncated?: observation.truncated?,
+      value_truncated?: observation.value_truncated?,
       caps_hit: observation.caps_hit,
       sampled_keys: observation.sampled_keys,
       prints_truncated?: observation.prints_truncated?
@@ -64,6 +69,7 @@ defmodule PtcRunner.Kernel.EvaluationObservation do
       |> Map.put(:observation, "user=> #<preview unavailable>")
       |> Map.put(:preview, %{
         truncated?: true,
+        value_truncated?: true,
         caps_hit: [:output],
         sampled_keys: [],
         prints_truncated?: Map.get(evaluation, :prints, []) != []
@@ -81,6 +87,7 @@ defmodule PtcRunner.Kernel.EvaluationObservation do
       %{
         text: prefix |> take_graphemes(max_chars) |> elem(0),
         truncated?: true,
+        value_truncated?: true,
         caps_hit: [:output],
         sampled_keys: [],
         prints_truncated?: Map.get(evaluation, :prints, []) != []
@@ -107,6 +114,7 @@ defmodule PtcRunner.Kernel.EvaluationObservation do
     %{
       text: text,
       truncated?: preview.truncated? or prints_truncated?,
+      value_truncated?: preview.truncated?,
       caps_hit: preview.caps_hit ++ if(prints_truncated?, do: [:prints], else: []),
       sampled_keys: preview.sampled_keys,
       prints_truncated?: prints_truncated?

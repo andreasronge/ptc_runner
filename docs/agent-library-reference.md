@@ -352,14 +352,30 @@ definitions and history.
 
 ## Feedback bounds and disclosure
 
-Successful observations contain a heap-proportional structural preview and
+Successful observations contain a heap-proportional value preview and
 chronological `println` output. Preview traversal has independent collection,
 depth, node, string, character, and UTF-8 byte ceilings; it does not first
-serialize the complete value. When truncated, feedback reports the ceilings
-hit, sampled map keys (including bounded nested samples), and reminds the model
-that the complete committed value remains in `*1`. The body is marked as
-untrusted and escapes its closing marker. Closures and other executable values
-cross only as inert display labels.
+serialize the complete value. The default pass preserves sibling shape under a
+small per-string ceiling. When the shape pass reports only the string cap and
+no explicit string ceiling was supplied, one bounded greedy pass may replace
+the preview with an exact rendering, but only when the complete compact
+representation fits every active ceiling. An incomplete retry is discarded in
+favor of the original shape-preserving preview.
+
+Feedback distinguishes value-preview truncation from `println` output omitted
+while assembling the bounded observation. For an ordinary successful result,
+the exact retained value is available as `*1`, so feedback advises reusing it
+instead of repeating a capability call. An explicit return does not advance
+history; feedback for a non-final phased return therefore refers only to
+persisted definitions and never claims that the returned result is in `*1`.
+Omitted print output is not stored in `*1`. The earlier per-call
+`max_print_length` bound remains separate and carries its own visible
+`... (kept/total chars)` marker.
+
+Truncated previews continue to report the ceilings hit and sampled map keys
+(including bounded nested samples). The body is marked as untrusted and escapes
+its closing marker. Closures and other executable values cross only as inert
+display labels.
 
 The preview is non-authoritative presentation work: a preview failure cannot
 turn a committed evaluation into a failure. A retained-memory or `*1` history

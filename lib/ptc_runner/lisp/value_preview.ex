@@ -2,10 +2,16 @@ defmodule PtcRunner.Lisp.ValuePreview do
   @moduledoc """
   Heap-proportional structural previews for human and model observations.
 
-  Unlike `PtcRunner.Lisp.Format`, this module is deliberately inexact. It
-  samples collections and enforces depth, node, string, character, and UTF-8
-  byte ceilings while traversing. It never recursively sanitizes a complete
-  value or materializes a complete collection before applying those ceilings.
+  Unlike `PtcRunner.Lisp.Format`, this module is deliberately bounded. Its
+  default pass samples collections and preserves sibling shape while enforcing
+  depth, node, string, character, and UTF-8 byte ceilings. When the shape pass
+  reports only the string cap and no explicit string ceiling was supplied, one
+  bounded greedy pass may replace the preview with an exact rendering if every
+  part fits all remaining ceilings. Otherwise the original shape-preserving
+  preview wins.
+
+  Neither pass recursively sanitizes a complete value or materializes a
+  complete collection before applying the traversal ceilings.
 
   Preview results are presentation metadata only. Callers must never turn a
   preview failure into an evaluation failure or use a preview as the retained
@@ -51,28 +57,15 @@ defmodule PtcRunner.Lisp.ValuePreview do
 
   @spec render(term(), [option()]) :: Result.t()
   def render(value, opts \\ []) when is_list(opts) do
-    policy = policy(opts)
-    sampled_keys = sampled_keys(value, policy)
+    shape_policy = policy(opts, :shape)
+    sampled_keys = sampled_keys(value, shape_policy)
 
-    {text, truncated?, caps, _nodes_left} =
-      render_value(value, 0, policy.max_chars, policy.max_bytes, policy.max_nodes, policy)
-
-    caps_hit = caps |> MapSet.to_list() |> Enum.sort()
-
-    %Result{
-      text: text,
-      truncated?: truncated? or caps_hit != [],
-      caps_hit: caps_hit,
-      sampled_keys: sampled_keys
-    }
+    value
+    |> render_once(shape_policy, sampled_keys)
+    |> maybe_render_complete(value, opts, shape_policy, sampled_keys)
   rescue
     _error ->
-      %Result{
-        text: "#<preview unavailable>",
-        truncated?: true,
-        caps_hit: [:output],
-        sampled_keys: []
-      }
+      unavailable()
   end
 
   @doc false
@@ -99,7 +92,7 @@ defmodule PtcRunner.Lisp.ValuePreview do
   @doc "Renders a preview with a bounded visible truncation notice."
   @spec render_with_notice(term(), [option()]) :: Result.t()
   def render_with_notice(value, opts \\ []) when is_list(opts) do
-    policy = policy(opts)
+    policy = policy(opts, :shape)
     initial = render(value, opts)
 
     if initial.truncated? do
@@ -109,13 +102,13 @@ defmodule PtcRunner.Lisp.ValuePreview do
       notice_bytes = byte_size(separator <> notice)
 
       if notice_chars < policy.max_chars and notice_bytes < policy.max_bytes do
-        bounded =
-          render(
-            value,
-            opts
-            |> Keyword.put(:max_chars, policy.max_chars - notice_chars)
-            |> Keyword.put(:max_bytes, policy.max_bytes - notice_bytes)
-          )
+        bounded_policy =
+          opts
+          |> Keyword.put(:max_chars, policy.max_chars - notice_chars)
+          |> Keyword.put(:max_bytes, policy.max_bytes - notice_bytes)
+          |> policy(:shape)
+
+        bounded = safe_render_once(value, bounded_policy, initial.sampled_keys)
 
         %{bounded | text: bounded.text <> separator <> notice, truncated?: true}
       else
@@ -151,16 +144,65 @@ defmodule PtcRunner.Lisp.ValuePreview do
     }
   end
 
-  defp policy(opts) do
+  defp policy(opts, allocation_mode) when allocation_mode in [:shape, :complete] do
     max_chars = positive(opts[:max_chars], @default_max_chars)
 
     %{
+      allocation_mode: allocation_mode,
       max_chars: max_chars,
       max_bytes: positive(opts[:max_bytes], max(max_chars * 4, max_chars)),
       max_items: positive(opts[:max_items], @default_max_items),
       max_depth: non_negative(opts[:max_depth], @default_max_depth),
       max_nodes: positive(opts[:max_nodes], @default_max_nodes),
       max_string_chars: positive(opts[:max_string_chars], @default_max_string_chars)
+    }
+  end
+
+  defp render_once(value, policy, sampled_keys) do
+    {text, truncated?, caps, _nodes_left} =
+      render_value(value, 0, policy.max_chars, policy.max_bytes, policy.max_nodes, policy)
+
+    caps_hit = caps |> MapSet.to_list() |> Enum.sort()
+
+    %Result{
+      text: text,
+      truncated?: truncated? or caps_hit != [],
+      caps_hit: caps_hit,
+      sampled_keys: sampled_keys
+    }
+  end
+
+  defp safe_render_once(value, policy, sampled_keys) do
+    render_once(value, policy, sampled_keys)
+  rescue
+    _error -> unavailable()
+  end
+
+  defp maybe_render_complete(shape, value, opts, shape_policy, sampled_keys) do
+    if shape.caps_hit == [:string] and not Keyword.has_key?(opts, :max_string_chars) do
+      complete_policy = %{
+        shape_policy
+        | allocation_mode: :complete,
+          max_string_chars: shape_policy.max_chars
+      }
+
+      case render_once(value, complete_policy, sampled_keys) do
+        %Result{truncated?: false, caps_hit: []} = complete -> complete
+        _incomplete -> shape
+      end
+    else
+      shape
+    end
+  rescue
+    _error -> shape
+  end
+
+  defp unavailable do
+    %Result{
+      text: "#<preview unavailable>",
+      truncated?: true,
+      caps_hit: [:output],
+      sampled_keys: []
     }
   end
 
@@ -369,13 +411,16 @@ defmodule PtcRunner.Lisp.ValuePreview do
     do: leaf(Integer.to_string(value), chars, bytes, nodes)
 
   defp render_keyword(%LispKeyword{name: name}, chars, bytes, nodes, policy) do
-    {prefix, more?} = take_graphemes(name, policy.max_string_chars)
-    text = ":" <> prefix <> if(more?, do: "…", else: "")
-    leaf(text, chars, bytes, nodes, if(more?, do: :string, else: nil))
+    render_bounded_label(":", name, "", chars, bytes, nodes, policy)
   end
 
   defp render_string(value, chars, bytes, nodes, policy) do
-    limit = min(policy.max_string_chars, max(chars - 3, 0))
+    limit =
+      case policy.allocation_mode do
+        :shape -> min(policy.max_string_chars, max(chars - 3, 0))
+        :complete -> min(policy.max_string_chars, max(chars, 0))
+      end
+
     {graphemes, more?} = take_grapheme_list(value, limit)
     fit_quoted(graphemes, more?, chars, bytes, nodes)
   end
@@ -389,48 +434,135 @@ defmodule PtcRunner.Lisp.ValuePreview do
   end
 
   defp fit_regex(graphemes, more?, chars, bytes, nodes) do
-    suffix = if(more?, do: "…", else: "")
-    text = "#\"" <> (graphemes |> IO.iodata_to_binary() |> escape_untrusted()) <> suffix <> "\""
+    chunks = graphemes |> IO.iodata_to_binary() |> escape_untrusted() |> grapheme_chunks()
 
-    cond do
-      fits?(text, chars, bytes) ->
-        caps = if(more?, do: MapSet.new([:string]), else: MapSet.new())
-        {text, more?, caps, nodes}
+    case fit_delimited_chunks(chunks, more?, "#\"", "\"", chars, bytes) do
+      {:ok, text, truncated?} ->
+        caps = if(truncated?, do: MapSet.new([:string]), else: MapSet.new())
+        {text, truncated?, caps, nodes}
 
-      graphemes != [] ->
-        fit_regex(Enum.drop(graphemes, -1), true, chars, bytes, nodes)
-
-      true ->
-        leaf("#<…>", chars, bytes, nodes, :output)
+      :error ->
+        leaf("#<…>", chars, bytes, nodes, :string)
     end
   end
 
   defp fit_quoted(graphemes, more?, chars, bytes, nodes) do
-    suffix = if(more?, do: "…", else: "")
-
-    text =
+    content =
       graphemes
-      |> Kernel.++([suffix])
       |> IO.iodata_to_binary()
       |> String.replace("</untrusted_ptc_output>", "</untrusted_ptc_output (escaped)>")
-      |> inspect(printable_limit: :infinity)
 
-    cond do
-      fits?(text, chars, bytes) ->
-        caps = if(more?, do: MapSet.new([:string]), else: MapSet.new())
-        {text, more?, caps, nodes}
+    exact = inspect(content <> if(more?, do: "…", else: ""), printable_limit: :infinity)
 
-      graphemes != [] ->
-        fit_quoted(Enum.drop(graphemes, -1), true, chars, bytes, nodes)
+    if fits?(exact, chars, bytes) do
+      caps = if(more?, do: MapSet.new([:string]), else: MapSet.new())
+      {exact, more?, caps, nodes}
+    else
+      case content |> quoted_chunks() |> fit_truncated_chunks(~S|"|, ~S|"|, chars, bytes) do
+        {:ok, text, true} ->
+          {text, true, MapSet.new([:string]), nodes}
 
-      fits?(~S|"…"|, chars, bytes) ->
-        {~S|"…"|, true, MapSet.new([:output, :string]), nodes}
+        :error when chars >= 2 and bytes >= 2 ->
+          {~S|""|, true, MapSet.new([:output, :string]), nodes}
 
-      fits?(~S|""|, chars, bytes) ->
-        {~S|""|, true, MapSet.new([:output, :string]), nodes}
+        :error ->
+          {"", true, MapSet.new([:output, :string]), nodes}
+      end
+    end
+  end
 
-      true ->
-        {"", true, MapSet.new([:output, :string]), nodes}
+  defp fit_delimited_chunks(chunks, more?, open, close, chars, bytes) do
+    marker = if(more?, do: "…", else: "")
+    exact = IO.iodata_to_binary([open, chunks, marker, close])
+
+    if fits?(exact, chars, bytes) do
+      {:ok, exact, more?}
+    else
+      fit_truncated_chunks(chunks, open, close, chars, bytes)
+    end
+  end
+
+  defp fit_truncated_chunks(chunks, open, close, chars, bytes) do
+    marker = "…"
+    fixed_chars = String.length(open <> marker <> close)
+    fixed_bytes = byte_size(open <> marker <> close)
+
+    if fixed_chars <= chars and fixed_bytes <= bytes do
+      kept =
+        take_fitting_chunks(
+          chunks,
+          max(chars - fixed_chars, 0),
+          max(bytes - fixed_bytes, 0),
+          [],
+          0,
+          0
+        )
+
+      {:ok, IO.iodata_to_binary([open, kept, marker, close]), true}
+    else
+      :error
+    end
+  end
+
+  defp take_fitting_chunks([], _chars, _bytes, acc, _used_chars, _used_bytes),
+    do: Enum.reverse(acc)
+
+  defp take_fitting_chunks([chunk | rest], chars, bytes, acc, used_chars, used_bytes) do
+    next_chars = used_chars + String.length(chunk)
+    next_bytes = used_bytes + byte_size(chunk)
+
+    if next_chars <= chars and next_bytes <= bytes do
+      take_fitting_chunks(rest, chars, bytes, [chunk | acc], next_chars, next_bytes)
+    else
+      Enum.reverse(acc)
+    end
+  end
+
+  defp grapheme_chunks(value), do: grapheme_chunks(value, [])
+
+  defp grapheme_chunks("", acc), do: Enum.reverse(acc)
+
+  defp grapheme_chunks(value, acc) do
+    case String.next_grapheme(value) do
+      {grapheme, rest} -> grapheme_chunks(rest, [grapheme | acc])
+      nil -> Enum.reverse(acc)
+    end
+  end
+
+  defp quoted_chunks(value), do: quoted_chunks(value, [])
+
+  defp quoted_chunks("", acc), do: Enum.reverse(acc)
+
+  defp quoted_chunks(<<"#", "{", rest::binary>>, acc),
+    do: quoted_chunks(rest, [<<"\\", "#", "{">> | acc])
+
+  defp quoted_chunks(value, acc) do
+    case String.next_grapheme(value) do
+      {grapheme, rest} -> quoted_chunks(rest, [quoted_chunk(grapheme) | acc])
+      nil -> Enum.reverse(acc)
+    end
+  end
+
+  defp quoted_chunk("\""), do: "\\\""
+  defp quoted_chunk("\\"), do: "\\\\"
+  defp quoted_chunk(<<0>>), do: "\\0"
+  defp quoted_chunk(<<7>>), do: "\\a"
+  defp quoted_chunk(<<8>>), do: "\\b"
+  defp quoted_chunk("\t"), do: "\\t"
+  defp quoted_chunk("\n"), do: "\\n"
+  defp quoted_chunk(<<11>>), do: "\\v"
+  defp quoted_chunk(<<12>>), do: "\\f"
+  defp quoted_chunk("\r"), do: "\\r"
+  defp quoted_chunk(<<27>>), do: "\\e"
+
+  defp quoted_chunk(grapheme) do
+    if String.printable?(grapheme) do
+      grapheme
+    else
+      grapheme
+      |> inspect(binaries: :as_strings, printable_limit: :infinity)
+      |> String.trim_leading(~S|"|)
+      |> String.trim_trailing(~S|"|)
     end
   end
 
@@ -477,12 +609,17 @@ defmodule PtcRunner.Lisp.ValuePreview do
 
   defp render_bounded_label(prefix, value, suffix, chars, bytes, nodes, policy)
        when is_binary(value) do
-    component_chars =
-      max(min(policy.max_string_chars, chars - String.length(prefix <> suffix)), 0)
+    {graphemes, more?} = take_grapheme_list(value, policy.max_string_chars)
+    chunks = graphemes |> IO.iodata_to_binary() |> escape_untrusted() |> grapheme_chunks()
 
-    {component, more?} = take_graphemes(value, component_chars)
-    text = prefix <> component <> if(more?, do: "…", else: "") <> suffix
-    leaf(text, chars, bytes, nodes, if(more?, do: :string, else: nil))
+    case fit_delimited_chunks(chunks, more?, prefix, suffix, chars, bytes) do
+      {:ok, text, truncated?} ->
+        caps = if(truncated?, do: MapSet.new([:string]), else: MapSet.new())
+        {text, truncated?, caps, nodes}
+
+      :error ->
+        leaf("#<…>", chars, bytes, nodes, :string)
+    end
   end
 
   defp render_bounded_label(_prefix, _value, _suffix, chars, bytes, nodes, _policy),
@@ -571,15 +708,23 @@ defmodule PtcRunner.Lisp.ValuePreview do
         cap: :items,
         chars: chars,
         bytes: bytes,
-        nodes: nodes
+        nodes: nodes,
+        allocation_mode: policy.allocation_mode
       },
       entry_fun
     )
   end
 
   defp render_map_entry(key, value, depth, chars, bytes, nodes, policy) do
-    key_budget_chars = min(max(div(chars, 3), 8), @sort_key_chars + 4)
-    key_budget_bytes = min(max(div(bytes, 3), 8), (@sort_key_chars + 4) * 4)
+    {key_budget_chars, key_budget_bytes} =
+      case policy.allocation_mode do
+        :shape ->
+          {min(max(div(chars, 3), 8), @sort_key_chars + 4),
+           min(max(div(bytes, 3), 8), (@sort_key_chars + 4) * 4)}
+
+        :complete ->
+          {chars, bytes}
+      end
 
     {key_text, key_truncated?, key_caps, nodes} =
       render_key(key, key_budget_chars, key_budget_bytes, nodes, policy)
@@ -629,15 +774,23 @@ defmodule PtcRunner.Lisp.ValuePreview do
         cap: cap,
         chars: chars,
         bytes: bytes,
-        nodes: nodes
+        nodes: nodes,
+        allocation_mode: policy.allocation_mode
       },
       item_fun
     )
   end
 
   defp render_sequence_with(sequence, item_fun) do
-    %{open: open, close: close, items: items, chars: chars, bytes: bytes, nodes: nodes} =
-      sequence
+    %{
+      open: open,
+      close: close,
+      items: items,
+      chars: chars,
+      bytes: bytes,
+      nodes: nodes,
+      allocation_mode: allocation_mode
+    } = sequence
 
     case fits?(open <> close, chars, bytes) do
       false ->
@@ -653,6 +806,7 @@ defmodule PtcRunner.Lisp.ValuePreview do
             bytes: bytes - base_bytes,
             nodes: nodes,
             remaining_count: length(items),
+            allocation_mode: allocation_mode,
             parts: [],
             used_chars: 0,
             used_bytes: 0,
@@ -685,16 +839,17 @@ defmodule PtcRunner.Lisp.ValuePreview do
 
   defp render_sequence_items([item | rest], item_fun, state) do
     separator = if(state.parts == [], do: "", else: " ")
-    marker_reserve_chars = 4
-    marker_reserve_bytes = 4
+    marker_reserve_chars = if(state.allocation_mode == :shape, do: 4, else: 0)
+    marker_reserve_bytes = if(state.allocation_mode == :shape, do: 4, else: 0)
 
     remaining_chars =
       state.chars - state.used_chars - String.length(separator) - marker_reserve_chars
 
     remaining_bytes = state.bytes - state.used_bytes - byte_size(separator) - marker_reserve_bytes
 
-    child_chars = max(div(max(remaining_chars, 0), max(state.remaining_count, 1)), 0)
-    child_bytes = max(div(max(remaining_bytes, 0), max(state.remaining_count, 1)), 0)
+    divisor = if(state.allocation_mode == :shape, do: max(state.remaining_count, 1), else: 1)
+    child_chars = max(div(max(remaining_chars, 0), divisor), 0)
+    child_bytes = max(div(max(remaining_bytes, 0), divisor), 0)
 
     {text, child_truncated?, child_caps, next_nodes} =
       item_fun.(item, child_chars, child_bytes, state.nodes)

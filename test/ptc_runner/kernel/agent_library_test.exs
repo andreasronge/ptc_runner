@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.TrustedTool
   alias PtcRunner.TestSupport.ProviderSessionFixture
+  alias PtcRunner.TestSupport.ValuePreviewFixture
 
   test "llm/request is an ordinary bounded workflow capability" do
     parent = self()
@@ -665,6 +666,56 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
            end)
 
     assert List.last(synthesize_request["messages"])["content"] =~ "PHASE TRANSITION"
+  end
+
+  test "agent.core does not claim a truncated non-final return was added to history" do
+    returned = String.duplicate("r", 1_000)
+
+    responses = [
+      %{
+        content: "Complete exploration.",
+        tool_calls: [
+          %{
+            id: "early-return",
+            name: "run_ptc_lisp",
+            args: %{"program" => "(return #{inspect(returned)})"}
+          }
+        ]
+      },
+      %{
+        content: "Complete synthesis.",
+        tool_calls: [
+          %{id: "final-return", name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+    ]
+
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config(responses, [], missions: %{"explore" => mission, "synthesize" => mission})
+
+    source = ~S"""
+    (agent.core/run-phased-result-value
+      "Decide."
+      {"max_observation_chars" 128
+       "phases"
+       [{"mission" "explore" "max_turns" 1}
+        {"mission" "synthesize" "max_turns" 1}]})
+    """
+
+    assert {:ok, %{value: 42}} = Kernel.run(source, config)
+
+    assert_receive {:agent_request, _explore_request}
+    assert_receive {:agent_request, synthesize_request}
+
+    feedback =
+      synthesize_request["messages"]
+      |> Enum.find(&(&1["role"] == "tool" and &1["tool_call_id"] == "early-return"))
+      |> Map.fetch!("content")
+
+    assert feedback =~ "returned result was not added to *1 history"
+    refute feedback =~ "exact evaluation result is already available as *1"
   end
 
   test "agent.core keeps an intermediate phase on a phase-local budget" do
@@ -1545,6 +1596,74 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert success_feedback(%{"value" => "done", "prints" => ["line"]}, 1_024) =~
              ~s|user=> "done"\nprintln:\nline|
+  end
+
+  test "agent observation renders the compact tutorial page without truncation metadata" do
+    page = ValuePreviewFixture.tutorial_page()
+    observation = EvaluationObservation.success(%{value: page, prints: []}, 2_048)
+
+    refute observation.truncated?
+    refute observation.value_truncated?
+    refute observation.prints_truncated?
+    assert observation.caps_hit == []
+    assert observation.text =~ inspect(get_in(page, ["items", Access.at(0), "text"]))
+  end
+
+  test "agent.feedback distinguishes retained values, returned values, and print omission" do
+    retained =
+      success_feedback(
+        %{
+          "value" => String.duplicate("v", 1_000),
+          "prints" => [],
+          "continuation_effect" => "committed_with_history"
+        },
+        128
+      )
+
+    assert retained =~ "exact evaluation result is already available as *1"
+    assert retained =~ "capability call should not be repeated"
+    refute retained =~ "println output was omitted"
+
+    returned =
+      success_feedback(
+        %{
+          "value" => String.duplicate("r", 1_000),
+          "prints" => [],
+          "continuation_effect" => "committed_without_history"
+        },
+        128
+      )
+
+    refute returned =~ "available as *1"
+    assert returned =~ "returned result was not added to *1 history"
+    assert returned =~ "persisted definitions"
+
+    print_only =
+      success_feedback(
+        %{
+          "value" => 42,
+          "prints" => [String.duplicate("p", 1_000)],
+          "continuation_effect" => "committed_with_history"
+        },
+        128
+      )
+
+    refute print_only =~ "exact evaluation result is already available as *1"
+    assert print_only =~ "println output was omitted"
+    assert print_only =~ "not stored in *1"
+
+    both =
+      success_feedback(
+        %{
+          "value" => String.duplicate("b", 1_000),
+          "prints" => [String.duplicate("p", 1_000)],
+          "continuation_effect" => "committed_with_history"
+        },
+        128
+      )
+
+    assert both =~ "exact evaluation result is already available as *1"
+    assert both =~ "println output was omitted"
   end
 
   test "agent.feedback escapes delimiters and truncates by Unicode characters" do
@@ -4518,6 +4637,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         "observation" => observation.observation,
         "preview" => %{
           "truncated?" => observation.preview.truncated?,
+          "value_truncated?" => observation.preview.value_truncated?,
           "caps_hit" => Enum.map(observation.preview.caps_hit, &Atom.to_string/1),
           "sampled_keys" => observation.preview.sampled_keys,
           "prints_truncated?" => observation.preview.prints_truncated?
