@@ -143,7 +143,8 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
   end
 
   describe "the schema mirrors the decoder" do
-    test "the schema never rejects an endpoint the decoder accepts" do
+    @tag :tmp_dir
+    test "the schema never rejects an endpoint the decoder accepts", %{tmp_dir: dir} do
       # The mirror is one-directional. Schema-stricter is a correctness bug: a
       # valid document would fail as a generic schema fault at `/install`
       # instead of the endpoint diagnostic. Schema-lenient is harmless, because
@@ -231,7 +232,7 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
             overrides = mirror_overrides(loopback, credential),
             document = config(endpoint, overrides),
             not match?({:ok, _validated}, JSV.validate(document, root, cast: false)),
-            not endpoint_diagnostic?(document),
+            not endpoint_diagnostic?(dir, document),
             do: {endpoint, overrides}
 
       assert divergent == []
@@ -419,20 +420,13 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
       else: credential
   end
 
-  defp endpoint_diagnostic?(document) do
-    dir = Path.join(System.tmp_dir!(), "ptc-mirror-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(dir)
+  defp endpoint_diagnostic?(dir, document) do
+    path = write(dir, document, "mirror-host.json")
 
-    try do
-      path = write(dir, document, "host.json")
-
-      match?(
-        {:error, {:installation_endpoint_invalid, _name, _reason}},
-        HostConfig.load_command(path)
-      )
-    after
-      File.rm_rf!(dir)
-    end
+    match?(
+      {:error, {:installation_endpoint_invalid, _name, _reason}},
+      HostConfig.load_command(path)
+    )
   end
 
   defp mappings, do: %{"echo" => %{as: "workspace.echo", effect: :read}}

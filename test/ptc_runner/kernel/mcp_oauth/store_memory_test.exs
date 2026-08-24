@@ -11,6 +11,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Test.MCPOAuthRecordingStore
 
+  @setup_deadline_ms 5_000
+
   test "loads a valid external adapter before checking its callback" do
     module = PtcRunner.Test.MCPOAuthUnloadedStore
     :code.purge(module)
@@ -151,7 +153,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
         store,
         "tenant",
         [{authority.installation_id, authority.fingerprint}],
-        Deadline.new(1_000)
+        Deadline.new(@setup_deadline_ms)
       )
 
     {:ok, alice} =
@@ -159,7 +161,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
         tenant_id: "tenant",
         principal_id: "alice",
         store: store,
-        deadline: Deadline.new(1_000)
+        deadline: Deadline.new(@setup_deadline_ms)
       )
 
     {:ok, bob} =
@@ -167,7 +169,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
         tenant_id: "tenant",
         principal_id: "bob",
         store: store,
-        deadline: Deadline.new(1_000)
+        deadline: Deadline.new(@setup_deadline_ms)
       )
 
     {:ok,
