@@ -261,14 +261,26 @@ available API, task, budgets, and correction policy, but not fixture values,
 benchmark domains, or expected answer patterns.</p><h2 id="evaluation-outcomes">Evaluation outcomes</h2><p>The loop interprets mission evaluation outcomes as follows:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Outcome</th><th style="text-align: left;">Loop behavior</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">(return value)</code></td><td style="text-align: left;">Completes as <code class="inline">:returned</code>; <code class="inline">agent.main</code> first validates the result contract.</td></tr><tr><td style="text-align: left;">Ordinary value</td><td style="text-align: left;">Sends a bounded success observation and continues if a turn remains.</td></tr><tr><td style="text-align: left;"><code class="inline">(fail value)</code></td><td style="text-align: left;">Becomes a subject failure, except for the proven read-only capability case below.</td></tr><tr><td style="text-align: left;">Retryable evaluation error</td><td style="text-align: left;">Sends bounded correction feedback if a turn remains.</td></tr><tr><td style="text-align: left;"><code class="inline">:busy</code> or <code class="inline">:limit_exceeded</code> admission</td><td style="text-align: left;">Fails the workflow as <code class="inline">evaluation-unavailable</code>; correcting source cannot clear a host condition.</td></tr><tr><td style="text-align: left;">Terminal provider-originated mission failure</td><td style="text-align: left;">Becomes a model-program subject failure.</td></tr><tr><td style="text-align: left;">Host input validation unavailable</td><td style="text-align: left;">Fails the workflow as <code class="inline">capability-unavailable/input-validation-unavailable</code>.</td></tr></tbody></table></div><p>An ordinary successful turn commits definitions and adds its native value to
 the bounded <code class="inline">*1</code>/<code class="inline">*2</code>/<code class="inline">*3</code> history. A terminal return commits definitions but
 does not add the returned value. Failed turns preserve the previously committed
-definitions and history.</p><h2 id="feedback-bounds-and-disclosure">Feedback bounds and disclosure</h2><p>Successful observations contain a heap-proportional structural preview and
+definitions and history.</p><h2 id="feedback-bounds-and-disclosure">Feedback bounds and disclosure</h2><p>Successful observations contain a heap-proportional value preview and
 chronological <code class="inline">println</code> output. Preview traversal has independent collection,
 depth, node, string, character, and UTF-8 byte ceilings; it does not first
-serialize the complete value. When truncated, feedback reports the ceilings
-hit, sampled map keys (including bounded nested samples), and reminds the model
-that the complete committed value remains in <code class="inline">*1</code>. The body is marked as
-untrusted and escapes its closing marker. Closures and other executable values
-cross only as inert display labels.</p><p>The preview is non-authoritative presentation work: a preview failure cannot
+serialize the complete value. The default pass preserves sibling shape under a
+small per-string ceiling. When the shape pass reports only the string cap and
+no explicit string ceiling was supplied, one bounded greedy pass may replace
+the preview with an exact rendering, but only when the complete compact
+representation fits every active ceiling. An incomplete retry is discarded in
+favor of the original shape-preserving preview.</p><p>Feedback distinguishes value-preview truncation from <code class="inline">println</code> output omitted
+while assembling the bounded observation. For an ordinary successful result,
+the exact retained value is available as <code class="inline">*1</code>, so feedback advises reusing it
+instead of repeating a capability call. An explicit return does not advance
+history; feedback for a non-final phased return therefore refers only to
+persisted definitions and never claims that the returned result is in <code class="inline">*1</code>.
+Omitted print output is not stored in <code class="inline">*1</code>. The earlier per-call
+<code class="inline">max_print_length</code> bound remains separate and carries its own visible
+<code class="inline">... (kept/total chars)</code> marker.</p><p>Truncated previews continue to report the ceilings hit and sampled map keys
+(including bounded nested samples). The body is marked as untrusted and escapes
+its closing marker. Closures and other executable values cross only as inert
+display labels.</p><p>The preview is non-authoritative presentation work: a preview failure cannot
 turn a committed evaluation into a failure. A retained-memory or <code class="inline">*1</code> history
 commit rejection instead rolls the candidate continuation back and reports
 actionable guidance. Programs with only read effects may be corrected and
