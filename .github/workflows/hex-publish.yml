@@ -205,6 +205,7 @@ jobs:
             "https://hex.pm/api/packages/ptc_runner/releases/$version" \
             >/dev/null
           curl --fail --silent --show-error \
+            --location \
             --retry 12 \
             --retry-all-errors \
             --retry-delay 5 \

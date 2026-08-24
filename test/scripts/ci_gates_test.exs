@@ -193,6 +193,7 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     assert workflow =~ "packages/ptc_runner/releases?replace=false"
     assert workflow =~ "packages/ptc_runner/releases/$version/docs"
     assert workflow =~ "remote_checksum"
+    assert workflow =~ ~r/--location\s+\\\n\s+--retry 12/
     refute workflow =~ "mix hex.publish"
     refute workflow =~ "replace=true"
   end
