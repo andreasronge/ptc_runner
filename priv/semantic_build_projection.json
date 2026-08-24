@@ -129,7 +129,7 @@
     "req_llm",
     "telemetry"
   ],
-  "source_closure_hash": "161e5ddc7e49a4e86c4972c071bbe795769cd97bc63bd77cd82debd07252495f",
+  "source_closure_hash": "44b54449a0f2a59e96e8bfee4f083aebda35a6be72f5bb40fdbbd244f0972d0f",
   "sources": [
     {
       "bytes": 859,
@@ -482,9 +482,9 @@
       "sha256": "ae730995120db486b98924acc70c2cf17711d66131702bcad30002a8da026290"
     },
     {
-      "bytes": 5530,
+      "bytes": 5941,
       "path": "lib/ptc_runner/kernel/evaluation_observation.ex",
-      "sha256": "2dd1a3822ae6b2a57de091607910cce4ca19ff5f7ea1e79f41bb17dc012f1f85"
+      "sha256": "6601101666e79d1e64b3080b6a805ebdc4c2d7d7308a88263ceab2c11436e43e"
     },
     {
       "bytes": 1347,
@@ -2042,9 +2042,9 @@
       "sha256": "61fc4040252132df1b5780d62dab1ae4e251d7a9015784ed01218e7b0ab3653c"
     },
     {
-      "bytes": 32527,
+      "bytes": 37287,
       "path": "lib/ptc_runner/lisp/value_preview.ex",
-      "sha256": "7b239a29a1e7c39fee61cbc43ceaecb1ebfa904ecae23a6d0c252f46ad74fa90"
+      "sha256": "84228a563ffaae9b8cd2ef8a0c62d5a633d08a9948f6f03098aa72f1d734c144"
     },
     {
       "bytes": 660,
