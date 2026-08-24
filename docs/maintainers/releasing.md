@@ -84,13 +84,21 @@ the only standalone target; the published Linux container covers AMD64 and
 ARM64. macOS x86_64 still requires its own target evidence, and publishing it
 without that evidence is out of contract.
 
-Hex and HexDocs publication is a separate, explicit maintainer action performed
-from the tagged `main` commit. Publish the package with
-`MIX_ENV=prod mix hex.publish package` so it uses the same optional Hex
-dependency metadata as the verified archive instead of the local development
-path. Publish documentation separately with
-`MIX_ENV=dev mix hex.publish docs`, where `ex_doc` is installed. Verify the
-package, documentation, changelog, artifacts, and tag after publication.
+Hex and HexDocs publication is a separate, explicit maintainer action. Dispatch
+`Publish PtcRunner to Hex` with the published root tag. Its protected
+`hex-publish` environment should require maintainer approval and provide a
+`HEX_API_KEY` secret with only the required Hex API write authority. The
+workflow checks out the requested tag, requires its immutable GitHub release
+and ancestry from `main`, builds the package with the production dependency
+set, and builds HexDocs with the development dependency set where `ex_doc` is
+installed. After maintainer approval, the protected publish job starts on a
+separate fresh runner, downloads and verifies those artifacts, and exposes the
+Hex credential only to the upload step. The credential is never available to
+dependency installation, compilation, documentation generation, or any process
+retained from them. A rerun skips an existing package only when its Hex
+checksum matches the package rebuilt from the tag; it still republishes
+documentation. Verify the package, documentation, changelog, artifacts, and
+tag after publication.
 
 Do not create or push a release tag, publish a package, or publish documentation
 without explicit user confirmation.

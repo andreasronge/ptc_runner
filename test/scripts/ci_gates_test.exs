@@ -174,6 +174,29 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     refute container =~ "docker/build-push-action"
   end
 
+  test "root Hex publication requires the immutable tagged release" do
+    workflow = File.read!(Path.join(@root, ".github/workflows/hex-publish.yml"))
+
+    assert workflow =~ "environment: hex-publish"
+    assert workflow =~ "needs: build"
+    assert workflow =~ "attestations: read"
+    assert workflow =~ ~s(ref: ${{ github.workflow_sha }})
+    assert workflow =~ "gh release verify \"$RELEASE_TAG\""
+    assert workflow =~ "test \"$release_state\" = $'false\\ttrue'"
+    assert workflow =~ "mix local.hex 2.3.1 --force"
+    assert workflow =~ "actions/upload-artifact@v6"
+    assert workflow =~ "actions/download-artifact@v7"
+    assert workflow =~ "scripts/publish_hex_artifact.sh"
+    assert workflow =~ "MIX_ENV=dev mix compile --warnings-as-errors"
+    assert workflow =~ "MIX_ENV=dev mix docs --warnings-as-errors"
+    assert workflow =~ "../workflow-source/scripts/build_hex_docs.exs"
+    assert workflow =~ "packages/ptc_runner/releases?replace=false"
+    assert workflow =~ "packages/ptc_runner/releases/$version/docs"
+    assert workflow =~ "remote_checksum"
+    refute workflow =~ "mix hex.publish"
+    refute workflow =~ "replace=true"
+  end
+
   test "the interactive REPL PTY check is a Nightly gate, not a PR core-release gate" do
     workflow = File.read!(Path.join(@root, ".github/workflows/test.yml"))
     nightly = File.read!(Path.join(@root, ".github/workflows/nightly.yml"))

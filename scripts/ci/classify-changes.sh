@@ -171,8 +171,15 @@ while IFS= read -r path || [ -n "$path" ]; do
       launcher=true
       ;;
 
-    .github/workflows/release.yml|.github/workflows/container-release.yml)
+    .github/workflows/release.yml|.github/workflows/container-release.yml|\
+      .github/workflows/hex-publish.yml|scripts/build_hex_docs.exs|\
+      scripts/hex_docs_artifact.ex)
       core=true
+      ;;
+
+    scripts/publish_hex_artifact.sh)
+      core=true
+      launcher=true
       ;;
 
     scripts/ci/docs.sh|scripts/build_site.sh)
