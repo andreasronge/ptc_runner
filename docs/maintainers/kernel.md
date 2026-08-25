@@ -409,7 +409,7 @@ followed by one last content verification after that inventory. Any name,
 identity, metadata, type, or content change between baseline and final
 verification returns `:source_changed`; a mixed capture is never installed. The
 decoded event set is normalized and validated exactly once before the owner
-becomes queryable. Private `.private.jsonl` and `.inspection.jsonl` artifacts
+becomes queryable. Private `.private.jsonl` and `.ptcins` artifacts
 stay excluded by normal discovery. The private-authorized capture instead
 selects both ordinary and `.private.jsonl` traces, records `sanitized` or
 `private` provenance per run, and still rejects inspection artifacts. A run
@@ -671,7 +671,7 @@ suites must keep proving, concretely:
   destination is restricted before its first record, and per-record and
   aggregate ceilings fail closed without partial persistence;
 - the capture path adds no connector credentials, transport headers, session
-  IDs, or endpoints, normal discovery omits `.inspection.jsonl`, and querying a
+  IDs, or endpoints, normal discovery omits `.ptcins`, and querying a
   trace source never grants or reconstructs an inspection record;
 - the local Viewer accepts only the exact host-configured inspection artifact
   and rejects symlinks, changed files, wrong run IDs, and oversized input.

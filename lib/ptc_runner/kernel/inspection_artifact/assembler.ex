@@ -1,4 +1,4 @@
-defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
+defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
   @moduledoc """
   Builds ETS indexes from one streaming evidence record at a time.
 
@@ -6,21 +6,22 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   inserted after the last frame, once joins and conversation facts are closed.
   """
 
+  alias PtcRunner.Kernel.FrozenBundle
+  alias PtcRunner.Kernel.InspectionArtifact.Conversation
+  alias PtcRunner.Kernel.InspectionArtifact.Format
+  alias PtcRunner.Kernel.InspectionArtifact.Indexes
+  alias PtcRunner.Kernel.InspectionArtifact.ValueHash
   alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.RunAnalysisRelationships
   alias PtcRunner.Lisp.RetainedSize
-  alias PtcRunner.Research.SealedEvidenceLog.Conversation
-  alias PtcRunner.Research.SealedEvidenceLog.Format
-  alias PtcRunner.Research.SealedEvidenceLog.Indexes
-  alias PtcRunner.Research.SealedEvidenceLog.ValueHash
 
-  @spec new(Indexes.t(), map()) :: map()
-  def new(indexes, limits) do
+  @spec new(Indexes.t(), map(), nil | %{run_id: binary(), trace_id: binary()}) :: map()
+  def new(indexes, limits, identity \\ nil) do
     %{
       indexes: indexes,
       limits: limits,
-      run_id: nil,
-      trace_id: nil,
+      run_id: identity && identity.run_id,
+      trace_id: identity && identity.trace_id,
       schema_version: 8,
       first_timestamp: nil,
       last_timestamp: nil,
@@ -35,11 +36,15 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
       mcp_responses: %{},
       mcp_stderrs: %{},
       analyses: %{},
+      evaluations: MapSet.new(),
+      preludes: MapSet.new(),
+      execution_ids: %{prints: MapSet.new(), errors: MapSet.new(), failures: MapSet.new()},
       prelude_calls_by_eval: %{},
       generated_meta: [],
       prelude_meta: [],
       execution_meta: %{prints: [], errors: [], failures: []},
-      result_sequence: nil
+      result_sequence: nil,
+      result_hash: nil
     }
   end
 
@@ -73,6 +78,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
     state = Map.put(state, :pending_parents, Map.get(trace_facts, "parent_evaluation_ids", %{}))
 
     with :ok <- closed_joins(state),
+         :ok <- validate_trace(state, trace_facts),
          conversation <- Conversation.finish(state.conversation, trace_facts),
          {:ok, state} <- materialize_pairs(state),
          {:ok, state} <- materialize_sources(state),
@@ -174,8 +180,11 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
 
   defp put_join(state, %{"record_type" => "mcp-request"} = record) do
     key = mcp_key(record)
+    capability = Map.get(state.inputs, elem(key, 0))
+    payload = record["payload"]
 
-    if Map.has_key?(state.mcp_requests, key) do
+    if Map.has_key?(state.mcp_requests, key) or
+         not mission_join?(capability, payload["mission_name"]) do
       {:error, :invalid_record}
     else
       {:ok,
@@ -193,8 +202,12 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
 
   defp put_join(state, %{"record_type" => "mcp-response"} = record) do
     key = mcp_key(record)
+    request = Map.get(state.mcp_requests, key)
+    payload = record["payload"]
 
-    if Map.has_key?(state.mcp_responses, key) do
+    if Map.has_key?(state.mcp_responses, key) or is_nil(request) or
+         request.transport != payload["transport"] or
+         request.mission_name != payload["mission_name"] do
       {:error, :invalid_record}
     else
       {:ok,
@@ -206,49 +219,85 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   end
 
   defp put_join(state, %{"record_type" => "mcp-stderr"} = record) do
-    {:ok, %{state | mcp_stderrs: Map.put(state.mcp_stderrs, mcp_key(record), record["sequence"])}}
+    key = mcp_key(record)
+    request = Map.get(state.mcp_requests, key)
+    payload = record["payload"]
+
+    if Map.has_key?(state.mcp_stderrs, key) or is_nil(request) or
+         request.transport != payload["transport"] or
+         request.mission_name != payload["mission_name"] do
+      {:error, :invalid_record}
+    else
+      {:ok, %{state | mcp_stderrs: Map.put(state.mcp_stderrs, key, record["sequence"])}}
+    end
   end
 
   defp put_join(state, %{"record_type" => "evaluation-analysis"} = record) do
     id = record["correlation"]["evaluation_id"]
 
-    with {:ok, state} <-
+    with true <- MapSet.member?(state.evaluations, id),
+         false <- Map.has_key?(state.analyses, id),
+         {:ok, state} <-
            insert(state, :join_evaluation, {record["run_id"], id, :analysis}, record["sequence"]) do
       {:ok,
        %{
          state
          | analyses: Map.put(state.analyses, id, record["sequence"]),
            prelude_calls_by_eval:
-             Map.put(state.prelude_calls_by_eval, id, record["payload"]["prelude_calls"])
+             Map.put(state.prelude_calls_by_eval, id, %{
+               mission_name: record["payload"]["mission_name"],
+               calls: record["payload"]["prelude_calls"]
+             })
        }}
+    else
+      _invalid -> {:error, :invalid_record}
     end
   end
 
   defp put_join(state, %{"record_type" => "evaluation-source"} = record) do
-    if valid_source_payload?(record["payload"]) do
+    id = record["correlation"]["evaluation_id"]
+
+    if valid_source_payload?(record["payload"]) and not MapSet.member?(state.evaluations, id) do
       meta = %{
         sequence: record["sequence"],
-        evaluation_id: record["correlation"]["evaluation_id"],
+        evaluation_id: id,
         environment: record["payload"]["environment"],
-        mission_name: record["payload"]["mission_name"]
+        mission_name: record["payload"]["mission_name"],
+        source_hash: record["payload"]["source_hash"],
+        source_bytes: record["payload"]["source_bytes"]
       }
 
-      {:ok, %{state | generated_meta: [meta | state.generated_meta]}}
+      {:ok,
+       %{
+         state
+         | generated_meta: [meta | state.generated_meta],
+           evaluations: MapSet.put(state.evaluations, id)
+       }}
     else
       {:error, :invalid_record}
     end
   end
 
   defp put_join(state, %{"record_type" => "prelude-source"} = record) do
-    if valid_source_payload?(record["payload"]) do
+    key =
+      {record["payload"]["environment"], record["payload"]["mission_name"],
+       record["correlation"]["component_id"]}
+
+    if valid_source_payload?(record["payload"]) and not MapSet.member?(state.preludes, key) do
       meta = %{
         sequence: record["sequence"],
         component_id: record["correlation"]["component_id"],
         environment: record["payload"]["environment"],
-        mission_name: record["payload"]["mission_name"]
+        mission_name: record["payload"]["mission_name"],
+        source_hash: record["payload"]["source_hash"]
       }
 
-      {:ok, %{state | prelude_meta: [meta | state.prelude_meta]}}
+      {:ok,
+       %{
+         state
+         | prelude_meta: [meta | state.prelude_meta],
+           preludes: MapSet.put(state.preludes, key)
+       }}
     else
       {:error, :invalid_record}
     end
@@ -277,8 +326,16 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
       true ->
         insert(state, :result, record["run_id"], record["sequence"])
         |> case do
-          {:ok, state} -> {:ok, %{state | result_sequence: record["sequence"]}}
-          error -> error
+          {:ok, state} ->
+            {:ok,
+             %{
+               state
+               | result_sequence: record["sequence"],
+                 result_hash: record["payload"]["result_hash"]
+             }}
+
+          error ->
+            error
         end
     end
   end
@@ -306,10 +363,20 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   defp put_execution(state, field, record) do
     meta = %{
       sequence: record["sequence"],
-      evaluation_id: record["correlation"]["evaluation_id"]
+      evaluation_id: record["correlation"]["evaluation_id"],
+      details: record["payload"]["details"]
     }
 
-    {:ok, update_in(state, [:execution_meta, field], &[meta | &1])}
+    seen = get_in(state, [:execution_ids, field])
+
+    if MapSet.member?(seen, meta.evaluation_id) do
+      {:error, :invalid_record}
+    else
+      {:ok,
+       state
+       |> update_in([:execution_meta, field], &[meta | &1])
+       |> put_in([:execution_ids, field], MapSet.put(seen, meta.evaluation_id))}
+    end
   end
 
   defp observe(state, record) do
@@ -334,6 +401,13 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
       input.mission_name == payload["mission_name"] and
       input.name == payload["name"]
   end
+
+  defp mission_join?(%{environment: "mission", mission_name: mission_name}, mission_name)
+       when is_binary(mission_name),
+       do: true
+
+  defp mission_join?(%{environment: "workflow", mission_name: nil}, nil), do: true
+  defp mission_join?(_input, _mission_name), do: false
 
   defp valid_exception_output?(state, id, result) do
     not Map.has_key?(state.exceptions, id) or
@@ -360,6 +434,209 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
     if MapSet.equal?(request_keys, response_keys),
       do: :ok,
       else: {:error, :incomplete_inspection_correlation}
+  end
+
+  defp validate_trace(state, trace_facts) do
+    with true <- trace_facts["trace_id"] == state.trace_id,
+         {:ok, preludes} <- canonical_preludes(trace_facts),
+         :ok <- validate_prelude_identities(state.prelude_meta, preludes),
+         :ok <- validate_prelude_calls(state.prelude_calls_by_eval, preludes),
+         :ok <- validate_result(state, trace_facts["terminal_result"]),
+         :ok <- validate_canonical_records(state, trace_facts, preludes) do
+      :ok
+    else
+      _unproven -> {:error, :inspection_correlation_missing}
+    end
+  end
+
+  defp canonical_preludes(trace_facts) do
+    workflow = put_projection(%{}, {"workflow", nil}, trace_facts["workflow_prelude"])
+
+    Enum.reduce_while(trace_facts["missions"] || %{}, workflow, fn {mission, metadata},
+                                                                   {:ok, acc} ->
+      case put_projection(acc, {"mission", mission}, metadata["prelude"]) do
+        {:ok, next} -> {:cont, {:ok, next}}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp put_projection(acc, _key, nil), do: {:ok, acc}
+
+  defp put_projection(acc, key, %{
+         "component_ids" => ids,
+         "dependency_indices" => indices,
+         "hash" => hash
+       })
+       when is_list(ids) and is_list(indices) do
+    {:ok, Map.put(acc, key, %{component_ids: ids, dependency_indices: indices, hash: hash})}
+  end
+
+  defp put_projection(_acc, _key, _projection), do: {:error, :inspection_correlation_missing}
+
+  defp validate_prelude_identities(records, preludes) do
+    groups =
+      Enum.group_by(
+        records,
+        &{&1.environment, &1.mission_name},
+        &{&1.component_id, &1.source_hash}
+      )
+
+    committed =
+      preludes
+      |> Enum.filter(fn {_key, projection} -> not is_nil(projection.hash) end)
+      |> MapSet.new(&elem(&1, 0))
+
+    groups
+    |> Map.keys()
+    |> MapSet.new()
+    |> MapSet.union(committed)
+    |> Enum.reduce_while(:ok, fn key, :ok ->
+      if prelude_identity_proven?(Map.get(groups, key, []), Map.get(preludes, key)),
+        do: {:cont, :ok},
+        else: {:halt, {:error, :inspection_correlation_missing}}
+    end)
+  end
+
+  defp prelude_identity_proven?(_sources, nil), do: false
+
+  defp prelude_identity_proven?(sources, projection) do
+    hashes = Map.new(sources)
+    ids = projection.component_ids
+
+    with true <- map_size(hashes) == length(sources),
+         true <- MapSet.new(Map.keys(hashes)) == MapSet.new(ids),
+         true <- length(projection.dependency_indices) == length(ids),
+         {:ok, identity} <- FrozenBundle.identity(prelude_components(projection, hashes)) do
+      identity == projection.hash
+    else
+      _unproven -> false
+    end
+  end
+
+  defp prelude_components(projection, hashes) do
+    projection.dependency_indices
+    |> Enum.with_index()
+    |> Enum.map(fn {indices, position} ->
+      id = Enum.at(projection.component_ids, position)
+
+      %{
+        id: id,
+        dependencies: Enum.map(indices, &Enum.at(projection.component_ids, &1)),
+        source_hash: Map.fetch!(hashes, id)
+      }
+    end)
+  end
+
+  defp validate_prelude_calls(calls_by_evaluation, preludes) do
+    Enum.reduce_while(calls_by_evaluation, :ok, fn {_evaluation_id, analysis}, :ok ->
+      mission = analysis.mission_name
+      component_ids = prelude_component_ids(preludes, {"mission", mission})
+
+      if is_binary(mission) and
+           Enum.all?(analysis.calls, &MapSet.member?(component_ids, &1["component_id"])),
+         do: {:cont, :ok},
+         else: {:halt, {:error, :inspection_correlation_missing}}
+    end)
+  end
+
+  defp prelude_component_ids(preludes, key) do
+    case Map.fetch(preludes, key) do
+      {:ok, projection} -> MapSet.new(projection.component_ids)
+      :error -> MapSet.new()
+    end
+  end
+
+  defp validate_result(%{result_sequence: nil}, _terminal), do: :ok
+
+  defp validate_result(state, %{"outcome" => "ok", "result_hash" => result_hash})
+       when result_hash == state.result_hash,
+       do: :ok
+
+  defp validate_result(_state, _terminal), do: {:error, :inspection_correlation_missing}
+
+  defp validate_canonical_records(state, trace_facts, preludes) do
+    canonical_capabilities = trace_facts["capabilities"] || %{}
+    canonical_evaluations = trace_facts["evaluations"] || %{}
+
+    with {:ok, missing_capabilities} <-
+           validate_capabilities(state.inputs, canonical_capabilities),
+         {:ok, missing_evaluations} <-
+           validate_evaluations(state, canonical_evaluations, preludes),
+         true <-
+           MapSet.size(missing_capabilities) <=
+             dropped(trace_facts, "capability-started"),
+         true <-
+           map_size(missing_evaluations) <= dropped(trace_facts, "evaluation-started") do
+      :ok
+    else
+      _unproven -> {:error, :inspection_correlation_missing}
+    end
+  end
+
+  defp validate_capabilities(inputs, canonical) do
+    Enum.reduce_while(inputs, {:ok, MapSet.new()}, fn {id, input}, {:ok, missing} ->
+      expected = %{
+        "environment" => input.environment,
+        "mission_name" => input.mission_name,
+        "name" => input.name
+      }
+
+      case Map.fetch(canonical, id) do
+        {:ok, ^expected} -> {:cont, {:ok, missing}}
+        :error -> {:cont, {:ok, MapSet.put(missing, id)}}
+        {:ok, _mismatch} -> {:halt, {:error, :inspection_correlation_missing}}
+      end
+    end)
+  end
+
+  defp validate_evaluations(state, canonical, _preludes) do
+    checks =
+      Enum.map(state.generated_meta, fn meta ->
+        {meta.evaluation_id,
+         {meta.environment, meta.mission_name, meta.source_hash, meta.source_bytes}}
+      end) ++
+        Enum.flat_map(state.execution_ids, fn {_kind, ids} ->
+          Enum.map(ids, &{&1, {"workflow", nil, :any, :any}})
+        end)
+
+    Enum.reduce_while(checks, {:ok, %{}}, fn {id, expected}, {:ok, missing} ->
+      case Map.fetch(canonical, id) do
+        {:ok, actual} ->
+          if evaluation_matches?(actual, expected),
+            do: {:cont, {:ok, missing}},
+            else: {:halt, {:error, :inspection_correlation_missing}}
+
+        :error ->
+          owner = {elem(expected, 0), elem(expected, 1)}
+
+          case Map.fetch(missing, id) do
+            :error -> {:cont, {:ok, Map.put(missing, id, owner)}}
+            {:ok, ^owner} -> {:cont, {:ok, missing}}
+            {:ok, _other} -> {:halt, {:error, :inspection_correlation_missing}}
+          end
+      end
+    end)
+  end
+
+  defp evaluation_matches?(actual, {environment, mission, :any, :any}) do
+    actual["environment"] == environment and actual["mission_name"] == mission
+  end
+
+  defp evaluation_matches?(actual, {environment, mission, hash, bytes}) do
+    actual == %{
+      "environment" => environment,
+      "mission_name" => mission,
+      "source_hash" => hash,
+      "source_bytes" => bytes
+    }
+  end
+
+  defp dropped(trace_facts, type) do
+    case get_in(trace_facts, ["dropped_event_counts", type]) do
+      count when is_integer(count) and count > 0 -> count
+      _other -> 0
+    end
   end
 
   defp materialize_pairs(state) do
@@ -398,7 +675,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
     |> Enum.reduce_while({:ok, state}, fn meta, {:ok, acc} ->
       locator = {:record, meta.sequence}
       parent = Map.get(acc, :pending_parents, %{})[meta.evaluation_id]
-      prelude_calls = Map.get(acc.prelude_calls_by_eval, meta.evaluation_id)
+      analysis = Map.get(acc.prelude_calls_by_eval, meta.evaluation_id)
+      prelude_calls = if analysis, do: analysis.calls
 
       meta =
         meta
@@ -592,7 +870,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
       |> Enum.reverse()
       |> Enum.map(fn meta ->
         parent = get_in(trace_facts, ["parent_evaluation_ids", meta.evaluation_id])
-        calls = Map.get(state.prelude_calls_by_eval, meta.evaluation_id)
+        analysis = Map.get(state.prelude_calls_by_eval, meta.evaluation_id)
+        calls = if analysis, do: analysis.calls
 
         %{
           "run_id" => state.run_id,
@@ -623,7 +902,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
           "run_id" => state.run_id,
           "evaluation_id" => meta.evaluation_id,
           "sequence" => meta.sequence,
-          "details" => %{}
+          "details" => meta.details || %{}
         }
       end)
 
@@ -677,7 +956,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   defp enrich_generated(state, generated) do
     Enum.map(generated, fn entry ->
       parent = Map.get(state.pending_parents, entry.evaluation_id)
-      calls = Map.get(state.prelude_calls_by_eval, entry.evaluation_id)
+      analysis = Map.get(state.prelude_calls_by_eval, entry.evaluation_id)
+      calls = if analysis, do: analysis.calls
 
       entry
       |> Map.put(:parent_evaluation_id, parent)

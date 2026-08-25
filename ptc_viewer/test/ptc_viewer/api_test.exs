@@ -69,7 +69,7 @@ defmodule PtcViewer.ApiTest do
 
   test "conversation delegates only the exact configured file and run", %{trace_dir: trace_dir} do
     parent = self()
-    source = {:pinned, "run.inspection.jsonl"}
+    source = {:pinned, "run.ptcins"}
 
     adapter = fn pinned_source, run_id ->
       send(parent, {:inspection, pinned_source, run_id})
@@ -110,7 +110,7 @@ defmodule PtcViewer.ApiTest do
   end
 
   test "preludes delegates the pinned inspection grant", %{trace_dir: trace_dir} do
-    source = {:pinned, "run.inspection.jsonl"}
+    source = {:pinned, "run.ptcins"}
     {:ok, store} = PtcViewer.InspectionStore.start(source)
     on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
 
@@ -129,7 +129,7 @@ defmodule PtcViewer.ApiTest do
   test "execution_errors and explicit_failure_values delegate the pinned grant", %{
     trace_dir: trace_dir
   } do
-    source = {:pinned, "run.inspection.jsonl"}
+    source = {:pinned, "run.ptcins"}
     {:ok, store} = PtcViewer.InspectionStore.start(source)
     on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
 
@@ -156,11 +156,11 @@ defmodule PtcViewer.ApiTest do
 
   test "start requires a valid inspection adapter for a fixed file" do
     assert {:error, :invalid_inspection_config} =
-             PtcViewer.start(inspection_file: "run.inspection.jsonl", open: false)
+             PtcViewer.start(inspection_file: "run.ptcins", open: false)
 
     assert {:error, :invalid_inspection_adapter} =
              PtcViewer.start(
-               inspection_file: "run.inspection.jsonl",
+               inspection_file: "run.ptcins",
                inspection_adapter: String,
                open: false
              )

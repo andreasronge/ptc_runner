@@ -1,4 +1,4 @@
-defmodule PtcRunner.Research.SealedEvidenceLog.ValueHash do
+defmodule PtcRunner.Kernel.InspectionArtifact.ValueHash do
   @moduledoc false
 
   @domain "ptc-inspection-value-v1\0"

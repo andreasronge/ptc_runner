@@ -397,7 +397,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
                  "name" => "observed",
                  "status" => "pass",
                  "artifacts" => %{
-                   "inspection" => "01/inspection/run.inspection.jsonl",
+                   "inspection" => "01/inspection/run.ptcins",
                    "traces" => "01/traces"
                  }
                },
@@ -408,7 +408,7 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
 
     assert source_hash == ComponentOverride.hash(@authored)
     assert File.dir?(Path.join(validation_out, "01/traces"))
-    assert File.regular?(Path.join(validation_out, "01/inspection/run.inspection.jsonl"))
+    assert File.regular?(Path.join(validation_out, "01/inspection/run.ptcins"))
 
     assert %{
              "base_source_hash" => base_hash,

@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.TestSupport.ProviderSessionFixture
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
@@ -175,7 +176,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, state} = RunState.start(Limits.defaults())
 
     {:ok, inspection} =
-      InspectionSink.start(run_id: "analysis-rejection", trace_id: "analysis-rejection")
+      StreamingInspection.start(
+        run_id: "analysis-rejection",
+        trace_id: "analysis-rejection"
+      )
 
     assert %{
              outcome: :evaluation_error,
@@ -1750,7 +1754,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, event_sink} = EventSink.start(:private, limits, run_id: "full-before-evaluation")
 
     {:ok, inspection_sink} =
-      InspectionSink.start(run_id: "full-before-evaluation", trace_id: "full-before-evaluation")
+      StreamingInspection.start(
+        run_id: "full-before-evaluation",
+        trace_id: "full-before-evaluation"
+      )
 
     assert :ok = EventSink.emit(event_sink, "occupied", %{})
 
@@ -1765,7 +1772,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                inspection_sink
              )
 
-    assert {:ok, []} = InspectionSink.records(inspection_sink)
+    assert {:ok, []} = StreamingInspection.records(inspection_sink)
     assert :ok = InspectionSink.stop(inspection_sink)
     assert :ok = EventSink.stop(event_sink)
     assert :ok = RunState.stop(state)

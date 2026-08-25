@@ -125,7 +125,7 @@ ptc run ptc.json \
   --env-file .env \
   --host-config ptc-host.json \
   --trace-dir traces \
-  --inspect traces/run.inspection.jsonl \
+  --inspect traces/run.ptcins \
   --envelope results/command.json
 ```
 
@@ -143,7 +143,7 @@ Useful run switches are:
 - `--trace-dir DIR` writes `<run_ref>.jsonl` or
   `<run_ref>.private.jsonl` according to the run's artifact class.
 - `--inspect FILE` writes sensitive execution evidence to an owner-only
-  `.inspection.jsonl` file.
+  `.ptcins` file.
 - `--envelope FILE` atomically publishes a convenience copy of the stable V3
   command envelope. When a project enables `artifacts.envelope`, the project's
   `.ptc/envelopes/<run_ref>.json` ledger entry is still written for that run.
@@ -486,7 +486,7 @@ Every classified diagnostic and the status it exits with:
 | 7 | `destination` | `inspection_destination_unsafe` | no | the inspection destination is unsafe |
 | 7 | `destination` | `inspection_directory_missing` | no | --inspect must name a file in an existing directory |
 | 7 | `destination` | `invalid_destination` | no | an artifact destination is invalid |
-| 7 | `destination` | `invalid_inspection_destination` | no | --inspect must name a valid destination ending in .inspection.jsonl |
+| 7 | `destination` | `invalid_inspection_destination` | no | --inspect must name a valid destination ending in .ptcins |
 | 7 | `destination` | `invalid_result_destination` | no | the result destination is invalid |
 | 7 | `destination` | `invalid_trace_destination` | no | the trace destination is invalid |
 | 7 | `destination` | `private_destination_required` | no | the run requires an authorized private destination |
@@ -547,7 +547,7 @@ For exact authorized detail, capture inspection evidence:
 ```console
 ptc run ptc.json \
   --trace-dir traces \
-  --inspect private/run.inspection.jsonl
+  --inspect private/run.ptcins
 ```
 
 Each inspection artifact includes the frozen component sources. It adds
@@ -679,7 +679,7 @@ either directory:
 ```text
 TRACE_DIRECTORY/RUN_ID.jsonl
 TRACE_DIRECTORY/RUN_ID.private.jsonl
-INSPECTION_DIRECTORY/RUN_ID.inspection.jsonl
+INSPECTION_DIRECTORY/RUN_ID.ptcins
 ```
 
 Exactly one of the two trace candidates must exist as a regular file; both

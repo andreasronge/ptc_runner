@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.ObservedException
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   @effects [:read, :write, :unknown]
@@ -202,7 +203,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
   test "raised callbacks retain a correlated private diagnostic without changing the public result" do
     {:ok, inspection_sink} =
-      InspectionSink.start(
+      StreamingInspection.start(
         run_id: "dispatcher-exception-run",
         trace_id: "dispatcher-exception-trace"
       )
@@ -217,7 +218,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
              retryable?: false
            }
 
-    assert {:ok, [input, diagnostic, output]} = InspectionSink.records(inspection_sink)
+    assert {:ok, [input, diagnostic, output]} =
+             StreamingInspection.records(inspection_sink)
+
     assert input["record_type"] == "capability-input"
 
     assert %{
@@ -271,7 +274,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
   test "a blocking exception formatter cannot change the public or canonical outcome" do
     {:ok, inspection_sink} =
-      InspectionSink.start(
+      StreamingInspection.start(
         run_id: "blocking-formatter-run",
         trace_id: "blocking-formatter-trace"
       )
@@ -296,7 +299,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
     refute Enum.any?(events, &(&1.type == "limit-exceeded"))
 
-    assert {:ok, [_input, diagnostic, output]} = InspectionSink.records(inspection_sink)
+    assert {:ok, [_input, diagnostic, output]} =
+             StreamingInspection.records(inspection_sink)
+
     assert diagnostic["payload"]["message"] == "exception message unavailable"
     assert diagnostic["payload"]["message_truncated"]
     assert diagnostic["payload"]["stacktrace_truncated"]
@@ -322,7 +327,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
   test "workflow raises retain diagnostics without mission attribution" do
     {:ok, inspection_sink} =
-      InspectionSink.start(
+      StreamingInspection.start(
         run_id: "workflow-exception-run",
         trace_id: "workflow-exception-trace"
       )
@@ -332,7 +337,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
                inspection_sink: inspection_sink
              )
 
-    assert {:ok, [_input, diagnostic, _output]} = InspectionSink.records(inspection_sink)
+    assert {:ok, [_input, diagnostic, _output]} =
+             StreamingInspection.records(inspection_sink)
+
     assert diagnostic["record_type"] == "capability-exception"
     assert diagnostic["payload"]["environment"] == "workflow"
     refute Map.has_key?(diagnostic["payload"], "mission_name")
@@ -341,7 +348,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
   test "exit and throw retain no exception diagnostic" do
     for callback <- [fn -> exit(:private_failure) end, fn -> throw(:private_failure) end] do
       {:ok, inspection_sink} =
-        InspectionSink.start(
+        StreamingInspection.start(
           run_id: "non-exception-run-#{System.unique_integer([:positive])}",
           trace_id: "non-exception-trace"
         )
@@ -349,7 +356,9 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
       assert %{kind: :provider_error} =
                dispatch_mission(:read, callback, inspection_sink: inspection_sink)
 
-      assert {:ok, [input, output]} = InspectionSink.records(inspection_sink)
+      assert {:ok, [input, output]} =
+               StreamingInspection.records(inspection_sink)
+
       assert input["record_type"] == "capability-input"
       assert output["record_type"] == "capability-output"
     end
@@ -358,7 +367,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
   test "exception diagnostic sink failure preserves the terminal inspection contract" do
     for effect <- [:read, :write] do
       {:ok, inspection_sink} =
-        InspectionSink.start(
+        StreamingInspection.start(
           run_id: "exception-sink-failure-#{effect}",
           trace_id: "exception-sink-failure-trace",
           max_record_bytes: 2_000,
@@ -390,7 +399,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
   test "private exception capture leaves the canonical failure projection unchanged" do
     {:ok, inspection_sink} =
-      InspectionSink.start(
+      StreamingInspection.start(
         run_id: "canonical-separation-run",
         trace_id: "canonical-separation-trace"
       )
@@ -573,7 +582,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
   test "inspection output replacement is effect-aware after callback completion" do
     for effect <- @effects do
       {:ok, inspection_sink} =
-        InspectionSink.start(
+        StreamingInspection.start(
           run_id: "dispatcher-effect-run",
           trace_id: "dispatcher-effect-trace",
           max_record_bytes: 4_000,
@@ -645,7 +654,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
     for effect <- @effects do
       {:ok, inspection_sink} =
-        InspectionSink.start(
+        StreamingInspection.start(
           run_id: "dispatcher-input-run",
           trace_id: "dispatcher-input-trace"
         )

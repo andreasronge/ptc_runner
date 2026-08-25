@@ -3,11 +3,10 @@ defmodule PtcViewer.ServerTest do
 
   alias PtcViewer.{PinningInspectionTestAdapter, TestInspectionAdapter, TestReplAdapter}
 
-  test "inspection startup preserves an unsupported schema version error" do
-    assert {:error,
-            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 8}}} =
+  test "inspection startup preserves the sealed-reader failure" do
+    assert {:error, :malformed_source} =
              PtcViewer.start(
-               inspection_file: "run.inspection.jsonl",
+               inspection_file: "run.ptcins",
                inspection_adapter: TestInspectionAdapter,
                open: false
              )
@@ -84,7 +83,7 @@ defmodule PtcViewer.ServerTest do
         port: 0,
         trace_dir: trace_dir,
         private_traces: true,
-        inspection_file: "run.inspection.jsonl",
+        inspection_file: "run.ptcins",
         inspection_adapter: PinningInspectionTestAdapter,
         open: false
       )

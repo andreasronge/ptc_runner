@@ -506,7 +506,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
                "run",
                application,
                "--inspect",
-               "run.inspection.jsonl"
+               "run.ptcins"
              ])
 
     assert preparation.artifact_destinations == %{}
@@ -519,7 +519,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     assert %{
              "phase" => "destination",
              "code" => "invalid_inspection_destination",
-             "message" => "--inspect must name a valid destination ending in .inspection.jsonl",
+             "message" => "--inspect must name a valid destination ending in .ptcins",
              "retryable" => false,
              "source" => nil,
              "subject" => nil
@@ -562,7 +562,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
          tmp_dir: directory
        } do
     invocation = Path.join(directory, "removed-entry-cwd")
-    collision = Path.join(directory, "shared.inspection.jsonl")
+    collision = Path.join(directory, "shared.ptcins")
     original = File.cwd!()
     File.mkdir!(invocation)
 

@@ -1,56 +1,25 @@
 defmodule PtcRunner.Kernel.InspectionQuery do
   @moduledoc """
-  Pure, source-bound queries over validated private inspection records.
+  ETS-selected queries that verify dependency frames before returning a page.
 
-  The compiler performs the joins once, before a snapshot publishes any
-  capability. Capability inputs and outputs are paired by `capability_id`, and
-  a validated input without an output is retained as an explicitly incomplete
-  interrupted attempt. MCP request and response bodies remain paired by
-  `{capability_id, request_id}`. Optional stdio `mcp-stderr` records join that
-  same identity and project onto the exchange when present. Captured stdio
-  exchanges are serialized per session so that join is one request's capture
-  window, not a mix of concurrent calls. Callers therefore never join private records
-  by timestamp or depend on file order beyond the artifact's validated
-  sequence.
-
-  Every collection uses the same bounded page shape as canonical trace
-  queries. Cursors are opaque, bind the immutable source identity, operation,
-  filters, ordering, and offset, and cannot be reused against another query or
-  capture. The requested item limit is an upper bound: a page returns the
-  largest prefix whose final encoded and retained sizes both fit the result
-  ceiling. Run-scoped private collections accept
-  `"order": "asc" | "desc"`; ascending sequence order is the default.
-
-  Inspection artifacts retain their versioned bare-hex source hashes. Query
-  results expose those hashes with the `sha256:` algorithm prefix required by
-  trusted component-override descriptors, so an effective-prelude result can
-  be copied into `base_source_hash` without reinterpretation.
-
-  Execution-phase diagnostics (`execution-prints`, `execution-error`,
-  `explicit-failure-value`) are
-  exposed as run-scoped collections alongside their counts in each `list_runs`
-  row. Their items retain the correlated `evaluation_id`, sequence, timestamp,
-  environment, and exact bounded diagnostic payload.
-  Projections include `mission_name` on every mission-owned result so
-  repeated component and capability names remain unambiguous.
-  V8 adds the dedicated `explicit-failure-value` collection. V7 added
-  correlated private callback exception diagnostics to capability
-  attempts. V6 added one singular, non-paginated terminal `result` projection per run and
-  joins static prelude-call analysis to generated source by `evaluation_id`.
-  Generated source and reconstructed turns copy the canonical
-  `parent_evaluation_id` edge rather than inferring one from snapshot-local
-  sequence numbers. Execution errors and generated sources add typed,
-  state-bearing navigation relationships only from validated identities,
-  direct boundary-value provenance, and exact source/prelude associations.
+  Cursors bind the admission snapshot digest and the logical query identity.
+  They do not rehash the complete evidence preimage. ETS supplies ordering,
+  membership, cursor position, and exact `omitted_count`; only returned items
+  and their join or turn dependencies are reread and verified.
   """
 
   alias PtcRunner.Kernel.ConversationProjection
+  alias PtcRunner.Kernel.InspectionArtifact.Conversation
+  alias PtcRunner.Kernel.InspectionArtifact.Handle
+  alias PtcRunner.Kernel.InspectionArtifact.Indexes
+  alias PtcRunner.Kernel.InspectionArtifact.Items
+  alias PtcRunner.Kernel.InspectionArtifact.ValueHash
   alias PtcRunner.Kernel.ResultLimit
-  alias PtcRunner.Kernel.RunAnalysisRelationships
 
   @default_limit 100
   @max_limit 1_000
   @max_cursor_bytes 2_048
+
   @operations [
     :list_runs,
     :get_run,
@@ -66,6 +35,15 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     :result
   ]
 
+  @type metrics :: %{
+          postings_visited: non_neg_integer(),
+          candidate_frames_verified: non_neg_integer(),
+          hash_operations: non_neg_integer(),
+          ranges: non_neg_integer(),
+          bytes_read: non_neg_integer(),
+          exact_count_work: non_neg_integer()
+        }
+
   @type operation ::
           :list_runs
           | :get_run
@@ -80,461 +58,64 @@ defmodule PtcRunner.Kernel.InspectionQuery do
           | :explicit_failure_values
           | :result
 
-  @spec compile([[map()]], binary(), map()) ::
-          {:ok, %{source_id: binary(), collections: map()}} | {:error, atom()}
-  @doc false
-  def compile(artifacts, trace_source_id, trace_analysis)
-      when is_list(artifacts) and is_binary(trace_source_id) and is_map(trace_analysis) do
-    with {:ok, compiled} <- compile_artifacts(artifacts),
-         {:ok, collections} <- merge_artifacts(compiled, trace_analysis),
-         source_id <- digest({trace_source_id, artifacts}) do
-      {:ok, %{source_id: source_id, collections: collections}}
-    else
-      {:error, _reason} = error -> error
-    end
+  @spec operations() :: [atom()]
+  def operations, do: @operations
+
+  @spec empty_metrics() :: metrics()
+  def empty_metrics do
+    %{
+      postings_visited: 0,
+      candidate_frames_verified: 0,
+      hash_operations: 0,
+      ranges: 0,
+      bytes_read: 0,
+      exact_count_work: 0
+    }
   end
 
-  def compile(_artifacts, _trace_source_id, _trace_analysis),
-    do: {:error, :invalid_inspection_snapshot}
+  @spec run(map(), atom(), map(), pos_integer(), map()) ::
+          {:ok, map(), metrics()} | {:error, atom()}
+  def run(snapshot, operation, arguments, max_result_bytes, metadata \\ %{})
 
-  @spec query(map(), binary(), operation(), map(), pos_integer(), map()) ::
-          {:ok, map()} | {:error, atom()}
-  @doc false
-  def query(collections, source_id, operation, arguments, max_result_bytes, metadata \\ %{})
-
-  def query(collections, source_id, operation, arguments, max_result_bytes, metadata)
-      when is_map(collections) and is_binary(source_id) and operation in @operations and
-             is_map(arguments) and is_integer(max_result_bytes) and max_result_bytes > 0 and
-             is_map(metadata) do
-    execute(collections, source_id, operation, arguments, max_result_bytes, metadata)
+  def run(snapshot, operation, arguments, max_result_bytes, metadata)
+      when is_map(snapshot) and operation in @operations and is_map(arguments) and
+             is_integer(max_result_bytes) and max_result_bytes > 0 and is_map(metadata) do
+    maybe_query_hook(snapshot)
+    execute(snapshot, operation, arguments, max_result_bytes, metadata, empty_metrics())
   end
 
-  def query(_collections, _source_id, _operation, _arguments, _max_result_bytes, _metadata),
+  def run(_snapshot, _operation, _arguments, _max_result_bytes, _metadata),
     do: {:error, :invalid_query}
 
-  defp compile_artifacts(artifacts) do
-    Enum.reduce_while(artifacts, {:ok, []}, fn records, {:ok, compiled} ->
-      case compile_artifact(records) do
-        {:ok, artifact} -> {:cont, {:ok, [artifact | compiled]}}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
-    |> case do
-      {:ok, compiled} -> {:ok, Enum.reverse(compiled)}
-      {:error, _reason} = error -> error
-    end
-  end
-
-  defp compile_artifact([first | _rest] = records) do
-    with {:ok, capability_pairs} <- capability_pairs(records),
-         {:ok, provider_pairs} <- provider_pairs(records) do
-      model_exchanges = Enum.filter(capability_pairs, &model_exchange?/1)
-      capability_calls = Enum.reject(capability_pairs, &model_exchange?/1)
-
-      evaluation_analyses =
-        records
-        |> records_of_type("evaluation-analysis")
-        |> Map.new(&{&1["correlation"]["evaluation_id"], &1["payload"]["prelude_calls"]})
-
-      generated_sources =
-        records
-        |> records_of_type("evaluation-source")
-        |> Enum.map(&source_item(&1, evaluation_analyses))
-
-      effective_preludes =
-        records
-        |> records_of_type("prelude-source")
-        |> Enum.map(&prelude_item/1)
-
-      execution_prints =
-        records
-        |> records_of_type("execution-prints")
-        |> Enum.map(&execution_item/1)
-
-      execution_errors =
-        records
-        |> records_of_type("execution-error")
-        |> Enum.map(&execution_item/1)
-
-      explicit_failure_values =
-        records
-        |> records_of_type("explicit-failure-value")
-        |> Enum.map(&execution_item/1)
-
-      result =
-        records
-        |> Enum.find(&(&1["record_type"] == "run-result"))
-        |> result_item()
-
-      counts = %{
-        "model_exchanges" => length(model_exchanges),
-        "incomplete_model_exchanges" => incomplete_count(model_exchanges),
-        "capability_calls" => length(capability_calls),
-        "capability_exceptions" => exception_count(capability_pairs),
-        "incomplete_capability_calls" => incomplete_count(capability_calls),
-        "generated_sources" => length(generated_sources),
-        "evaluation_analyses" => map_size(evaluation_analyses),
-        "effective_preludes" => length(effective_preludes),
-        "provider_exchanges" => length(provider_pairs),
-        "execution_prints" => length(execution_prints),
-        "execution_errors" => length(execution_errors),
-        "explicit_failure_values" => length(explicit_failure_values)
-      }
-
-      {:ok,
-       %{
-         run: %{
-           "run_id" => first["run_id"],
-           "trace_id" => first["trace_id"],
-           "schema_version" => first["schema_version"],
-           "record_count" => length(records),
-           "first_timestamp" => first["timestamp"],
-           "last_timestamp" => List.last(records)["timestamp"],
-           "counts" => counts
-         },
-         model_exchanges: model_exchanges,
-         capability_calls: capability_calls,
-         generated_sources: generated_sources,
-         effective_preludes: effective_preludes,
-         provider_exchanges: provider_pairs,
-         execution_prints: execution_prints,
-         execution_errors: execution_errors,
-         explicit_failure_values: explicit_failure_values,
-         result: result
-       }}
-    end
-  end
-
-  defp compile_artifact(_records), do: {:error, :invalid_inspection_snapshot}
-
-  defp capability_pairs(records) do
-    inputs =
-      records
-      |> records_of_type("capability-input")
-      |> Map.new(&{&1["correlation"]["capability_id"], &1})
-
-    outputs =
-      records
-      |> records_of_type("capability-output")
-      |> Map.new(&{&1["correlation"]["capability_id"], &1})
-
-    exceptions =
-      records
-      |> records_of_type("capability-exception")
-      |> Map.new(&{&1["correlation"]["capability_id"], &1})
-
-    pairs =
-      inputs
-      |> Enum.map(fn {capability_id, input} ->
-        capability_pair(
-          capability_id,
-          input,
-          Map.get(outputs, capability_id),
-          Map.get(exceptions, capability_id)
-        )
-      end)
-      |> Enum.sort_by(& &1["input_sequence"])
-
-    {:ok, pairs}
-  end
-
-  defp provider_pairs(records) do
-    requests =
-      records
-      |> records_of_type("mcp-request")
-      |> Map.new(fn record ->
-        correlation = record["correlation"]
-        {{correlation["capability_id"], correlation["request_id"]}, record}
-      end)
-
-    responses =
-      records
-      |> records_of_type("mcp-response")
-      |> Map.new(fn record ->
-        correlation = record["correlation"]
-        {{correlation["capability_id"], correlation["request_id"]}, record}
-      end)
-
-    stderrs =
-      records
-      |> records_of_type("mcp-stderr")
-      |> Map.new(fn record ->
-        correlation = record["correlation"]
-        {{correlation["capability_id"], correlation["request_id"]}, record}
-      end)
-
-    if Map.keys(requests) |> MapSet.new() == Map.keys(responses) |> MapSet.new() do
-      pairs =
-        requests
-        |> Enum.map(fn {{capability_id, request_id}, request} ->
-          provider_pair(
-            capability_id,
-            request_id,
-            request,
-            Map.fetch!(responses, {capability_id, request_id}),
-            Map.get(stderrs, {capability_id, request_id})
-          )
-        end)
-        |> Enum.sort_by(& &1["request_sequence"])
-
-      {:ok, pairs}
-    else
-      {:error, :incomplete_inspection_correlation}
-    end
-  end
-
-  defp capability_pair(capability_id, input, nil, exception) do
-    capability_input(capability_id, input)
-    |> Map.put("complete?", false)
-    |> maybe_put_exception(exception)
-  end
-
-  defp capability_pair(capability_id, input, output, exception) do
-    capability_input(capability_id, input)
-    |> Map.merge(%{
-      "complete?" => true,
-      "output_sequence" => output["sequence"],
-      "output_timestamp" => output["timestamp"],
-      "result" => output["payload"]["result"]
-    })
-    |> maybe_put_exception(exception)
-  end
-
-  defp maybe_put_exception(item, nil), do: item
-
-  defp maybe_put_exception(item, exception) do
-    payload = exception["payload"]
-
-    Map.merge(item, %{
-      "exception_sequence" => exception["sequence"],
-      "exception_timestamp" => exception["timestamp"],
-      "exception" =>
-        Map.take(
-          payload,
-          ~w(exception_class message message_truncated stacktrace stacktrace_truncated)
-        )
-    })
-  end
-
-  defp capability_input(capability_id, input) do
-    input_payload = input["payload"]
-
-    %{
-      "run_id" => input["run_id"],
-      "trace_id" => input["trace_id"],
-      "capability_id" => capability_id,
-      "environment" => input_payload["environment"],
-      "mission_name" => input_payload["mission_name"],
-      "name" => input_payload["name"],
-      "input_sequence" => input["sequence"],
-      "input_timestamp" => input["timestamp"],
-      "arguments" => input_payload["arguments"]
-    }
-  end
-
-  defp incomplete_count(items), do: Enum.count(items, &(&1["complete?"] == false))
-  defp exception_count(items), do: Enum.count(items, &Map.has_key?(&1, "exception"))
-
-  defp provider_pair(capability_id, request_id, request, response, stderr) do
-    request_payload = request["payload"]
-    response_payload = response["payload"]
-
-    %{
-      "run_id" => request["run_id"],
-      "trace_id" => request["trace_id"],
-      "capability_id" => capability_id,
-      "request_id" => request_id,
-      "transport" => request_payload["transport"],
-      "mission_name" => request_payload["mission_name"],
-      "request_sequence" => request["sequence"],
-      "response_sequence" => response["sequence"],
-      "request_timestamp" => request["timestamp"],
-      "response_timestamp" => response["timestamp"],
-      "request" => request_payload["body"],
-      "response" => response_payload["body"]
-    }
-    |> maybe_put_stderr(stderr)
-  end
-
-  defp maybe_put_stderr(item, nil), do: item
-
-  defp maybe_put_stderr(item, stderr) do
-    payload = stderr["payload"]
-
-    Map.merge(item, %{
-      "stderr_sequence" => stderr["sequence"],
-      "stderr_timestamp" => stderr["timestamp"],
-      "stderr" => payload["text"],
-      "stderr_truncated" => payload["truncated"]
-    })
-  end
-
-  defp source_item(record, analyses) do
-    payload = record["payload"]
-    evaluation_id = record["correlation"]["evaluation_id"]
-    prelude_calls = Map.get(analyses, evaluation_id)
-
-    %{
-      "run_id" => record["run_id"],
-      "trace_id" => record["trace_id"],
-      "evaluation_id" => evaluation_id,
-      "sequence" => record["sequence"],
-      "timestamp" => record["timestamp"],
-      "environment" => payload["environment"],
-      "mission_name" => payload["mission_name"],
-      "program_kind" => payload["program_kind"],
-      "source" => payload["source"],
-      "source_hash" => descriptor_hash(payload["source_hash"]),
-      "source_bytes" => payload["source_bytes"],
-      "prelude_calls_available?" => is_list(prelude_calls),
-      "prelude_calls" => prelude_calls || []
-    }
-  end
-
-  defp prelude_item(record) do
-    payload = record["payload"]
-
-    %{
-      "run_id" => record["run_id"],
-      "trace_id" => record["trace_id"],
-      "component_id" => record["correlation"]["component_id"],
-      "sequence" => record["sequence"],
-      "timestamp" => record["timestamp"],
-      "environment" => payload["environment"],
-      "mission_name" => payload["mission_name"],
-      "source" => payload["source"],
-      "source_hash" => descriptor_hash(payload["source_hash"]),
-      "source_bytes" => payload["source_bytes"]
-    }
-  end
-
-  defp execution_item(record) do
-    %{
-      "run_id" => record["run_id"],
-      "trace_id" => record["trace_id"],
-      "evaluation_id" => record["correlation"]["evaluation_id"],
-      "sequence" => record["sequence"],
-      "timestamp" => record["timestamp"]
-    }
-    |> Map.merge(record["payload"])
-  end
-
-  defp result_item(nil), do: nil
-
-  defp result_item(record) do
-    payload = record["payload"]
-
-    %{
-      "run_id" => record["run_id"],
-      "trace_id" => record["trace_id"],
-      "sequence" => record["sequence"],
-      "timestamp" => record["timestamp"],
-      "result_hash" => payload["result_hash"],
-      "value" => payload["value"]
-    }
-  end
-
-  defp descriptor_hash(hash), do: "sha256:" <> hash
-
-  defp model_exchange?(%{"environment" => "workflow", "name" => "llm-request"}), do: true
-  defp model_exchange?(_pair), do: false
-
-  defp records_of_type(records, type),
-    do: Enum.filter(records, &(&1["record_type"] == type))
-
-  defp merge_artifacts(compiled, %{"runs" => trace_facts} = trace_analysis)
-       when is_map(trace_facts) do
-    generated_sources =
-      compiled
-      |> merge_collection(:generated_sources)
-      |> Enum.map(&attach_parent_evaluation_id(&1, trace_facts))
-
-    collections = %{
-      list_runs: compiled |> Enum.map(& &1.run) |> Enum.sort_by(& &1["run_id"]),
-      model_exchanges: merge_collection(compiled, :model_exchanges),
-      capability_calls: merge_collection(compiled, :capability_calls),
-      generated_sources: generated_sources,
-      effective_preludes: merge_collection(compiled, :effective_preludes),
-      provider_exchanges: merge_collection(compiled, :provider_exchanges),
-      execution_prints: merge_collection(compiled, :execution_prints),
-      execution_errors: merge_collection(compiled, :execution_errors),
-      explicit_failure_values: merge_collection(compiled, :explicit_failure_values),
-      results: compiled |> Enum.map(& &1.result) |> Enum.reject(&is_nil/1)
-    }
-
-    turns =
-      Map.new(collections.list_runs, fn run ->
-        run_id = run["run_id"]
-
-        projection =
-          ConversationProjection.compile(
-            Enum.filter(
-              collections.model_exchanges,
-              &(&1["run_id"] == run_id and &1["complete?"])
-            ),
-            Enum.filter(collections.generated_sources, &(&1["run_id"] == run_id)),
-            Map.get(trace_facts, run_id, %{})
-          )
-          |> Map.update!(:items, fn items ->
-            Enum.map(items, &Map.merge(&1, %{"run_id" => run_id, "trace_id" => run["trace_id"]}))
-          end)
-
-        {run_id, projection}
-      end)
-
-    collections =
-      collections
-      |> Map.put(:runs_by_id, Map.new(collections.list_runs, &{&1["run_id"], &1}))
-      |> Map.put(:turns_by_run_id, turns)
-      |> Map.put(:turns, turns |> Map.values() |> Enum.flat_map(& &1.items))
-      |> Map.put(:trace_snapshot_hash, trace_analysis["trace_snapshot_hash"])
-      |> RunAnalysisRelationships.attach(trace_facts)
-
-    {:ok, collections}
-  end
-
-  defp merge_artifacts(_compiled, _trace_analysis), do: {:error, :invalid_inspection_snapshot}
-
-  defp attach_parent_evaluation_id(source, trace_facts) do
-    parent_evaluation_id =
-      get_in(trace_facts, [source["run_id"], "parent_evaluation_ids", source["evaluation_id"]])
-
-    if is_binary(parent_evaluation_id),
-      do: Map.put(source, "parent_evaluation_id", parent_evaluation_id),
-      else: source
-  end
-
-  defp merge_collection(compiled, operation) do
-    compiled
-    |> Enum.flat_map(&Map.fetch!(&1, operation))
-    |> Enum.sort_by(&{&1["run_id"], item_sequence(&1)})
-  end
-
-  defp item_sequence(%{"input_sequence" => sequence}), do: sequence
-  defp item_sequence(%{"request_sequence" => sequence}), do: sequence
-  defp item_sequence(%{"sequence" => sequence}), do: sequence
-
-  defp execute(collections, source_id, :list_runs, arguments, max_result_bytes, metadata) do
+  defp execute(snapshot, :list_runs, arguments, max_bytes, metadata, metrics) do
     with :ok <- validate_keys(arguments, ~w(limit cursor)),
-         {:ok, page} <- page_options(arguments, source_id, :list_runs) do
-      paginate(collections.list_runs, page, source_id, max_result_bytes, metadata)
+         {:ok, page} <- page_options(arguments, snapshot.snapshot_digest, :list_runs),
+         :ok <- verify_handles(snapshot, :catalog, metrics) do
+      runs =
+        snapshot.indexes
+        |> Indexes.tab2list(:runs)
+        |> Enum.sort_by(&elem(&1, 0))
+        |> Enum.map(&elem(&1, 1))
+
+      paginate(runs, :catalog, page, snapshot, max_bytes, metadata, metrics)
     end
   end
 
   defp execute(
-         collections,
-         _source_id,
+         snapshot,
          :get_run,
          %{"run_id" => run_id} = arguments,
          max_bytes,
-         metadata
+         metadata,
+         metrics
        ) do
     with :ok <- validate_keys(arguments, ["run_id"]),
          true <- valid_string?(run_id),
-         {:ok, run} <- Map.fetch(collections.runs_by_id, run_id),
-         result = Map.merge(run, metadata),
+         :ok <- verify_handles(snapshot, {:get_run, run_id}, metrics),
+         {:ok, run} <- fetch_run(snapshot, run_id),
+         result <- Map.merge(run, metadata),
          :ok <- ResultLimit.validate(result, max_bytes) do
-      {:ok, result}
+      {:ok, result, metrics}
     else
       false -> {:error, :invalid_query}
       :error -> {:error, :not_found}
@@ -542,72 +123,58 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     end
   end
 
-  defp execute(_collections, _source_id, :get_run, _arguments, _max_result_bytes, _metadata),
+  defp execute(_snapshot, :get_run, _arguments, _max_bytes, _metadata, _metrics),
     do: {:error, :invalid_query}
 
-  defp execute(
-         collections,
-         _source_id,
-         :result,
-         %{"run_id" => run_id} = arguments,
-         max_bytes,
-         metadata
-       ) do
+  defp execute(snapshot, :result, %{"run_id" => run_id} = arguments, max_bytes, metadata, metrics) do
     with :ok <- validate_keys(arguments, ["run_id"]),
-         :ok <- validate_result_run_id(run_id, collections.list_runs),
-         {:ok, result} <- fetch_result(collections.results, run_id),
-         result = Map.merge(result, metadata),
+         :ok <- validate_result_run_id(run_id, snapshot),
+         :ok <- verify_handles(snapshot, {:result, run_id}, metrics),
+         {:ok, item, metrics} <- fetch_result(snapshot, run_id, metrics),
+         result <- Map.merge(item, metadata),
          :ok <- ResultLimit.validate(result, max_bytes) do
-      {:ok, result}
+      {:ok, result, metrics}
     end
   end
 
-  defp execute(_collections, _source_id, :result, _arguments, _max_result_bytes, _metadata),
+  defp execute(_snapshot, :result, _arguments, _max_bytes, _metadata, _metrics),
     do: {:error, :invalid_query}
 
-  defp execute(
-         collections,
-         source_id,
-         :turns,
-         %{"run_id" => run_id} = arguments,
-         max_bytes,
-         result_metadata
-       ) do
+  defp execute(snapshot, :turns, %{"run_id" => run_id} = arguments, max_bytes, metadata, metrics) do
     allowed =
       ~w(run_id limit cursor stream_id capability_id evaluation_id parent_evaluation_id prelude_call prelude_component)
 
     with :ok <- validate_keys(arguments, allowed),
          true <- valid_string?(run_id),
          :ok <- validate_filter_values(arguments, allowed -- ~w(run_id limit cursor)),
-         {:ok, projection} <- Map.fetch(collections.turns_by_run_id, run_id),
-         {:ok, page} <- page_options(arguments, source_id, :turns) do
+         :ok <- run_present(snapshot, run_id),
+         {:ok, page} <- page_options(arguments, snapshot.snapshot_digest, :turns),
+         {:ok, locators, metrics} <- select(snapshot, run_id, :turns, arguments, "asc", metrics),
+         {:ok, locators, metrics} <- filter_turns(snapshot, run_id, locators, arguments, metrics) do
       metadata =
-        Map.merge(result_metadata, %{
-          "evidence" => projection.evidence,
-          "trace_snapshot_hash" => collections.trace_snapshot_hash
+        Map.merge(metadata, %{
+          "evidence" => turn_evidence(snapshot, run_id),
+          "trace_snapshot_hash" => snapshot.trace_snapshot_hash
         })
 
-      projection.items
-      |> Enum.filter(&collection_match?(:turns, &1, arguments))
-      |> paginate(page, source_id, max_bytes, metadata)
+      paginate(locators, {:turns, run_id}, page, snapshot, max_bytes, metadata, metrics)
       |> compact_turn_page()
     else
       false -> {:error, :invalid_query}
-      :error -> {:error, :not_found}
       {:error, _reason} = error -> error
     end
   end
 
-  defp execute(_collections, _source_id, :turns, _arguments, _max_result_bytes, _metadata),
+  defp execute(_snapshot, :turns, _arguments, _max_bytes, _metadata, _metrics),
     do: {:error, :invalid_query}
 
   defp execute(
-         collections,
-         source_id,
+         snapshot,
          operation,
          %{"run_id" => run_id} = arguments,
          max_bytes,
-         metadata
+         metadata,
+         metrics
        )
        when operation in [
               :model_exchanges,
@@ -625,145 +192,497 @@ defmodule PtcRunner.Kernel.InspectionQuery do
          true <- valid_string?(run_id),
          :ok <- validate_order(arguments),
          :ok <- validate_filter_values(arguments, collection_filters(operation)),
-         true <- Enum.any?(collections.list_runs, &(&1["run_id"] == run_id)),
-         {:ok, page} <- page_options(arguments, source_id, operation) do
-      collections
-      |> Map.fetch!(operation)
-      |> Enum.filter(&(&1["run_id"] == run_id and collection_match?(operation, &1, arguments)))
-      |> order(Map.get(arguments, "order", "asc"))
-      |> paginate(page, source_id, max_bytes, metadata)
+         :ok <- run_present(snapshot, run_id),
+         {:ok, page} <- page_options(arguments, snapshot.snapshot_digest, operation),
+         {:ok, locators, metrics} <-
+           select(
+             snapshot,
+             run_id,
+             operation,
+             arguments,
+             Map.get(arguments, "order", "asc"),
+             metrics
+           ) do
+      paginate(locators, {operation, run_id}, page, snapshot, max_bytes, metadata, metrics)
     else
-      false -> {:error, :not_found}
+      false -> {:error, :invalid_query}
       {:error, _reason} = error -> error
     end
   end
 
-  defp execute(_collections, _source_id, _operation, _arguments, _max_result_bytes, _metadata),
+  defp execute(_snapshot, _operation, _arguments, _max_bytes, _metadata, _metrics),
     do: {:error, :invalid_query}
 
-  defp validate_result_run_id(run_id, runs) do
+  defp select(snapshot, run_id, collection, arguments, order, metrics) do
+    ordered =
+      snapshot.indexes
+      |> Indexes.match(:collection_order, {{run_id, collection, :_}, :_})
+      |> Enum.sort_by(fn {{_run, _collection, ordinal}, _locator} -> ordinal end)
+
+    filters =
+      arguments
+      |> Map.take(collection_filters(collection) ++ turn_filters())
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+
+    {ordinals, metrics} =
+      Enum.reduce(filters, {MapSet.new(Enum.map(ordered, &ordinal/1)), metrics}, fn {filter,
+                                                                                     value},
+                                                                                    {set, metrics} ->
+        postings =
+          Indexes.match(
+            snapshot.indexes,
+            :filter_posting,
+            {{run_id, collection, filter, ValueHash.hash(value), :_}, :_}
+          )
+
+        posting_ordinals = MapSet.new(Enum.map(postings, &posting_ordinal/1))
+        metrics = bump(metrics, :postings_visited, length(postings))
+        {MapSet.intersection(set, posting_ordinals), metrics}
+      end)
+
+    locators =
+      ordered
+      |> Enum.filter(fn row -> MapSet.member?(ordinals, ordinal(row)) end)
+      |> Enum.map(&elem(&1, 1))
+      |> order(order)
+
+    {:ok, locators, metrics}
+  end
+
+  defp filter_turns(snapshot, run_id, locators, arguments, metrics) do
+    filters =
+      Map.take(arguments, ~w(evaluation_id parent_evaluation_id prelude_call prelude_component))
+
+    if Enum.all?(filters, fn {_key, value} -> is_nil(value) end) do
+      {:ok, locators, metrics}
+    else
+      kept =
+        Enum.filter(locators, fn {:turn, ordinal} ->
+          case Indexes.lookup(snapshot.indexes, :turn_projection, {run_id, ordinal}) do
+            [{_key, turn}] -> generated_source_match?(turn, arguments, snapshot, run_id)
+            _other -> false
+          end
+        end)
+
+      {:ok, kept, metrics}
+    end
+  end
+
+  defp generated_source_match?(turn, arguments, _snapshot, _run_id) do
+    Enum.any?(turn.generated, fn generated ->
+      equal_filter?(generated.evaluation_id, arguments["evaluation_id"]) and
+        equal_filter?(generated.parent_evaluation_id, arguments["parent_evaluation_id"]) and
+        call_match?(generated, arguments["prelude_call"], "ref") and
+        call_match?(generated, arguments["prelude_component"], "component_id")
+    end)
+  end
+
+  defp paginate(items, kind, page, snapshot, max_bytes, metadata, metrics) do
+    with :ok <- verify_handles(snapshot, kind, metrics) do
+      candidates = items |> Enum.drop(page.offset) |> Enum.take(page.limit)
+      metrics = bump(metrics, :exact_count_work, max(length(items) - page.offset, 0))
+
+      context = %{
+        all_items: items,
+        page: page,
+        snapshot: snapshot,
+        max_bytes: max_bytes,
+        metadata: metadata
+      }
+
+      assemble_page(candidates, kind, context, [], metrics)
+    end
+  end
+
+  defp assemble_page([], _kind, context, assembled, metrics) do
+    result = page_result(assembled, context)
+
+    if ResultLimit.within?(result, context.max_bytes),
+      do: {:ok, result, metrics},
+      else: {:error, :result_limit_exceeded}
+  end
+
+  defp assemble_page([candidate | rest], kind, context, assembled, metrics) do
+    with {:ok, metrics} <- verify_dependency(context.snapshot, kind, candidate, metrics),
+         {:ok, item, metrics} <- assemble_one(context.snapshot, kind, candidate, metrics) do
+      proposed = assembled ++ [item]
+      result = page_result(proposed, context)
+
+      cond do
+        ResultLimit.within?(result, context.max_bytes) ->
+          assemble_page(rest, kind, context, proposed, metrics)
+
+        assembled == [] ->
+          {:error, :result_limit_exceeded}
+
+        true ->
+          {:ok, page_result(assembled, context), metrics}
+      end
+    end
+  end
+
+  defp verify_handles(snapshot, :catalog, _metrics) do
+    snapshot.handles
+    |> Map.values()
+    |> Enum.reduce_while(:ok, fn handle, :ok ->
+      case Handle.assert_stable(handle) do
+        :ok -> {:cont, :ok}
+        error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp verify_handles(snapshot, {_operation, run_id}, _metrics) do
+    case Map.fetch(snapshot.handles, run_id) do
+      {:ok, handle} -> Handle.assert_stable(handle)
+      :error -> {:error, :not_found}
+    end
+  end
+
+  defp verify_dependency(_snapshot, :catalog, _item, metrics), do: {:ok, metrics}
+
+  defp verify_dependency(snapshot, kind, locator, metrics),
+    do: verify_locator(snapshot, kind, locator, metrics)
+
+  defp verify_locator(snapshot, {operation, run_id}, locator, metrics) do
+    sequences = locator_sequences(snapshot, operation, run_id, locator)
+
+    Enum.reduce_while(sequences, {:ok, metrics}, fn sequence, {:ok, acc} ->
+      case Items.read_record(
+             Map.fetch!(snapshot.handles, run_id),
+             snapshot.indexes,
+             run_id,
+             sequence,
+             range_ceiling(snapshot)
+           ) do
+        {:ok, _record, bytes_read} ->
+          acc =
+            acc
+            |> bump(:candidate_frames_verified, 1)
+            |> bump(:hash_operations, 1)
+            |> bump(:ranges, 1)
+            |> bump(:bytes_read, bytes_read)
+
+          {:cont, {:ok, acc}}
+
+        {:error, _reason} = error ->
+          {:halt, error}
+      end
+    end)
+  end
+
+  defp assemble_one(_snapshot, :catalog, item, metrics), do: {:ok, item, metrics}
+
+  defp assemble_one(snapshot, {:turns, run_id}, {:turn, ordinal}, metrics) do
+    case Indexes.lookup(snapshot.indexes, :turn_projection, {run_id, ordinal}) do
+      [{_key, turn}] ->
+        handle = Map.fetch!(snapshot.handles, run_id)
+
+        with {:ok, input, metrics} <- read(handle, snapshot, run_id, turn.input_sequence, metrics),
+             {:ok, output, metrics} <-
+               read(handle, snapshot, run_id, turn.output_sequence, metrics),
+             {:ok, generated, metrics} <-
+               assemble_generated(snapshot, run_id, turn.generated, metrics) do
+          item =
+            turn
+            |> Conversation.assemble_turn(input, output, generated)
+            |> Map.put("run_id", run_id)
+
+          {:ok, item, metrics}
+        end
+
+      _other ->
+        {:error, :source_changed}
+    end
+  end
+
+  defp assemble_one(snapshot, {operation, run_id}, locator, metrics)
+       when operation in [:model_exchanges, :capability_calls] do
+    {:capability, id, _sequence} = locator
+    [{_key, join}] = Indexes.lookup(snapshot.indexes, :capability_join, {run_id, id})
+    handle = Map.fetch!(snapshot.handles, run_id)
+
+    with {:ok, input, metrics} <- read(handle, snapshot, run_id, join.input_sequence, metrics),
+         {:ok, output, metrics} <-
+           maybe_read(handle, snapshot, run_id, join.output_sequence, metrics),
+         {:ok, exception, metrics} <-
+           maybe_read(handle, snapshot, run_id, join.exception_sequence, metrics) do
+      {:ok, Items.capability_item(input, output, exception), metrics}
+    end
+  end
+
+  defp assemble_one(snapshot, {:provider_exchanges, run_id}, locator, metrics) do
+    {:provider, capability_id, request_id, _sequence} = locator
+
+    [{_key, join}] =
+      Indexes.lookup(snapshot.indexes, :provider_join, {run_id, capability_id, request_id})
+
+    handle = Map.fetch!(snapshot.handles, run_id)
+
+    with {:ok, request, metrics} <- read(handle, snapshot, run_id, join.request_sequence, metrics),
+         {:ok, response, metrics} <-
+           read(handle, snapshot, run_id, join.response_sequence, metrics),
+         {:ok, stderr, metrics} <-
+           maybe_read(handle, snapshot, run_id, join.stderr_sequence, metrics) do
+      {:ok, Items.provider_item(request, response, stderr), metrics}
+    end
+  end
+
+  defp assemble_one(snapshot, {:generated_sources, run_id}, {:record, sequence}, metrics) do
+    handle = Map.fetch!(snapshot.handles, run_id)
+
+    with {:ok, record, metrics} <- read(handle, snapshot, run_id, sequence, metrics),
+         evaluation_id = record["correlation"]["evaluation_id"],
+         {:ok, calls, metrics} <- analysis_calls(snapshot, run_id, evaluation_id, metrics) do
+      parent =
+        get_in(snapshot.indexes.trace_facts, [run_id, "parent_evaluation_ids", evaluation_id])
+
+      relationships = relationships(snapshot, run_id, :generated_sources, sequence)
+      {:ok, Items.source_item(record, calls, parent, relationships), metrics}
+    end
+  end
+
+  defp assemble_one(snapshot, {:effective_preludes, run_id}, {:record, sequence}, metrics) do
+    handle = Map.fetch!(snapshot.handles, run_id)
+
+    with {:ok, record, metrics} <- read(handle, snapshot, run_id, sequence, metrics) do
+      relationships = relationships(snapshot, run_id, :effective_preludes, sequence)
+      {:ok, Items.prelude_item(record, relationships), metrics}
+    end
+  end
+
+  defp assemble_one(snapshot, {operation, run_id}, {:record, sequence}, metrics)
+       when operation in [:execution_prints, :execution_errors, :explicit_failure_values] do
+    handle = Map.fetch!(snapshot.handles, run_id)
+
+    with {:ok, record, metrics} <- read(handle, snapshot, run_id, sequence, metrics) do
+      relationships =
+        if operation == :execution_errors,
+          do: relationships(snapshot, run_id, :execution_errors, sequence),
+          else: nil
+
+      {:ok, Items.execution_item(record, relationships), metrics}
+    end
+  end
+
+  defp assemble_generated(snapshot, run_id, generated, metrics) do
+    Enum.reduce_while(generated, {:ok, [], metrics}, fn entry, {:ok, items, acc} ->
+      locator = {:record, entry.sequence}
+
+      case assemble_one(snapshot, {:generated_sources, run_id}, locator, acc) do
+        {:ok, item, acc} ->
+          item =
+            item
+            |> Map.put("association", entry.association)
+            |> Map.put("association_ambiguous?", entry.association_ambiguous?)
+
+          {:cont, {:ok, items ++ [item], acc}}
+
+        error ->
+          {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, items, metrics} -> {:ok, items, metrics}
+      error -> error
+    end
+  end
+
+  defp page_result(selected, context) do
+    next_offset = context.page.offset + length(selected)
+    more? = next_offset < length(context.all_items)
+
+    Map.merge(context.metadata, %{
+      "items" => selected,
+      "next_cursor" =>
+        if(more?,
+          do: encode_cursor(next_offset, context.snapshot.snapshot_digest, context.page.query_id),
+          else: nil
+        ),
+      "truncated" => more?,
+      "omitted_count" => max(length(context.all_items) - next_offset, 0)
+    })
+  end
+
+  defp compact_turn_page({:ok, %{"items" => items} = page, metrics}) do
+    {:ok, Map.put(page, "items", ConversationProjection.compact_turns(items)), metrics}
+  end
+
+  defp compact_turn_page(result), do: result
+
+  defp read(handle, snapshot, run_id, sequence, metrics) do
+    case Items.read_record(
+           handle,
+           snapshot.indexes,
+           run_id,
+           sequence,
+           range_ceiling(snapshot)
+         ) do
+      {:ok, record, bytes_read} ->
+        metrics =
+          metrics
+          |> bump(:ranges, 1)
+          |> bump(:hash_operations, 1)
+          |> bump(:bytes_read, bytes_read)
+
+        {:ok, record, metrics}
+
+      error ->
+        error
+    end
+  end
+
+  defp maybe_read(_handle, _snapshot, _run_id, nil, metrics), do: {:ok, nil, metrics}
+
+  defp maybe_read(handle, snapshot, run_id, sequence, metrics),
+    do: read(handle, snapshot, run_id, sequence, metrics)
+
+  defp fetch_run(snapshot, run_id) do
+    case Indexes.lookup(snapshot.indexes, :runs, run_id) do
+      [{^run_id, run}] -> {:ok, run}
+      _other -> :error
+    end
+  end
+
+  defp fetch_result(snapshot, run_id, metrics) do
+    case Indexes.lookup(snapshot.indexes, :results, run_id) do
+      [{^run_id, sequence}] ->
+        handle = Map.fetch!(snapshot.handles, run_id)
+
+        with {:ok, record, metrics} <- read(handle, snapshot, run_id, sequence, metrics) do
+          {:ok, Items.result_item(record), metrics}
+        end
+
+      _other ->
+        {:error, :result_not_found}
+    end
+  end
+
+  defp validate_result_run_id(run_id, snapshot) do
     cond do
       not valid_string?(run_id) -> {:error, :invalid_query}
-      Enum.any?(runs, &(&1["run_id"] == run_id)) -> :ok
+      match?({:ok, _}, fetch_run(snapshot, run_id)) -> :ok
       true -> {:error, :not_found}
     end
   end
 
-  defp fetch_result(results, run_id) do
-    case Enum.find(results, &(&1["run_id"] == run_id)) do
-      nil -> {:error, :result_not_found}
-      result -> {:ok, result}
+  defp run_present(snapshot, run_id) do
+    case fetch_run(snapshot, run_id) do
+      {:ok, _run} -> :ok
+      :error -> {:error, :not_found}
     end
   end
 
-  defp validate_keys(arguments, allowed) do
-    if Map.keys(arguments) -- allowed == [],
-      do: :ok,
-      else: {:error, :invalid_query}
-  end
+  defp locator_sequences(snapshot, :turns, run_id, {:turn, ordinal}) do
+    case Indexes.lookup(snapshot.indexes, :turn_projection, {run_id, ordinal}) do
+      [{_key, turn}] ->
+        generated = Enum.map(turn.generated, & &1.sequence)
 
-  defp valid_string?(value),
-    do: is_binary(value) and byte_size(value) in 1..4_096 and String.valid?(value)
+        analysis =
+          Enum.flat_map(generated, fn sequence ->
+            analysis_sequences(snapshot, run_id, sequence)
+          end)
 
-  defp validate_order(%{"order" => order}) when order in ["asc", "desc"], do: :ok
-  defp validate_order(arguments) when not is_map_key(arguments, "order"), do: :ok
-  defp validate_order(_arguments), do: {:error, :invalid_query}
+        [turn.input_sequence, turn.output_sequence | generated ++ analysis]
 
-  defp collection_filters(:model_exchanges), do: ~w(capability_id input_sequence)
-  defp collection_filters(:capability_calls), do: ~w(capability_id mission_name name)
-  defp collection_filters(:provider_exchanges), do: ~w(capability_id mission_name request_id)
-
-  defp collection_filters(:generated_sources),
-    do: ~w(evaluation_id parent_evaluation_id mission_name prelude_call prelude_component)
-
-  defp collection_filters(:effective_preludes),
-    do: ~w(component_id environment mission_name)
-
-  defp collection_filters(operation)
-       when operation in [:execution_prints, :execution_errors, :explicit_failure_values],
-       do: ["evaluation_id"]
-
-  defp validate_filter_values(arguments, filters) do
-    valid? =
-      Enum.all?(filters, fn
-        filter when filter in ["input_sequence", "request_id"] ->
-          is_nil(arguments[filter]) or (is_integer(arguments[filter]) and arguments[filter] > 0)
-
-        filter ->
-          is_nil(arguments[filter]) or valid_string?(arguments[filter])
-      end)
-
-    if valid?, do: :ok, else: {:error, :invalid_query}
-  end
-
-  # Compaction only ever shrinks a page, so it cannot invalidate the byte
-  # fitting `paginate/4` already performed.
-  defp compact_turn_page({:ok, %{"items" => items} = page}) when is_list(items),
-    do: {:ok, Map.put(page, "items", ConversationProjection.compact_turns(items))}
-
-  defp compact_turn_page(result), do: result
-
-  defp collection_match?(:turns, item, arguments) do
-    equal_filter?(item, arguments, "stream_id") and
-      equal_filter?(item, arguments, "capability_id") and
-      generated_source_match?(item, arguments)
-  end
-
-  defp collection_match?(:generated_sources, item, arguments) do
-    equal_filter?(item, arguments, "evaluation_id") and
-      equal_filter?(item, arguments, "parent_evaluation_id") and
-      equal_filter?(item, arguments, "mission_name") and
-      call_match?(item, arguments["prelude_call"], "ref") and
-      call_match?(item, arguments["prelude_component"], "component_id")
-  end
-
-  defp collection_match?(_operation, item, arguments) do
-    arguments
-    |> Map.drop(~w(run_id limit cursor order prelude_call prelude_component))
-    |> Enum.all?(fn {key, value} -> is_nil(value) or item[key] == value end)
-  end
-
-  defp generated_source_match?(item, arguments) do
-    filters = ~w(evaluation_id parent_evaluation_id prelude_call prelude_component)
-
-    if Enum.all?(filters, &is_nil(arguments[&1])) do
-      true
-    else
-      item
-      |> Map.get("generated", [])
-      |> Enum.any?(fn source ->
-        equal_filter?(source, arguments, "evaluation_id") and
-          equal_filter?(source, arguments, "parent_evaluation_id") and
-          call_match?(source, arguments["prelude_call"], "ref") and
-          call_match?(source, arguments["prelude_component"], "component_id")
-      end)
+      _other ->
+        []
     end
   end
 
-  defp call_match?(_item, nil, _key), do: true
+  defp locator_sequences(snapshot, operation, run_id, {:capability, id, _sequence})
+       when operation in [:model_exchanges, :capability_calls] do
+    case Indexes.lookup(snapshot.indexes, :capability_join, {run_id, id}) do
+      [{_key, join}] ->
+        [join.input_sequence, join.output_sequence, join.exception_sequence]
+        |> Enum.reject(&is_nil/1)
 
-  defp call_match?(item, expected, key) do
-    item
-    |> Map.get("prelude_calls", [])
-    |> Enum.any?(&(&1[key] == expected))
+      _other ->
+        []
+    end
   end
 
-  defp equal_filter?(item, arguments, key),
-    do: is_nil(arguments[key]) or item[key] == arguments[key]
+  defp locator_sequences(
+         snapshot,
+         :provider_exchanges,
+         run_id,
+         {:provider, capability_id, request_id, _}
+       ) do
+    case Indexes.lookup(snapshot.indexes, :provider_join, {run_id, capability_id, request_id}) do
+      [{_key, join}] ->
+        [join.request_sequence, join.response_sequence, join.stderr_sequence]
+        |> Enum.reject(&is_nil/1)
 
-  defp order(items, "asc"), do: items
-  defp order(items, "desc"), do: Enum.reverse(items)
+      _other ->
+        []
+    end
+  end
+
+  defp locator_sequences(snapshot, :generated_sources, run_id, {:record, sequence}) do
+    [sequence | analysis_sequences(snapshot, run_id, sequence)]
+  end
+
+  defp locator_sequences(_snapshot, _operation, _run_id, {:record, sequence}), do: [sequence]
+  defp locator_sequences(_snapshot, _operation, _run_id, _locator), do: []
+
+  defp analysis_sequences(snapshot, run_id, sequence) do
+    case Indexes.match(snapshot.indexes, :evaluation_join, {{run_id, :_, :source}, sequence}) do
+      [{{^run_id, evaluation_id, :source}, ^sequence}] ->
+        case Indexes.lookup(
+               snapshot.indexes,
+               :evaluation_join,
+               {run_id, evaluation_id, :analysis}
+             ) do
+          [{_key, analysis_seq}] -> [analysis_seq]
+          _other -> []
+        end
+
+      _other ->
+        []
+    end
+  end
+
+  defp analysis_calls(snapshot, run_id, evaluation_id, metrics) do
+    case Indexes.lookup(snapshot.indexes, :evaluation_join, {run_id, evaluation_id, :analysis}) do
+      [{_key, sequence}] ->
+        handle = Map.fetch!(snapshot.handles, run_id)
+
+        with {:ok, record, metrics} <- read(handle, snapshot, run_id, sequence, metrics) do
+          {:ok, record["payload"]["prelude_calls"], metrics}
+        end
+
+      _other ->
+        {:ok, nil, metrics}
+    end
+  end
+
+  defp relationships(snapshot, run_id, collection, key) do
+    case Indexes.lookup(snapshot.indexes, :relationships, {run_id, collection, key}) do
+      [{_key, relations}] -> relations
+      _other -> []
+    end
+  end
+
+  defp turn_evidence(snapshot, run_id) do
+    get_in(snapshot.indexes.turn_evidence, [run_id]) ||
+      %{
+        "complete?" => false,
+        "canonical_complete?" => false,
+        "missing_exchange_count" => 0,
+        "ambiguity_count" => 0
+      }
+  end
 
   defp page_options(arguments, source_id, operation) do
     limit = Map.get(arguments, "limit", @default_limit)
-    query_id = digest({operation, Map.drop(arguments, ["cursor", "limit"])})
+    query_id = digest({operation, Map.drop(arguments, ["cursor"])})
 
     with true <- is_integer(limit) and limit in 1..@max_limit,
          {:ok, offset} <- cursor_offset(Map.get(arguments, "cursor"), source_id, query_id) do
       {:ok, %{limit: limit, offset: offset, query_id: query_id}}
     else
       {:error, _reason} = error -> error
-      _ -> {:error, :invalid_query}
+      _invalid -> {:error, :invalid_query}
     end
   end
 
@@ -784,88 +703,13 @@ defmodule PtcRunner.Kernel.InspectionQuery do
         true -> {:ok, offset}
       end
     else
-      _ -> {:error, :invalid_query}
+      _invalid -> {:error, :invalid_query}
     end
   end
 
   defp cursor_offset(_cursor, _source_id, _query_id), do: {:error, :invalid_query}
 
-  defp paginate(items, page, source_id, max_result_bytes, metadata) do
-    selected = items |> Enum.drop(page.offset) |> Enum.take(page.limit)
-    fit_page(selected, items, page.offset, source_id, page.query_id, max_result_bytes, metadata)
-  end
-
-  defp fit_page(selected, all_items, offset, source_id, query_id, max_result_bytes, metadata) do
-    result = page_result(selected, all_items, offset, source_id, query_id, metadata)
-
-    cond do
-      ResultLimit.within?(result, max_result_bytes) ->
-        {:ok, result}
-
-      selected == [] ->
-        {:error, :result_limit_exceeded}
-
-      true ->
-        context = {all_items, offset, source_id, query_id, max_result_bytes, metadata}
-
-        fit_page_prefix(
-          selected,
-          context,
-          1,
-          length(selected) - 1,
-          nil
-        )
-    end
-  end
-
-  defp fit_page_prefix(_selected, _context, lower, upper, best)
-       when lower > upper do
-    if best, do: {:ok, best}, else: {:error, :result_limit_exceeded}
-  end
-
-  defp fit_page_prefix(
-         selected,
-         {all_items, offset, source_id, query_id, max_result_bytes, metadata} = context,
-         lower,
-         upper,
-         best
-       ) do
-    count = div(lower + upper, 2)
-
-    result =
-      page_result(Enum.take(selected, count), all_items, offset, source_id, query_id, metadata)
-
-    if ResultLimit.within?(result, max_result_bytes) do
-      fit_page_prefix(
-        selected,
-        context,
-        count + 1,
-        upper,
-        result
-      )
-    else
-      fit_page_prefix(
-        selected,
-        context,
-        lower,
-        count - 1,
-        best
-      )
-    end
-  end
-
-  defp page_result(selected, all_items, offset, source_id, query_id, metadata) do
-    next_offset = offset + length(selected)
-    more? = next_offset < length(all_items)
-
-    Map.merge(metadata, %{
-      "items" => selected,
-      "next_cursor" => if(more?, do: encode_cursor(next_offset, source_id, query_id), else: nil),
-      "truncated" => more?,
-      "omitted_count" => max(length(all_items) - next_offset, 0)
-    })
-  end
-
+  # ex_dna:disable-for-next-line — cursor encoding is intentionally local to the sealed reader
   defp encode_cursor(offset, source_id, query_id) do
     %{"offset" => offset, "source" => source_id, "query" => query_id}
     |> Jason.encode!()
@@ -878,4 +722,82 @@ defmodule PtcRunner.Kernel.InspectionQuery do
     |> then(&:crypto.hash(:sha256, &1))
     |> Base.url_encode64(padding: false)
   end
+
+  # ex_dna:disable-for-next-line — closed query validation stays beside its production caller
+  defp validate_keys(arguments, allowed) do
+    if Map.keys(arguments) -- allowed == [], do: :ok, else: {:error, :invalid_query}
+  end
+
+  # ex_dna:disable-for-next-line — closed query validation stays beside its production caller
+  defp valid_string?(value),
+    do: is_binary(value) and byte_size(value) in 1..4_096 and String.valid?(value)
+
+  # ex_dna:disable-for-next-line — closed query validation stays beside its production caller
+  defp validate_order(%{"order" => order}) when order in ["asc", "desc"], do: :ok
+  defp validate_order(arguments) when not is_map_key(arguments, "order"), do: :ok
+  defp validate_order(_arguments), do: {:error, :invalid_query}
+
+  defp collection_filters(:model_exchanges), do: ~w(capability_id input_sequence)
+  defp collection_filters(:capability_calls), do: ~w(capability_id mission_name name)
+  defp collection_filters(:provider_exchanges), do: ~w(capability_id mission_name request_id)
+
+  defp collection_filters(:generated_sources),
+    do: ~w(evaluation_id parent_evaluation_id mission_name prelude_call prelude_component)
+
+  defp collection_filters(:effective_preludes), do: ~w(component_id environment mission_name)
+
+  defp collection_filters(operation)
+       when operation in [:execution_prints, :execution_errors, :explicit_failure_values, :turns],
+       do: ["evaluation_id"]
+
+  defp collection_filters(_operation), do: []
+
+  defp turn_filters, do: ~w(stream_id capability_id)
+
+  # ex_dna:disable-for-next-line — closed query validation stays beside its production caller
+  defp validate_filter_values(arguments, filters) do
+    valid? =
+      Enum.all?(filters, fn
+        filter when filter in ["input_sequence", "request_id"] ->
+          is_nil(arguments[filter]) or (is_integer(arguments[filter]) and arguments[filter] > 0)
+
+        filter ->
+          is_nil(arguments[filter]) or valid_string?(arguments[filter])
+      end)
+
+    if valid?, do: :ok, else: {:error, :invalid_query}
+  end
+
+  defp order(items, "asc"), do: items
+  defp order(items, "desc"), do: Enum.reverse(items)
+
+  defp ordinal({{_run, _collection, ordinal}, _locator}), do: ordinal
+  defp posting_ordinal({{_run, _collection, _filter, _hash, ordinal}, _locator}), do: ordinal
+
+  defp equal_filter?(_actual, nil), do: true
+  defp equal_filter?(actual, expected), do: actual == expected
+
+  defp call_match?(_item, nil, _key), do: true
+
+  defp call_match?(item, expected, key) do
+    item
+    |> prelude_calls()
+    |> Enum.any?(&(&1[key] == expected))
+  end
+
+  defp prelude_calls(%{prelude_calls: calls}) when is_list(calls), do: calls
+  defp prelude_calls(item) when is_map(item), do: Map.get(item, "prelude_calls", [])
+  defp prelude_calls(_item), do: []
+
+  defp bump(metrics, key, amount), do: Map.update!(metrics, key, &(&1 + amount))
+
+  defp range_ceiling(snapshot) do
+    case snapshot do
+      %{limits: %{max_range_bytes: bytes}} when is_integer(bytes) and bytes > 0 -> bytes
+      _other -> 64 * 1024 * 1024
+    end
+  end
+
+  defp maybe_query_hook(%{query_hook: hook}) when is_function(hook, 1), do: hook.(:before_query)
+  defp maybe_query_hook(_snapshot), do: :ok
 end

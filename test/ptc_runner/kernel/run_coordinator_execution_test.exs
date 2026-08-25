@@ -149,7 +149,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     {prepared, catalog} = prepared_run("(return 42)")
 
     assert {:ok, authority} =
-             PublicationAuthority.new(inspect: Path.join(dir, "unreserved.inspection.jsonl"))
+             PublicationAuthority.new(inspect: Path.join(dir, "unreserved.ptcins"))
 
     assert {:error, :invalid_publication_authority} =
              RunCoordinator.execute(prepared, authority)
@@ -262,8 +262,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
   @tag :tmp_dir
   test "owned sink authority and inspection path cannot be replaced", %{tmp_dir: directory} do
-    original_path = Path.join(directory, "original.inspection.jsonl")
-    replacement_path = Path.join(directory, "occupied.inspection.jsonl")
+    original_path = Path.join(directory, "original.ptcins")
+    replacement_path = Path.join(directory, "occupied.ptcins")
     {prepared, catalog} = prepared_run("(return 1)", inspection_capture: true)
 
     assert {:ok, original_authority} =
@@ -363,7 +363,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
   @tag :tmp_dir
   test "owned execution preserves inspection and cross-artifact preflight", %{tmp_dir: directory} do
-    occupied = Path.join(directory, "occupied.inspection.jsonl")
+    occupied = Path.join(directory, "occupied.ptcins")
     File.write!(occupied, "occupied")
     {prepared, catalog} = prepared_run("(return 1)", inspection_capture: true)
 
@@ -379,7 +379,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert :ok = PreparedRun.close(prepared)
     assert :ok = InstallationCatalog.close(catalog)
 
-    shared = Path.join(directory, "shared.inspection.jsonl")
+    shared = Path.join(directory, "shared.ptcins")
     {prepared, catalog} = prepared_run("(return 1)", inspection_capture: true)
 
     assert {:error, {:conflicting_destinations, [:inspect, :output]}} =
@@ -400,7 +400,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     tmp_dir: directory
   } do
     {prepared, catalog} = oversized_metadata_prepared_run()
-    inspection_path = Path.join(directory, "failed.inspection.jsonl")
+    inspection_path = Path.join(directory, "failed.ptcins")
 
     assert {:ok, authority} =
              PublicationAuthority.authorize(
@@ -488,7 +488,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     # `workflow_timeout_ms` (a 30s default, unrelated to this loop's budget).
     {prepared, catalog} = prepared_run(long_running_body(), inspection_capture: true)
 
-    inspection_path = Path.join(directory, "run.inspection.jsonl")
+    inspection_path = Path.join(directory, "run.ptcins")
 
     assert {:ok, authority} =
              PublicationAuthority.authorize(

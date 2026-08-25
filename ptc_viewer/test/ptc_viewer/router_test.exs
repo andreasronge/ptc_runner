@@ -189,7 +189,7 @@ defmodule PtcViewer.RouterTest do
     assert ungranted.status == 404
     assert ungranted.resp_body == "inspection_not_private"
 
-    source = {:pinned, "fixed.inspection.jsonl"}
+    source = {:pinned, "fixed.ptcins"}
 
     adapter = fn pinned_source, run_id ->
       {:ok,
@@ -236,7 +236,7 @@ defmodule PtcViewer.RouterTest do
 
     Enum.each(responses, fn {reason, {expected_status, expected_body}} ->
       {:ok, store} =
-        PtcViewer.InspectionStore.start({:pinned, "fixed.inspection.jsonl"})
+        PtcViewer.InspectionStore.start({:pinned, "fixed.ptcins"})
 
       response =
         conn(:get, "/api/analysis/runs/run-1/conversation")
@@ -253,7 +253,7 @@ defmodule PtcViewer.RouterTest do
   end
 
   test "prelude route delegates only the pinned inspection grant", %{trace_dir: trace_dir} do
-    source = {:pinned, "fixed.inspection.jsonl"}
+    source = {:pinned, "fixed.ptcins"}
     {:ok, store} = PtcViewer.InspectionStore.start(source)
     on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
 
@@ -277,7 +277,7 @@ defmodule PtcViewer.RouterTest do
   test "execution-error and explicit-failure-value routes delegate the pinned grant", %{
     trace_dir: trace_dir
   } do
-    source = {:pinned, "fixed.inspection.jsonl"}
+    source = {:pinned, "fixed.ptcins"}
     {:ok, store} = PtcViewer.InspectionStore.start(source)
     on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
 

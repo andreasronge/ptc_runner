@@ -47,9 +47,6 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
              measured_bytes: pos_integer(),
              limit_bytes: pos_integer()
            }}
-  @type unsupported_schema_error ::
-          PtcRunner.Kernel.InspectionArtifact.unsupported_schema_error()
-
   @common_options [
     :persistence_fault_hook,
     :capture_hook,
@@ -80,7 +77,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   """
   @spec start(binary(), resources(), destination()) ::
           {:ok, AnalysisSession.t(), map()}
-          | {:error, atom() | retained_limit_error() | unsupported_schema_error()}
+          | {:error, atom() | retained_limit_error()}
   def start(profile_id, resources, destination),
     do: start(profile_id, resources, destination, [])
 
@@ -524,9 +521,6 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   end
 
   defp normalize_error(reason, _recipe) when is_atom(reason), do: reason
-
-  defp normalize_error({:unsupported_inspection_schema_version, _details} = reason, _recipe),
-    do: reason
 
   defp normalize_error(
          {:source_retained_limit_exceeded,

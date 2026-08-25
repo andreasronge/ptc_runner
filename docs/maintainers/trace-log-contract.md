@@ -37,7 +37,7 @@ ptc run PROJECT.json --trace-dir traces/
 # Trace plus private inspection — additionally supports every private
 # collection: turns, model_exchanges, generated_sources, and the rest.
 ptc run PROJECT.json --trace-dir traces/ \
-  --inspect traces-private/run.inspection.jsonl
+  --inspect traces-private/run.ptcins
 ```
 
 A project document can capture both instead of the two switches; see
@@ -55,7 +55,7 @@ prompts, generated source, and capability payloads.
 ptc repl --profile run-analysis-v1 --resource traces=traces/
 
 # Private: adds every private collection. --resource takes the DIRECTORY
-# holding the artifact, not the .inspection.jsonl path --inspect was given.
+# holding the artifact, not the .ptcins path --inspect was given.
 ptc repl --profile private-run-analysis-v1 --private-terminal \
   --resource traces=traces/ --resource inspection=traces-private/
 ```
@@ -122,7 +122,7 @@ deterministic: discover supported files, normalize paths, sort them, then load
 in sorted order under one aggregate byte cap. Exact selected capture is a
 distinct source variant used by `ptc transcript RUN_ID`: it resolves only
 `<run-ref>.jsonl` or `<run-ref>.private.jsonl` plus
-`<run-ref>.inspection.jsonl`, never lists the granted directory, and does not
+`<run-ref>.ptcins`, never lists the granted directory, and does not
 count unrelated members toward `max_directory_entries`, `max_files`, or the
 aggregate source-byte ceiling. Selected snapshot identity commits to the
 requested run reference, trace source class, exact evidence digests, and
@@ -562,11 +562,10 @@ Every collection query has:
 - one aggregate source-read byte cap;
 - bounded filter/tag/name lengths and counts.
 
-A cursor is bound to the source identity, query operation, and normalized
-filters that produced it. Changing filters or reusing a cursor for another
-operation fails as an invalid query; changing the source fails as
-`source-changed`. The caller may reduce or increase the page limit within the
-hard maximum without changing the selected result set.
+A cursor is bound to the source identity, query operation, normalized filters,
+ordering, and page limit that produced it. Changing any of them or reusing a
+cursor for another operation fails as an invalid query; changing the source
+fails as `source-changed`.
 
 If a page would exceed either result-size measurement, return the largest valid
 prefix plus explicit truncation/next-cursor metadata, or a stable bounded error
@@ -677,8 +676,8 @@ Orphaned, cyclic, wrong-environment, or contradictory edges make the source
 malformed rather than becoming navigation evidence.
 
 Optional sensitive development capture uses a separate private inspection
-record stream, not a canonical event. Every `.inspection.jsonl` line is one
-JSON object with this exact envelope:
+record stream, not a canonical event. Every V1 evidence-frame payload is one
+deterministically encoded JSON object with this exact envelope:
 
 ```json
 {
@@ -718,6 +717,103 @@ The current record types and payloads are:
 | `execution-prints` | `evaluation_id` | `environment`, `prints`, `truncated` |
 | `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
 | `explicit-failure-value` | `evaluation_id` | `environment`, `value` |
+
+#### Sealed inspection artifact V1
+
+The private inspection artifact suffix is `.ptcins`. It is a sealed binary
+container, not JSONL. All multibyte integers are unsigned big-endian and all
+offsets are absolute:
+
+```text
+16-byte header
+  "PTCINS01" | format_version:u16 | schema_version:u16 | header_size:u32
+
+zero or more evidence frames
+  payload_bytes:u64 | deterministic_json_payload:payload_bytes
+
+192-byte footer
+  "PTCIFTR1" | format_version:u16 | schema_version:u16 | footer_size:u32
+  total_bytes:u64 | evidence_offset:u64 | evidence_bytes:u64
+  record_count:u64 | first_sequence:u64 | last_sequence:u64
+  run_id_sha256:32 | trace_id_sha256:32 | evidence_sha256:32
+  artifact_digest:32
+```
+
+V1 uses format version 1, the installed inspection schema version, header size
+16, and footer size 192. Evidence starts immediately after the header and the
+footer immediately follows it. A zero-frame artifact uses zero for
+`record_count`, `first_sequence`, and `last_sequence`; its footer identity
+hashes are resolved independently against the paired trace. Gaps, overlap,
+trailing bytes, nonzero reserved representations, unknown versions, integer
+overflow, truncation, or inconsistent offsets and counts are malformed.
+
+`evidence_sha256` covers the exact length prefixes and payload bytes. The
+artifact digest covers the exact header and framed evidence followed by the
+exact footer with its final 32-byte digest field zeroed. Run and trace identity
+fields are SHA-256 of their UTF-8 bytes. Payloads use the envelope key order
+above and `DeterministicJSON` UTF-8 byte ordering for nested object keys.
+Admission rejects duplicate JSON keys, non-canonical or invalid record shapes,
+and any footer claim it cannot reconstruct independently.
+
+Production reserves an absent final destination before execution, writes the
+header and each accepted frame through owner-atomic offset-returning appends,
+updates counts and digests incrementally, appends and synchronizes the footer,
+then publishes the staging inode without replacing an existing destination.
+The sink retains no complete record list and publication never constructs a
+complete artifact binary. Refusal or interruption before the synchronized
+footer leaves no published partial artifact; a destination collision at
+publication fails closed.
+
+Reader admission inventories only regular files, then verifies the opened
+descriptor's device, inode, type, and size against that inventory before
+pinning it; a pathname replacement or symlink substitution fails closed. One
+bounded decode scan validates every frame, reconstructs collection order,
+filter postings, joins, turns, counts, results, conversations, and
+relationships, and checks those facts against the independently admitted
+paired trace. Derived locator and projection metadata is inserted into private,
+owner-bound ETS tables under entry, logical-state, actual retained-state,
+heap, and deadline ceilings. A second pass rehashes the exact evidence bytes
+without decoding records and confirms the footer, identities, counts, and
+opened source remained stable. A snapshot capability is returned only after
+all artifacts pass; any refusal tears down every table and pinned handle while
+leaving already published evidence durable.
+
+Queries select locators through ETS and read only the pinned ranges needed for
+returned records and their join or turn dependencies. Every such range is
+digest-checked against admission before a page is returned. A required-range
+change returns `source_changed` without partial items or a cursor. Append,
+truncate, or opened-size/footer inconsistency fails the next query. Replacing
+the pathname does not redirect the pinned reader, while unrelated unread
+same-size corruption may remain latent.
+
+`omitted_count` is the exact cardinality remaining in the admission-validated
+ETS result set after the returned logical position. Frames represented only by
+omitted locators are not reread merely to count them. Their same-size mutation
+may remain latent until selected or needed by a returned join. Cursors bind the
+admitted artifact digest, run and query identity, filters, order, page-limit
+semantics, and logical position; they never require a complete artifact rehash
+per page.
+
+The finite production authorities are:
+
+- `max_record_bytes`: 2,000,000 encoded payload bytes;
+- framed evidence: 536,870,912 bytes, excluding the fixed header/footer;
+- complete artifact: 536,871,120 bytes;
+- `max_records`: default 16,384 and maintained maximum 65,536;
+- logical index entries: 1,000,000 and logical index bytes: 128,000,000;
+- aggregate derived snapshot retention: 128,000,000 actual ETS and disjoint
+  owner metadata, paired-trace facts, and cache bytes;
+- host-facing selected-source/directory bytes: at most 536,871,120;
+- host-facing directory files: at most 1,024;
+- host-facing result bytes: at most 1,048,576; and
+- admission/query phase envelope: 15 seconds, cleanup: 5 seconds.
+
+The producer refuses before crossing its evidence or record limit. Admission
+refuses before crossing record or logical retained-state authority and again
+after measuring actual aggregate retention. One admitted artifact owns one
+pinned reader handle. ETS layout, table type/count, key shape, allocation word
+counts, concurrency, sorting, caching, and backend choice are implementation
+details and are not configurable host policy.
 
 Named-mission ownership is explicit. Mission `capability-input`,
 `capability-exception`, `capability-output`, `evaluation-source`, `evaluation-analysis`,
@@ -812,8 +908,8 @@ not synthesize one. Failure to accept a required input/source record prevents
 execution. Failure after an external read has completed fails the run but
 cannot retroactively undo that read.
 
-Artifact validation rejects ambiguous joins before persistence or Viewer
-pinning. There may be at most one input, exception, and output for a capability ID, one
+Artifact admission rejects ambiguous joins before publishing a snapshot or
+Viewer capability. There may be at most one input, exception, and output for a capability ID, one
 source and one subsequent analysis for an evaluation ID, and one source for an
 environment/component pair.
 A capability exception requires an earlier matching input, must precede any
@@ -858,14 +954,12 @@ a fully retained inspection stream may still be persisted as the trace-marked
 partial correlation overlay described above. Retention belongs to the host in
 0.x.
 
-Installed defaults are 2,000,000 encoded bytes per record and 16,000,000
-encoded bytes for the artifact; a host may lower them but a manifest cannot
-raise or select them. A record over the retained-size limit is rejected before
-encoding; encoded expansion — a record within the retained limit that grows
-past it under JSON escaping — is necessarily caught after encoding.
-Persistence is atomic and no-clobber, so a failed write is never mistaken for
-a complete capture, and this increment deliberately does not append or merge
-inspection runs.
+These authorities are internal to the installed producer and snapshot. A host
+may lower its exposed source, file, and result ceilings, but a manifest cannot
+raise or select any of them. Encoded expansion under JSON escaping is checked
+before the frame append. Publication is atomic and no-clobber, and one artifact
+contains exactly one run; production never appends to or merges a published
+artifact.
 
 This increment captures the normalized LLM request and response, exact
 generated subordinate PTC-Lisp, exact effective prelude component source, and
@@ -892,7 +986,7 @@ inspection states.
 
 The inspection artifact is absent from TraceLog file/directory discovery and
 from every primitive TraceLog query. Normal discovery explicitly rejects or omits the
-`.inspection.jsonl` suffix rather than accidentally parsing it as canonical
+`.ptcins` suffix rather than accidentally parsing it as canonical
 JSONL.
 
 A host-installed inspection snapshot composes its correlated canonical trace
@@ -963,10 +1057,11 @@ condition is carried in the bounded details string. `:invalid_request` covers
 Details are bounded and sanitized. Host paths are not exposed beyond safe
 grant-relative identifiers.
 
-Inspection loading and persistence use a separate stable error set:
-`:inspection_sink_error`, `:inspection_persistence_failed`,
-`:invalid_inspection_source`, `:inspection_source_changed`,
-`:inspection_source_limit_exceeded`, and `:inspection_run_mismatch`.
+Inspection production uses `:inspection_sink_error` and
+`:inspection_persistence_failed`; admitted inspection sources use the snapshot
+failure algebra (`:malformed_source`, `:source_changed`,
+`:source_limit_exceeded`, `:result_limit_exceeded`, correlation failures, and
+selected-run mismatch).
 Destination preflight adds `:inspection_destination_exists`,
 `:inspection_destination_unavailable`, and `:inspection_destination_unsafe`,
 the last naming an ancestor with an untrusted owner or mode. Errors do

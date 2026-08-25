@@ -134,7 +134,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         %{
           key: :inspect,
           type: :string,
-          syntax: ["--inspect RUN.inspection.jsonl"],
+          syntax: ["--inspect RUN.ptcins"],
           description: "owner-only private inspection artifact"
         },
         %{
@@ -213,7 +213,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :inspection,
           type: :string,
           syntax: ["--inspection DIRECTORY"],
-          description: "inspection directory; transcript selects RUN_ID.inspection.jsonl"
+          description: "inspection directory; transcript selects RUN_ID.ptcins"
         },
         %{
           key: :private_unattended,

@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   test "routes by alias, uses the declared default, and strips model before invocation" do
@@ -97,7 +98,10 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:ok, router} = LLMRouter.new([route("hy3", "llm", "hy3-v1", true, leaf)])
 
     assert {:ok, inspection} =
-             InspectionSink.start(run_id: run_id, trace_id: "#{run_id}-inspection")
+             StreamingInspection.start(
+               run_id: run_id,
+               trace_id: "#{run_id}-inspection"
+             )
 
     assert {:ok, config} = agent_router_config(router, run_id, inspection_sink: inspection)
 
@@ -152,7 +156,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert run_stopped.limit_bindings == [:configured]
     assert run_stopped.alias == "hy3"
 
-    assert {:ok, records} = InspectionSink.records(inspection)
+    assert {:ok, records} = StreamingInspection.records(inspection)
 
     assert output =
              Enum.find(records, fn record ->
@@ -194,7 +198,10 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:ok, router} = LLMRouter.new([route("hy3", "llm", "hy3-v1", true, leaf)])
 
     assert {:ok, inspection} =
-             InspectionSink.start(run_id: run_id, trace_id: "#{run_id}-inspection")
+             StreamingInspection.start(
+               run_id: run_id,
+               trace_id: "#{run_id}-inspection"
+             )
 
     assert {:ok, config} = agent_router_config(router, run_id, inspection_sink: inspection)
 
@@ -229,7 +236,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert run_stopped.alias == "hy3"
     refute Map.has_key?(run_stopped, :limit)
 
-    assert {:ok, records} = InspectionSink.records(inspection)
+    assert {:ok, records} = StreamingInspection.records(inspection)
     assert error = Enum.find(records, &(&1["record_type"] == "execution-error"))
     assert error["payload"]["details"] == %{"alias" => "hy3"}
     assert :ok = InspectionSink.stop(inspection)

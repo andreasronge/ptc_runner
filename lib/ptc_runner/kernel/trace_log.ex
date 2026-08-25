@@ -263,8 +263,40 @@ defmodule PtcRunner.Kernel.TraceLog do
             not is_binary(evaluation_id) or not is_binary(status)
           end)
 
+        capabilities =
+          run_events
+          |> Enum.filter(&(&1["type"] == "capability-started"))
+          |> Map.new(fn event ->
+            {event_data(event, "capability_id"),
+             %{
+               "environment" => stringify(event_data(event, "environment")),
+               "mission_name" => event_data(event, "mission_name"),
+               "name" => event_data(event, "name")
+             }}
+          end)
+          |> Map.reject(fn {id, _value} -> not is_binary(id) end)
+
+        evaluations =
+          run_events
+          |> Enum.filter(&(&1["type"] == "evaluation-started"))
+          |> Map.new(fn event ->
+            {event_data(event, "evaluation_id"),
+             %{
+               "environment" => stringify(event_data(event, "environment")),
+               "mission_name" => event_data(event, "mission_name"),
+               "source_hash" => event_data(event, "source_hash"),
+               "source_bytes" => event_data(event, "source_bytes")
+             }}
+          end)
+          |> Map.reject(fn {id, _value} -> not is_binary(id) end)
+
         {run_id,
          %{
+           "trace_id" => summary["trace_id"],
+           "capabilities" => capabilities,
+           "evaluations" => evaluations,
+           "dropped_event_counts" => inspection_dropped_counts(run_events),
+           "terminal_result" => inspection_terminal_result(run_events),
            "expected_model_exchange_ids" => expected_model_exchanges,
            "evaluation_statuses" => evaluation_statuses,
            "parent_evaluation_ids" => parent_evaluation_ids,
@@ -280,6 +312,30 @@ defmodule PtcRunner.Kernel.TraceLog do
       runs_by_id: summaries_by_id,
       facts_by_run_id: facts
     }
+  end
+
+  defp inspection_dropped_counts(events) do
+    marker = Enum.find(events, &(&1["type"] == "events-dropped"))
+    terminal = Enum.find(events, &(&1["type"] == "run-stopped"))
+    marker_counts = event_data(marker, "counts")
+    terminal_counts = get_in(terminal || %{}, ["data", "usage", "events_dropped"])
+
+    if is_map(marker_counts) and marker_counts == terminal_counts,
+      do: marker_counts,
+      else: %{}
+  end
+
+  defp inspection_terminal_result(events) do
+    case Enum.filter(events, &(&1["type"] == "run-stopped")) do
+      [terminal] ->
+        %{
+          "outcome" => stringify(event_data(terminal, "outcome")),
+          "result_hash" => event_data(terminal, "result_hash")
+        }
+
+      _other ->
+        nil
+    end
   end
 
   defp valid_query_source_kind?(_events, source_kind)
@@ -3069,7 +3125,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp normalize(value), do: value
 
   defp private_path?(path), do: String.ends_with?(path, ".private.jsonl")
-  defp inspection_path?(path), do: String.ends_with?(path, ".inspection.jsonl")
+  defp inspection_path?(path), do: String.ends_with?(path, ".ptcins")
   defp reserved_path?(path), do: private_path?(path) or inspection_path?(path)
 
   @doc false

@@ -540,7 +540,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     for {switch, name} <- [
           {"--private-output", "private-answer.json"},
-          {"--inspect", "run.inspection.jsonl"}
+          {"--inspect", "run.ptcins"}
         ] do
       path = Path.join(dir, name)
 
@@ -666,7 +666,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     for {name, phase, code, exit_status, collision?} <- [
           {"shared.json", "destination", "invalid_inspection_destination", 7, false},
-          {"shared.inspection.jsonl", "arguments", "conflicting_arguments", 2, true}
+          {"shared.ptcins", "arguments", "conflicting_arguments", 2, true}
         ] do
       destination = Path.join(dir, name)
       argv = ["run", application, "--output", destination, "--inspect", destination]

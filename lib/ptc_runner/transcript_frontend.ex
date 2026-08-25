@@ -121,15 +121,6 @@ defmodule PtcRunner.TranscriptFrontend do
     end
   end
 
-  defp selected_capture_error(
-         {:unsupported_inspection_schema_version,
-          %{artifact_version: artifact_version, supported_version: supported_version}}
-       ) do
-    {:error, :unsupported_schema,
-     "inspection artifact schema version #{artifact_version} is unsupported; " <>
-       "this build supports version #{supported_version}"}
-  end
-
   defp selected_capture_error(:source_changed),
     do: {:error, :source_changed, "analysis source changed during capture"}
 

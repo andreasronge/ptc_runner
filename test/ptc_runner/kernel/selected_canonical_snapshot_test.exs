@@ -6,13 +6,14 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
   alias PtcRunner.Kernel.PrivateRunAnalysisProfile
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.TestSupport.PrivateInspectionFixture
+  alias PtcRunner.TestSupport.StreamingInspection
 
   @tag :tmp_dir
   test "selected capture ignores malformed and oversized unselected members", %{tmp_dir: root} do
     fixture = fixture!(root)
     File.write!(Path.join(fixture.traces, "broken.jsonl"), "{not-json\n")
     File.write!(Path.join(fixture.traces, "huge.jsonl"), :binary.copy("x", 9_000_001))
-    File.write!(Path.join(fixture.inspection, "broken.inspection.jsonl"), "not-json\n")
+    File.write!(Path.join(fixture.inspection, "broken.ptcins"), "not-json\n")
 
     test_pid = self()
     listed = fn -> send(test_pid, :listed) end
@@ -49,9 +50,9 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
     tmp_dir: root
   } do
     fixture = fixture!(root)
-    extra = Path.join(root, "extra.inspection.jsonl")
+    extra = Path.join(root, "extra.ptcins")
     File.write!(extra, "not-used\n")
-    File.ln_s!(extra, Path.join(fixture.inspection, "extra.inspection.jsonl"))
+    File.ln_s!(extra, Path.join(fixture.inspection, "extra.ptcins"))
 
     assert {:ok, traces} =
              TraceSnapshot.start({:directory, fixture.traces}, owner: self())
@@ -110,7 +111,7 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
   @tag :tmp_dir
   test "selected inspection capture does not inventory unrelated artifacts", %{tmp_dir: root} do
     fixture = fixture!(root)
-    File.write!(Path.join(fixture.inspection, "broken.inspection.jsonl"), "not-json\n")
+    File.write!(Path.join(fixture.inspection, "broken.ptcins"), "not-json\n")
 
     assert {:ok, traces} =
              TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
@@ -273,20 +274,11 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
   @tag :tmp_dir
   test "selected inspection refuses a mismatched correlated trace id", %{tmp_dir: root} do
     fixture = fixture!(root)
-    path = Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl")
+    path = Path.join(fixture.inspection, "#{fixture.run_id}.ptcins")
 
-    rewritten =
-      path
-      |> File.stream!()
-      |> Enum.map_join(fn line ->
-        line
-        |> Jason.decode!()
-        |> Map.put("trace_id", "trace-unrelated")
-        |> Jason.encode!()
-        |> Kernel.<>("\n")
-      end)
-
-    File.write!(path, rewritten)
+    {:ok, records} = StreamingInspection.read_path(path)
+    rewritten = Enum.map(records, &Map.put(&1, "trace_id", "trace-unrelated"))
+    StreamingInspection.rewrite_path(path, rewritten)
 
     assert {:ok, traces} =
              TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
@@ -310,12 +302,12 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
     fixture = fixture!(root)
 
     File.write!(
-      Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl"),
+      Path.join(fixture.inspection, "#{fixture.run_id}.ptcins"),
       :binary.copy("x", 200)
     )
 
     File.write!(
-      Path.join(fixture.inspection, "unrelated.inspection.jsonl"),
+      Path.join(fixture.inspection, "unrelated.ptcins"),
       :binary.copy("x", 9_000_001)
     )
 
@@ -338,7 +330,7 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
   @tag :tmp_dir
   test "an unreadable selected inspection is unavailable rather than changed", %{tmp_dir: root} do
     fixture = fixture!(root)
-    path = Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl")
+    path = Path.join(fixture.inspection, "#{fixture.run_id}.ptcins")
 
     assert {:ok, traces} =
              TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},

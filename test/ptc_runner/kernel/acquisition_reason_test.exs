@@ -222,17 +222,6 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     assert diagnostic.subject.operation == :local
   end
 
-  test "an unsupported inspection schema tuple remains a local environment failure" do
-    reason =
-      {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 8}}
-
-    diagnostic = AcquisitionReason.diagnostic(reason, @occurrence)
-
-    assert diagnostic.phase == :local_preflight
-    assert diagnostic.code == :environment_unavailable
-    assert diagnostic.subject.operation == :local
-  end
-
   test "a malformed occurrence is this module's defect, not an escaping exception" do
     # Classification runs inside an acquisition loop holding provisional roots,
     # so it must not raise past them.

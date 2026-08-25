@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.TestSupport.ProviderSessionFixture
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.StreamingInspection
   alias ReqLLM.ToolCall
 
   @schema %{"type" => "object", "additionalProperties" => false}
@@ -861,7 +862,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       {:ok, sink} = EventSink.start(:normal, limits)
 
       {:ok, inspection} =
-        InspectionSink.start(
+        StreamingInspection.start(
           run_id: "invalid-built-#{index}",
           trace_id: "invalid-built-#{index}"
         )
@@ -1438,7 +1439,10 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, event_sink} = EventSink.start(:normal, limits())
 
     {:ok, inspection_sink} =
-      InspectionSink.start(run_id: "finite-stop", trace_id: "finite-stop")
+      StreamingInspection.start(
+        run_id: "finite-stop",
+        trace_id: "finite-stop"
+      )
 
     true = :erlang.suspend_process(event_sink.pid)
     true = :erlang.suspend_process(inspection_sink.pid)

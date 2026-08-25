@@ -3,7 +3,6 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   use GenServer
 
-  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Kernel.SafeMetadata
@@ -50,8 +49,24 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
           opts
         )
 
+  @doc false
+  def start({:private_viewer_directory, directory}, opts)
+      when is_binary(directory) and is_list(opts),
+      do:
+        start_capture(
+          {:private_viewer_directory, directory},
+          :ptc_private_trace_snapshot,
+          :private,
+          nil,
+          opts
+        )
+
   def start({:file, path, run_ref}, opts) when is_binary(path) and is_list(opts),
     do: start_capture({:file, path}, :ptc_trace_snapshot, :sanitized, run_ref, opts)
+
+  @doc false
+  def start({:viewer_file, path}, opts) when is_binary(path) and is_list(opts),
+    do: start_capture({:file, path}, :ptc_trace_snapshot, :sanitized, nil, opts)
 
   def start({:private_authorized_file, path, run_ref}, opts)
       when is_binary(path) and is_list(opts),
@@ -63,6 +78,10 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
           run_ref,
           opts
         )
+
+  @doc false
+  def start({:private_viewer_file, path}, opts) when is_binary(path) and is_list(opts),
+    do: start_capture({:file, path}, :ptc_private_trace_snapshot, :private, nil, opts)
 
   def start({:selected_canonical, directory, run_ref}, opts)
       when is_binary(directory) and is_binary(run_ref) and is_list(opts) do
@@ -188,18 +207,22 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   def run_exists?(_snapshot, _run_id), do: {:error, :invalid_query}
 
   @doc false
-  @spec validate_inspection(t(), [map()]) :: :ok | {:error, atom()}
-  def validate_inspection(%__MODULE__{} = snapshot, records) when is_list(records),
-    do: call(snapshot, {:validate_inspection, records})
-
-  def validate_inspection(_snapshot, _records), do: {:error, :invalid_snapshot}
-
-  @doc false
   @spec analysis_facts(t(), [binary()]) :: {:ok, map()} | {:error, atom()}
   def analysis_facts(%__MODULE__{} = snapshot, run_ids) when is_list(run_ids),
     do: call(snapshot, {:analysis_facts, run_ids})
 
   def analysis_facts(_snapshot, _run_ids), do: {:error, :invalid_snapshot}
+
+  @doc false
+  @spec resolve_inspection_identity(t(), binary(), binary()) ::
+          {:ok, %{run_id: binary(), trace_id: binary()}} | {:error, atom()}
+  def resolve_inspection_identity(%__MODULE__{} = snapshot, run_digest, trace_digest)
+      when is_binary(run_digest) and byte_size(run_digest) == 32 and is_binary(trace_digest) and
+             byte_size(trace_digest) == 32,
+      do: call(snapshot, {:resolve_inspection_identity, run_digest, trace_digest})
+
+  def resolve_inspection_identity(_snapshot, _run_digest, _trace_digest),
+    do: {:error, :invalid_snapshot}
 
   @doc false
   @spec transfer_owner(t(), pid()) :: :ok | {:error, atom()}
@@ -301,27 +324,24 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   end
 
   def handle_call(
-        {token,
-         {:validate_inspection, [%{"run_id" => run_id, "trace_id" => trace_id} | _] = records}},
+        {token, {:resolve_inspection_identity, run_digest, trace_digest}},
         _from,
         %{token: token} = state
       ) do
-    matching_identity? =
-      Enum.any?(
-        state.events,
-        &(&1["run_id"] == run_id and &1["trace_id"] == trace_id)
-      )
+    matches =
+      Enum.filter(state.analysis.facts_by_run_id, fn {run_id, facts} ->
+        :crypto.hash(:sha256, run_id) == run_digest and
+          :crypto.hash(:sha256, facts["trace_id"]) == trace_digest
+      end)
 
     result =
-      if matching_identity?,
-        do: InspectionArtifact.validate_correlations(records, state.events),
-        else: {:error, :inspection_correlation_missing}
+      case matches do
+        [{run_id, %{"trace_id" => trace_id}}] -> {:ok, %{run_id: run_id, trace_id: trace_id}}
+        _none_or_ambiguous -> {:error, :inspection_correlation_missing}
+      end
 
     {:reply, result, state}
   end
-
-  def handle_call({token, {:validate_inspection, _records}}, _from, %{token: token} = state),
-    do: {:reply, {:error, :inspection_correlation_missing}, state}
 
   def handle_call({token, :stop}, _from, %{token: token} = state),
     do: {:stop, :normal, :ok, state}
@@ -389,6 +409,22 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     end
   end
 
+  defp capture({:private_viewer_directory, directory}, config, capture_hook, listing_hook) do
+    case TraceLog.capture_directory(directory,
+           max_source_bytes: config.max_source_bytes,
+           max_directory_entries: config.max_directory_entries,
+           max_trace_files: config.max_trace_files,
+           source_kind: :private,
+           include_sanitized: false,
+           capture_hook: capture_hook,
+           listing_hook: listing_hook
+         ) do
+      {:ok, capture} -> retain_capture(capture, config)
+      {:error, :invalid_trace_log} -> {:error, :invalid_snapshot}
+      {:error, reason} when is_atom(reason) -> {:error, reason}
+    end
+  end
+
   defp capture({:file, path}, config, capture_hook, _listing_hook) do
     capture_file_source(path, config, capture_hook, fn -> :ok end)
   end
@@ -436,6 +472,8 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
         {:error, reason}
     end
   end
+
+  defp selected_source_id(%{selected_run_ref: nil}, capture), do: {:ok, capture.source_id}
 
   defp selected_source_id(config, capture) do
     with {:ok, trace_id} <-

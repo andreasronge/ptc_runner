@@ -12,9 +12,9 @@ defmodule PtcRunner.Kernel.PtcFsMCPStdioTest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.TestSupport.PtcFsMCP
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   if reason = TestHelpers.executable_skip_reason(["node", "npm"]) do
@@ -28,7 +28,7 @@ defmodule PtcRunner.Kernel.PtcFsMCPStdioTest do
     node = System.find_executable("node") || flunk("Node.js is required for this E2E")
     cli = PtcFsMCP.install!(dir)
     paths = write_application(dir, node, cli)
-    inspection_path = Path.join(dir, "run.inspection.jsonl")
+    inspection_path = Path.join(dir, "run.ptcins")
 
     assert {:ok, host} = HostConfig.load(paths.host)
 
@@ -58,7 +58,7 @@ defmodule PtcRunner.Kernel.PtcFsMCPStdioTest do
 
     refute Map.has_key?(failure, "mutation_state")
 
-    assert {:ok, records} = InspectionArtifact.load(inspection_path)
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
     stderrs = Enum.filter(records, &(&1["record_type"] == "mcp-stderr"))
 
     assert Enum.any?(stderrs, fn record ->

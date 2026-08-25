@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
   boundary.
 
   The outcome freezes the effective result class, result-contract decision,
-  terminal canonical events, and optional private inspection records while the
+  terminal canonical events, and optional sealed private inspection metadata while the
   execution sinks are still live. Publication can therefore run after those
   sinks stop without consulting a `PtcRunner.Kernel.RunConfig`, reopening an
   execution resource, or re-deriving disclosure authority.
@@ -40,7 +40,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
   @type result_class :: :normal | :private
   @type result_contract :: :ok | {:error, {:result_contract_failed, map()}}
   @type terminal_batch :: {:ok, [map()]} | {:error, atom()}
-  @type inspection :: :disabled | {:ok, [map()]} | {:error, :inspection_sink_error}
+  @type inspection :: :disabled | {:ok, map()} | {:error, :inspection_sink_error}
   @type publication_evidence :: %{
           result: result(),
           result_class: result_class(),
@@ -135,7 +135,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
 
   defp capture_inspection(%InspectionSink{} = sink, result, terminal_batch) do
     case maybe_emit_result(sink, result, terminal_batch) do
-      :ok -> InspectionSink.records(sink)
+      :ok -> InspectionSink.seal(sink)
       _error -> {:error, :inspection_sink_error}
     end
   end
@@ -272,7 +272,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcome do
   defp terminal_batch_valid?(_terminal_batch), do: false
 
   defp inspection_valid?(:disabled), do: true
-  defp inspection_valid?({:ok, records}), do: is_list(records) and Enum.all?(records, &is_map/1)
+  defp inspection_valid?({:ok, seal}), do: is_map(seal)
   defp inspection_valid?({:error, :inspection_sink_error}), do: true
   defp inspection_valid?(_inspection), do: false
 

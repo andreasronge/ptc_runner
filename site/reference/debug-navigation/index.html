@@ -140,7 +140,7 @@ that directory contains <code class="inline">--traces</code>. A sibling director
 both rules. A rejection names the two conflicting switches and their physical
 relationship, and discloses no path.</p><p><code class="inline">RUN_ID</code> must be a canonical PTC command run reference. The command then
 captures exactly <code class="inline">RUN_ID.jsonl</code> or <code class="inline">RUN_ID.private.jsonl</code> under <code class="inline">--traces</code> and
-<code class="inline">RUN_ID.inspection.jsonl</code> under <code class="inline">--inspection</code>. It does not list those
+<code class="inline">RUN_ID.ptcins</code> under <code class="inline">--inspection</code>. It does not list those
 directories, so unrelated, malformed, or oversized history cannot reject a
 valid selected pair. Selected files still keep their individual source,
 record, retained-memory, heap, deadline, and result ceilings. Both trace
