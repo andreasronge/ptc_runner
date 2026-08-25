@@ -36,7 +36,9 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
         "type" => "object",
         "properties" => %{"value" => %{"type" => "string"}},
         "required" => ["value"],
-        "additionalProperties" => true
+        "additionalProperties" => true,
+        "maxProperties" => 8,
+        "propertyNames" => %{"type" => "string", "maxLength" => 64}
       }
     },
     "required" => ["name", "fixed", "count", "ratio", "enabled", "nothing", "tags"]
@@ -201,7 +203,9 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
       %{"type" => "object", "patternProperties" => %{}},
       %{"type" => "object", "unevaluatedProperties" => false},
       %{"type" => ["object", "null"]},
-      %{"type" => "string"}
+      %{"type" => "string"},
+      %{"type" => "string", "maxProperties" => 1},
+      %{"type" => "array", "propertyNames" => %{"type" => "string"}}
     ]
 
     for schema <- invalid_schemas do

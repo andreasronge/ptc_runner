@@ -48,13 +48,14 @@ container image; the published Hex package does not carry it.
 
 The REPL evaluates PTC-Lisp against an immutable capture of the selected trace
 directory. The server fixes the `run-analysis-v1` profile: normal bounded
-PTC-Lisp built-ins, the three `analysis/*` navigation functions, their shared
-`cap` helpers, three read-only analysis capabilities, and the ordinary
+PTC-Lisp built-ins, the four `analysis/*` navigation functions, their shared
+`cap` helpers, four read-only analysis capabilities, and the ordinary
 runtime/capability introspection routes. It does not grant filesystem, network,
 LLM, MCP, workflow-event, or arbitrary prelude authority.
 
-Forms such as `(analysis/runs {})`, `(analysis/open "run-id")`, and
-`(analysis/read "run-id" {"collection" "activity" "limit" 100})` return bounded values,
+Forms such as `(analysis/runs {})`, `(analysis/open "run-id")`,
+`(analysis/read "run-id" {"collection" "activity" "limit" 100})`, and
+`(analysis/counters {"status" "error"})` return bounded values,
 prints, errors, continuation effects, duration, and remaining usage. The
 server-owned transcript survives a page reload. Reset first closes and persists
 the analysis run, then captures a new snapshot and starts with fresh

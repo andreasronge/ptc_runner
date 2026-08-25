@@ -103,7 +103,7 @@ frozen dependencies.</p><p>The substrate is structural. It exposes evidence and 
 selects a suspect or proposes a repair. Reaching a conclusion — or deciding the
 evidence is insufficient — stays with the caller, whether that caller is a
 deterministic walk or a model.</p><h2 id="what-the-evidence-path-looks-like">What the evidence path looks like</h2><pre><code class="text language-text">failed immutable run
-  -&gt; runs / open / read / follow
+  -&gt; runs / open / read / counters / follow
   -&gt; generated source and result
   -&gt; referenced prelude source
   -&gt; dependency prelude source
@@ -182,13 +182,13 @@ prelude:</p><pre><code class="json language-json">&quot;missions&quot;: {
     {&quot;name&quot;: &quot;failed-run-traces&quot;, &quot;config&quot;: {&quot;expose&quot;: false}}
   ]
 }</code></pre><p><code class="inline">{&quot;expose&quot;: false}</code> keeps the trace selection as the inspection source's
-dependency without creating a second navigation namespace.</p><p>A snapshot provider names its operations <code class="inline">&lt;alias&gt;.runs</code>, <code class="inline">&lt;alias&gt;.open</code>, and
-<code class="inline">&lt;alias&gt;.read</code>, and the shipped prelude binds that conventional alias, so the
-inspection selection must be called <code class="inline">debug.nav</code>. The alternative shipped
-surface, <code class="inline">analysis</code>, binds the stable <code class="inline">analysis-runs</code>/<code class="inline">analysis-open</code>/
-<code class="inline">analysis-read</code> names a REPL profile grants; install one or the other, never
-both.</p><h2 id="navigate-with-debug-nav">Navigate with debug.nav</h2><p><code class="inline">debug.nav</code> is a thin policy layer over the snapshot provider. It adds no host
-authority and no diagnosis policy:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Call</th><th style="text-align: left;">Purpose</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">(debug.nav/runs options)</code></td><td style="text-align: left;">list captured runs, filtered by status, name, tags, or id</td></tr><tr><td style="text-align: left;"><code class="inline">(debug.nav/open run-id)</code></td><td style="text-align: left;">discover a run's collections, filters, identifiers, and completeness fields</td></tr><tr><td style="text-align: left;"><code class="inline">(debug.nav/read run-id options)</code></td><td style="text-align: left;">read one bounded native page from a named collection</td></tr><tr><td style="text-align: left;"><code class="inline">(debug.nav/follow run-id relationship options)</code></td><td style="text-align: left;">follow one typed relationship</td></tr></tbody></table></div><p><code class="inline">follow</code> takes a relationship exactly as an evidence item published it and
+dependency without creating a second navigation namespace.</p><p>A snapshot provider names its operations <code class="inline">&lt;alias&gt;.runs</code>, <code class="inline">&lt;alias&gt;.open</code>,
+<code class="inline">&lt;alias&gt;.read</code>, and <code class="inline">&lt;alias&gt;.counters</code>, and the shipped prelude binds that
+conventional alias, so the inspection selection must be called <code class="inline">debug.nav</code>. The
+alternative shipped surface, <code class="inline">analysis</code>, binds the stable <code class="inline">analysis-runs</code>/
+<code class="inline">analysis-open</code>/<code class="inline">analysis-read</code>/<code class="inline">analysis-counters</code> names a REPL profile
+grants; install one or the other, never both.</p><h2 id="navigate-with-debug-nav">Navigate with debug.nav</h2><p><code class="inline">debug.nav</code> is a thin policy layer over the snapshot provider. It adds no host
+authority and no diagnosis policy:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Call</th><th style="text-align: left;">Purpose</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">(debug.nav/runs options)</code></td><td style="text-align: left;">list captured runs, filtered by status, name, tags, or id</td></tr><tr><td style="text-align: left;"><code class="inline">(debug.nav/open run-id)</code></td><td style="text-align: left;">discover a run's collections, filters, identifiers, and completeness fields</td></tr><tr><td style="text-align: left;"><code class="inline">(debug.nav/read run-id options)</code></td><td style="text-align: left;">read one bounded native page from a named collection</td></tr><tr><td style="text-align: left;"><code class="inline">(debug.nav/counters filters)</code></td><td style="text-align: left;">return trace counters for a filtered run cohort</td></tr><tr><td style="text-align: left;"><code class="inline">(debug.nav/follow run-id relationship options)</code></td><td style="text-align: left;">follow one typed relationship</td></tr></tbody></table></div><p><code class="inline">follow</code> takes a relationship exactly as an evidence item published it and
 reads its declared target collection and filters. It returns the original
 relationship beside the unchanged page envelope, so cursors, <code class="inline">omitted_count</code>,
 <code class="inline">snapshot_hash</code>, truncation, and the relationship's own state all survive the

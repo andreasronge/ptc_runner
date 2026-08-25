@@ -238,12 +238,13 @@ files at its own level. Capture is immutable and one level deep. Empty capture
 is refused so a mispointed directory cannot look like a real empty result. A
 started session reports its admitted file and run counts.
 
-The profile installs three navigation functions:
+The profile installs four navigation functions:
 
 ```clojure
 (analysis/runs {"limit" 50})
 (analysis/open "run-id")
 (analysis/read "run-id" {"collection" "activity" "limit" 100})
+(analysis/counters {"status" "error"})
 ```
 
 `analysis/open` advertises every collection with its filters, order, authority,
@@ -260,6 +261,48 @@ One session can build an investigation incrementally:
 (def run-id (get slowest "run_id"))
 (analysis/open run-id)
 (analysis/read run-id {"collection" "activity" "limit" 100})
+(analysis/counters {"run_id" run-id})
+```
+
+`analysis/counters` is one bounded aggregate, not a page. Filter a cohort in
+one call, or call once per selected `run_id` and reduce the returned
+`llm_usage_by_model` rows in PTC-Lisp. Those rows carry `calls`,
+`successful_calls`, `usage_calls`, `missing_usage_calls`, and a nested
+`usage` map with `input`, `output`, and optional `total_cost`. Group by
+`resolved_model` and sum the call counters plus nested token keys. Sum
+`unattributed_model_calls` across the same pages so unprovable identities are
+not dropped from the cohort. Absent `total_cost` is unknown spend, not zero:
+omit it from the merged `usage` map whenever any contributing row withholds it.
+
+```clojure
+(analysis/counters
+  {"tags" {"cohort" "candidate"}
+   "from" "2026-08-01T00:00:00Z"
+   "to" "2026-09-01T00:00:00Z"})
+
+(defn withheld-cost? [rows]
+  (some #(not (contains? (get % "usage") "total_cost")) rows))
+
+(defn reduce-model-rows [rows]
+  (->> rows
+       (group-by #(get % "resolved_model"))
+       (map (fn [[model group]]
+              (let [usage (apply merge-with + (map #(get % "usage") group))
+                    usage (if (withheld-cost? group)
+                            (dissoc usage "total_cost")
+                            usage)]
+                {"resolved_model" model
+                 "calls" (reduce + (map #(get % "calls") group))
+                 "successful_calls" (reduce + (map #(get % "successful_calls") group))
+                 "usage_calls" (reduce + (map #(get % "usage_calls") group))
+                 "missing_usage_calls" (reduce + (map #(get % "missing_usage_calls") group))
+                 "usage" usage})))))
+
+(def selected ["run-a" "run-b"])
+(def pages (map #(analysis/counters {"run_id" %}) selected))
+(def model-rows (mapcat #(get % "llm_usage_by_model") pages))
+(def unattributed (apply + (map #(get % "unattributed_model_calls") pages)))
+{:models (reduce-model-rows model-rows) :unattributed unattributed}
 ```
 
 Loaded files, repeated expressions, scripts, stdin, and interactive forms use
@@ -304,7 +347,7 @@ uncorrelated, oversized, or unsupported artifact rejects the complete private
 source. Use the PtcRunner build matching the artifact's reported schema when
 versions differ.
 
-Private authority adds collections to the same three operations rather than
+Private authority adds collections to the same navigation surface rather than
 adding smart diagnosis APIs:
 
 ```clojure
@@ -317,6 +360,7 @@ adding smart diagnosis APIs:
 (analysis/read run-id {"collection" "prelude_sources"
                        "component_id" "workspace"})
 (analysis/read run-id {"collection" "execution_errors"})
+(analysis/counters {"run_id" run-id})
 ```
 
 An execution error carries the workflow `evaluation_id`. Follow its exact

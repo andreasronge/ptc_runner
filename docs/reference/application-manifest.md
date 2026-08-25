@@ -232,12 +232,13 @@ including mappings whose host `model_visible` flag is false. Omitted, it
 defaults to the authorized names the host already marked visible. Visibility
 never grants or denies call authority.
 
-Native trace and inspection aliases derive three navigation capabilities:
-`runs`, `open`, and `read`. `open` advertises the named collections and their
-filters; `read` returns one native bounded page. Public trace sources provide
-the `activity` collection and return `evidence_unavailable` for private
-collections. An inspection alias composes its
-required trace snapshot with authorized private records. Set the
+Native trace and inspection aliases derive four navigation capabilities:
+`runs`, `open`, `read`, and `counters`. `open` advertises the named collections
+and their filters; `read` returns one native bounded page; `counters` returns
+the captured trace aggregate, including adapter-attested model usage. Public
+trace sources provide the `activity` collection and return
+`evidence_unavailable` for private collections. An inspection alias composes
+its required trace snapshot with authorized private records. Set the
 trace dependency's config to `{"expose": false}` when only the aggregate
 inspection namespace should be callable.
 

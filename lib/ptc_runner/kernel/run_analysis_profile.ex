@@ -11,7 +11,7 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
 
   @components ["cap", "analysis"]
   @namespaces ["analysis", "cap"]
-  @capabilities ~w(analysis-open analysis-read analysis-runs)
+  @capabilities ~w(analysis-counters analysis-open analysis-read analysis-runs)
   @persistence "canonical-trace-on-close"
   @trace_capture_policy "private-authorized-canonical-v1"
 

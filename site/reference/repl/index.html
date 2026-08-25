@@ -217,9 +217,10 @@ artifacts:</p><pre><code class="console language-console">ptc repl \
   --resource traces=tmp/tutorial-traces</code></pre><p>The <code class="inline">traces</code> resource must be a directory containing ordinary canonical JSONL
 files at its own level. Capture is immutable and one level deep. Empty capture
 is refused so a mispointed directory cannot look like a real empty result. A
-started session reports its admitted file and run counts.</p><p>The profile installs three navigation functions:</p><pre><code class="clojure language-clojure">(analysis/runs {&quot;limit&quot; 50})
+started session reports its admitted file and run counts.</p><p>The profile installs four navigation functions:</p><pre><code class="clojure language-clojure">(analysis/runs {&quot;limit&quot; 50})
 (analysis/open &quot;run-id&quot;)
-(analysis/read &quot;run-id&quot; {&quot;collection&quot; &quot;activity&quot; &quot;limit&quot; 100})</code></pre><p><code class="inline">analysis/open</code> advertises every collection with its filters, order, authority,
+(analysis/read &quot;run-id&quot; {&quot;collection&quot; &quot;activity&quot; &quot;limit&quot; 100})
+(analysis/counters {&quot;status&quot; &quot;error&quot;})</code></pre><p><code class="inline">analysis/open</code> advertises every collection with its filters, order, authority,
 and availability. Public sessions expose <code class="inline">activity</code>; private collections return
 <code class="inline">evidence_unavailable</code> here. Pages are bounded and report <code class="inline">truncated</code>,
 <code class="inline">omitted_count</code>, and an opaque <code class="inline">next_cursor</code> for explicit navigation.</p><p>One session can build an investigation incrementally:</p><pre><code class="clojure language-clojure">(def runs (analysis/runs {&quot;limit&quot; 50}))
@@ -227,7 +228,43 @@ and availability. Public sessions expose <code class="inline">activity</code>; p
 (def slowest (first (sort-by #(get % &quot;duration_ms&quot;) &gt; items)))
 (def run-id (get slowest &quot;run_id&quot;))
 (analysis/open run-id)
-(analysis/read run-id {&quot;collection&quot; &quot;activity&quot; &quot;limit&quot; 100})</code></pre><p>Loaded files, repeated expressions, scripts, stdin, and interactive forms use
+(analysis/read run-id {&quot;collection&quot; &quot;activity&quot; &quot;limit&quot; 100})
+(analysis/counters {&quot;run_id&quot; run-id})</code></pre><p><code class="inline">analysis/counters</code> is one bounded aggregate, not a page. Filter a cohort in
+one call, or call once per selected <code class="inline">run_id</code> and reduce the returned
+<code class="inline">llm_usage_by_model</code> rows in PTC-Lisp. Those rows carry <code class="inline">calls</code>,
+<code class="inline">successful_calls</code>, <code class="inline">usage_calls</code>, <code class="inline">missing_usage_calls</code>, and a nested
+<code class="inline">usage</code> map with <code class="inline">input</code>, <code class="inline">output</code>, and optional <code class="inline">total_cost</code>. Group by
+<code class="inline">resolved_model</code> and sum the call counters plus nested token keys. Sum
+<code class="inline">unattributed_model_calls</code> across the same pages so unprovable identities are
+not dropped from the cohort. Absent <code class="inline">total_cost</code> is unknown spend, not zero:
+omit it from the merged <code class="inline">usage</code> map whenever any contributing row withholds it.</p><pre><code class="clojure language-clojure">(analysis/counters
+  {&quot;tags&quot; {&quot;cohort&quot; &quot;candidate&quot;}
+   &quot;from&quot; &quot;2026-08-01T00:00:00Z&quot;
+   &quot;to&quot; &quot;2026-09-01T00:00:00Z&quot;})
+
+(defn withheld-cost? [rows]
+  (some #(not (contains? (get % &quot;usage&quot;) &quot;total_cost&quot;)) rows))
+
+(defn reduce-model-rows [rows]
+  (-&gt;&gt; rows
+       (group-by #(get % &quot;resolved_model&quot;))
+       (map (fn [[model group]]
+              (let [usage (apply merge-with + (map #(get % &quot;usage&quot;) group))
+                    usage (if (withheld-cost? group)
+                            (dissoc usage &quot;total_cost&quot;)
+                            usage)]
+                {&quot;resolved_model&quot; model
+                 &quot;calls&quot; (reduce + (map #(get % &quot;calls&quot;) group))
+                 &quot;successful_calls&quot; (reduce + (map #(get % &quot;successful_calls&quot;) group))
+                 &quot;usage_calls&quot; (reduce + (map #(get % &quot;usage_calls&quot;) group))
+                 &quot;missing_usage_calls&quot; (reduce + (map #(get % &quot;missing_usage_calls&quot;) group))
+                 &quot;usage&quot; usage})))))
+
+(def selected [&quot;run-a&quot; &quot;run-b&quot;])
+(def pages (map #(analysis/counters {&quot;run_id&quot; %}) selected))
+(def model-rows (mapcat #(get % &quot;llm_usage_by_model&quot;) pages))
+(def unattributed (apply + (map #(get % &quot;unattributed_model_calls&quot;) pages)))
+{:models (reduce-model-rows model-rows) :unattributed unattributed}</code></pre><p>Loaded files, repeated expressions, scripts, stdin, and interactive forms use
 one serialized mission continuation and aggregate budget. Each source input is
 bounded before evaluation. The profile contains no filesystem, network, LLM,
 agent, workflow, MCP, private-inspection, or nested-evaluation authority.</p><p>Inspect its complete safe static contract without opening any resource:</p><pre><code class="console language-console">ptc repl --describe-profile run-analysis-v1
@@ -247,7 +284,7 @@ separate, including through ancestors and symlink aliases. Capture validates
 every private artifact against its matching run. A malformed, changed,
 uncorrelated, oversized, or unsupported artifact rejects the complete private
 source. Use the PtcRunner build matching the artifact's reported schema when
-versions differ.</p><p>Private authority adds collections to the same three operations rather than
+versions differ.</p><p>Private authority adds collections to the same navigation surface rather than
 adding smart diagnosis APIs:</p><pre><code class="clojure language-clojure">(def runs (analysis/runs {&quot;limit&quot; 20}))
 (def run-id (get (first (get runs &quot;items&quot;)) &quot;run_id&quot;))
 (analysis/open run-id)
@@ -256,7 +293,8 @@ adding smart diagnosis APIs:</p><pre><code class="clojure language-clojure">(def
                        &quot;prelude_call&quot; &quot;workspace/read&quot;})
 (analysis/read run-id {&quot;collection&quot; &quot;prelude_sources&quot;
                        &quot;component_id&quot; &quot;workspace&quot;})
-(analysis/read run-id {&quot;collection&quot; &quot;execution_errors&quot;})</code></pre><p>An execution error carries the workflow <code class="inline">evaluation_id</code>. Follow its exact
+(analysis/read run-id {&quot;collection&quot; &quot;execution_errors&quot;})
+(analysis/counters {&quot;run_id&quot; run-id})</code></pre><p>An execution error carries the workflow <code class="inline">evaluation_id</code>. Follow its exact
 children without comparing collection-local sequence numbers:</p><pre><code class="clojure language-clojure">(def error (first (get (analysis/read run-id {&quot;collection&quot; &quot;execution_errors&quot;})
                        &quot;items&quot;)))
 (def workflow-evaluation-id (get error &quot;evaluation_id&quot;))

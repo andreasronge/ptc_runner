@@ -2,17 +2,21 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
   @moduledoc """
   The single capability builder for bounded run-evidence navigation.
 
-  Profile sessions receive three stable `analysis-*` capabilities. A sealed host
+  Profile sessions receive four stable `analysis-*` capabilities. A sealed host
   recipe may expose the same operations as `<alias>.<operation>`. Both naming
   forms delegate to `PtcRunner.Kernel.RunAnalysis`; neither exposes primitive
-  trace or inspection record-family operations.
+  trace or inspection record-family operations. Installed provider aliases are
+  capped at 119 ASCII bytes so every derived name, including `.counters`, fits
+  `Capability`'s 128-byte name ceiling.
   """
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunAnalysis
 
-  @operations [:runs, :open, :read]
+  @operations [:runs, :open, :read, :counters]
+  @max_provider_bytes 119
+  @provider_name ~r/\A[a-z][a-z0-9._-]{0,118}\z/
 
   @spec from_snapshots(term(), term() | nil, binary() | nil) ::
           {:ok, [Capability.t()]} | {:error, :invalid_run_analysis_capability}
@@ -69,6 +73,10 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
   defp description(:open), do: "Open one run's metadata and discover its evidence collections"
   defp description(:read), do: "Read one bounded page from a named run evidence collection"
 
+  defp description(:counters),
+    do:
+      "Return canonical trace counters for a filtered run cohort, including adapter-attested model usage"
+
   defp input_schema(:runs) do
     object_schema(%{
       "limit" => limit_schema(),
@@ -115,6 +123,22 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
     )
   end
 
+  defp input_schema(:counters) do
+    object_schema(%{
+      "status" => filter_string_schema(),
+      "run_id" => filter_string_schema(),
+      "trace_id" => filter_string_schema(),
+      "tags" => tags_schema(),
+      "name" => filter_string_schema(),
+      "bundle" => filter_string_schema(),
+      "model" => filter_string_schema(),
+      "provider" => filter_string_schema(),
+      "from" => filter_string_schema(),
+      "to" => filter_string_schema(),
+      "mission_name" => filter_string_schema()
+    })
+  end
+
   defp object_schema(properties, required \\ []) do
     %{
       "type" => "object",
@@ -125,6 +149,17 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
   end
 
   defp string_schema, do: %{"type" => "string", "minLength" => 1, "maxLength" => 4_096}
+  defp filter_string_schema, do: %{"type" => "string", "maxLength" => 256}
+
+  defp tags_schema do
+    %{
+      "type" => "object",
+      "additionalProperties" => true,
+      "maxProperties" => 16,
+      "propertyNames" => %{"type" => "string", "maxLength" => 256}
+    }
+  end
+
   defp limit_schema, do: %{"type" => "integer", "minimum" => 1, "maximum" => 100}
   defp positive_integer_schema, do: %{"type" => "integer", "minimum" => 1}
 
@@ -157,7 +192,9 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
   end
 
   defp valid_provider?(provider),
-    do: is_binary(provider) and provider =~ ~r/\A[a-z][a-z0-9._-]{0,127}\z/
+    do:
+      is_binary(provider) and byte_size(provider) <= @max_provider_bytes and
+        provider =~ @provider_name
 
   defp provider_error(kind, details), do: {:error, ProviderError.new(kind, details)}
 end

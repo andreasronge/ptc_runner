@@ -31,7 +31,7 @@ directory, and `--inspect` names a file inside one.
 ```bash
 mkdir -p traces traces-private
 
-# Canonical trace only — supports analysis/runs, analysis/open, and activity.
+# Canonical trace only — supports analysis/runs, analysis/open, analysis/counters, and activity.
 ptc run PROJECT.json --trace-dir traces/
 
 # Trace plus private inspection — additionally supports every private
@@ -44,7 +44,8 @@ A project document can capture both instead of the two switches; see
 [project configuration](../reference/project-files.md).
 
 Two code-owned profiles read those artifacts. `run-analysis-v1` takes the
-canonical trace and grants the three `analysis-*` capabilities.
+canonical trace and grants the four `analysis-*` capabilities (`analysis-runs`,
+`analysis-open`, `analysis-read`, `analysis-counters`).
 `private-run-analysis-v1` additionally takes the inspection artifact, and
 requires an authorized private sink because the records it returns carry exact
 prompts, generated source, and capability payloads.
@@ -268,6 +269,7 @@ The shipped analysis prelude exposes a small navigation namespace:
 (analysis/runs options)
 (analysis/open run-id)
 (analysis/read run-id options)
+(analysis/counters filters)
 ```
 
 Examples:
@@ -277,6 +279,9 @@ Examples:
 (analysis/runs {"status" "error" "tags" {"stage" "failed"} "limit" 20})
 (analysis/open "run-id")
 (analysis/read "run-id" {"collection" "activity" "limit" 100})
+(analysis/counters {"tags" {"cohort" "candidate"}
+                    "from" "2026-08-01T00:00:00Z"
+                    "to" "2026-09-01T00:00:00Z"})
 
 ;; private-run-analysis-v1 only: every collection but `activity` is private
 ;; authority, and returns an :invalid_request envelope under the public profile.
@@ -488,6 +493,62 @@ increments even when `successful_calls` does not). Dropped
 produce `"unavailable"` with null aggregate fields. A validated run with no
 calls produces `"available"`, empty arrays, and zero unattributed calls.
 
+### `analysis/counters`
+
+Returns one canonical trace aggregate for the selected run cohort. Filters are
+the existing counter keys: `status`, `run_id`, `trace_id`, `tags`, `name`,
+`bundle`, `model`, `provider`, `from`, `to`, and `mission_name`. There is no
+`limit`, `cursor`, `view`, `run_ids`, or resolved-model filter. Unknown keys
+fail at the capability schema before dispatch. Tags are limited to 16
+properties and 256-character property names at that same schema boundary.
+UTF-8 byte ceilings for keys and values remain TraceLog's semantic
+`invalid_query`. `model` keeps its run-filter meaning and is not reinterpreted
+as adapter-attested `resolved_model`.
+
+The result is the captured `TraceSnapshot` `:counters` map, including
+`events`, `runs`, `errors`, `evaluations`, `evaluations_by_mission`,
+`workflow_capability_calls`, `mission_capability_calls`, `llm_usage`,
+`llm_usage_by_model`, `unattributed_model_calls`, and snapshot/source metadata.
+If the complete aggregate exceeds the snapshot result ceiling, the call fails
+as `result_limit_exceeded` rather than returning a truncated map.
+
+A filter-defined cohort is one counters call. An explicit list of selected run
+IDs is one call per `run_id`, with the caller reducing the returned
+`llm_usage_by_model` rows in PTC-Lisp. Those rows carry `calls`,
+`successful_calls`, `usage_calls`, `missing_usage_calls`, and a nested `usage`
+map with `input`, `output`, and optional `total_cost`. Group by
+`resolved_model` and sum the call counters plus nested token keys. The run-ID
+list is cohort selection data; each result already carries attested attribution
+or an honest unattributed count. Absent `total_cost` is unknown spend, not
+zero: omit it from the merged `usage` map whenever any contributing row
+withholds it.
+
+```clojure
+(defn withheld-cost? [rows]
+  (some #(not (contains? (get % "usage") "total_cost")) rows))
+
+(defn reduce-model-rows [rows]
+  (->> rows
+       (group-by #(get % "resolved_model"))
+       (map (fn [[model group]]
+              (let [usage (apply merge-with + (map #(get % "usage") group))
+                    usage (if (withheld-cost? group)
+                            (dissoc usage "total_cost")
+                            usage)]
+                {"resolved_model" model
+                 "calls" (reduce + (map #(get % "calls") group))
+                 "successful_calls" (reduce + (map #(get % "successful_calls") group))
+                 "usage_calls" (reduce + (map #(get % "usage_calls") group))
+                 "missing_usage_calls" (reduce + (map #(get % "missing_usage_calls") group))
+                 "usage" usage})))))
+
+(def selected ["run-a" "run-b" "run-c"])
+(def pages (map #(analysis/counters {"run_id" %}) selected))
+(def model-rows (mapcat #(get % "llm_usage_by_model") pages))
+(def unattributed (apply + (map #(get % "unattributed_model_calls") pages)))
+{:models (reduce-model-rows model-rows) :unattributed unattributed}
+```
+
 ## Pagination, ordering, and bounds
 
 Every collection query has:
@@ -519,9 +580,9 @@ memory diffs, and program source follow their own projection ceilings.
 ## Capabilities and swappable preludes
 
 Analysis capabilities follow the standard Kernel envelope and are named
-`analysis-runs`, `analysis-open`, and `analysis-read`.
+`analysis-counters`, `analysis-open`, `analysis-read`, and `analysis-runs`.
 
-All three delegate to `PtcRunner.Kernel.RunAnalysis`. The `analysis` prelude is a
+All four delegate to `PtcRunner.Kernel.RunAnalysis`. The `analysis` prelude is a
 thin `cap/unwrap!` layer; Viewer, CLI, and embedders call the same read model.
 Capability error envelopes fail evaluation rather than flowing into projections
 as ordinary empty data.
@@ -835,7 +896,7 @@ from every primitive TraceLog query. Normal discovery explicitly rejects or omit
 JSONL.
 
 A host-installed inspection snapshot composes its correlated canonical trace
-through the three navigation operations. `analysis/open` includes an eligible
+through the four navigation operations. `analysis/open` includes an eligible
 immutable V8 result value and canonical `result_hash`; an unknown run and a
 known run without an eligible result remain distinct internally. Both encoded
 and retained sizes must fit the snapshot result ceiling. Possessing a private

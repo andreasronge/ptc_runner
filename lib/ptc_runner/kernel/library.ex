@@ -20,17 +20,19 @@ defmodule PtcRunner.Kernel.Library do
 
   `analysis` and `debug.nav` are the two navigation surfaces over one immutable
   run-evidence capture, and a mission installs one or the other. `analysis`
-  binds the stable `analysis-runs`/`analysis-open`/`analysis-read` capability
-  names a REPL analysis profile grants. `debug.nav` adds `follow` and binds a
-  manifest-installed snapshot provider, which names its operations
-  `<alias>.runs`/`<alias>.open`/`<alias>.read`; the mission must therefore
-  select its correlated inspection snapshot provider under the conventional
-  alias `debug.nav`. `follow` takes one typed relationship from an evidence
-  item and reads its exact target collection and filters, refusing an
-  unavailable or filterless relationship and any caller filter beyond `limit`
-  and `cursor`. It adds no host authority and no diagnosis policy: it returns
-  the original relationship beside the unchanged native page envelope, so
-  cursors, completeness, and relationship state survive the hop.
+  binds the stable `analysis-runs`/`analysis-open`/`analysis-read`/
+  `analysis-counters` capability names a REPL analysis profile grants.
+  `debug.nav` adds `follow` and binds a manifest-installed snapshot provider,
+  which names its operations `<alias>.runs`/`<alias>.open`/`<alias>.read`/
+  `<alias>.counters`; the mission must therefore select its correlated
+  inspection snapshot provider under the conventional alias `debug.nav`.
+  `counters` is a thin unwrap of the captured canonical trace aggregate;
+  `follow` takes one typed relationship from an evidence item and reads its
+  exact target collection and filters, refusing an unavailable or filterless
+  relationship and any caller filter beyond `limit` and `cursor`. Neither adds
+  host authority or diagnosis policy: `follow` returns the original
+  relationship beside the unchanged native page envelope, so cursors,
+  completeness, and relationship state survive the hop.
 
   `cap` is `:discoverable` rather than `:prompt`. Its envelope and pagination
   helpers compose capabilities for other libraries and stay out of the prompt
