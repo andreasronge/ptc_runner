@@ -1139,6 +1139,12 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     assert read.input_schema["properties"]["parent_evaluation_id"]["type"] == "string"
     assert counters.input_schema["additionalProperties"] == false
     assert counters.input_schema["required"] == []
+    assert counters.input_schema["properties"]["tags"]["maxProperties"] == 16
+
+    assert counters.input_schema["properties"]["tags"]["propertyNames"] == %{
+             "type" => "string",
+             "maxLength" => 256
+           }
 
     assert {:ok, %{"items" => [_]}} =
              read.callback.(%{"run_id" => fixture.run_id, "collection" => "turns"})
@@ -1240,12 +1246,17 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     utf8_overflow = String.duplicate("é", 129)
     sixteen_tags = Map.new(1..16, &{"tag-#{&1}", "value-#{&1}"})
     seventeen_tags = Map.put(sixteen_tags, "tag-17", "extra")
+    ascii_key = String.duplicate("k", 256)
+    overflow_key = String.duplicate("k", 257)
 
     assert JSONSchema.valid?(counters.input_validator, %{})
     assert JSONSchema.valid?(counters.input_validator, %{"run_id" => ascii_limit})
     assert JSONSchema.valid?(counters.input_validator, %{"tags" => sixteen_tags})
-    assert JSONSchema.valid?(counters.input_validator, %{"tags" => seventeen_tags})
+    assert JSONSchema.valid?(counters.input_validator, %{"tags" => %{ascii_key => "ok"}})
     assert JSONSchema.valid?(counters.input_validator, %{"name" => utf8_overflow})
+    assert JSONSchema.valid?(counters.input_validator, %{"tags" => %{utf8_overflow => "ok"}})
+    refute JSONSchema.valid?(counters.input_validator, %{"tags" => seventeen_tags})
+    refute JSONSchema.valid?(counters.input_validator, %{"tags" => %{overflow_key => "ok"}})
     refute JSONSchema.valid?(counters.input_validator, %{"run_id" => ascii_overflow})
     refute JSONSchema.valid?(counters.input_validator, %{"limit" => 1})
     refute JSONSchema.valid?(counters.input_validator, %{"cursor" => "next"})
@@ -1257,10 +1268,10 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     assert {:ok, %{"runs" => 0}} = counters.callback.(%{"tags" => sixteen_tags})
 
     assert {:error, %{kind: :invalid_request, details: "invalid analysis query"}} =
-             counters.callback.(%{"tags" => seventeen_tags})
+             counters.callback.(%{"name" => utf8_overflow})
 
     assert {:error, %{kind: :invalid_request, details: "invalid analysis query"}} =
-             counters.callback.(%{"name" => utf8_overflow})
+             counters.callback.(%{"tags" => %{utf8_overflow => "ok"}})
 
     assert {:error, %{kind: :invalid_request, details: "invalid analysis query"}} =
              counters.callback.(%{"from" => "not-a-timestamp"})

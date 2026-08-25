@@ -4,11 +4,11 @@ defmodule PtcRunner.Kernel.JSONSchema do
 
   The accepted profile is a strict subset of JSON Schema 2020-12 containing
   `type`, `title`, `description`, `default`, `properties`, `required`,
-  `additionalProperties`, `items`, `enum`, `const`, `minimum`, `maximum`,
-  `minLength`, `maxLength`, `minItems`, `maxItems`, and the single bounded
-  `sha256` string format. Types are scalar rather than unions, roots are
-  objects, and a missing `additionalProperties` on an object is normalized to
-  `false`.
+  `additionalProperties`, `propertyNames`, `items`, `enum`, `const`, `minimum`,
+  `maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`, `maxProperties`,
+  and the single bounded `sha256` string format. Types are scalar rather than
+  unions, roots are objects, and a missing `additionalProperties` on an object
+  is normalized to `false`.
 
   `$schema` selects the schema dialect; absence means the MCP default
   (2020-12). Because the accepted profile is a common subset of the
@@ -45,7 +45,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
   alias PtcRunner.Kernel.JSONSchema.SHA256Format
   alias PtcRunner.Kernel.JSONValue
 
-  @allowed ~w(type title description properties required additionalProperties items enum const minimum maximum minLength maxLength minItems maxItems format)
+  @allowed ~w(type title description properties required additionalProperties propertyNames items enum const minimum maximum minLength maxLength minItems maxItems maxProperties format)
   @types ~w(null boolean object array number integer string)
   @max_schema_bytes 65_536
   @max_depth 16
@@ -57,7 +57,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
   @max_argument_bytes 512
   @max_expected_bytes 256
   @simple_argument_segment ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
-  @expected_constraints ~w(minimum maximum minLength maxLength minItems maxItems)
+  @expected_constraints ~w(minimum maximum minLength maxLength minItems maxItems maxProperties)
 
   @constraint_keys %{
     type: "type",
@@ -69,6 +69,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
     maxLength: "maxLength",
     minItems: "minItems",
     maxItems: "maxItems",
+    maxProperties: "maxProperties",
     format: "format",
     required: "required",
     additionalProperties: "additionalProperties"
@@ -265,7 +266,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
     with kind when is_atom(kind) <- Map.get(error, :kind),
          {:ok, constraint} <- Map.fetch(@constraint_keys, kind),
          schema_path when is_list(schema_path) <- Map.get(error, :schema_path),
-         {:ok, node, path} <- schema_context(schema, schema_path),
+         {:ok, node, path} <- schema_context(schema, schema_path, constraint),
          {:ok, argument} <- render_argument(path),
          {:ok, declared} <- Map.fetch(node, constraint) do
       violation = %{argument: argument, constraint: constraint}
@@ -283,26 +284,49 @@ defmodule PtcRunner.Kernel.JSONSchema do
   # the rejected value. Resolve every property and item step against the frozen
   # schema before retaining it. Array positions become `[]`, because a
   # submitted index is not a declared schema fact.
-  defp schema_context(schema, schema_path),
-    do: schema_path |> Enum.reverse() |> walk_schema_context(schema, [])
+  defp schema_context(schema, schema_path, constraint),
+    do: schema_path |> Enum.reverse() |> walk_schema_context(schema, [], constraint)
 
-  defp walk_schema_context([], node, path), do: {:ok, node, Enum.reverse(path)}
+  defp walk_schema_context([], node, path, _constraint), do: {:ok, node, Enum.reverse(path)}
 
-  defp walk_schema_context([:root | rest], node, path),
-    do: walk_schema_context(rest, node, path)
+  defp walk_schema_context([:root | rest], node, path, constraint),
+    do: walk_schema_context(rest, node, path, constraint)
 
-  defp walk_schema_context([{:properties, name} | rest], %{"properties" => properties}, path)
+  defp walk_schema_context(
+         [{:properties, name} | rest],
+         %{"properties" => properties},
+         path,
+         constraint
+       )
        when is_map(properties) do
     case Map.fetch(properties, name) do
-      {:ok, child} -> walk_schema_context(rest, child, [name | path])
+      {:ok, child} -> walk_schema_context(rest, child, [name | path], constraint)
       :error -> :error
     end
   end
 
-  defp walk_schema_context([:items | rest], %{"items" => child}, path),
-    do: walk_schema_context(rest, child, [:item | path])
+  defp walk_schema_context([:items | rest], %{"items" => child}, path, constraint),
+    do: walk_schema_context(rest, child, [:item | path], constraint)
 
-  defp walk_schema_context(_segments, _node, _path), do: :error
+  # JSV may prefix an object node's schema path with `:propertyNames` even for
+  # a sibling keyword such as `maxProperties`. Stay on the object when it
+  # declares the violated constraint; otherwise descend into the nested names
+  # schema. Never retain a caller-authored property name on the argument path.
+  defp walk_schema_context([:propertyNames | rest], node, path, constraint)
+       when is_map(node) and is_binary(constraint) do
+    cond do
+      Map.has_key?(node, constraint) ->
+        walk_schema_context(rest, node, path, constraint)
+
+      is_map(node["propertyNames"]) ->
+        walk_schema_context(rest, node["propertyNames"], path, constraint)
+
+      true ->
+        :error
+    end
+  end
+
+  defp walk_schema_context(_segments, _node, _path, _constraint), do: :error
 
   defp render_argument([]), do: {:ok, "$"}
 
@@ -391,12 +415,15 @@ defmodule PtcRunner.Kernel.JSONSchema do
          :ok <- validate_enum(schema),
          {:ok, properties} <- normalize_properties(schema, type, path, depth),
          {:ok, items} <- normalize_items(schema, type, path, depth),
+         {:ok, property_names} <- normalize_property_names(schema, type, path, depth),
          :ok <- validate_required(schema, type, properties),
-         :ok <- validate_additional_properties(schema, type) do
+         :ok <- validate_additional_properties(schema, type),
+         :ok <- validate_max_properties(schema, type) do
       normalized =
         schema
         |> maybe_put("properties", properties)
         |> maybe_put("items", items)
+        |> maybe_put("propertyNames", property_names)
         |> normalize_additional_properties(type)
 
       {:ok, normalized}
@@ -503,6 +530,39 @@ defmodule PtcRunner.Kernel.JSONSchema do
   end
 
   defp normalize_items(schema, _type, _path, _depth), do: not_applicable(schema, "items")
+
+  defp normalize_property_names(schema, "object", path, depth) do
+    case Map.fetch(schema, "propertyNames") do
+      {:ok, names} ->
+        normalize(names, [{:property, "propertyNames"} | path], depth + 1)
+
+      :error ->
+        {:ok, nil}
+    end
+  end
+
+  defp normalize_property_names(schema, _type, _path, _depth),
+    do: not_applicable(schema, "propertyNames")
+
+  defp validate_max_properties(schema, "object") do
+    case Map.fetch(schema, "maxProperties") do
+      :error ->
+        :ok
+
+      {:ok, value} when is_integer(value) and value >= 0 ->
+        :ok
+
+      {:ok, _value} ->
+        {:error, {:invalid_keyword_value, [{:property, "maxProperties"}]}}
+    end
+  end
+
+  defp validate_max_properties(schema, _type) do
+    case not_applicable(schema, "maxProperties") do
+      {:ok, nil} -> :ok
+      error -> error
+    end
+  end
 
   defp not_applicable(schema, keyword) do
     if Map.has_key?(schema, keyword),

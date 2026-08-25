@@ -269,9 +269,10 @@ one call, or call once per selected `run_id` and reduce the returned
 `llm_usage_by_model` rows in PTC-Lisp. Those rows carry `calls`,
 `successful_calls`, `usage_calls`, `missing_usage_calls`, and a nested
 `usage` map with `input`, `output`, and optional `total_cost`. Group by
-`resolved_model` and sum the call counters plus nested token keys. Absent
-`total_cost` is unknown spend, not zero: omit it from the merged `usage` map
-whenever any contributing row withholds it.
+`resolved_model` and sum the call counters plus nested token keys. Sum
+`unattributed_model_calls` across the same pages so unprovable identities are
+not dropped from the cohort. Absent `total_cost` is unknown spend, not zero:
+omit it from the merged `usage` map whenever any contributing row withholds it.
 
 ```clojure
 (analysis/counters
@@ -300,7 +301,8 @@ whenever any contributing row withholds it.
 (def selected ["run-a" "run-b"])
 (def pages (map #(analysis/counters {"run_id" %}) selected))
 (def model-rows (mapcat #(get % "llm_usage_by_model") pages))
-(reduce-model-rows model-rows)
+(def unattributed (apply + (map #(get % "unattributed_model_calls") pages)))
+{:models (reduce-model-rows model-rows) :unattributed unattributed}
 ```
 
 Loaded files, repeated expressions, scripts, stdin, and interactive forms use

@@ -499,10 +499,11 @@ Returns one canonical trace aggregate for the selected run cohort. Filters are
 the existing counter keys: `status`, `run_id`, `trace_id`, `tags`, `name`,
 `bundle`, `model`, `provider`, `from`, `to`, and `mission_name`. There is no
 `limit`, `cursor`, `view`, `run_ids`, or resolved-model filter. Unknown keys
-fail at the capability schema before dispatch. The 16-tag and 256-byte tag-key
-ceilings are TraceLog's semantic `invalid_query`: the capability JSON Schema
-profile has no `maxProperties` or `propertyNames`. `model` keeps its run-filter
-meaning and is not reinterpreted as adapter-attested `resolved_model`.
+fail at the capability schema before dispatch. Tags are limited to 16
+properties and 256-character property names at that same schema boundary.
+UTF-8 byte ceilings for keys and values remain TraceLog's semantic
+`invalid_query`. `model` keeps its run-filter meaning and is not reinterpreted
+as adapter-attested `resolved_model`.
 
 The result is the captured `TraceSnapshot` `:counters` map, including
 `events`, `runs`, `errors`, `evaluations`, `evaluations_by_mission`,

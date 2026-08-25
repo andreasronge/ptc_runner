@@ -131,4 +131,30 @@ defmodule PtcRunner.Kernel.JSONSchemaAnnotationTest do
 
     assert segments == [property: "properties", property: "q", property: "anyOf"]
   end
+
+  test "accepts object property-count and property-name bounds" do
+    schema = %{
+      "type" => "object",
+      "additionalProperties" => true,
+      "maxProperties" => 2,
+      "propertyNames" => %{"type" => "string", "maxLength" => 4}
+    }
+
+    assert {:ok, normalized, compiled} = JSONSchema.compile(schema)
+    assert normalized["maxProperties"] == 2
+    assert get_in(normalized, ["propertyNames", "maxLength"]) == 4
+
+    assert JSONSchema.valid?(compiled, %{"ab" => 1, "cd" => 2})
+    refute JSONSchema.valid?(compiled, %{"ab" => 1, "cd" => 2, "ef" => 3})
+    refute JSONSchema.valid?(compiled, %{"abcde" => 1})
+
+    assert {:error, {:invalid_schema, %{rule: :keyword_not_applicable}}} =
+             JSONSchema.compile(%{
+               "type" => "object",
+               "properties" => %{"n" => %{"type" => "integer", "maxProperties" => 1}}
+             })
+
+    assert {:error, {:invalid_schema, %{rule: :invalid_keyword_value}}} =
+             JSONSchema.compile(%{"type" => "object", "maxProperties" => -1})
+  end
 end

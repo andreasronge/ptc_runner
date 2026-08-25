@@ -234,9 +234,10 @@ one call, or call once per selected <code class="inline">run_id</code> and reduc
 <code class="inline">llm_usage_by_model</code> rows in PTC-Lisp. Those rows carry <code class="inline">calls</code>,
 <code class="inline">successful_calls</code>, <code class="inline">usage_calls</code>, <code class="inline">missing_usage_calls</code>, and a nested
 <code class="inline">usage</code> map with <code class="inline">input</code>, <code class="inline">output</code>, and optional <code class="inline">total_cost</code>. Group by
-<code class="inline">resolved_model</code> and sum the call counters plus nested token keys. Absent
-<code class="inline">total_cost</code> is unknown spend, not zero: omit it from the merged <code class="inline">usage</code> map
-whenever any contributing row withholds it.</p><pre><code class="clojure language-clojure">(analysis/counters
+<code class="inline">resolved_model</code> and sum the call counters plus nested token keys. Sum
+<code class="inline">unattributed_model_calls</code> across the same pages so unprovable identities are
+not dropped from the cohort. Absent <code class="inline">total_cost</code> is unknown spend, not zero:
+omit it from the merged <code class="inline">usage</code> map whenever any contributing row withholds it.</p><pre><code class="clojure language-clojure">(analysis/counters
   {&quot;tags&quot; {&quot;cohort&quot; &quot;candidate&quot;}
    &quot;from&quot; &quot;2026-08-01T00:00:00Z&quot;
    &quot;to&quot; &quot;2026-09-01T00:00:00Z&quot;})
@@ -262,7 +263,8 @@ whenever any contributing row withholds it.</p><pre><code class="clojure languag
 (def selected [&quot;run-a&quot; &quot;run-b&quot;])
 (def pages (map #(analysis/counters {&quot;run_id&quot; %}) selected))
 (def model-rows (mapcat #(get % &quot;llm_usage_by_model&quot;) pages))
-(reduce-model-rows model-rows)</code></pre><p>Loaded files, repeated expressions, scripts, stdin, and interactive forms use
+(def unattributed (apply + (map #(get % &quot;unattributed_model_calls&quot;) pages)))
+{:models (reduce-model-rows model-rows) :unattributed unattributed}</code></pre><p>Loaded files, repeated expressions, scripts, stdin, and interactive forms use
 one serialized mission continuation and aggregate budget. Each source input is
 bounded before evaluation. The profile contains no filesystem, network, LLM,
 agent, workflow, MCP, private-inspection, or nested-evaluation authority.</p><p>Inspect its complete safe static contract without opening any resource:</p><pre><code class="console language-console">ptc repl --describe-profile run-analysis-v1

@@ -151,9 +151,14 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
   defp string_schema, do: %{"type" => "string", "minLength" => 1, "maxLength" => 4_096}
   defp filter_string_schema, do: %{"type" => "string", "maxLength" => 256}
 
-  # The capability JSON Schema profile has no maxProperties or propertyNames.
-  # Sixteen tags and 256-byte tag keys remain TraceLog's semantic ceiling.
-  defp tags_schema, do: %{"type" => "object", "additionalProperties" => true}
+  defp tags_schema do
+    %{
+      "type" => "object",
+      "additionalProperties" => true,
+      "maxProperties" => 16,
+      "propertyNames" => %{"type" => "string", "maxLength" => 256}
+    }
+  end
 
   defp limit_schema, do: %{"type" => "integer", "minimum" => 1, "maximum" => 100}
   defp positive_integer_schema, do: %{"type" => "integer", "minimum" => 1}
