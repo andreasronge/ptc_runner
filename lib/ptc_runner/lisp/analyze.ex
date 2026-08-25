@@ -72,6 +72,7 @@ defmodule PtcRunner.Lisp.Analyze do
                     ])
 
   @bindings_key :__ptc_analyze_bindings__
+  @recur_arity_key :__ptc_analyze_recur_arity__
 
   @type error_reason ::
           {:invalid_form, String.t()}
@@ -563,20 +564,25 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   defp analyze_loop([bindings_ast | body_asts], _tail?) do
-    with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast) do
-      body_asts = mark_shadowed_asts(body_asts, shadowed)
-      bound = Enum.flat_map(bindings, fn {:binding, pattern, _} -> pattern_names(pattern) end)
-
-      with_bindings(bound, fn ->
-        with {:ok, body} <- wrap_body(body_asts, true) do
-          {:ok, {:loop, bindings, body}}
-        end
-      end)
+    with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast),
+         {:ok, body} <- analyze_loop_body(bindings, shadowed, body_asts) do
+      {:ok, {:loop, bindings, body}}
     end
   end
 
   defp analyze_loop(_, _tail?) do
     {:error, {:invalid_arity, :loop, "expected (loop [bindings] body ...)"}}
+  end
+
+  defp analyze_loop_body(bindings, shadowed, body_asts) do
+    body_asts = mark_shadowed_asts(body_asts, shadowed)
+    bound = Enum.flat_map(bindings, fn {:binding, pattern, _} -> pattern_names(pattern) end)
+
+    with_bindings(bound, fn ->
+      with_recur_arity(length(bindings), fn ->
+        wrap_body(body_asts, true)
+      end)
+    end)
   end
 
   # ============================================================
@@ -585,7 +591,7 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_recur(args, true) do
     with {:ok, analyzed_args} <- analyze_list(args) do
-      {:ok, {:recur, analyzed_args}}
+      analyzed_recur(analyzed_args)
     end
   end
 
@@ -682,29 +688,17 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_fn([{:symbol, name}, params_ast | body_asts])
        when is_atom(name) or is_binary(name) do
     with :ok <- Patterns.validate_binding_name(name),
-         {:ok, params} <- analyze_fn_params(params_ast) do
-      shadowed = compute_shadowed_names(params)
-      body_asts = mark_shadowed_asts(body_asts, shadowed)
-
-      with_bindings(param_names(params), fn ->
-        with {:ok, body} <- wrap_body(body_asts, true) do
-          {:ok, {:fn, name, params, body}}
-        end
-      end)
+         {:ok, params} <- analyze_fn_params(params_ast),
+         {:ok, body} <- analyze_scoped_body(body_asts, true, params) do
+      {:ok, {:fn, name, params, body}}
     end
   end
 
   # Anonymous fn: (fn [params] body ...)
   defp analyze_fn([params_ast | body_asts]) do
-    with {:ok, params} <- analyze_fn_params(params_ast) do
-      shadowed = compute_shadowed_names(params)
-      body_asts = mark_shadowed_asts(body_asts, shadowed)
-
-      with_bindings(param_names(params), fn ->
-        with {:ok, body} <- wrap_body(body_asts, true) do
-          {:ok, {:fn, params, body}}
-        end
-      end)
+    with {:ok, params} <- analyze_fn_params(params_ast),
+         {:ok, body} <- analyze_scoped_body(body_asts, true, params) do
+      {:ok, {:fn, params, body}}
     end
   end
 
@@ -780,6 +774,58 @@ defmodule PtcRunner.Lisp.Analyze do
       fun.()
     after
       Process.put(@bindings_key, previous)
+    end
+  end
+
+  defp with_recur_arity(arity, fun)
+       when is_integer(arity) and arity >= 0 and is_function(fun, 0) do
+    previous = Process.get(@recur_arity_key, [])
+    Process.put(@recur_arity_key, [arity | previous])
+
+    try do
+      fun.()
+    after
+      case previous do
+        [] -> Process.delete(@recur_arity_key)
+        stack -> Process.put(@recur_arity_key, stack)
+      end
+    end
+  end
+
+  defp analyze_scoped_body(body_asts, tail?, params) do
+    shadowed = compute_shadowed_names(params)
+    body_asts = mark_shadowed_asts(body_asts, shadowed)
+
+    with_bindings(param_names(params), fn ->
+      with_recur_arity(recur_arity(params), fn ->
+        wrap_body(body_asts, tail?)
+      end)
+    end)
+  end
+
+  defp recur_arity({:variadic, leading, _rest_pattern}) when is_list(leading),
+    do: length(leading) + 1
+
+  defp recur_arity(params) when is_list(params), do: length(params)
+
+  defp analyzed_recur(args) when is_list(args) do
+    with :ok <- validate_recur_arity(length(args)) do
+      {:ok, {:recur, args}}
+    end
+  end
+
+  defp validate_recur_arity(actual) when is_integer(actual) do
+    case Process.get(@recur_arity_key, []) do
+      [expected | _] when expected == actual ->
+        :ok
+
+      [expected | _] ->
+        {:error,
+         {:invalid_arity, :recur,
+          "Mismatched argument count to recur, expected: #{expected} args, got: #{actual}"}}
+
+      [] ->
+        :ok
     end
   end
 
@@ -1016,7 +1062,7 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp resolve_call_or_recur({:var, :recur}, args, true), do: {:ok, {:recur, args}}
+  defp resolve_call_or_recur({:var, :recur}, args, true), do: analyzed_recur(args)
 
   defp resolve_call_or_recur({:var, :recur}, _args, false),
     do: {:error, {:invalid_form, "recur must be in tail position"}}
@@ -1152,14 +1198,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_defn(args, _tail?), do: do_analyze_defn(args)
 
   defp do_analyze_defn(args) do
-    Definitions.analyze_defn(args, &analyze_fn_params/1, fn body_asts, tail?, params ->
-      shadowed = compute_shadowed_names(params)
-      body_asts = mark_shadowed_asts(body_asts, shadowed)
-
-      with_bindings(param_names(params), fn ->
-        wrap_body(body_asts, tail?)
-      end)
-    end)
+    Definitions.analyze_defn(args, &analyze_fn_params/1, &analyze_scoped_body/3)
   end
 
   defp analyze_value(ast), do: do_analyze(ast, false)

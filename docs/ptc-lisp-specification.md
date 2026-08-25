@@ -1163,6 +1163,11 @@ Syntactic sugar for defining named functions in the user namespace:
 **Semantics:**
 - `loop` establishes bindings just like `let`.
 - `recur` can only appear in a **tail position** of a `loop` or `fn`.
+- The number of `recur` arguments must match the nearest recursion point, checked while analyzing that `loop`, `fn`, or `defn` — including a dormant definition that is never called:
+  - `loop`: the number of binding pairs, not the number of names introduced by destructuring
+  - fixed-arity `fn`/`defn`: the number of parameter slots
+  - variadic `fn`/`defn`: the number of leading parameter slots plus one slot for the rest parameter (so `[x & xs]` expects `(recur new-x new-xs)`)
+- A nested `loop` or function shadows the outer recursion point for its body; leaving that body restores the outer target.
 - When `recur` is evaluated, it re-binds the arguments and jumps back to the start of the `loop` or `fn` body.
 - Evaluation is **stack-safe** (no stack growth).
 - An iteration check is enforced to prevent infinite loops (default limit: 1000 iterations).
