@@ -6,7 +6,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
   bounded worker that is cancelled with the original caller; after admission
   returns, the owner is the sole mutator of retained state. Owner death deletes
   every table and closes every handle. Query workers cancel with the caller;
-  the snapshot stays usable.
+  the snapshot stays usable. Tests may supply `:resource_hook` to observe the
+  snapshot PID, table IDs, and pinned handles without printing paths or digests.
   """
 
   use GenServer
@@ -77,6 +78,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
     owner_ref = Process.monitor(owner)
     indexes = Indexes.create(self())
     opts = opts |> Keyword.put_new(:cancel_with, owner) |> Keyword.put_new(:owner, owner)
+    notify_resources(opts, self(), indexes, [])
 
     case admit_all(artifacts, indexes, limits, opts) do
       {:ok, state} ->
@@ -171,10 +173,12 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
   def handle_info(_message, state), do: {:noreply, state}
 
   @impl GenServer
-  def terminate(_reason, state) do
+  def terminate(_reason, state) when is_map(state) do
     cleanup_owned(state)
     :ok
   end
+
+  def terminate(_reason, _state), do: :ok
 
   @impl GenServer
   def format_status(status), do: redact_status(status)
@@ -231,6 +235,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
 
     case Handle.open(path) do
       {:ok, handle} ->
+        notify_resources(opts, self(), indexes, [handle])
+
         case Admission.run(handle, indexes, trace_facts, limits, opts) do
           {:ok, admitted} ->
             {:ok,
@@ -366,6 +372,17 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
     if is_integer(requested) and requested > 0,
       do: min(requested, limits.max_result_bytes),
       else: limits.max_result_bytes
+  end
+
+  defp notify_resources(opts, snapshot, indexes, handles)
+       when is_list(opts) and is_pid(snapshot) and is_map(indexes) and is_list(handles) do
+    case Keyword.get(opts, :resource_hook) do
+      hook when is_function(hook, 1) ->
+        hook.(%{snapshot: snapshot, tables: Indexes.table_ids(indexes), handles: handles})
+
+      _other ->
+        :ok
+    end
   end
 
   defp cleanup_owned(state) do

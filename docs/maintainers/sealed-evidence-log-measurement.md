@@ -119,11 +119,16 @@ verified.
 | Relevant same-size overwrite | next query `source_changed` |
 | Unrelated same-size overwrite | `list_runs` may succeed; the dependent collection returns `source_changed` |
 | Path replacement after admission | queries continue against the pinned handle |
-| Admission caller death | admission worker cancelled; no snapshot |
+| Admission caller death | admission worker and snapshot terminate; tables/handles gone |
+| Query caller death | query worker cancelled; snapshot remains usable |
 | Quota / retained-ceiling refusal | no snapshot; tables deleted; input artifact remains |
 | Snapshot owner death | ETS tables undefined; handles unusable |
-| Normal close | tables deleted; handles unusable |
-| Query caller death | query worker cancelled; snapshot remains usable |
+| Normal close | tables deleted; handles unusable; input artifact remains |
+
+Focused tests ledger the snapshot PID, ETS table IDs, pinned handles, and
+scratch bytes for those rows. After cleanup they assert monitored process
+death, `:ets.info(table) == :undefined`, unusable handles, and zero
+prototype-created scratch bytes. The sealed input artifact remains.
 
 ## Configuration inventory
 
