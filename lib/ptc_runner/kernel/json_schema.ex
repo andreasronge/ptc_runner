@@ -31,8 +31,9 @@ defmodule PtcRunner.Kernel.JSONSchema do
   only schema-declared paths, keywords, and bounds; submitted values and
   undeclared property names never enter that explanation. Validation and
   explanation projection run together in one bounded worker. `valid?/2` remains
-  a host-side predicate for construction and tests; Dispatcher output admission
-  uses `validate/5`.
+  a host-side predicate for construction, tests, and the MCP structured-result
+  check inside the already-bounded provider process. Dispatcher output
+  admission uses `validate/5`.
 
   Rejection reports the first proven fault as a closed `rule` atom plus the
   segments locating it inside the submitted schema document. Every segment is

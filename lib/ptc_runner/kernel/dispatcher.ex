@@ -56,6 +56,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.LLM.OutputLimit
 
   @validation_handoff_ms 25
+  @output_validation_floor_ms @validation_handoff_ms
 
   @doc "Dispatches one capability through the bounded, context-aware boundary."
   @spec dispatch(
@@ -988,7 +989,13 @@ defmodule PtcRunner.Kernel.Dispatcher do
     # Input validation reserves `@validation_handoff_ms` so a refusal can still
     # persist terminal host provenance. Output admission runs after dispatch,
     # so that reserve must not turn a still-open deadline into unavailability.
-    max(deadline_ms - System.monotonic_time(:millisecond), 0)
+    # Provider work may still consume the shared evaluation deadline; admission
+    # keeps a bounded floor so a valid result is not classified as validator
+    # unavailability. The worker remains heap- and time-capped.
+    max(
+      deadline_ms - System.monotonic_time(:millisecond),
+      @output_validation_floor_ms
+    )
   end
 
   defp output_validation(heap_words, deadline_ms, evaluation_lease) do
@@ -1026,7 +1033,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
           true ->
             case JSONSchema.compile_bounded(schema, compile_timeout_ms, validation_heap_words) do
               {:ok, normalized, compiled} ->
-                {:ok, CapabilityInvocation.put_request_schema(invocation, normalized, compiled)}
+                put_compiled_request_schema(invocation, normalized, compiled, state)
 
               {:error, {:invalid_schema, _rejection}} ->
                 {:error, :invalid_arguments}
@@ -1047,6 +1054,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
          _deadline_ms
        ),
        do: {:ok, invocation}
+
+  defp put_compiled_request_schema(invocation, normalized, compiled, state) do
+    invocation = CapabilityInvocation.put_request_schema(invocation, normalized, compiled)
+
+    case validate_size(invocation.arguments, capability_argument_limit(state)) do
+      :ok -> {:ok, invocation}
+      {:error, _reason} = error -> error
+    end
+  end
 
   defp request_schema_timeout_ms(state, environment, requested_timeout_ms, validation_deadline_ms) do
     limits = state_limits(state)
@@ -1338,6 +1354,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
          invocation,
          validation
        ) do
+    # Request-schema validation sees this merged envelope, including host-injected
+    # `result_attributes`. A request schema that omits those keys (the profile
+    # normalizes missing `additionalProperties` to `false`) will mismatch.
     admit_output(state, environment, invocation, validation, value, [:request, :static])
   end
 

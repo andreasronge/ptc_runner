@@ -4284,7 +4284,18 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     unstable = %{unstable | input_validator: :forced_validator_failure}
-    {:ok, config} = agent_config([response, @recovered], [], mission_capabilities: [unstable])
+
+    {:ok, inspection_sink} =
+      InspectionSink.start(
+        run_id: "input-validator-unavailable",
+        trace_id: "input-validator-unavailable"
+      )
+
+    {:ok, config} =
+      agent_config([response, @recovered], [],
+        mission_capabilities: [unstable],
+        inspection_sink: inspection_sink
+      )
 
     assert {:error,
             %{
@@ -4295,6 +4306,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert_receive {:agent_request, _first}
     refute_receive {:agent_request, _second}
+    assert_host_validation_unavailable_reason(inspection_sink, "input-validation-unavailable")
   end
 
   test "agent.core fails output validation unavailability without another provider turn" do
@@ -4323,7 +4335,18 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     unstable = %{unstable | output_validator: :forced_validator_failure}
-    {:ok, config} = agent_config([response, @recovered], [], mission_capabilities: [unstable])
+
+    {:ok, inspection_sink} =
+      InspectionSink.start(
+        run_id: "output-validator-unavailable",
+        trace_id: "output-validator-unavailable"
+      )
+
+    {:ok, config} =
+      agent_config([response, @recovered], [],
+        mission_capabilities: [unstable],
+        inspection_sink: inspection_sink
+      )
 
     assert {:error,
             %{
@@ -4334,6 +4357,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert_receive {:agent_request, _first}
     refute_receive {:agent_request, _second}
+    assert_host_validation_unavailable_reason(inspection_sink, "output-validation-unavailable")
   end
 
   test "default prompt renders nested direct-capability schema documentation" do
@@ -4810,6 +4834,15 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         "value" => %{"type" => "string", "enum" => country_enum_values()}
       }
     })
+  end
+
+  defp assert_host_validation_unavailable_reason(inspection_sink, reason) do
+    assert {:ok, records} = InspectionSink.records(inspection_sink)
+
+    fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
+
+    assert %{"kind" => "capability-unavailable", "ok" => false, "reason" => ^reason} =
+             fail_record["payload"]["value"]
   end
 
   defp agent_config(responses, limit_overrides \\ [], opts \\ []) do

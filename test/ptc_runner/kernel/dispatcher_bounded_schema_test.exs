@@ -127,6 +127,51 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
            end)
   end
 
+  test "valid output is admitted after the shared validation deadline" do
+    parent = self()
+    deadline_ms = System.monotonic_time(:millisecond) + 200
+
+    {:ok, capability} =
+      Capability.new(
+        name: "checked-output",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        output_schema: %{
+          "type" => "object",
+          "properties" => %{"ok" => %{"type" => "boolean"}},
+          "required" => ["ok"]
+        },
+        callback: fn _arguments ->
+          send(parent, {:in_callback, self()})
+
+          receive do
+            :continue -> {:ok, %{"ok" => true}}
+          end
+        end
+      )
+
+    task =
+      Task.async(fn ->
+        dispatch_capability(capability, %{}, validation_deadline_ms: deadline_ms)
+      end)
+
+    assert_receive {:in_callback, worker}
+
+    wait_ms = max(deadline_ms - System.monotonic_time(:millisecond) + 1, 0)
+
+    if wait_ms > 0 do
+      receive do
+      after
+        wait_ms -> :ok
+      end
+    end
+
+    send(worker, :continue)
+
+    assert {result, _state, _sink} = Task.await(task)
+    assert %{status: :ok, value: %{"ok" => true}} = result
+  end
+
   test "output validator unavailability is distinct from invalid provider output" do
     parent = self()
 
@@ -243,11 +288,12 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
     {result, state, sink, capability}
   end
 
-  defp dispatch_capability(capability, arguments) do
+  defp dispatch_capability(capability, arguments, opts \\ []) do
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
     {:ok, limits} = Limits.new()
     {:ok, state} = RunState.start(limits)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "bounded-schema")
+    timeout_ms = Keyword.get(opts, :timeout_ms, 1_000)
 
     result =
       Dispatcher.dispatch(
@@ -256,7 +302,7 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
         environment,
         capability.name,
         arguments,
-        TestHelpers.dispatch_context(state, :workflow, 1_000),
+        TestHelpers.dispatch_context(state, :workflow, timeout_ms, opts),
         sink,
         nil
       )
