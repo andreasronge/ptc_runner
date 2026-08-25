@@ -266,10 +266,12 @@ One session can build an investigation incrementally:
 
 `analysis/counters` is one bounded aggregate, not a page. Filter a cohort in
 one call, or call once per selected `run_id` and reduce the returned
-`llm_usage_by_model` rows in PTC-Lisp. Group those rows by `resolved_model`
-and sum `calls`, `prompt_tokens`, and `completion_tokens`. Absent `total_cost`
-is unknown spend, not zero: omit the aggregate cost whenever any contributing
-row withholds it.
+`llm_usage_by_model` rows in PTC-Lisp. Those rows carry `calls`,
+`successful_calls`, `usage_calls`, `missing_usage_calls`, and a nested
+`usage` map with `input`, `output`, and optional `total_cost`. Group by
+`resolved_model` and sum the call counters plus nested token keys. Absent
+`total_cost` is unknown spend, not zero: omit it from the merged `usage` map
+whenever any contributing row withholds it.
 
 ```clojure
 (analysis/counters
@@ -277,21 +279,23 @@ row withholds it.
    "from" "2026-08-01T00:00:00Z"
    "to" "2026-09-01T00:00:00Z"})
 
-(defn cost-or-unknown [rows]
-  (if (every? #(contains? % "total_cost") rows)
-    {"total_cost" (reduce + (map #(get % "total_cost") rows))}
-    {}))
+(defn withheld-cost? [rows]
+  (some #(not (contains? (get % "usage") "total_cost")) rows))
 
 (defn reduce-model-rows [rows]
   (->> rows
        (group-by #(get % "resolved_model"))
        (map (fn [[model group]]
-              (merge
+              (let [usage (apply merge-with + (map #(get % "usage") group))
+                    usage (if (withheld-cost? group)
+                            (dissoc usage "total_cost")
+                            usage)]
                 {"resolved_model" model
                  "calls" (reduce + (map #(get % "calls") group))
-                 "prompt_tokens" (reduce + (map #(get % "prompt_tokens") group))
-                 "completion_tokens" (reduce + (map #(get % "completion_tokens") group))}
-                (cost-or-unknown group))))))
+                 "successful_calls" (reduce + (map #(get % "successful_calls") group))
+                 "usage_calls" (reduce + (map #(get % "usage_calls") group))
+                 "missing_usage_calls" (reduce + (map #(get % "missing_usage_calls") group))
+                 "usage" usage})))))
 
 (def selected ["run-a" "run-b"])
 (def pages (map #(analysis/counters {"run_id" %}) selected))
@@ -341,7 +345,7 @@ uncorrelated, oversized, or unsupported artifact rejects the complete private
 source. Use the PtcRunner build matching the artifact's reported schema when
 versions differ.
 
-Private authority adds collections to the same four operations rather than
+Private authority adds collections to the same navigation surface rather than
 adding smart diagnosis APIs:
 
 ```clojure

@@ -344,8 +344,9 @@ directory capture through the fixed public profile:</p><pre><code class="console
   --profile run-analysis-v1 \
   --resource traces=traces \
   -e '(analysis/runs {})' \
-  -e '(analysis/open &quot;run-id&quot;)'</code></pre><p>Public analysis supports <code class="inline">runs</code>, <code class="inline">open</code>, and <code class="inline">read</code>; the public <code class="inline">activity</code>
-collection contains trace events. <code class="inline">open</code> advertises the private collections
+  -e '(analysis/open &quot;run-id&quot;)'</code></pre><p>Public analysis supports <code class="inline">runs</code>, <code class="inline">open</code>, <code class="inline">read</code>, and <code class="inline">counters</code>; the public
+<code class="inline">activity</code> collection contains trace events. <code class="inline">open</code> advertises the private
+collections
 but they require a correlated inspection snapshot and private authority.
 <code class="inline">analysis/runs</code> defaults to a compact projection containing run ID, status,
 duration, LLM calls, evaluations, terminal reason, and completeness flags. Pass

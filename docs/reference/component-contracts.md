@@ -100,7 +100,7 @@ Shipped components use the same dependency rules. For example:
 | Component | Purpose |
 | --- | --- |
 | `cap` | Fail-safe capability-envelope handling and bounded cursor traversal |
-| `analysis` | Three bounded public/private run-evidence navigation operations |
+| `analysis` | Four bounded public/private run-evidence navigation operations |
 
 The generated [shipped prelude reference](../prelude-reference.md) groups every
 installed component by purpose and lists its visibility, direct and transitive

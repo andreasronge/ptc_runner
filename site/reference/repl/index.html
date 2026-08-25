@@ -231,29 +231,33 @@ and availability. Public sessions expose <code class="inline">activity</code>; p
 (analysis/read run-id {&quot;collection&quot; &quot;activity&quot; &quot;limit&quot; 100})
 (analysis/counters {&quot;run_id&quot; run-id})</code></pre><p><code class="inline">analysis/counters</code> is one bounded aggregate, not a page. Filter a cohort in
 one call, or call once per selected <code class="inline">run_id</code> and reduce the returned
-<code class="inline">llm_usage_by_model</code> rows in PTC-Lisp. Group those rows by <code class="inline">resolved_model</code>
-and sum <code class="inline">calls</code>, <code class="inline">prompt_tokens</code>, and <code class="inline">completion_tokens</code>. Absent <code class="inline">total_cost</code>
-is unknown spend, not zero: omit the aggregate cost whenever any contributing
-row withholds it.</p><pre><code class="clojure language-clojure">(analysis/counters
+<code class="inline">llm_usage_by_model</code> rows in PTC-Lisp. Those rows carry <code class="inline">calls</code>,
+<code class="inline">successful_calls</code>, <code class="inline">usage_calls</code>, <code class="inline">missing_usage_calls</code>, and a nested
+<code class="inline">usage</code> map with <code class="inline">input</code>, <code class="inline">output</code>, and optional <code class="inline">total_cost</code>. Group by
+<code class="inline">resolved_model</code> and sum the call counters plus nested token keys. Absent
+<code class="inline">total_cost</code> is unknown spend, not zero: omit it from the merged <code class="inline">usage</code> map
+whenever any contributing row withholds it.</p><pre><code class="clojure language-clojure">(analysis/counters
   {&quot;tags&quot; {&quot;cohort&quot; &quot;candidate&quot;}
    &quot;from&quot; &quot;2026-08-01T00:00:00Z&quot;
    &quot;to&quot; &quot;2026-09-01T00:00:00Z&quot;})
 
-(defn cost-or-unknown [rows]
-  (if (every? #(contains? % &quot;total_cost&quot;) rows)
-    {&quot;total_cost&quot; (reduce + (map #(get % &quot;total_cost&quot;) rows))}
-    {}))
+(defn withheld-cost? [rows]
+  (some #(not (contains? (get % &quot;usage&quot;) &quot;total_cost&quot;)) rows))
 
 (defn reduce-model-rows [rows]
   (-&gt;&gt; rows
        (group-by #(get % &quot;resolved_model&quot;))
        (map (fn [[model group]]
-              (merge
+              (let [usage (apply merge-with + (map #(get % &quot;usage&quot;) group))
+                    usage (if (withheld-cost? group)
+                            (dissoc usage &quot;total_cost&quot;)
+                            usage)]
                 {&quot;resolved_model&quot; model
                  &quot;calls&quot; (reduce + (map #(get % &quot;calls&quot;) group))
-                 &quot;prompt_tokens&quot; (reduce + (map #(get % &quot;prompt_tokens&quot;) group))
-                 &quot;completion_tokens&quot; (reduce + (map #(get % &quot;completion_tokens&quot;) group))}
-                (cost-or-unknown group))))))
+                 &quot;successful_calls&quot; (reduce + (map #(get % &quot;successful_calls&quot;) group))
+                 &quot;usage_calls&quot; (reduce + (map #(get % &quot;usage_calls&quot;) group))
+                 &quot;missing_usage_calls&quot; (reduce + (map #(get % &quot;missing_usage_calls&quot;) group))
+                 &quot;usage&quot; usage})))))
 
 (def selected [&quot;run-a&quot; &quot;run-b&quot;])
 (def pages (map #(analysis/counters {&quot;run_id&quot; %}) selected))
@@ -278,7 +282,7 @@ separate, including through ancestors and symlink aliases. Capture validates
 every private artifact against its matching run. A malformed, changed,
 uncorrelated, oversized, or unsupported artifact rejects the complete private
 source. Use the PtcRunner build matching the artifact's reported schema when
-versions differ.</p><p>Private authority adds collections to the same four operations rather than
+versions differ.</p><p>Private authority adds collections to the same navigation surface rather than
 adding smart diagnosis APIs:</p><pre><code class="clojure language-clojure">(def runs (analysis/runs {&quot;limit&quot; 20}))
 (def run-id (get (first (get runs &quot;items&quot;)) &quot;run_id&quot;))
 (analysis/open run-id)

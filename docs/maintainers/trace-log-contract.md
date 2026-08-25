@@ -499,8 +499,10 @@ Returns one canonical trace aggregate for the selected run cohort. Filters are
 the existing counter keys: `status`, `run_id`, `trace_id`, `tags`, `name`,
 `bundle`, `model`, `provider`, `from`, `to`, and `mission_name`. There is no
 `limit`, `cursor`, `view`, `run_ids`, or resolved-model filter. Unknown keys
-fail closed. `model` keeps its run-filter meaning and is not reinterpreted as
-adapter-attested `resolved_model`.
+fail at the capability schema before dispatch. The 16-tag and 256-byte tag-key
+ceilings are TraceLog's semantic `invalid_query`: the capability JSON Schema
+profile has no `maxProperties` or `propertyNames`. `model` keeps its run-filter
+meaning and is not reinterpreted as adapter-attested `resolved_model`.
 
 The result is the captured `TraceSnapshot` `:counters` map, including
 `events`, `runs`, `errors`, `evaluations`, `evaluations_by_mission`,
@@ -511,34 +513,39 @@ as `result_limit_exceeded` rather than returning a truncated map.
 
 A filter-defined cohort is one counters call. An explicit list of selected run
 IDs is one call per `run_id`, with the caller reducing the returned
-`llm_usage_by_model` rows in PTC-Lisp. Group those rows by `resolved_model` and
-sum `calls`, `prompt_tokens`, and `completion_tokens`. The run-ID list is
-cohort selection data; each result already carries attested attribution or an
-honest unattributed count. Absent `total_cost` is unknown spend, not zero: omit
-the aggregate cost whenever any contributing row withholds it.
+`llm_usage_by_model` rows in PTC-Lisp. Those rows carry `calls`,
+`successful_calls`, `usage_calls`, `missing_usage_calls`, and a nested `usage`
+map with `input`, `output`, and optional `total_cost`. Group by
+`resolved_model` and sum the call counters plus nested token keys. The run-ID
+list is cohort selection data; each result already carries attested attribution
+or an honest unattributed count. Absent `total_cost` is unknown spend, not
+zero: omit it from the merged `usage` map whenever any contributing row
+withholds it.
 
 ```clojure
-(defn cost-or-unknown [rows]
-  (if (every? #(contains? % "total_cost") rows)
-    {"total_cost" (reduce + (map #(get % "total_cost") rows))}
-    {}))
+(defn withheld-cost? [rows]
+  (some #(not (contains? (get % "usage") "total_cost")) rows))
 
 (defn reduce-model-rows [rows]
   (->> rows
        (group-by #(get % "resolved_model"))
        (map (fn [[model group]]
-              (merge
+              (let [usage (apply merge-with + (map #(get % "usage") group))
+                    usage (if (withheld-cost? group)
+                            (dissoc usage "total_cost")
+                            usage)]
                 {"resolved_model" model
                  "calls" (reduce + (map #(get % "calls") group))
-                 "prompt_tokens" (reduce + (map #(get % "prompt_tokens") group))
-                 "completion_tokens" (reduce + (map #(get % "completion_tokens") group))}
-                (cost-or-unknown group))))))
+                 "successful_calls" (reduce + (map #(get % "successful_calls") group))
+                 "usage_calls" (reduce + (map #(get % "usage_calls") group))
+                 "missing_usage_calls" (reduce + (map #(get % "missing_usage_calls") group))
+                 "usage" usage})))))
 
 (def selected ["run-a" "run-b" "run-c"])
 (def pages (map #(analysis/counters {"run_id" %}) selected))
 (def model-rows (mapcat #(get % "llm_usage_by_model") pages))
 (def unattributed (apply + (map #(get % "unattributed_model_calls") pages)))
-(reduce-model-rows model-rows)
+{:models (reduce-model-rows model-rows) :unattributed unattributed}
 ```
 
 ## Pagination, ordering, and bounds

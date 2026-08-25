@@ -622,8 +622,9 @@ ptc repl \
   -e '(analysis/open "run-id")'
 ```
 
-Public analysis supports `runs`, `open`, and `read`; the public `activity`
-collection contains trace events. `open` advertises the private collections
+Public analysis supports `runs`, `open`, `read`, and `counters`; the public
+`activity` collection contains trace events. `open` advertises the private
+collections
 but they require a correlated inspection snapshot and private authority.
 `analysis/runs` defaults to a compact projection containing run ID, status,
 duration, LLM calls, evaluations, terminal reason, and completeness flags. Pass
