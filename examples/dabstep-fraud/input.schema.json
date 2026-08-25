@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task", "guidelines", "model", "max_turns"],
+  "properties": {
+    "task": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "guidelines": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "model": {"type": "string", "enum": ["deepseek", "luna"]},
+    "max_turns": {"type": "integer", "minimum": 1, "maximum": 128}
+  }
+}

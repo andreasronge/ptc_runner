@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "dabstep.workflow",
+        "path": "workflow.clj",
+        "dependencies": ["agent.core"]
+      },
+      {"library": "agent.core"}
+    ],
+    "entry": "dabstep.workflow/run"
+  },
+  "contracts": {
+    "input_schema": {"path": "input.schema.json"},
+    "result_schema": {"path": "result.schema.json"}
+  },
+  "input": {
+    "path": "inputs/deepseek.json"
+  },
+  "missions": {
+    "analysis": {
+      "components": [
+        {"id": "dabstep.payments", "path": "payments.clj"}
+      ],
+      "providers": ["payments_data"]
+    }
+  },
+  "providers": {
+    "workflow": [{"name": "deepseek"}, {"name": "luna"}],
+    "mission": [{"name": "payments_data"}]
+  },
+  "limits": {
+    "run_duration_ms": 900000,
+    "workflow_timeout_ms": 900000,
+    "evaluation_timeout_ms": 600000,
+    "evaluation_heap_words": 5000000,
+    "mission_capability_calls": 256,
+    "mission_capability_calls_per_name": 256,
+    "normal_event_count": 1024,
+    "normal_event_bytes": 8000000
+  },
+  "labels": {
+    "name": "dabstep-fraud-analysis",
+    "provider": "openrouter",
+    "tags": {"mode": "agent"}
+  }
+}

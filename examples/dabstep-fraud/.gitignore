@@ -1,0 +1,6 @@
+data/
+reference/
+.ptc/
+.ptc-replay/
+out*.json
+.env
