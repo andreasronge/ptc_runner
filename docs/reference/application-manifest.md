@@ -155,11 +155,15 @@ escapes unusual contract-authored property names rather than emitting their
 control bytes. Missing-required failures name the first missing schema-declared
 property, including when the absent property is at the contract root.
 
-The `agent.main/run` entry also gives a model-authored terminal candidate one
-ordinary correction turn when budget remains. Feedback is schema-derived and
-bounded: it may identify a safe declared path, missing required names, allowed
-names, and an undeclared-name count, but never an undeclared submitted name or
-value.
+Terminal agent helpers also give a model-authored candidate one ordinary
+correction turn when budget remains. `agent.core/run` validates the exact
+final value it returns — the standard success envelope by default, or the
+raw object when `result_envelope` is false. `agent.main/run` and
+`agent.core/run-result-value` validate the raw model-authored value, which is
+the right contract when that raw value is itself the application result.
+Feedback is schema-derived and bounded: it may identify a safe declared path,
+missing required names, allowed names, and an undeclared-name count, but never
+an undeclared submitted name or value.
 
 Contracts are closed object schemas by default. The profile supports common
 object, array, scalar, enum, const, and bound keywords, plus the asserted

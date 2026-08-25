@@ -89,7 +89,7 @@ promote a change only after evaluating its evidence.
 The short [component replacement guide](components-and-preludes.md#trial-a-replacement-safely)
 shows how to materialize and run an `agent.prompt` candidate.
 
-Use the [agent library reference](../agent-library-reference.md) for exact entry
+Use the [agent library reference](../agent-library-reference.md#agent-core-run) for exact entry
 functions, options, outcomes, turn protocol, feedback, retry behavior, and
 concurrency limits. See [Customize agent components](components-and-preludes.md)
 for dependency and replacement rules, and [Evaluate changes with

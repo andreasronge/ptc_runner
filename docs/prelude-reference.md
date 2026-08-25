@@ -140,8 +140,12 @@ Provider-neutral scripted PTC-Lisp agent loop.
 Runs the agent loop as a terminal workflow entry.
 
 The default result is a success envelope. Set `result_envelope` to false for
-a raw application value. Use `run-value` when the caller must continue after
-the model-authored value returns.
+a raw application value. The exact value this entry returns is validated
+against the manifest result contract while a correction turn remains: the
+envelope by default, or the raw value when `result_envelope` is false. Use
+`run-value` when the caller must continue after the model-authored value
+returns, and `run-result-value` when that raw value is itself the
+contract-shaped application result.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`
@@ -156,7 +160,9 @@ the model-authored value returns.
 ```
 
 Runs the agent loop and distinguishes model-authored completion from a
-bounded subject-attributable failure or a bounded provider failure.
+bounded subject-attributable failure or a bounded provider failure. The
+returned outcome is workflow data; this entry does not validate against the
+manifest result contract.
 
 Provider failures return `{:status :provider-failure :error error :model alias}`
 with the complete bounded LLM envelope. The closed `kind` and `reason` are
@@ -197,8 +203,10 @@ mission evaluation, and only the final phase may declare terminal_only.
 (agent.core/run-result-value task cfg)
 ```
 
-Runs the agent loop and validates model-authored completion against the
-manifest result contract before returning it to the calling workflow.
+Runs the agent loop and validates the raw model-authored value against the
+manifest result contract before returning it to the calling workflow. Use
+this when that raw value is itself the final contract-shaped application
+result.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`
@@ -213,8 +221,9 @@ manifest result contract before returning it to the calling workflow.
 ```
 
 Runs the agent loop and returns its model-authored value to the calling
-PTC-Lisp function. Unlike `run`, this does not terminate the outer program,
-so an application can validate or score the answer before returning.
+PTC-Lisp function. Unlike `run`, this does not terminate the outer program
+and does not validate against the manifest result contract, so an application
+can validate or score the answer before returning.
 
 Subject failures and provider failures retain the historical fail behavior.
 Evaluators that need to record those attempts use `run-outcome`.

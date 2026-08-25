@@ -386,16 +386,22 @@
     (kernel/check-terminal-source mission-name source)
     {:outcome :valid}))
 
+(defn- project-ok [value]
+  (result/ok value))
+
 (defn- run-outcome*
   "Runs the agent loop and distinguishes model-authored completion, a bounded
   subject-attributable failure, and a bounded provider failure.
 
-  Prompt, transcript, evaluation-admission, provider-callback crashes, and
-  other host/infrastructure failures still fail the outer workflow. Typed LLM
-  envelopes, named quota refusals, and alias-resolution protocol errors return
-  as `:provider-failure` so a workflow that called this entry can inspect
-  `kind` and `reason`. Fail-fast entries still abort those envelopes."
-  [task cfg validate-result?]
+  `projector` is the internal final-result projection used before result-contract
+  validation: nil skips validation, identity keeps the model-authored value, and
+  `project-ok` wraps it in the standard success envelope. Prompt, transcript,
+  evaluation-admission, provider-callback crashes, and other host/infrastructure
+  failures still fail the outer workflow. Typed LLM envelopes, named quota
+  refusals, and alias-resolution protocol errors return as `:provider-failure` so
+  a workflow that called this entry can inspect `kind` and `reason`. Fail-fast
+  entries still abort those envelopes."
+  [task cfg projector]
   (let [default-max-turns (bounded-option cfg "max_turns" 4 128)
         phases (configured-phases cfg default-max-turns)
         total-max-turns (reduce + 0 (map #(get % "max_turns") phases))
@@ -491,10 +497,12 @@
                                (get next-state :messages)
                                (get next-state :prompt-state)
                                (get next-state :closing?)))
-                      (if validate-result?
-                        (let [validation (kernel/validate-result (get evaluation :value))]
+                      (if (nil? projector)
+                        (returned-outcome (get evaluation :value))
+                        (let [projected (projector (get evaluation :value))
+                              validation (kernel/validate-result projected)]
                           (if (true? (get validation :valid?))
-                            (returned-outcome (get evaluation :value))
+                            (returned-outcome projected)
                             (let [next-state
                                   (continuation-state
                                     phases phase-index turn messages action
@@ -510,9 +518,8 @@
                                        (get next-state :prompt-state)
                                        (get next-state :closing?))
                                 (result-contract-failure
-                                  (get evaluation :value)
-                                  total-max-turns)))))
-                        (returned-outcome (get evaluation :value))))
+                                  projected
+                                  total-max-turns)))))))
                     :failed
                     (if (correctable-capability-failure? evaluation)
                       (let [next-state
@@ -695,7 +702,9 @@
 
 (defn run-outcome
   "Runs the agent loop and distinguishes model-authored completion from a
-  bounded subject-attributable failure or a bounded provider failure.
+  bounded subject-attributable failure or a bounded provider failure. The
+  returned outcome is workflow data; this entry does not validate against the
+  manifest result contract.
 
   Provider failures return `{:status :provider-failure :error error :model alias}`
   with the complete bounded LLM envelope. The closed `kind` and `reason` are
@@ -704,12 +713,13 @@
   the previous transcript."
   {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
-  (run-outcome* task cfg false))
+  (run-outcome* task cfg nil))
 
 (defn run-value
   "Runs the agent loop and returns its model-authored value to the calling
-  PTC-Lisp function. Unlike `run`, this does not terminate the outer program,
-  so an application can validate or score the answer before returning.
+  PTC-Lisp function. Unlike `run`, this does not terminate the outer program
+  and does not validate against the manifest result contract, so an application
+  can validate or score the answer before returning.
 
   Subject failures and provider failures retain the historical fail behavior.
   Evaluators that need to record those attempts use `run-outcome`."
@@ -718,11 +728,13 @@
   (propagate-outcome (run-outcome task cfg)))
 
 (defn run-result-value
-  "Runs the agent loop and validates model-authored completion against the
-  manifest result contract before returning it to the calling workflow."
+  "Runs the agent loop and validates the raw model-authored value against the
+  manifest result contract before returning it to the calling workflow. Use
+  this when that raw value is itself the final contract-shaped application
+  result."
   {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
-  (propagate-outcome (run-outcome* task cfg true)))
+  (propagate-outcome (run-outcome* task cfg identity)))
 
 (defn run-phased-result-value
   "Runs a sequence of bounded mission phases while retaining the exact
@@ -735,17 +747,25 @@
   mission evaluation, and only the final phase may declare terminal_only."
   {:signature "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?, terminal_only :bool?}], max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
-  (propagate-outcome (run-outcome* task cfg true)))
+  (propagate-outcome (run-outcome* task cfg identity)))
 
 (defn run
   "Runs the agent loop as a terminal workflow entry.
 
   The default result is a success envelope. Set `result_envelope` to false for
-  a raw application value. Use `run-value` when the caller must continue after
-  the model-authored value returns."
+  a raw application value. The exact value this entry returns is validated
+  against the manifest result contract while a correction turn remains: the
+  envelope by default, or the raw value when `result_envelope` is false. Use
+  `run-value` when the caller must continue after the model-authored value
+  returns, and `run-result-value` when that raw value is itself the
+  contract-shaped application result."
   {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, result_envelope :bool?}) -> :any"}
   [task cfg]
-  (let [value (run-value task cfg)]
-    (if (false? (get cfg "result_envelope"))
-      (return value)
-      (return (result/ok value)))))
+  (return
+    (propagate-outcome
+      (run-outcome*
+        task
+        cfg
+        (if (false? (get cfg "result_envelope"))
+          identity
+          project-ok)))))

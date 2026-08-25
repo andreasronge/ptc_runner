@@ -1384,6 +1384,244 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _request}
   end
 
+  test "agent.core/run corrects an invalid default envelope while a turn remains" do
+    invalid = agent_return("invalid-envelope", ~S|(return {})|)
+    corrected = agent_return("corrected-envelope", ~S|(return "B. BE")|)
+    assert {:ok, result_contract} = country_envelope_contract()
+
+    {:ok, config} =
+      agent_config([invalid, corrected], [], result_contract: result_contract)
+
+    assert {:ok, %{value: %{"ok" => true, "value" => "B. BE"}}} =
+             Kernel.run(~S|(agent.core/run "Return the country" {"max_turns" 2})|, config)
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, second_request}
+    refute_receive {:agent_request, _third_request}
+
+    correction = List.last(second_request["messages"])["content"]
+    assert correction =~ "did not satisfy the application result contract"
+    assert correction =~ ":kind :type"
+    assert correction =~ ~s("value")
+    refute correction =~ "private-value"
+  end
+
+  test "agent.core/run reports authenticated default-envelope exhaustion under /value" do
+    assert {:ok, result_contract} = country_envelope_contract()
+    responses = [agent_return("invalid-envelope", ~S|(return {})|)]
+
+    {:ok, inspection_sink} =
+      InspectionSink.start(
+        run_id: "core-run-envelope-exhaustion",
+        trace_id: "core-run-envelope-exhaustion"
+      )
+
+    {:ok, config} =
+      agent_config(responses, [],
+        result_contract: result_contract,
+        result_contract_source: "manifest.json",
+        inspection_sink: inspection_sink
+      )
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :result_contract_failed,
+              details: %{
+                agent_turns: 1,
+                constraint: :enum,
+                contract_source: "manifest.json",
+                violations: [%{kind: :enum, path: path}]
+              }
+            }} =
+             Kernel.run(~S|(agent.core/run "Return the country" {"max_turns" 1})|, config)
+
+    assert path.segments == [{:property, "value"}]
+
+    assert_receive {:agent_request, _request}
+    refute_receive {:agent_request, _second_request}
+
+    assert {:ok, records} = InspectionSink.records(inspection_sink)
+    diagnostic = Enum.find(records, &(&1["record_type"] == "execution-error"))
+    assert diagnostic["payload"]["reason"] == "result_contract_failed"
+
+    assert diagnostic["payload"]["details"]
+           |> Map.take(~w(agent_turns constraint contract_source violations)) ==
+             %{
+               "agent_turns" => 1,
+               "constraint" => "enum",
+               "contract_source" => "manifest.json",
+               "violations" => [%{"kind" => "enum", "path" => "/value"}]
+             }
+
+    refute Map.has_key?(diagnostic["payload"]["details"], "contract_authority")
+
+    assert Enum.any?(EventSink.events(config.event_sink), fn event ->
+             event.type == "run-stopped" and event.data[:failure_kind] == "result-contract" and
+               event.data[:agent_turns] == 1 and event.data[:constraint] == :enum
+           end)
+  end
+
+  test "agent.core/run corrects a raw candidate when result_envelope is false" do
+    invalid = agent_return("invalid-raw", ~S|(return {"country" "not-a-country"})|)
+    corrected = agent_return("corrected-raw", ~S|(return {"country" "B. BE"})|)
+
+    assert {:ok, result_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => false,
+               "required" => ["country"],
+               "properties" => %{
+                 "country" => %{"type" => "string", "enum" => country_enum_values()}
+               }
+             })
+
+    {:ok, config} =
+      agent_config([invalid, corrected], [], result_contract: result_contract)
+
+    assert {:ok, %{value: %{"country" => "B. BE"}}} =
+             Kernel.run(
+               ~S|(agent.core/run "Return the country" {"max_turns" 2 "result_envelope" false})|,
+               config
+             )
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, _second_request}
+    refute_receive {:agent_request, _third_request}
+  end
+
+  test "agent.core/run without a result contract keeps current shapes and one provider turn" do
+    response = agent_return("plain-success", "(return 42)")
+    {:ok, config} = agent_config([response])
+
+    assert {:ok, %{value: %{"ok" => true, "value" => 42}}} =
+             Kernel.run(~S|(agent.core/run "Compute" {"max_turns" 2})|, config)
+
+    assert_receive {:agent_request, _request}
+    refute_receive {:agent_request, _second_request}
+
+    {:ok, raw_config} = agent_config([response])
+
+    assert {:ok, %{value: 42}} =
+             Kernel.run(
+               ~S|(agent.core/run "Compute" {"max_turns" 2 "result_envelope" false})|,
+               raw_config
+             )
+
+    assert_receive {:agent_request, _raw_request}
+    refute_receive {:agent_request, _raw_second_request}
+  end
+
+  test "run-value and run-outcome do not acquire automatic result-contract validation" do
+    response = agent_return("invalid-sum", ~S|(return {"sum" 42})|)
+
+    assert {:ok, result_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => false,
+               "required" => ["sum"],
+               "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+             })
+
+    {:ok, value_config} =
+      agent_config([response], [], result_contract: result_contract)
+
+    assert {:ok, %{value: %{"sum" => 42}}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-value "Return a sum" {"max_turns" 2}))|,
+               value_config
+             )
+
+    assert_receive {:agent_request, _value_request}
+    refute_receive {:agent_request, _value_second}
+
+    {:ok, outcome_config} =
+      agent_config([response], [], result_contract: result_contract)
+
+    assert {:ok, %{value: %{"status" => "returned", "value" => %{"sum" => 42}}}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Return a sum" {"max_turns" 2}))|,
+               outcome_config
+             )
+
+    assert_receive {:agent_request, _outcome_request}
+    refute_receive {:agent_request, _outcome_second}
+  end
+
+  test "agent.core/run result-contract feedback omits rejected values and undeclared names" do
+    invalid =
+      agent_return(
+        "secret-envelope",
+        ~S|(return {"sum" 42 "secret" "candidate-secret" "smuggled" "hidden-name"})|
+      )
+
+    corrected = agent_return("valid-envelope", ~S|(return {"sum" 100})|)
+
+    assert {:ok, result_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => false,
+               "required" => ["ok", "value"],
+               "properties" => %{
+                 "ok" => %{"type" => "boolean", "const" => true},
+                 "value" => %{
+                   "type" => "object",
+                   "additionalProperties" => false,
+                   "required" => ["sum"],
+                   "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+                 }
+               }
+             })
+
+    {:ok, config} =
+      agent_config([invalid, corrected], [], result_contract: result_contract)
+
+    assert {:ok, %{value: %{"ok" => true, "value" => %{"sum" => 100}}}} =
+             Kernel.run(~S|(agent.core/run "Return a sum" {"max_turns" 2})|, config)
+
+    assert_receive {:agent_request, _first_request}
+    assert_receive {:agent_request, second_request}
+    refute_receive {:agent_request, _third_request}
+
+    correction = List.last(second_request["messages"])["content"]
+    assert correction =~ "did not satisfy the application result contract"
+    assert correction =~ ":kind :minimum"
+    assert correction =~ ":expected 100"
+    assert correction =~ ~s("value")
+    refute correction =~ "candidate-secret"
+    refute correction =~ "hidden-name"
+    refute correction =~ "smuggled"
+  end
+
+  test "agent.core/run validates keyword-keyed envelope values through the kernel JSON projection" do
+    response = agent_return("keyword-envelope", ~S|(return {:when 42})|)
+
+    assert {:ok, result_contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => false,
+               "required" => ["ok", "value"],
+               "properties" => %{
+                 "ok" => %{"type" => "boolean", "const" => true},
+                 "value" => %{
+                   "type" => "object",
+                   "additionalProperties" => false,
+                   "required" => ["when"],
+                   "properties" => %{"when" => %{"type" => "integer"}}
+                 }
+               }
+             })
+
+    {:ok, config} =
+      agent_config([response], [], result_contract: result_contract)
+
+    assert {:ok, %{value: %{"ok" => true, "value" => %{"when" => 42}}}} =
+             Kernel.run(~S|(agent.core/run "Return a keyword map" {"max_turns" 1})|, config)
+
+    assert_receive {:agent_request, _request}
+    refute_receive {:agent_request, _second_request}
+  end
+
   test "agent.core persists narration and a defn across a correlated intermediate turn" do
     define = %{
       content: "I will define the helper before using it.",
@@ -4508,6 +4746,31 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                ~S|(return (agent.core/run-outcome "Host crash" {"max_turns" 1}))|,
                config
              )
+  end
+
+  defp agent_return(id, program) do
+    %{
+      content: nil,
+      tool_calls: [
+        %{id: id, name: "run_ptc_lisp", args: %{"program" => program}}
+      ]
+    }
+  end
+
+  defp country_enum_values do
+    ["A. NL", "B. BE", "C. ES", "D. FR", "Not Applicable"]
+  end
+
+  defp country_envelope_contract do
+    ValueContract.compile(%{
+      "type" => "object",
+      "additionalProperties" => false,
+      "required" => ["ok", "value"],
+      "properties" => %{
+        "ok" => %{"type" => "boolean", "const" => true},
+        "value" => %{"type" => "string", "enum" => country_enum_values()}
+      }
+    })
   end
 
   defp agent_config(responses, limit_overrides \\ [], opts \\ []) do

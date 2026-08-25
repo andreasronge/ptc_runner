@@ -47,6 +47,11 @@ program with:
 ```
 
 Set `"result_envelope"` to `false` to complete with the raw application value.
+The exact value this entry returns is the application result: a manifest
+`result_schema` describes that envelope by default, or the raw object when
+`result_envelope` is false. Invalid candidates receive bounded correction
+feedback while a turn remains; exhausting correction reports authenticated
+`result_contract_failed` for that same projected value.
 
 ### `agent.core/run-value`
 
@@ -55,8 +60,9 @@ Set `"result_envelope"` to `false` to complete with the raw application value.
 ```
 
 Returns the application value to its PTC-Lisp caller without completing the
-outer workflow. A subject failure or provider failure calls `fail`, so use this
-entry when the caller should continue only after a successful agent result.
+outer workflow and without validating it against the manifest result contract.
+A subject failure or provider failure calls `fail`, so use this entry when the
+caller should continue only after a successful agent result.
 
 ### `agent.core/run-outcome`
 
@@ -64,7 +70,9 @@ entry when the caller should continue only after a successful agent result.
 (agent.core/run-outcome task config)
 ```
 
-Represents model-attributable completion or failure as data:
+Represents model-attributable completion or failure as data. The outcome
+remains workflow data; this entry does not validate against the manifest
+result contract:
 
 ```clojure
 {:status :returned :value application-value}
@@ -115,14 +123,16 @@ workflow or mission capability-call quota to the command boundary, it reports
 (agent.core/run-result-value task config)
 ```
 
-Runs the same loop, validates every model-authored terminal candidate against
-the manifest result contract, and returns the contract-valid value to its
-PTC-Lisp caller. Invalid candidates receive bounded correction feedback while
-a turn remains. If correction is exhausted, the Kernel reports an authenticated
-`result_contract_failed` diagnostic with the effective turn count, the final
-schema constraint, and an attested contract path when one is available. That
-authenticated cause is retained when the call is composed through sequential
-or parallel higher-order functions such as `map`, `pmap`, and `pcalls`.
+Runs the same loop, validates every raw model-authored terminal candidate
+against the manifest result contract, and returns the contract-valid value to
+its PTC-Lisp caller. Use this when that raw value is itself the final
+contract-shaped application result. Invalid candidates receive bounded
+correction feedback while a turn remains. If correction is exhausted, the
+Kernel reports an authenticated `result_contract_failed` diagnostic with the
+effective turn count, the final schema constraint, and an attested contract
+path when one is available. That authenticated cause is retained when the call
+is composed through sequential or parallel higher-order functions such as
+`map`, `pmap`, and `pcalls`.
 
 This is the composable result-contract entry used by `agent.main/run`.
 
@@ -187,7 +197,7 @@ it does not add task-specific prompt policy.
 | `max_observation_chars` | `2048` | integer, 1–65,536 | Bounds the untrusted structural preview and `println` body of one successful observation. |
 | `max_transcript_chars` | `262144` | integer, 1–1,000,000 | Bounds the JSON-encoded prospective provider request. |
 | `consolidate_at_turns_remaining` | omitted | integer, 1–effective `max_turns` | Adds generic consolidation guidance at and below this remaining-turn count. |
-| `result_envelope` | `true` | boolean | Changes only `agent.core/run`; `false` returns the raw value. |
+| `result_envelope` | `true` | boolean | Changes only `agent.core/run`; `false` returns the raw value and validates that raw value against the result contract. |
 
 For the four `max_*` options, an omitted or `nil` value selects the documented
 default. An out-of-range integer or a non-integer fails with
