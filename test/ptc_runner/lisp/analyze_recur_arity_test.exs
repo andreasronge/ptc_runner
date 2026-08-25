@@ -60,7 +60,7 @@ defmodule PtcRunner.Lisp.AnalyzeRecurArityTest do
     end
 
     test "fixed-arity matching recur analyzes successfully" do
-      assert {:ok, {:fn, [{:var, :x}], {:recur, [{:var, :x}]}}} =
+      assert {:ok, {:fn, [{:var, "x"}], {:recur, [{:var, "x"}]}}} =
                analyze_source("(fn [x] (recur x))")
     end
   end
@@ -71,7 +71,7 @@ defmodule PtcRunner.Lisp.AnalyzeRecurArityTest do
     end
 
     test "accepts leading-plus-rest recur arguments" do
-      assert {:ok, {:fn, {:variadic, [{:var, :x}], {:var, :xs}}, {:recur, args}}} =
+      assert {:ok, {:fn, {:variadic, [{:var, "x"}], {:var, "xs"}}, {:recur, args}}} =
                analyze_source("(fn [x & xs] (recur 1 []))")
 
       assert length(args) == 2
@@ -84,7 +84,7 @@ defmodule PtcRunner.Lisp.AnalyzeRecurArityTest do
 
   describe "nearest recursion point" do
     test "loop inside a function validates against the loop, not the function" do
-      assert {:ok, {:fn, [{:var, :a}, {:var, :b}], {:loop, [_], {:recur, [_]}}}} =
+      assert {:ok, {:fn, [{:var, "a"}, {:var, "b"}], {:loop, [_], {:recur, [_]}}}} =
                analyze_source("(fn [a b] (loop [x 1] (recur 1)))")
 
       assert_recur_arity_error("(fn [a b] (loop [x 1] (recur 1 2)))", 1, 2)
