@@ -378,8 +378,10 @@ ptc transcript RUN_ID \
   --private-output tmp/tutorial-transcript/conversation.private.json
 ```
 
-The destination is reserved at owner-only mode before capture. Incomplete or
-ambiguous evidence fails without publication. The parent of
+The destination is reserved at owner-only mode before capture. `RUN_ID` must be
+a canonical command run reference; capture then admits only that run's exact
+canonical trace and inspection files rather than inventorying the directories.
+Incomplete or ambiguous evidence fails without publication. The parent of
 `--private-output` must already exist and be reached without a symbolic link
 — on macOS `/tmp` is a symlink, so `/tmp/out.json` is refused. The trace,
 inspection, and output directories must be pairwise physically separate: none

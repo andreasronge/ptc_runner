@@ -691,10 +691,10 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     refute inspect(closure_environment) =~ directory
   end
 
-  test "rejects anything except a host-selected normal directory" do
-    assert {:error, :invalid_snapshot} = TraceSnapshot.start({:file, "trace.jsonl"})
+  test "rejects unknown snapshot sources" do
     assert {:error, :invalid_snapshot} = TraceSnapshot.start({:private_directory, "traces"})
     assert {:error, :invalid_snapshot} = TraceSnapshot.start("traces")
+    assert {:error, :invalid_snapshot} = TraceSnapshot.start({:file, "trace.jsonl"})
   end
 
   defp write_events(path, events) do

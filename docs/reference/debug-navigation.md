@@ -89,6 +89,15 @@ that directory contains `--traces`. A sibling directory, as above, satisfies
 both rules. A rejection names the two conflicting switches and their physical
 relationship, and discloses no path.
 
+`RUN_ID` must be a canonical PTC command run reference. The command then
+captures exactly `RUN_ID.jsonl` or `RUN_ID.private.jsonl` under `--traces` and
+`RUN_ID.inspection.jsonl` under `--inspection`. It does not list those
+directories, so unrelated, malformed, or oversized history cannot reject a
+valid selected pair. Both trace suffixes present, a missing selected file, a
+symlink, or an embedded identity that does not match `RUN_ID` fails closed.
+Whole-directory analysis snapshots remain a separate contract: they still
+inventory every canonical member.
+
 ## Give the debugger bounded navigation authority
 
 The debugger is an ordinary application. Its host document installs the failed

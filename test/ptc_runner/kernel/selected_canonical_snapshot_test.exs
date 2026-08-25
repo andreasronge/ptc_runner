@@ -1,0 +1,174 @@
+defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
+  use ExUnit.Case, async: true
+
+  alias PtcRunner.Kernel.AnalysisResources
+  alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.PrivateRunAnalysisProfile
+  alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.TestSupport.PrivateInspectionFixture
+
+  @tag :tmp_dir
+  test "selected capture ignores malformed and oversized unselected members", %{tmp_dir: root} do
+    fixture = fixture!(root)
+    File.write!(Path.join(fixture.traces, "broken.jsonl"), "{not-json\n")
+    File.write!(Path.join(fixture.traces, "huge.jsonl"), :binary.copy("x", 9_000_001))
+    File.write!(Path.join(fixture.inspection, "broken.inspection.jsonl"), "not-json\n")
+
+    test_pid = self()
+    listed = fn -> send(test_pid, :listed) end
+
+    assert {:ok, resources} =
+             PrivateRunAnalysisProfile.capture(
+               %{"traces" => fixture.traces, "inspection" => fixture.inspection},
+               selected_run_ref: fixture.run_id,
+               listing_hook: listed,
+               inspection_listing_hook: listed
+             )
+
+    on_exit(fn -> AnalysisResources.stop(resources) end)
+    refute_received :listed
+
+    traces = AnalysisResources.handle(resources, :traces)
+    assert {:ok, info} = TraceSnapshot.info(traces)
+    assert info.file_count == 1
+    assert info.run_count == 1
+    assert {:ok, true} = TraceSnapshot.run_exists?(traces, fixture.run_id)
+  end
+
+  @tag :tmp_dir
+  test "directory capture still fails closed on an unselected malformed member", %{tmp_dir: root} do
+    fixture = fixture!(root)
+    File.write!(Path.join(fixture.traces, "broken.jsonl"), "{not-json\n")
+
+    assert {:error, :malformed_source} =
+             TraceSnapshot.start({:private_authorized_directory, fixture.traces}, owner: self())
+  end
+
+  @tag :tmp_dir
+  test "selected identity differs from a whole-directory snapshot of the same file", %{
+    tmp_dir: root
+  } do
+    fixture = fixture!(root)
+
+    assert {:ok, directory} =
+             TraceSnapshot.start({:directory, fixture.traces}, owner: self())
+
+    assert {:ok, selected} =
+             TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+               owner: self()
+             )
+
+    on_exit(fn ->
+      TraceSnapshot.stop(directory)
+      TraceSnapshot.stop(selected)
+    end)
+
+    assert {:ok, directory_info} = TraceSnapshot.info(directory)
+    assert {:ok, selected_info} = TraceSnapshot.info(selected)
+    assert directory_info.capture_id != selected_info.capture_id
+    assert directory_info.snapshot_hash != selected_info.snapshot_hash
+    assert selected_info.file_count == 1
+    assert selected_info.source == :ptc_private_trace_snapshot
+  end
+
+  @tag :tmp_dir
+  test "a selected private file records the private source class", %{tmp_dir: root} do
+    fixture = fixture!(root)
+
+    File.rename!(
+      Path.join(fixture.traces, "#{fixture.run_id}.jsonl"),
+      Path.join(fixture.traces, "#{fixture.run_id}.private.jsonl")
+    )
+
+    assert {:ok, snapshot} =
+             TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+               owner: self()
+             )
+
+    on_exit(fn -> TraceSnapshot.stop(snapshot) end)
+    assert {:ok, %{source: :ptc_private_trace_snapshot}} = TraceSnapshot.info(snapshot)
+  end
+
+  @tag :tmp_dir
+  test "selected inspection capture does not inventory unrelated artifacts", %{tmp_dir: root} do
+    fixture = fixture!(root)
+    File.write!(Path.join(fixture.inspection, "broken.inspection.jsonl"), "not-json\n")
+
+    assert {:ok, traces} =
+             TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+               owner: self()
+             )
+
+    test_pid = self()
+    listed = fn -> send(test_pid, :listed) end
+
+    assert {:ok, inspection} =
+             InspectionSnapshot.start(
+               {:selected_canonical, fixture.inspection, fixture.run_id},
+               traces,
+               owner: self(),
+               listing_hook: listed
+             )
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(inspection)
+      TraceSnapshot.stop(traces)
+    end)
+
+    refute_received :listed
+    assert {:ok, %{file_count: 1, run_count: 1}} = InspectionSnapshot.info(inspection)
+  end
+
+  @tag :tmp_dir
+  test "owner death cancels selected file capture", %{tmp_dir: root} do
+    fixture = fixture!(root)
+    test = self()
+
+    owner =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    starter =
+      Task.async(fn ->
+        TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+          owner: owner,
+          capture_hook: fn ->
+            send(test, {:capture_paused, self()})
+
+            receive do
+              :continue_capture -> :ok
+            end
+          end
+        )
+      end)
+
+    assert_receive {:capture_paused, capture_pid}, 5_000
+    capture_ref = Process.monitor(capture_pid)
+    Process.exit(owner, :kill)
+
+    assert {:error, :snapshot_unavailable} = Task.await(starter)
+    assert_receive {:DOWN, ^capture_ref, :process, ^capture_pid, :killed}, 5_000
+  end
+
+  @tag :tmp_dir
+  test "an oversized selected file is refused without reading unselected members", %{
+    tmp_dir: root
+  } do
+    fixture = fixture!(root)
+    File.write!(Path.join(fixture.traces, "#{fixture.run_id}.jsonl"), :binary.copy("x", 200))
+    File.write!(Path.join(fixture.traces, "unrelated.jsonl"), :binary.copy("x", 9_000_001))
+
+    assert {:error, :source_limit_exceeded} =
+             TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+               owner: self(),
+               max_source_bytes: 64
+             )
+  end
+
+  defp fixture!(root) do
+    PrivateInspectionFixture.create!(root, PrivateInspectionFixture.command_run_ref())
+  end
+end

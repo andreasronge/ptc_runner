@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunAnalysisCapability
+  alias PtcRunner.Kernel.SelectedCanonicalSource
   alias PtcRunner.Kernel.TraceSnapshot
 
   @components ["cap", "analysis"]
@@ -144,7 +145,11 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
 
   def capture(:public, recipe, %{"traces" => directory} = resources, opts)
       when map_size(resources) == 1 and is_binary(directory) and is_list(opts) do
-    capture_trace(recipe, {:directory, directory}, opts)
+    if Keyword.has_key?(opts, :selected_run_ref) do
+      {:error, recipe.invalid_source_error()}
+    else
+      capture_trace(recipe, {:directory, directory}, opts)
+    end
   end
 
   def capture(
@@ -155,11 +160,25 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
       )
       when map_size(resources) == 2 and is_binary(inspection) and is_binary(traces) and
              is_list(opts) do
-    with {:ok, trace} <- start_trace({:private_authorized_directory, traces}, opts) do
-      case AnalysisProfile.refuse_empty_capture(TraceSnapshot.info(trace), :empty_traces_resource) do
-        :ok -> capture_inspection(recipe, trace, inspection, opts)
-        {:error, _reason} = error -> stop_trace(trace, error)
-      end
+    {selected_run_ref, capture_opts} = Keyword.pop(opts, :selected_run_ref)
+
+    cond do
+      is_nil(selected_run_ref) ->
+        with {:ok, trace} <- start_trace({:private_authorized_directory, traces}, capture_opts) do
+          case AnalysisProfile.refuse_empty_capture(
+                 TraceSnapshot.info(trace),
+                 :empty_traces_resource
+               ) do
+            :ok -> capture_inspection(recipe, trace, {:directory, inspection}, capture_opts)
+            {:error, _reason} = error -> stop_trace(trace, error)
+          end
+        end
+
+      SelectedCanonicalSource.valid_run_ref?(selected_run_ref) ->
+        capture_selected(recipe, traces, inspection, selected_run_ref, capture_opts)
+
+      true ->
+        {:error, :invalid_run_reference}
     end
   end
 
@@ -200,8 +219,18 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
     )
   end
 
-  defp capture_inspection(recipe, trace, directory, opts) do
-    case InspectionSnapshot.start({:directory, directory}, trace,
+  defp capture_selected(recipe, traces, inspection, run_ref, opts) do
+    with {:ok, _trace_source} <- SelectedCanonicalSource.resolve_trace(traces, run_ref),
+         {:ok, _inspection_path} <-
+           SelectedCanonicalSource.resolve_inspection(inspection, run_ref),
+         {:ok, trace} <-
+           start_trace({:selected_canonical, traces, run_ref}, opts) do
+      capture_inspection(recipe, trace, {:selected_canonical, inspection, run_ref}, opts)
+    end
+  end
+
+  defp capture_inspection(recipe, trace, source, opts) do
+    case InspectionSnapshot.start(source, trace,
            owner: self(),
            capture_hook: Keyword.get(opts, :inspection_capture_hook),
            listing_hook: Keyword.get(opts, :inspection_listing_hook),
