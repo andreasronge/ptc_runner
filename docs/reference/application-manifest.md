@@ -235,7 +235,7 @@ never grants or denies call authority.
 Native trace and inspection aliases derive four navigation capabilities:
 `runs`, `open`, `read`, and `counters`. `open` advertises the named collections
 and their filters; `read` returns one native bounded page; `counters` returns
-the canonical trace aggregate, including adapter-attested model usage. Public
+the captured trace aggregate, including adapter-attested model usage. Public
 trace sources provide the `activity` collection and return
 `evidence_unavailable` for private collections. An inspection alias composes
 its required trace snapshot with authorized private records. Set the

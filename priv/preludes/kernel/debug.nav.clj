@@ -21,7 +21,7 @@
   (cap/unwrap! (tool/debug.nav.read (assoc options "run_id" run-id))))
 
 (defn counters
-  "Return canonical trace counters for a filtered run cohort, including adapter-attested model usage. Filters are the existing counter keys; call once per selected run_id to reduce an explicit cohort. Example: (debug.nav/counters {\"run_id\" \"run-id\"})."
+  "Return trace counters for a filtered run cohort, including adapter-attested model usage. Filters are the existing counter keys; call once per selected run_id to reduce an explicit cohort. Example: (debug.nav/counters {\"run_id\" \"run-id\"})."
   {:signature "(filters :map) -> :map"}
   [filters]
   (cap/unwrap! (tool/debug.nav.counters filters)))

@@ -899,7 +899,7 @@ Bounded navigation over one immutable run-evidence capture.
 (analysis/counters filters)
 ```
 
-Returns canonical trace counters for a filtered run cohort, including adapter-attested model usage. Filters are the existing counter keys; there is no limit, cursor, view, or run_ids argument. Call once per selected run_id to reduce an explicit cohort.
+Returns trace counters for a filtered run cohort, including adapter-attested model usage. Filters are the existing counter keys; there is no limit, cursor, view, or run_ids argument. Call once per selected run_id to reduce an explicit cohort.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`
@@ -966,7 +966,7 @@ Typed navigation over one immutable private run-evidence capture. The mission mu
 (debug.nav/counters filters)
 ```
 
-Return canonical trace counters for a filtered run cohort, including adapter-attested model usage. Filters are the existing counter keys; call once per selected run_id to reduce an explicit cohort. Example: (debug.nav/counters {"run_id" "run-id"}).
+Return trace counters for a filtered run cohort, including adapter-attested model usage. Filters are the existing counter keys; call once per selected run_id to reduce an explicit cohort. Example: (debug.nav/counters {"run_id" "run-id"}).
 
 - **Kind:** `function`
 - **Visibility:** `prompt`

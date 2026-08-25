@@ -170,7 +170,7 @@ authority and no diagnosis policy:
 | `(debug.nav/runs options)` | list captured runs, filtered by status, name, tags, or id |
 | `(debug.nav/open run-id)` | discover a run's collections, filters, identifiers, and completeness fields |
 | `(debug.nav/read run-id options)` | read one bounded native page from a named collection |
-| `(debug.nav/counters filters)` | return canonical trace counters for a filtered run cohort |
+| `(debug.nav/counters filters)` | return trace counters for a filtered run cohort |
 | `(debug.nav/follow run-id relationship options)` | follow one typed relationship |
 
 `follow` takes a relationship exactly as an evidence item published it and
