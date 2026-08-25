@@ -620,7 +620,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
        do: reason
 
   defp normalize_capture_error(:inspection_source_changed), do: :source_changed
-  defp normalize_capture_error(:inspection_source_unavailable), do: :source_changed
+  defp normalize_capture_error(:inspection_source_unavailable), do: :source_unavailable
   defp normalize_capture_error(:inspection_source_limit_exceeded), do: :source_limit_exceeded
   defp normalize_capture_error(:invalid_inspection_artifact), do: :malformed_source
   defp normalize_capture_error(:malformed_inspection_artifact), do: :malformed_source

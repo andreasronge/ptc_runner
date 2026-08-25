@@ -187,6 +187,22 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
   end
 
   @tag :tmp_dir
+  test "selected capture refuses an alternate candidate created during capture", %{tmp_dir: root} do
+    fixture = fixture!(root)
+    selected = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
+    alternate = Path.join(fixture.traces, "#{fixture.run_id}.private.jsonl")
+
+    assert {:error, :ambiguous_selected_trace} =
+             TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+               owner: self(),
+               capture_hook: fn ->
+                 File.cp!(selected, alternate)
+                 :ok
+               end
+             )
+  end
+
+  @tag :tmp_dir
   test "selected capture detects truncation and same-size replacement", %{tmp_dir: root} do
     fixture = fixture!(root)
     path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
@@ -317,6 +333,31 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
                owner: self(),
                max_source_bytes: 64
              )
+  end
+
+  @tag :tmp_dir
+  test "an unreadable selected inspection is unavailable rather than changed", %{tmp_dir: root} do
+    fixture = fixture!(root)
+    path = Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl")
+
+    assert {:ok, traces} =
+             TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+               owner: self()
+             )
+
+    on_exit(fn -> TraceSnapshot.stop(traces) end)
+    File.chmod!(path, 0o000)
+
+    try do
+      assert {:error, :source_unavailable} =
+               InspectionSnapshot.start(
+                 {:selected_canonical, fixture.inspection, fixture.run_id},
+                 traces,
+                 owner: self()
+               )
+    after
+      File.chmod!(path, 0o600)
+    end
   end
 
   @tag :tmp_dir

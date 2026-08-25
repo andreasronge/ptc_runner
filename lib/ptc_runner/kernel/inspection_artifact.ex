@@ -225,7 +225,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
          :ok <- within_limit(before, max_bytes),
          {:ok, content, opened} <-
            read_regular_file(path, before, max_bytes, verification_hook, reader),
-         {:ok, after_read} <- regular_file(path),
+         {:ok, after_read} <- verified_regular_file(path),
          :ok <- unchanged(before, opened),
          :ok <- unchanged(before, after_read),
          {:ok, records} <- decode(content, max_record_bytes),
@@ -1334,6 +1334,14 @@ defmodule PtcRunner.Kernel.InspectionArtifact do
       {:ok, %File.Stat{type: :regular} = stat} -> {:ok, stat}
       {:ok, _stat} -> {:error, :invalid_inspection_source}
       {:error, _reason} -> {:error, :inspection_source_unavailable}
+    end
+  end
+
+  defp verified_regular_file(path) do
+    case regular_file(path) do
+      {:ok, stat} -> {:ok, stat}
+      {:error, :inspection_source_unavailable} -> {:error, :inspection_source_changed}
+      {:error, :invalid_inspection_source} -> {:error, :inspection_source_changed}
     end
   end
 

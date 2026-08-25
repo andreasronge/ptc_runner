@@ -36,39 +36,54 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   @spec start(term(), keyword()) :: {:ok, t()} | {:error, atom() | retained_limit_error()}
   def start(source, opts \\ [])
 
-  def start({:directory, directory}, opts),
+  def start({:directory, directory}, opts) when is_binary(directory) and is_list(opts),
     do: start_capture({:directory, directory}, :ptc_trace_snapshot, :sanitized, nil, opts)
 
-  def start({:private_authorized_directory, directory}, opts),
-    do:
-      start_capture(
-        {:directory, directory},
-        :ptc_private_trace_snapshot,
-        :private,
-        nil,
-        opts
-      )
+  def start({:private_authorized_directory, directory}, opts)
+      when is_binary(directory) and is_list(opts),
+      do:
+        start_capture(
+          {:directory, directory},
+          :ptc_private_trace_snapshot,
+          :private,
+          nil,
+          opts
+        )
 
-  def start({:file, path, run_ref}, opts),
+  def start({:file, path, run_ref}, opts) when is_binary(path) and is_list(opts),
     do: start_capture({:file, path}, :ptc_trace_snapshot, :sanitized, run_ref, opts)
 
-  def start({:private_authorized_file, path, run_ref}, opts),
-    do:
-      start_capture(
-        {:file, path},
-        :ptc_private_trace_snapshot,
-        :private,
-        run_ref,
-        opts
-      )
+  def start({:private_authorized_file, path, run_ref}, opts)
+      when is_binary(path) and is_list(opts),
+      do:
+        start_capture(
+          {:file, path},
+          :ptc_private_trace_snapshot,
+          :private,
+          run_ref,
+          opts
+        )
 
-  def start({:selected_canonical, directory, run_ref}, opts) do
+  def start({:selected_canonical, directory, run_ref}, opts)
+      when is_binary(directory) and is_binary(run_ref) and is_list(opts) do
     case SelectedCanonicalSource.resolve_trace(directory, run_ref) do
       {:ok, {:file, path, ^run_ref}} ->
-        start_capture({:file, path}, :ptc_private_trace_snapshot, :sanitized, run_ref, opts)
+        start_capture(
+          {:selected_file, path, directory},
+          :ptc_private_trace_snapshot,
+          :sanitized,
+          run_ref,
+          opts
+        )
 
       {:ok, {:private_authorized_file, path, ^run_ref}} ->
-        start_capture({:file, path}, :ptc_private_trace_snapshot, :private, run_ref, opts)
+        start_capture(
+          {:selected_file, path, directory},
+          :ptc_private_trace_snapshot,
+          :private,
+          run_ref,
+          opts
+        )
 
       {:error, reason} ->
         {:error, reason}
@@ -95,8 +110,6 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     ]
 
     with true <- Keyword.keys(opts) -- allowed == [],
-         true <- valid_capture_source?(capture_source),
-         true <- valid_selected_run_ref?(capture_source, selected_run_ref),
          owner when is_pid(owner) <- Keyword.get(opts, :owner, self()),
          registrar <- Keyword.get(opts, :resource_registrar),
          max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
@@ -143,18 +156,6 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   defp start_capture(_capture_source, _source, _source_kind, _selected_run_ref, _opts),
     do: {:error, :invalid_snapshot}
-
-  defp valid_capture_source?({:directory, directory}),
-    do: is_binary(directory) and String.valid?(directory)
-
-  defp valid_capture_source?({:file, path}), do: is_binary(path) and String.valid?(path)
-
-  defp valid_selected_run_ref?({:directory, _directory}, nil), do: true
-
-  defp valid_selected_run_ref?({:file, _path}, run_ref),
-    do: SelectedCanonicalSource.valid_run_ref?(run_ref)
-
-  defp valid_selected_run_ref?(_source, _run_ref), do: false
 
   @spec query(t(), :list_runs | :get_run | :list_turns | :counters, map()) ::
           {:ok, map()} | {:error, atom()}
@@ -389,26 +390,49 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   end
 
   defp capture({:file, path}, config, capture_hook, _listing_hook) do
+    capture_file_source(path, config, capture_hook, fn -> :ok end)
+  end
+
+  defp capture({:selected_file, path, directory}, config, capture_hook, _listing_hook) do
+    capture_file_source(path, config, capture_hook, fn ->
+      prove_selected_trace(directory, path, config)
+    end)
+  end
+
+  defp capture_file_source(path, config, capture_hook, after_capture) do
     case TraceLog.capture_file(path,
            max_source_bytes: config.max_source_bytes,
            source_kind: config.source_kind,
            capture_hook: capture_hook
          ) do
       {:ok, capture} ->
-        case selected_source_id(config, capture) do
-          {:ok, source_id} ->
-            capture
-            |> Map.put(:source_id, source_id)
-            |> retain_capture(config)
-
-          {:error, reason} ->
-            {:error, reason}
+        with :ok <- after_capture.(),
+             {:ok, source_id} <- selected_source_id(config, capture) do
+          capture
+          |> Map.put(:source_id, source_id)
+          |> retain_capture(config)
         end
 
       {:error, :invalid_trace_log} ->
         {:error, :invalid_snapshot}
 
       {:error, reason} when is_atom(reason) ->
+        {:error, reason}
+    end
+  end
+
+  defp prove_selected_trace(directory, path, config) do
+    case SelectedCanonicalSource.resolve_trace(directory, config.selected_run_ref) do
+      {:ok, {:file, ^path, _run_ref}} when config.source_kind == :sanitized ->
+        :ok
+
+      {:ok, {:private_authorized_file, ^path, _run_ref}} when config.source_kind == :private ->
+        :ok
+
+      {:ok, _resolved} ->
+        {:error, :source_changed}
+
+      {:error, reason} ->
         {:error, reason}
     end
   end
