@@ -22,14 +22,17 @@ defmodule PtcRunner.Kernel.JSONSchema do
   rejected.
 
   Each normalized schema is at most 64 KiB with maximum depth 16, 128
-  properties per object, and 256 enum members. Schemas are compiled once with
-  JSV. Runtime validation delegates to the compiled JSV root. Input rejection
-  may retain a small explanation containing only schema-declared paths,
-  keywords, and bounds; submitted values and undeclared property names never
-  enter that explanation. Validation and explanation projection run together
-  in one time- and heap-bounded worker. Proven schema invalidity is distinct
-  from validator timeout, heap exhaustion, crashes, and malformed validator
-  results.
+  properties per object, and 256 enum members. Host construction compiles with
+  `compile/1`. Request-scoped schemas compile with `compile_bounded/3` in the
+  same time- and heap-bounded worker used for runtime validation. Proven schema
+  invalidity is distinct from compiler or validator timeout, heap exhaustion,
+  crashes, and malformed worker results. Runtime validation delegates to the
+  compiled JSV root. Input rejection may retain a small explanation containing
+  only schema-declared paths, keywords, and bounds; submitted values and
+  undeclared property names never enter that explanation. Validation and
+  explanation projection run together in one bounded worker. `valid?/2` remains
+  a host-side predicate for construction and tests; Dispatcher output admission
+  uses `validate/5`.
 
   Rejection reports the first proven fault as a closed `rule` atom plus the
   segments locating it inside the submitted schema document. Every segment is
@@ -89,23 +92,47 @@ defmodule PtcRunner.Kernel.JSONSchema do
     "http://json-schema.org/draft-07/schema#"
   ]
 
-  @spec compile(map()) :: {:ok, map(), compiled()} | {:error, {:invalid_schema, rejection()}}
-  def compile(schema) when is_map(schema) and not is_struct(schema) do
-    with {:ok, schema} <- validate_dialect(schema),
-         {:ok, normalized} <- normalize(schema, [], 1),
-         :ok <- validate_root_object(normalized),
-         {:ok, encoded} <- encode_normalized(normalized),
-         :ok <- validate_schema_size(encoded),
-         {:ok, root} <- build(normalized) do
-      {:ok, normalized, root}
-    else
-      {:error, %{rule: _rule} = rejection} -> {:error, {:invalid_schema, rejection}}
-    end
+  @spec compile(term()) :: {:ok, map(), compiled()} | {:error, {:invalid_schema, rejection()}}
+  def compile(schema) do
+    compile_document(schema)
   rescue
     _exception -> {:error, {:invalid_schema, rejection(:unsupported_schema, [])}}
   end
 
-  def compile(_schema), do: {:error, {:invalid_schema, rejection(:not_a_schema_object, [])}}
+  @doc """
+  Compiles a request-scoped schema in a caller-cancelled bounded worker.
+
+  Proven profile rejections stay `{:error, {:invalid_schema, rejection}}`.
+  Worker timeout, heap exhaustion, cancellation, crashes, and malformed worker
+  results are `{:unavailable, cause}` and must not be treated as an invalid
+  document.
+  """
+  @spec compile_bounded(term(), pos_integer(), pos_integer()) ::
+          {:ok, map(), compiled()}
+          | {:error, {:invalid_schema, rejection()}}
+          | {:unavailable, atom()}
+  def compile_bounded(schema, timeout_ms, max_heap_words)
+      when is_integer(timeout_ms) and timeout_ms > 0 and is_integer(max_heap_words) and
+             max_heap_words > 0 do
+    case BoundedWorker.run(fn -> compile_document(schema) end,
+           timeout_ms: timeout_ms,
+           max_heap_words: max_heap_words,
+           cancel_with_caller: true
+         ) do
+      {:ok, {:ok, normalized, compiled}} ->
+        {:ok, normalized, compiled}
+
+      {:ok, {:error, {:invalid_schema, %{rule: rule, segments: segments} = rejection}}}
+      when is_atom(rule) and is_list(segments) ->
+        {:error, {:invalid_schema, rejection}}
+
+      {:ok, _unexpected} ->
+        {:unavailable, :unexpected_compiler_result}
+
+      {:error, cause} ->
+        {:unavailable, cause}
+    end
+  end
 
   @doc """
   Returns every rule a rejection can carry, most specific first.
@@ -134,6 +161,22 @@ defmodule PtcRunner.Kernel.JSONSchema do
       :unsupported_schema
     ]
   end
+
+  defp compile_document(schema) when is_map(schema) and not is_struct(schema) do
+    with {:ok, schema} <- validate_dialect(schema),
+         {:ok, normalized} <- normalize(schema, [], 1),
+         :ok <- validate_root_object(normalized),
+         {:ok, encoded} <- encode_normalized(normalized),
+         :ok <- validate_schema_size(encoded),
+         {:ok, root} <- build(normalized) do
+      {:ok, normalized, root}
+    else
+      {:error, %{rule: _rule} = rejection} -> {:error, {:invalid_schema, rejection}}
+    end
+  end
+
+  defp compile_document(_schema),
+    do: {:error, {:invalid_schema, rejection(:not_a_schema_object, [])}}
 
   defp validate_root_object(%{"type" => "object"}), do: :ok
   defp validate_root_object(_normalized), do: {:error, rejection(:root_not_object, [])}

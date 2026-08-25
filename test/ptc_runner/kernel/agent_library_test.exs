@@ -4297,6 +4297,45 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _second}
   end
 
+  test "agent.core fails output validation unavailability without another provider turn" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "output-validator-unavailable",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(fail (tool/unstable {}))|}
+        }
+      ]
+    }
+
+    {:ok, unstable} =
+      Capability.new(
+        name: "unstable",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        output_schema: %{
+          "type" => "object",
+          "properties" => %{"ok" => %{"type" => "boolean"}},
+          "required" => ["ok"]
+        },
+        callback: fn _ -> {:ok, %{"ok" => true}} end
+      )
+
+    unstable = %{unstable | output_validator: :forced_validator_failure}
+    {:ok, config} = agent_config([response, @recovered], [], mission_capabilities: [unstable])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :explicit_failure,
+              details: %{failure_kind: "capability-unavailable"}
+            }} = Kernel.run(~S|(agent.core/run "Read once" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
+  end
+
   test "default prompt renders nested direct-capability schema documentation" do
     response = %{
       content: nil,

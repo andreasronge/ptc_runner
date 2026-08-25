@@ -768,9 +768,16 @@ defmodule PtcRunner.Kernel.Evaluation do
         do: Map.put(result, :terminal_provider_failure?, true),
         else: result
 
-    if evaluation_status.terminal_host_failure?,
-      do: Map.put(result, :terminal_host_failure?, true),
-      else: result
+    result =
+      if evaluation_status.terminal_host_failure? do
+        result
+        |> Map.put(:terminal_host_failure?, true)
+        |> maybe_put_host_failure_reason(step)
+      else
+        result
+      end
+
+    result
   end
 
   defp evaluation_activity(state, environment, step, mission_calls_before) do
@@ -884,27 +891,41 @@ defmodule PtcRunner.Kernel.Evaluation do
   end
 
   defp put_terminal_host_failure(result, step) do
-    if terminal_host_failure?(step),
-      do: Map.put(result, :terminal_host_failure?, true),
-      else: result
+    case host_validation_unavailable_reason(step) do
+      nil ->
+        result
+
+      reason ->
+        result
+        |> Map.put(:terminal_host_failure?, true)
+        |> Map.put(:terminal_host_failure_reason, reason)
+    end
   end
 
-  defp terminal_host_failure?(step) do
+  defp maybe_put_host_failure_reason(result, step) do
+    case host_validation_unavailable_reason(step) do
+      nil -> result
+      reason -> Map.put(result, :terminal_host_failure_reason, reason)
+    end
+  end
+
+  defp host_validation_unavailable_reason(step) do
     step
     |> Map.get(:tool_calls, [])
     |> List.wrap()
-    |> Enum.any?(fn
+    |> Enum.find_value(fn
       %{
         result: %{
           status: :error,
           kind: :capability_unavailable,
-          reason: :input_validation_unavailable
+          reason: reason
         }
-      } ->
-        true
+      }
+      when reason in [:input_validation_unavailable, :output_validation_unavailable] ->
+        reason
 
       _call ->
-        false
+        nil
     end)
   end
 

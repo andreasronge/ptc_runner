@@ -476,7 +476,8 @@
                 ;; so it applies even when a later expression fails.
                 (if (true? (get evaluation :terminal-host-failure?))
                   (fail (result/error :capability-unavailable
-                                      :input-validation-unavailable))
+                                      (or (get evaluation :terminal-host-failure-reason)
+                                          :input-validation-unavailable)))
                   (if (true? (get evaluation :terminal-provider-failure?))
                     (subject-failure
                       :model-program-failed
