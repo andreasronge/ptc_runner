@@ -393,6 +393,22 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     refute File.exists?(output)
   end
 
+  @tag :tmp_dir
+  test "removing the selected inspection during verification is a source change", %{tmp_dir: root} do
+    fixture = canonical_create!(root)
+    output = Path.join(fixture.output, "removed-inspection.json")
+    argv = transcript_argv(fixture, output)
+    assert {:ok, entry} = CommandEntry.open(argv, :standalone)
+    inspection_path = Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl")
+
+    assert {:error, :source_changed, "analysis source changed during capture"} =
+             TranscriptFrontend.run(entry.arguments, CommandRuntime.standalone(),
+               inspection_artifact_verification_hook: fn -> File.rm!(inspection_path) end
+             )
+
+    refute File.exists?(output)
+  end
+
   test "every missing required argument reports the complete transcript command shape" do
     complete = [
       "transcript",
