@@ -50,7 +50,7 @@ sequential stages whenever one stage's output feeds the next.
 ## Contracts instead of parsing
 
 Declare the shape as a manifest `result_schema` and produce the value with
-`agent.core/run-result-value`. Invalid candidates get bounded correction
+`agent.core/run`. Invalid candidates get bounded correction
 feedback while turns remain, and the run fails honestly rather than shipping a
 malformed report.
 

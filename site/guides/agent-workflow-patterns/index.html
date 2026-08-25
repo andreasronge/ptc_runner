@@ -113,7 +113,7 @@ plan cannot execute early.</p><h2 id="parallel-fan-out">Parallel fan-out</h2><p>
 turn by turn. Bounded parallelism is a limits decision: every branch draws from
 the same admission queue, so size the shared limits for the whole fan-out. Use
 sequential stages whenever one stage's output feeds the next.</p><h2 id="contracts-instead-of-parsing">Contracts instead of parsing</h2><p>Declare the shape as a manifest <code class="inline">result_schema</code> and produce the value with
-<code class="inline">agent.core/run-result-value</code>. Invalid candidates get bounded correction
+<code class="inline">agent.core/run</code>. Invalid candidates get bounded correction
 feedback while turns remain, and the run fails honestly rather than shipping a
 malformed report.</p><h2 id="effects-at-the-edge">Effects at the edge</h2><p>Keep writes in the last possible stage, behind an explicitly allowed effect
 tool. Never automatically retry an indeterminate write — a timeout may mean the

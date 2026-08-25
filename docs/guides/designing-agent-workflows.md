@@ -180,7 +180,7 @@ bounds — is a property of the run, not a hope about the model. The contract
 does not judge content: whether every breached ticket appears with its policy
 score is checked by this example's scheduled live test, not the schema. The
 correction loop is described in the
-[agent library reference](../agent-library-reference.md).
+[agent library reference](../agent-library-reference.md#agent-core-run).
 
 ## Where to go next
 

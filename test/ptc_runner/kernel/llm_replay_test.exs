@@ -791,6 +791,71 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
     end
 
     @tag :tmp_dir
+    test "run-value leaves final result cleanup fail-closed", %{tmp_dir: dir} do
+      {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
+      write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
+
+      paths = write_application(dir)
+
+      write_agent_application(
+        paths,
+        ~S|(agent.core/run-value "Return a sum of at least 100" {"max_turns" 1})|
+      )
+
+      result_schema = %{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["sum"],
+        "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+      }
+
+      schema_path = Path.join(dir, "result.schema.json")
+      File.write!(schema_path, Jason.encode!(result_schema))
+
+      manifest = paths.manifest |> File.read!() |> Jason.decode!()
+
+      File.write!(
+        paths.manifest,
+        manifest
+        |> Map.put("contracts", %{"result_schema" => %{"path" => "result.schema.json"}})
+        |> Jason.encode!()
+      )
+
+      assert {:error, %CommandOutcome{} = first_miss} =
+               CommandEngine.dispatch(["run", paths.manifest, "--host-config", paths.host])
+
+      first_hash = replay_request_hash(first_miss)
+      first_response = invalid_result_response("cleanup-invalid", 42)
+      write(dir, [%{"request_hash" => first_hash, "response" => first_response}])
+
+      trace_dir = Path.join(dir, "run-value-cleanup-traces")
+      File.mkdir_p!(trace_dir)
+
+      assert {:error, %CommandOutcome{} = cleanup} =
+               CommandEngine.dispatch([
+                 "run",
+                 paths.manifest,
+                 "--host-config",
+                 paths.host,
+                 "--trace-dir",
+                 trace_dir
+               ])
+
+      assert cleanup.envelope["error"]["code"] == "result_contract_failed"
+      assert cleanup.envelope["error"]["phase"] == "result_cleanup"
+
+      assert cleanup.envelope["error"]["message"] ==
+               "the workflow result does not satisfy its contract"
+
+      refute cleanup.envelope["error"]["message"] =~ "within 1 turns"
+      assert cleanup.envelope["result"] == nil
+      assert CommandContract.valid_envelope?(cleanup.envelope)
+
+      assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
+      refute File.read!(trace_path) =~ "candidate-secret"
+    end
+
+    @tag :tmp_dir
     test "parallel replay misses retain the authoring hash", %{tmp_dir: dir} do
       {:ok, unrelated_hash} = LLMReplay.request_hash(@request)
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
