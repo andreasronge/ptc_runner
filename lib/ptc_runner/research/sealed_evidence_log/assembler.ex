@@ -224,25 +224,33 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   end
 
   defp put_join(state, %{"record_type" => "evaluation-source"} = record) do
-    meta = %{
-      sequence: record["sequence"],
-      evaluation_id: record["correlation"]["evaluation_id"],
-      environment: record["payload"]["environment"],
-      mission_name: record["payload"]["mission_name"]
-    }
+    if valid_source_payload?(record["payload"]) do
+      meta = %{
+        sequence: record["sequence"],
+        evaluation_id: record["correlation"]["evaluation_id"],
+        environment: record["payload"]["environment"],
+        mission_name: record["payload"]["mission_name"]
+      }
 
-    {:ok, %{state | generated_meta: [meta | state.generated_meta]}}
+      {:ok, %{state | generated_meta: [meta | state.generated_meta]}}
+    else
+      {:error, :invalid_record}
+    end
   end
 
   defp put_join(state, %{"record_type" => "prelude-source"} = record) do
-    meta = %{
-      sequence: record["sequence"],
-      component_id: record["correlation"]["component_id"],
-      environment: record["payload"]["environment"],
-      mission_name: record["payload"]["mission_name"]
-    }
+    if valid_source_payload?(record["payload"]) do
+      meta = %{
+        sequence: record["sequence"],
+        component_id: record["correlation"]["component_id"],
+        environment: record["payload"]["environment"],
+        mission_name: record["payload"]["mission_name"]
+      }
 
-    {:ok, %{state | prelude_meta: [meta | state.prelude_meta]}}
+      {:ok, %{state | prelude_meta: [meta | state.prelude_meta]}}
+    else
+      {:error, :invalid_record}
+    end
   end
 
   defp put_join(state, %{"record_type" => "execution-prints"} = record) do
@@ -270,6 +278,18 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   end
 
   defp put_join(_state, _record), do: {:error, :invalid_record}
+
+  defp valid_source_payload?(%{
+         "source" => source,
+         "source_hash" => hash,
+         "source_bytes" => bytes
+       })
+       when is_binary(source) and is_binary(hash) and is_integer(bytes) do
+    bytes == byte_size(source) and
+      hash == Base.encode16(:crypto.hash(:sha256, source), case: :lower)
+  end
+
+  defp valid_source_payload?(_payload), do: false
 
   defp put_execution(state, field, record) do
     meta = %{

@@ -362,6 +362,55 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
 
     assert {:error, :invalid_snapshot} =
              SealedEvidenceLog.query(forged, :list_runs, %{"limit" => 1})
+
+    assert {:error, :invalid_snapshot} = SealedEvidenceLog.info(forged)
+    assert :ok = SealedEvidenceLog.close(forged)
+    assert Snapshot.alive?(snapshot)
+  end
+
+  test "admission deadline cancels the worker", %{tmp_dir: tmp} do
+    corpus = Generator.mixed_run("deadline-run")
+    path = Path.join(tmp, "deadline.ptcins")
+    assert {:ok, _} = SealedEvidenceLog.produce(path, corpus.records)
+
+    hook = fn
+      :before_frames ->
+        receive do
+          :never -> :ok
+        after
+          50 -> :ok
+        end
+
+      _other ->
+        :ok
+    end
+
+    assert {:error, :deadline_exceeded} =
+             SealedEvidenceLog.admit(%{path: path, trace_facts: corpus.trace_facts},
+               during_admission_hook: hook,
+               deadline_ms: 1
+             )
+  end
+
+  test "query cannot widen the installed result-byte ceiling", %{tmp_dir: tmp} do
+    corpus = Generator.mixed_run("result-cap")
+    path = Path.join(tmp, "result-cap.ptcins")
+    assert {:ok, _} = SealedEvidenceLog.produce(path, corpus.records)
+
+    assert {:ok, snapshot} =
+             SealedEvidenceLog.admit(%{path: path, trace_facts: corpus.trace_facts},
+               limits: [max_result_bytes: 100]
+             )
+
+    on_exit(fn -> SealedEvidenceLog.close(snapshot) end)
+
+    assert {:error, :result_limit_exceeded} =
+             SealedEvidenceLog.query(
+               snapshot,
+               :capability_calls,
+               %{"run_id" => "result-cap", "limit" => 10},
+               max_result_bytes: 1_000_000
+             )
   end
 
   defp produce_only(tmp, run_id) do

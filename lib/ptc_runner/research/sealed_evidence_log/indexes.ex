@@ -3,7 +3,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
   Private ETS indexes and logical versus actual retained accounting.
 
   Logical index bytes are the conservative `RetainedSize.bytes/1` charge of
-  each detached `{family, key, value}` row. Actual ETS allocation is
+  each detached `{family, key, value}` row, matching issue #1646. The physical
+  ETS tuple is `{key, value}` inside the family table. Actual ETS allocation is
   `sum(:ets.info(table, :memory)) * word_size`. Owner metadata, paired trace
   facts, and cache state are charged separately and never as a substitute for
   the ETS total. Shared binaries that appear in both owner metadata and an ETS
@@ -80,7 +81,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
           {:ok, t()} | {:error, :max_index_entries | :max_logical_index_bytes}
   def insert(indexes, family, key, value, limits)
       when is_map(indexes) and is_atom(family) and is_map(limits) do
-    row = RetainedSize.detach_binaries({key, value})
+    row = RetainedSize.detach_binaries({family, key, value})
     charge = logical_charge(row)
     entries = indexes.logical_entries + 1
     bytes = indexes.logical_bytes + charge
@@ -94,7 +95,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
 
       true ->
         table = table_for(family)
-        true = :ets.insert(Map.fetch!(indexes.tables, table), row)
+        true = :ets.insert(Map.fetch!(indexes.tables, table), {key, value})
 
         {:ok,
          %{

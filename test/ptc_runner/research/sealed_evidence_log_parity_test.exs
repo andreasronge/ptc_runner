@@ -71,34 +71,49 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
   end
 
   test "result-byte shrinking stays aligned", %{tmp_dir: tmp} do
-    {current, snapshot} = admit_mixed(tmp, "parity-shrink")
+    corpus = Generator.dense_filter_run("parity-shrink", 8)
+    path = Path.join(tmp, "parity-shrink.ptcins")
+    assert {:ok, _} = SealedEvidenceLog.produce(path, corpus.records)
+
+    assert {:ok, snapshot} =
+             SealedEvidenceLog.admit(%{path: path, trace_facts: corpus.trace_facts})
+
     on_exit(fn -> SealedEvidenceLog.close(snapshot) end)
+
+    {:ok, current} =
+      Oracle.compile_current([corpus.records], "trace-source", %{
+        "trace_snapshot_hash" => "trace-source",
+        "runs" => %{"parity-shrink" => corpus.trace_facts}
+      })
 
     assert :ok =
              Oracle.walk_equal(
                current,
                snapshot,
-               :capability_calls,
-               %{"run_id" => "parity-shrink", "limit" => 10},
-               80
+               :generated_sources,
+               %{"run_id" => "parity-shrink", "limit" => 8},
+               500
              )
   end
 
   test "rejects invalid filter types and unknown keys", %{tmp_dir: tmp} do
-    {_current, snapshot} = admit_mixed(tmp, "parity-invalid")
+    {current, snapshot} = admit_mixed(tmp, "parity-invalid")
     on_exit(fn -> SealedEvidenceLog.close(snapshot) end)
-
-    assert {:error, :invalid_query} =
-             SealedEvidenceLog.query(snapshot, :capability_calls, %{
-               "run_id" => "parity-invalid",
-               "name" => 1
-             })
 
     assert {:error, :invalid_query} =
              SealedEvidenceLog.query(snapshot, :capability_calls, %{
                "run_id" => "parity-invalid",
                "unknown" => "x"
              })
+
+    assert :ok =
+             Oracle.walk_equal(
+               current,
+               snapshot,
+               :capability_calls,
+               %{"run_id" => "parity-invalid", "name" => 1},
+               1_000_000
+             )
   end
 
   test "multi-run list_runs, get_run, and result", %{tmp_dir: tmp} do
@@ -206,12 +221,14 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
          "mission_name" => "default",
          "capability_id" => "tool-1"
        }},
-      {:generated_sources, ~w(evaluation_id parent_evaluation_id mission_name prelude_call),
+      {:generated_sources,
+       ~w(evaluation_id parent_evaluation_id mission_name prelude_call prelude_component),
        %{
          "evaluation_id" => "evaluation-1",
          "parent_evaluation_id" => "workflow-1",
          "mission_name" => "default",
-         "prelude_call" => "call-1"
+         "prelude_call" => "call-1",
+         "prelude_component" => "shared.api"
        }},
       {:model_exchanges, ~w(capability_id input_sequence),
        %{"capability_id" => "llm-1", "input_sequence" => 1}},
@@ -224,8 +241,14 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
          "mission_name" => "default"
        }},
       {:execution_prints, ~w(evaluation_id), %{"evaluation_id" => "workflow-eval"}},
-      {:turns, ~w(stream_id capability_id),
-       %{"stream_id" => "stream-1", "capability_id" => "llm-1"}}
+      {:execution_errors, ~w(evaluation_id), %{"evaluation_id" => "workflow-eval"}},
+      {:explicit_failure_values, ~w(evaluation_id), %{"evaluation_id" => "workflow-eval"}},
+      {:turns, ~w(stream_id capability_id evaluation_id),
+       %{
+         "stream_id" => "stream-1",
+         "capability_id" => "llm-1",
+         "evaluation_id" => "evaluation-1"
+       }}
     ]
     |> Enum.flat_map(fn {operation, keys, values} ->
       base = %{"run_id" => run_id}
@@ -236,8 +259,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
         Enum.map(keys, fn key -> {operation, Map.put(base, key, Map.fetch!(values, key))} end)
 
       conjunctions =
-        keys
-        |> combinations(2)
+        (combinations(keys, 2) ++ combinations(keys, 3))
         |> Enum.map(fn pair -> {operation, Map.merge(base, Map.take(values, pair))} end)
 
       all = [{operation, Map.merge(base, values)}]
@@ -247,5 +269,9 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
 
   defp combinations(list, 2) do
     for a <- list, b <- list, a < b, do: [a, b]
+  end
+
+  defp combinations(list, 3) do
+    for a <- list, b <- list, c <- list, a < b, b < c, do: [a, b, c]
   end
 end

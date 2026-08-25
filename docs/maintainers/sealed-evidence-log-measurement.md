@@ -35,10 +35,12 @@ length-framed deterministic JSON evidence
 192-byte terminal footer (PTCIFTR1) with counts, identities, offsets, digests
 ```
 
-Admission is one streaming pass. ETS holds bounded metadata only. Queries
-select through ETS and read required ranges from a pinned file-server
-handle. Cursors bind the admission snapshot digest and the logical query
-identity; they do not rehash the complete evidence preimage.
+Admission is one ingest scan that validates frames and inserts bounded ETS
+rows. Seal confirmation then rehashes evidence bytes without decoding records
+so a same-size overwrite cannot publish a snapshot. Queries select through ETS
+and read required ranges from a pinned file-server handle. Cursors bind the
+admission snapshot digest and the logical query identity; they do not rehash
+the complete evidence preimage.
 
 ## Payload-size ladder
 
@@ -144,13 +146,17 @@ Class `host_facing` is the public JSON/API path under a
 | internal only | prototype | admission | records | 1 000 000 | selected file | research `max_records` (experiment ceiling; 1 000 000 did not complete) |
 | internal only | prototype | admission | entries | 8 000 000 | selected file | research `max_index_entries` |
 | internal only | prototype | admission | bytes | 536 870 912 | selected file | research `max_logical_index_bytes` |
-| internal only | prototype | query | bytes | 67 108 864 | selected file | research verified range-byte ceiling |
+| internal only | prototype | query | bytes | 67 108 864 | selected file | research per-frame verified range-byte ceiling |
 | internal only | prototype | query | milliseconds | 15 000 / 15 000 / 15 000 | selected or directory | research query deadline |
 | internal only | prototype | admission | bytes | 536 870 912 | selected or directory | research `max_retained_bytes` |
 | internal only | prototype | query | bytes | 1 000 000 | selected or directory | research `max_result_bytes` |
 | internal only | prototype | producer | bytes | 268 435 456 | selected file | research producer heap envelope |
 | internal only | prototype | admission | bytes | 268 435 456 | selected file | research admission heap envelope |
 | internal only | prototype | query | bytes | 268 435 456 | selected file | research query heap envelope |
+| internal only | prototype | producer | milliseconds | 120 000 | selected file | research producer deadline |
+| internal only | prototype | admission | milliseconds | 120 000 | selected file | research admission deadline |
+| internal only | prototype | cleanup | milliseconds | 5 000 | selected or directory | research cleanup deadline |
+| internal only | prototype | producer | bytes | 65 536 | selected file | research I/O buffer |
 | internal only | maintained_guard | admission | schema_version | 8 | selected file | `InspectionArtifact` / prototype schema |
 | internal only | maintained_guard | query | items | 1 000 max / 100 default | selected or directory | `InspectionQuery` page limit |
 

@@ -476,7 +476,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
   end
 
   defp shrink(selected, all_items, page, snapshot, max_bytes, metadata, metrics, _kind) do
-    Enum.reduce_while(length(selected)..1, {:error, :result_limit_exceeded}, fn count, acc ->
+    Enum.reduce_while(length(selected)..1//-1, {:error, :result_limit_exceeded}, fn count, acc ->
       result = page_result(Enum.take(selected, count), all_items, page, snapshot, metadata)
 
       if ResultLimit.within?(result, max_bytes),
@@ -573,7 +573,14 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
   defp locator_sequences(snapshot, :turns, run_id, {:turn, ordinal}) do
     case Indexes.lookup(snapshot.indexes, :turn_projection, {run_id, ordinal}) do
       [{_key, turn}] ->
-        [turn.input_sequence, turn.output_sequence | Enum.map(turn.generated, & &1.sequence)]
+        generated = Enum.map(turn.generated, & &1.sequence)
+
+        analysis =
+          Enum.flat_map(generated, fn sequence ->
+            analysis_sequences(snapshot, run_id, sequence)
+          end)
+
+        [turn.input_sequence, turn.output_sequence | generated ++ analysis]
 
       _other ->
         []

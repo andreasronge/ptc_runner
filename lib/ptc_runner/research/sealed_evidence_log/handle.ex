@@ -1,10 +1,13 @@
 defmodule PtcRunner.Research.SealedEvidenceLog.Handle do
   @moduledoc """
-  Pinned raw reader for one sealed evidence artifact.
+  Pinned reader for one sealed evidence artifact.
 
-  Queries continue against this descriptor after the path is replaced. Size and
-  footer accounting detect append or truncate. Same-size overwrites are detected
-  only when a queried range's digest disagrees with admission.
+  The descriptor is a file-server IoDevice so admission and query workers can
+  `pread/3` the same opened inode. `:raw` descriptors are process-local and
+  cannot be shared with bounded workers. Queries continue against this
+  descriptor after the path is replaced. Size and footer accounting detect
+  append or truncate. Same-size overwrites are detected when a queried range's
+  digest disagrees with admission, or during admission seal confirmation.
   """
 
   alias PtcRunner.Research.SealedEvidenceLog.Format

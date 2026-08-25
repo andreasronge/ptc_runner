@@ -1,10 +1,11 @@
 defmodule PtcRunner.Research.SealedEvidenceLog.Admission do
   @moduledoc """
-  One streaming admission pass over a sealed evidence artifact.
-
-  The pass validates every complete frame, identities, sequences, lifecycle,
-  joins, conversation facts, and paired trace claims; inserts bounded ETS rows;
-  and releases each evidence payload before the next frame is read.
+  One streaming ingest pass validates every complete frame, identities,
+  sequences, lifecycle, joins, conversation facts, and paired trace claims;
+  inserts bounded ETS rows; and releases each evidence payload before the next
+  frame is read. After that ingest scan, seal confirmation rehashes evidence
+  bytes without decoding records so a same-size overwrite cannot publish a
+  snapshot.
   """
 
   alias PtcRunner.Kernel.BoundedWorker
@@ -73,6 +74,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Admission do
              },
              limits.io_buffer_bytes
            ),
+         :ok <- Handle.assert_stable(handle),
          {:ok, state} <- Assembler.finish(state, trace_facts),
          true <- Indexes.within_retained?(state.indexes, limits) do
       checkpoints = Checkpoints.record(checkpoints, :ets_inserted, pids)

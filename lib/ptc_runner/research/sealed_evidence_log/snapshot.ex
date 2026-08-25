@@ -2,9 +2,11 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
   @moduledoc """
   Owner process for admitted ETS indexes and pinned sealed-log readers.
 
-  The owner creates the tables, runs admission in a bounded worker, and remains
-  the sole mutator of retained state. Owner death deletes every table and closes
-  every handle. Query workers cancel with the caller; the snapshot stays usable.
+  The owner creates the tables with itself as heir. Admission inserts through a
+  bounded worker that is cancelled with the original caller; after admission
+  returns, the owner is the sole mutator of retained state. Owner death deletes
+  every table and closes every handle. Query workers cancel with the caller;
+  the snapshot stays usable.
   """
 
   use GenServer
@@ -45,12 +47,12 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
   def query(_snapshot, _operation, _arguments, _opts), do: {:error, :invalid_query}
 
   @spec info(t()) :: {:ok, map()} | {:error, atom()}
-  def info(%__MODULE__{} = snapshot), do: call(snapshot, :info)
+  def info(%__MODULE__{} = snapshot), do: call(snapshot, {:info, snapshot.token})
   def info(_snapshot), do: {:error, :invalid_snapshot}
 
   @spec close(term()) :: :ok
   def close(%__MODULE__{} = snapshot) do
-    case call(snapshot, :stop) do
+    case call(snapshot, {:stop, snapshot.token}) do
       :ok -> :ok
       {:error, _reason} -> :ok
     end
@@ -62,10 +64,10 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
   def alive?(%__MODULE__{pid: pid}), do: Process.alive?(pid)
 
   @spec table_ids(t()) :: [reference()] | {:error, atom()}
-  def table_ids(%__MODULE__{} = snapshot), do: call(snapshot, :table_ids)
+  def table_ids(%__MODULE__{} = snapshot), do: call(snapshot, {:table_ids, snapshot.token})
 
   @spec handles(t()) :: {:ok, [Handle.t()]} | {:error, atom()}
-  def handles(%__MODULE__{} = snapshot), do: call(snapshot, :handles)
+  def handles(%__MODULE__{} = snapshot), do: call(snapshot, {:handles, snapshot.token})
 
   @impl GenServer
   def init({artifacts, limits, owner, token, opts}) do
@@ -110,30 +112,42 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
     end
   end
 
-  def handle_call(:info, _from, state) do
-    accounting = Indexes.accounting(state.indexes)
+  def handle_call({:info, token}, _from, state) do
+    if token == state.token do
+      accounting = Indexes.accounting(state.indexes)
 
-    {:reply,
-     {:ok,
-      %{
-        snapshot_digest: state.snapshot_digest,
-        run_count: map_size(state.handles),
-        accounting: accounting,
-        record_count: state.record_count,
-        checkpoints: state.checkpoints,
-        diagnostic_peaks: state.peaks,
-        handle_count: map_size(state.handles)
-      }}, state}
+      {:reply,
+       {:ok,
+        %{
+          snapshot_digest: state.snapshot_digest,
+          run_count: map_size(state.handles),
+          accounting: accounting,
+          record_count: state.record_count,
+          checkpoints: state.checkpoints,
+          diagnostic_peaks: state.peaks,
+          handle_count: map_size(state.handles)
+        }}, state}
+    else
+      {:reply, {:error, :invalid_snapshot}, state}
+    end
   end
 
-  def handle_call(:table_ids, _from, state),
-    do: {:reply, Indexes.table_ids(state.indexes), state}
+  def handle_call({:table_ids, token}, _from, state) do
+    if token == state.token,
+      do: {:reply, Indexes.table_ids(state.indexes), state},
+      else: {:reply, {:error, :invalid_snapshot}, state}
+  end
 
-  def handle_call(:handles, _from, state),
-    do: {:reply, {:ok, Map.values(state.handles)}, state}
+  def handle_call({:handles, token}, _from, state) do
+    if token == state.token,
+      do: {:reply, {:ok, Map.values(state.handles)}, state},
+      else: {:reply, {:error, :invalid_snapshot}, state}
+  end
 
-  def handle_call(:stop, _from, state) do
-    {:stop, :normal, :ok, state}
+  def handle_call({:stop, token}, _from, state) do
+    if token == state.token,
+      do: {:stop, :normal, :ok, state},
+      else: {:reply, {:error, :invalid_snapshot}, state}
   end
 
   def handle_call(_message, _from, state), do: {:reply, {:error, :invalid_query}, state}
@@ -231,7 +245,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
 
   defp run_query(state, operation, arguments, caller, from, opts) do
     snapshot = query_state(state)
-    max_bytes = Keyword.get(opts, :max_result_bytes, state.limits.max_result_bytes)
+    max_bytes = installed_result_bytes(state.limits, opts)
     metadata = %{"snapshot_hash" => snapshot_hash(state.snapshot_digest)}
     limits = state.limits
 
@@ -335,6 +349,14 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
   end
 
   defp turn_evidence(admitted), do: admitted.turn_evidence
+
+  defp installed_result_bytes(limits, opts) do
+    requested = Keyword.get(opts, :max_result_bytes, limits.max_result_bytes)
+
+    if is_integer(requested) and requested > 0,
+      do: min(requested, limits.max_result_bytes),
+      else: limits.max_result_bytes
+  end
 
   defp cleanup_owned(state) do
     if Map.has_key?(state, :indexes), do: Indexes.delete_all(state.indexes)
