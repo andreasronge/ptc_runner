@@ -2,12 +2,14 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   @moduledoc """
   Small bounded navigation API over one immutable run-evidence capture.
 
-  The prompt-facing contract has three operations: `runs` discovers runs,
-  `open` returns singular metadata and a collection catalog, and `read`
+  The prompt-facing contract has four operations: `runs` discovers runs,
+  `open` returns singular metadata and a collection catalog, `read`
   delegates one bounded collection page to its trace or private-inspection
-  snapshot owner. Collection names, filters, authority, and order come from one
-  closed registry. No operation diagnoses evidence or aggregates primitive
-  pages before returning to Lisp.
+  snapshot owner, and `counters` delegates the canonical trace aggregate —
+  including adapter-attested model usage — to the captured `TraceSnapshot`.
+  Collection names, filters, authority, and order come from one closed
+  registry. No operation diagnoses evidence or aggregates primitive pages
+  before returning to Lisp.
 
   Public captures expose only canonical `activity`. Private captures add exact
   exchanges, reconstructed turns, generated source with static prelude-call
@@ -22,7 +24,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Kernel.TraceSnapshot
 
-  @operations [:runs, :open, :read]
+  @operations [:runs, :open, :read, :counters]
   @max_limit 100
   @collect_page_limit 100
   @max_collect_pages 1_000
@@ -175,7 +177,7 @@ defmodule PtcRunner.Kernel.RunAnalysis do
             max_result_bytes: pos_integer()
           }
 
-  @type operation :: :runs | :open | :read
+  @type operation :: :runs | :open | :read | :counters
 
   @doc false
   @spec operations() :: [operation()]
@@ -279,6 +281,9 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   end
 
   defp execute(_analysis, :read, _arguments), do: {:error, :invalid_query}
+
+  defp execute(analysis, :counters, arguments),
+    do: TraceSnapshot.query(analysis.traces, :counters, arguments)
 
   defp run_view(%{"view" => "full"}), do: {:ok, :full}
   defp run_view(%{"view" => "summary"}), do: {:ok, :summary}

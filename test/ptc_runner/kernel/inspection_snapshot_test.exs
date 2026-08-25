@@ -711,13 +711,15 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     assert Enum.map(profile_capabilities, & &1.name) == [
              "analysis-runs",
              "analysis-open",
-             "analysis-read"
+             "analysis-read",
+             "analysis-counters"
            ]
 
     assert Enum.map(provider_capabilities, & &1.name) == [
              "private.runs",
              "private.open",
-             "private.read"
+             "private.read",
+             "private.counters"
            ]
 
     provider_exchange = Enum.find(provider_capabilities, &(&1.name == "private.read"))

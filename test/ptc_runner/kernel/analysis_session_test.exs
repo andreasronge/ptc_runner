@@ -655,12 +655,34 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     assert {:ok, info} = AnalysisSession.info(session)
     assert info.usage.capability_calls == usage.capability_calls
 
+    assert {:ok, %{status: :ok, value: counters, usage: counter_usage}} =
+             AnalysisSession.evaluate(session, "(analysis/counters {})")
+
+    assert counters["runs"] == 1
+    assert is_list(counters["llm_usage_by_model"])
+    assert counters["unattributed_model_calls"] == 0
+    refute Map.has_key?(counters, "status")
+
+    assert counter_usage.capability_calls["analysis-counters"] == %{
+             used: 1,
+             limit: 256,
+             remaining: 255
+           }
+
+    assert {:ok, %{status: :error, outcome: :failed}} =
+             AnalysisSession.evaluate(session, ~S|(analysis/counters {"unsupported" true})|)
+
     seed_trace(directory, "later")
 
     assert {:ok, %{value: %{"items" => still_frozen}}} =
              AnalysisSession.evaluate(session, "(analysis/runs {})")
 
     assert Enum.map(still_frozen, & &1["run_id"]) == ["seed"]
+
+    assert {:ok, %{value: still_frozen_counters}} =
+             AnalysisSession.evaluate(session, "(analysis/counters {})")
+
+    assert still_frozen_counters["runs"] == 1
 
     assert {:ok, %{value: %{"items" => [full]}}} =
              AnalysisSession.evaluate(session, ~S|(analysis/runs {"view" "full"})|)

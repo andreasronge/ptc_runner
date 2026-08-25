@@ -17,7 +17,7 @@ deterministic walk or a model.
 
 ```text
 failed immutable run
-  -> runs / open / read / follow
+  -> runs / open / read / counters / follow
   -> generated source and result
   -> referenced prelude source
   -> dependency prelude source
@@ -153,12 +153,12 @@ prelude:
 `{"expose": false}` keeps the trace selection as the inspection source's
 dependency without creating a second navigation namespace.
 
-A snapshot provider names its operations `<alias>.runs`, `<alias>.open`, and
-`<alias>.read`, and the shipped prelude binds that conventional alias, so the
-inspection selection must be called `debug.nav`. The alternative shipped
-surface, `analysis`, binds the stable `analysis-runs`/`analysis-open`/
-`analysis-read` names a REPL profile grants; install one or the other, never
-both.
+A snapshot provider names its operations `<alias>.runs`, `<alias>.open`,
+`<alias>.read`, and `<alias>.counters`, and the shipped prelude binds that
+conventional alias, so the inspection selection must be called `debug.nav`. The
+alternative shipped surface, `analysis`, binds the stable `analysis-runs`/
+`analysis-open`/`analysis-read`/`analysis-counters` names a REPL profile
+grants; install one or the other, never both.
 
 ## Navigate with debug.nav
 
@@ -170,6 +170,7 @@ authority and no diagnosis policy:
 | `(debug.nav/runs options)` | list captured runs, filtered by status, name, tags, or id |
 | `(debug.nav/open run-id)` | discover a run's collections, filters, identifiers, and completeness fields |
 | `(debug.nav/read run-id options)` | read one bounded native page from a named collection |
+| `(debug.nav/counters filters)` | return canonical trace counters for a filtered run cohort |
 | `(debug.nav/follow run-id relationship options)` | follow one typed relationship |
 
 `follow` takes a relationship exactly as an evidence item published it and

@@ -293,7 +293,8 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     arguments = [
       %{"limit" => 10},
       %{"run_id" => fixture.run_id},
-      %{"run_id" => fixture.run_id, "collection" => "provider_exchanges"}
+      %{"run_id" => fixture.run_id, "collection" => "provider_exchanges"},
+      %{}
     ]
 
     Enum.zip([all_profile_capabilities, manifest_capabilities, arguments])

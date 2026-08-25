@@ -4,11 +4,13 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   alias PtcRunner.Kernel.ConversationProjection
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.RunAnalysis
   alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.RunAnalysisRelationships
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.TestSupport.PrivateInspectionFixture
+  alias PtcRunner.TestSupport.TestHelpers
 
   @tag :tmp_dir
   test "run listing delegates the bounded native page", %{tmp_dir: root} do
@@ -1112,26 +1114,31 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   end
 
   @tag :tmp_dir
-  test "one capability builder exposes only runs, open, and read", %{tmp_dir: root} do
+  test "one capability builder exposes runs, open, read, then counters", %{tmp_dir: root} do
     fixture = PrivateInspectionFixture.create!(root)
     {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
     {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
     on_exit(fn -> InspectionSnapshot.stop(inspection) end)
     on_exit(fn -> TraceSnapshot.stop(trace) end)
 
+    assert RunAnalysis.operations() == [:runs, :open, :read, :counters]
     assert {:ok, capabilities} = RunAnalysisCapability.from_snapshots(trace, inspection)
 
     assert Enum.map(capabilities, & &1.name) == [
              "analysis-runs",
              "analysis-open",
-             "analysis-read"
+             "analysis-read",
+             "analysis-counters"
            ]
 
     runs = Enum.find(capabilities, &(&1.name == "analysis-runs"))
     read = Enum.find(capabilities, &(&1.name == "analysis-read"))
+    counters = Enum.find(capabilities, &(&1.name == "analysis-counters"))
     assert runs.input_schema["properties"]["bundle"]["type"] == "string"
     assert read.input_schema["properties"]["limit"]["maximum"] == 100
     assert read.input_schema["properties"]["parent_evaluation_id"]["type"] == "string"
+    assert counters.input_schema["additionalProperties"] == false
+    assert counters.input_schema["required"] == []
 
     assert {:ok, %{"items" => [_]}} =
              read.callback.(%{"run_id" => fixture.run_id, "collection" => "turns"})
@@ -1142,8 +1149,224 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     assert Enum.map(provider_capabilities, & &1.name) == [
              "evidence.runs",
              "evidence.open",
-             "evidence.read"
+             "evidence.read",
+             "evidence.counters"
            ]
+
+    alias_119 = "a" <> String.duplicate("b", 118)
+    alias_120 = "a" <> String.duplicate("b", 119)
+    assert byte_size(alias_119) == 119
+    assert byte_size(alias_120) == 120
+
+    assert {:ok, long_capabilities} =
+             RunAnalysisCapability.from_snapshots(trace, inspection, alias_119)
+
+    assert Enum.map(long_capabilities, & &1.name) == [
+             alias_119 <> ".runs",
+             alias_119 <> ".open",
+             alias_119 <> ".read",
+             alias_119 <> ".counters"
+           ]
+
+    assert {:error, :invalid_run_analysis_capability} =
+             RunAnalysisCapability.from_snapshots(trace, inspection, alias_120)
+  end
+
+  @tag :tmp_dir
+  test "counters delegates the captured snapshot aggregate unchanged", %{tmp_dir: root} do
+    write_counter_runs!(root)
+
+    {:ok, trace} = TraceSnapshot.start({:directory, root}, owner: self())
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace)
+
+    empty = %{}
+    assert {:ok, expected} = TraceSnapshot.query(trace, :counters, empty)
+    assert {:ok, ^expected} = RunAnalysis.query(analysis, :counters, empty)
+
+    filters = [
+      %{"status" => "ok"},
+      %{"run_id" => "second"},
+      %{"trace_id" => "trace-second"},
+      %{"tags" => %{"cohort" => "candidate"}},
+      %{"name" => "second-run"},
+      %{"bundle" => "missing-bundle"},
+      %{"model" => "openrouter:vendor/model-b"},
+      %{"provider" => "openrouter"},
+      %{"from" => "2026-01-01T00:00:00Z"},
+      %{"to" => "2027-01-01T00:00:00Z"},
+      %{"mission_name" => "default"}
+    ]
+
+    for arguments <- filters do
+      assert {:ok, expected_page} = TraceSnapshot.query(trace, :counters, arguments)
+      assert {:ok, ^expected_page} = RunAnalysis.query(analysis, :counters, arguments)
+    end
+
+    assert {:ok, %{"llm_usage_by_model" => [%{"resolved_model" => resolved}]}} =
+             RunAnalysis.query(analysis, :counters, %{"run_id" => "second"})
+
+    assert resolved == "openrouter:vendor/model-b"
+
+    assert {:ok, %{"unattributed_model_calls" => 1, "llm_usage" => usage}} =
+             RunAnalysis.query(analysis, :counters, %{})
+
+    assert Enum.any?(usage, &(&1["alias"] == "writer"))
+    assert Enum.any?(usage, &(&1["installation_revision"] == "review-v2"))
+
+    File.write!(
+      Path.join(root, "later.jsonl"),
+      Jason.encode!(counter_event("later", 1, "run-started", %{"missions" => %{}})) <> "\n"
+    )
+
+    assert {:ok, ^expected} = RunAnalysis.query(analysis, :counters, empty)
+  end
+
+  @tag :tmp_dir
+  test "counter filters fail closed at schema then at the canonical query", %{tmp_dir: root} do
+    write_counter_runs!(root)
+    {:ok, trace} = TraceSnapshot.start({:directory, root}, owner: self())
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+
+    assert {:ok, capabilities} = RunAnalysisCapability.from_snapshots(trace)
+    counters = Enum.find(capabilities, &(&1.name == "analysis-counters"))
+    properties = Map.keys(counters.input_schema["properties"]) |> Enum.sort()
+
+    assert properties ==
+             ~w(bundle from mission_name model name provider run_id status tags to trace_id)
+
+    ascii_limit = String.duplicate("a", 256)
+    ascii_overflow = String.duplicate("a", 257)
+    utf8_overflow = String.duplicate("é", 129)
+    sixteen_tags = Map.new(1..16, &{"tag-#{&1}", "value-#{&1}"})
+    seventeen_tags = Map.put(sixteen_tags, "tag-17", "extra")
+
+    assert JSONSchema.valid?(counters.input_validator, %{})
+    assert JSONSchema.valid?(counters.input_validator, %{"run_id" => ascii_limit})
+    assert JSONSchema.valid?(counters.input_validator, %{"tags" => sixteen_tags})
+    assert JSONSchema.valid?(counters.input_validator, %{"tags" => seventeen_tags})
+    assert JSONSchema.valid?(counters.input_validator, %{"name" => utf8_overflow})
+    refute JSONSchema.valid?(counters.input_validator, %{"run_id" => ascii_overflow})
+    refute JSONSchema.valid?(counters.input_validator, %{"limit" => 1})
+    refute JSONSchema.valid?(counters.input_validator, %{"cursor" => "next"})
+    refute JSONSchema.valid?(counters.input_validator, %{"view" => "full"})
+    refute JSONSchema.valid?(counters.input_validator, %{"run_ids" => ["second"]})
+    refute JSONSchema.valid?(counters.input_validator, %{"unsupported" => true})
+
+    assert {:ok, analysis} = RunAnalysis.new(trace)
+    assert {:ok, %{"runs" => 0}} = counters.callback.(%{"tags" => sixteen_tags})
+
+    assert {:error, %{kind: :invalid_request, details: "invalid analysis query"}} =
+             counters.callback.(%{"tags" => seventeen_tags})
+
+    assert {:error, %{kind: :invalid_request, details: "invalid analysis query"}} =
+             counters.callback.(%{"name" => utf8_overflow})
+
+    assert {:error, %{kind: :invalid_request, details: "invalid analysis query"}} =
+             counters.callback.(%{"from" => "not-a-timestamp"})
+
+    assert {:error, :invalid_query} =
+             RunAnalysis.query(analysis, :counters, %{"view" => "full"})
+  end
+
+  @tag :tmp_dir
+  test "an oversized counter aggregate fails closed without a partial map", %{tmp_dir: root} do
+    write_counter_runs!(root)
+
+    {:ok, trace} =
+      TraceSnapshot.start({:directory, root}, owner: self(), max_result_bytes: 100)
+
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace)
+
+    assert {:error, :result_limit_exceeded} = TraceSnapshot.query(trace, :counters, %{})
+    assert {:error, :result_limit_exceeded} = RunAnalysis.query(analysis, :counters, %{})
+
+    assert {:ok, capabilities} = RunAnalysisCapability.from_snapshots(trace)
+    counters = Enum.find(capabilities, &(&1.name == "analysis-counters"))
+
+    assert {:error, %{kind: :invalid_request, details: "analysis result limit exceeded"}} =
+             counters.callback.(%{})
+  end
+
+  defp write_counter_runs!(directory) do
+    first = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-a")
+    second = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-b")
+    reviewer = TestHelpers.llm_snapshot("reviewer", "review-v2", "openrouter:vendor/model-a")
+
+    File.write!(
+      Path.join(directory, "counters.jsonl"),
+      Enum.map_join(
+        counter_run("first", first, "ok", %{"input" => 3, "output" => 2, "total_cost" => 0.25}) ++
+          counter_run("second", second, "ok", %{"input" => 5}) ++
+          counter_run("review", reviewer, "ok", %{"input" => 7}, "reviewer", "review-v2") ++
+          counter_run("private", nil, "error", nil),
+        "",
+        &(Jason.encode!(&1) <> "\n")
+      )
+    )
+  end
+
+  defp counter_run(
+         run_id,
+         snapshot_or_snapshots,
+         status,
+         usage,
+         alias_name \\ "writer",
+         revision \\ "stable-v1"
+       ) do
+    snapshots =
+      case snapshot_or_snapshots do
+        nil -> []
+        snapshots when is_list(snapshots) -> snapshots
+        snapshot -> [snapshot]
+      end
+
+    labels = %{
+      "name" => run_id <> "-run",
+      "provider" => "openrouter",
+      "tags" => %{"cohort" => "candidate"}
+    }
+
+    labels =
+      case snapshot_or_snapshots do
+        %{"acquisition" => %{"resolved_model" => model}} -> Map.put(labels, "model", model)
+        _other -> labels
+      end
+
+    started = %{
+      "missions" => %{},
+      "connector_snapshots" => snapshots,
+      "labels" => labels
+    }
+
+    stopped = %{
+      "environment" => "workflow",
+      "name" => "llm-request",
+      "alias" => alias_name,
+      "installation_revision" => revision,
+      "status" => status
+    }
+
+    stopped = if is_nil(usage), do: stopped, else: Map.put(stopped, "usage", usage)
+
+    [
+      counter_event(run_id, 1, "run-started", started),
+      counter_event(run_id, 2, "capability-stopped", stopped),
+      counter_event(run_id, 3, "run-stopped", %{"outcome" => "ok"})
+    ]
+  end
+
+  defp counter_event(run_id, sequence, type, data) do
+    %{
+      "schema_version" => 2,
+      "run_id" => run_id,
+      "trace_id" => "trace-#{run_id}",
+      "sequence" => sequence,
+      "timestamp" => "2026-07-12T12:00:00Z",
+      "type" => type,
+      "data" => data
+    }
   end
 
   defp exchange(sequence, messages, assistant, id \\ nil) do

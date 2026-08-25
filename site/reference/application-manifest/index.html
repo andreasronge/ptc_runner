@@ -232,12 +232,13 @@ is read-only. If any mapping is a write, an explicit non-empty list is
 required. <code class="inline">model_visible</code> may name any subset of the authorized <code class="inline">allow</code> names,
 including mappings whose host <code class="inline">model_visible</code> flag is false. Omitted, it
 defaults to the authorized names the host already marked visible. Visibility
-never grants or denies call authority.</p><p>Native trace and inspection aliases derive three navigation capabilities:
-<code class="inline">runs</code>, <code class="inline">open</code>, and <code class="inline">read</code>. <code class="inline">open</code> advertises the named collections and their
-filters; <code class="inline">read</code> returns one native bounded page. Public trace sources provide
-the <code class="inline">activity</code> collection and return <code class="inline">evidence_unavailable</code> for private
-collections. An inspection alias composes its
-required trace snapshot with authorized private records. Set the
+never grants or denies call authority.</p><p>Native trace and inspection aliases derive four navigation capabilities:
+<code class="inline">runs</code>, <code class="inline">open</code>, <code class="inline">read</code>, and <code class="inline">counters</code>. <code class="inline">open</code> advertises the named collections
+and their filters; <code class="inline">read</code> returns one native bounded page; <code class="inline">counters</code> returns
+the canonical trace aggregate, including adapter-attested model usage. Public
+trace sources provide the <code class="inline">activity</code> collection and return
+<code class="inline">evidence_unavailable</code> for private collections. An inspection alias composes
+its required trace snapshot with authorized private records. Set the
 trace dependency's config to <code class="inline">{&quot;expose&quot;: false}</code> when only the aggregate
 inspection namespace should be callable.</p><p>Snapshot acquisition is fail closed and immutable: malformed, duplicate,
 orphaned, or oversized evidence rejects the capture rather than exposing a

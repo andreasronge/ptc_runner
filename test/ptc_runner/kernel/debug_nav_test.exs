@@ -14,7 +14,8 @@ defmodule PtcRunner.Kernel.DebugNavTest do
     assert {:ok, components} = Library.resolve_components([{:library, "debug.nav"}])
     assert {:ok, bundle} = Kernel.compile_bundle(components)
 
-    for ref <- ~w(debug.nav/runs debug.nav/open debug.nav/read debug.nav/follow) do
+    for ref <-
+          ~w(debug.nav/runs debug.nav/open debug.nav/read debug.nav/counters debug.nav/follow) do
       assert {:ok, _export} = Prelude.fetch_export(bundle.prelude, ref)
     end
 
@@ -25,10 +26,10 @@ defmodule PtcRunner.Kernel.DebugNavTest do
            |> Enum.filter(&(&1.namespace == "debug.nav"))
            |> Enum.map(& &1.ref)
            |> Enum.sort() ==
-             ~w(debug.nav/follow debug.nav/open debug.nav/read debug.nav/runs)
+             ~w(debug.nav/counters debug.nav/follow debug.nav/open debug.nav/read debug.nav/runs)
   end
 
-  test "runs, open, and read delegate the unwrapped native page unchanged" do
+  test "runs, open, read, and counters delegate the unwrapped native page unchanged" do
     assert run(~S|(debug.nav/runs {"status" "error" "limit" 5})|) == %{
              "items" => [failed_run()],
              "next_cursor" => nil
@@ -45,6 +46,19 @@ defmodule PtcRunner.Kernel.DebugNavTest do
            }
 
     assert_receive {:read_arguments, %{"collection" => "turns", "run_id" => "run-1"}}
+
+    assert run(~S|(debug.nav/counters {"run_id" "run-1"})|) == %{
+             "events" => 3,
+             "llm_usage_by_model" => [%{"resolved_model" => "openrouter:vendor/model-b"}],
+             "unattributed_model_calls" => 0
+           }
+
+    assert_receive {:counters_arguments, %{"run_id" => "run-1"}}
+  end
+
+  test "counters fails a capability refusal rather than treating it as data" do
+    assert {:ok, %{return: {:__ptc_fail__, %{status: :error, kind: :invalid_request}}}} =
+             run_result(~S|(debug.nav/counters {"unsupported" true})|)
   end
 
   test "follow preserves a typed relationship and its complete native page" do
@@ -194,6 +208,24 @@ defmodule PtcRunner.Kernel.DebugNavTest do
           send(owner, {:read_arguments, arguments})
           read(arguments)
         end),
+      "debug.nav.counters" => %TrustedTool{
+        function: fn arguments ->
+          send(owner, {:counters_arguments, arguments})
+
+          if Map.has_key?(arguments, "unsupported") do
+            %{status: :error, kind: :invalid_request, reason: "refused"}
+          else
+            %{
+              status: :ok,
+              value: %{
+                "events" => 3,
+                "llm_usage_by_model" => [%{"resolved_model" => "openrouter:vendor/model-b"}],
+                "unattributed_model_calls" => 0
+              }
+            }
+          end
+        end
+      },
       "cap-list" => tool(fn _arguments -> [] end),
       "cap-describe" => tool(fn _arguments -> %{} end)
     }

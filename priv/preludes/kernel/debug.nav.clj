@@ -20,6 +20,12 @@
   [run-id options]
   (cap/unwrap! (tool/debug.nav.read (assoc options "run_id" run-id))))
 
+(defn counters
+  "Return canonical trace counters for a filtered run cohort, including adapter-attested model usage. Filters are the existing counter keys; call once per selected run_id to reduce an explicit cohort. Example: (debug.nav/counters {\"run_id\" \"run-id\"})."
+  {:signature "(filters :map) -> :map"}
+  [filters]
+  (cap/unwrap! (tool/debug.nav.counters filters)))
+
 (defn follow
   "Follow one typed relationship returned by an evidence item. The relationship supplies the exact target collection and filters; options may contain only limit and cursor. Check the relationship first: one whose state is \"unavailable\", or whose filters are null, cannot be followed and calling follow on it fails the program instead of returning a page. Returns the original relationship beside the complete native page envelope. Example: (debug.nav/follow run-id relationship {\"limit\" 20})."
   {:signature "(run-id :string, relationship :map, options :map) -> :map"}
