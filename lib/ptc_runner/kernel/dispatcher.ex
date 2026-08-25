@@ -898,50 +898,48 @@ defmodule PtcRunner.Kernel.Dispatcher do
     cap = capability_result_limit(state)
     bytes = RetainedSize.bytes_with_cap(value, cap)
 
-    cond do
-      not (json_value?(value) and is_integer(bytes) and bytes <= cap) ->
-        post_invocation_failure(
-          %{
-            status: :error,
-            kind: :result_exceeded,
-            reason: :provider_result_limit,
-            retryable?: false
-          },
-          environment,
-          capability
-        )
+    if json_value?(value) and is_integer(bytes) and bytes <= cap do
+      case validate_output_stages(invocation, validation, value, stages) do
+        :ok ->
+          %{status: :ok, value: RetainedSize.detach_binaries(value)}
 
-      true ->
-        case validate_output_stages(invocation, validation, value, stages) do
-          :ok ->
-            %{status: :ok, value: RetainedSize.detach_binaries(value)}
+        {:error, :output_schema_mismatch} ->
+          post_invocation_failure(
+            %{
+              status: :error,
+              kind: :invalid_result,
+              reason: :output_schema_mismatch,
+              retryable?: false
+            },
+            environment,
+            capability
+          )
 
-          {:error, :output_schema_mismatch} ->
-            post_invocation_failure(
-              %{
-                status: :error,
-                kind: :invalid_result,
-                reason: :output_schema_mismatch,
-                retryable?: false
-              },
-              environment,
-              capability
-            )
+        {:error, :output_validation_unavailable} ->
+          _ = mark_terminal_host_failure(state, environment, validation.evaluation_lease)
 
-          {:error, :output_validation_unavailable} ->
-            _ = mark_terminal_host_failure(state, environment, validation.evaluation_lease)
-
-            post_invocation_failure(
-              %{
-                status: :error,
-                kind: :capability_unavailable,
-                reason: :output_validation_unavailable,
-                retryable?: false
-              },
-              environment,
-              capability
-            )
-        end
+          post_invocation_failure(
+            %{
+              status: :error,
+              kind: :capability_unavailable,
+              reason: :output_validation_unavailable,
+              retryable?: false
+            },
+            environment,
+            capability
+          )
+      end
+    else
+      post_invocation_failure(
+        %{
+          status: :error,
+          kind: :result_exceeded,
+          reason: :provider_result_limit,
+          retryable?: false
+        },
+        environment,
+        capability
+      )
     end
   end
 

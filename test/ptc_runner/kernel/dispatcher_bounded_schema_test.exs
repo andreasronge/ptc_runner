@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Dispatcher
+  alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
@@ -129,23 +130,12 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
   test "output validator unavailability is distinct from invalid provider output" do
     parent = self()
 
-    {:ok, capability} =
-      Capability.new(
-        name: "checked-output",
-        effect: :read,
-        input_schema: %{"type" => "object"},
-        output_schema: %{
-          "type" => "object",
-          "properties" => %{"ok" => %{"type" => "boolean"}},
-          "required" => ["ok"]
-        },
-        callback: fn arguments ->
-          send(parent, {:called, arguments})
-          {:ok, %{"ok" => true}}
-        end
-      )
+    capability =
+      unavailable_output_capability(fn arguments ->
+        send(parent, {:called, arguments})
+        {:ok, %{"ok" => true}}
+      end)
 
-    capability = %{capability | output_validator: :forced_validator_failure}
     {result, state, sink} = dispatch_capability(capability, %{})
 
     assert_received {:called, %{}}
@@ -169,20 +159,7 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
   end
 
   test "mission output validator unavailability marks terminal host failure" do
-    {:ok, capability} =
-      Capability.new(
-        name: "checked-output",
-        effect: :read,
-        input_schema: %{"type" => "object"},
-        output_schema: %{
-          "type" => "object",
-          "properties" => %{"ok" => %{"type" => "boolean"}},
-          "required" => ["ok"]
-        },
-        callback: fn _ -> {:ok, %{"ok" => true}} end
-      )
-
-    capability = %{capability | output_validator: :forced_validator_failure}
+    capability = unavailable_output_capability(fn _ -> {:ok, %{"ok" => true}} end)
     {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
     {:ok, limits} = Limits.new()
     {:ok, state} = RunState.start(limits)
@@ -211,25 +188,12 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
   end
 
   test "evaluation surfaces output validation unavailability on the host-failure reason" do
-    {:ok, capability} =
-      Capability.new(
-        name: "checked-output",
-        effect: :read,
-        input_schema: %{"type" => "object"},
-        output_schema: %{
-          "type" => "object",
-          "properties" => %{"ok" => %{"type" => "boolean"}},
-          "required" => ["ok"]
-        },
-        callback: fn _ -> {:ok, %{"ok" => true}} end
-      )
-
-    capability = %{capability | output_validator: :forced_validator_failure}
+    capability = unavailable_output_capability(fn _ -> {:ok, %{"ok" => true}} end)
     {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
     {:ok, state} = RunState.start(Limits.defaults())
 
     result =
-      PtcRunner.Kernel.Evaluation.evaluate_source(
+      Evaluation.evaluate_source(
         state,
         "default",
         environment,
@@ -241,6 +205,23 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
              terminal_host_failure?: true,
              terminal_host_failure_reason: :output_validation_unavailable
            } = result
+  end
+
+  defp unavailable_output_capability(callback) do
+    {:ok, capability} =
+      Capability.new(
+        name: "checked-output",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        output_schema: %{
+          "type" => "object",
+          "properties" => %{"ok" => %{"type" => "boolean"}},
+          "required" => ["ok"]
+        },
+        callback: callback
+      )
+
+    %{capability | output_validator: :forced_validator_failure}
   end
 
   defp dispatch_request_schema(arguments, callback) do
