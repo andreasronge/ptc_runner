@@ -231,15 +231,34 @@ and availability. Public sessions expose <code class="inline">activity</code>; p
 (analysis/read run-id {&quot;collection&quot; &quot;activity&quot; &quot;limit&quot; 100})
 (analysis/counters {&quot;run_id&quot; run-id})</code></pre><p><code class="inline">analysis/counters</code> is one bounded aggregate, not a page. Filter a cohort in
 one call, or call once per selected <code class="inline">run_id</code> and reduce the returned
-<code class="inline">llm_usage_by_model</code> rows in PTC-Lisp. Absent <code class="inline">total_cost</code> is unknown spend,
-not zero:</p><pre><code class="clojure language-clojure">(analysis/counters
+<code class="inline">llm_usage_by_model</code> rows in PTC-Lisp. Group those rows by <code class="inline">resolved_model</code>
+and sum <code class="inline">calls</code>, <code class="inline">prompt_tokens</code>, and <code class="inline">completion_tokens</code>. Absent <code class="inline">total_cost</code>
+is unknown spend, not zero: omit the aggregate cost whenever any contributing
+row withholds it.</p><pre><code class="clojure language-clojure">(analysis/counters
   {&quot;tags&quot; {&quot;cohort&quot; &quot;candidate&quot;}
    &quot;from&quot; &quot;2026-08-01T00:00:00Z&quot;
    &quot;to&quot; &quot;2026-09-01T00:00:00Z&quot;})
 
+(defn cost-or-unknown [rows]
+  (if (every? #(contains? % &quot;total_cost&quot;) rows)
+    {&quot;total_cost&quot; (reduce + (map #(get % &quot;total_cost&quot;) rows))}
+    {}))
+
+(defn reduce-model-rows [rows]
+  (-&gt;&gt; rows
+       (group-by #(get % &quot;resolved_model&quot;))
+       (map (fn [[model group]]
+              (merge
+                {&quot;resolved_model&quot; model
+                 &quot;calls&quot; (reduce + (map #(get % &quot;calls&quot;) group))
+                 &quot;prompt_tokens&quot; (reduce + (map #(get % &quot;prompt_tokens&quot;) group))
+                 &quot;completion_tokens&quot; (reduce + (map #(get % &quot;completion_tokens&quot;) group))}
+                (cost-or-unknown group))))))
+
 (def selected [&quot;run-a&quot; &quot;run-b&quot;])
 (def pages (map #(analysis/counters {&quot;run_id&quot; %}) selected))
-(def model-rows (mapcat #(get % &quot;llm_usage_by_model&quot;) pages))</code></pre><p>Loaded files, repeated expressions, scripts, stdin, and interactive forms use
+(def model-rows (mapcat #(get % &quot;llm_usage_by_model&quot;) pages))
+(reduce-model-rows model-rows)</code></pre><p>Loaded files, repeated expressions, scripts, stdin, and interactive forms use
 one serialized mission continuation and aggregate budget. Each source input is
 bounded before evaluation. The profile contains no filesystem, network, LLM,
 agent, workflow, MCP, private-inspection, or nested-evaluation authority.</p><p>Inspect its complete safe static contract without opening any resource:</p><pre><code class="console language-console">ptc repl --describe-profile run-analysis-v1

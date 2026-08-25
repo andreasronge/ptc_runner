@@ -266,8 +266,10 @@ One session can build an investigation incrementally:
 
 `analysis/counters` is one bounded aggregate, not a page. Filter a cohort in
 one call, or call once per selected `run_id` and reduce the returned
-`llm_usage_by_model` rows in PTC-Lisp. Absent `total_cost` is unknown spend,
-not zero:
+`llm_usage_by_model` rows in PTC-Lisp. Group those rows by `resolved_model`
+and sum `calls`, `prompt_tokens`, and `completion_tokens`. Absent `total_cost`
+is unknown spend, not zero: omit the aggregate cost whenever any contributing
+row withholds it.
 
 ```clojure
 (analysis/counters
@@ -275,9 +277,26 @@ not zero:
    "from" "2026-08-01T00:00:00Z"
    "to" "2026-09-01T00:00:00Z"})
 
+(defn cost-or-unknown [rows]
+  (if (every? #(contains? % "total_cost") rows)
+    {"total_cost" (reduce + (map #(get % "total_cost") rows))}
+    {}))
+
+(defn reduce-model-rows [rows]
+  (->> rows
+       (group-by #(get % "resolved_model"))
+       (map (fn [[model group]]
+              (merge
+                {"resolved_model" model
+                 "calls" (reduce + (map #(get % "calls") group))
+                 "prompt_tokens" (reduce + (map #(get % "prompt_tokens") group))
+                 "completion_tokens" (reduce + (map #(get % "completion_tokens") group))}
+                (cost-or-unknown group))))))
+
 (def selected ["run-a" "run-b"])
 (def pages (map #(analysis/counters {"run_id" %}) selected))
 (def model-rows (mapcat #(get % "llm_usage_by_model") pages))
+(reduce-model-rows model-rows)
 ```
 
 Loaded files, repeated expressions, scripts, stdin, and interactive forms use

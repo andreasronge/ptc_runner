@@ -44,7 +44,8 @@ A project document can capture both instead of the two switches; see
 [project configuration](../reference/project-files.md).
 
 Two code-owned profiles read those artifacts. `run-analysis-v1` takes the
-canonical trace and grants the three `analysis-*` capabilities.
+canonical trace and grants the four `analysis-*` capabilities (`analysis-runs`,
+`analysis-open`, `analysis-read`, `analysis-counters`).
 `private-run-analysis-v1` additionally takes the inspection artifact, and
 requires an authorized private sink because the records it returns carry exact
 prompts, generated source, and capability payloads.
@@ -510,16 +511,34 @@ as `result_limit_exceeded` rather than returning a truncated map.
 
 A filter-defined cohort is one counters call. An explicit list of selected run
 IDs is one call per `run_id`, with the caller reducing the returned
-`llm_usage_by_model` rows in PTC-Lisp. The run-ID list is cohort selection
-data; each result already carries attested attribution or an honest
-unattributed count. Absent `total_cost` is unknown spend, not zero:
+`llm_usage_by_model` rows in PTC-Lisp. Group those rows by `resolved_model` and
+sum `calls`, `prompt_tokens`, and `completion_tokens`. The run-ID list is
+cohort selection data; each result already carries attested attribution or an
+honest unattributed count. Absent `total_cost` is unknown spend, not zero: omit
+the aggregate cost whenever any contributing row withholds it.
 
 ```clojure
+(defn cost-or-unknown [rows]
+  (if (every? #(contains? % "total_cost") rows)
+    {"total_cost" (reduce + (map #(get % "total_cost") rows))}
+    {}))
+
+(defn reduce-model-rows [rows]
+  (->> rows
+       (group-by #(get % "resolved_model"))
+       (map (fn [[model group]]
+              (merge
+                {"resolved_model" model
+                 "calls" (reduce + (map #(get % "calls") group))
+                 "prompt_tokens" (reduce + (map #(get % "prompt_tokens") group))
+                 "completion_tokens" (reduce + (map #(get % "completion_tokens") group))}
+                (cost-or-unknown group))))))
+
 (def selected ["run-a" "run-b" "run-c"])
 (def pages (map #(analysis/counters {"run_id" %}) selected))
 (def model-rows (mapcat #(get % "llm_usage_by_model") pages))
 (def unattributed (apply + (map #(get % "unattributed_model_calls") pages)))
-;; Reduce priced rows separately. A missing total_cost stays missing.
+(reduce-model-rows model-rows)
 ```
 
 ## Pagination, ordering, and bounds

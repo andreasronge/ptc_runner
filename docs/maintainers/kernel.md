@@ -442,7 +442,8 @@ span them:
 
 - The server-owned `run-analysis-v1` profile is shared by the Viewer and
   ordinary terminal REPL frontends. Its mission bundle contains `cap` and
-  `analysis`, its explicit authority the three `analysis-*` capabilities.
+  `analysis`, its explicit authority the four `analysis-*` capabilities
+  (`analysis-runs`, `analysis-open`, `analysis-read`, `analysis-counters`).
   Ordinary implicit mission introspection remains available. Filesystem,
   network, LLM, agent, workflow, MCP, private-inspection, and nested
   `kernel-eval` authority are absent. `private-run-analysis-v1` uses the
