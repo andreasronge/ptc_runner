@@ -1007,6 +1007,14 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         [:destructuring]
       ),
       regression_case(
+        "regression/gap-f03-dormant-defn-recur-arity-001",
+        "clojure.core",
+        ["defn", "loop", "recur"],
+        "(defn bad [] (loop [x 1 y 2] (recur 1 2 3)))",
+        ["GAP-F03"],
+        []
+      ),
+      regression_case(
         "regression/gap-c01-int-predicate-001",
         "clojure.core",
         ["int?"],
