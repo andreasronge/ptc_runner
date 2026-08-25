@@ -1076,4 +1076,12 @@ defmodule PtcRunner.Lisp.ClojureConformanceTest do
       assert_clojure_equivalent(~S|(= :hello (keyword (name :hello)))|)
     end
   end
+
+  describe "Clojure conformance - recur arity (GAP-F03)" do
+    @describetag :clojure
+
+    test "wrong-arity recur in a dormant defn is rejected" do
+      assert_clojure_equivalent("(defn bad [] (loop [x 1 y 2] (recur 1 2 3)))")
+    end
+  end
 end

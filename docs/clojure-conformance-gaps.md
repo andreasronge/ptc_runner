@@ -129,6 +129,25 @@ Features marked ✅ in the audit but whose behavior diverges from Clojure.
 
 **Fix:** Already working — rest args with vector destructuring (`[& [y]]`) are handled correctly by the existing variadic binding + pattern matching logic.
 
+### GAP-F03: Wrong-arity `recur` accepted in an uncalled definition
+
+| Field | Value |
+|-------|-------|
+| **Priority** | P0 |
+| **Status** | **fixed** |
+| **Source** | Issue #1638; DABStep experiment #1634 |
+
+**Clojure behavior:** Every `recur` must match the arity of its nearest recursion point (`loop`, `fn`, or `defn`) while that containing form is compiled. The definition is rejected even if the function is never invoked:
+
+```clojure
+(defn bad [] (loop [x 1 y 2] (recur 1 2 3)))
+;; Mismatched argument count to recur, expected: 2 args, got: 3
+```
+
+Recur arity is the number of loop binding pairs or function parameter slots, not the number of names introduced by destructuring. A variadic `[x & xs]` expects exactly two recur arguments: the new `x` and the new rest-slot value. Nested recursion points shadow the outer target for their body.
+
+**Fix:** The analyzer installs the current recur target arity while analyzing each `loop`/`fn`/`defn` body and rejects a mismatch as `{:invalid_arity, :recur, message}` before evaluation. Runtime `arity_mismatch` checks remain as invariant defenses.
+
 ---
 
 ## 3. Core Functions — Missing functions
