@@ -623,7 +623,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   defp normalize_capture_error(:inspection_source_limit_exceeded), do: :source_limit_exceeded
   defp normalize_capture_error(:invalid_inspection_artifact), do: :malformed_source
   defp normalize_capture_error(:malformed_inspection_artifact), do: :malformed_source
-  defp normalize_capture_error(:invalid_inspection_source), do: :selected_inspection_not_regular
+  defp normalize_capture_error(:invalid_inspection_source), do: :malformed_source
 
   defp normalize_capture_error(_reason), do: :invalid_snapshot
 

@@ -45,6 +45,24 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
   end
 
   @tag :tmp_dir
+  test "directory inspection capture refuses a symlink member without a selected code", %{
+    tmp_dir: root
+  } do
+    fixture = fixture!(root)
+    extra = Path.join(root, "extra.inspection.jsonl")
+    File.write!(extra, "not-used\n")
+    File.ln_s!(extra, Path.join(fixture.inspection, "extra.inspection.jsonl"))
+
+    assert {:ok, traces} =
+             TraceSnapshot.start({:directory, fixture.traces}, owner: self())
+
+    on_exit(fn -> TraceSnapshot.stop(traces) end)
+
+    assert {:error, :malformed_source} =
+             InspectionSnapshot.start({:directory, fixture.inspection}, traces, owner: self())
+  end
+
+  @tag :tmp_dir
   test "selected identity differs from a whole-directory snapshot of the same file", %{
     tmp_dir: root
   } do
