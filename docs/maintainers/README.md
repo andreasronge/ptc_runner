@@ -24,6 +24,8 @@ runtime implementation, repository workflow, and host-integration view.
   compatibility review method and classification records.
 - [Release procedure](releasing.md) — package, documentation, standalone, and
   launcher release gates.
+- [Sealed evidence log measurement](sealed-evidence-log-measurement.md) —
+  issue #1646 prototype results and the format/index recommendation for #1643.
 
 `AGENTS.md` remains the canonical repository instruction file. Do not duplicate
 its changing worktree, testing, or release commands here when a link is enough.
