@@ -7,7 +7,6 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
   In-flight request messages are staged only until the matching output arrives.
   """
 
-  alias PtcRunner.Kernel.ConversationProjection
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Lisp.Runtime.String, as: RuntimeString
 
@@ -368,6 +367,4 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
       "complete?" => true
     }
   end
-
-  defdelegate compact_turns(items), to: ConversationProjection
 end

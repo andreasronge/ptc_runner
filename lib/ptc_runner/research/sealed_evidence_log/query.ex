@@ -8,6 +8,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
   cursor position is verified against its admission digest.
   """
 
+  alias PtcRunner.Kernel.ConversationProjection
   alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Research.SealedEvidenceLog.Conversation
   alias PtcRunner.Research.SealedEvidenceLog.Handle
@@ -495,7 +496,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
   end
 
   defp compact_turn_page({:ok, %{"items" => items} = page, metrics}) do
-    {:ok, Map.put(page, "items", Conversation.compact_turns(items)), metrics}
+    {:ok, Map.put(page, "items", ConversationProjection.compact_turns(items)), metrics}
   end
 
   defp compact_turn_page(result), do: result
