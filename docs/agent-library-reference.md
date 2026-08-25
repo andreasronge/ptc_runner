@@ -347,7 +347,7 @@ The loop interprets mission evaluation outcomes as follows:
 
 | Outcome | Loop behavior |
 | --- | --- |
-| `(return value)` | Completes as `:returned`; `agent.main` first validates the result contract. |
+| `(return value)` | Completes as `:returned`; validating entries (`agent.core/run`, `run-result-value`, `run-phased-result-value`, and `agent.main`) first check the result contract. |
 | Ordinary value | Sends a bounded success observation and continues if a turn remains. |
 | `(fail value)` | Becomes a subject failure, except for the proven read-only capability case below. |
 | Retryable evaluation error | Sends bounded correction feedback if a turn remains. |
@@ -405,7 +405,7 @@ violated constraints, and small declared numeric, length, or item bounds. It
 does not echo submitted values, enum or const literals, undeclared property
 names, opaque validator reasons, or provider details.
 
-When `agent.main` rejects a returned value, feedback may identify permitted
+When a validating agent entry rejects a returned value, feedback may identify permitted
 and missing keys at retained closed-object paths, only the count of undeclared
 submitted keys, and small schema-declared numeric, length, or item bounds.
 Open objects report missing required keys without treating extension keys as
