@@ -366,15 +366,29 @@ ptc transcript RUN_ID \
   --traces tmp/traces \
   --inspection tmp/inspection \
   --private-unattended \
-  --private-output tmp/transcript/conversation.private.json</code></pre><p>The command reserves an owner-only destination before capture. The parent of
-<code class="inline">--private-output</code> must already exist and be reached without a symbolic link
-— on macOS <code class="inline">/tmp</code> is a symlink, so <code class="inline">/tmp/out.json</code> is refused. Trace,
-inspection, and output directories must be pairwise physically separate: no
-directory may equal, contain, or be contained by either of the others. A file
-in the current directory fails when that directory contains <code class="inline">--traces</code>; create
-a sibling directory instead, as above. A rejection names the two conflicting
-switches and their physical relationship, and discloses no path. Ambiguous,
-incomplete, changed, unsupported, or oversized evidence fails without a
+  --private-output tmp/transcript/conversation.private.json</code></pre><p>The command reserves an owner-only destination before capture. <code class="inline">RUN_ID</code> must be
+a canonical PTC command run reference (<code class="inline">cmd-</code> followed by 26 Crockford
+characters). Capture then opens only these exact candidates, without listing
+either directory:</p><pre><code class="text language-text">TRACE_DIRECTORY/RUN_ID.jsonl
+TRACE_DIRECTORY/RUN_ID.private.jsonl
+INSPECTION_DIRECTORY/RUN_ID.inspection.jsonl</code></pre><p>Exactly one of the two trace candidates must exist as a regular file; both
+present is an ambiguous selected source. The inspection candidate must exist as
+a regular file. Filenames are routing hints: embedded run and trace identities
+remain authoritative, and unrelated directory members are not listed, opened,
+sized, decoded, or counted toward directory or aggregate source limits. The
+selected files still keep their individual source, record, retained-memory,
+heap, deadline, and result ceilings. Whole-directory snapshots used by
+<code class="inline">private-run-analysis-v1</code> stay a distinct source variant and still fail closed
+on malformed or mismatched members.</p><p>The parent of <code class="inline">--private-output</code> must already exist and be reached without a
+symbolic link — on macOS <code class="inline">/tmp</code> is a symlink, so <code class="inline">/tmp/out.json</code> is refused.
+Trace, inspection, and output directories must be pairwise physically separate:
+no directory may equal, contain, or be contained by either of the others. A
+file in the current directory fails when that directory contains <code class="inline">--traces</code>;
+create a sibling directory instead, as above. A rejection names the two
+conflicting switches and their physical relationship, and discloses no path.
+A noncanonical or traversal-shaped <code class="inline">RUN_ID</code>, a missing or non-regular selected
+candidate, a selected identity or correlation mismatch, and ambiguous,
+incomplete, changed, unsupported, or oversized selected evidence fail without a
 partial output.</p><p>Use <code class="inline">private-run-analysis-v1</code> when you need several correlated questions or
 custom PTC-Lisp analysis. Its results can include exact messages, generated
 source, effective components, capability payloads, prints, diagnostics, and

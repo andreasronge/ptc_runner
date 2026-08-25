@@ -1,13 +1,15 @@
 defmodule PtcRunner.TranscriptFrontend do
   @moduledoc """
-  One-shot private conversation retrieval for an immutable run capture.
+  One-shot private conversation retrieval for an immutable selected run capture.
 
   The command reserves an owner-only destination before touching either
-  evidence directory, captures the sealed private analysis recipe, asks the
-  shared `RunAnalysis` read model one question, and publishes deterministic
-  JSON atomically. `--private-unattended` is an explicit accident guard, not
-  access control; same-UID callers able to invoke this command can already read
-  the supplied artifacts.
+  evidence directory, then captures exactly one canonical trace candidate and
+  one canonical inspection artifact for `RUN_ID`. Unrelated files in those
+  directories are not listed, opened, sized, decoded, or counted. The shared
+  `RunAnalysis` read model answers one question, and the command publishes
+  deterministic JSON atomically. `--private-unattended` is an explicit accident
+  guard, not access control; same-UID callers able to invoke this command can
+  already read the supplied artifacts.
   """
 
   alias PtcRunner.Kernel.AnalysisDirectory
@@ -78,75 +80,145 @@ defmodule PtcRunner.TranscriptFrontend do
   end
 
   defp capture_source(handle, run_id, resources, capture_opts) do
-    case PrivateRunAnalysisProfile.capture(resources, capture_opts) do
+    case PrivateRunAnalysisProfile.capture(
+           resources,
+           Keyword.put(capture_opts, :selected_run_ref, run_id)
+         ) do
       {:ok, captured} ->
         try do
-          with {:ok, analysis} <-
-                 RunAnalysis.new(
-                   AnalysisResources.handle(captured, :traces),
-                   AnalysisResources.handle(captured, :inspection)
-                 ),
-               {:ok, turns} <- RunAnalysis.collect(analysis, run_id, "turns", @max_items),
-               conversation = ConversationProjection.present_page(turns),
-               :ok <- admissible_evidence(conversation),
-               {:ok, encoded} <-
-                 DeterministicJSON.encode(%{
-                   "schema_version" => 1,
-                   "run_id" => run_id,
-                   "conversation" => conversation
-                 }),
-               :ok <- PublicationHandle.write(handle, encoded <> "\n"),
-               :ok <- PublicationHandle.sync(handle),
-               :ok <- PublicationHandle.publish(handle) do
-            :ok
-          else
-            # `admissible_evidence/1` already classifies its own refusal.
-            {:error, _code, _message} = classified ->
-              classified
-
-            {:error, :not_found} ->
-              {:error, :run_not_found,
-               "RUN_ID was not found in the correlated --traces and --inspection sources"}
-
-            {:error, :source_changed} ->
-              {:error, :source_changed, "analysis source changed during capture"}
-
-            {:error, :result_limit_exceeded} ->
-              {:error, :result_limit_exceeded, "transcript result limit exceeded"}
-
-            {:error, :evidence_unavailable} ->
-              {:error, :evidence_unavailable, "private transcript evidence unavailable"}
-
-            {:error, _reason} ->
-              {:error, :evidence_unavailable, "private transcript unavailable"}
-          end
+          publish_selected_transcript(handle, run_id, captured)
         after
           AnalysisResources.stop(captured)
         end
 
-      {:error,
-       {:unsupported_inspection_schema_version,
-        %{artifact_version: artifact_version, supported_version: supported_version}}} ->
-        {:error, :unsupported_schema,
-         "inspection artifact schema version #{artifact_version} is unsupported; " <>
-           "this build supports version #{supported_version}"}
-
-      {:error, :source_changed} ->
-        {:error, :source_changed, "analysis source changed during capture"}
-
-      {:error, :empty_traces_resource} ->
-        {:error, :source_unavailable,
-         "--traces must contain at least one canonical trace artifact"}
-
-      {:error, :empty_inspection_resource} ->
-        {:error, :source_unavailable,
-         "--inspection must contain at least one correlated inspection artifact"}
-
-      {:error, _reason} ->
-        {:error, :source_unavailable,
-         "--traces or --inspection could not be captured as private transcript sources"}
+      {:error, reason} ->
+        selected_capture_error(reason)
     end
   end
+
+  defp publish_selected_transcript(handle, run_id, captured) do
+    with {:ok, analysis} <-
+           RunAnalysis.new(
+             AnalysisResources.handle(captured, :traces),
+             AnalysisResources.handle(captured, :inspection)
+           ),
+         {:ok, turns} <- RunAnalysis.collect(analysis, run_id, "turns", @max_items),
+         conversation = ConversationProjection.present_page(turns),
+         :ok <- admissible_evidence(conversation),
+         {:ok, encoded} <-
+           DeterministicJSON.encode(%{
+             "schema_version" => 1,
+             "run_id" => run_id,
+             "conversation" => conversation
+           }),
+         :ok <- PublicationHandle.write(handle, encoded <> "\n"),
+         :ok <- PublicationHandle.sync(handle),
+         :ok <- PublicationHandle.publish(handle) do
+      :ok
+    else
+      {:error, _code, _message} = classified -> classified
+      {:error, reason} -> selected_publish_error(reason)
+    end
+  end
+
+  defp selected_capture_error(
+         {:unsupported_inspection_schema_version,
+          %{artifact_version: artifact_version, supported_version: supported_version}}
+       ) do
+    {:error, :unsupported_schema,
+     "inspection artifact schema version #{artifact_version} is unsupported; " <>
+       "this build supports version #{supported_version}"}
+  end
+
+  defp selected_capture_error(:source_changed),
+    do: {:error, :source_changed, "analysis source changed during capture"}
+
+  defp selected_capture_error(:invalid_run_reference),
+    do: {:error, :invalid_run_reference, "RUN_ID must be a canonical PTC command run reference"}
+
+  defp selected_capture_error(:selected_trace_missing),
+    do:
+      {:error, :selected_trace_missing,
+       "RUN_ID does not name a canonical trace artifact under --traces"}
+
+  defp selected_capture_error(:ambiguous_selected_trace),
+    do:
+      {:error, :ambiguous_selected_trace,
+       "RUN_ID names both canonical trace candidates under --traces"}
+
+  defp selected_capture_error(:selected_inspection_missing),
+    do:
+      {:error, :selected_inspection_missing,
+       "RUN_ID does not name a canonical inspection artifact under --inspection"}
+
+  defp selected_capture_error(:selected_trace_not_regular),
+    do:
+      {:error, :selected_trace_not_regular,
+       "the selected --traces artifact must be a regular file, not a symbolic link"}
+
+  defp selected_capture_error(:selected_inspection_not_regular),
+    do:
+      {:error, :selected_inspection_not_regular,
+       "the selected --inspection artifact must be a regular file, not a symbolic link"}
+
+  defp selected_capture_error(:selected_run_mismatch),
+    do:
+      {:error, :selected_run_mismatch,
+       "the selected --traces and --inspection artifacts do not declare RUN_ID"}
+
+  defp selected_capture_error(reason)
+       when reason in [:inspection_correlation_missing, :incomplete_inspection_correlation],
+       do:
+         {:error, :inspection_correlation_missing,
+          "the selected --traces and --inspection artifacts do not correlate"}
+
+  defp selected_capture_error(:malformed_source),
+    do: {:error, :malformed_source, "the selected transcript source is malformed"}
+
+  defp selected_capture_error(:unsupported_version),
+    do:
+      {:error, :unsupported_schema,
+       "the selected transcript source uses an unsupported schema version"}
+
+  defp selected_capture_error(:source_limit_exceeded),
+    do: {:error, :source_limit_exceeded, "the selected transcript source exceeded its limit"}
+
+  defp selected_capture_error(:empty_traces_resource),
+    do:
+      {:error, :source_unavailable, "--traces must contain at least one canonical trace artifact"}
+
+  defp selected_capture_error(:empty_inspection_resource),
+    do:
+      {:error, :source_unavailable,
+       "--inspection must contain at least one correlated inspection artifact"}
+
+  defp selected_capture_error({:source_retained_limit_exceeded, _details}),
+    do: {:error, :source_limit_exceeded, "the selected transcript source exceeded its limit"}
+
+  defp selected_capture_error(:source_retained_limit_exceeded),
+    do: {:error, :source_limit_exceeded, "the selected transcript source exceeded its limit"}
+
+  defp selected_capture_error(_reason),
+    do:
+      {:error, :source_unavailable,
+       "--traces or --inspection could not be captured as private transcript sources"}
+
+  defp selected_publish_error(:not_found),
+    do:
+      {:error, :run_not_found,
+       "RUN_ID was not found in the correlated --traces and --inspection sources"}
+
+  defp selected_publish_error(:source_changed),
+    do: {:error, :source_changed, "analysis source changed during capture"}
+
+  defp selected_publish_error(:result_limit_exceeded),
+    do: {:error, :result_limit_exceeded, "transcript result limit exceeded"}
+
+  defp selected_publish_error(:evidence_unavailable),
+    do: {:error, :evidence_unavailable, "private transcript evidence unavailable"}
+
+  defp selected_publish_error(_reason),
+    do: {:error, :evidence_unavailable, "private transcript unavailable"}
 
   # The projection measures three independent conditions and `complete?`
   # collapses them into one boolean. Refusing on the boolean is right; reporting

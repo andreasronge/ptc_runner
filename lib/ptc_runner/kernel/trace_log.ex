@@ -27,7 +27,8 @@ defmodule PtcRunner.Kernel.TraceLog do
   normal and private trace files while retaining accurate per-run provenance.
 
   The internal trace-snapshot owner uses this module's canonical validation and
-  query execution against one immutable directory capture. A snapshot is
+  query execution against one immutable directory capture or one exact selected
+  canonical file. A snapshot is
   deliberately not another public `t:source/0` variant.
   """
 

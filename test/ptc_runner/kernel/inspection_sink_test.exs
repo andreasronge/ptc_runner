@@ -1227,6 +1227,31 @@ defmodule PtcRunner.Kernel.InspectionSinkTest do
   end
 
   @tag :tmp_dir
+  test "loading reports disappearance during verification as a change", %{tmp_dir: dir} do
+    path = Path.join(dir, "vanishing.inspection.jsonl")
+    _records = persisted_records(path, "VANISH")
+
+    assert {:error, :inspection_source_changed} =
+             InspectionArtifact.load(path, [], fn -> File.rm!(path) end)
+  end
+
+  @tag :tmp_dir
+  test "loading reports a missing or unreadable artifact as unavailable", %{tmp_dir: dir} do
+    missing = Path.join(dir, "missing.inspection.jsonl")
+    assert {:error, :inspection_source_unavailable} = InspectionArtifact.load(missing)
+
+    path = Path.join(dir, "unreadable.inspection.jsonl")
+    _records = persisted_records(path, "UNREADABLE")
+    File.chmod!(path, 0o000)
+
+    try do
+      assert {:error, :inspection_source_unavailable} = InspectionArtifact.load(path)
+    after
+      File.chmod!(path, 0o600)
+    end
+  end
+
+  @tag :tmp_dir
   test "loading rejects an incomplete short read instead of parsing its prefix", %{tmp_dir: dir} do
     path = Path.join(dir, "short-read.inspection.jsonl")
     _records = persisted_records(path, "PRIVATE_SUFFIX")

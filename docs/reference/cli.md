@@ -670,15 +670,37 @@ ptc transcript RUN_ID \
   --private-output tmp/transcript/conversation.private.json
 ```
 
-The command reserves an owner-only destination before capture. The parent of
-`--private-output` must already exist and be reached without a symbolic link
-— on macOS `/tmp` is a symlink, so `/tmp/out.json` is refused. Trace,
-inspection, and output directories must be pairwise physically separate: no
-directory may equal, contain, or be contained by either of the others. A file
-in the current directory fails when that directory contains `--traces`; create
-a sibling directory instead, as above. A rejection names the two conflicting
-switches and their physical relationship, and discloses no path. Ambiguous,
-incomplete, changed, unsupported, or oversized evidence fails without a
+The command reserves an owner-only destination before capture. `RUN_ID` must be
+a canonical PTC command run reference (`cmd-` followed by 26 Crockford
+characters). Capture then opens only these exact candidates, without listing
+either directory:
+
+```text
+TRACE_DIRECTORY/RUN_ID.jsonl
+TRACE_DIRECTORY/RUN_ID.private.jsonl
+INSPECTION_DIRECTORY/RUN_ID.inspection.jsonl
+```
+
+Exactly one of the two trace candidates must exist as a regular file; both
+present is an ambiguous selected source. The inspection candidate must exist as
+a regular file. Filenames are routing hints: embedded run and trace identities
+remain authoritative, and unrelated directory members are not listed, opened,
+sized, decoded, or counted toward directory or aggregate source limits. The
+selected files still keep their individual source, record, retained-memory,
+heap, deadline, and result ceilings. Whole-directory snapshots used by
+`private-run-analysis-v1` stay a distinct source variant and still fail closed
+on malformed or mismatched members.
+
+The parent of `--private-output` must already exist and be reached without a
+symbolic link — on macOS `/tmp` is a symlink, so `/tmp/out.json` is refused.
+Trace, inspection, and output directories must be pairwise physically separate:
+no directory may equal, contain, or be contained by either of the others. A
+file in the current directory fails when that directory contains `--traces`;
+create a sibling directory instead, as above. A rejection names the two
+conflicting switches and their physical relationship, and discloses no path.
+A noncanonical or traversal-shaped `RUN_ID`, a missing or non-regular selected
+candidate, a selected identity or correlation mismatch, and ambiguous,
+incomplete, changed, unsupported, or oversized selected evidence fail without a
 partial output.
 
 Use `private-run-analysis-v1` when you need several correlated questions or

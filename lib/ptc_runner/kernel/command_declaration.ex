@@ -207,13 +207,13 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :traces,
           type: :string,
           syntax: ["--traces DIRECTORY"],
-          description: "private-authorized trace directory"
+          description: "trace directory; transcript selects RUN_ID.jsonl or RUN_ID.private.jsonl"
         },
         %{
           key: :inspection,
           type: :string,
           syntax: ["--inspection DIRECTORY"],
-          description: "correlated private inspection directory"
+          description: "inspection directory; transcript selects RUN_ID.inspection.jsonl"
         },
         %{
           key: :private_unattended,

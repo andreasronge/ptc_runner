@@ -118,7 +118,16 @@ The current trace schema supports:
 
 JSONL files are written in canonical sequence order. Directory loading is
 deterministic: discover supported files, normalize paths, sort them, then load
-in sorted order under one aggregate byte cap.
+in sorted order under one aggregate byte cap. Exact selected capture is a
+distinct source variant used by `ptc transcript RUN_ID`: it resolves only
+`<run-ref>.jsonl` or `<run-ref>.private.jsonl` plus
+`<run-ref>.inspection.jsonl`, never lists the granted directory, and does not
+count unrelated members toward `max_directory_entries`, `max_files`, or the
+aggregate source-byte ceiling. Selected snapshot identity commits to the
+requested run reference, trace source class, exact evidence digests, and
+correlated trace ID. Filenames remain routing hints; embedded identities are
+authoritative. Directory snapshots keep their current fail-closed contract and
+still reject malformed or mismatched members.
 
 One directory holds both sanitized and private trace files, and one source
 grant reads exactly one kind. A run listing and a counters query therefore
@@ -157,9 +166,12 @@ The implementation:
 - normalizes and confines file access to the granted root;
 - rejects traversal, symlink escape, and unsupported file types;
 - applies one aggregate input-byte limit across directory files;
+- for a selected canonical run, opens only the exact named candidates and
+  applies the existing per-file source limits;
 - exposes no ambient filesystem operations;
 - keeps private canonical event-source access separate and explicit;
-- never infers access from visible names, tags, or run IDs.
+- never infers access from visible names, tags, or run IDs, and never treats a
+  selected filename as authority over the embedded run identity.
 
 The `analysis` prelude contains no authority. It requires host run-analysis
 capabilities whose source grant provides authority. Missing requirements fail

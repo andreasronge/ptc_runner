@@ -291,8 +291,15 @@ ptc transcript RUN_ID \
   --traces tmp/tutorial-traces \
   --inspection tmp/tutorial-inspection \
   --private-unattended \
-  --private-output tmp/tutorial-transcript/conversation.private.json</code></pre><p>The destination is reserved at owner-only mode before capture. Incomplete or
-ambiguous evidence fails without publication. The parent of
+  --private-output tmp/tutorial-transcript/conversation.private.json</code></pre><p>The destination is reserved at owner-only mode before capture. <code class="inline">RUN_ID</code> must be
+a command run reference; capture then admits only that run's exact trace file
+and private inspection record rather than inventorying the directories.
+Selected files keep their per-file source and result ceilings; unrelated
+members do not count toward directory or aggregate limits. Incomplete,
+ambiguous, malformed, unsupported, changed, oversized, or uncorrelated
+selected evidence fails without publication. Refusals name a stable
+<code class="inline">transcript/</code> diagnostic and disclose neither <code class="inline">RUN_ID</code> nor a filesystem path.
+The parent of
 <code class="inline">--private-output</code> must already exist and be reached without a symbolic link
 — on macOS <code class="inline">/tmp</code> is a symlink, so <code class="inline">/tmp/out.json</code> is refused. The trace,
 inspection, and output directories must be pairwise physically separate: none

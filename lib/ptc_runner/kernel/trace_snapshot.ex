@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.SelectedCanonicalSource
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.RetainedSize
 
@@ -32,21 +33,67 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
              limit_bytes: pos_integer()
            }}
 
-  @spec start({:directory | :private_authorized_directory, binary()}, keyword()) ::
-          {:ok, t()} | {:error, atom() | retained_limit_error()}
+  @spec start(term(), keyword()) :: {:ok, t()} | {:error, atom() | retained_limit_error()}
   def start(source, opts \\ [])
 
-  def start({:directory, directory}, opts),
-    do: start_directory(directory, :ptc_trace_snapshot, :sanitized, opts)
+  def start({:directory, directory}, opts) when is_binary(directory) and is_list(opts),
+    do: start_capture({:directory, directory}, :ptc_trace_snapshot, :sanitized, nil, opts)
 
-  def start({:private_authorized_directory, directory}, opts),
-    do: start_directory(directory, :ptc_private_trace_snapshot, :private, opts)
+  def start({:private_authorized_directory, directory}, opts)
+      when is_binary(directory) and is_list(opts),
+      do:
+        start_capture(
+          {:directory, directory},
+          :ptc_private_trace_snapshot,
+          :private,
+          nil,
+          opts
+        )
+
+  def start({:file, path, run_ref}, opts) when is_binary(path) and is_list(opts),
+    do: start_capture({:file, path}, :ptc_trace_snapshot, :sanitized, run_ref, opts)
+
+  def start({:private_authorized_file, path, run_ref}, opts)
+      when is_binary(path) and is_list(opts),
+      do:
+        start_capture(
+          {:file, path},
+          :ptc_private_trace_snapshot,
+          :private,
+          run_ref,
+          opts
+        )
+
+  def start({:selected_canonical, directory, run_ref}, opts)
+      when is_binary(directory) and is_binary(run_ref) and is_list(opts) do
+    case SelectedCanonicalSource.resolve_trace(directory, run_ref) do
+      {:ok, {:file, path, ^run_ref}} ->
+        start_capture(
+          {:selected_file, path, directory},
+          :ptc_private_trace_snapshot,
+          :sanitized,
+          run_ref,
+          opts
+        )
+
+      {:ok, {:private_authorized_file, path, ^run_ref}} ->
+        start_capture(
+          {:selected_file, path, directory},
+          :ptc_private_trace_snapshot,
+          :private,
+          run_ref,
+          opts
+        )
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   def start(_source, _opts), do: {:error, :invalid_snapshot}
 
-  defp start_directory(directory, source, source_kind, opts)
-       when is_binary(directory) and
-              source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] and
+  defp start_capture(capture_source, source, source_kind, selected_run_ref, opts)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] and
               source_kind in [:sanitized, :private] and is_list(opts) do
     allowed = [
       :owner,
@@ -63,7 +110,6 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     ]
 
     with true <- Keyword.keys(opts) -- allowed == [],
-         true <- String.valid?(directory),
          owner when is_pid(owner) <- Keyword.get(opts, :owner, self()),
          registrar <- Keyword.get(opts, :resource_registrar),
          max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
@@ -93,9 +139,10 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
       case GenServer.start(
              __MODULE__,
-             {directory, source, source_kind, owner, registrar, token, max_source_bytes,
-              max_retained_bytes, max_result_bytes, max_directory_entries, max_trace_files,
-              capture_heap_words, capture_deadline_ms, capture_hook, listing_hook}
+             {capture_source, source, source_kind, selected_run_ref, owner, registrar, token,
+              max_source_bytes, max_retained_bytes, max_result_bytes, max_directory_entries,
+              max_trace_files, capture_heap_words, capture_deadline_ms, capture_hook,
+              listing_hook}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
         {:error, {:source_retained_limit_exceeded, _details} = reason} -> {:error, reason}
@@ -107,7 +154,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     end
   end
 
-  defp start_directory(_directory, _source, _source_kind, _opts),
+  defp start_capture(_capture_source, _source, _source_kind, _selected_run_ref, _opts),
     do: {:error, :invalid_snapshot}
 
   @spec query(t(), :list_runs | :get_run | :list_turns | :counters, map()) ::
@@ -185,15 +232,16 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   @impl GenServer
   def init(
-        {directory, source, source_kind, owner, registrar, token, max_source_bytes,
-         max_retained_bytes, max_result_bytes, max_directory_entries, max_trace_files,
-         capture_heap_words, capture_deadline_ms, capture_hook, listing_hook}
+        {capture_source, source, source_kind, selected_run_ref, owner, registrar, token,
+         max_source_bytes, max_retained_bytes, max_result_bytes, max_directory_entries,
+         max_trace_files, capture_heap_words, capture_deadline_ms, capture_hook, listing_hook}
       ) do
     owner_ref = Process.monitor(owner)
 
     capture_config = %{
       source: source,
       source_kind: source_kind,
+      selected_run_ref: selected_run_ref,
       max_source_bytes: max_source_bytes,
       max_retained_bytes: max_retained_bytes,
       max_directory_entries: max_directory_entries,
@@ -201,7 +249,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     }
 
     capture = fn ->
-      capture(directory, capture_config, capture_hook, listing_hook)
+      capture(capture_source, capture_config, capture_hook, listing_hook)
     end
 
     with :ok <- ResourceRegistrar.register_root(registrar),
@@ -321,29 +369,105 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   defp call(_snapshot, _request), do: {:error, :invalid_snapshot}
 
-  defp capture(directory, config, capture_hook, listing_hook) do
-    with {:ok, capture} <-
-           TraceLog.capture_directory(directory,
-             max_source_bytes: config.max_source_bytes,
-             max_directory_entries: config.max_directory_entries,
-             max_trace_files: config.max_trace_files,
-             source_kind: config.source_kind,
-             capture_hook: capture_hook,
-             listing_hook: listing_hook
-           ),
-         analysis = TraceLog.compile_analysis(capture.events, capture.run_sources),
-         retained_bytes
-         when is_integer(retained_bytes) and retained_bytes <= config.max_retained_bytes <-
-           RetainedSize.bytes({capture.events, capture.run_sources, analysis}) do
-      retained_capture =
-        capture
-        |> Map.put(:events, RetainedSize.detach_binaries(capture.events))
-        |> Map.put(:run_sources, RetainedSize.detach_binaries(capture.run_sources))
-        |> Map.put(:analysis, RetainedSize.detach_binaries(analysis))
+  defp capture({:directory, directory}, config, capture_hook, listing_hook) do
+    case TraceLog.capture_directory(directory,
+           max_source_bytes: config.max_source_bytes,
+           max_directory_entries: config.max_directory_entries,
+           max_trace_files: config.max_trace_files,
+           source_kind: config.source_kind,
+           capture_hook: capture_hook,
+           listing_hook: listing_hook
+         ) do
+      {:ok, capture} ->
+        retain_capture(capture, config)
 
-      {:ok, retained_capture, retained_bytes}
-    else
-      retained_bytes when is_integer(retained_bytes) ->
+      {:error, :invalid_trace_log} ->
+        {:error, :invalid_snapshot}
+
+      {:error, reason} when is_atom(reason) ->
+        {:error, reason}
+    end
+  end
+
+  defp capture({:file, path}, config, capture_hook, _listing_hook) do
+    capture_file_source(path, config, capture_hook, fn -> :ok end)
+  end
+
+  defp capture({:selected_file, path, directory}, config, capture_hook, _listing_hook) do
+    capture_file_source(path, config, capture_hook, fn ->
+      prove_selected_trace(directory, path, config)
+    end)
+  end
+
+  defp capture_file_source(path, config, capture_hook, after_capture) do
+    case TraceLog.capture_file(path,
+           max_source_bytes: config.max_source_bytes,
+           source_kind: config.source_kind,
+           capture_hook: capture_hook
+         ) do
+      {:ok, capture} ->
+        with :ok <- after_capture.(),
+             {:ok, source_id} <- selected_source_id(config, capture) do
+          capture
+          |> Map.put(:source_id, source_id)
+          |> retain_capture(config)
+        end
+
+      {:error, :invalid_trace_log} ->
+        {:error, :invalid_snapshot}
+
+      {:error, reason} when is_atom(reason) ->
+        {:error, reason}
+    end
+  end
+
+  defp prove_selected_trace(directory, path, config) do
+    case SelectedCanonicalSource.resolve_trace(directory, config.selected_run_ref) do
+      {:ok, {:file, ^path, _run_ref}} when config.source_kind == :sanitized ->
+        :ok
+
+      {:ok, {:private_authorized_file, ^path, _run_ref}} when config.source_kind == :private ->
+        :ok
+
+      {:ok, _resolved} ->
+        {:error, :source_changed}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp selected_source_id(config, capture) do
+    with {:ok, trace_id} <-
+           SelectedCanonicalSource.prove_trace_events(capture.events, config.selected_run_ref) do
+      {:ok,
+       SelectedCanonicalSource.trace_source_id(
+         config.selected_run_ref,
+         config.source,
+         config.source_kind,
+         capture.source_id,
+         trace_id
+       )}
+    end
+  end
+
+  defp retain_capture(capture, config) do
+    analysis = TraceLog.compile_analysis(capture.events, capture.run_sources)
+
+    retained_bytes =
+      RetainedSize.bytes({capture.events, capture.run_sources, analysis})
+
+    cond do
+      is_integer(retained_bytes) and retained_bytes <= config.max_retained_bytes ->
+        retained_capture =
+          capture
+          |> Map.put(:events, RetainedSize.detach_binaries(capture.events))
+          |> Map.put(:run_sources, RetainedSize.detach_binaries(capture.run_sources))
+          |> Map.put(:analysis, RetainedSize.detach_binaries(analysis))
+
+        {:ok, retained_capture, retained_bytes}
+
+      is_integer(retained_bytes) ->
         {:error,
          {:source_retained_limit_exceeded,
           %{
@@ -352,14 +476,11 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
             limit_bytes: config.max_retained_bytes
           }}}
 
-      :oversized ->
+      retained_bytes == :oversized ->
         {:error, :source_retained_limit_exceeded}
 
-      {:error, :invalid_trace_log} ->
-        {:error, :invalid_snapshot}
-
-      {:error, reason} when is_atom(reason) ->
-        {:error, reason}
+      true ->
+        {:error, :source_unavailable}
     end
   end
 

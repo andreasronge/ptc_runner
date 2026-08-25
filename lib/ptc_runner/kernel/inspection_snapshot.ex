@@ -2,15 +2,20 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   @moduledoc """
   Owner-bound immutable capture of private inspection artifacts.
 
-  A snapshot inventories one bounded directory, loads each regular
-  `.inspection.jsonl` artifact exactly once through `InspectionArtifact`, and
-  validates every artifact against an already captured `TraceSnapshot`.
-  Duplicate runs, orphaned identities, malformed artifacts, output-only
-  capability joins, incomplete MCP joins, replacement during capture, and
-  aggregate or retained limits fail the entire capture. Validated input-only
-  capability attempts remain available as explicitly incomplete records. MCP
-  request/response pairs are retained atomically so interruption cannot publish
-  only half of an exchange. No partial catalog is published.
+  A snapshot captures either one bounded directory of `.inspection.jsonl`
+  artifacts or one exact selected canonical file. Directory capture inventories
+  every regular artifact, loads each exactly once through `InspectionArtifact`,
+  and validates every artifact against an already captured `TraceSnapshot`.
+  Selected capture resolves `<directory>/<run-ref>.inspection.jsonl` without
+  listing other members, then uses the same loader, correlation, and
+  immutability checks. Duplicate runs, orphaned identities, malformed
+  artifacts, output-only capability joins, incomplete MCP joins, replacement
+  during capture, and aggregate or retained limits fail the entire capture.
+  Filenames are routing hints: a selected snapshot still requires the embedded
+  run identity to match the requested command run reference. Validated
+  input-only capability attempts remain available as explicitly incomplete
+  records. MCP request/response pairs are retained atomically so interruption
+  cannot publish only half of an exchange. No partial catalog is published.
 
   The owner process holds only compiled query collections and safe metadata.
   Paths and private records are redacted from process status. Its tokenized
@@ -24,6 +29,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   alias PtcRunner.Kernel.InspectionQuery
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.SelectedCanonicalSource
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Lisp.RetainedSize
 
@@ -75,12 +81,31 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
   @type unsupported_schema_error :: InspectionArtifact.unsupported_schema_error()
 
-  @spec start({:directory, binary()}, trace_snapshot(), keyword()) ::
+  @spec start(term(), term(), keyword()) ::
           {:ok, t()} | {:error, atom() | retained_limit_error() | unsupported_schema_error()}
   def start(source, trace_snapshot, opts \\ [])
 
   def start({:directory, directory}, %TraceSnapshot{} = trace_snapshot, opts)
       when is_binary(directory) and is_list(opts) do
+    start_capture({:directory, directory}, trace_snapshot, opts)
+  end
+
+  def start({:file, path, run_ref}, %TraceSnapshot{} = trace_snapshot, opts)
+      when is_binary(path) and is_binary(run_ref) and is_list(opts) do
+    start_capture({:file, path, run_ref}, trace_snapshot, opts)
+  end
+
+  def start({:selected_canonical, directory, run_ref}, %TraceSnapshot{} = trace_snapshot, opts)
+      when is_binary(directory) and is_binary(run_ref) and is_list(opts) do
+    case SelectedCanonicalSource.resolve_inspection(directory, run_ref) do
+      {:ok, path} -> start({:file, path, run_ref}, trace_snapshot, opts)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def start(_source, _trace_snapshot, _opts), do: {:error, :invalid_snapshot}
+
+  defp start_capture(capture_source, %TraceSnapshot{} = trace_snapshot, opts) do
     allowed = [
       :owner,
       :resource_registrar,
@@ -97,8 +122,6 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     ]
 
     with true <- Keyword.keys(opts) -- allowed == [],
-         true <- String.valid?(directory),
-         true <- TraceSnapshot.valid?(trace_snapshot),
          owner when is_pid(owner) <- Keyword.get(opts, :owner, self()),
          registrar <- Keyword.get(opts, :resource_registrar),
          max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
@@ -131,9 +154,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
       case GenServer.start(
              __MODULE__,
-             {Path.expand(directory), trace_snapshot, owner, registrar, token, max_source_bytes,
-              max_retained_bytes, max_result_bytes, max_directory_entries, max_files,
-              capture_heap_words, capture_deadline_ms, capture_hook, listing_hook,
+             {expand_source(capture_source), trace_snapshot, owner, registrar, token,
+              max_source_bytes, max_retained_bytes, max_result_bytes, max_directory_entries,
+              max_files, capture_heap_words, capture_deadline_ms, capture_hook, listing_hook,
               artifact_verification_hook}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
@@ -147,7 +170,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     end
   end
 
-  def start(_source, _trace_snapshot, _opts), do: {:error, :invalid_snapshot}
+  defp expand_source({:directory, directory}), do: {:directory, Path.expand(directory)}
+  defp expand_source({:file, path, run_ref}), do: {:file, Path.expand(path), run_ref}
 
   @spec query(t(), InspectionQuery.operation(), map()) ::
           {:ok, map()} | {:error, atom()}
@@ -196,9 +220,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
   @impl GenServer
   def init(
-        {directory, trace_snapshot, owner, registrar, token, max_source_bytes, max_retained_bytes,
-         max_result_bytes, max_directory_entries, max_files, capture_heap_words,
-         capture_deadline_ms, capture_hook, listing_hook, artifact_verification_hook}
+        {capture_source, trace_snapshot, owner, registrar, token, max_source_bytes,
+         max_retained_bytes, max_result_bytes, max_directory_entries, max_files,
+         capture_heap_words, capture_deadline_ms, capture_hook, listing_hook,
+         artifact_verification_hook}
       ) do
     owner_ref = Process.monitor(owner)
     trace_ref = Process.monitor(trace_snapshot.pid)
@@ -209,16 +234,15 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
       artifact_verification: artifact_verification_hook
     }
 
+    limits = %{
+      max_source_bytes: max_source_bytes,
+      max_retained_bytes: max_retained_bytes,
+      max_directory_entries: max_directory_entries,
+      max_files: max_files
+    }
+
     capture = fn ->
-      capture(
-        directory,
-        trace_snapshot,
-        max_source_bytes,
-        max_retained_bytes,
-        max_directory_entries,
-        max_files,
-        hooks
-      )
+      capture(capture_source, trace_snapshot, limits, hooks)
     end
 
     with :ok <- ResourceRegistrar.register_root(registrar),
@@ -298,56 +322,40 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
   defp call(_snapshot, _request), do: {:error, :invalid_snapshot}
 
-  defp capture(
-         directory,
-         trace_snapshot,
-         max_source_bytes,
-         max_retained_bytes,
-         max_directory_entries,
-         max_files,
-         hooks
-       ) do
+  defp capture(source, trace_snapshot, limits, hooks) do
     with {:ok, trace_info} <- TraceSnapshot.info(trace_snapshot),
-         {:ok, before} <- inventory(directory, max_directory_entries, max_files, hooks.listing),
-         true <- before.source_bytes <= max_source_bytes,
-         {:ok, artifacts} <-
-           load_artifacts(directory, before.files, hooks.artifact_verification),
-         :ok <- run_capture_hook(hooks.capture),
-         {:ok, after_capture} <-
-           changed_inventory(directory, max_directory_entries, max_files, hooks.listing),
-         :ok <- same_inventory(before, after_capture),
-         :ok <- validate_unique_runs(artifacts),
-         :ok <- validate_correlations(artifacts, trace_snapshot),
+         {:ok, loaded} <- load_source(source, limits, hooks),
+         :ok <- validate_unique_runs(loaded.artifacts),
+         :ok <- prove_selected_source(source, loaded.artifacts),
+         :ok <- validate_correlations(loaded.artifacts, trace_snapshot),
          {:ok, trace_analysis} <-
-           TraceSnapshot.analysis_facts(trace_snapshot, artifact_run_ids(artifacts)),
+           TraceSnapshot.analysis_facts(trace_snapshot, artifact_run_ids(loaded.artifacts)),
          {:ok, compiled} <-
-           InspectionQuery.compile(artifacts, trace_info.capture_id, trace_analysis),
+           InspectionQuery.compile(loaded.artifacts, trace_info.capture_id, trace_analysis),
+         {:ok, source_id} <- selected_source_id(source, compiled.source_id, loaded.artifacts),
          retained_bytes
-         when is_integer(retained_bytes) and retained_bytes <= max_retained_bytes <-
+         when is_integer(retained_bytes) and retained_bytes <= limits.max_retained_bytes <-
            RetainedSize.bytes(compiled.collections) do
       collections = RetainedSize.detach_binaries(compiled.collections)
 
       {:ok,
        %{
-         source_id: compiled.source_id,
+         source_id: source_id,
          collections: collections,
-         source_bytes: before.source_bytes,
+         source_bytes: loaded.source_bytes,
          retained_bytes: retained_bytes,
-         file_count: length(before.files),
-         run_count: length(artifacts),
+         file_count: loaded.file_count,
+         run_count: length(loaded.artifacts),
          trace_capture_id: trace_info.capture_id
        }}
     else
-      false ->
-        {:error, :source_limit_exceeded}
-
       retained_bytes when is_integer(retained_bytes) ->
         {:error,
          {:source_retained_limit_exceeded,
           %{
             source: :ptc_inspection_snapshot,
             measured_bytes: retained_bytes,
-            limit_bytes: max_retained_bytes
+            limit_bytes: limits.max_retained_bytes
           }}}
 
       :oversized ->
@@ -360,6 +368,97 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
         {:error, normalize_capture_error(reason)}
     end
   end
+
+  defp load_source({:directory, directory}, limits, hooks) do
+    with {:ok, before} <-
+           inventory(directory, limits.max_directory_entries, limits.max_files, hooks.listing),
+         true <- before.source_bytes <= limits.max_source_bytes,
+         {:ok, artifacts} <-
+           load_artifacts(directory, before.files, hooks.artifact_verification),
+         :ok <- run_capture_hook(hooks.capture),
+         {:ok, after_capture} <-
+           changed_inventory(
+             directory,
+             limits.max_directory_entries,
+             limits.max_files,
+             hooks.listing
+           ),
+         :ok <- same_inventory(before, after_capture) do
+      {:ok,
+       %{
+         artifacts: artifacts,
+         source_bytes: before.source_bytes,
+         file_count: length(before.files)
+       }}
+    else
+      false -> {:error, :source_limit_exceeded}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp load_source({:file, path, _run_ref}, limits, hooks) do
+    with {:ok, before} <- regular_file_identity(path),
+         true <- before.size <= limits.max_source_bytes,
+         {:ok, records} <-
+           InspectionArtifact.load(
+             path,
+             [max_bytes: min(before.size, min(limits.max_source_bytes, @max_artifact_bytes))],
+             hooks.artifact_verification
+           ),
+         :ok <- run_capture_hook(hooks.capture),
+         {:ok, after_capture} <- changed_regular_file_identity(path),
+         :ok <- same_file_identity(before, after_capture) do
+      {:ok, %{artifacts: [records], source_bytes: before.size, file_count: 1}}
+    else
+      false -> {:error, :source_limit_exceeded}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp prove_selected_source({:directory, _directory}, _artifacts), do: :ok
+
+  defp prove_selected_source({:file, _path, run_ref}, [records | _rest]) do
+    case SelectedCanonicalSource.prove_inspection_records(records, run_ref) do
+      {:ok, _trace_id} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp prove_selected_source(_source, _artifacts), do: {:error, :selected_run_mismatch}
+
+  defp selected_source_id({:directory, _directory}, compiled_source_id, _artifacts),
+    do: {:ok, compiled_source_id}
+
+  defp selected_source_id({:file, _path, run_ref}, compiled_source_id, [records | _rest]) do
+    case SelectedCanonicalSource.prove_inspection_records(records, run_ref) do
+      {:ok, trace_id} ->
+        {:ok, SelectedCanonicalSource.inspection_source_id(run_ref, compiled_source_id, trace_id)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp selected_source_id(_source, _compiled_source_id, _artifacts),
+    do: {:error, :selected_run_mismatch}
+
+  defp regular_file_identity(path) do
+    case File.lstat(path, time: :posix) do
+      {:ok, %File.Stat{type: :regular} = stat} -> {:ok, stat_identity(stat)}
+      {:ok, %File.Stat{}} -> {:error, :selected_inspection_not_regular}
+      {:error, _reason} -> {:error, :source_unavailable}
+    end
+  end
+
+  defp changed_regular_file_identity(path) do
+    case regular_file_identity(path) do
+      {:ok, identity} -> {:ok, identity}
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp same_file_identity(identity, identity), do: :ok
+  defp same_file_identity(_before, _after), do: {:error, :source_changed}
 
   defp inventory(directory, max_directory_entries, max_files, listing_hook) do
     with {:ok, %File.Stat{type: :directory} = directory_stat} <-
@@ -509,13 +608,23 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
               :source_retained_limit_exceeded,
               :source_changed,
               :source_unavailable,
+              :malformed_source,
               :inspection_correlation_missing,
               :incomplete_inspection_correlation,
-              :duplicate_inspection_run
+              :duplicate_inspection_run,
+              :selected_run_mismatch,
+              :selected_inspection_missing,
+              :selected_inspection_not_regular,
+              :invalid_run_reference
             ],
        do: reason
 
   defp normalize_capture_error(:inspection_source_changed), do: :source_changed
+  defp normalize_capture_error(:inspection_source_unavailable), do: :source_unavailable
+  defp normalize_capture_error(:inspection_source_limit_exceeded), do: :source_limit_exceeded
+  defp normalize_capture_error(:invalid_inspection_artifact), do: :malformed_source
+  defp normalize_capture_error(:malformed_inspection_artifact), do: :malformed_source
+  defp normalize_capture_error(:invalid_inspection_source), do: :malformed_source
 
   defp normalize_capture_error(_reason), do: :invalid_snapshot
 

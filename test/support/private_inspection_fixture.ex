@@ -1,6 +1,7 @@
 defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
   @moduledoc false
 
+  alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
@@ -8,6 +9,12 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
   @source "(return 42)"
   @source_hash :crypto.hash(:sha256, @source) |> Base.encode16(case: :lower)
+
+  @doc false
+  @spec command_run_ref(non_neg_integer()) :: binary()
+  def command_run_ref(seed \\ 0) when is_integer(seed) and seed >= 0 do
+    CommandRunRef.encode(<<seed::unsigned-big-128>>)
+  end
 
   def create!(root, run_id \\ "private-run") do
     %{traces: traces, inspection: inspection} = fixture = create_directories(root, run_id)
