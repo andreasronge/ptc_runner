@@ -17,6 +17,10 @@ belongs in guides or retained specifications.
 
 ## Remaining Kernel product work
 
+- [`indexed-inspection-artifact.md`](indexed-inspection-artifact.md) specifies
+  the settled single-container format, query indexes, independent admission,
+  streaming seal, and lazy range-read boundary for large private inspection
+  artifacts in issue #1643.
 - [`lisp-kernel/stable-cli-contract.md`](lisp-kernel/stable-cli-contract.md)
   retains only the first GHCR publication, macOS x86_64 evidence, and final
   acceptance work for the completed standalone command.
