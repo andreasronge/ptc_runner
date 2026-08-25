@@ -564,22 +564,25 @@ defmodule PtcRunner.Lisp.Analyze do
   # ============================================================
 
   defp analyze_loop([bindings_ast | body_asts], _tail?) do
-    with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast) do
-      body_asts = mark_shadowed_asts(body_asts, shadowed)
-      bound = Enum.flat_map(bindings, fn {:binding, pattern, _} -> pattern_names(pattern) end)
-
-      with_bindings(bound, fn ->
-        with_recur_arity(length(bindings), fn ->
-          with {:ok, body} <- wrap_body(body_asts, true) do
-            {:ok, {:loop, bindings, body}}
-          end
-        end)
-      end)
+    with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast),
+         {:ok, body} <- analyze_loop_body(bindings, shadowed, body_asts) do
+      {:ok, {:loop, bindings, body}}
     end
   end
 
   defp analyze_loop(_, _tail?) do
     {:error, {:invalid_arity, :loop, "expected (loop [bindings] body ...)"}}
+  end
+
+  defp analyze_loop_body(bindings, shadowed, body_asts) do
+    body_asts = mark_shadowed_asts(body_asts, shadowed)
+    bound = Enum.flat_map(bindings, fn {:binding, pattern, _} -> pattern_names(pattern) end)
+
+    with_bindings(bound, fn ->
+      with_recur_arity(length(bindings), fn ->
+        wrap_body(body_asts, true)
+      end)
+    end)
   end
 
   # ============================================================
