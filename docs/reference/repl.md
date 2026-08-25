@@ -379,9 +379,14 @@ ptc transcript RUN_ID \
 ```
 
 The destination is reserved at owner-only mode before capture. `RUN_ID` must be
-a canonical command run reference; capture then admits only that run's exact
-canonical trace and inspection files rather than inventorying the directories.
-Incomplete or ambiguous evidence fails without publication. The parent of
+a command run reference; capture then admits only that run's exact trace file
+and private inspection record rather than inventorying the directories.
+Selected files keep their per-file source and result ceilings; unrelated
+members do not count toward directory or aggregate limits. Incomplete,
+ambiguous, malformed, unsupported, changed, oversized, or uncorrelated
+selected evidence fails without publication. Refusals name a stable
+`transcript/` diagnostic and disclose neither `RUN_ID` nor a filesystem path.
+The parent of
 `--private-output` must already exist and be reached without a symbolic link
 — on macOS `/tmp` is a symlink, so `/tmp/out.json` is refused. The trace,
 inspection, and output directories must be pairwise physically separate: none

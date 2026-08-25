@@ -33,12 +33,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
              limit_bytes: pos_integer()
            }}
 
-  @spec start(
-          {:directory | :private_authorized_directory, binary()}
-          | {:file | :private_authorized_file, binary(), binary()}
-          | {:selected_canonical, binary(), binary()},
-          keyword()
-        ) :: {:ok, t()} | {:error, atom() | retained_limit_error()}
+  @spec start(term(), keyword()) :: {:ok, t()} | {:error, atom() | retained_limit_error()}
   def start(source, opts \\ [])
 
   def start({:directory, directory}, opts),
@@ -153,7 +148,6 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     do: is_binary(directory) and String.valid?(directory)
 
   defp valid_capture_source?({:file, path}), do: is_binary(path) and String.valid?(path)
-  defp valid_capture_source?(_source), do: false
 
   defp valid_selected_run_ref?({:directory, _directory}, nil), do: true
 
@@ -401,22 +395,10 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
            capture_hook: capture_hook
          ) do
       {:ok, capture} ->
-        case SelectedCanonicalSource.prove_trace_events(
-               capture.events,
-               config.selected_run_ref
-             ) do
-          {:ok, trace_id} ->
+        case selected_source_id(config, capture) do
+          {:ok, source_id} ->
             capture
-            |> Map.put(
-              :source_id,
-              SelectedCanonicalSource.trace_source_id(
-                config.selected_run_ref,
-                config.source,
-                config.source_kind,
-                capture.source_id,
-                trace_id
-              )
-            )
+            |> Map.put(:source_id, source_id)
             |> retain_capture(config)
 
           {:error, reason} ->
@@ -428,6 +410,20 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
       {:error, reason} when is_atom(reason) ->
         {:error, reason}
+    end
+  end
+
+  defp selected_source_id(config, capture) do
+    with {:ok, trace_id} <-
+           SelectedCanonicalSource.prove_trace_events(capture.events, config.selected_run_ref) do
+      {:ok,
+       SelectedCanonicalSource.trace_source_id(
+         config.selected_run_ref,
+         config.source,
+         config.source_kind,
+         capture.source_id,
+         trace_id
+       )}
     end
   end
 

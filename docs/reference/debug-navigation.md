@@ -93,10 +93,14 @@ relationship, and discloses no path.
 captures exactly `RUN_ID.jsonl` or `RUN_ID.private.jsonl` under `--traces` and
 `RUN_ID.inspection.jsonl` under `--inspection`. It does not list those
 directories, so unrelated, malformed, or oversized history cannot reject a
-valid selected pair. Both trace suffixes present, a missing selected file, a
-symlink, or an embedded identity that does not match `RUN_ID` fails closed.
-Whole-directory analysis snapshots remain a separate contract: they still
-inventory every canonical member.
+valid selected pair. Selected files still keep their individual source,
+record, retained-memory, heap, deadline, and result ceilings. Both trace
+suffixes present, a missing selected file, a symlink, an embedded identity
+that does not match `RUN_ID`, a correlation mismatch, or malformed,
+unsupported, changed, or oversized selected evidence fails closed. A refusal
+names a stable `transcript/` diagnostic and does not echo `RUN_ID` or a
+filesystem path. Whole-directory analysis snapshots remain a separate
+contract: they still inventory every canonical member.
 
 ## Give the debugger bounded navigation authority
 

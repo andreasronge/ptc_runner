@@ -12,12 +12,21 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSourceTest do
     File.touch!(Path.join(traces, "#{run_ref}.jsonl"))
     File.touch!(Path.join(traces, "unrelated.jsonl"))
 
-    # Resolution constructs exact paths; it does not inventory the directory.
-    assert {:ok, {:file, path, ^run_ref}} = SelectedCanonicalSource.resolve_trace(traces, run_ref)
-    assert path == Path.expand(Path.join(traces, "#{run_ref}.jsonl"))
-    refute_received :listed
+    expected = Path.expand(Path.join(traces, "#{run_ref}.jsonl"))
 
-    File.rm!(path)
+    # Resolution constructs exact paths; listing the directory would fail here.
+    File.chmod!(traces, 0o111)
+
+    try do
+      assert {:error, :eacces} = File.ls(traces)
+
+      assert {:ok, {:file, ^expected, ^run_ref}} =
+               SelectedCanonicalSource.resolve_trace(traces, run_ref)
+    after
+      File.chmod!(traces, 0o700)
+    end
+
+    File.rm!(expected)
     File.touch!(Path.join(traces, "#{run_ref}.private.jsonl"))
 
     assert {:ok, {:private_authorized_file, private, ^run_ref}} =

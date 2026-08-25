@@ -574,9 +574,118 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
 
     assert presentation.exit_status == 1
-    assert presentation.stderr =~ "transcript/"
+    assert presentation.stderr =~ "transcript/malformed_source"
     refute presentation.stderr =~ fixture.run_id
     refute presentation.stderr =~ root
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
+  test "a malformed selected inspection fails without publishing output", %{tmp_dir: root} do
+    fixture = canonical_create!(root)
+    File.write!(Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl"), "not-json\n")
+    output = Path.join(fixture.output, "malformed-inspection.json")
+
+    presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
+
+    assert presentation.exit_status == 1
+    assert presentation.stderr =~ "transcript/malformed_source"
+    refute presentation.stderr =~ fixture.run_id
+    refute presentation.stderr =~ root
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
+  test "a selected inspection symlink is refused without disclosing the path", %{tmp_dir: root} do
+    fixture = canonical_create!(root)
+    real = Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl")
+    linked = Path.join(root, "linked.inspection.jsonl")
+    File.rename!(real, linked)
+    File.ln_s!(linked, real)
+    output = Path.join(fixture.output, "symlink-inspection.json")
+
+    presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
+
+    assert presentation.exit_status == 1
+    assert presentation.stderr =~ "transcript/selected_inspection_not_regular"
+    assert presentation.stderr =~ "--inspection"
+    refute presentation.stderr =~ linked
+    refute presentation.stderr =~ fixture.run_id
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
+  test "an unsupported selected trace schema fails without publishing output", %{tmp_dir: root} do
+    fixture = canonical_create!(root)
+    path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
+
+    rewritten =
+      path
+      |> File.stream!()
+      |> Enum.map_join(fn line ->
+        line
+        |> Jason.decode!()
+        |> Map.put("schema_version", 3)
+        |> Jason.encode!()
+        |> Kernel.<>("\n")
+      end)
+
+    File.write!(path, rewritten)
+    output = Path.join(fixture.output, "unsupported-trace.json")
+
+    presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
+
+    assert presentation.exit_status == 1
+    assert presentation.stderr =~ "transcript/unsupported_schema"
+    refute presentation.stderr =~ fixture.run_id
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
+  test "a selected correlation mismatch fails without disclosing identities", %{tmp_dir: root} do
+    fixture = canonical_create!(root)
+    path = Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl")
+
+    rewritten =
+      path
+      |> File.stream!()
+      |> Enum.map_join(fn line ->
+        line
+        |> Jason.decode!()
+        |> Map.put("trace_id", "trace-unrelated")
+        |> Jason.encode!()
+        |> Kernel.<>("\n")
+      end)
+
+    File.write!(path, rewritten)
+    output = Path.join(fixture.output, "correlation-mismatch.json")
+
+    presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
+
+    assert presentation.exit_status == 1
+    assert presentation.stderr =~ "transcript/inspection_correlation_missing"
+    refute presentation.stderr =~ "trace-unrelated"
+    refute presentation.stderr =~ fixture.run_id
+    refute presentation.stderr =~ root
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
+  test "truncating the selected trace during capture fails closed", %{tmp_dir: root} do
+    fixture = canonical_create!(root)
+    output = Path.join(fixture.output, "truncated-selected.json")
+    argv = transcript_argv(fixture, output)
+    assert {:ok, entry} = CommandEntry.open(argv, :standalone)
+    trace_path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
+
+    assert {:error, :source_changed, "analysis source changed during capture"} =
+             TranscriptFrontend.run(entry.arguments, CommandRuntime.standalone(),
+               capture_hook: fn ->
+                 content = File.read!(trace_path)
+                 File.write!(trace_path, binary_part(content, 0, div(byte_size(content), 2)))
+               end
+             )
+
     refute File.exists?(output)
   end
 

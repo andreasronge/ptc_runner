@@ -81,13 +81,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
   @type unsupported_schema_error :: InspectionArtifact.unsupported_schema_error()
 
-  @spec start(
-          {:directory, binary()}
-          | {:file, binary(), binary()}
-          | {:selected_canonical, binary(), binary()},
-          trace_snapshot(),
-          keyword()
-        ) ::
+  @spec start(term(), term(), keyword()) ::
           {:ok, t()} | {:error, atom() | retained_limit_error() | unsupported_schema_error()}
   def start(source, trace_snapshot, opts \\ [])
 
@@ -111,7 +105,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
   def start(_source, _trace_snapshot, _opts), do: {:error, :invalid_snapshot}
 
-  defp start_capture(capture_source, trace_snapshot, opts) do
+  defp start_capture(capture_source, %TraceSnapshot{} = trace_snapshot, opts) do
     allowed = [
       :owner,
       :resource_registrar,
@@ -128,8 +122,6 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     ]
 
     with true <- Keyword.keys(opts) -- allowed == [],
-         true <- valid_inspection_source?(capture_source),
-         true <- TraceSnapshot.valid?(trace_snapshot),
          owner when is_pid(owner) <- Keyword.get(opts, :owner, self()),
          registrar <- Keyword.get(opts, :resource_registrar),
          max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
@@ -177,15 +169,6 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
       _ -> {:error, :invalid_snapshot}
     end
   end
-
-  defp valid_inspection_source?({:directory, directory}),
-    do: is_binary(directory) and String.valid?(directory)
-
-  defp valid_inspection_source?({:file, path, run_ref}),
-    do:
-      is_binary(path) and String.valid?(path) and SelectedCanonicalSource.valid_run_ref?(run_ref)
-
-  defp valid_inspection_source?(_source), do: false
 
   defp expand_source({:directory, directory}), do: {:directory, Path.expand(directory)}
   defp expand_source({:file, path, run_ref}), do: {:file, Path.expand(path), run_ref}
@@ -349,7 +332,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
            TraceSnapshot.analysis_facts(trace_snapshot, artifact_run_ids(loaded.artifacts)),
          {:ok, compiled} <-
            InspectionQuery.compile(loaded.artifacts, trace_info.capture_id, trace_analysis),
-         source_id = selected_source_id(source, compiled.source_id, loaded.artifacts),
+         {:ok, source_id} <- selected_source_id(source, compiled.source_id, loaded.artifacts),
          retained_bytes
          when is_integer(retained_bytes) and retained_bytes <= limits.max_retained_bytes <-
            RetainedSize.bytes(compiled.collections) do
@@ -366,9 +349,6 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
          trace_capture_id: trace_info.capture_id
        }}
     else
-      false ->
-        {:error, :source_limit_exceeded}
-
       retained_bytes when is_integer(retained_bytes) ->
         {:error,
          {:source_retained_limit_exceeded,
@@ -447,17 +427,20 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   defp prove_selected_source(_source, _artifacts), do: {:error, :selected_run_mismatch}
 
   defp selected_source_id({:directory, _directory}, compiled_source_id, _artifacts),
-    do: compiled_source_id
+    do: {:ok, compiled_source_id}
 
   defp selected_source_id({:file, _path, run_ref}, compiled_source_id, [records | _rest]) do
     case SelectedCanonicalSource.prove_inspection_records(records, run_ref) do
       {:ok, trace_id} ->
-        SelectedCanonicalSource.inspection_source_id(run_ref, compiled_source_id, trace_id)
+        {:ok, SelectedCanonicalSource.inspection_source_id(run_ref, compiled_source_id, trace_id)}
 
-      {:error, _reason} ->
-        compiled_source_id
+      {:error, reason} ->
+        {:error, reason}
     end
   end
+
+  defp selected_source_id(_source, _compiled_source_id, _artifacts),
+    do: {:error, :selected_run_mismatch}
 
   defp regular_file_identity(path) do
     case File.lstat(path, time: :posix) do
@@ -625,6 +608,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
               :source_retained_limit_exceeded,
               :source_changed,
               :source_unavailable,
+              :malformed_source,
               :inspection_correlation_missing,
               :incomplete_inspection_correlation,
               :duplicate_inspection_run,
@@ -636,6 +620,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
        do: reason
 
   defp normalize_capture_error(:inspection_source_changed), do: :source_changed
+  defp normalize_capture_error(:inspection_source_limit_exceeded), do: :source_limit_exceeded
+  defp normalize_capture_error(:invalid_inspection_artifact), do: :malformed_source
+  defp normalize_capture_error(:malformed_inspection_artifact), do: :malformed_source
+  defp normalize_capture_error(:invalid_inspection_source), do: :selected_inspection_not_regular
 
   defp normalize_capture_error(_reason), do: :invalid_snapshot
 

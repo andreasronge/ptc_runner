@@ -142,10 +142,14 @@ relationship, and discloses no path.</p><p><code class="inline">RUN_ID</code> mu
 captures exactly <code class="inline">RUN_ID.jsonl</code> or <code class="inline">RUN_ID.private.jsonl</code> under <code class="inline">--traces</code> and
 <code class="inline">RUN_ID.inspection.jsonl</code> under <code class="inline">--inspection</code>. It does not list those
 directories, so unrelated, malformed, or oversized history cannot reject a
-valid selected pair. Both trace suffixes present, a missing selected file, a
-symlink, or an embedded identity that does not match <code class="inline">RUN_ID</code> fails closed.
-Whole-directory analysis snapshots remain a separate contract: they still
-inventory every canonical member.</p><h2 id="give-the-debugger-bounded-navigation-authority">Give the debugger bounded navigation authority</h2><p>The debugger is an ordinary application. Its host document installs the failed
+valid selected pair. Selected files still keep their individual source,
+record, retained-memory, heap, deadline, and result ceilings. Both trace
+suffixes present, a missing selected file, a symlink, an embedded identity
+that does not match <code class="inline">RUN_ID</code>, a correlation mismatch, or malformed,
+unsupported, changed, or oversized selected evidence fails closed. A refusal
+names a stable <code class="inline">transcript/</code> diagnostic and does not echo <code class="inline">RUN_ID</code> or a
+filesystem path. Whole-directory analysis snapshots remain a separate
+contract: they still inventory every canonical member.</p><h2 id="give-the-debugger-bounded-navigation-authority">Give the debugger bounded navigation authority</h2><p>The debugger is an ordinary application. Its host document installs the failed
 run's two directories as snapshot providers:</p><pre><code class="json language-json">{
   &quot;install&quot;: {
     &quot;failed-run-traces&quot;: {

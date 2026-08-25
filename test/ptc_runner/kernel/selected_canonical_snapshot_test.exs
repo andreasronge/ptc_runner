@@ -168,6 +168,164 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
              )
   end
 
+  @tag :tmp_dir
+  test "selected capture detects truncation and same-size replacement", %{tmp_dir: root} do
+    fixture = fixture!(root)
+    path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
+    original = File.read!(path)
+    test = self()
+
+    truncated =
+      Task.async(fn ->
+        TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+          owner: test,
+          capture_hook: fn ->
+            send(test, {:capture_paused, self()})
+
+            receive do
+              :continue_capture -> :ok
+            end
+          end
+        )
+      end)
+
+    assert_receive {:capture_paused, capture_pid}, 5_000
+    File.write!(path, binary_part(original, 0, div(byte_size(original), 2)))
+    send(capture_pid, :continue_capture)
+    assert {:error, :source_changed} = Task.await(truncated)
+
+    File.write!(path, original)
+
+    replacement = String.replace(original, "2026-07-26T12:00:01Z", "2026-07-26T12:00:11Z")
+    assert byte_size(replacement) == byte_size(original)
+    assert replacement != original
+
+    replaced =
+      Task.async(fn ->
+        TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+          owner: test,
+          capture_hook: fn ->
+            send(test, {:rewrite_paused, self()})
+
+            receive do
+              :continue_rewrite -> :ok
+            end
+          end
+        )
+      end)
+
+    assert_receive {:rewrite_paused, rewrite_pid}, 5_000
+    File.write!(path, replacement)
+    send(rewrite_pid, :continue_rewrite)
+    assert {:error, :source_changed} = Task.await(replaced)
+  end
+
+  @tag :tmp_dir
+  test "an oversized selected compiled result fails closed", %{tmp_dir: root} do
+    fixture = fixture!(root)
+
+    assert {:ok, snapshot} =
+             TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+               owner: self(),
+               max_result_bytes: 64
+             )
+
+    on_exit(fn -> TraceSnapshot.stop(snapshot) end)
+
+    assert {:error, :result_limit_exceeded} =
+             TraceSnapshot.query(snapshot, :get_run, %{"run_id" => fixture.run_id})
+  end
+
+  @tag :tmp_dir
+  test "selected inspection refuses a mismatched correlated trace id", %{tmp_dir: root} do
+    fixture = fixture!(root)
+    path = Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl")
+
+    rewritten =
+      path
+      |> File.stream!()
+      |> Enum.map_join(fn line ->
+        line
+        |> Jason.decode!()
+        |> Map.put("trace_id", "trace-unrelated")
+        |> Jason.encode!()
+        |> Kernel.<>("\n")
+      end)
+
+    File.write!(path, rewritten)
+
+    assert {:ok, traces} =
+             TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+               owner: self()
+             )
+
+    on_exit(fn -> TraceSnapshot.stop(traces) end)
+
+    assert {:error, :inspection_correlation_missing} =
+             InspectionSnapshot.start(
+               {:selected_canonical, fixture.inspection, fixture.run_id},
+               traces,
+               owner: self()
+             )
+  end
+
+  @tag :tmp_dir
+  test "an oversized selected inspection is refused without reading unselected members", %{
+    tmp_dir: root
+  } do
+    fixture = fixture!(root)
+
+    File.write!(
+      Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl"),
+      :binary.copy("x", 200)
+    )
+
+    File.write!(
+      Path.join(fixture.inspection, "unrelated.inspection.jsonl"),
+      :binary.copy("x", 9_000_001)
+    )
+
+    assert {:ok, traces} =
+             TraceSnapshot.start({:selected_canonical, fixture.traces, fixture.run_id},
+               owner: self()
+             )
+
+    on_exit(fn -> TraceSnapshot.stop(traces) end)
+
+    assert {:error, :source_limit_exceeded} =
+             InspectionSnapshot.start(
+               {:selected_canonical, fixture.inspection, fixture.run_id},
+               traces,
+               owner: self(),
+               max_source_bytes: 64
+             )
+  end
+
+  @tag :tmp_dir
+  test "selected capture admits an execute-only directory that cannot be listed", %{tmp_dir: root} do
+    fixture = fixture!(root)
+    File.chmod!(fixture.traces, 0o111)
+    File.chmod!(fixture.inspection, 0o111)
+
+    try do
+      assert {:error, :eacces} = File.ls(fixture.traces)
+      assert {:error, :eacces} = File.ls(fixture.inspection)
+
+      assert {:ok, resources} =
+               PrivateRunAnalysisProfile.capture(
+                 %{"traces" => fixture.traces, "inspection" => fixture.inspection},
+                 selected_run_ref: fixture.run_id
+               )
+
+      on_exit(fn -> AnalysisResources.stop(resources) end)
+      traces = AnalysisResources.handle(resources, :traces)
+      assert {:ok, true} = TraceSnapshot.run_exists?(traces, fixture.run_id)
+    after
+      File.chmod!(fixture.traces, 0o700)
+      File.chmod!(fixture.inspection, 0o700)
+    end
+  end
+
   defp fixture!(root) do
     PrivateInspectionFixture.create!(root, PrivateInspectionFixture.command_run_ref())
   end

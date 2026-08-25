@@ -175,6 +175,11 @@ defmodule PtcRunner.TranscriptFrontend do
   defp selected_capture_error(:malformed_source),
     do: {:error, :malformed_source, "the selected transcript source is malformed"}
 
+  defp selected_capture_error(:unsupported_version),
+    do:
+      {:error, :unsupported_schema,
+       "the selected transcript source uses an unsupported schema version"}
+
   defp selected_capture_error(:source_limit_exceeded),
     do: {:error, :source_limit_exceeded, "the selected transcript source exceeded its limit"}
 
@@ -186,6 +191,12 @@ defmodule PtcRunner.TranscriptFrontend do
     do:
       {:error, :source_unavailable,
        "--inspection must contain at least one correlated inspection artifact"}
+
+  defp selected_capture_error({:source_retained_limit_exceeded, _details}),
+    do: {:error, :source_limit_exceeded, "the selected transcript source exceeded its limit"}
+
+  defp selected_capture_error(:source_retained_limit_exceeded),
+    do: {:error, :source_limit_exceeded, "the selected transcript source exceeded its limit"}
 
   defp selected_capture_error(_reason),
     do:
