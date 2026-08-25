@@ -5,7 +5,6 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
   alias PtcRunner.Research.SealedEvidenceLog.Format
   alias PtcRunner.Research.SealedEvidenceLog.Generator
   alias PtcRunner.Research.SealedEvidenceLog.Handle
-  alias PtcRunner.Research.SealedEvidenceLog.Indexes
   alias PtcRunner.Research.SealedEvidenceLog.Snapshot
 
   @moduletag :tmp_dir
@@ -15,13 +14,29 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
     corpus = Generator.second_run("fault-run")
     assert {:ok, _} = SealedEvidenceLog.produce(path, corpus.records)
     File.write!(path, File.read!(path) <> <<0, 1, 2, 3>>, [:append])
-    assert {:error, :malformed_source} = SealedEvidenceLog.admit(%{path: path, trace_facts: %{}})
+
+    assert {:error, :malformed_source} =
+             SealedEvidenceLog.admit(%{path: path, trace_facts: %{}},
+               resource_hook: resource_hook()
+             )
+
+    assert_reclaimed!(await_resources())
+    assert File.exists?(path)
+    assert scratch_bytes(tmp, [path]) == 0
   end
 
   test "truncated evidence before open", %{tmp_dir: tmp} do
     path = Path.join(tmp, "truncated-body.ptcins")
     File.write!(path, Format.encode_header() <> <<0, 1, 2, 3>>)
-    assert {:error, :malformed_source} = SealedEvidenceLog.admit(%{path: path, trace_facts: %{}})
+
+    assert {:error, :malformed_source} =
+             SealedEvidenceLog.admit(%{path: path, trace_facts: %{}},
+               resource_hook: resource_hook()
+             )
+
+    assert_reclaimed!(await_resources())
+    assert File.exists?(path)
+    assert scratch_bytes(tmp, [path]) == 0
   end
 
   test "truncated footer before open", %{tmp_dir: tmp} do
@@ -50,11 +65,15 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
 
     result =
       SealedEvidenceLog.admit(%{path: path, trace_facts: corpus.trace_facts},
-        during_admission_hook: hook
+        during_admission_hook: hook,
+        resource_hook: resource_hook()
       )
 
     assert_receive :mutated
     assert result == {:error, :source_changed}
+    assert_reclaimed!(await_resources())
+    assert File.exists?(path)
+    assert scratch_bytes(tmp, [path]) == 0
   end
 
   test "overwrite during admission returns source_changed", %{tmp_dir: tmp} do
@@ -76,11 +95,14 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
 
     result =
       SealedEvidenceLog.admit(%{path: path, trace_facts: corpus.trace_facts},
-        during_admission_hook: hook
+        during_admission_hook: hook,
+        resource_hook: resource_hook()
       )
 
     assert_receive :overwritten
     assert result == {:error, :source_changed}
+    assert_reclaimed!(await_resources())
+    assert File.exists?(path)
   end
 
   test "truncate during admission returns source_changed", %{tmp_dir: tmp} do
@@ -106,11 +128,14 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
 
     result =
       SealedEvidenceLog.admit(%{path: path, trace_facts: corpus.trace_facts},
-        during_admission_hook: hook
+        during_admission_hook: hook,
+        resource_hook: resource_hook()
       )
 
     assert_receive :truncated
     assert result == {:error, :source_changed}
+    assert_reclaimed!(await_resources())
+    assert File.exists?(path)
   end
 
   test "append after admission is observed by the next query", %{tmp_dir: tmp} do
@@ -222,10 +247,12 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
 
     assert Enum.all?(tables, &(:ets.info(&1) == :undefined))
     assert Enum.all?(handles, &(not Handle.usable?(&1)))
+    assert File.exists?(path)
+    assert scratch_bytes(tmp, [path]) == 0
   end
 
   test "normal close deletes tables and handles", %{tmp_dir: tmp} do
-    {_path, snapshot} = admit_second(tmp, "close-run")
+    {path, snapshot} = admit_second(tmp, "close-run")
     tables = Snapshot.table_ids(snapshot)
     {:ok, handles} = Snapshot.handles(snapshot)
     snapshot_ref = Process.monitor(snapshot.pid)
@@ -234,11 +261,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
     assert_receive {:DOWN, ^snapshot_ref, :process, _, :normal}
     assert Enum.all?(tables, &(:ets.info(&1) == :undefined))
     assert Enum.all?(handles, &(not Handle.usable?(&1)))
-
-    assert Indexes.undefined?(%{
-             tables: Map.new(Enum.with_index(tables), fn {tid, i} -> {i, tid} end)
-           }) or
-             Enum.all?(tables, &(:ets.info(&1) == :undefined))
+    assert File.exists?(path)
+    assert scratch_bytes(tmp, [path]) == 0
   end
 
   test "query caller death cancels the worker and leaves the snapshot usable", %{tmp_dir: tmp} do
@@ -284,6 +308,10 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
     assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
     assert_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 5_000
 
+    tables = Snapshot.table_ids(snapshot)
+    assert is_list(tables)
+    assert Enum.all?(tables, &(:ets.info(&1) != :undefined))
+
     assert {:ok, %{"items" => [_run]}, _metrics} =
              SealedEvidenceLog.query(snapshot, :list_runs, %{"limit" => 1})
   end
@@ -315,20 +343,29 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
         end
       end)
 
+    resources = resource_hook()
+
     caller =
       spawn(fn ->
         SealedEvidenceLog.admit(%{path: path, trace_facts: corpus.trace_facts},
           during_admission_hook: hook,
-          owner: owner
+          owner: owner,
+          resource_hook: resources
         )
       end)
 
     caller_ref = Process.monitor(caller)
+    ledger = await_handles()
+    snapshot_ref = Process.monitor(ledger.snapshot)
     assert_receive {:worker, worker}, 5_000
     worker_ref = Process.monitor(worker)
     Process.exit(caller, :kill)
     assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
     assert_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 5_000
+    assert_receive {:DOWN, ^snapshot_ref, :process, _, _}, 5_000
+    assert_reclaimed!(ledger)
+    assert File.exists?(path)
+    assert scratch_bytes(tmp, [path]) == 0
     Process.exit(owner, :kill)
   end
 
@@ -338,10 +375,13 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
 
     assert {:error, :max_records} =
              SealedEvidenceLog.admit(%{path: path, trace_facts: Generator.empty_trace_facts()},
-               limits: [max_records: 2]
+               limits: [max_records: 2],
+               resource_hook: resource_hook()
              )
 
+    assert_reclaimed!(await_handles())
     assert File.exists?(path)
+    assert scratch_bytes(tmp, [path]) == 0
 
     assert {:ok, snapshot} =
              SealedEvidenceLog.admit(%{path: path, trace_facts: Generator.empty_trace_facts()},
@@ -359,8 +399,13 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
 
     assert {:error, :max_retained_bytes} =
              SealedEvidenceLog.admit(%{path: path, trace_facts: Generator.empty_trace_facts()},
-               limits: [max_retained_bytes: 1]
+               limits: [max_retained_bytes: 1],
+               resource_hook: resource_hook()
              )
+
+    assert_reclaimed!(await_handles())
+    assert File.exists?(path)
+    assert scratch_bytes(tmp, [path]) == 0
   end
 
   test "forged snapshot token is rejected", %{tmp_dir: tmp} do
@@ -396,8 +441,13 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
     assert {:error, :deadline_exceeded} =
              SealedEvidenceLog.admit(%{path: path, trace_facts: corpus.trace_facts},
                during_admission_hook: hook,
-               deadline_ms: 1
+               deadline_ms: 1,
+               resource_hook: resource_hook()
              )
+
+    assert_reclaimed!(await_handles())
+    assert File.exists?(path)
+    assert scratch_bytes(tmp, [path]) == 0
   end
 
   test "query cannot widen the installed result-byte ceiling", %{tmp_dir: tmp} do
@@ -419,6 +469,53 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
                %{"run_id" => "result-cap", "limit" => 10},
                max_result_bytes: 1_000_000
              )
+  end
+
+  defp resource_hook do
+    parent = self()
+    fn resources -> send(parent, {:resources, resources}) end
+  end
+
+  defp await_resources do
+    assert_receive {:resources, first}, 5_000
+    drain_resources(first)
+  end
+
+  defp await_handles do
+    ledger = await_resources()
+    wait_for_handles(ledger)
+  end
+
+  defp wait_for_handles(%{handles: [_ | _]} = ledger), do: ledger
+
+  defp wait_for_handles(_empty) do
+    assert_receive {:resources, ledger}, 5_000
+    wait_for_handles(drain_resources(ledger))
+  end
+
+  defp drain_resources(current) do
+    receive do
+      {:resources, next} -> drain_resources(next)
+    after
+      0 -> current
+    end
+  end
+
+  defp assert_reclaimed!(ledger) do
+    refute Process.alive?(ledger.snapshot)
+    assert Enum.all?(ledger.tables, &(:ets.info(&1) == :undefined))
+    assert Enum.all?(ledger.handles, &(not Handle.usable?(&1)))
+  end
+
+  defp scratch_bytes(tmp, keep) do
+    keep = MapSet.new(Enum.map(keep, &Path.expand/1))
+
+    tmp
+    |> File.ls!()
+    |> Enum.map(&Path.join(tmp, &1))
+    |> Enum.reject(&MapSet.member?(keep, Path.expand(&1)))
+    |> Enum.map(&File.stat!(&1).size)
+    |> Enum.sum()
   end
 
   defp produce_only(tmp, run_id) do
