@@ -6,6 +6,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   inserted after the last frame, once joins and conversation facts are closed.
   """
 
+  alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.RunAnalysisRelationships
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Research.SealedEvidenceLog.Conversation
@@ -266,14 +267,19 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   end
 
   defp put_join(state, %{"record_type" => "run-result"} = record) do
-    if state.result_sequence do
-      {:error, :invalid_record}
-    else
-      insert(state, :result, record["run_id"], record["sequence"])
-      |> case do
-        {:ok, state} -> {:ok, %{state | result_sequence: record["sequence"]}}
-        error -> error
-      end
+    cond do
+      not is_nil(state.result_sequence) ->
+        {:error, :invalid_record}
+
+      not valid_run_result?(record) ->
+        {:error, :invalid_record}
+
+      true ->
+        insert(state, :result, record["run_id"], record["sequence"])
+        |> case do
+          {:ok, state} -> {:ok, %{state | result_sequence: record["sequence"]}}
+          error -> error
+        end
     end
   end
 
@@ -290,6 +296,12 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   end
 
   defp valid_source_payload?(_payload), do: false
+
+  defp valid_run_result?(%{"payload" => %{"result_hash" => hash, "value" => value}}) do
+    ResultIdentity.valid_hash?(hash) and ResultIdentity.strict_json_hash(value) == {:ok, hash}
+  end
+
+  defp valid_run_result?(_record), do: false
 
   defp put_execution(state, field, record) do
     meta = %{

@@ -322,9 +322,30 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Measure do
         "mission_name" => "default"
       })
 
+    next =
+      if is_binary(page["next_cursor"]) do
+        {:ok, second, _} =
+          SealedEvidenceLog.query(snapshot, :generated_sources, %{
+            "run_id" => "dense",
+            "limit" => 3,
+            "mission_name" => "default",
+            "cursor" => page["next_cursor"]
+          })
+
+        %{omitted_count: second["omitted_count"], truncated: second["truncated"]}
+      else
+        nil
+      end
+
     SealedEvidenceLog.close(snapshot)
     File.rm(path)
-    %{omitted_count: page["omitted_count"], metrics: metrics, truncated: page["truncated"]}
+
+    %{
+      omitted_count: page["omitted_count"],
+      metrics: metrics,
+      truncated: page["truncated"],
+      next_page: next
+    }
   end
 
   defp operation_args(:list_runs, _run_id), do: %{"limit" => 10}

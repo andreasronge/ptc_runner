@@ -26,8 +26,10 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
   @spec start([map()], map(), keyword()) :: {:ok, t()} | {:error, atom()}
   def start(artifacts, limits, opts \\ [])
       when is_list(artifacts) and is_map(limits) and is_list(opts) do
-    owner = Keyword.get(opts, :owner, self())
+    caller = self()
+    owner = Keyword.get(opts, :owner, caller)
     token = make_ref()
+    opts = opts |> Keyword.put(:owner, owner) |> Keyword.put(:cancel_with, caller)
 
     case GenServer.start(__MODULE__, {artifacts, limits, owner, token, opts}) do
       {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
@@ -78,7 +80,15 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
 
     case admit_all(artifacts, indexes, limits, opts) do
       {:ok, state} ->
-        indexes = Indexes.put_owner_metadata(state.indexes, %{token: token})
+        indexes =
+          Indexes.put_owner_metadata(state.indexes, %{
+            token: token,
+            run_count: map_size(state.handles),
+            record_count: state.record_count,
+            digests: state.digests,
+            checkpoints: state.checkpoints,
+            peaks: state.peaks
+          })
 
         started = %{
           token: token,
@@ -370,8 +380,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
     :exit, _reason -> {:error, :invalid_snapshot}
   end
 
-  # The token is stored on the handle; calls go to the pid. The struct token is
-  # checked by the public functions that pattern-match `%__MODULE__{}`.
+  # The capability token lives on the snapshot struct and in owner state; every
+  # public call sends that token to the pid.
   defp redact_status(status) when is_map(status) do
     Map.new(status, fn
       {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}

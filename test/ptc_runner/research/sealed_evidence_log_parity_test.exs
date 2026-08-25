@@ -51,6 +51,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
          "parent_evaluation_id" => "workflow-2"
        }},
       {:model_exchanges, %{"run_id" => "parity-filters", "order" => "desc"}},
+      {:generated_sources, %{"run_id" => "parity-filters", "order" => "desc"}},
       {:execution_prints, %{"run_id" => "parity-filters", "limit" => 1}}
     ]
 
@@ -243,11 +244,12 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
       {:execution_prints, ~w(evaluation_id), %{"evaluation_id" => "workflow-eval"}},
       {:execution_errors, ~w(evaluation_id), %{"evaluation_id" => "workflow-eval"}},
       {:explicit_failure_values, ~w(evaluation_id), %{"evaluation_id" => "workflow-eval"}},
-      {:turns, ~w(stream_id capability_id evaluation_id),
+      {:turns, ~w(stream_id capability_id evaluation_id parent_evaluation_id),
        %{
          "stream_id" => "stream-1",
          "capability_id" => "llm-1",
-         "evaluation_id" => "evaluation-1"
+         "evaluation_id" => "evaluation-1",
+         "parent_evaluation_id" => "workflow-1"
        }}
     ]
     |> Enum.flat_map(fn {operation, keys, values} ->
@@ -259,7 +261,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
         Enum.map(keys, fn key -> {operation, Map.put(base, key, Map.fetch!(values, key))} end)
 
       conjunctions =
-        (combinations(keys, 2) ++ combinations(keys, 3))
+        (combinations(keys, 2) ++ combinations(keys, 3) ++ combinations(keys, 4))
         |> Enum.map(fn pair -> {operation, Map.merge(base, Map.take(values, pair))} end)
 
       all = [{operation, Map.merge(base, values)}]
@@ -267,11 +269,17 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
     end)
   end
 
+  defp combinations(_list, n) when n < 2, do: []
+
   defp combinations(list, 2) do
     for a <- list, b <- list, a < b, do: [a, b]
   end
 
   defp combinations(list, 3) do
     for a <- list, b <- list, c <- list, a < b, b < c, do: [a, b, c]
+  end
+
+  defp combinations(list, 4) do
+    for a <- list, b <- list, c <- list, d <- list, a < b, b < c, c < d, do: [a, b, c, d]
   end
 end

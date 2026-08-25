@@ -308,11 +308,18 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
         :ok
     end
 
+    owner =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
     caller =
       spawn(fn ->
         SealedEvidenceLog.admit(%{path: path, trace_facts: corpus.trace_facts},
           during_admission_hook: hook,
-          owner: self()
+          owner: owner
         )
       end)
 
@@ -322,6 +329,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.FaultTest do
     Process.exit(caller, :kill)
     assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
     assert_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 5_000
+    Process.exit(owner, :kill)
   end
 
   test "quota refusal deletes tables and leaves the artifact", %{tmp_dir: tmp} do

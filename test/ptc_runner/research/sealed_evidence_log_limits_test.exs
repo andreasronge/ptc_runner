@@ -132,6 +132,25 @@ defmodule PtcRunner.Research.SealedEvidenceLog.LimitsTest do
              SealedEvidenceLog.admit(%{path: path, trace_facts: corpus.trace_facts})
   end
 
+  test "rejects a run-result whose result_hash does not match the value", %{tmp_dir: tmp} do
+    path = Path.join(tmp, "bad-result.ptcins")
+    corpus = Generator.mixed_run("bad-result")
+
+    records =
+      Enum.map(corpus.records, fn
+        %{"record_type" => "run-result"} = record ->
+          put_in(record, ["payload", "result_hash"], "sha256:" <> String.duplicate("a", 64))
+
+        record ->
+          record
+      end)
+
+    {:ok, _} = SealedEvidenceLog.produce(path, records)
+
+    assert {:error, :invalid_record} =
+             SealedEvidenceLog.admit(%{path: path, trace_facts: corpus.trace_facts})
+  end
+
   test "merge refuses an override above the maintained maximum", %{tmp_dir: tmp} do
     path = Path.join(tmp, "hard-max.ptcins")
     {:ok, _} = SealedEvidenceLog.produce(path, Generator.count_stream("hard-run", 1))
