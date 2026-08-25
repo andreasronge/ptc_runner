@@ -1,0 +1,220 @@
+# DABStep fraud analysis
+
+This example asks a model to solve DABStep dev task 49 over 138,236 synthetic
+payment transactions. The published answer is `B. BE`. In the observed
+five-run cohorts, DeepSeek returned the exact answer 3/5 times and GPT-5.6 Luna
+4/5 times—but private transcript inspection showed fully trace-proven
+computation in only 2/5 and 1/5 runs respectively.
+
+That distinction is the demo: a correct string is not proof that a model did
+the calculation. PtcRunner preserves the generated program and its bounded
+tool traffic so both can be checked.
+
+## Run it
+
+Requirements: `ptc` 0.14.0, Node/npm for the pinned filesystem MCP server,
+`curl`, `jq`, and an OpenRouter key for live runs.
+
+```console
+./fetch-data.sh
+ptc validate ptc-project.json
+ptc doctor ptc-project.json --connect --env-file /absolute/path/to/private.env
+ptc run ptc-project.json \
+  --input inputs/deepseek.json \
+  --env-file /absolute/path/to/private.env \
+  --envelope out.json
+jq '.result.value' out.json
+```
+
+The environment file must define `OPENROUTER_API_KEY`. Keep it outside the
+repository, owner-readable only, and pass its exact path with `--env-file`.
+Use `inputs/luna.json` for GPT-5.6 Luna.
+
+The command result is an object because PtcRunner 0.14 requires an object-root
+result contract:
+
+```json
+{"ok": true, "value": "B. BE"}
+```
+
+### Replay without a live model
+
+The checked-in replay freezes both model responses from the representative
+Luna run. It still executes the generated PTC-Lisp and all 133 local MCP reads
+against the checksum-pinned data projection.
+
+```console
+./fetch-data.sh
+ptc run ptc-project.replay.json \
+  --input inputs/luna.json \
+  --envelope out-replay.json
+```
+
+No model credential is needed. Replay is exact-request matched: changing the
+task, tools, prompt, or continuation causes a fixture miss instead of silently
+using unrelated output.
+
+## What the program computed
+
+The official DABStep manual defines fraud as the ratio of fraudulent volume to
+total volume. Here, volume is `eur_amount`, and fraudulent rows have
+`has_fraudulent_dispute == True`.
+
+| IP country | Total EUR | Fraudulent EUR | Fraud rate |
+|---|---:|---:|---:|
+| **BE** | **2,150,473.54** | **263,833.85** | **12.269%** |
+| NL | 2,701,907.13 | 329,134.08 | 12.182% |
+| SE | 2,002,434.74 | 169,937.79 | 8.487% |
+| IT | 2,599,613.80 | 182,231.72 | 7.010% |
+| FR | 1,292,201.83 | 89,135.03 | 6.898% |
+| ES | 644,883.17 | 43,531.87 | 6.750% |
+| LU | 665,077.96 | 44,628.44 | 6.710% |
+| GR | 640,705.29 | 39,916.73 | 6.230% |
+
+NL is the tempting wrong answer: it leads both raw fraudulent transaction
+count and raw fraudulent EUR volume. Only the ratio puts BE first, by about
+0.087 percentage points.
+
+## The actual generated PTC-Lisp
+
+Luna run `cmd-0xfcwmstj3d6xraxrm810bfm9p` generated the program preserved
+byte-for-byte in [`evidence/luna-01.clj`](evidence/luna-01.clj). Its inspection
+source hash is
+`c61fd9af9544a6f7a12fd1391826ecbf57a4bee7f1288f1329d025fcd9340a7f`.
+
+Formatted for display, it:
+
+```clojure
+(let [cols ["ip_country" "eur_amount" "has_fraudulent_dispute"]
+      res (loop [cur nil acc {}]
+            (let [p (dabstep.payments/read-page cur cols)
+                  a (reduce
+                      (fn [m row]
+                        (let [c (nth row 0)
+                              amt (nth row 1)
+                              fraud? (nth row 2)
+                              [total fraud] (get m c [0 0])]
+                          (assoc m c
+                            [(+ total (or amt 0))
+                             (+ fraud (if fraud? (or amt 0) 0))])))
+                      acc
+                      (get p :rows))]
+              (if (nil? (get p :next_cursor))
+                a
+                (recur (get p :next_cursor) a))))
+      opts [["A" "NL"] ["B" "BE"] ["C" "ES"] ["D" "FR"]]
+      scored (map
+               (fn [[letter country]]
+                 (let [[total fraud] (get res country [0 0])]
+                   [letter country (if (pos? total) (/ fraud total) 0)]))
+               opts)
+      best (reduce
+             (fn [x y] (if (> (nth y 2) (nth x 2)) y x))
+             (first scored)
+             (rest scored))]
+  (return (str (nth best 0) ". " (nth best 1))))
+```
+
+The model chose the three required columns, followed every cursor to `nil`,
+kept only per-country aggregates, divided fraudulent EUR by total EUR, ranked
+the four options, and returned the required format in one program.
+
+## Observed comparison
+
+These are five independent live samples per model observed on 2026-08-24 with
+the same task, six-turn budget, data, contracts, and PtcRunner limits. Caching
+was disabled. They are observations of one task, not benchmark scores.
+
+| Model | Exact answer | Evidence-backed | Model calls | Observed cost |
+|---|---:|---:|---:|---:|
+| `openrouter:deepseek/deepseek-v4-flash` | 3/5 | 2/5 | 29 | $0.006663 |
+| `openrouter:openai/gpt-5.6-luna` | 4/5 | 1/5 | 16 | $0.003161 |
+
+“Evidence-backed” was defined before classification and requires all of:
+
+- exact published answer `B. BE`;
+- the three semantic columns above;
+- terminal cursor traversal;
+- per-country total and fraudulent EUR aggregation; and
+- traceable derivation of those aggregates from a successful scan rather than
+  unexplained model-authored literals; and
+- division into rates in generated PTC-Lisp before selecting BE.
+
+One Luna run got the right answer using transaction-count rate instead of the
+manual-defined EUR-volume rate. Two more computed EUR numerators and
+denominators but left the division to model reasoning. Those count as exact
+answers and fail the stricter computation criterion. A DeepSeek run attempted
+a streaming calculation, exceeded the heap budget, then authored all eight
+exact aggregate pairs as literals even though those values never appeared in
+its earlier visible transcript. It therefore fails the provenance-aware
+criterion despite performing the final division in PTC-Lisp. Two DeepSeek
+runs failed at the turn/result boundary. Every run, including failures, is
+recorded with its run reference, source hashes, calls, duration, cost, and
+classification in [`evidence/cohort.json`](evidence/cohort.json).
+
+## Why the data is columnar
+
+The pinned source CSV is 23.6 MB. `fetch-data.sh` verifies it first, then
+deterministically transposes all 21 columns into newline-delimited files. The
+model still chooses any distinct projection; host code contains no answer,
+country, or fraud-rate logic.
+
+The MCP installation can read only `data/columns/*.txt`. It cannot read the raw
+CSV, the answer-bearing `reference/dev.jsonl`, or the benchmark context files.
+For the representative three-column run this reduced exact private inspection
+to 8.3 MB. The initial row-file design exceeded PtcRunner's fail-closed 16 MB
+inspection capture after 294 reads; the projected design completes in 133.
+
+`payments.clj` aligns independently paged columns with signed cursors and
+bounded buffers. The application grants only two prompt-visible functions:
+the official fraud definition and the paged reader. The raw MCP function is
+not prompt-visible. Evaluation is bounded to 40 MB, 600 seconds, 256 mission
+capability calls, and six agent turns.
+
+## Benchmark fidelity and attribution
+
+This is DABStep dev task 49 with its exact published question, guidelines, and
+answer. The released payment data is synthetic, while the task is derived from
+realistic analytical work. This example is not a DABStep leaderboard
+submission and makes no benchmark-score claim.
+
+The official harness supplies a larger context corpus. This example supplies
+the payments data plus the exact fraud definition from the pinned official
+manual through a prompt-visible domain function. It omits unrelated fee,
+merchant, MCC, and acquirer files, and exposes a lossless model-selected column
+projection instead of raw rows. Those are deliberate harness deviations.
+
+The prompt-facing namespace and function documentation also name DABStep and
+point directly to the relevant manual fact. They do not expose the published
+answer, but they reveal benchmark identity and may cue memorized knowledge. A
+contamination-resistant follow-up should use neutral dataset APIs and verify
+the workflow on option permutations and counterfactual data where BE is not
+the correct result.
+
+Dataset revision:
+`9cef9a2976ccce4d306bf220604597788b090d43`. The source and context hashes are
+recorded in `fetch-data.sh` and `evidence/cohort.json`; updating them requires
+recomputing the reference table and rerunning both cohorts and replay.
+
+> DABstep: Data Agent Benchmark for Multi-step Reasoning © 2025 by Alexander
+> David Egg, Martin Iglesias Goyanes, Andreu Mora, Friso H. Kingma, Thomas
+> Wolf, Leandro Von Werra is licensed under Creative Commons Attribution 4.0
+> International. <https://creativecommons.org/licenses/by/4.0/>
+
+Upstream dataset: <https://huggingface.co/datasets/adyen/DABstep>
+
+## Inspect a run
+
+The project writes canonical traces, private inspection, results, and command
+envelopes below owner-only `.ptc/`. Treat inspection as sensitive: it contains
+exact model exchanges and capability payloads and is intentionally gitignored.
+
+```console
+run_ref=$(jq -r '.run_ref' out.json)
+jq -r 'select(.record_type == "evaluation-source") | .payload.source' \
+  ".ptc/inspection/${run_ref}.inspection.jsonl"
+ptc viewer ptc-project.json
+```
+
+The checked-in evidence contains hashes and the selected generated source, not
+raw private inspection or credentials.
