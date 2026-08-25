@@ -63,7 +63,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Oracle do
         max_bytes
       )
 
-    proto_result = proto_query(snapshot, operation, put_cursor(base, proto_cursor))
+    proto_result = proto_query(snapshot, operation, put_cursor(base, proto_cursor), max_bytes)
 
     with :ok <- compare_results(current_result, proto_result, operation) do
       advance(
@@ -128,8 +128,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Oracle do
   defp put_cursor(base, nil), do: base
   defp put_cursor(base, cursor), do: Map.put(base, "cursor", cursor)
 
-  defp proto_query(snapshot, operation, arguments) do
-    case SealedEvidenceLog.query(snapshot, operation, arguments) do
+  defp proto_query(snapshot, operation, arguments, max_bytes) do
+    case SealedEvidenceLog.query(snapshot, operation, arguments, max_result_bytes: max_bytes) do
       {:ok, page, _metrics} -> {:ok, page}
       {:error, reason} -> {:error, reason}
     end

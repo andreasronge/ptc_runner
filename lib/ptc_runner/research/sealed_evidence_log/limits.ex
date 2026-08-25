@@ -81,7 +81,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Limits do
     defaults = defaults()
     allowed = Map.keys(defaults)
 
-    if Map.keys(opts) -- allowed == [] and Enum.all?(opts, &positive_override?/1) do
+    if Map.keys(opts) -- allowed == [] and Enum.all?(opts, &allowed_override?(defaults, &1)) do
       {:ok, Map.merge(defaults, opts)}
     else
       {:error, :invalid_limits}
@@ -100,7 +100,9 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Limits do
     host_facing() ++ snapshot_internal() ++ producer_sink() ++ prototype_installed() ++ guards()
   end
 
-  defp positive_override?({_key, value}), do: is_integer(value) and value > 0
+  defp allowed_override?(defaults, {key, value}) do
+    is_integer(value) and value > 0 and value <= Map.fetch!(defaults, key)
+  end
 
   defp host_facing do
     [
@@ -265,6 +267,92 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Limits do
         {defaults.query_deadline_ms, defaults.query_deadline_ms, defaults.query_deadline_ms},
         :selected_or_directory,
         "prototype query deadline"
+      ),
+      limit_row(
+        "internal only",
+        :prototype,
+        :admission,
+        :bytes,
+        {defaults.max_retained_bytes, defaults.max_retained_bytes, defaults.max_retained_bytes},
+        :selected_or_directory,
+        "prototype max_retained_bytes"
+      ),
+      limit_row(
+        "internal only",
+        :prototype,
+        :query,
+        :bytes,
+        {defaults.max_result_bytes, defaults.max_result_bytes, defaults.max_result_bytes},
+        :selected_or_directory,
+        "prototype max_result_bytes"
+      ),
+      limit_row(
+        "internal only",
+        :prototype,
+        :producer,
+        :bytes,
+        {defaults.producer_heap_bytes, defaults.producer_heap_bytes,
+         defaults.producer_heap_bytes},
+        :selected_file,
+        "prototype producer max_heap_size envelope"
+      ),
+      limit_row(
+        "internal only",
+        :prototype,
+        :admission,
+        :bytes,
+        {defaults.admission_heap_bytes, defaults.admission_heap_bytes,
+         defaults.admission_heap_bytes},
+        :selected_file,
+        "prototype admission max_heap_size envelope"
+      ),
+      limit_row(
+        "internal only",
+        :prototype,
+        :query,
+        :bytes,
+        {defaults.query_heap_bytes, defaults.query_heap_bytes, defaults.query_heap_bytes},
+        :selected_file,
+        "prototype query max_heap_size envelope"
+      ),
+      limit_row(
+        "internal only",
+        :prototype,
+        :producer,
+        :milliseconds,
+        {defaults.producer_deadline_ms, defaults.producer_deadline_ms,
+         defaults.producer_deadline_ms},
+        :selected_file,
+        "prototype producer deadline"
+      ),
+      limit_row(
+        "internal only",
+        :prototype,
+        :admission,
+        :milliseconds,
+        {defaults.admission_deadline_ms, defaults.admission_deadline_ms,
+         defaults.admission_deadline_ms},
+        :selected_file,
+        "prototype admission deadline"
+      ),
+      limit_row(
+        "internal only",
+        :prototype,
+        :cleanup,
+        :milliseconds,
+        {defaults.cleanup_deadline_ms, defaults.cleanup_deadline_ms,
+         defaults.cleanup_deadline_ms},
+        :selected_or_directory,
+        "prototype cleanup deadline"
+      ),
+      limit_row(
+        "internal only",
+        :prototype,
+        :producer,
+        :bytes,
+        {defaults.io_buffer_bytes, defaults.io_buffer_bytes, defaults.io_buffer_bytes},
+        :selected_file,
+        "prototype I/O buffer"
       )
     ]
   end

@@ -43,7 +43,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
           logical_bytes: non_neg_integer(),
           owner_metadata: map(),
           trace_facts: map(),
-          cache: map()
+          cache: map(),
+          turn_evidence: map()
         }
 
   @spec create(pid()) :: t()
@@ -70,7 +71,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
       logical_bytes: 0,
       owner_metadata: %{},
       trace_facts: %{},
-      cache: %{}
+      cache: %{},
+      turn_evidence: %{}
     }
   end
 
@@ -78,7 +80,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
           {:ok, t()} | {:error, :max_index_entries | :max_logical_index_bytes}
   def insert(indexes, family, key, value, limits)
       when is_map(indexes) and is_atom(family) and is_map(limits) do
-    row = RetainedSize.detach_binaries({family, key, value})
+    row = RetainedSize.detach_binaries({key, value})
     charge = logical_charge(row)
     entries = indexes.logical_entries + 1
     bytes = indexes.logical_bytes + charge
@@ -92,7 +94,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
 
       true ->
         table = table_for(family)
-        true = :ets.insert(Map.fetch!(indexes.tables, table), {key, value})
+        true = :ets.insert(Map.fetch!(indexes.tables, table), row)
 
         {:ok,
          %{
@@ -116,6 +118,11 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
   @spec put_cache(t(), map()) :: t()
   def put_cache(indexes, cache) when is_map(indexes) and is_map(cache) do
     %{indexes | cache: RetainedSize.detach_binaries(cache)}
+  end
+
+  @spec put_turn_evidence(t(), map()) :: t()
+  def put_turn_evidence(indexes, evidence) when is_map(indexes) and is_map(evidence) do
+    %{indexes | turn_evidence: RetainedSize.detach_binaries(evidence)}
   end
 
   @spec lookup(t(), atom(), term()) :: [term()]
@@ -221,7 +228,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
   end
 
   defp other_retained_bytes(indexes) do
-    charge(indexes.owner_metadata) + charge(indexes.trace_facts) + charge(indexes.cache)
+    charge(indexes.owner_metadata) + charge(indexes.trace_facts) + charge(indexes.cache) +
+      charge(indexes.turn_evidence)
   end
 
   defp charge(value) do

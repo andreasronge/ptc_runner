@@ -39,7 +39,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
 
   def query(%__MODULE__{} = snapshot, operation, arguments, opts)
       when is_atom(operation) and is_map(arguments) and is_list(opts) do
-    call(snapshot, {:query, operation, arguments, opts})
+    call(snapshot, {:query, snapshot.token, operation, arguments, opts})
   end
 
   def query(_snapshot, _operation, _arguments, _opts), do: {:error, :invalid_query}
@@ -72,16 +72,28 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
     Process.flag(:trap_exit, true)
     owner_ref = Process.monitor(owner)
     indexes = Indexes.create(self())
+    opts = opts |> Keyword.put_new(:cancel_with, owner) |> Keyword.put_new(:owner, owner)
 
     case admit_all(artifacts, indexes, limits, opts) do
       {:ok, state} ->
-        {:ok,
-         Map.merge(state, %{
-           token: token,
-           owner_ref: owner_ref,
-           limits: limits,
-           indexes: Indexes.put_owner_metadata(state.indexes, %{token: token})
-         })}
+        indexes = Indexes.put_owner_metadata(state.indexes, %{token: token})
+
+        started = %{
+          token: token,
+          owner_ref: owner_ref,
+          limits: limits,
+          indexes: indexes,
+          query_hook: Keyword.get(opts, :query_hook)
+        }
+
+        state = Map.merge(state, started)
+
+        if Indexes.within_retained?(indexes, limits) do
+          {:ok, state}
+        else
+          cleanup_owned(state)
+          {:stop, :max_retained_bytes}
+        end
 
       {:error, reason} ->
         Indexes.delete_all(indexes)
@@ -90,9 +102,9 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
   end
 
   @impl GenServer
-  def handle_call({:query, operation, arguments, opts}, {caller, _ref} = from, state) do
-    if valid_token?(state, opts) do
-      run_query(state, operation, arguments, caller, from)
+  def handle_call({:query, token, operation, arguments, opts}, {caller, _ref} = from, state) do
+    if token == state.token do
+      run_query(state, operation, arguments, caller, from, opts)
     else
       {:reply, {:error, :invalid_snapshot}, state}
     end
@@ -136,8 +148,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
 
   @impl GenServer
   def terminate(_reason, state) do
-    if Map.has_key?(state, :indexes), do: Indexes.delete_all(state.indexes)
-    state |> Map.get(:handles, %{}) |> Map.values() |> Enum.each(&Handle.close/1)
+    cleanup_owned(state)
     :ok
   end
 
@@ -166,17 +177,23 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
             }}}
 
         {:error, reason} ->
+          acc.handles |> Map.values() |> Enum.each(&Handle.close/1)
           {:halt, {:error, reason}}
       end
     end)
     |> case do
       {:ok, state} ->
+        indexes =
+          state.indexes
+          |> Indexes.put_trace_facts(state.trace_facts)
+          |> Indexes.put_turn_evidence(state.turn_evidence)
+
         {:ok,
          %{
            state
            | snapshot_digest: snapshot_digest(state, opts),
              trace_snapshot_hash: Keyword.get(opts, :trace_snapshot_hash, "trace-source"),
-             indexes: Indexes.put_trace_facts(state.indexes, state.trace_facts)
+             indexes: indexes
          }}
 
       error ->
@@ -188,23 +205,33 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
     path = artifact.path
     trace_facts = artifact.trace_facts
 
-    with {:ok, handle} <- Handle.open(path),
-         {:ok, admitted} <- Admission.run(handle, indexes, trace_facts, limits, opts) do
-      {:ok,
-       %{
-         handle: handle,
-         indexes: admitted.indexes,
-         run_id: admitted.run_id,
-         record_count: admitted.record_count,
-         checkpoints: admitted.checkpoints,
-         turn_evidence: turn_evidence(admitted)
-       }}
+    case Handle.open(path) do
+      {:ok, handle} ->
+        case Admission.run(handle, indexes, trace_facts, limits, opts) do
+          {:ok, admitted} ->
+            {:ok,
+             %{
+               handle: handle,
+               indexes: admitted.indexes,
+               run_id: admitted.run_id,
+               record_count: admitted.record_count,
+               checkpoints: admitted.checkpoints,
+               turn_evidence: turn_evidence(admitted)
+             }}
+
+          {:error, reason} ->
+            Handle.close(handle)
+            {:error, reason}
+        end
+
+      error ->
+        error
     end
   end
 
-  defp run_query(state, operation, arguments, caller, from) do
+  defp run_query(state, operation, arguments, caller, from, opts) do
     snapshot = query_state(state)
-    max_bytes = state.limits.max_result_bytes
+    max_bytes = Keyword.get(opts, :max_result_bytes, state.limits.max_result_bytes)
     metadata = %{"snapshot_hash" => snapshot_hash(state.snapshot_digest)}
     limits = state.limits
 
@@ -246,7 +273,9 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
       snapshot_digest: state.snapshot_digest,
       trace_facts: state.trace_facts,
       trace_snapshot_hash: state.trace_snapshot_hash,
-      turn_evidence: state.turn_evidence
+      turn_evidence: state.turn_evidence,
+      limits: state.limits,
+      query_hook: Map.get(state, :query_hook)
     }
   end
 
@@ -307,7 +336,11 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Snapshot do
 
   defp turn_evidence(admitted), do: admitted.turn_evidence
 
-  defp valid_token?(state, _opts), do: is_reference(state.token)
+  defp cleanup_owned(state) do
+    if Map.has_key?(state, :indexes), do: Indexes.delete_all(state.indexes)
+    state |> Map.get(:handles, %{}) |> Map.values() |> Enum.each(&Handle.close/1)
+    :ok
+  end
 
   defp call(%__MODULE__{pid: pid}, message) do
     GenServer.call(pid, message, 30_000)

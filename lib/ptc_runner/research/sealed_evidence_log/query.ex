@@ -66,6 +66,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
   def run(snapshot, operation, arguments, max_result_bytes, metadata)
       when is_map(snapshot) and operation in @operations and is_map(arguments) and
              is_integer(max_result_bytes) and max_result_bytes > 0 and is_map(metadata) do
+    maybe_query_hook(snapshot)
     execute(snapshot, operation, arguments, max_result_bytes, metadata, empty_metrics())
   end
 
@@ -74,7 +75,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
 
   defp execute(snapshot, :list_runs, arguments, max_bytes, metadata, metrics) do
     with :ok <- validate_keys(arguments, ~w(limit cursor)),
-         {:ok, page} <- page_options(arguments, snapshot.snapshot_digest, :list_runs) do
+         {:ok, page} <- page_options(arguments, snapshot.snapshot_digest, :list_runs),
+         :ok <- verify_handles(snapshot, :catalog, metrics) do
       runs =
         snapshot.indexes
         |> Indexes.tab2list(:runs)
@@ -95,6 +97,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
        ) do
     with :ok <- validate_keys(arguments, ["run_id"]),
          true <- valid_string?(run_id),
+         :ok <- verify_handles(snapshot, {:get_run, run_id}, metrics),
          {:ok, run} <- fetch_run(snapshot, run_id),
          result <- Map.merge(run, metadata),
          :ok <- ResultLimit.validate(result, max_bytes) do
@@ -112,6 +115,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
   defp execute(snapshot, :result, %{"run_id" => run_id} = arguments, max_bytes, metadata, metrics) do
     with :ok <- validate_keys(arguments, ["run_id"]),
          :ok <- validate_result_run_id(run_id, snapshot),
+         :ok <- verify_handles(snapshot, {:result, run_id}, metrics),
          {:ok, item, metrics} <- fetch_result(snapshot, run_id, metrics),
          result <- Map.merge(item, metadata),
          :ok <- ResultLimit.validate(result, max_bytes) do
@@ -187,7 +191,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
            ) do
       paginate(locators, {operation, run_id}, page, snapshot, max_bytes, metadata, metrics)
     else
-      false -> {:error, :not_found}
+      false -> {:error, :invalid_query}
       {:error, _reason} = error -> error
     end
   end
@@ -264,7 +268,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
       selected = items |> Enum.drop(page.offset) |> Enum.take(page.limit)
       omitted = Enum.drop(items, page.offset + length(selected))
 
-      with {:ok, metrics} <- verify_dependencies(snapshot, kind, selected ++ omitted, metrics),
+      with {:ok, metrics} <- verify_dependencies(snapshot, kind, items, metrics),
            {:ok, assembled, metrics} <- assemble_many(snapshot, kind, selected, metrics) do
         metrics = bump(metrics, :exact_count_work, length(omitted))
         fit_page(assembled, items, page, snapshot, max_bytes, metadata, metrics, kind)
@@ -309,14 +313,16 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
              Map.fetch!(snapshot.handles, run_id),
              snapshot.indexes,
              run_id,
-             sequence
+             sequence,
+             range_ceiling(snapshot)
            ) do
-        {:ok, _record, _digest} ->
+        {:ok, _record, bytes_read} ->
           acc =
             acc
             |> bump(:candidate_frames_verified, 1)
             |> bump(:hash_operations, 1)
             |> bump(:ranges, 1)
+            |> bump(:bytes_read, bytes_read)
 
           {:cont, {:ok, acc}}
 
@@ -399,10 +405,10 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
   defp assemble_one(snapshot, {:generated_sources, run_id}, {:record, sequence}, metrics) do
     handle = Map.fetch!(snapshot.handles, run_id)
 
-    with {:ok, record, metrics} <- read(handle, snapshot, run_id, sequence, metrics) do
-      evaluation_id = record["correlation"]["evaluation_id"]
+    with {:ok, record, metrics} <- read(handle, snapshot, run_id, sequence, metrics),
+         evaluation_id = record["correlation"]["evaluation_id"],
+         {:ok, calls, metrics} <- analysis_calls(snapshot, run_id, evaluation_id, metrics) do
       parent = get_in(snapshot.trace_facts, [run_id, "parent_evaluation_ids", evaluation_id])
-      calls = analysis_calls(snapshot, run_id, evaluation_id)
       relationships = relationships(snapshot, run_id, :generated_sources, sequence)
       {:ok, Items.source_item(record, calls, parent, relationships), metrics}
     end
@@ -502,13 +508,19 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
   defp compact_turn_page(result), do: result
 
   defp read(handle, snapshot, run_id, sequence, metrics) do
-    case Items.read_record(handle, snapshot.indexes, run_id, sequence) do
-      {:ok, record, _digest} ->
+    case Items.read_record(
+           handle,
+           snapshot.indexes,
+           run_id,
+           sequence,
+           range_ceiling(snapshot)
+         ) do
+      {:ok, record, bytes_read} ->
         metrics =
           metrics
           |> bump(:ranges, 1)
           |> bump(:hash_operations, 1)
-          |> bump(:bytes_read, byte_size_of(record))
+          |> bump(:bytes_read, bytes_read)
 
         {:ok, record, metrics}
 
@@ -596,21 +608,41 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
     end
   end
 
+  defp locator_sequences(snapshot, :generated_sources, run_id, {:record, sequence}) do
+    [sequence | analysis_sequences(snapshot, run_id, sequence)]
+  end
+
   defp locator_sequences(_snapshot, _operation, _run_id, {:record, sequence}), do: [sequence]
   defp locator_sequences(_snapshot, _operation, _run_id, _locator), do: []
 
-  defp analysis_calls(snapshot, run_id, evaluation_id) do
+  defp analysis_sequences(snapshot, run_id, sequence) do
+    case Indexes.match(snapshot.indexes, :evaluation_join, {{run_id, :_, :source}, sequence}) do
+      [{{^run_id, evaluation_id, :source}, ^sequence}] ->
+        case Indexes.lookup(
+               snapshot.indexes,
+               :evaluation_join,
+               {run_id, evaluation_id, :analysis}
+             ) do
+          [{_key, analysis_seq}] -> [analysis_seq]
+          _other -> []
+        end
+
+      _other ->
+        []
+    end
+  end
+
+  defp analysis_calls(snapshot, run_id, evaluation_id, metrics) do
     case Indexes.lookup(snapshot.indexes, :evaluation_join, {run_id, evaluation_id, :analysis}) do
       [{_key, sequence}] ->
         handle = Map.fetch!(snapshot.handles, run_id)
 
-        case Items.read_record(handle, snapshot.indexes, run_id, sequence) do
-          {:ok, record, _digest} -> record["payload"]["prelude_calls"]
-          _error -> nil
+        with {:ok, record, metrics} <- read(handle, snapshot, run_id, sequence, metrics) do
+          {:ok, record["payload"]["prelude_calls"], metrics}
         end
 
       _other ->
-        nil
+        {:ok, nil, metrics}
     end
   end
 
@@ -749,10 +781,13 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Query do
 
   defp bump(metrics, key, amount), do: Map.update!(metrics, key, &(&1 + amount))
 
-  defp byte_size_of(record) do
-    case Jason.encode(record) do
-      {:ok, encoded} -> byte_size(encoded)
-      _error -> 0
+  defp range_ceiling(snapshot) do
+    case snapshot do
+      %{limits: %{max_range_bytes: bytes}} when is_integer(bytes) and bytes > 0 -> bytes
+      _other -> 64 * 1024 * 1024
     end
   end
+
+  defp maybe_query_hook(%{query_hook: hook}) when is_function(hook, 1), do: hook.(:before_query)
+  defp maybe_query_hook(_snapshot), do: :ok
 end

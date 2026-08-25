@@ -24,13 +24,16 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Admission do
     hook = Keyword.get(opts, :checkpoint_hook)
     mutate_hook = Keyword.get(opts, :during_admission_hook)
     timeout_ms = Keyword.get(opts, :deadline_ms, limits.admission_deadline_ms)
-    owner = self()
+    snapshot_owner = self()
+    cancel_with = Keyword.get(opts, :cancel_with, Keyword.get(opts, :owner, snapshot_owner))
 
     BoundedWorker.run(
-      fn -> admit(handle, indexes, trace_facts, limits, hook, mutate_hook, owner) end,
+      fn ->
+        admit(handle, indexes, trace_facts, limits, hook, mutate_hook, snapshot_owner)
+      end,
       timeout_ms: timeout_ms,
       max_heap_words: Limits.heap_words(limits.admission_heap_bytes),
-      cancel_with: owner
+      cancel_with: cancel_with
     )
     |> wrap_worker()
   end
@@ -56,7 +59,20 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Admission do
            stream_frames(ctx, state, offset, evidence_hash, checkpoints),
          :ok <- maybe_hook(mutate_hook, :after_frames),
          :ok <- Handle.assert_stable(handle),
-         :ok <- verify_evidence_digest(handle, evidence_hash),
+         streamed <- :crypto.hash_final(evidence_hash),
+         :ok <-
+           Handle.confirm_seal(
+             handle,
+             streamed,
+             %{
+               record_count: state.record_count,
+               first_sequence: state.first_sequence,
+               last_sequence: state.last_sequence,
+               run_id: state.run_id,
+               trace_id: state.trace_id
+             },
+             limits.io_buffer_bytes
+           ),
          {:ok, state} <- Assembler.finish(state, trace_facts),
          true <- Indexes.within_retained?(state.indexes, limits) do
       checkpoints = Checkpoints.record(checkpoints, :ets_inserted, pids)
@@ -105,8 +121,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Admission do
          {:ok, payload} <- Handle.pread(ctx.handle, payload_offset, length),
          evidence_hash <-
            :crypto.hash_update(evidence_hash, [<<length::unsigned-big-64>>, payload]),
-         checkpoints <- Checkpoints.record(checkpoints, :decoded, ctx.pids),
          {:ok, record} <- Codec.decode_record(payload),
+         checkpoints <- Checkpoints.record(checkpoints, :decoded, ctx.pids),
          digest <- :crypto.hash(:sha256, payload),
          {:ok, state} <- Assembler.ingest(state, record, payload_offset, length, digest) do
       _ = payload
@@ -121,12 +137,6 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Admission do
       {:error, :source_changed} -> {:error, :source_changed}
       {:error, reason} -> {:error, reason}
     end
-  end
-
-  defp verify_evidence_digest(handle, evidence_hash) do
-    if :crypto.hash_final(evidence_hash) == handle.footer.evidence_sha256,
-      do: :ok,
-      else: {:error, :malformed_source}
   end
 
   defp maybe_hook(nil, _name), do: :ok

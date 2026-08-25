@@ -233,7 +233,14 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Generator do
     padding = payload_padding(run_id, trace_id, frame_bytes)
 
     Stream.map(1..frame_count, fn sequence ->
-      evaluation_source(run_id, trace_id, sequence, "evaluation-#{sequence}", padding, "default")
+      evaluation_source(
+        run_id,
+        trace_id,
+        sequence,
+        "evaluation-#{sequence}",
+        :binary.copy(padding),
+        "default"
+      )
     end)
   end
 

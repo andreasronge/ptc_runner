@@ -6,18 +6,23 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Items do
   alias PtcRunner.Research.SealedEvidenceLog.Handle
   alias PtcRunner.Research.SealedEvidenceLog.Indexes
 
-  @spec read_record(Handle.t(), Indexes.t(), binary(), pos_integer()) ::
-          {:ok, map(), binary()} | {:error, atom()}
-  def read_record(handle, indexes, run_id, sequence) do
+  @spec read_record(Handle.t(), Indexes.t(), binary(), pos_integer(), pos_integer()) ::
+          {:ok, map(), non_neg_integer()} | {:error, atom()}
+  def read_record(handle, indexes, run_id, sequence, max_range_bytes)
+      when is_integer(max_range_bytes) and max_range_bytes > 0 do
     case Indexes.lookup(indexes, :records, {run_id, sequence}) do
       [{_key, {type, offset, length, digest}}] ->
-        with {:ok, bytes} <- Handle.verify_range(handle, offset, length, digest),
-             {:ok, record} <- Codec.decode_record(bytes),
-             true <- record["record_type"] == type and record["sequence"] == sequence do
-          {:ok, record, digest}
+        if length > max_range_bytes do
+          {:error, :range_limit_exceeded}
         else
-          false -> {:error, :source_changed}
-          {:error, _reason} = error -> error
+          with {:ok, bytes} <- Handle.verify_range(handle, offset, length, digest),
+               {:ok, record} <- Codec.decode_record(bytes),
+               true <- record["record_type"] == type and record["sequence"] == sequence do
+            {:ok, record, length}
+          else
+            false -> {:error, :source_changed}
+            {:error, _reason} = error -> error
+          end
         end
 
       _other ->

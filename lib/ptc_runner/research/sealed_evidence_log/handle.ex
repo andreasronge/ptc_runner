@@ -105,6 +105,90 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Handle do
     end
   end
 
+  @spec confirm_seal(t(), binary(), map(), pos_integer()) ::
+          :ok | {:error, :malformed_source | :source_changed}
+  def confirm_seal(handle, streamed_evidence_sha, state, io_buffer_bytes)
+      when is_binary(streamed_evidence_sha) and is_map(state) and
+             is_integer(io_buffer_bytes) and io_buffer_bytes > 0 do
+    footer = handle.footer
+
+    with true <- footer.record_count == state.record_count,
+         true <- footer.first_sequence == state.first_sequence,
+         true <- footer.last_sequence == state.last_sequence,
+         true <- footer.run_id_sha256 == Format.identity_sha256(state.run_id || ""),
+         true <- footer.trace_id_sha256 == Format.identity_sha256(state.trace_id || ""),
+         {:ok, file_evidence_sha, artifact_digest} <- hash_opened(handle, io_buffer_bytes),
+         :ok <- compare_evidence_hash(streamed_evidence_sha, file_evidence_sha, footer),
+         true <- artifact_digest == footer.artifact_digest do
+      :ok
+    else
+      {:error, _reason} = error -> error
+      false -> {:error, :malformed_source}
+    end
+  end
+
+  defp compare_evidence_hash(streamed, file_hash, footer) do
+    cond do
+      streamed != file_hash -> {:error, :source_changed}
+      file_hash != footer.evidence_sha256 -> {:error, :malformed_source}
+      true -> :ok
+    end
+  end
+
+  defp hash_opened(handle, io_buffer_bytes) do
+    footer = handle.footer
+
+    with {:ok, header} <- pread(handle, 0, Format.header_size()) do
+      start = footer.evidence_offset
+      ending = start + footer.evidence_bytes
+
+      case hash_range(
+             handle,
+             start,
+             ending,
+             :crypto.hash_init(:sha256),
+             :crypto.hash_update(:crypto.hash_init(:sha256), header),
+             io_buffer_bytes
+           ) do
+        {:ok, evidence_acc, artifact_acc} ->
+          evidence_sha = :crypto.hash_final(evidence_acc)
+
+          artifact_digest =
+            artifact_acc
+            |> :crypto.hash_update(Format.unsigned_footer(footer))
+            |> :crypto.hash_final()
+
+          {:ok, evidence_sha, artifact_digest}
+
+        error ->
+          error
+      end
+    end
+  end
+
+  defp hash_range(_handle, offset, ending, evidence_acc, artifact_acc, _buffer)
+       when offset >= ending,
+       do: {:ok, evidence_acc, artifact_acc}
+
+  defp hash_range(handle, offset, ending, evidence_acc, artifact_acc, buffer) do
+    chunk = min(buffer, ending - offset)
+
+    case pread(handle, offset, chunk) do
+      {:ok, bytes} ->
+        hash_range(
+          handle,
+          offset + chunk,
+          ending,
+          :crypto.hash_update(evidence_acc, bytes),
+          :crypto.hash_update(artifact_acc, bytes),
+          buffer
+        )
+
+      error ->
+        error
+    end
+  end
+
   defp inspect_opened(io) do
     with {:ok, header} <- read_at(io, 0, Format.header_size()),
          {:ok, :header} <- Format.decode_header(header),

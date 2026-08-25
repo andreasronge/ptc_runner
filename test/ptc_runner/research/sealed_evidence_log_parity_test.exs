@@ -60,6 +60,30 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
     end
   end
 
+  test "enumerates filter absence, nil, presence, and conjunctions", %{tmp_dir: tmp} do
+    {current, snapshot} = admit_mixed(tmp, "parity-grid")
+    on_exit(fn -> SealedEvidenceLog.close(snapshot) end)
+
+    for {operation, arguments} <- filter_grid("parity-grid") do
+      assert :ok = Oracle.walk_equal(current, snapshot, operation, arguments, 1_000_000),
+             "#{operation} #{inspect(arguments)} diverged"
+    end
+  end
+
+  test "result-byte shrinking stays aligned", %{tmp_dir: tmp} do
+    {current, snapshot} = admit_mixed(tmp, "parity-shrink")
+    on_exit(fn -> SealedEvidenceLog.close(snapshot) end)
+
+    assert :ok =
+             Oracle.walk_equal(
+               current,
+               snapshot,
+               :capability_calls,
+               %{"run_id" => "parity-shrink", "limit" => 10},
+               80
+             )
+  end
+
   test "rejects invalid filter types and unknown keys", %{tmp_dir: tmp} do
     {_current, snapshot} = admit_mixed(tmp, "parity-invalid")
     on_exit(fn -> SealedEvidenceLog.close(snapshot) end)
@@ -134,6 +158,28 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
              SealedEvidenceLog.query(snapshot, :list_runs, %{"limit" => 1, "cursor" => cursor})
   end
 
+  test "cursor from another snapshot is source_changed", %{tmp_dir: tmp} do
+    {_current, first} = admit_mixed(tmp, "cursor-a")
+    {_current, second} = admit_mixed(tmp, "cursor-b")
+    on_exit(fn -> SealedEvidenceLog.close(first) end)
+    on_exit(fn -> SealedEvidenceLog.close(second) end)
+
+    assert {:ok, %{"next_cursor" => cursor}, _} =
+             SealedEvidenceLog.query(first, :model_exchanges, %{
+               "run_id" => "cursor-a",
+               "limit" => 1
+             })
+
+    assert is_binary(cursor)
+
+    assert {:error, :source_changed} =
+             SealedEvidenceLog.query(second, :model_exchanges, %{
+               "run_id" => "cursor-b",
+               "limit" => 1,
+               "cursor" => cursor
+             })
+  end
+
   defp admit_mixed(tmp, run_id) do
     corpus = Generator.mixed_run(run_id)
     path = Path.join(tmp, "#{run_id}.ptcins")
@@ -151,4 +197,55 @@ defmodule PtcRunner.Research.SealedEvidenceLog.ParityTest do
   defp args(:list_runs, _run_id), do: %{"limit" => 10}
   defp args(operation, run_id) when operation in [:get_run, :result], do: %{"run_id" => run_id}
   defp args(_operation, run_id), do: %{"run_id" => run_id, "limit" => 10}
+
+  defp filter_grid(run_id) do
+    [
+      {:capability_calls, ~w(name mission_name capability_id),
+       %{
+         "name" => "search",
+         "mission_name" => "default",
+         "capability_id" => "tool-1"
+       }},
+      {:generated_sources, ~w(evaluation_id parent_evaluation_id mission_name prelude_call),
+       %{
+         "evaluation_id" => "evaluation-1",
+         "parent_evaluation_id" => "workflow-1",
+         "mission_name" => "default",
+         "prelude_call" => "call-1"
+       }},
+      {:model_exchanges, ~w(capability_id input_sequence),
+       %{"capability_id" => "llm-1", "input_sequence" => 1}},
+      {:provider_exchanges, ~w(capability_id mission_name request_id),
+       %{"capability_id" => "tool-1", "mission_name" => "default", "request_id" => 1}},
+      {:effective_preludes, ~w(component_id environment mission_name),
+       %{
+         "component_id" => "shared.api",
+         "environment" => "mission",
+         "mission_name" => "default"
+       }},
+      {:execution_prints, ~w(evaluation_id), %{"evaluation_id" => "workflow-eval"}},
+      {:turns, ~w(stream_id capability_id),
+       %{"stream_id" => "stream-1", "capability_id" => "llm-1"}}
+    ]
+    |> Enum.flat_map(fn {operation, keys, values} ->
+      base = %{"run_id" => run_id}
+      absent = [{operation, base}]
+      nils = Enum.map(keys, fn key -> {operation, Map.put(base, key, nil)} end)
+
+      presents =
+        Enum.map(keys, fn key -> {operation, Map.put(base, key, Map.fetch!(values, key))} end)
+
+      conjunctions =
+        keys
+        |> combinations(2)
+        |> Enum.map(fn pair -> {operation, Map.merge(base, Map.take(values, pair))} end)
+
+      all = [{operation, Map.merge(base, values)}]
+      absent ++ nils ++ presents ++ conjunctions ++ all
+    end)
+  end
+
+  defp combinations(list, 2) do
+    for a <- list, b <- list, a < b, do: [a, b]
+  end
 end

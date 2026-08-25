@@ -110,14 +110,18 @@ verified.
 
 | Event | Outcome |
 | --- | --- |
-| Trailing bytes before open | `malformed_source`; no snapshot |
-| Append during admission | `source_changed` from pinned size/footer accounting |
-| Append after admission | next query `source_changed` |
+| Trailing, truncated, or malformed bytes before open | `malformed_source`; no snapshot |
+| Footer counts/identities/digest mismatch | `malformed_source`; no snapshot |
+| Append, truncate, or overwrite during admission | `source_changed`; no snapshot |
+| Append or truncate after admission | next query `source_changed`, including `get_run` / `result` |
 | Relevant same-size overwrite | next query `source_changed` |
+| Unrelated same-size overwrite | `list_runs` may succeed; the dependent collection returns `source_changed` |
 | Path replacement after admission | queries continue against the pinned handle |
+| Admission caller death | admission worker cancelled; no snapshot |
+| Quota / retained-ceiling refusal | no snapshot; tables deleted; input artifact remains |
 | Snapshot owner death | ETS tables undefined; handles unusable |
 | Normal close | tables deleted; handles unusable |
-| Query caller death | snapshot remains usable |
+| Query caller death | query worker cancelled; snapshot remains usable |
 
 ## Configuration inventory
 
@@ -141,7 +145,12 @@ Class `host_facing` is the public JSON/API path under a
 | internal only | prototype | admission | entries | 8 000 000 | selected file | research `max_index_entries` |
 | internal only | prototype | admission | bytes | 536 870 912 | selected file | research `max_logical_index_bytes` |
 | internal only | prototype | query | bytes | 67 108 864 | selected file | research verified range-byte ceiling |
-| internal only | prototype | query | milliseconds | 15 000 | selected or directory | research query deadline |
+| internal only | prototype | query | milliseconds | 15 000 / 15 000 / 15 000 | selected or directory | research query deadline |
+| internal only | prototype | admission | bytes | 536 870 912 | selected or directory | research `max_retained_bytes` |
+| internal only | prototype | query | bytes | 1 000 000 | selected or directory | research `max_result_bytes` |
+| internal only | prototype | producer | bytes | 268 435 456 | selected file | research producer heap envelope |
+| internal only | prototype | admission | bytes | 268 435 456 | selected file | research admission heap envelope |
+| internal only | prototype | query | bytes | 268 435 456 | selected file | research query heap envelope |
 | internal only | maintained_guard | admission | schema_version | 8 | selected file | `InspectionArtifact` / prototype schema |
 | internal only | maintained_guard | query | items | 1 000 max / 100 default | selected or directory | `InspectionQuery` page limit |
 

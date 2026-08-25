@@ -42,7 +42,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Measure do
         refusals: measure_refusals(tmp),
         mixed: measure_mixed(tmp, limits),
         dense: measure_dense(tmp, limits),
-        recommendation: recommendation()
+        recommendation: recommendation(completed_counts)
       }
     after
       if Keyword.get(opts, :cleanup, true) do
@@ -121,6 +121,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Measure do
     artifact_stat = File.stat!(path)
     accounting = summarize_accounting(info.accounting)
     SealedEvidenceLog.close(snapshot)
+    remaining = File.stat!(path).size
     File.rm(path)
 
     case {catalog_result, repeated_result} do
@@ -136,13 +137,16 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Measure do
           repeated_query_ms: repeated_ms,
           generated_sources_query: query_outcome(source_result, source_ms),
           producer_checkpoints: summarize_checkpoints(produced.checkpoints),
+          admission_checkpoints: admission_checkpoint_summary(info),
           admission_peaks: summarize_peaks(info.diagnostic_peaks),
           accounting: accounting,
           query_metrics: metrics,
           omitted_count: page["omitted_count"],
           handle_count_before_close: handle_count,
-          scratch_bytes_before_close: artifact_stat.size,
-          scratch_bytes_after_close: 0
+          scratch_bytes_before_close: 0,
+          scratch_bytes_after_close: 0,
+          artifact_bytes_remaining_after_close: remaining,
+          artifact_bytes_before_close: artifact_stat.size
         }
 
       {error, _repeated} ->
@@ -206,6 +210,18 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Measure do
     accounting = info.accounting
     per_record = if count > 0, do: accounting.ets_bytes / count, else: 0.0
     SealedEvidenceLog.close(snapshot)
+
+    one_over =
+      if count > 1 do
+        error_reason(
+          SealedEvidenceLog.admit(%{path: path, trace_facts: Generator.empty_trace_facts()},
+            limits: [max_records: count - 1]
+          )
+        )
+      else
+        :skipped
+      end
+
     File.rm(path)
 
     %{
@@ -225,7 +241,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Measure do
       query_metrics: metrics,
       omitted_count: page["omitted_count"],
       producer_checkpoints: summarize_checkpoints(produced.checkpoints),
-      admission_peaks: summarize_peaks(info.diagnostic_peaks)
+      admission_peaks: summarize_peaks(info.diagnostic_peaks),
+      max_records_plus_one: one_over
     }
   end
 
@@ -443,14 +460,32 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Measure do
     Path.join(System.tmp_dir!(), "ptc-sealed-evidence-#{System.unique_integer([:positive])}")
   end
 
-  defp recommendation do
+  defp recommendation(completed_counts) do
+    last = completed_counts |> Enum.map(& &1.record_count) |> Enum.max(fn -> 0 end)
+
     %{
       format: :ets_only_v1,
       omitted_count: :exact_when_dependency_bytes_fit,
       next_comparison: :none,
       host_surface: :keep_existing_plus_internal_max_records,
-      last_successful_count_rung: 100_000,
-      experiment_safety_ceiling: 100_000
+      last_successful_count_rung: last,
+      experiment_safety_ceiling: 1_000_000,
+      proposed_production_max_records_default: 16_384,
+      proposed_production_max_records_hard_max: 65_536
     }
+  end
+
+  defp checkpoint_counts(checkpoints) when is_list(checkpoints) do
+    Enum.frequencies_by(checkpoints, & &1.name)
+  end
+
+  defp checkpoint_counts(_other), do: %{}
+
+  defp admission_checkpoint_summary(info) do
+    summarize_checkpoints(%{
+      checkpoints: info.checkpoints,
+      diagnostic_peaks: info.diagnostic_peaks,
+      counts: checkpoint_counts(info.checkpoints)
+    })
   end
 end

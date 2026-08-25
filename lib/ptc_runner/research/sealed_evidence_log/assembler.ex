@@ -9,6 +9,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   alias PtcRunner.Kernel.RunAnalysisRelationships
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.Research.SealedEvidenceLog.Conversation
+  alias PtcRunner.Research.SealedEvidenceLog.Format
   alias PtcRunner.Research.SealedEvidenceLog.Indexes
   alias PtcRunner.Research.SealedEvidenceLog.ValueHash
 
@@ -22,6 +23,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
       schema_version: 8,
       first_timestamp: nil,
       last_timestamp: nil,
+      first_sequence: 0,
+      last_sequence: 0,
       record_count: 0,
       conversation: Conversation.new(),
       inputs: %{},
@@ -44,7 +47,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   def ingest(state, record, offset, length, digest) do
     record = RetainedSize.detach_binaries(record)
 
-    with :ok <- identity(state, record),
+    with :ok <- schema_version(record),
+         :ok <- identity(state, record),
          :ok <- next_sequence(state, record),
          {:ok, state} <- put_primary(state, record, offset, length, digest),
          {:ok, state} <- put_join(state, record) do
@@ -56,6 +60,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
            schema_version: record["schema_version"],
            first_timestamp: state.first_timestamp || record["timestamp"],
            last_timestamp: record["timestamp"],
+           first_sequence: first_sequence(state, record["sequence"]),
+           last_sequence: record["sequence"],
            record_count: state.record_count + 1
        }}
     end
@@ -80,6 +86,15 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
       {:ok, Map.put(state, :evidence, conversation.evidence)}
     end
   end
+
+  defp schema_version(%{"schema_version" => version}) do
+    if version == Format.schema_version(), do: :ok, else: {:error, :invalid_record}
+  end
+
+  defp schema_version(_record), do: {:error, :invalid_record}
+
+  defp first_sequence(%{record_count: 0}, sequence), do: sequence
+  defp first_sequence(%{first_sequence: first}, _sequence), do: first
 
   defp identity(%{run_id: nil}, %{"run_id" => run_id, "trace_id" => trace_id})
        when is_binary(run_id) and is_binary(trace_id),
@@ -116,7 +131,19 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
     if Map.has_key?(state.inputs, id) do
       {:error, :invalid_record}
     else
-      {:ok, %{state | inputs: Map.put(state.inputs, id, record)}}
+      payload = record["payload"]
+
+      {:ok,
+       %{
+         state
+         | inputs:
+             Map.put(state.inputs, id, %{
+               sequence: record["sequence"],
+               environment: payload["environment"],
+               mission_name: payload["mission_name"],
+               name: payload["name"]
+             })
+       }}
     end
   end
 
@@ -126,7 +153,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
 
     if compatible_capability?(input, record) and not Map.has_key?(state.outputs, id) and
          valid_exception_output?(state, id, record["payload"]["result"]) do
-      {:ok, %{state | outputs: Map.put(state.outputs, id, record)}}
+      {:ok, %{state | outputs: Map.put(state.outputs, id, record["sequence"])}}
     else
       {:error, :invalid_record}
     end
@@ -138,7 +165,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
 
     if compatible_capability?(input, record) and not Map.has_key?(state.exceptions, id) and
          not Map.has_key?(state.outputs, id) do
-      {:ok, %{state | exceptions: Map.put(state.exceptions, id, record)}}
+      {:ok, %{state | exceptions: Map.put(state.exceptions, id, record["sequence"])}}
     else
       {:error, :invalid_record}
     end
@@ -150,7 +177,16 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
     if Map.has_key?(state.mcp_requests, key) do
       {:error, :invalid_record}
     else
-      {:ok, %{state | mcp_requests: Map.put(state.mcp_requests, key, record)}}
+      {:ok,
+       %{
+         state
+         | mcp_requests:
+             Map.put(state.mcp_requests, key, %{
+               sequence: record["sequence"],
+               transport: record["payload"]["transport"],
+               mission_name: record["payload"]["mission_name"]
+             })
+       }}
     end
   end
 
@@ -160,12 +196,16 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
     if Map.has_key?(state.mcp_responses, key) do
       {:error, :invalid_record}
     else
-      {:ok, %{state | mcp_responses: Map.put(state.mcp_responses, key, record)}}
+      {:ok,
+       %{
+         state
+         | mcp_responses: Map.put(state.mcp_responses, key, record["sequence"])
+       }}
     end
   end
 
   defp put_join(state, %{"record_type" => "mcp-stderr"} = record) do
-    {:ok, %{state | mcp_stderrs: Map.put(state.mcp_stderrs, mcp_key(record), record)}}
+    {:ok, %{state | mcp_stderrs: Map.put(state.mcp_stderrs, mcp_key(record), record["sequence"])}}
   end
 
   defp put_join(state, %{"record_type" => "evaluation-analysis"} = record) do
@@ -176,7 +216,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
       {:ok,
        %{
          state
-         | analyses: Map.put(state.analyses, id, record),
+         | analyses: Map.put(state.analyses, id, record["sequence"]),
            prelude_calls_by_eval:
              Map.put(state.prelude_calls_by_eval, id, record["payload"]["prelude_calls"])
        }}
@@ -250,17 +290,17 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
     %{state | conversation: conversation}
   end
 
-  defp capability_class(%{"environment" => "workflow", "name" => "llm-request"}), do: :model
-  defp capability_class(_payload), do: :capability
+  defp capability_class(%{environment: "workflow", name: "llm-request"}), do: :model
+  defp capability_class(_input), do: :capability
 
   defp compatible_capability?(nil, _record), do: false
 
   defp compatible_capability?(input, record) do
     payload = record["payload"]
 
-    input["payload"]["environment"] == payload["environment"] and
-      input["payload"]["mission_name"] == payload["mission_name"] and
-      input["payload"]["name"] == payload["name"]
+    input.environment == payload["environment"] and
+      input.mission_name == payload["mission_name"] and
+      input.name == payload["name"]
   end
 
   defp valid_exception_output?(state, id, result) do
@@ -292,26 +332,26 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
 
   defp materialize_pairs(state) do
     state.inputs
-    |> Enum.sort_by(fn {_id, record} -> record["sequence"] end)
+    |> Enum.sort_by(fn {_id, input} -> input.sequence end)
     |> Enum.reduce_while({:ok, state}, fn {id, input}, {:ok, acc} ->
       output = Map.get(acc.outputs, id)
       exception = Map.get(acc.exceptions, id)
-      class = capability_class(input["payload"])
+      class = capability_class(input)
       collection = if class == :model, do: :model_exchanges, else: :capability_calls
 
-      locator = {:capability, id, input["sequence"]}
+      locator = {:capability, id, input.sequence}
 
       join = %{
-        input_sequence: input["sequence"],
-        exception_sequence: exception && exception["sequence"],
-        output_sequence: output && output["sequence"],
-        environment: input["payload"]["environment"],
-        mission_name: input["payload"]["mission_name"],
-        name: input["payload"]["name"],
+        input_sequence: input.sequence,
+        exception_sequence: exception,
+        output_sequence: output,
+        environment: input.environment,
+        mission_name: input.mission_name,
+        name: input.name,
         class: class
       }
 
-      with {:ok, acc} <- insert(acc, :join_capability, {input["run_id"], id}, join),
+      with {:ok, acc} <- insert(acc, :join_capability, {acc.run_id, id}, join),
            {:ok, acc} <- order_and_filters(acc, collection, locator, pair_filters(input, id)) do
         {:cont, {:ok, acc}}
       else
@@ -370,18 +410,18 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
 
   defp materialize_providers(state) do
     state.mcp_requests
-    |> Enum.sort_by(fn {_key, record} -> record["sequence"] end)
+    |> Enum.sort_by(fn {_key, request} -> request.sequence end)
     |> Enum.reduce_while({:ok, state}, fn {{capability_id, request_id}, request}, {:ok, acc} ->
       response = Map.fetch!(acc.mcp_responses, {capability_id, request_id})
       stderr = Map.get(acc.mcp_stderrs, {capability_id, request_id})
-      locator = {:provider, capability_id, request_id, request["sequence"]}
+      locator = {:provider, capability_id, request_id, request.sequence}
 
       join = %{
-        request_sequence: request["sequence"],
-        response_sequence: response["sequence"],
-        stderr_sequence: stderr && stderr["sequence"],
-        transport: request["payload"]["transport"],
-        mission_name: request["payload"]["mission_name"]
+        request_sequence: request.sequence,
+        response_sequence: response,
+        stderr_sequence: stderr,
+        transport: request.transport,
+        mission_name: request.mission_name
       }
 
       with {:ok, acc} <-
@@ -468,10 +508,10 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
     pairs = Enum.to_list(state.inputs)
 
     model =
-      Enum.filter(pairs, fn {_id, input} -> capability_class(input["payload"]) == :model end)
+      Enum.filter(pairs, fn {_id, input} -> capability_class(input) == :model end)
 
     calls =
-      Enum.reject(pairs, fn {_id, input} -> capability_class(input["payload"]) == :model end)
+      Enum.reject(pairs, fn {_id, input} -> capability_class(input) == :model end)
 
     counts = %{
       "model_exchanges" => length(model),
@@ -641,13 +681,11 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
     do: put_in(state, [Access.key(:ordinals, %{}), collection], ordinal)
 
   defp pair_filters(input, capability_id) do
-    payload = input["payload"]
-
     [
       {"capability_id", capability_id},
-      {"input_sequence", input["sequence"]},
-      {"mission_name", payload["mission_name"]},
-      {"name", payload["name"]}
+      {"input_sequence", input.sequence},
+      {"mission_name", input.mission_name},
+      {"name", input.name}
     ]
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
   end
@@ -674,7 +712,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Assembler do
   defp provider_filters(request, capability_id, request_id) do
     [
       {"capability_id", capability_id},
-      {"mission_name", request["payload"]["mission_name"]},
+      {"mission_name", request.mission_name},
       {"request_id", request_id}
     ]
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
