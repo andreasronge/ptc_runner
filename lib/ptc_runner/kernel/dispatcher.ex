@@ -449,14 +449,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
           )
 
         result =
-          merge_result_attributes(
-            state,
-            environment,
-            invocation,
-            validation,
-            result,
-            invocation.result_attributes
-          )
+          result
+          |> merge_result_attributes(invocation.result_attributes)
+          |> admit_success_output(state, environment, invocation, validation)
 
         result =
           if output_allowed? do
@@ -830,8 +825,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp cancel_exception_diagnostic(_result), do: :ok
 
-  defp normalize_result(state, environment, invocation, validation, {:ok, value}) do
-    admit_output(state, environment, invocation, validation, value, [:request, :static])
+  defp normalize_result(_state, _environment, _invocation, _validation, {:ok, value}) do
+    %{status: :ok, value: value}
   end
 
   defp normalize_result(
@@ -990,7 +985,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
   end
 
   defp remaining_output_validation_ms(%{deadline_ms: deadline_ms}) do
-    max(deadline_ms - System.monotonic_time(:millisecond) - @validation_handoff_ms, 0)
+    # Input validation reserves `@validation_handoff_ms` so a refusal can still
+    # persist terminal host provenance. Output admission runs after dispatch,
+    # so that reserve must not turn a still-open deadline into unavailability.
+    max(deadline_ms - System.monotonic_time(:millisecond), 0)
   end
 
   defp output_validation(heap_words, deadline_ms, evaluation_lease) do
@@ -1327,34 +1325,23 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp maybe_put_usage(data, _result, nil), do: data
 
-  defp merge_result_attributes(
+  defp merge_result_attributes(%{status: :ok, value: value}, attributes)
+       when is_map(value) and is_map(attributes) and map_size(attributes) > 0,
+       do: %{status: :ok, value: Map.merge(value, attributes)}
+
+  defp merge_result_attributes(result, _attributes), do: result
+
+  defp admit_success_output(
+         %{status: :ok, value: value},
          state,
          environment,
          invocation,
-         validation,
-         %{status: :ok, value: value},
-         attributes
-       )
-       when is_map(value) and is_map(attributes) and map_size(attributes) > 0 do
-    admit_output(
-      state,
-      environment,
-      invocation,
-      validation,
-      Map.merge(value, attributes),
-      [:static]
-    )
+         validation
+       ) do
+    admit_output(state, environment, invocation, validation, value, [:request, :static])
   end
 
-  defp merge_result_attributes(
-         _state,
-         _environment,
-         _invocation,
-         _validation,
-         result,
-         _attributes
-       ),
-       do: result
+  defp admit_success_output(result, _state, _environment, _invocation, _validation), do: result
 
   defp maybe_put_llm_result_metadata(data, %{status: :ok, value: value}, :llm_tokens)
        when is_map(value) do
