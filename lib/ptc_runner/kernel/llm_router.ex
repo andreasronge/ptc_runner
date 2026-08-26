@@ -3,12 +3,13 @@ defmodule PtcRunner.Kernel.LLMRouter do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CapabilityInvocation
+  alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.RoutedCapability
 
   @alias ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @sources ~w(llm llm_replay custom)
   @route_keys [:alias, :source, :installation_revision, :default?, :capability, :max_calls]
-  @optional_route_keys [:structured_output_mode]
+  @optional_route_keys [:structured_output_mode, :request_timeout_ms]
   @structured_output_modes [:json_schema, :json_object, :unsupported]
 
   @type route :: %{
@@ -18,7 +19,8 @@ defmodule PtcRunner.Kernel.LLMRouter do
           required(:default?) => boolean(),
           required(:capability) => Capability.t(),
           required(:max_calls) => pos_integer() | nil,
-          optional(:structured_output_mode) => :json_schema | :json_object | :unsupported
+          optional(:structured_output_mode) => :json_schema | :json_object | :unsupported,
+          optional(:request_timeout_ms) => pos_integer()
         }
 
   @spec new([route()]) :: {:ok, RoutedCapability.t()} | {:error, :invalid_llm_router}
@@ -67,7 +69,8 @@ defmodule PtcRunner.Kernel.LLMRouter do
       is_binary(route.installation_revision) and route.installation_revision =~ @alias and
       is_boolean(route.default?) and match?(%Capability{name: "llm-request"}, route.capability) and
       valid_max_calls?(route.max_calls) and
-      valid_structured_output_mode?(Map.get(route, :structured_output_mode))
+      valid_structured_output_mode?(Map.get(route, :structured_output_mode)) and
+      valid_route_timeout_ms?(Map.get(route, :request_timeout_ms), route.source)
   end
 
   defp valid_route?(_route), do: false
@@ -77,6 +80,17 @@ defmodule PtcRunner.Kernel.LLMRouter do
   defp valid_structured_output_mode?(mode) when mode in @structured_output_modes, do: true
 
   defp valid_structured_output_mode?(_mode), do: false
+
+  @doc false
+  @spec valid_route_timeout_ms?(term(), binary()) :: boolean()
+  def valid_route_timeout_ms?(nil, source) when source in ["llm_replay", "custom"], do: true
+
+  def valid_route_timeout_ms?(nil, "llm"), do: true
+
+  def valid_route_timeout_ms?(timeout_ms, "llm"),
+    do: LimitCatalog.llm_request_timeout_ms?(timeout_ms)
+
+  def valid_route_timeout_ms?(_timeout_ms, _source), do: false
 
   defp valid_max_calls?(nil), do: true
   defp valid_max_calls?(max_calls) when is_integer(max_calls) and max_calls > 0, do: true
@@ -163,9 +177,23 @@ defmodule PtcRunner.Kernel.LLMRouter do
        error_attributes: %{model: route.alias},
        result_attributes: %{"model" => route.alias},
        usage_projection: :llm_tokens,
-       structured_output_mode: Map.get(route, :structured_output_mode)
+       structured_output_mode: Map.get(route, :structured_output_mode),
+       request_timeout_ms: live_request_timeout_ms(route)
      }}
   end
+
+  defp live_request_timeout_ms(%{source: "llm"} = route) do
+    case Map.get(route, :request_timeout_ms) do
+      timeout_ms when is_integer(timeout_ms) and timeout_ms > 0 ->
+        timeout_ms
+
+      _omitted ->
+        {:ok, row} = LimitCatalog.fetch(:llm_request_timeout_ms)
+        row.compiled_default
+    end
+  end
+
+  defp live_request_timeout_ms(_route), do: nil
 
   defp alias_label(%{alias: alias_name, default?: true}), do: alias_name <> " (default)"
   defp alias_label(%{alias: alias_name}), do: alias_name

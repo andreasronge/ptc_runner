@@ -44,7 +44,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   )
   @llm_provider_failures ~w(
     authentication-failed payment-required rate-limited tool-calling-unsupported denied not-found timeout
-    invalid-request unavailable transport-error internal domain-error invalid-result
+    provider-timeout llm-request-timeout invalid-request unavailable transport-error internal domain-error
+    invalid-result
   )
   @capability_rejection_kinds [
     :capability_denied,
@@ -104,6 +105,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :provider_heap_exceeded,
     :provider_result_limit,
     :provider_timeout,
+    :llm_request_timeout,
     :rate_limited,
     :reservation_held,
     :resolver_unavailable,
@@ -505,6 +507,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   defp provider_failure_atom("denied"), do: :denied
   defp provider_failure_atom("not-found"), do: :not_found
   defp provider_failure_atom("timeout"), do: :timeout
+  defp provider_failure_atom("provider-timeout"), do: :timeout
+  defp provider_failure_atom("llm-request-timeout"), do: :timeout
   defp provider_failure_atom("invalid-request"), do: :invalid_request
   defp provider_failure_atom("unavailable"), do: :unavailable
   defp provider_failure_atom("transport-error"), do: :transport_error

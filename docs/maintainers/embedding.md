@@ -140,6 +140,9 @@ processes, ports, credentials, or other resources that need cleanup.
 `{:ok, requester}` only after preparation and binding succeed, so embedding
 callers must propagate its error tuple before dispatch. The requester is arity
 two: a provider-neutral request plus `%{llm_request_deadline_ms: integer() | nil}`.
+Live Kernel dispatch supplies an integer absolute monotonic deadline. Replay,
+doctor connectivity probes, and embedding callers that invoke the requester
+directly pass `nil`.
 
 An adapter may implement `c:PtcRunner.LLM.public_model/1` to attest that its exact
 configured target is safe to publish. Missing, altered, invalid, oversized, or

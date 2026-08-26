@@ -202,7 +202,17 @@ to the catalog installed default for <code class="inline">workflow_capability_ca
 bind and is refused at load. The application may narrow it
 with <code class="inline">config.max_calls</code>; asking above the host ceiling is refused rather than
 clamped. When that selected cap is at or above the run's per-name
-<code class="inline">llm-request</code> budget, the public per-name quota still binds first.</p><pre><code class="json language-json">&quot;deepseek&quot;: {
+<code class="inline">llm-request</code> budget, the public per-name quota still binds first.</p><p><code class="inline">ceilings.request_timeout_ms</code> is the selected installation's whole-call
+deadline. Omitted, it defaults to 120000 ms, clamped by the host
+<code class="inline">limits.llm_request_timeout_ms</code> ceiling (also 120000 unless the host document
+widens or narrows it). The accepted range is 100 through that host ceiling.
+Applications may only narrow <code class="inline">limits.llm_request_timeout_ms</code>; they cannot raise
+the installation ceiling. Changing <code class="inline">ceilings.request_timeout_ms</code> requires a new
+<code class="inline">installation_revision</code>. Dispatcher samples one absolute deadline immediately
+before admission and enforces it through the provider worker and structured
+output validation. When that LLM clock wins over the enclosing run or workflow
+clocks, the public result is retryable <code class="inline">timeout/llm_request_timeout</code>. Replay
+installations do not carry this deadline.</p><pre><code class="json language-json">&quot;deepseek&quot;: {
   &quot;source&quot;: &quot;llm&quot;,
   &quot;structured_output_mode&quot;: &quot;unsupported&quot;,
   &quot;installation_revision&quot;: &quot;deepseek-policy-v1&quot;,
@@ -328,10 +338,13 @@ ceilings for an application that selects no providers:</p><pre><code class="json
     &quot;workflow_heap_words&quot;: 16000000
   }
 }</code></pre><p>The four heap and concurrency rows (<code class="inline">workflow_heap_words</code>,
-<code class="inline">evaluation_heap_words</code>, <code class="inline">provider_heap_words</code>, <code class="inline">live_provider_tasks</code>) have no
-manifest headroom: raising them is a resource decision and needs both this
-host ceiling and a matching manifest request. Every other application-narrowable
-row can be raised from the manifest alone, up to its installed ceiling.</p><p>Four timeouts are host-only: <code class="inline">provider_cleanup_timeout_ms</code>,
+<code class="inline">evaluation_heap_words</code>, <code class="inline">provider_heap_words</code>, <code class="inline">live_provider_tasks</code>) and
+<code class="inline">llm_request_timeout_ms</code> have no manifest headroom. Raising a heap or concurrency
+row needs both the host ceiling and a matching manifest request. Raising the LLM
+deadline needs three matching values: the host <code class="inline">llm_request_timeout_ms</code>, the
+selected live installation's <code class="inline">ceilings.request_timeout_ms</code>, and the manifest
+request. Every other application-narrowable row can be raised from the manifest
+alone, up to its installed ceiling.</p><p>Four timeouts are host-only: <code class="inline">provider_cleanup_timeout_ms</code>,
 <code class="inline">local_preflight_timeout_ms</code>, <code class="inline">selection_validation_timeout_ms</code>, and
 <code class="inline">doctor_connectivity_timeout_ms</code>. A manifest cannot declare them.</p><p>The generated <a href="/reference/kernel-limits-reference/">Kernel limits reference</a> is the
 complete table of names, meanings, units, scopes, defaults, accepted ranges,

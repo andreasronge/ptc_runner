@@ -767,9 +767,18 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       max_calls: Map.get(entry.workflow_llm_route, :max_calls)
     }
 
-    case Map.get(entry.workflow_llm_route, :structured_output_mode) do
-      nil -> route
-      mode -> Map.put(route, :structured_output_mode, mode)
+    route =
+      case Map.get(entry.workflow_llm_route, :structured_output_mode) do
+        nil -> route
+        mode -> Map.put(route, :structured_output_mode, mode)
+      end
+
+    case Map.get(entry.workflow_llm_route, :request_timeout_ms) do
+      timeout_ms when is_integer(timeout_ms) ->
+        Map.put(route, :request_timeout_ms, timeout_ms)
+
+      _absent ->
+        route
     end
   end
 
@@ -819,9 +828,18 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           route
       end
 
-    case descriptor.structured_output_mode do
-      mode when mode in [:json_schema, :json_object, :unsupported] ->
-        Map.put(route, :structured_output_mode, mode)
+    route =
+      case descriptor.structured_output_mode do
+        mode when mode in [:json_schema, :json_object, :unsupported] ->
+          Map.put(route, :structured_output_mode, mode)
+
+        _absent ->
+          route
+      end
+
+    case descriptor.request_timeout_ms do
+      timeout_ms when is_integer(timeout_ms) ->
+        Map.put(route, :request_timeout_ms, timeout_ms)
 
       _absent ->
         route

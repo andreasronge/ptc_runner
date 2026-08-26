@@ -177,7 +177,13 @@ if Code.ensure_loaded?(ReqLLM) do
             {:ok, map()} | {:error, ProviderError.t()}
     def call(%ReqLLMPreparedModel{} = target, %Invocation{} = invocation) do
       if Invocation.valid?(invocation) do
-        dispatch_invocation(target, invocation)
+        case remaining_request_ms(invocation) do
+          {:bounded, 0} ->
+            {:error, request_deadline_error()}
+
+          _remaining ->
+            dispatch_invocation(target, invocation)
+        end
       else
         {:error, ProviderError.new(:invalid_request, "invalid LLM invocation")}
       end
@@ -469,7 +475,6 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp call_req_llm(%ReqLLMPreparedModel{selector: model, model: req_llm_model}, messages, opts) do
-      timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
 
@@ -479,7 +484,8 @@ if Code.ensure_loaded?(ReqLLM) do
       extra_opts = apply_bedrock_region(model, extra_opts)
 
       req_opts =
-        [receive_timeout: timeout, req_http_options: http_opts]
+        req_timeout_opts(opts)
+        |> Keyword.put(:req_http_options, http_opts)
         |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
 
@@ -503,7 +509,6 @@ if Code.ensure_loaded?(ReqLLM) do
            opts
          ) do
       if native_json_schema_model?(req_llm_model) do
-        timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
         http_opts = Keyword.get(opts, :req_http_options, [])
         cache_enabled = Keyword.get(opts, :cache, false)
 
@@ -516,7 +521,8 @@ if Code.ensure_loaded?(ReqLLM) do
         extra_opts = apply_bedrock_region(model, extra_opts)
 
         req_opts =
-          [receive_timeout: timeout, req_http_options: http_opts]
+          req_timeout_opts(opts)
+          |> Keyword.put(:req_http_options, http_opts)
           |> Keyword.merge(generation_opts)
           |> Keyword.merge(extra_opts)
 
@@ -541,7 +547,6 @@ if Code.ensure_loaded?(ReqLLM) do
            tools,
            opts
          ) do
-      timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
       http_opts = Keyword.get(opts, :req_http_options, [])
       cache_enabled = Keyword.get(opts, :cache, false)
 
@@ -554,7 +559,9 @@ if Code.ensure_loaded?(ReqLLM) do
       req_llm_tools = Enum.map(tools, &to_req_llm_tool/1)
 
       req_opts =
-        [receive_timeout: timeout, req_http_options: http_opts, tools: req_llm_tools]
+        req_timeout_opts(opts)
+        |> Keyword.put(:req_http_options, http_opts)
+        |> Keyword.put(:tools, req_llm_tools)
         |> Keyword.merge(generation_opts)
         |> Keyword.merge(extra_opts)
 
@@ -610,6 +617,10 @@ if Code.ensure_loaded?(ReqLLM) do
     defp normalize_provider_error(reason, _mode), do: normalize_provider_error(reason)
 
     defp normalize_provider_error(%ProviderError{} = error), do: error
+
+    defp normalize_provider_error(%ReqLLM.Error.API.Timeout{} = error) do
+      ProviderError.new(:timeout, Exception.message(error), retryable?: true)
+    end
 
     defp normalize_provider_error(%ReqLLM.Error.API.Request{status: status} = error)
          when is_integer(status) do
@@ -1232,22 +1243,23 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp dispatch_invocation(target, invocation) do
       request = invocation.request
-      opts = invocation_opts(target, invocation)
       messages = build_messages(request)
 
-      cond do
-        is_map(Map.get(request, :schema)) ->
-          dispatch_structured(target, messages, request.schema, opts)
+      with {:ok, opts} <- invocation_opts(target, invocation) do
+        cond do
+          is_map(Map.get(request, :schema)) ->
+            dispatch_structured(target, messages, request.schema, opts)
 
-        is_list(Map.get(request, :tools)) and request.tools != [] ->
-          target
-          |> generate_with_tools(messages, request.tools, opts)
-          |> normalize_call_result(:tools)
+          is_list(Map.get(request, :tools)) and request.tools != [] ->
+            target
+            |> generate_with_tools(messages, request.tools, opts)
+            |> normalize_call_result(:tools)
 
-        true ->
-          target
-          |> generate_text(messages, opts)
-          |> normalize_call_result()
+          true ->
+            target
+            |> generate_text(messages, opts)
+            |> normalize_call_result()
+        end
       end
     end
 
@@ -1359,9 +1371,66 @@ if Code.ensure_loaded?(ReqLLM) do
         target
         |> merge_exact_options(on_unsupported: :error, cache: invocation.cache)
 
-      if is_binary(invocation.credential),
-        do: Keyword.put(opts, :api_key, invocation.credential),
-        else: opts
+      opts =
+        if is_binary(invocation.credential),
+          do: Keyword.put(opts, :api_key, invocation.credential),
+          else: opts
+
+      put_deadline_timeouts(opts, invocation)
+    end
+
+    defp remaining_request_ms(%Invocation{llm_request_deadline_ms: nil}), do: :unbounded
+
+    defp remaining_request_ms(%Invocation{llm_request_deadline_ms: deadline})
+         when is_integer(deadline),
+         do: {:bounded, max(deadline - System.monotonic_time(:millisecond), 0)}
+
+    defp put_deadline_timeouts(opts, %Invocation{llm_request_deadline_ms: nil}), do: {:ok, opts}
+
+    defp put_deadline_timeouts(opts, %Invocation{llm_request_deadline_ms: deadline})
+         when is_integer(deadline) do
+      request_deadline_opts(opts, deadline, System.monotonic_time(:millisecond))
+    end
+
+    @doc false
+    @spec request_deadline_opts(keyword(), integer(), integer()) ::
+            {:ok, keyword()} | {:error, ProviderError.t()}
+    def request_deadline_opts(opts, deadline, now)
+        when is_list(opts) and is_integer(deadline) and is_integer(now) do
+      remaining = max(deadline - now, 0)
+
+      if remaining == 0 do
+        {:error, request_deadline_error()}
+      else
+        receive_timeout = min(Keyword.get(opts, :receive_timeout, @default_timeout), remaining)
+
+        {:ok,
+         opts
+         |> Keyword.put(:receive_timeout, max(receive_timeout, 1))
+         |> Keyword.put(:total_timeout, :infinity)}
+      end
+    end
+
+    defp request_deadline_error do
+      ProviderError.new(:timeout, "LLM request deadline elapsed",
+        retryable?: true,
+        dispatch_provenance: :not_dispatched
+      )
+    end
+
+    defp req_timeout_opts(opts) do
+      receive_timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
+
+      case Keyword.get(opts, :total_timeout) do
+        total when is_integer(total) and total > 0 ->
+          [receive_timeout: min(receive_timeout, total), total_timeout: total]
+
+        :infinity ->
+          [receive_timeout: receive_timeout, total_timeout: :infinity]
+
+        _omitted ->
+          [receive_timeout: receive_timeout]
+      end
     end
 
     defp merge_exact_options(%ReqLLMPreparedModel{exact_options: exact_options}, opts)

@@ -14,7 +14,11 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   """
 
   @generic_maximum 2_592_000_000
-  @maximums %{llm_request_output_tokens: 1_000_000}
+  @maximums %{
+    llm_request_output_tokens: 1_000_000,
+    llm_request_timeout_ms: 1_800_000
+  }
+  @minimums %{llm_request_timeout_ms: 100}
 
   # `{field, effective default, installed ceiling}`.
   #
@@ -49,6 +53,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     {:provider_heap_words, 5_000_000, 5_000_000},
     {:live_provider_tasks, 8, 8},
     {:llm_request_output_tokens, 4_096, 65_536},
+    {:llm_request_timeout_ms, 120_000, 120_000},
     {:workflow_capability_calls, 256, 4_096},
     {:workflow_capability_calls_per_name, 128, 2_048},
     {:mission_capability_calls, 256, 4_096},
@@ -83,12 +88,19 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     :live_provider_tasks
   ]
 
+  # Applications may only narrow this row. A host document owns any widening
+  # because a live model call is billed wall-clock, not a free slice of the
+  # run. The compiled default is therefore also the shipped installed ceiling.
+  @host_owned_ceiling_rows [:llm_request_timeout_ms]
+
   # For every other row a ceiling equal to the default is not a ceiling. It
   # leaves an application no way to raise its own value except by writing a host
   # document. Twenty-one rows were in that state; this keeps them out of it.
-  # The four aggregate-memory rows above are the deliberate exception.
+  # The four aggregate-memory rows and the host-owned LLM whole-call deadline
+  # are the deliberate exceptions.
   if Enum.any?(@manifest_defaults, fn {field, default, installed} ->
-       field not in @aggregate_memory_rows and installed <= default
+       field not in @aggregate_memory_rows and field not in @host_owned_ceiling_rows and
+         installed <= default
      end) do
     raise "every application-narrowable limit needs an installed ceiling above its default"
   end
@@ -115,6 +127,8 @@ defmodule PtcRunner.Kernel.LimitCatalog do
       "Concurrent provider callback processes and Kernel-owned parallel Lisp workers.",
     llm_request_output_tokens:
       "Authorized output tokens for one live language-model call, supplied as that call's max_tokens.",
+    llm_request_timeout_ms:
+      "Whole-call deadline for one live language-model request, including adapter work, retries, and structured output validation.",
     workflow_capability_calls: "Total workflow capability calls in one run.",
     workflow_capability_calls_per_name:
       "Workflow capability calls to any one public name in one run.",
@@ -152,6 +166,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     provider_heap_words: :heap_words,
     live_provider_tasks: :count,
     llm_request_output_tokens: :count,
+    llm_request_timeout_ms: :milliseconds,
     workflow_capability_calls: :count,
     workflow_capability_calls_per_name: :count,
     mission_capability_calls: :count,
@@ -182,7 +197,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
              scope: :manifest_narrowable,
              compiled_default: compiled_default,
              installed_default: installed_default,
-             minimum: 1,
+             minimum: Map.get(@minimums, field, 1),
              maximum: Map.get(@maximums, field, @generic_maximum),
              identity: true,
              unit: Map.fetch!(@units, field),
@@ -256,6 +271,13 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     do: value >= minimum and value <= maximum
 
   def valid_value?(_row, _value), do: false
+
+  @spec llm_request_timeout_ms?(term()) :: boolean()
+  @doc "Checks one live LLM whole-call deadline against the cataloged range."
+  def llm_request_timeout_ms?(value) do
+    {:ok, row} = fetch(:llm_request_timeout_ms)
+    valid_value?(row, value)
+  end
 
   @spec valid_values?(map()) :: boolean()
   @doc "Checks a complete atom-keyed value map against every catalog row."

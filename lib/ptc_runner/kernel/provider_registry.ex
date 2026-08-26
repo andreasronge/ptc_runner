@@ -75,6 +75,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ResourceRegistrar
 
@@ -149,7 +150,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
                 required(:default) => boolean(),
                 optional(:max_calls) => pos_integer() | nil,
                 optional(:structured_output_mode) =>
-                  :json_schema | :json_object | :unsupported | nil
+                  :json_schema | :json_object | :unsupported | nil,
+                optional(:request_timeout_ms) => pos_integer() | nil
               },
           preflight: (-> {:ok, acquire()}
                          | {:ok, acquire(), (-> :ok | {:error, term()})}
@@ -516,7 +518,14 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
        when is_map(route) and not is_struct(route) do
     extra =
       Map.keys(route) --
-        [:default, :installation_revision, :max_calls, :source, :structured_output_mode]
+        [
+          :default,
+          :installation_revision,
+          :max_calls,
+          :source,
+          :structured_output_mode,
+          :request_timeout_ms
+        ]
 
     extra == [] and
       Map.has_key?(route, :source) and
@@ -525,7 +534,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
       route.source in ["llm", "llm_replay", "custom"] and
       is_binary(route.installation_revision) and valid_name?(route.installation_revision) and
       is_boolean(route.default) and valid_optional_max_calls?(Map.get(route, :max_calls)) and
-      valid_structured_output_mode?(Map.get(route, :structured_output_mode), route.source)
+      valid_structured_output_mode?(Map.get(route, :structured_output_mode), route.source) and
+      LLMRouter.valid_route_timeout_ms?(Map.get(route, :request_timeout_ms), route.source)
   end
 
   defp valid_workflow_llm_route?(_workflow_llm?, _route), do: false

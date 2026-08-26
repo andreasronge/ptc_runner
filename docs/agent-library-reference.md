@@ -105,6 +105,7 @@ not resume the previous transcript.
 | Observation | Envelope `kind` | Envelope `reason` | Typical policy |
 | --- | --- | --- | --- |
 | Transient transport or provider failure | `provider-error` | `timeout`, `unavailable`, `rate-limited`, or `transport-error` with `retryable?` true | retry the same alias |
+| Whole-call live LLM deadline | `timeout` | `llm-request-timeout` / `llm_request_timeout` with `retryable?` true | retry the same alias or choose another |
 | Permanent per-alias provider refusal | `provider-error` | `authentication-failed`, `payment-required`, `denied`, `not-found`, `invalid-request`, `tool-calling-unsupported`, and other non-retryable provider reasons | try another alias or abort |
 | Per-alias `max_calls` exhaustion | `limit-exceeded` | `capability-quota` with `details.limit` `max-calls` | another alias may still run |
 | Global LLM capability quota | `limit-exceeded` | `capability-quota` with a workflow or mission capability-call limit | no selected alias can run |

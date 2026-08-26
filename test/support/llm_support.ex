@@ -44,7 +44,9 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   end
 
   @doc """
-  Returns the slice-2 requester context. Live deadline propagation is later.
+  Returns the requester context Kernel dispatch supplies. Live calls carry an
+  integer absolute deadline; replay, doctor probes, and direct embedding pass
+  `nil`.
   """
   @spec llm_context() :: PtcRunner.LLM.requester_context()
   def llm_context, do: %{llm_request_deadline_ms: nil}
