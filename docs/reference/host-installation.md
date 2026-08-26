@@ -185,6 +185,18 @@ with `config.max_calls`; asking above the host ceiling is refused rather than
 clamped. When that selected cap is at or above the run's per-name
 `llm-request` budget, the public per-name quota still binds first.
 
+`ceilings.request_timeout_ms` is the selected installation's whole-call
+deadline. Omitted, it defaults to 120000 ms, clamped by the host
+`limits.llm_request_timeout_ms` ceiling (also 120000 unless the host document
+widens or narrows it). The accepted range is 100 through that host ceiling.
+Applications may only narrow `limits.llm_request_timeout_ms`; they cannot raise
+the installation ceiling. Changing `ceilings.request_timeout_ms` requires a new
+`installation_revision`. Dispatcher samples one absolute deadline immediately
+before admission and enforces it through the provider worker and structured
+output validation. When that LLM clock wins over the enclosing run or workflow
+clocks, the public result is retryable `timeout/llm_request_timeout`. Replay
+installations do not carry this deadline.
+
 ```json
 "deepseek": {
   "source": "llm",
@@ -397,10 +409,13 @@ ceilings for an application that selects no providers:
 ```
 
 The four heap and concurrency rows (`workflow_heap_words`,
-`evaluation_heap_words`, `provider_heap_words`, `live_provider_tasks`) have no
-manifest headroom: raising them is a resource decision and needs both this
-host ceiling and a matching manifest request. Every other application-narrowable
-row can be raised from the manifest alone, up to its installed ceiling.
+`evaluation_heap_words`, `provider_heap_words`, `live_provider_tasks`) and
+`llm_request_timeout_ms` have no manifest headroom. Raising a heap or concurrency
+row needs both the host ceiling and a matching manifest request. Raising the LLM
+deadline needs three matching values: the host `llm_request_timeout_ms`, the
+selected live installation's `ceilings.request_timeout_ms`, and the manifest
+request. Every other application-narrowable row can be raised from the manifest
+alone, up to its installed ceiling.
 
 Four timeouts are host-only: `provider_cleanup_timeout_ms`,
 `local_preflight_timeout_ms`, `selection_validation_timeout_ms`, and

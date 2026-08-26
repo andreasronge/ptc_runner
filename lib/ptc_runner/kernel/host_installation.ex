@@ -360,7 +360,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
       selection_rules: rules,
       authority_fingerprint: if(authority, do: authority.fingerprint, else: nil),
       local_preflight: local_preflight_mode(installation),
-      structured_output_mode: descriptor_structured_output_mode(installation)
+      structured_output_mode: descriptor_structured_output_mode(installation),
+      request_timeout_ms: descriptor_request_timeout_ms(installation)
     )
   end
 
@@ -388,6 +389,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
        do: mode
 
   defp descriptor_structured_output_mode(_installation), do: nil
+
+  defp descriptor_request_timeout_ms(%{source: :llm, ceilings: %{request_timeout_ms: timeout_ms}})
+       when is_integer(timeout_ms) and timeout_ms > 0,
+       do: timeout_ms
+
+  defp descriptor_request_timeout_ms(_installation), do: nil
 
   defp descriptor_data_class(%{source: source})
        when source in [:ptc_private_trace_snapshot, :ptc_inspection_snapshot],
@@ -719,7 +726,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
       installation_revision: installation.installation_revision,
       default: selected.default,
       max_calls: selected.max_calls,
-      structured_output_mode: installation.structured_output_mode
+      structured_output_mode: installation.structured_output_mode,
+      request_timeout_ms: installation.ceilings.request_timeout_ms
     }
   end
 
@@ -1103,8 +1111,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
   # `ConnectivityProbe` before they become reportable evidence; a response
   # without them still answers `:ok`, because unreachable and unattributed are
   # different facts. The doctor connectivity deadline remains the outer
-  # `BoundedWorker` bound; the LLM invocation deadline stays nil until the
-  # ordinary whole-call slice.
+  # `BoundedWorker` bound; the probe does not participate in the ordinary
+  # whole-call LLM clock.
   defp run_llm_connectivity_probe(probe) do
     binding = %{credential: probe.credential, cache: probe.cache}
 
@@ -1356,11 +1364,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
            }),
          {:ok, capability} <-
            LLMCapability.new(
-             requester: fn request ->
+             requester: fn request, context ->
                with :ok <- provider_application_ready(adapter, model) do
                  request
                  |> ProviderRegistry.adapter_request()
-                 |> requester.(%{llm_request_deadline_ms: nil})
+                 |> requester.(llm_requester_context(context))
                end
              end,
              max_request_bytes: selected.max_request_bytes,
@@ -1382,6 +1390,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
   rescue
     _exception -> {:error, :invalid_llm_provider}
   end
+
+  defp llm_requester_context(%{llm_request_deadline_ms: deadline})
+       when is_integer(deadline) or is_nil(deadline),
+       do: %{llm_request_deadline_ms: deadline}
+
+  defp llm_requester_context(_context), do: %{llm_request_deadline_ms: nil}
 
   # The core no longer starts an adapter's backing application on a host's
   # behalf; a run admits it through ProviderApplicationGate. An embedding host

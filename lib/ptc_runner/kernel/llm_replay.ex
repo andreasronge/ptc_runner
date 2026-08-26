@@ -170,9 +170,11 @@ defmodule PtcRunner.Kernel.LLMReplay do
   Returns the requester `LLMCapability` calls, so replay and live installations
   present the identical provider-facing contract.
   """
-  @spec requester(t()) :: (map() -> {:ok, map()} | {:error, ProviderError.t()})
+  @spec requester(t()) ::
+          (map(), %{llm_request_deadline_ms: integer() | nil} ->
+             {:ok, map()} | {:error, ProviderError.t()})
   def requester(%__MODULE__{} = replay) do
-    fn request -> respond(replay, request) end
+    fn request, _context -> respond(replay, request) end
   end
 
   @doc "Stops the owner. Safe to call more than once."

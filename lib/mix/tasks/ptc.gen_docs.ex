@@ -208,7 +208,17 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     { "install": {}, "limits": { "run_duration_ms": #{run_duration.installed_default * 2} } }
     ```
 
-    The four heap and concurrency rows are the exception: their installed default equals their effective default because live memory is `live_provider_tasks` multiplied by a heap ceiling. Raising them is a resource decision, so it requires both a host ceiling above the compiled default and a matching manifest request. A limits-only host document — `{"install": {}, "limits": {...}}` — is enough; it does not need a fabricated provider.
+    The four heap and concurrency rows, and `llm_request_timeout_ms`, are the
+    exceptions whose installed default equals their effective default. Heap
+    rows stay there because live memory is `live_provider_tasks` multiplied by
+    a heap ceiling. The LLM whole-call deadline stays there because
+    applications may only narrow it; a host document owns any widening. Raising
+    either exception requires both a host ceiling above the compiled default
+    and a matching manifest request. A limits-only host document —
+    `{"install": {}, "limits": {...}}` — is enough for heap and concurrency
+    rows; it does not need a fabricated provider. A live LLM deadline also
+    requires the selected installation's `ceilings.request_timeout_ms` to be
+    raised to the requested value.
 
     A breached ceiling names itself, its configured value, and the manifest key that raises it, so the error at the point of failure carries this rule too. A request above the ceiling is refused by name, with both numbers.
 

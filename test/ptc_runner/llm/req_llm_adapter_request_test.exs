@@ -3,12 +3,14 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
   import ExUnit.CaptureIO
 
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.LLM.ReqLLMPreparedModel
   alias PtcRunner.LLM.Requirements
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.MCPHTTPFixture
+  alias ReqLLM.Error.API.Timeout, as: ReqLLMTimeout
 
   setup do
     LLMSupport.admit_provider_application!()
@@ -113,6 +115,134 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     assert get_in(body, ["response_format", "type"]) == "json_object"
     refute Map.has_key?(body, "tools")
     refute Map.has_key?(body, "tool_choice")
+  end
+
+  test "an elapsed Kernel deadline is a timeout without dispatching" do
+    plug = fn _conn ->
+      flunk("elapsed LLM deadline must not dispatch")
+    end
+
+    schema = %{
+      "type" => "object",
+      "properties" => %{"ok" => %{"type" => "boolean"}},
+      "required" => ["ok"]
+    }
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               Requirements.interim(%{max_tokens: 64}, :json_object)
+             )
+
+    {:ok, invocation} =
+      Invocation.new(
+        %{messages: [%{role: :user, content: "hi"}], schema: schema},
+        false,
+        "test",
+        System.monotonic_time(:millisecond) - 1
+      )
+
+    assert {:error,
+            %ProviderError{
+              kind: :timeout,
+              retryable?: true,
+              dispatch_provenance: :not_dispatched
+            }} = ReqLLMAdapter.call(put_test_http_options(target, plug), invocation)
+  end
+
+  test "a deadline expiring at final ReqLLM option assembly returns timeout" do
+    deadline = System.monotonic_time(:millisecond)
+
+    assert {:error,
+            %ProviderError{
+              kind: :timeout,
+              retryable?: true,
+              dispatch_provenance: :not_dispatched
+            }} = ReqLLMAdapter.request_deadline_opts([], deadline, deadline)
+  end
+
+  test "ReqLLM whole-call timeout exceptions stay classified as timeouts" do
+    timeout = ReqLLMTimeout.exception(kind: :total, timeout: 10)
+
+    assert {:error, %ProviderError{kind: :timeout, retryable?: true}} =
+             ReqLLMAdapter.normalize_provider_call({:error, timeout})
+  end
+
+  test "a live Kernel deadline still dispatches while time remains", %{test: test} do
+    schema = %{
+      "type" => "object",
+      "properties" => %{"ok" => %{"type" => "boolean"}},
+      "required" => ["ok"]
+    }
+
+    expect_request(test, "deepseek/deepseek-v4-flash-0731", content: ~s({"ok":true}))
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               Requirements.interim(%{max_tokens: 64}, :json_object)
+             )
+
+    {:ok, invocation} =
+      Invocation.new(
+        %{messages: [%{role: :user, content: "hi"}], schema: schema},
+        false,
+        "test",
+        System.monotonic_time(:millisecond) + 60_000
+      )
+
+    assert {:ok, %{json: ~s({"ok":true})}} =
+             ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
+  end
+
+  test "terminating the adapter caller also terminates the active HTTP request" do
+    parent = self()
+    previous_total_timeout = Application.fetch_env(:req_llm, :total_timeout)
+    Application.put_env(:req_llm, :total_timeout, 5_000)
+
+    on_exit(fn ->
+      case previous_total_timeout do
+        {:ok, timeout} -> Application.put_env(:req_llm, :total_timeout, timeout)
+        :error -> Application.delete_env(:req_llm, :total_timeout)
+      end
+    end)
+
+    plug = fn conn ->
+      send(parent, {:request_started, self()})
+
+      receive do
+        :release -> Req.Test.json(conn, %{"choices" => []})
+      end
+    end
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               Requirements.interim(%{max_tokens: 64}, :unsupported)
+             )
+
+    {:ok, invocation} =
+      Invocation.new(
+        %{messages: [%{role: :user, content: "hi"}]},
+        false,
+        "test",
+        System.monotonic_time(:millisecond) + 5_000
+      )
+
+    caller =
+      spawn(fn -> ReqLLMAdapter.call(put_test_http_options(target, plug), invocation) end)
+
+    caller_ref = Process.monitor(caller)
+    assert_receive {:request_started, request_pid}
+    request_ref = Process.monitor(request_pid)
+
+    on_exit(fn ->
+      if Process.alive?(request_pid), do: send(request_pid, :release)
+    end)
+
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+    assert_receive {:DOWN, ^request_ref, :process, ^request_pid, _reason}, 500
   end
 
   test "json_object does not dispatch Anthropic or Bedrock through OpenAI response_format" do

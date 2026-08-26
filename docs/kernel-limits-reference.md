@@ -18,7 +18,17 @@ Only when the application needs a value above the installed ceiling — here, ab
 { "install": {}, "limits": { "run_duration_ms": 3600000 } }
 ```
 
-The four heap and concurrency rows are the exception: their installed default equals their effective default because live memory is `live_provider_tasks` multiplied by a heap ceiling. Raising them is a resource decision, so it requires both a host ceiling above the compiled default and a matching manifest request. A limits-only host document — `{"install": {}, "limits": {...}}` — is enough; it does not need a fabricated provider.
+The four heap and concurrency rows, and `llm_request_timeout_ms`, are the
+exceptions whose installed default equals their effective default. Heap
+rows stay there because live memory is `live_provider_tasks` multiplied by
+a heap ceiling. The LLM whole-call deadline stays there because
+applications may only narrow it; a host document owns any widening. Raising
+either exception requires both a host ceiling above the compiled default
+and a matching manifest request. A limits-only host document —
+`{"install": {}, "limits": {...}}` — is enough for heap and concurrency
+rows; it does not need a fabricated provider. A live LLM deadline also
+requires the selected installation's `ceilings.request_timeout_ms` to be
+raised to the requested value.
 
 A breached ceiling names itself, its configured value, and the manifest key that raises it, so the error at the point of failure carries this rule too. A request above the ceiling is refused by name, with both numbers.
 
@@ -41,6 +51,7 @@ Time values are milliseconds. Heap values are BEAM process heap words, not bytes
 | `event_payload_bytes` | One trace event payload. | bytes | 262,144 | 4,000,000 | 1–2,592,000,000 |
 | `live_provider_tasks` | Concurrent provider callback processes and Kernel-owned parallel Lisp workers. | count | 8 | 8 | 1–2,592,000,000 |
 | `llm_request_output_tokens` | Authorized output tokens for one live language-model call, supplied as that call's max_tokens. | count | 4,096 | 65,536 | 1–1,000,000 |
+| `llm_request_timeout_ms` | Whole-call deadline for one live language-model request, including adapter work, retries, and structured output validation. | milliseconds | 120,000 | 120,000 | 100–1,800,000 |
 | `mission_capability_calls` | Total mission capability calls in one run. | count | 256 | 4,096 | 1–2,592,000,000 |
 | `mission_capability_calls_per_name` | Mission capability calls to any one public name in one run. | count | 128 | 2,048 | 1–2,592,000,000 |
 | `normal_event_bytes` | Aggregate encoded trace events retained under the normal policy. | bytes | 4,000,000 | 64,000,000 | 1–2,592,000,000 |

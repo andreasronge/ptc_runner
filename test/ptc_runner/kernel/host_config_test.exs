@@ -100,7 +100,8 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              ceilings: %{
                max_request_bytes: 200_000,
                max_response_bytes: 300_000,
-               max_calls: 2_048
+               max_calls: 2_048,
+               request_timeout_ms: 120_000
              },
              data_class: :normal,
              accepts_data: [:normal, :private_inspection]
@@ -148,6 +149,66 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     }
 
     assert {:error, :invalid_host_config} = dir |> write_config(config) |> HostConfig.load()
+  end
+
+  @tag :tmp_dir
+  test "loads an explicit live LLM request_timeout_ms ceiling", %{tmp_dir: dir} do
+    config = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+          "credential" => "openrouter_key",
+          "installation_revision" => "model-policy-v2",
+          "ceilings" => %{"request_timeout_ms" => 5_000}
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+    assert host.install["deepseek"].ceilings.request_timeout_ms == 5_000
+  end
+
+  @tag :tmp_dir
+  test "refuses a request_timeout_ms ceiling above the host LLM deadline", %{tmp_dir: dir} do
+    config = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+          "credential" => "openrouter_key",
+          "installation_revision" => "model-policy-v2",
+          "ceilings" => %{"request_timeout_ms" => 120_001}
+        }
+      }
+    }
+
+    assert {:error, :invalid_host_config} = dir |> write_config(config) |> HostConfig.load()
+  end
+
+  @tag :tmp_dir
+  test "omitted live LLM request_timeout_ms follows a narrowed host deadline", %{tmp_dir: dir} do
+    config = %{
+      "limits" => %{"llm_request_timeout_ms" => 5_000},
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+          "credential" => "openrouter_key",
+          "installation_revision" => "model-policy-v2"
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+    assert host.limits.llm_request_timeout_ms == 5_000
+    assert host.install["deepseek"].ceilings.request_timeout_ms == 5_000
   end
 
   test "command decoding rejects explicit nulls that semantic defaults would otherwise accept" do

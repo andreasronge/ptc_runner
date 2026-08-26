@@ -396,17 +396,16 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
       end)
 
     assert_receive {:in_callback, worker}
-
-    wait_ms = max(deadline_ms - System.monotonic_time(:millisecond) + 1, 0)
-
-    if wait_ms > 0 do
-      receive do
-      after
-        wait_ms -> :ok
-      end
-    end
-
+    worker_ref = Process.monitor(worker)
+    assert true == :erlang.suspend_process(task.pid)
     send(worker, :continue)
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :normal}
+
+    try do
+      wait_until(deadline_ms + 1)
+    after
+      assert true == :erlang.resume_process(task.pid)
+    end
 
     assert {result, _state, _sink} = Task.await(task)
 
@@ -416,6 +415,17 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
              reason: :output_validation_unavailable,
              retryable?: false
            } = result
+  end
+
+  defp wait_until(deadline_ms) do
+    wait_ms = max(deadline_ms - System.monotonic_time(:millisecond), 0)
+
+    if wait_ms > 0 do
+      receive do
+      after
+        wait_ms -> :ok
+      end
+    end
   end
 
   defp dispatch_structured(

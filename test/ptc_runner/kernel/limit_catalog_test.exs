@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     {"event_payload_bytes", :event_payload_bytes, 262_144, 4_000_000},
     {"live_provider_tasks", :live_provider_tasks, 8, 8},
     {"llm_request_output_tokens", :llm_request_output_tokens, 4_096, 65_536},
+    {"llm_request_timeout_ms", :llm_request_timeout_ms, 120_000, 120_000},
     {"mission_capability_calls", :mission_capability_calls, 256, 4_096},
     {"mission_capability_calls_per_name", :mission_capability_calls_per_name, 128, 2_048},
     {"normal_event_bytes", :normal_event_bytes, 4_000_000, 64_000_000},
@@ -70,7 +71,14 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                         maximum =
                           case name do
                             "llm_request_output_tokens" -> 1_000_000
+                            "llm_request_timeout_ms" -> 1_800_000
                             _other -> 2_592_000_000
+                          end
+
+                        minimum =
+                          case name do
+                            "llm_request_timeout_ms" -> 100
+                            _other -> 1
                           end
 
                         {name,
@@ -80,7 +88,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                            scope: :manifest_narrowable,
                            compiled_default: compiled_default,
                            installed_default: installed_default,
-                           minimum: 1,
+                           minimum: minimum,
                            maximum: maximum,
                            identity: true
                          }}
@@ -102,13 +110,15 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   # A ceiling equal to the default leaves a manifest no way to raise its own
   # value except by writing a host document. Twenty-one rows were in that
   # state. The four aggregate-memory rows stay there on purpose: live memory is
-  # a product, and raising it is a resource decision.
+  # a product, and raising it is a resource decision. The LLM whole-call
+  # deadline stays there because applications may only narrow it.
   @aggregate_memory_names ~w(
     evaluation_heap_words
     live_provider_tasks
     provider_heap_words
     workflow_heap_words
   )
+  @zero_headroom_names @aggregate_memory_names ++ ["llm_request_timeout_ms"]
 
   test "every application-narrowable limit can be raised from the manifest alone" do
     {zero_headroom, raisable} =
@@ -117,7 +127,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
         &(&1.installed_default <= &1.compiled_default)
       )
 
-    assert Enum.sort(Enum.map(zero_headroom, & &1.name)) == @aggregate_memory_names
+    assert Enum.sort(Enum.map(zero_headroom, & &1.name)) == Enum.sort(@zero_headroom_names)
 
     for row <- zero_headroom do
       assert row.installed_default == row.compiled_default,

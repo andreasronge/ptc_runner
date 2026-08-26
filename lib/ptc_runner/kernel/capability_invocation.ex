@@ -18,7 +18,10 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
                 max_calls: nil,
                 request_schema: nil,
                 request_validator: nil,
-                structured_output_mode: nil
+                structured_output_mode: nil,
+                request_timeout_ms: nil,
+                llm_request_deadline_ms: nil,
+                enclosing_deadline_ms: nil
               ]
 
   @type t :: %__MODULE__{
@@ -32,7 +35,10 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
           usage_projection: nil | :llm_tokens,
           request_schema: map() | nil,
           request_validator: JSONSchema.compiled() | nil,
-          structured_output_mode: :json_schema | :json_object | :unsupported | nil
+          structured_output_mode: :json_schema | :json_object | :unsupported | nil,
+          request_timeout_ms: pos_integer() | nil,
+          llm_request_deadline_ms: integer() | nil,
+          enclosing_deadline_ms: integer() | nil
         }
 
   @doc false
@@ -60,4 +66,18 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
         request_validator: validator
     }
   end
+
+  @doc false
+  @spec clamp_provider_timeout(t(), non_neg_integer()) :: non_neg_integer()
+  def clamp_provider_timeout(
+        %__MODULE__{llm_request_deadline_ms: deadline},
+        timeout_ms
+      )
+      when is_integer(deadline) and is_integer(timeout_ms) and timeout_ms >= 0 do
+    min(timeout_ms, max(deadline - System.monotonic_time(:millisecond), 0))
+  end
+
+  def clamp_provider_timeout(%__MODULE__{llm_request_deadline_ms: nil}, timeout_ms)
+      when is_integer(timeout_ms) and timeout_ms >= 0,
+      do: timeout_ms
 end
