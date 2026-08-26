@@ -15,8 +15,6 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
   @tag :tmp_dir
   test "run listing delegates the bounded native page", %{tmp_dir: root} do
-    File.write!(Path.join(root, "empty.jsonl"), "")
-
     {:ok, trace} =
       TraceSnapshot.start({:directory, root},
         max_result_bytes: HostConfig.minimum_snapshot_result_bytes()

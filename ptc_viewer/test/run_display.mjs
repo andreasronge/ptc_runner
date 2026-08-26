@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import {
   displayRunName,
+  damagedTraceNote,
   emptyRunsMessage,
   excludedTraceNote,
   formatRunSpend,
   searchableRunFields,
+  traceSourceNotes,
   validSpend
 } from '../priv/static/js/run-display.js';
 
@@ -80,5 +82,34 @@ assert.equal(excludedTraceNote({ omitted_count: 12 }), null);
 assert.equal(excludedTraceNote({ excluded_private_trace_files: 0 }), null);
 assert.equal(excludedTraceNote({ excluded_private_trace_files: '3' }), null);
 assert.equal(excludedTraceNote(null), null);
+
+const isolation = {
+  component_count: 2,
+  source_count: 3,
+  known_run_count: 4,
+  reasons: [],
+  examples: [],
+  examples_omitted_count: 2
+};
+
+assert.equal(
+  damagedTraceNote({ isolation }),
+  '3 damaged trace sources isolated in 2 components; 4 known runs are unavailable.'
+);
+assert.equal(damagedTraceNote({ isolation: { ...isolation, source_count: '3' } }), null);
+assert.equal(damagedTraceNote(null), null);
+
+assert.deepEqual(
+  traceSourceNotes({ isolation, excluded_private_trace_files: 1 }),
+  [
+    '3 damaged trace sources isolated in 2 components; 4 known runs are unavailable.',
+    '1 private trace file excluded — set "viewer": { "private": true } in ptc-project.json to read them.'
+  ]
+);
+
+assert.equal(
+  emptyRunsMessage({ items: [], omitted_count: 0, isolation }),
+  '3 damaged trace sources isolated in 2 components; 4 known runs are unavailable.'
+);
 
 process.stdout.write('ok');

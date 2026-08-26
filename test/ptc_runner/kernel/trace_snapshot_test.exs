@@ -11,8 +11,6 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   test "the accepted minimum result ceiling can return an empty page", %{
     tmp_dir: directory
   } do
-    File.write!(Path.join(directory, "empty.jsonl"), "")
-
     assert {:ok, snapshot} =
              TraceSnapshot.start({:directory, directory},
                owner: self(),

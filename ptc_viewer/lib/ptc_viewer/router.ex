@@ -696,6 +696,12 @@ defmodule PtcViewer.Router do
       {:error, :source_limit_exceeded} ->
         send_resp(conn, 413, "Trace source too large")
 
+      {:error, :source_retained_limit_exceeded} ->
+        send_resp(conn, 413, "Trace source retained size exceeded")
+
+      {:error, :run_isolated} ->
+        send_resp(conn, 422, "run_isolated")
+
       {:error, reason} when reason in [:malformed_source, :unsupported_version] ->
         send_resp(conn, 422, "Unsupported trace source")
 

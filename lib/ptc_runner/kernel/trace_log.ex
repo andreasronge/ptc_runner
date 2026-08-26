@@ -57,6 +57,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceDirectoryAdmission
   alias PtcRunner.Kernel.TraceEventValidation
+  alias PtcRunner.Kernel.TraceIsolationPresentation
   alias PtcRunner.Kernel.TracePublication
   alias PtcRunner.Lisp.RetainedSize
 
@@ -352,6 +353,18 @@ defmodule PtcRunner.Kernel.TraceLog do
       do: metadata
 
   def source_presence_metadata(_operation, _metadata), do: %{}
+
+  @doc false
+  @spec directory_source_metadata(map()) :: map()
+  def directory_source_metadata(%{
+        excluded_trace_files: excluded,
+        isolated_components: components,
+        known_isolated_run_ids: known_run_ids
+      }) do
+    Map.merge(excluded, TraceIsolationPresentation.metadata(components, known_run_ids))
+  end
+
+  def directory_source_metadata(%{excluded_trace_files: excluded}), do: excluded
 
   @doc false
   @spec compile_analysis([map()], :sanitized | :private | map()) :: map()
@@ -1119,9 +1132,9 @@ defmodule PtcRunner.Kernel.TraceLog do
           &mission_matches?(&1, arguments["mission_name"])
         )
 
-      result = selected |> counters(selected_run_events) |> Map.merge(metadata)
+      aggregate = counters(selected, selected_run_events)
 
-      with :ok <- ResultLimit.validate(result, max_result_bytes), do: {:ok, result}
+      fit_metadata(metadata, max_result_bytes, &Map.merge(aggregate, &1))
     end
   end
 
@@ -1987,8 +2000,8 @@ defmodule PtcRunner.Kernel.TraceLog do
              include_sanitized: false
            ),
          {:ok, capture} <- retain_transient_directory(capture, trace_log.max_retained_bytes) do
-      {:ok, capture.events, capture.source_id, capture.run_sources, capture.excluded_trace_files,
-       capture.known_isolated_run_ids}
+      {:ok, capture.events, capture.source_id, capture.run_sources,
+       directory_source_metadata(capture), capture.known_isolated_run_ids}
     end
   end
 
@@ -3018,25 +3031,68 @@ defmodule PtcRunner.Kernel.TraceLog do
          max_result_bytes,
          metadata
        ) do
-    result = page_result(selected, all_items, offset, source_id, query_id, metadata)
+    full_result = fn fitted_metadata ->
+      page_result(selected, all_items, offset, source_id, query_id, fitted_metadata)
+    end
 
-    cond do
-      ResultLimit.within?(result, max_result_bytes) ->
+    case fit_metadata_result(metadata, max_result_bytes, full_result) do
+      {:ok, result, _fitted_metadata} ->
         {:ok, result}
 
-      selected == [] ->
+      {:exhausted, fitted_metadata} ->
+        fit_page_items(
+          selected,
+          all_items,
+          offset,
+          source_id,
+          query_id,
+          max_result_bytes,
+          fitted_metadata
+        )
+    end
+  end
+
+  defp fit_page_items(
+         selected,
+         all_items,
+         offset,
+         source_id,
+         query_id,
+         max_result_bytes,
+         metadata
+       ) do
+    base = page_result([], all_items, offset, source_id, query_id, metadata)
+
+    cond do
+      not ResultLimit.within?(base, max_result_bytes) ->
         {:error, :result_limit_exceeded}
+
+      selected == [] ->
+        {:ok, base}
 
       true ->
         context = {all_items, offset, source_id, query_id, max_result_bytes, metadata}
+        fit_page_prefix(selected, context, 1, length(selected) - 1, nil)
+    end
+  end
 
-        fit_page_prefix(
-          selected,
-          context,
-          1,
-          length(selected) - 1,
-          nil
-        )
+  defp fit_metadata(metadata, max_result_bytes, build_result) do
+    case fit_metadata_result(metadata, max_result_bytes, build_result) do
+      {:ok, result, _metadata} -> {:ok, result}
+      {:exhausted, _metadata} -> {:error, :result_limit_exceeded}
+    end
+  end
+
+  defp fit_metadata_result(metadata, max_result_bytes, build_result) do
+    result = build_result.(metadata)
+
+    if ResultLimit.within?(result, max_result_bytes) do
+      {:ok, result, metadata}
+    else
+      case TraceIsolationPresentation.shrink(metadata) do
+        {:ok, smaller} -> fit_metadata_result(smaller, max_result_bytes, build_result)
+        :exhausted -> {:exhausted, metadata}
+      end
     end
   end
 

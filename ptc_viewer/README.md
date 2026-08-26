@@ -204,7 +204,11 @@ live ingestion and controls, not the trace browser as a whole.
 
 Query parameters are passed to `Kernel.TraceLog`; `limit` is decoded as an
 integer and `tags` as a JSON object. The routes preserve not-found, invalid
-query, unavailable-adapter, and adapter-failure classifications.
+query, unavailable-adapter, and adapter-failure classifications. Run listings
+render the Kernel's bounded `isolation` object as a damaged-source notice while
+retaining any separate source-kind exclusion notice. An isolated run claim is
+returned as `422 run_isolated`; direct retained-size refusal is returned as
+`413 Trace source retained size exceeded`.
 
 ## Architecture
 

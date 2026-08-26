@@ -169,6 +169,25 @@ defmodule PtcViewer.RouterTest do
     end)
   end
 
+  test "canonical routes preserve isolated-run and retained-size failures", %{
+    trace_dir: trace_dir
+  } do
+    for {reason, expected_status, expected_body} <- [
+          {:run_isolated, 422, "run_isolated"},
+          {:source_retained_limit_exceeded, 413, "Trace source retained size exceeded"}
+        ] do
+      response =
+        conn(:get, "/api/kernel/runs/damaged")
+        |> call_router(
+          trace_dir: trace_dir,
+          kernel_trace_adapter: fn _, _, _ -> {:error, reason} end
+        )
+
+      assert response.status == expected_status
+      assert response.resp_body == expected_body
+    end
+  end
+
   test "conversation route is unconfigured by default and delegates a fixed source", %{
     trace_dir: trace_dir
   } do

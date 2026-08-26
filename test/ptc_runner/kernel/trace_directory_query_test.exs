@@ -70,6 +70,188 @@ defmodule PtcRunner.Kernel.TraceDirectoryQueryTest do
   end
 
   @tag :tmp_dir
+  test "directory catalog queries report exact bounded isolation evidence", %{
+    tmp_dir: directory
+  } do
+    write_events(directory, "healthy.jsonl", [event("healthy", "trace-healthy", 1)])
+    write_events(directory, "healthy-two.jsonl", [event("healthy-two", "trace-healthy-two", 1)])
+    File.write!(Path.join(directory, "broken.jsonl"), "not-json\n")
+
+    write_events(directory, "alpha.jsonl", [event("shared", "trace-alpha", 1)])
+    write_events(directory, "beta.jsonl", [event("shared", "trace-beta", 1)])
+
+    expected = %{
+      "component_count" => 2,
+      "source_count" => 3,
+      "known_run_count" => 4,
+      "reasons" => [
+        %{"reason" => "malformed_jsonl", "component_count" => 1, "source_count" => 1},
+        %{
+          "reason" => "filename_run_mismatch",
+          "component_count" => 1,
+          "source_count" => 2
+        },
+        %{
+          "reason" => "run_identity_conflict",
+          "component_count" => 1,
+          "source_count" => 2
+        }
+      ],
+      "examples" => [
+        %{
+          "sources" => ["alpha.jsonl", "beta.jsonl"],
+          "source_count" => 2,
+          "sources_omitted_count" => 0,
+          "reasons" => ["filename_run_mismatch", "run_identity_conflict"]
+        },
+        %{
+          "sources" => ["broken.jsonl"],
+          "source_count" => 1,
+          "sources_omitted_count" => 0,
+          "reasons" => ["malformed_jsonl"]
+        }
+      ],
+      "examples_omitted_count" => 0
+    }
+
+    assert {:ok, trace_log} = TraceLog.new(source: {:directory, directory})
+    assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
+    on_exit(fn -> TraceSnapshot.stop(snapshot) end)
+
+    for {operation, arguments} <- [
+          {:list_runs, %{"limit" => 1}},
+          {:list_runs, %{"status" => "absent"}},
+          {:counters, %{"status" => "absent"}}
+        ] do
+      assert {:ok, %{"isolation" => ^expected} = direct} =
+               TraceLog.query(trace_log, operation, arguments)
+
+      assert {:ok, %{"isolation" => ^expected} = frozen} =
+               TraceSnapshot.query(snapshot, operation, arguments)
+
+      assert Map.delete(frozen, "snapshot_hash") == direct
+    end
+
+    assert {:ok, %{"next_cursor" => cursor}} =
+             TraceSnapshot.query(snapshot, :list_runs, %{"limit" => 1})
+
+    assert {:ok, %{"isolation" => ^expected, "items" => [_]}} =
+             TraceSnapshot.query(snapshot, :list_runs, %{"limit" => 1, "cursor" => cursor})
+
+    assert {:ok, run} = TraceLog.query(trace_log, :get_run, %{"run_id" => "healthy"})
+    refute Map.has_key?(run, "isolation")
+
+    assert {:ok, turns} = TraceSnapshot.query(snapshot, :list_turns, %{"run_id" => "healthy"})
+    refute Map.has_key?(turns, "isolation")
+  end
+
+  @tag :tmp_dir
+  test "isolation examples and source names have deterministic presentation caps", %{
+    tmp_dir: directory
+  } do
+    for index <- 1..18 do
+      File.write!(
+        Path.join(directory, "broken-#{String.pad_leading(to_string(index), 2, "0")}.jsonl"),
+        "bad\n"
+      )
+    end
+
+    File.write!(Path.join(directory, "!.jsonl"), "bad\n")
+
+    for index <- 1..10 do
+      write_events(directory, "a-joined-#{index}.jsonl", [event("shared", "trace-#{index}", 1)])
+    end
+
+    assert {:ok, trace_log} = TraceLog.new(source: {:directory, directory})
+    assert {:ok, %{"isolation" => isolation}} = TraceLog.query(trace_log, :list_runs, %{})
+
+    assert isolation["component_count"] == 20
+    assert isolation["source_count"] == 29
+    assert isolation["known_run_count"] == 29
+    assert length(isolation["examples"]) == 16
+    assert isolation["examples_omitted_count"] == 4
+
+    invalid = hd(isolation["examples"])
+    assert invalid["sources"] == []
+    assert invalid["source_count"] == 1
+    assert invalid["sources_omitted_count"] == 1
+
+    joined = Enum.find(isolation["examples"], &(&1["source_count"] == 10))
+    assert length(joined["sources"]) == 8
+    assert joined["sources"] == Enum.sort(joined["sources"])
+    assert joined["sources_omitted_count"] == 2
+  end
+
+  @tag :tmp_dir
+  test "result fitting drops isolation examples before canonical run items", %{
+    tmp_dir: directory
+  } do
+    write_events(directory, "healthy.jsonl", [event("healthy", "trace-healthy", 1)])
+
+    for index <- 1..4 do
+      name = "#{String.duplicate("damaged", 12)}-#{index}.jsonl"
+      File.write!(Path.join(directory, name), "bad\n")
+    end
+
+    assert {:ok, unbounded} = TraceSnapshot.start({:directory, directory}, owner: self())
+    on_exit(fn -> TraceSnapshot.stop(unbounded) end)
+    assert {:ok, full_page} = TraceSnapshot.query(unbounded, :list_runs, %{})
+    assert length(full_page["isolation"]["examples"]) == 4
+
+    fitted_isolation =
+      full_page["isolation"]
+      |> Map.put("examples", [])
+      |> Map.put("examples_omitted_count", 4)
+
+    expected_page = Map.put(full_page, "isolation", fitted_isolation)
+    exact_bytes = max(byte_size(Jason.encode!(expected_page)), RetainedSize.bytes(expected_page))
+
+    assert {:ok, snapshot} =
+             TraceSnapshot.start({:directory, directory},
+               owner: self(),
+               max_result_bytes: exact_bytes
+             )
+
+    on_exit(fn -> TraceSnapshot.stop(snapshot) end)
+
+    assert {:ok, ^expected_page} = TraceSnapshot.query(snapshot, :list_runs, %{})
+
+    assert {:ok, direct} =
+             TraceLog.new(source: {:directory, directory}, max_result_bytes: exact_bytes)
+
+    assert {:ok, direct_page} = TraceLog.query(direct, :list_runs, %{})
+    assert direct_page == Map.delete(expected_page, "snapshot_hash")
+
+    assert {:ok, full_counters} = TraceSnapshot.query(unbounded, :counters, %{})
+
+    expected_counters = Map.put(full_counters, "isolation", fitted_isolation)
+
+    exact_counter_bytes =
+      max(byte_size(Jason.encode!(expected_counters)), RetainedSize.bytes(expected_counters))
+
+    assert {:ok, counter_snapshot} =
+             TraceSnapshot.start({:directory, directory},
+               owner: self(),
+               max_result_bytes: exact_counter_bytes
+             )
+
+    on_exit(fn -> TraceSnapshot.stop(counter_snapshot) end)
+    assert {:ok, ^expected_counters} = TraceSnapshot.query(counter_snapshot, :counters, %{})
+
+    assert {:ok, counter_direct} =
+             TraceLog.new(source: {:directory, directory}, max_result_bytes: exact_counter_bytes)
+
+    assert {:ok, direct_counters} = TraceLog.query(counter_direct, :counters, %{})
+    assert direct_counters == Map.delete(expected_counters, "snapshot_hash")
+
+    assert {:ok, impossible} =
+             TraceLog.new(source: {:directory, directory}, max_result_bytes: 1)
+
+    assert {:error, :result_limit_exceeded} = TraceLog.query(impossible, :list_runs, %{})
+    assert {:error, :result_limit_exceeded} = TraceLog.query(impossible, :counters, %{})
+  end
+
+  @tag :tmp_dir
   test "direct cursors bind isolation evidence while snapshot cursors stay frozen", %{
     tmp_dir: directory
   } do

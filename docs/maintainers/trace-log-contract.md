@@ -164,6 +164,25 @@ transiently for every call. Their cursors therefore invalidate when any
 selected admitted or isolated evidence changes; snapshot cursors remain bound
 to the retained value.
 
+Every `list_runs` page and `counters` result reports grant-visible damaged
+components in an `isolation` object, independent of filters and pagination.
+Its exact `component_count`, `source_count`, and `known_run_count` count the
+complete isolated graph; `known_run_count` is the distinct union of valid
+filename and decoded embedded run claims. `reasons` follows the classifier's
+fixed reason order and gives exact component and source counts for each reason,
+with a multi-reason component contributing once to every applicable reason.
+Run-scoped successful answers omit `isolation`.
+
+The diagnostic `examples` list contains at most 16 components in classifier
+order. Each example contains at most eight sorted, canonical UTF-8 basenames,
+while `source_count`, `sources_omitted_count`, and
+`examples_omitted_count` state the exact omissions, including invalid
+basenames that cannot be displayed. Result fitting removes example source
+names and then examples from the deterministic tail, updating those omission
+counts, before shortening a run-item page. The exact counts and reason totals
+are never removed; if those fixed fields plus the counters aggregate or an
+empty page envelope do not fit, the query returns `result_limit_exceeded`.
+
 Normal trace sinks sanitize before persistence. Private canonical event sinks
 use the separate fail-closed policy specified by the event-sink section of the
 `PtcRunner.Kernel.EventSink` module documentation, but retain the same event

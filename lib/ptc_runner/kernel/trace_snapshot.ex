@@ -613,10 +613,15 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   defp query_with_snapshot_hash(state, operation, arguments) do
     metadata =
       %{"snapshot_hash" => state.info.snapshot_hash}
-      |> Map.merge(TraceLog.source_presence_metadata(operation, state.info.excluded_trace_files))
+      |> Map.merge(TraceLog.source_presence_metadata(operation, source_metadata(state)))
 
     snapshot_query(state, operation, arguments, state.max_result_bytes, metadata)
   end
+
+  defp source_metadata(%{directory_admission: %{} = admission}),
+    do: TraceLog.directory_source_metadata(admission)
+
+  defp source_metadata(state), do: state.info.excluded_trace_files
 
   defp snapshot_query(
          state,
