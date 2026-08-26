@@ -2406,6 +2406,129 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
+  @doc false
+  @spec directory_event_reasons([map()]) ::
+          [
+            :unsupported_version
+            | :sequence_conflict
+            | :lifecycle_conflict
+            | :malformed_event
+          ]
+  def directory_event_reasons(events) when is_list(events) do
+    []
+    |> maybe_directory_reason(unsupported_directory_version?(events), :unsupported_version)
+    |> maybe_directory_reason(directory_sequence_conflict?(events), :sequence_conflict)
+    |> maybe_directory_reason(directory_lifecycle_conflict?(events), :lifecycle_conflict)
+    |> maybe_directory_reason(directory_malformed_event?(events), :malformed_event)
+  end
+
+  defp unsupported_directory_version?(events) do
+    Enum.any?(events, fn event ->
+      case Map.fetch(event, "schema_version") do
+        {:ok, version} when is_integer(version) -> version != 2
+        _other -> false
+      end
+    end)
+  end
+
+  defp directory_sequence_conflict?(events) do
+    Enum.reduce_while(events, %{}, fn event, sequences ->
+      case {event["trace_id"], event["sequence"]} do
+        {trace_id, sequence} when is_binary(trace_id) and is_integer(sequence) and sequence > 0 ->
+          cond do
+            valid_event_id(trace_id) != :ok ->
+              {:cont, sequences}
+
+            sequence > Map.get(sequences, trace_id, 0) ->
+              {:cont, Map.put(sequences, trace_id, sequence)}
+
+            true ->
+              {:halt, :conflict}
+          end
+
+        {trace_id, _sequence} when is_binary(trace_id) ->
+          if valid_event_id(trace_id) == :ok,
+            do: {:halt, :conflict},
+            else: {:cont, sequences}
+
+        _invalid_identity ->
+          {:cont, sequences}
+      end
+    end) == :conflict
+  end
+
+  defp directory_lifecycle_conflict?(events) do
+    directory_run_lifecycle_conflict?(events) or
+      directory_evaluation_lifecycle_conflict?(events)
+  end
+
+  defp directory_run_lifecycle_conflict?(events) do
+    Enum.reduce_while(events, %{}, &advance_directory_run_lifecycle/2) == :conflict
+  end
+
+  defp directory_evaluation_lifecycle_conflict?(events) do
+    Enum.reduce_while(events, %{}, &advance_directory_evaluation_lifecycle/2) == :conflict
+  end
+
+  defp advance_directory_run_lifecycle(
+         %{"run_id" => run_id, "type" => type},
+         lifecycles
+       )
+       when is_binary(run_id) and is_binary(type) do
+    if directory_lifecycle_identity?(run_id, type),
+      do: lifecycle_reduction(advance_run_lifecycle(lifecycles, run_id, type)),
+      else: {:cont, lifecycles}
+  end
+
+  defp advance_directory_run_lifecycle(_event, lifecycles), do: {:cont, lifecycles}
+
+  defp advance_directory_evaluation_lifecycle(
+         %{"run_id" => run_id, "type" => type, "data" => data} = event,
+         lifecycles
+       )
+       when is_binary(run_id) and is_binary(type) and is_map(data) do
+    if directory_lifecycle_identity?(run_id, type),
+      do: lifecycle_reduction(advance_evaluation_lifecycle(lifecycles, run_id, event)),
+      else: {:cont, lifecycles}
+  end
+
+  defp advance_directory_evaluation_lifecycle(_event, lifecycles),
+    do: {:cont, lifecycles}
+
+  defp lifecycle_reduction({:ok, advanced}), do: {:cont, advanced}
+  defp lifecycle_reduction({:error, _reason}), do: {:halt, :conflict}
+
+  defp directory_lifecycle_identity?(run_id, type),
+    do: valid_event_id(run_id) == :ok and type =~ @event_type
+
+  defp directory_malformed_event?(events),
+    do: Enum.any?(events, &match?({:error, _reason}, directory_event_shape(&1)))
+
+  defp directory_event_shape(event) when is_map(event) do
+    event
+    |> Map.put("schema_version", normalized_directory_version(event["schema_version"]))
+    |> Map.put("sequence", normalized_directory_sequence(event["sequence"]))
+    |> validate_event()
+    |> case do
+      :ok -> :ok
+      {:error, _reason} -> {:error, :malformed_event}
+    end
+  end
+
+  defp directory_event_shape(_event), do: {:error, :malformed_event}
+
+  defp normalized_directory_version(version) when is_integer(version) and version != 2, do: 2
+  defp normalized_directory_version(version), do: version
+
+  defp normalized_directory_sequence(sequence)
+       when not is_integer(sequence) or sequence <= 0,
+       do: 1
+
+  defp normalized_directory_sequence(sequence), do: sequence
+
+  defp maybe_directory_reason(reasons, true, reason), do: reasons ++ [reason]
+  defp maybe_directory_reason(reasons, false, _reason), do: reasons
+
   defp advance_run_lifecycle(run_lifecycles, run_id, type) do
     case {Map.get(run_lifecycles, run_id), type} do
       {nil, "run-started"} ->
