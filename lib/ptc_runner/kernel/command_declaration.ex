@@ -48,6 +48,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
         "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]",
+        "ptc version [--envelope ENVELOPE.json]",
         "ptc --version"
       ],
       options: [
@@ -72,6 +73,10 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         @envelope_option,
         @help_option
       ]
+    },
+    version: %{
+      usage: ["ptc version [--envelope ENVELOPE.json]"],
+      options: [@envelope_option]
     },
     docs: %{
       usage: ["ptc docs [PAGE]"],
@@ -381,14 +386,34 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     }
   }
 
-  @commands [:init, :docs, :validate, :run, :doctor, :models, :transcript, :repl, :viewer]
+  @commands [
+    :version,
+    :init,
+    :docs,
+    :validate,
+    :run,
+    :doctor,
+    :models,
+    :transcript,
+    :repl,
+    :viewer
+  ]
   @topics [:root | @commands]
   # Commands the shared engine never dispatches: their frontend owns the
   # process for as long as it runs and returns no envelope.
   @frontend_commands [:transcript, :repl, :viewer]
 
   @type command ::
-          :init | :docs | :validate | :run | :doctor | :models | :transcript | :repl | :viewer
+          :version
+          | :init
+          | :docs
+          | :validate
+          | :run
+          | :doctor
+          | :models
+          | :transcript
+          | :repl
+          | :viewer
   @type topic :: :root | command()
   @type frontend :: :standalone | :mix
 

@@ -53,10 +53,14 @@ cd "$project_root"
 # release fails with "the dependency is not available". A machine that has run
 # a dev or test `deps.get` already has them, which is why this only appeared on
 # a fresh CI runner.
+PTC_SOURCE_REVISION="${PTC_SOURCE_REVISION:-$(git rev-parse HEAD)}" \
+PTC_SOURCE_DIRTY="${PTC_SOURCE_DIRTY:-$(test -z "$(git status --porcelain)" && echo false || echo true)}" \
 MIX_ENV=prod mix do deps.get --only prod --check-locked \
   + release ptc_runner --overwrite --path "$release_root"
 
-version="$("$release_root/bin/ptc" --version)"
+version_envelope="$package_tmp_dir/version.json"
+"$release_root/bin/ptc" version --envelope "$version_envelope" > /dev/null
+version="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["result"]["version"])' "$version_envelope")"
 architecture="$(uname -m)"
 
 # The origin map is packaging bookkeeping, not part of the artifact.

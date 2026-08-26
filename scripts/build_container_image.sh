@@ -54,6 +54,8 @@ done
 # Loading still limits this helper to one platform at a time; the publication
 # workflow assembles the independently verified native results afterward.
 docker buildx build \
+  --build-arg "PTC_SOURCE_REVISION=${PTC_SOURCE_REVISION:-$(git rev-parse HEAD)}" \
+  --build-arg "PTC_SOURCE_DIRTY=${PTC_SOURCE_DIRTY:-$(test -z "$(git status --porcelain)" && echo false || echo true)}" \
   --output "type=docker,name=$image_tag" \
   "$@" \
   --target released \
