@@ -835,14 +835,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  # Contract attestation needs the adapter's backing application when one is
-  # required. Doctor and other declaration checks still report adapter
-  # availability from the selector/module, and do not start a provider
-  # application merely to ask whether a model can honor its options.
-  # Local preflight already admitted the selector and adapter module. Preparing
-  # here is only for a positive unsupported-contract refusal. An adapter that
-  # cannot resolve the target yet (backing application not started, catalog
-  # unavailable) is not a new local failure.
+  # Contract attestation must not load a provider catalog or call ensure_ready
+  # inside the audited-local worker. Doctor and other declaration checks still
+  # report adapter availability from the selector/module. Preparing here is only
+  # for a positive unsupported-contract refusal that does not need the catalog:
+  # openai_codex drops max_tokens, and test adapters can attest without warmup.
+  # An adapter that cannot resolve the target yet is not a new local failure.
   defp maybe_prepare_llm_contract(installation, context, model, adapter) do
     case live_llm_requirements(installation, context) do
       {:ok, requirements} -> attest_or_skip_local_contract(requirements, model, adapter)
@@ -850,21 +848,32 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp attest_or_skip_local_contract(requirements, model, adapter) do
-    case {adapter, provider_application(adapter, model)} do
-      {ReqLLMAdapter, _application} ->
-        :ok
-
-      {_adapter, nil} ->
-        finish_local_contract_prepare(prepare_llm_model(model, requirements, adapter))
-
-      {_adapter, _application} ->
-        :ok
+  defp attest_or_skip_local_contract(requirements, model, ReqLLMAdapter) do
+    case ReqLLMAdapter.local_contract_attestation(model, requirements) do
+      :ok -> :ok
+      {:error, :unsupported_model_option} = error -> error
     end
   end
 
-  defp finish_local_contract_prepare({:ok, _prepared_model}), do: :ok
-  defp finish_local_contract_prepare({:error, _reason} = error), do: error
+  defp attest_or_skip_local_contract(requirements, model, adapter) do
+    adapter_local_prepare(adapter, model, requirements)
+  end
+
+  defp adapter_local_prepare(adapter, model, requirements) do
+    if function_exported?(adapter, :prepare_model, 2) do
+      case adapter.prepare_model(model, requirements) do
+        {:ok, _target, _status, _attestation} -> :ok
+        {:error, :unsupported_model_option} = error -> error
+        {:error, _reason} -> {:error, :invalid_llm_model}
+      end
+    else
+      :ok
+    end
+  rescue
+    _exception -> {:error, :invalid_llm_model}
+  catch
+    _kind, _reason -> {:error, :invalid_llm_model}
+  end
 
   defp live_llm_requirements(installation, %{limits: limits}) do
     case Requirements.live(installation.params, limits.llm_request_output_tokens) do

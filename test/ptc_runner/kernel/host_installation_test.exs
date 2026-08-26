@@ -1158,6 +1158,29 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "openai_codex fails local preflight before credentials", %{tmp_dir: dir} do
+    host =
+      load_host(dir, %{
+        "credentials" => %{"key" => %{"literal" => "test-llm-secret"}},
+        "install" => %{
+          "codex" => %{
+            "source" => "llm",
+            "model" => "openai_codex:future-chat-1408",
+            "credential" => "key",
+            "installation_revision" => "codex-v1"
+          }
+        }
+      })
+
+    assert_local_preflight_parity(
+      host,
+      "codex",
+      :workflow,
+      {:error, :unsupported_model_option}
+    )
+  end
+
+  @tag :tmp_dir
   test "LLM max_calls uses the host ceiling when it sits below per-name", %{tmp_dir: dir} do
     host =
       load_host(dir, %{

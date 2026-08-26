@@ -130,6 +130,26 @@ if Code.ensure_loaded?(ReqLLM) do
 
     def prepare_model(_model, _requirements), do: {:error, :invalid_model}
 
+    # Catalog-free local preflight: refuse contracts this adapter already knows
+    # it cannot honor, without loading llm_db inside the audited-local worker.
+    @doc false
+    @spec local_contract_attestation(String.t(), Requirements.t()) ::
+            :ok | {:error, :unsupported_model_option}
+    def local_contract_attestation(model, requirements) when is_binary(model) do
+      with {:ok, canonical} <- Requirements.canonical(requirements),
+           :ok <- attest_slice2_requirements(canonical) do
+        case parse_provider(model) do
+          {:req_llm, selector} -> refuse_lossy_max_tokens(selector)
+          _direct_http -> :ok
+        end
+      else
+        :error -> {:error, :unsupported_model_option}
+        {:error, :unsupported_model_option} = error -> error
+      end
+    end
+
+    def local_contract_attestation(_model, _requirements), do: :ok
+
     @impl true
     @spec call(ReqLLMPreparedModel.t(), Invocation.t()) ::
             {:ok, map()} | {:error, ProviderError.t()}
