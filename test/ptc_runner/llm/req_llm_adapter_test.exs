@@ -175,6 +175,15 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                ReqLLMAdapter.prepare_model("ollama:test", requirements)
     end
 
+    test "refuses json_schema preparation for tool-fallback providers" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_schema)
+
+      for selector <- ["groq:openai/gpt-oss-20b", "amazon_bedrock:amazon.nova-pro-v1:0"] do
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+      end
+    end
+
     test "attests json_schema and json_object on a cataloged ReqLLM selector" do
       selector = "openrouter:deepseek/deepseek-v4-flash-0731"
 

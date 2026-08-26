@@ -13,6 +13,33 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     :ok
   end
 
+  test "json_schema generate_object uses provider-native response_format", %{test: test} do
+    schema = %{
+      "type" => "object",
+      "properties" => %{"ok" => %{"type" => "boolean"}},
+      "required" => ["ok"]
+    }
+
+    expect_object_request(test, "deepseek/deepseek-v4-flash-0731", ~s({"ok":true}))
+
+    assert {:ok, %{object: %{"ok" => true}, tokens: tokens}} =
+             ReqLLMAdapter.generate_object(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               [%{role: :user, content: "hi"}],
+               schema,
+               api_key: "test",
+               req_http_options: [plug: {Req.Test, test}]
+             )
+
+    assert is_map(tokens)
+    assert_receive {:request_body, body}
+
+    assert get_in(body, ["response_format", "type"]) == "json_schema"
+    assert get_in(body, ["response_format", "json_schema", "schema", "type"]) == "object"
+    refute Map.has_key?(body, "tools")
+    refute Map.has_key?(body, "tool_choice")
+  end
+
   test "bounds an omitted output budget below a model's full context window", %{test: test} do
     expect_request(test, "x-ai/grok-4.3")
 
@@ -367,6 +394,10 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
   defp expect_request(test, response_model, opts \\ []) do
     Req.Test.expect(test, request_handler(self(), response_model, opts))
+  end
+
+  defp expect_object_request(test, response_model, content) do
+    Req.Test.expect(test, request_handler(self(), response_model, content: content))
   end
 
   defp prepare_model(selector) do

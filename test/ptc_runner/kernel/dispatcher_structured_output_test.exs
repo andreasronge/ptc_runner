@@ -124,6 +124,57 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
            end)
   end
 
+  test "an invalid schema is invalid_arguments even under unsupported mode" do
+    parent = self()
+
+    {result, state, sink} =
+      dispatch_structured(
+        parent,
+        :unsupported,
+        %{object: %{"ok" => true}, tokens: %{}},
+        %{"schema" => %{"type" => "array"}}
+      )
+
+    assert %{
+             status: :error,
+             kind: :protocol_error,
+             reason: :invalid_arguments,
+             retryable?: false
+           } = result
+
+    refute_received {:called, _}
+    assert RunState.usage(state).protocol_errors == 1
+    assert RunState.usage(state).capability_calls.workflow == %{}
+
+    refute Enum.any?(EventSink.events(sink), fn event ->
+             event.type in ["capability-started", "capability-stopped"]
+           end)
+  end
+
+  test "tools with schema stay invalid_arguments under unsupported mode" do
+    parent = self()
+
+    {result, _state, _sink} =
+      dispatch_structured(
+        parent,
+        :unsupported,
+        %{object: %{"ok" => true}, tokens: %{}},
+        %{
+          "schema" => %{"type" => "array"},
+          "tools" => [%{"name" => "lookup", "description" => "x", "parameters" => %{}}]
+        }
+      )
+
+    assert %{
+             status: :error,
+             kind: :protocol_error,
+             reason: :invalid_arguments,
+             retryable?: false
+           } = result
+
+    refute_received {:called, _}
+  end
+
   test "encoded structured content is dropped from a json_schema success" do
     {result, _state, _sink} =
       dispatch_structured(
@@ -196,6 +247,39 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
   test "schema-invalid structured object is output_schema_mismatch" do
     {result, _state, _sink} =
       dispatch_structured(self(), :json_schema, %{object: %{"ok" => "no"}, tokens: %{}})
+
+    assert %{
+             status: :error,
+             kind: :invalid_result,
+             reason: :output_schema_mismatch
+           } = result
+  end
+
+  test "missing structured output is output_schema_mismatch" do
+    parent = self()
+
+    {result, state, sink} =
+      dispatch_structured(parent, :json_schema, %{tokens: %{}})
+
+    assert_received {:called, _}
+
+    assert %{
+             status: :error,
+             kind: :invalid_result,
+             reason: :output_schema_mismatch,
+             retryable?: false
+           } = result
+
+    assert RunState.usage(state).capability_calls.workflow["llm-request"] == 1
+
+    assert Enum.any?(EventSink.events(sink), fn event ->
+             event.type == "capability-stopped" and event.data.reason == :output_schema_mismatch
+           end)
+  end
+
+  test "a non-map json_schema object is output_schema_mismatch" do
+    {result, _state, _sink} =
+      dispatch_structured(self(), :json_schema, %{object: "not-an-object", tokens: %{}})
 
     assert %{
              status: :error,

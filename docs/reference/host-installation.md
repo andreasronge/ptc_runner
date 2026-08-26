@@ -214,12 +214,13 @@ not mean the provider request itself is known to fail.
 
 Every live model installation must declare `structured_output_mode` as
 `json_schema`, `json_object`, or `unsupported`. `json_schema` asks the provider
-to enforce the request schema. `json_object` asks the provider only for a JSON
-object, then the Kernel decodes and validates it. `unsupported` refuses a
-request `schema` before dispatch. Changing the mode requires a new
-`installation_revision`. A schema together with a non-empty `tools` list is
-invalid. Success is a `structured_output` object; encoded `content` is not
-duplicated.
+to enforce the request schema with its native schema mechanism and is refused
+at prepare when the adapter can only fall back to a synthetic tool.
+`json_object` asks the provider only for a JSON object, then the Kernel
+decodes and validates it. `unsupported` refuses a request `schema` before
+dispatch. Changing the mode requires a new `installation_revision`. A schema
+together with a non-empty `tools` list is invalid. Success is a
+`structured_output` object; encoded `content` is not duplicated.
 
 Model selectors are provider-qualified strings. These are the provider paths
 PtcRunner configures and exercises directly:

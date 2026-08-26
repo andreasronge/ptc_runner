@@ -40,7 +40,9 @@ if Code.ensure_loaded?(ReqLLM) do
     alias PtcRunner.LLM.Requirements
     alias ReqLLM.Message
     alias ReqLLM.Message.ContentPart
+    alias ReqLLM.ModelHelpers
     alias ReqLLM.Provider.Options
+    alias ReqLLM.Providers.XAI
 
     require Logger
 
@@ -65,6 +67,17 @@ if Code.ensure_loaded?(ReqLLM) do
     # ReqLLM's public string resolver construct each target. Generic providers
     # use the documented inline form so the dependency warning never escapes.
     @req_llm_special_fallback_providers [:github_copilot, :minimax, :mistral, :openai_codex]
+    @native_json_schema_providers [
+      :anthropic,
+      :azure,
+      :fireworks_ai,
+      :google,
+      :google_vertex,
+      :ollama,
+      :openai,
+      :openrouter,
+      :xai
+    ]
 
     # --- Behaviour Callbacks ---
 
@@ -480,29 +493,36 @@ if Code.ensure_loaded?(ReqLLM) do
            schema,
            opts
          ) do
-      timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
-      http_opts = Keyword.get(opts, :req_http_options, [])
-      cache_enabled = Keyword.get(opts, :cache, false)
+      if native_json_schema_model?(req_llm_model) do
+        timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
+        http_opts = Keyword.get(opts, :req_http_options, [])
+        cache_enabled = Keyword.get(opts, :cache, false)
 
-      generation_opts = req_llm_generation_opts(opts, req_llm_model, {messages, schema})
+        generation_opts =
+          opts
+          |> req_llm_generation_opts(req_llm_model, {messages, schema})
+          |> put_json_schema_native_mode(req_llm_model)
 
-      {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
-      extra_opts = apply_bedrock_region(model, extra_opts)
+        {messages, extra_opts} = apply_caching(model, messages, cache_enabled)
+        extra_opts = apply_bedrock_region(model, extra_opts)
 
-      req_opts =
-        [receive_timeout: timeout, req_http_options: http_opts]
-        |> Keyword.merge(generation_opts)
-        |> Keyword.merge(extra_opts)
+        req_opts =
+          [receive_timeout: timeout, req_http_options: http_opts]
+          |> Keyword.merge(generation_opts)
+          |> Keyword.merge(extra_opts)
 
-      case ReqLLM.generate_object(req_llm_model, messages, schema, req_opts) do
-        {:ok, response} ->
-          usage = ReqLLM.Response.usage(response) || %{}
-          tokens = build_tokens_from_req_llm_response(usage, response.provider_meta)
+        case ReqLLM.generate_object(req_llm_model, messages, schema, req_opts) do
+          {:ok, response} ->
+            usage = ReqLLM.Response.usage(response) || %{}
+            tokens = build_tokens_from_req_llm_response(usage, response.provider_meta)
 
-          {:ok, %{object: response.object, tokens: tokens}}
+            {:ok, %{object: response.object, tokens: tokens}}
 
-        {:error, reason} ->
-          {:error, reason}
+          {:error, reason} ->
+            {:error, reason}
+        end
+      else
+        {:error, :unsupported_model_option}
       end
     end
 
@@ -1296,22 +1316,46 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp put_json_object_format(opts) do
+      put_provider_option(opts, :response_format, %{type: "json_object"})
+    end
+
+    defp put_json_schema_native_mode(opts, %LLMDB.Model{provider: provider}) do
+      case json_schema_mode_key(provider) do
+        nil ->
+          opts
+
+        key ->
+          opts
+          |> put_provider_option(key, :json_schema)
+          |> Keyword.put_new(key, :json_schema)
+      end
+    end
+
+    defp json_schema_mode_key(:openrouter), do: :openrouter_structured_output_mode
+    defp json_schema_mode_key(:openai), do: :openai_structured_output_mode
+    defp json_schema_mode_key(:azure), do: :openai_structured_output_mode
+    defp json_schema_mode_key(:anthropic), do: :anthropic_structured_output_mode
+    defp json_schema_mode_key(:google_vertex), do: :anthropic_structured_output_mode
+    defp json_schema_mode_key(:xai), do: :xai_structured_output_mode
+    defp json_schema_mode_key(:fireworks_ai), do: :fireworks_structured_output_mode
+    defp json_schema_mode_key(_provider), do: nil
+
+    defp put_provider_option(opts, key, value) do
       provider_options =
         opts
         |> Keyword.get(:provider_options, [])
-        |> json_object_provider_options()
+        |> store_provider_option(key, value)
 
       Keyword.put(opts, :provider_options, provider_options)
     end
 
-    defp json_object_provider_options(options) when is_list(options),
-      do: Keyword.put(options, :response_format, %{type: "json_object"})
+    defp store_provider_option(options, key, value) when is_list(options),
+      do: Keyword.put(options, key, value)
 
-    defp json_object_provider_options(options) when is_map(options),
-      do: Map.put(options, :response_format, %{type: "json_object"})
+    defp store_provider_option(options, key, value) when is_map(options),
+      do: Map.put(options, key, value)
 
-    defp json_object_provider_options(_options),
-      do: [response_format: %{type: "json_object"}]
+    defp store_provider_option(_options, key, value), do: [{key, value}]
 
     defp invocation_opts(%ReqLLMPreparedModel{} = target, invocation) do
       opts =
@@ -1345,10 +1389,29 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp attest_structured_mode(_model, :unsupported), do: :ok
 
-    defp attest_structured_mode(model, mode) when mode in [:json_schema, :json_object] do
+    defp attest_structured_mode(model, :json_object) do
       case parse_provider(model) do
         {:req_llm, _selector} -> :ok
         _unsupported_route -> {:error, :unsupported_model_option}
+      end
+    end
+
+    defp attest_structured_mode(model, :json_schema) do
+      case parse_provider(model) do
+        {:req_llm, selector} ->
+          if native_json_schema_selector?(selector),
+            do: :ok,
+            else: {:error, :unsupported_model_option}
+
+        _unsupported_route ->
+          {:error, :unsupported_model_option}
+      end
+    end
+
+    defp native_json_schema_selector?(selector) do
+      case split_req_llm_selector(selector) do
+        {:ok, provider, _model_id} -> provider in @native_json_schema_providers
+        _invalid -> false
       end
     end
 
@@ -1363,7 +1426,8 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp prepare_req_llm_target(selector, canonical) do
       with :ok <- refuse_lossy_max_tokens(selector),
-           {:ok, prepared, status} <- prepare_req_llm_model(selector) do
+           {:ok, prepared, status} <- prepare_req_llm_model(selector),
+           :ok <- attest_prepared_json_schema(prepared, canonical.structured_output_mode) do
         {:ok,
          %{
            prepared
@@ -1372,6 +1436,27 @@ if Code.ensure_loaded?(ReqLLM) do
          }, status, canonical}
       end
     end
+
+    defp attest_prepared_json_schema(_prepared, mode) when mode in [:json_object, :unsupported],
+      do: :ok
+
+    defp attest_prepared_json_schema(%ReqLLMPreparedModel{model: model}, :json_schema) do
+      if native_json_schema_model?(model),
+        do: :ok,
+        else: {:error, :unsupported_model_option}
+    end
+
+    defp native_json_schema_model?(%LLMDB.Model{provider: provider} = model)
+         when provider in [:openai, :azure],
+         do: ModelHelpers.json_schema?(model)
+
+    defp native_json_schema_model?(%LLMDB.Model{provider: :xai} = model),
+      do: XAI.supports_native_structured_outputs?(model)
+
+    defp native_json_schema_model?(%LLMDB.Model{provider: provider}),
+      do: provider in @native_json_schema_providers
+
+    defp native_json_schema_model?(_model), do: false
 
     defp refuse_lossy_max_tokens("openai_codex:" <> _rest),
       do: {:error, :unsupported_model_option}

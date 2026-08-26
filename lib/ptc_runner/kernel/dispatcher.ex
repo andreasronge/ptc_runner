@@ -32,8 +32,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
   validation, a request `schema` is compiled with
   `PtcRunner.Kernel.JSONSchema.compile_bounded/3` and stored only on the
   private invocation. A schema together with a non-empty `tools` list is
-  `invalid_arguments` before reservation. A live alias whose
-  `structured_output_mode` is `unsupported` refuses schema requests as
+  `invalid_arguments` before reservation. A proven-invalid request schema is
+  `invalid_arguments` even when the selected alias declares structured output
+  `unsupported`. A live alias whose `structured_output_mode` is `unsupported`
+  then refuses a compiled schema request as
   `provider_error/structured_output_unsupported` before reservation.
   Compiler unavailability uses the same
   `capability_unavailable/input_validation_unavailable` category, with no
@@ -1035,23 +1037,24 @@ defmodule PtcRunner.Kernel.Dispatcher do
         {:ok, invocation}
 
       {:ok, schema} ->
-        cond do
-          tools_with_schema?(invocation.arguments) ->
-            {:error, :invalid_arguments}
+        if tools_with_schema?(invocation.arguments) do
+          {:error, :invalid_arguments}
+        else
+          case compile_live_request_schema(
+                 invocation,
+                 schema,
+                 state,
+                 environment,
+                 requested_timeout_ms,
+                 validation_heap_words,
+                 validation_deadline_ms
+               ) do
+            {:ok, compiled} ->
+              refuse_unsupported_structured_output(compiled)
 
-          invocation.structured_output_mode == :unsupported ->
-            {:error, :structured_output_unsupported, invocation}
-
-          true ->
-            compile_live_request_schema(
-              invocation,
-              schema,
-              state,
-              environment,
-              requested_timeout_ms,
-              validation_heap_words,
-              validation_deadline_ms
-            )
+            error ->
+              error
+          end
         end
     end
   end
@@ -1110,6 +1113,13 @@ defmodule PtcRunner.Kernel.Dispatcher do
       _absent -> false
     end
   end
+
+  defp refuse_unsupported_structured_output(
+         %CapabilityInvocation{structured_output_mode: :unsupported} = invocation
+       ),
+       do: {:error, :structured_output_unsupported, invocation}
+
+  defp refuse_unsupported_structured_output(invocation), do: {:ok, invocation}
 
   defp put_compiled_request_schema(invocation, normalized, compiled, state) do
     invocation = CapabilityInvocation.put_request_schema(invocation, normalized, compiled)

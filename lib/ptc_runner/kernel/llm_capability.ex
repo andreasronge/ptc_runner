@@ -88,7 +88,7 @@ defmodule PtcRunner.Kernel.LLMCapability do
   defp invoke(requester, request, response_limit) do
     case requester.(request) do
       {:ok, response} ->
-        normalize_response(response, response_limit)
+        normalize_response(response, response_limit, schema_request?(request))
 
       # A requester that already classified its own failure keeps that
       # classification. Relabelling everything `:unavailable` and retryable is
@@ -105,8 +105,12 @@ defmodule PtcRunner.Kernel.LLMCapability do
     end
   end
 
-  defp normalize_response(response, limit) do
-    case classify_success(response) do
+  defp schema_request?(request) when is_map(request) do
+    Map.has_key?(request, "schema") or Map.has_key?(request, :schema)
+  end
+
+  defp normalize_response(response, limit, schema_request?) do
+    case classify_success(response, schema_request?) do
       {:ok, classified} ->
         classified = stringify_json(classified)
         bytes = RetainedSize.bytes_with_cap(classified, limit)
@@ -122,16 +126,14 @@ defmodule PtcRunner.Kernel.LLMCapability do
     end
   end
 
-  defp classify_success(response) when is_map(response) and not is_struct(response) do
+  defp classify_success(response, schema_request?)
+       when is_map(response) and not is_struct(response) do
     cond do
-      structured_object?(response) ->
-        closed_structured(:object, fetch_success(response, :object), response)
+      schema_candidate?(response) ->
+        close_schema_candidate(response)
 
-      structured_json?(response) ->
-        closed_structured(:json, fetch_success(response, :json), response)
-
-      public_structured?(response) ->
-        closed_public_structured(fetch_success(response, "structured_output"), response)
+      schema_request? ->
+        {:ok, keep_success_keys(response, [:tokens])}
 
       tool_calls?(response) ->
         {:ok,
@@ -151,19 +153,28 @@ defmodule PtcRunner.Kernel.LLMCapability do
     end
   end
 
-  defp classify_success(_response), do: :error
+  defp classify_success(_response, _schema_request?), do: :error
 
-  defp structured_object?(response),
-    do: match?(%{object: object} when is_map(object) and not is_struct(object), response)
+  defp schema_candidate?(response) do
+    success_key?(response, :object) or success_key?(response, :json) or
+      success_key?(response, :structured_output)
+  end
 
-  defp structured_json?(response),
-    do: match?(%{json: json} when is_binary(json), response)
+  defp close_schema_candidate(response) do
+    cond do
+      success_key?(response, :object) ->
+        closed_structured(:object, fetch_success(response, :object), response)
 
-  defp public_structured?(response) do
-    match?(
-      %{"structured_output" => object} when is_map(object) and not is_struct(object),
-      response
-    )
+      success_key?(response, :json) ->
+        closed_structured(:json, fetch_success(response, :json), response)
+
+      true ->
+        closed_public_structured(fetch_success(response, :structured_output), response)
+    end
+  end
+
+  defp success_key?(response, key) when is_atom(key) do
+    Map.has_key?(response, key) or Map.has_key?(response, Atom.to_string(key))
   end
 
   defp tool_calls?(response) do
