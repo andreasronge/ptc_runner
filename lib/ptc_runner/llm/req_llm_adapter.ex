@@ -76,6 +76,14 @@ if Code.ensure_loaded?(ReqLLM) do
       :openrouter,
       :xai
     ]
+    @native_json_object_providers [
+      :azure,
+      :fireworks_ai,
+      :groq,
+      :openai,
+      :openrouter,
+      :xai
+    ]
 
     # --- Behaviour Callbacks ---
 
@@ -1246,29 +1254,14 @@ if Code.ensure_loaded?(ReqLLM) do
           target
           |> generate_object(messages, schema, opts)
           |> case do
-            {:ok, %{object: object, tokens: tokens}}
-            when is_map(object) and not is_struct(object) ->
-              {:ok, %{object: object, tokens: tokens}}
-
-            {:ok, _wrong_branch} ->
-              {:error,
-               ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
-
-            error ->
-              normalize_call_result(error)
+            {:ok, result} -> {:ok, result}
+            error -> normalize_call_result(error)
           end
 
         :json_object ->
           case generate_json(target, messages, opts) do
-            {:ok, %{json: json, tokens: tokens}} when is_binary(json) ->
-              {:ok, %{json: json, tokens: tokens}}
-
-            {:ok, _wrong_branch} ->
-              {:error,
-               ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
-
-            error ->
-              normalize_call_result(error)
+            {:ok, result} -> {:ok, result}
+            error -> normalize_call_result(error)
           end
 
         _unsupported ->
@@ -1298,18 +1291,22 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp call_req_llm_json(%ReqLLMPreparedModel{} = prepared, messages, opts) do
-      json_opts = put_json_object_format(opts)
+    defp call_req_llm_json(%ReqLLMPreparedModel{model: req_llm_model} = prepared, messages, opts) do
+      if native_json_object_model?(req_llm_model) do
+        json_opts = put_json_object_format(opts)
 
-      case call_req_llm(prepared, messages, json_opts) do
-        {:ok, %{content: content, tokens: tokens}} when is_binary(content) ->
-          {:ok, %{json: content, tokens: tokens}}
+        case call_req_llm(prepared, messages, json_opts) do
+          {:ok, %{content: content, tokens: tokens}} when is_binary(content) ->
+            {:ok, %{json: content, tokens: tokens}}
 
-        {:ok, _wrong_branch} ->
-          {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
+          {:ok, result} ->
+            {:ok, result}
 
-        error ->
-          normalize_call_result(error)
+          error ->
+            normalize_call_result(error)
+        end
+      else
+        {:error, :unsupported_model_option}
       end
     end
 
@@ -1388,8 +1385,13 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp attest_structured_mode(model, :json_object) do
       case parse_provider(model) do
-        {:req_llm, _selector} -> :ok
-        _unsupported_route -> {:error, :unsupported_model_option}
+        {:req_llm, selector} ->
+          if native_json_object_selector?(selector),
+            do: :ok,
+            else: {:error, :unsupported_model_option}
+
+        _unsupported_route ->
+          {:error, :unsupported_model_option}
       end
     end
 
@@ -1409,6 +1411,15 @@ if Code.ensure_loaded?(ReqLLM) do
       case split_req_llm_selector(selector) do
         {:ok, :google_vertex, model_id} -> vertex_native_json_schema_id?(model_id)
         {:ok, provider, _model_id} -> provider in @native_json_schema_providers
+        _invalid -> false
+      end
+    end
+
+    defp native_json_object_selector?(selector) do
+      case split_req_llm_selector(selector) do
+        {:ok, :google_vertex, model_id} -> not vertex_native_json_schema_id?(model_id)
+        {:ok, :azure, model_id} -> azure_json_object_id?(model_id)
+        {:ok, provider, _model_id} -> provider in @native_json_object_providers
         _invalid -> false
       end
     end
@@ -1435,14 +1446,19 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp attest_prepared_json_schema(_prepared, mode) when mode in [:json_object, :unsupported],
-      do: :ok
-
     defp attest_prepared_json_schema(%ReqLLMPreparedModel{model: model}, :json_schema) do
       if native_json_schema_model?(model),
         do: :ok,
         else: {:error, :unsupported_model_option}
     end
+
+    defp attest_prepared_json_schema(%ReqLLMPreparedModel{model: model}, :json_object) do
+      if native_json_object_model?(model),
+        do: :ok,
+        else: {:error, :unsupported_model_option}
+    end
+
+    defp attest_prepared_json_schema(_prepared, :unsupported), do: :ok
 
     defp native_json_schema_model?(%LLMDB.Model{provider: :openai} = model),
       do: ModelHelpers.json_schema?(model)
@@ -1457,6 +1473,36 @@ if Code.ensure_loaded?(ReqLLM) do
       do: provider in @native_json_schema_providers
 
     defp native_json_schema_model?(_model), do: false
+
+    defp native_json_object_model?(%LLMDB.Model{provider: :openai} = model),
+      do: ModelHelpers.json_native?(model)
+
+    defp native_json_object_model?(%LLMDB.Model{provider: :xai} = model),
+      do: ModelHelpers.json_native?(model)
+
+    defp native_json_object_model?(%LLMDB.Model{provider: :google_vertex} = model),
+      do: not vertex_native_json_schema_model?(model)
+
+    defp native_json_object_model?(%LLMDB.Model{provider: :azure} = model),
+      do: azure_json_object_model?(model)
+
+    defp native_json_object_model?(%LLMDB.Model{provider: provider}),
+      do: provider in @native_json_object_providers
+
+    defp native_json_object_model?(_model), do: false
+
+    defp azure_json_object_model?(%LLMDB.Model{} = model) do
+      id = model.provider_model_id || model.id
+      azure_json_object_id?(id) and not azure_claude_family?(vertex_extra_family(model))
+    end
+
+    defp azure_json_object_id?(id) when is_binary(id), do: not String.starts_with?(id, "claude")
+    defp azure_json_object_id?(_id), do: false
+
+    defp azure_claude_family?(family) when is_binary(family),
+      do: String.starts_with?(family, "claude")
+
+    defp azure_claude_family?(_family), do: false
 
     defp vertex_native_json_schema_model?(%LLMDB.Model{} = model) do
       id = model.provider_model_id || model.id

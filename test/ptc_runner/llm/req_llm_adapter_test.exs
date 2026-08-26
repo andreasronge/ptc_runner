@@ -189,6 +189,38 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       end
     end
 
+    test "refuses json_object preparation for providers without a native JSON-object control" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_object)
+
+      for selector <- [
+            "anthropic:claude-sonnet-4-6",
+            "amazon_bedrock:amazon.nova-pro-v1:0",
+            "google:gemini-2.5-flash",
+            "google_vertex:gemini-2.5-flash",
+            "azure:claude-sonnet-4-6"
+          ] do
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+      end
+    end
+
+    test "attests json_object on OpenAI-compatible native JSON-object providers" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_object)
+
+      for selector <- [
+            "openrouter:deepseek/deepseek-v4-flash-0731",
+            "groq:openai/gpt-oss-20b",
+            "azure:gpt-4o",
+            "google_vertex:zai-org/glm-4.7-maas"
+          ] do
+        assert {:ok, target, _status, attestation} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+
+        assert target.structured_output_mode == :json_object
+        assert attestation.structured_output_mode == :json_object
+      end
+    end
+
     test "attests json_schema for Vertex Gemini" do
       requirements = Requirements.interim(%{max_tokens: 64}, :json_schema)
 

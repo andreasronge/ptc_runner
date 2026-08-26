@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMRouter
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.TestHelpers
@@ -288,6 +289,63 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
            } = result
   end
 
+  test "an oversized structured response is output_schema_mismatch" do
+    parent = self()
+    payload = String.duplicate("x", 256)
+
+    {result, state, sink} =
+      dispatch_structured(
+        parent,
+        :json_schema,
+        %{object: %{"ok" => true, "blob" => payload}, tokens: %{}},
+        %{"schema" => @schema},
+        max_response_bytes: 64
+      )
+
+    assert_received {:called, _}
+
+    assert %{
+             status: :error,
+             kind: :invalid_result,
+             reason: :output_schema_mismatch,
+             retryable?: false
+           } = result
+
+    assert RunState.usage(state).capability_calls.workflow["llm-request"] == 1
+
+    assert Enum.any?(EventSink.events(sink), fn event ->
+             event.type == "capability-stopped" and event.data.reason == :output_schema_mismatch
+           end)
+  end
+
+  test "an adapter invalid_result on a schema request is output_schema_mismatch" do
+    parent = self()
+
+    {:ok, capability} =
+      LLMCapability.new(
+        requester: fn request ->
+          send(parent, {:called, request})
+
+          {:error,
+           ProviderError.new(
+             :invalid_result,
+             "LLM provider returned an invalid result"
+           )}
+        end
+      )
+
+    {result, _state, _sink} = dispatch_capability(capability, :json_schema)
+
+    assert_received {:called, _}
+
+    assert %{
+             status: :error,
+             kind: :invalid_result,
+             reason: :output_schema_mismatch,
+             retryable?: false
+           } = result
+  end
+
   test "json_object decode unavailability is distinct from invalid provider JSON" do
     parent = self()
     deadline_ms = System.monotonic_time(:millisecond) + 200
@@ -351,13 +409,16 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
          arguments \\ %{"schema" => @schema},
          opts \\ []
        ) do
-    {:ok, capability} =
-      LLMCapability.new(
+    capability_opts =
+      [
         requester: fn request ->
           send(parent, {:called, request})
           {:ok, response}
         end
-      )
+      ]
+      |> Keyword.merge(Keyword.take(opts, [:max_response_bytes]))
+
+    {:ok, capability} = LLMCapability.new(capability_opts)
 
     route = %{
       alias: "model",
@@ -388,6 +449,38 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
         "llm-request",
         arguments,
         TestHelpers.dispatch_context(state, :workflow, timeout_ms, opts),
+        sink,
+        nil
+      )
+
+    {result, state, sink}
+  end
+
+  defp dispatch_capability(capability, mode) do
+    route = %{
+      alias: "model",
+      source: "llm",
+      installation_revision: "model-v1",
+      default?: true,
+      capability: capability,
+      max_calls: nil,
+      structured_output_mode: mode
+    }
+
+    assert {:ok, router} = LLMRouter.new([route])
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [router])
+    {:ok, limits} = Limits.new()
+    {:ok, state} = RunState.start(limits)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "structured-output")
+
+    result =
+      Dispatcher.dispatch(
+        state,
+        :workflow,
+        environment,
+        "llm-request",
+        %{"schema" => @schema},
+        TestHelpers.dispatch_context(state, :workflow, 1_000),
         sink,
         nil
       )

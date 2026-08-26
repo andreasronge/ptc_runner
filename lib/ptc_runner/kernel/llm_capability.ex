@@ -86,9 +86,17 @@ defmodule PtcRunner.Kernel.LLMCapability do
   end
 
   defp invoke(requester, request, response_limit) do
+    schema_request? = schema_request?(request)
+
     case requester.(request) do
       {:ok, response} ->
-        normalize_response(response, response_limit, schema_request?(request))
+        normalize_response(response, response_limit, schema_request?)
+
+      # Adapter-branch and Kernel-side structured rejections are invalid
+      # results, not provider errors. Admit an empty candidate so Dispatcher
+      # publishes `invalid_result` / `output_schema_mismatch`.
+      {:error, %ProviderError{kind: :invalid_result}} when schema_request? ->
+        {:ok, %{}}
 
       # A requester that already classified its own failure keeps that
       # classification. Relabelling everything `:unavailable` and retryable is
@@ -101,7 +109,11 @@ defmodule PtcRunner.Kernel.LLMCapability do
         {:error, ProviderError.new(:unavailable, "LLM provider unavailable", retryable?: true)}
 
       _other ->
-        {:error, ProviderError.new(:internal, "LLM provider returned an invalid result")}
+        if schema_request? do
+          {:ok, %{}}
+        else
+          {:error, ProviderError.new(:internal, "LLM provider returned an invalid result")}
+        end
     end
   end
 
@@ -118,13 +130,21 @@ defmodule PtcRunner.Kernel.LLMCapability do
         if JSONValue.map?(classified) and is_integer(bytes) and bytes <= limit do
           admit_tokens(classified)
         else
-          {:error, ProviderError.new(:invalid_request, "LLM response exceeded its boundary")}
+          schema_output_mismatch(schema_request?, :invalid_request)
         end
 
       :error ->
-        {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
+        schema_output_mismatch(schema_request?, :invalid_result)
     end
   end
+
+  defp schema_output_mismatch(true, _kind), do: {:ok, %{}}
+
+  defp schema_output_mismatch(false, :invalid_request),
+    do: {:error, ProviderError.new(:invalid_request, "LLM response exceeded its boundary")}
+
+  defp schema_output_mismatch(false, :invalid_result),
+    do: {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
 
   defp classify_success(response, schema_request?)
        when is_map(response) and not is_struct(response) do

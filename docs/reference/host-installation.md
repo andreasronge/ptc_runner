@@ -217,8 +217,13 @@ Every live model installation must declare `structured_output_mode` as
 to enforce the request schema with its native schema mechanism and is refused
 at prepare when the adapter can only fall back to a synthetic tool.
 `json_object` asks the provider only for a JSON object, then the Kernel
-decodes and validates it. `unsupported` refuses a request `schema` before
-dispatch. Changing the mode requires a new `installation_revision`. A schema
+decodes and validates it. It is refused at prepare unless the adapter can send
+that provider's actual JSON-object control: OpenAI-style `response_format`
+`json_object` on OpenRouter, OpenAI, Groq, Fireworks, xAI, Azure OpenAI, and
+Vertex OpenAI-compatible MaaS. Anthropic, Bedrock, Google AI Studio, Vertex
+Claude/Gemini, and Azure Claude have no such control and stay `unsupported` or
+`json_schema`. `unsupported` refuses a request `schema` before dispatch.
+Changing the mode requires a new `installation_revision`. A schema
 together with a non-empty `tools` list is invalid. Success is a
 `structured_output` object; encoded `content` is not duplicated.
 
