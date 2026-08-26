@@ -2,8 +2,10 @@ defmodule PtcRunner.Kernel.LLMCapability do
   @moduledoc """
   Constructs the provider-neutral `llm-request` workflow capability.
 
-  The supplied requester owns transport and credential handling. Requests and
-  normalized JSON-like responses are independently bounded. Requesters may
+  The supplied requester owns transport and credential handling.   Requests and
+  normalized JSON-like responses are independently bounded. A request may
+  include an optional `schema` object; success then returns a closed
+  `structured_output` envelope rather than encoded `content`. Requesters may
   return a classified `PtcRunner.Kernel.ProviderError`; unclassified failures
   become retryable `:unavailable` errors. Invalid or oversized responses do not
   cross back into Lisp.
@@ -55,7 +57,12 @@ defmodule PtcRunner.Kernel.LLMCapability do
                    "type" => "array",
                    "items" => %{"type" => "object", "additionalProperties" => true}
                  },
-                 "cache" => %{"type" => "boolean"}
+                 "cache" => %{"type" => "boolean"},
+                 "schema" => %{
+                   "type" => "object",
+                   "additionalProperties" => true,
+                   "description" => "Request-authored JSON Schema for structured output"
+                 }
                }
              },
              output_schema: %{"type" => "object", "additionalProperties" => true},
@@ -79,9 +86,17 @@ defmodule PtcRunner.Kernel.LLMCapability do
   end
 
   defp invoke(requester, request, response_limit) do
+    schema_request? = schema_request?(request)
+
     case requester.(request) do
       {:ok, response} ->
-        normalize_response(response, response_limit)
+        normalize_response(response, response_limit, schema_request?)
+
+      # Adapter-branch and Kernel-side structured rejections are invalid
+      # results, not provider errors. Admit an empty candidate so Dispatcher
+      # publishes `invalid_result` / `output_schema_mismatch`.
+      {:error, %ProviderError{kind: :invalid_result}} when schema_request? ->
+        {:ok, %{}}
 
       # A requester that already classified its own failure keeps that
       # classification. Relabelling everything `:unavailable` and retryable is
@@ -94,29 +109,159 @@ defmodule PtcRunner.Kernel.LLMCapability do
         {:error, ProviderError.new(:unavailable, "LLM provider unavailable", retryable?: true)}
 
       _other ->
-        {:error, ProviderError.new(:internal, "LLM provider returned an invalid result")}
+        if schema_request? do
+          {:ok, %{}}
+        else
+          {:error, ProviderError.new(:internal, "LLM provider returned an invalid result")}
+        end
     end
   end
 
-  defp normalize_response(response, limit) do
-    response = stringify_json(response)
-    bytes = RetainedSize.bytes_with_cap(response, limit)
+  defp schema_request?(request) when is_map(request) do
+    Map.has_key?(request, "schema") or Map.has_key?(request, :schema)
+  end
 
-    cond do
-      not (JSONValue.map?(response) and is_integer(bytes) and bytes <= limit) ->
-        {:error, ProviderError.new(:invalid_request, "LLM response exceeded its boundary")}
+  defp normalize_response(response, limit, schema_request?) do
+    case classify_success(response, schema_request?) do
+      {:ok, classified} ->
+        classified = stringify_json(classified)
+        bytes = RetainedSize.bytes_with_cap(classified, limit)
 
-      Map.has_key?(response, "tokens") ->
-        case LLMUsage.normalize(response["tokens"]) do
-          {:ok, usage} ->
-            {:ok, response |> Map.put("tokens", usage) |> RetainedSize.detach_binaries()}
-
-          {:error, :invalid_llm_usage} ->
-            invalid_usage()
+        if JSONValue.map?(classified) and is_integer(bytes) and bytes <= limit do
+          admit_tokens(classified, schema_request?)
+        else
+          schema_output_mismatch(schema_request?, :invalid_request)
         end
 
+      :error ->
+        schema_output_mismatch(schema_request?, :invalid_result)
+    end
+  end
+
+  defp schema_output_mismatch(true, _kind), do: {:ok, %{}}
+
+  defp schema_output_mismatch(false, :invalid_request),
+    do: {:error, ProviderError.new(:invalid_request, "LLM response exceeded its boundary")}
+
+  defp schema_output_mismatch(false, :invalid_result),
+    do: {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
+
+  defp classify_success(response, schema_request?)
+       when is_map(response) and not is_struct(response) do
+    cond do
+      schema_candidate?(response) ->
+        close_schema_candidate(response)
+
+      schema_request? ->
+        {:ok, keep_success_keys(response, [:tokens])}
+
+      tool_calls?(response) ->
+        {:ok,
+         keep_success_keys(response, [
+           :content,
+           :tool_calls,
+           :tokens,
+           :finish_reason,
+           :output_limit
+         ])}
+
+      content_response?(response) ->
+        {:ok, keep_success_keys(response, [:content, :tokens, :finish_reason, :output_limit])}
+
       true ->
-        {:ok, RetainedSize.detach_binaries(response)}
+        :error
+    end
+  end
+
+  defp classify_success(_response, _schema_request?), do: :error
+
+  defp schema_candidate?(response) do
+    success_key?(response, :object) or success_key?(response, :json) or
+      success_key?(response, :structured_output)
+  end
+
+  defp close_schema_candidate(response) do
+    cond do
+      success_key?(response, :object) ->
+        closed_structured(:object, fetch_success(response, :object), response)
+
+      success_key?(response, :json) ->
+        closed_structured(:json, fetch_success(response, :json), response)
+
+      true ->
+        closed_public_structured(fetch_success(response, :structured_output), response)
+    end
+  end
+
+  defp success_key?(response, key) when is_atom(key) do
+    Map.has_key?(response, key) or Map.has_key?(response, Atom.to_string(key))
+  end
+
+  defp tool_calls?(response) do
+    calls = Map.get(response, :tool_calls, Map.get(response, "tool_calls"))
+    is_list(calls) and calls != []
+  end
+
+  defp content_response?(response) do
+    Map.has_key?(response, :content) or Map.has_key?(response, "content")
+  end
+
+  defp closed_structured(field, value, response) do
+    {:ok, %{field => value} |> maybe_put_tokens(response)}
+  end
+
+  defp closed_public_structured(object, response) do
+    {:ok, %{"structured_output" => object} |> maybe_put_tokens(response)}
+  end
+
+  defp maybe_put_tokens(envelope, response) do
+    case fetch_success(response, :tokens) do
+      :missing -> envelope
+      tokens -> Map.put(envelope, :tokens, tokens)
+    end
+  end
+
+  defp keep_success_keys(response, keys) do
+    Enum.reduce(keys, %{}, fn key, acc ->
+      case fetch_success(response, key) do
+        :missing -> acc
+        value -> Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp fetch_success(response, key) when is_atom(key) do
+    cond do
+      Map.has_key?(response, key) -> Map.fetch!(response, key)
+      Map.has_key?(response, Atom.to_string(key)) -> Map.fetch!(response, Atom.to_string(key))
+      true -> :missing
+    end
+  end
+
+  defp fetch_success(response, key) when is_binary(key) do
+    if Map.has_key?(response, key), do: Map.fetch!(response, key), else: :missing
+  end
+
+  defp admit_tokens(response, schema_request?) do
+    if Map.has_key?(response, "tokens") do
+      case LLMUsage.normalize(response["tokens"]) do
+        {:ok, usage} ->
+          {:ok, response |> Map.put("tokens", usage) |> RetainedSize.detach_binaries()}
+
+        {:error, :invalid_llm_usage} ->
+          if schema_request? do
+            # Slice 3 chooses this taxonomy deliberately: usage guarantees are
+            # interim-disabled, so malformed tokens on a schema response are
+            # provider output that failed the closed structured envelope
+            # (`output_schema_mismatch`), not promised-usage settlement
+            # (`promised_usage_missing`).
+            schema_output_mismatch(true, :invalid_result)
+          else
+            invalid_usage()
+          end
+      end
+    else
+      {:ok, RetainedSize.detach_binaries(response)}
     end
   end
 

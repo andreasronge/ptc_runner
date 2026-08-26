@@ -44,6 +44,12 @@ defmodule PtcRunner.Kernel.TypedCanonicalJSONTest do
     end
   end
 
+  test "classified decode separates invalid JSON from worker unavailability" do
+    assert {:ok, %{"ok" => true}} = StrictJSON.decode_classified(~s({"ok":true}))
+    assert {:invalid, :invalid_json} = StrictJSON.decode_classified("not-json")
+    assert {:invalid, :duplicate_json_key} = StrictJSON.decode_classified(~S({"a":1,"a":2}))
+  end
+
   test "shared structural admission rejects duplicates, depth excess, and node excess" do
     assert {:error, :duplicate_json_key} = StrictJSON.decode(~S({"a":1,"a":2}))
 

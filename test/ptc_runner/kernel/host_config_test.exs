@@ -72,6 +72,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "cache" => false,
@@ -94,6 +95,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              credential: "openrouter_key",
              cache: false,
              params: %{temperature: 0.2, seed: 42, max_tokens: 4_096},
+             structured_output_mode: :unsupported,
              installation_revision: "model-policy-v2",
              ceilings: %{
                max_request_bytes: 200_000,
@@ -116,6 +118,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "installation_revision" => "model-policy-v2",
@@ -135,6 +138,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "installation_revision" => "model-policy-v2",
@@ -572,6 +576,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
           "installation_revision" => "deepseek-v1",
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "key"
@@ -583,6 +588,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert {:ok, host} = HostConfig.decode(llm, "/tmp")
     assert host.install["deepseek"].source == :llm
     assert host.install["deepseek"].params == %{}
+    assert host.install["deepseek"].structured_output_mode == :unsupported
 
     for invalid_params <- [
           %{"temperature" => 2.1},
@@ -594,6 +600,22 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       assert {:error, :invalid_host_config} = HostConfig.decode(invalid, "/tmp")
       assert {:error, _details} = JSV.validate(invalid, root, cast: false)
     end
+
+    missing_mode =
+      update_in(llm, ["install", "deepseek"], &Map.delete(&1, "structured_output_mode"))
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(missing_mode, "/tmp")
+    assert {:error, _details} = JSV.validate(missing_mode, root, cast: false)
+
+    for invalid_mode <- ["prompt_and_parse", "json", nil, true] do
+      invalid = put_in(llm, ["install", "deepseek", "structured_output_mode"], invalid_mode)
+      assert {:error, :invalid_host_config} = HostConfig.decode(invalid, "/tmp")
+      assert {:error, _details} = JSV.validate(invalid, root, cast: false)
+    end
+
+    json_schema = put_in(llm, ["install", "deepseek", "structured_output_mode"], "json_schema")
+    assert {:ok, schema_host} = HostConfig.decode(json_schema, "/tmp")
+    assert schema_host.install["deepseek"].structured_output_mode == :json_schema
 
     trace = %{
       "install" => %{

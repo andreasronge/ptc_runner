@@ -19,10 +19,10 @@ Install one model alias with a credential read from the process environment:
   "install": {
     "model": {
       "source": "llm",
+      "structured_output_mode": "unsupported",
       "installation_revision": "model-v1",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "model_key",
-      "cache": false,
       "params": {"max_tokens": 4096}
     }
   }
@@ -38,8 +38,7 @@ ptc models ptc-project.json
 ```
 
 Plain `doctor` validates configuration without loading credentials or dialing
-providers. `--connect` is an explicit connectivity probe and may consume remote
-resources.
+providers. `--connect` is a connectivity probe and may consume resources.
 
 ## How do I install an MCP server?
 

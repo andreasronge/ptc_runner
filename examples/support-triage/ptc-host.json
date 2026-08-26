@@ -5,6 +5,7 @@
   "install": {
     "deepseek": {
       "source": "llm",
+      "structured_output_mode": "unsupported",
       "installation_revision": "support-triage-llm-v1",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",

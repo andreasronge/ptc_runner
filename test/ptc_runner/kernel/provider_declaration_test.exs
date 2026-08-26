@@ -163,6 +163,15 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
 
     assert {:ok, shipped} = ProviderDescriptor.new(Keyword.put(base, :source, :llm))
     assert shipped.local_preflight == :audited_local
+    assert shipped.structured_output_mode == :unsupported
+
+    assert {:error, :invalid_provider_descriptor} =
+             ProviderDescriptor.new(
+               Keyword.merge(base,
+                 local_preflight: :unverified,
+                 structured_output_mode: :json_schema
+               )
+             )
 
     builder = fn _selection, _context -> {:error, :inactive_provider} end
     probe = fn _selection, _context, _services -> :ok end
@@ -1010,6 +1019,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
         },
         "live" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
           "installation_revision" => "live-v1",
           "model" => "provider:private-selector",
           "credential" => "llm-key"

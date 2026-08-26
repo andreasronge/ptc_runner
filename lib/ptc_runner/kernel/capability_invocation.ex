@@ -13,7 +13,13 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
     :result_attributes,
     :usage_projection
   ]
-  defstruct @enforce_keys ++ [max_calls: nil, request_schema: nil, request_validator: nil]
+  defstruct @enforce_keys ++
+              [
+                max_calls: nil,
+                request_schema: nil,
+                request_validator: nil,
+                structured_output_mode: nil
+              ]
 
   @type t :: %__MODULE__{
           capability: Capability.t(),
@@ -25,7 +31,8 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
           result_attributes: map(),
           usage_projection: nil | :llm_tokens,
           request_schema: map() | nil,
-          request_validator: JSONSchema.compiled() | nil
+          request_validator: JSONSchema.compiled() | nil,
+          structured_output_mode: :json_schema | :json_object | :unsupported | nil
         }
 
   @doc false

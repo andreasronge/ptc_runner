@@ -49,6 +49,46 @@ defmodule PtcRunner.Kernel.StrictJSON do
   def decode(_source, _opts), do: {:error, :invalid_json}
 
   @doc """
+  Decodes one JSON value and distinguishes proven invalid input from worker
+  unavailability.
+
+  Ordinary JSON, duplicate-key, depth, and node faults are `{:invalid, reason}`.
+  Timeout, heap exhaustion, cancellation, and worker failure are
+  `{:unavailable, cause}`. Dispatcher uses this split for `json_object`
+  structured output so a malformed provider payload is not a host-validator
+  outage.
+  """
+  @spec decode_classified(binary(), keyword()) ::
+          {:ok, term()} | {:invalid, error()} | {:unavailable, atom()}
+  def decode_classified(source, opts \\ [])
+
+  def decode_classified(source, opts) when is_binary(source) and is_list(opts) do
+    timeout_ms = Keyword.get(opts, :timeout_ms, @timeout_ms)
+    max_heap_words = Keyword.get(opts, :max_heap_words, @max_heap_words)
+    decode_opts = Keyword.take(opts, [:max_depth, :max_nodes])
+
+    with true <- is_integer(timeout_ms) and timeout_ms > 0,
+         true <- is_integer(max_heap_words) and max_heap_words > 0,
+         {:ok, limits} <- limits(decode_opts) do
+      case BoundedWorker.run(
+             fn -> decode_document(source, Map.put(limits, :duplicate_locations?, false)) end,
+             timeout_ms: timeout_ms,
+             max_heap_words: max_heap_words,
+             cancel_with_caller: true
+           ) do
+        {:ok, {:ok, value}} -> {:ok, value}
+        {:ok, {:error, reason}} -> {:invalid, reason}
+        {:ok, _unexpected} -> {:unavailable, :malformed_worker_result}
+        {:error, cause} -> {:unavailable, cause}
+      end
+    else
+      _invalid -> {:invalid, :invalid_json}
+    end
+  end
+
+  def decode_classified(_source, _opts), do: {:invalid, :invalid_json}
+
+  @doc """
   Decodes one JSON value and retains the bounded parent location of a duplicate.
 
   Location segments are internal evidence. Callers must authorize them against
@@ -141,15 +181,17 @@ defmodule PtcRunner.Kernel.StrictJSON do
   def admit_with_locations(_value, _opts), do: {:error, :invalid_json}
 
   defp decode_bounded(source, limits) do
-    bounded(fn ->
-      case Jason.decode(source, objects: :ordered_objects) do
-        {:ok, decoded} ->
-          admit_value(decoded, Map.put(limits, :ordered_objects?, true))
+    bounded(fn -> decode_document(source, limits) end)
+  end
 
-        {:error, _reason} ->
-          {:error, :invalid_json}
-      end
-    end)
+  defp decode_document(source, limits) do
+    case Jason.decode(source, objects: :ordered_objects) do
+      {:ok, decoded} ->
+        admit_value(decoded, Map.put(limits, :ordered_objects?, true))
+
+      {:error, _reason} ->
+        {:error, :invalid_json}
+    end
   end
 
   defp unique_string_value(pairs, key) do

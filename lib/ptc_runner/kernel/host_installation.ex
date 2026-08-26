@@ -359,7 +359,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
       selection_validation: :declarative,
       selection_rules: rules,
       authority_fingerprint: if(authority, do: authority.fingerprint, else: nil),
-      local_preflight: local_preflight_mode(installation)
+      local_preflight: local_preflight_mode(installation),
+      structured_output_mode: descriptor_structured_output_mode(installation)
     )
   end
 
@@ -381,6 +382,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   def installation_credential_names(%{source: :llm, credential: credential}), do: [credential]
   def installation_credential_names(_installation), do: []
+
+  defp descriptor_structured_output_mode(%{source: :llm, structured_output_mode: mode})
+       when mode in [:json_schema, :json_object, :unsupported],
+       do: mode
+
+  defp descriptor_structured_output_mode(_installation), do: nil
 
   defp descriptor_data_class(%{source: source})
        when source in [:ptc_private_trace_snapshot, :ptc_inspection_snapshot],
@@ -706,6 +713,16 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  defp workflow_llm_route(%{source: :llm} = installation, selected) do
+    %{
+      source: "llm",
+      installation_revision: installation.installation_revision,
+      default: selected.default,
+      max_calls: selected.max_calls,
+      structured_output_mode: installation.structured_output_mode
+    }
+  end
+
   defp workflow_llm_route(installation, selected) do
     %{
       source: Atom.to_string(installation.source),
@@ -902,7 +919,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp live_llm_requirements(installation, %{limits: limits}) do
-    case Requirements.live(installation.params, limits.llm_request_output_tokens) do
+    case Requirements.live(
+           installation.params,
+           limits.llm_request_output_tokens,
+           installation.structured_output_mode
+         ) do
       {:ok, requirements} -> {:ok, requirements}
       :error -> {:error, :invalid_llm_model}
     end

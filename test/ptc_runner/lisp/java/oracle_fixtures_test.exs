@@ -232,26 +232,32 @@ defmodule PtcRunner.Lisp.Java.OracleFixturesTest do
   end
 
   test "dispatch attestation ignores unrelated Java references" do
-    handler_id = make_ref()
-    state = {self(), handler_id, :boolean_parse_boolean}
+    table = :ets.new(:ptc_java_dispatch_attestation_test, [:set, :public])
+    state = {table, :boolean_parse_boolean}
 
-    Runner.handle_dispatch_attestation(
-      [:ptc_runner, :lisp, :java, :dispatch],
-      %{},
-      %{reference_id: :double_parse_double, overload_id: :double_parse_double_string},
-      state
-    )
+    try do
+      Runner.handle_dispatch_attestation(
+        [:ptc_runner, :lisp, :java, :dispatch],
+        %{},
+        %{reference_id: :double_parse_double, overload_id: :double_parse_double_string},
+        state
+      )
 
-    refute_receive {:java_dispatch_attestation, ^handler_id, _overload_id}
+      assert :ets.lookup(table, :overload_id) == []
 
-    Runner.handle_dispatch_attestation(
-      [:ptc_runner, :lisp, :java, :dispatch],
-      %{},
-      %{reference_id: :boolean_parse_boolean, overload_id: :boolean_parse_boolean_string},
-      state
-    )
+      Runner.handle_dispatch_attestation(
+        [:ptc_runner, :lisp, :java, :dispatch],
+        %{},
+        %{reference_id: :boolean_parse_boolean, overload_id: :boolean_parse_boolean_string},
+        state
+      )
 
-    assert_receive {:java_dispatch_attestation, ^handler_id, :boolean_parse_boolean_string}
+      assert :ets.lookup(table, :overload_id) == [
+               {:overload_id, :boolean_parse_boolean_string}
+             ]
+    after
+      :ets.delete(table)
+    end
   end
 
   @tag :clojure

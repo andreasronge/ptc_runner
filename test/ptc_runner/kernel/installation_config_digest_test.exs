@@ -130,6 +130,11 @@ defmodule PtcRunner.Kernel.InstallationConfigDigestTest do
     llm = llm_host("openrouter:deepseek/deepseek-v4-flash-0731")
     with_zero = put_in(llm, ["install", "deepseek", "params"], %{"temperature" => 0.0})
     refute digest(llm, "deepseek") == digest(with_zero, "deepseek")
+
+    json_schema =
+      put_in(llm, ["install", "deepseek", "structured_output_mode"], "json_schema")
+
+    refute digest(llm, "deepseek") == digest(json_schema, "deepseek")
   end
 
   test "credential values are excluded while binding names and env keys remain" do
@@ -398,6 +403,7 @@ defmodule PtcRunner.Kernel.InstallationConfigDigestTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
           "installation_revision" => "model-policy-v2",
           "model" => model,
           "credential" => "openrouter_key"

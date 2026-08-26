@@ -39,17 +39,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     end)
 
     host_path =
-      write_host_config(directory, "billing-failure", %{
-        "credentials" => %{"key" => %{"literal" => "test-key"}},
-        "install" => %{
-          "model" => %{
-            "source" => "llm",
-            "installation_revision" => "model-v1",
-            "model" => "openrouter:test/model",
-            "credential" => "key"
-          }
-        }
-      })
+      write_host_config(directory, "billing-failure", literal_credential_host("test-key"))
 
     manifest =
       valid_manifest(%{
@@ -179,6 +169,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
         "install" => %{
           "model" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "model-v1",
             "model" => "openrouter:test/model",
             "credential" => "key"
@@ -688,17 +679,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     end)
 
     host_path =
-      write_host_config(directory, "timeout-inflight", %{
-        "credentials" => %{"key" => %{"literal" => "test-key"}},
-        "install" => %{
-          "model" => %{
-            "source" => "llm",
-            "installation_revision" => "model-v1",
-            "model" => "openrouter:test/model",
-            "credential" => "key"
-          }
-        }
-      })
+      write_host_config(directory, "timeout-inflight", literal_credential_host("test-key"))
 
     manifest =
       valid_manifest(%{

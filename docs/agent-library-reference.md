@@ -479,12 +479,16 @@ becomes a `non-retryable-evaluation` subject failure.
 | `system` | optional string |
 | `messages` | role/content message array |
 | `tools` | optional provider-neutral tool definitions |
+| `schema` | optional JSON Schema object for structured output |
 | `cache` | optional boolean preference; host-fixed policy wins |
 | `model` | optional manifest installation alias |
 
-Successful responses contain `content` and may contain `tool_calls`, `tokens`,
+A request may include `schema` or a non-empty `tools` list, not both. Successful
+text responses contain `content` and may contain `tool_calls`, `tokens`,
 `finish_reason`, `output_limit`, and the router-authenticated `model` alias.
-Normalized tool calls use `id`, `name`, and `args`. Invalid provider
+A schema request succeeds only as `structured_output` plus optional `tokens`
+and `model`; there is no encoded `content` duplicate. Normalized tool calls
+use `id`, `name`, and `args`. Invalid provider
 arguments may include a bounded `args_error` classification. Token usage may
 include `input`, `output`, `cache_creation`, `cache_read`, and `total_cost`.
 When provider pricing is unavailable, `total_cost` is absent; a present zero is

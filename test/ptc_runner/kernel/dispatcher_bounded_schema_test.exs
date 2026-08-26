@@ -25,11 +25,11 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
         %{"schema" => @request_schema},
         fn arguments ->
           send(parent, {:called, arguments})
-          {:ok, %{"ok" => true}}
+          {:ok, %{"structured_output" => %{"ok" => true}}}
         end
       )
 
-    assert %{status: :ok, value: %{"ok" => true}} = result
+    assert %{status: :ok, value: %{"structured_output" => %{"ok" => true}}} = result
     assert_received {:called, %{"schema" => normalized}}
     assert normalized["additionalProperties"] == false
     assert normalized["properties"]["ok"]["additionalProperties"] == nil
@@ -79,7 +79,7 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
         %{"schema" => %{"type" => "object", "$ref" => "#/$defs/value"}},
         fn arguments ->
           send(parent, {:unexpected_callback, arguments})
-          {:ok, %{"ok" => true}}
+          {:ok, %{"structured_output" => %{"ok" => true}}}
         end
       )
 
@@ -107,7 +107,7 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
         %{"schema" => @request_schema},
         fn _arguments ->
           send(parent, :called)
-          {:ok, %{"ok" => "not-boolean"}}
+          {:ok, %{"structured_output" => %{"ok" => "not-boolean"}}}
         end
       )
 
@@ -151,7 +151,7 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
           send(parent, {:in_callback, self()})
 
           receive do
-            :continue -> {:ok, %{"ok" => true}}
+            :continue -> {:ok, %{"structured_output" => %{"ok" => true}}}
           end
         end
       )

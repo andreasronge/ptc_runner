@@ -10,6 +10,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.LLM.Requirements
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
@@ -167,7 +168,86 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
               }} = classified_http(@openrouter_model, request(plug))
     end
 
-    test "routes schema mode to generate_object for ollama" do
+    test "refuses both structured modes on the direct ollama HTTP route" do
+      for mode <- [:json_schema, :json_object] do
+        requirements = Requirements.interim(%{max_tokens: 64}, mode)
+
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model("ollama:test", requirements)
+      end
+    end
+
+    test "refuses json_schema preparation for tool-fallback providers" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_schema)
+
+      for selector <- [
+            "groq:openai/gpt-oss-20b",
+            "amazon_bedrock:amazon.nova-pro-v1:0",
+            "google_vertex:zai-org/glm-4.7-maas",
+            "azure:gpt-4o"
+          ] do
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+      end
+    end
+
+    test "refuses json_object preparation for providers without a native JSON-object control" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_object)
+
+      for selector <- [
+            "anthropic:claude-sonnet-4-6",
+            "amazon_bedrock:amazon.nova-pro-v1:0",
+            "google:gemini-2.5-flash",
+            "google_vertex:gemini-2.5-flash",
+            "azure:claude-sonnet-4-6"
+          ] do
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+      end
+    end
+
+    test "attests json_object on OpenAI-compatible native JSON-object providers" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_object)
+
+      for selector <- [
+            "openrouter:deepseek/deepseek-v4-flash-0731",
+            "groq:openai/gpt-oss-20b",
+            "azure:gpt-4o",
+            "google_vertex:zai-org/glm-4.7-maas"
+          ] do
+        assert {:ok, target, _status, attestation} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+
+        assert target.structured_output_mode == :json_object
+        assert attestation.structured_output_mode == :json_object
+      end
+    end
+
+    test "attests json_schema for Vertex Gemini" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_schema)
+
+      assert {:ok, target, _status, attestation} =
+               ReqLLMAdapter.prepare_model("google_vertex:gemini-2.5-flash", requirements)
+
+      assert target.structured_output_mode == :json_schema
+      assert attestation.structured_output_mode == :json_schema
+    end
+
+    test "attests json_schema and json_object on a cataloged ReqLLM selector" do
+      selector = "openrouter:deepseek/deepseek-v4-flash-0731"
+
+      for mode <- [:json_schema, :json_object] do
+        requirements = Requirements.interim(%{max_tokens: 64}, mode)
+
+        assert {:ok, target, _status, attestation} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+
+        assert target.structured_output_mode == mode
+        assert attestation.structured_output_mode == mode
+      end
+    end
+
+    test "does not prompt-and-parse a schema request under unsupported mode" do
       req = %{
         system: "You are helpful",
         messages: [%{role: :user, content: "test"}],
@@ -176,8 +256,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
 
       assert {:error,
               %ProviderError{
-                kind: :invalid_request,
-                details: "LLM provider does not support structured output",
+                kind: :invalid_result,
                 retryable?: false
               }} = adapter_call("ollama:test", req)
     end

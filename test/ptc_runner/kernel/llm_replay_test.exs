@@ -60,6 +60,44 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       assert {:error, %ProviderError{kind: :not_found}} = requester.(@request)
     end
 
+    test "a request schema is part of the fixture hash" do
+      {:ok, without_schema} = LLMReplay.request_hash(@request)
+
+      {:ok, with_schema} =
+        LLMReplay.request_hash(
+          Map.put(@request, "schema", %{
+            "type" => "object",
+            "properties" => %{"ok" => %{"type" => "boolean"}}
+          })
+        )
+
+      refute without_schema == with_schema
+    end
+
+    @tag :tmp_dir
+    test "serves a structured_output fixture for a schema-bearing request", %{tmp_dir: dir} do
+      request =
+        Map.put(@request, "schema", %{
+          "type" => "object",
+          "properties" => %{"ok" => %{"type" => "boolean"}},
+          "required" => ["ok"]
+        })
+
+      {:ok, key} = LLMReplay.request_hash(request)
+
+      write(dir, [
+        %{
+          "request_hash" => key,
+          "response" => %{"structured_output" => %{"ok" => true}}
+        }
+      ])
+
+      {:ok, replay} = start(dir)
+
+      assert {:ok, %{"structured_output" => %{"ok" => true}}} =
+               LLMReplay.requester(replay).(request)
+    end
+
     @tag :tmp_dir
     test "an ordered sequence is consumed once per call and then closes", %{tmp_dir: dir} do
       {:ok, key} = LLMReplay.request_hash(@request)
@@ -1299,6 +1337,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
           "replay-llm" => replay,
           "live-llm" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "live-v1",
             "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
             "credential" => "key"

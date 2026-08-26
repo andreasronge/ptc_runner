@@ -3,14 +3,160 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
   import ExUnit.CaptureIO
 
+  alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.LLM.ReqLLMPreparedModel
+  alias PtcRunner.LLM.Requirements
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.MCPHTTPFixture
 
   setup do
     LLMSupport.admit_provider_application!()
     :ok
+  end
+
+  test "json_schema generate_object uses provider-native response_format", %{test: test} do
+    schema = %{
+      "type" => "object",
+      "properties" => %{"ok" => %{"type" => "boolean"}},
+      "required" => ["ok"]
+    }
+
+    expect_object_request(test, "deepseek/deepseek-v4-flash-0731", ~s({"ok":true}))
+
+    assert {:ok, %{object: %{"ok" => true}, tokens: tokens}} =
+             ReqLLMAdapter.generate_object(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               [%{role: :user, content: "hi"}],
+               schema,
+               api_key: "test",
+               req_http_options: [plug: {Req.Test, test}]
+             )
+
+    assert is_map(tokens)
+    assert_receive {:request_body, body}
+
+    assert get_in(body, ["response_format", "type"]) == "json_schema"
+    assert get_in(body, ["response_format", "json_schema", "schema", "type"]) == "object"
+    refute Map.has_key?(body, "tools")
+    refute Map.has_key?(body, "tool_choice")
+  end
+
+  test "json_schema generate_object does not dispatch a tool-fallback Vertex model" do
+    plug = fn _conn ->
+      flunk("json_schema must not dispatch a tool-fallback Vertex request")
+    end
+
+    assert {:error, :unsupported_model_option} =
+             ReqLLMAdapter.generate_object(
+               "google_vertex:zai-org/glm-4.7-maas",
+               [%{role: :user, content: "hi"}],
+               %{
+                 "type" => "object",
+                 "properties" => %{"ok" => %{"type" => "boolean"}},
+                 "required" => ["ok"]
+               },
+               api_key: "test",
+               req_http_options: [plug: plug, retry: false]
+             )
+  end
+
+  test "json_schema generate_object does not dispatch Azure through a synthetic tool" do
+    plug = fn _conn ->
+      flunk("json_schema must not dispatch an Azure tool-fallback request")
+    end
+
+    assert {:error, :unsupported_model_option} =
+             ReqLLMAdapter.generate_object(
+               "azure:gpt-4o",
+               [%{role: :user, content: "hi"}],
+               %{
+                 "type" => "object",
+                 "properties" => %{"ok" => %{"type" => "boolean"}},
+                 "required" => ["ok"]
+               },
+               api_key: "test",
+               req_http_options: [plug: plug, retry: false]
+             )
+  end
+
+  test "json_object uses provider-native response_format and does not inject tools", %{
+    test: test
+  } do
+    schema = %{
+      "type" => "object",
+      "properties" => %{"ok" => %{"type" => "boolean"}},
+      "required" => ["ok"]
+    }
+
+    expect_request(test, "deepseek/deepseek-v4-flash-0731", content: ~s({"ok":true}))
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               Requirements.interim(%{max_tokens: 64}, :json_object)
+             )
+
+    {:ok, invocation} =
+      Invocation.new(
+        %{messages: [%{role: :user, content: "hi"}], schema: schema},
+        false,
+        "test",
+        nil
+      )
+
+    assert {:ok, %{json: ~s({"ok":true}), tokens: tokens}} =
+             ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
+
+    assert is_map(tokens)
+    assert_receive {:request_body, body}
+    assert get_in(body, ["response_format", "type"]) == "json_object"
+    refute Map.has_key?(body, "tools")
+    refute Map.has_key?(body, "tool_choice")
+  end
+
+  test "json_object does not dispatch Anthropic or Bedrock through OpenAI response_format" do
+    plug = fn _conn ->
+      flunk("json_object must not dispatch a provider that cannot honor JSON-object output")
+    end
+
+    schema = %{
+      "type" => "object",
+      "properties" => %{"ok" => %{"type" => "boolean"}},
+      "required" => ["ok"]
+    }
+
+    for selector <- [
+          "anthropic:claude-sonnet-4-6",
+          "amazon_bedrock:amazon.nova-pro-v1:0"
+        ] do
+      assert {:error, :unsupported_model_option} =
+               ReqLLMAdapter.prepare_model(
+                 selector,
+                 Requirements.interim(%{max_tokens: 64}, :json_object)
+               )
+
+      assert {:ok, target, _status, _attestation} =
+               ReqLLMAdapter.prepare_model(
+                 selector,
+                 Requirements.interim(%{max_tokens: 64}, :unsupported)
+               )
+
+      {:ok, invocation} =
+        Invocation.new(
+          %{messages: [%{role: :user, content: "hi"}], schema: schema},
+          false,
+          "test",
+          nil
+        )
+
+      forced = %{
+        put_test_http_options(target, plug)
+        | structured_output_mode: :json_object
+      }
+
+      assert {:error, _reason} = ReqLLMAdapter.call(forced, invocation)
+    end
   end
 
   test "bounds an omitted output budget below a model's full context window", %{test: test} do
@@ -367,6 +513,20 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
   defp expect_request(test, response_model, opts \\ []) do
     Req.Test.expect(test, request_handler(self(), response_model, opts))
+  end
+
+  defp expect_object_request(test, response_model, content) do
+    Req.Test.expect(test, request_handler(self(), response_model, content: content))
+  end
+
+  defp put_test_http_options(%ReqLLMPreparedModel{} = target, plug_or_test) do
+    http_options =
+      case plug_or_test do
+        test when is_atom(test) -> [plug: {Req.Test, test}, retry: false]
+        plug when is_function(plug, 1) -> [plug: plug, retry: false]
+      end
+
+    %{target | exact_options: Map.put(target.exact_options, :req_http_options, http_options)}
   end
 
   defp prepare_model(selector) do

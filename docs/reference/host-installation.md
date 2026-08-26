@@ -44,6 +44,7 @@ diagnostic. For example, an excessive installation timeout is located at
   "install": {
     "deepseek": {
       "source": "llm",
+      "structured_output_mode": "unsupported",
       "installation_revision": "deepseek-policy-v1",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",
@@ -187,6 +188,7 @@ clamped. When that selected cap is at or above the run's per-name
 ```json
 "deepseek": {
   "source": "llm",
+  "structured_output_mode": "unsupported",
   "installation_revision": "deepseek-policy-v1",
   "model": "openrouter:deepseek/deepseek-v4-flash",
   "credential": "openrouter_key",
@@ -209,6 +211,22 @@ ReqLLM supports its provider, but PtcRunner emits one `model_uncataloged`
 warning for that requester. Catalog metadata such as pricing, limits, token
 estimation, and capability detection may then be incomplete; the warning does
 not mean the provider request itself is known to fail.
+
+Every live model installation must declare `structured_output_mode` as
+`json_schema`, `json_object`, or `unsupported`. `json_schema` asks the provider
+to enforce the request schema with its native schema mechanism and is refused
+at prepare when the adapter can only fall back to a synthetic tool.
+`json_object` asks the provider only for a JSON object, then the Kernel
+decodes and validates it. It is refused at prepare unless the adapter can send
+that provider's actual JSON-object control: OpenAI-style `response_format`
+`json_object` on OpenRouter, OpenAI, Groq, Fireworks, xAI, Azure OpenAI, and
+Vertex OpenAI-compatible MaaS. Anthropic, Bedrock, Google AI Studio, Vertex
+Claude/Gemini, and Azure Claude have no such control and stay `unsupported` or
+`json_schema`. Direct `ollama:` and `openai-compat:` selectors are refused for
+both structured modes. `unsupported` refuses a request `schema` before dispatch.
+Changing the mode requires a new `installation_revision`. A schema
+together with a non-empty `tools` list is invalid. Success is a
+`structured_output` object; encoded `content` is not duplicated.
 
 Model selectors are provider-qualified strings. These are the provider paths
 PtcRunner configures and exercises directly:
@@ -245,9 +263,10 @@ Use `source: "llm_replay"` when responses must be deterministic. The
 [replay evaluation guide](../guides/evaluating-with-replay.md) owns fixture authoring, the
 network-free example, candidate materialization, and component overrides.
 
-Fixture matching is exact: changed messages, tools, or provider-neutral
+Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another `request_hash` rather than silently consuming
-unrelated evidence. A miss is a provider error — `kind` `provider_error`,
+unrelated evidence. A structured-output fixture uses the public
+`structured_output` object rather than encoded `content`. A miss is a provider error — `kind` `provider_error`,
 `reason` `not_found` — and `llm/request` returns that envelope as a value with
 `:status :error` rather than failing the evaluation, so a workflow that wants a
 miss to be fatal calls `cap/unwrap!` on the raw `tool/llm-request` envelope. The

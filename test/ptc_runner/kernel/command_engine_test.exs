@@ -1690,19 +1690,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "frontend environment setup fails before the execution owner and activity marker", %{
     tmp_dir: directory
   } do
-    host = %{
-      "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
-      "install" => %{
-        "model" => %{
-          "source" => "llm",
-          "installation_revision" => "model-v1",
-          "model" => "openrouter:test/model",
-          "credential" => "key"
-        }
-      }
-    }
-
-    host_path = write_host_config(directory, "environment-setup", host)
+    host_path = write_host_config(directory, "environment-setup", env_credential_host())
     trace_directory = Path.join(directory, "traces")
     File.mkdir!(trace_directory)
 
@@ -2024,12 +2012,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "install" => %{
           "cataloged" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "cataloged-v1",
             "model" => "openrouter:test/model",
             "credential" => "key"
           },
           "endpoint" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "endpoint-v1",
             "model" => "openai-compat:https://private.example/v1|deployment",
             "credential" => "key"
@@ -2076,12 +2066,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "install" => %{
           "cataloged" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "cataloged-v1",
             "model" => "openrouter:test/model",
             "credential" => "key"
           },
           "endpoint" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "endpoint-v1",
             "model" => "openai-compat:https://private.example/v1|deployment",
             "credential" => "key"
@@ -2474,17 +2466,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     tmp_dir: directory
   } do
     host_path =
-      write_host_config(directory, "doctor-local-fail", %{
-        "credentials" => %{"key" => %{"literal" => "not-read"}},
-        "install" => %{
-          "model" => %{
-            "source" => "llm",
-            "installation_revision" => "model-v1",
-            "model" => "definitely-not-a-model",
-            "credential" => "key"
-          }
-        }
-      })
+      write_host_config(
+        directory,
+        "doctor-local-fail",
+        literal_credential_host("not-read", "definitely-not-a-model")
+      )
 
     application = doctor_application(directory, "selects-model", workflow: ["model"])
 
@@ -3039,17 +3025,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     # retains the diagnostic as the error authority while projecting its
     # attributable local check as a finding.
     host_path =
-      write_host_config(directory, "connect-local-fail", %{
-        "credentials" => %{"key" => %{"literal" => "not-read"}},
-        "install" => %{
-          "model" => %{
-            "source" => "llm",
-            "installation_revision" => "model-v1",
-            "model" => "definitely-not-a-model",
-            "credential" => "key"
-          }
-        }
-      })
+      write_host_config(
+        directory,
+        "connect-local-fail",
+        literal_credential_host("not-read", "definitely-not-a-model")
+      )
 
     application = doctor_application(directory, "connect-selects-model", workflow: ["model"])
 
@@ -3782,6 +3762,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "install" => %{
         "model" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
           "model" => "provider:model",
           "credential" => "key",
           "installation_revision" => host_revision
@@ -5587,6 +5568,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "install" => %{
           "model" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "model-v1",
             "model" => "provider:model",
             "credential" => "missing"

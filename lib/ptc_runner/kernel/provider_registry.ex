@@ -144,15 +144,12 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           workflow_llm_route:
             nil
             | %{
-                source: binary(),
-                installation_revision: binary(),
-                default: boolean()
-              }
-            | %{
-                source: binary(),
-                installation_revision: binary(),
-                default: boolean(),
-                max_calls: pos_integer() | nil
+                required(:source) => binary(),
+                required(:installation_revision) => binary(),
+                required(:default) => boolean(),
+                optional(:max_calls) => pos_integer() | nil,
+                optional(:structured_output_mode) =>
+                  :json_schema | :json_object | :unsupported | nil
               },
           preflight: (-> {:ok, acquire()}
                          | {:ok, acquire(), (-> :ok | {:error, term()})}
@@ -517,16 +514,30 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp valid_workflow_llm_route?(true, route)
        when is_map(route) and not is_struct(route) do
-    keys = Enum.sort(Map.keys(route))
+    extra =
+      Map.keys(route) --
+        [:default, :installation_revision, :max_calls, :source, :structured_output_mode]
 
-    (keys == [:default, :installation_revision, :source] or
-       keys == [:default, :installation_revision, :max_calls, :source]) and
+    extra == [] and
+      Map.has_key?(route, :source) and
+      Map.has_key?(route, :installation_revision) and
+      Map.has_key?(route, :default) and
       route.source in ["llm", "llm_replay", "custom"] and
       is_binary(route.installation_revision) and valid_name?(route.installation_revision) and
-      is_boolean(route.default) and valid_optional_max_calls?(Map.get(route, :max_calls))
+      is_boolean(route.default) and valid_optional_max_calls?(Map.get(route, :max_calls)) and
+      valid_structured_output_mode?(Map.get(route, :structured_output_mode), route.source)
   end
 
   defp valid_workflow_llm_route?(_workflow_llm?, _route), do: false
+
+  defp valid_structured_output_mode?(nil, source) when source in ["llm_replay", "custom"],
+    do: true
+
+  defp valid_structured_output_mode?(mode, "llm")
+       when mode in [:json_schema, :json_object, :unsupported],
+       do: true
+
+  defp valid_structured_output_mode?(_mode, _source), do: false
 
   defp valid_optional_max_calls?(nil), do: true
   defp valid_optional_max_calls?(max_calls) when is_integer(max_calls) and max_calls > 0, do: true
@@ -733,7 +744,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @doc false
   def adapter_request(request) do
     request
-    |> Map.take(~w(system messages tools cache))
+    |> Map.take(~w(system messages tools cache schema))
     |> Map.new(fn {key, value} -> {String.to_existing_atom(key), adapter_value(key, value)} end)
   end
 
