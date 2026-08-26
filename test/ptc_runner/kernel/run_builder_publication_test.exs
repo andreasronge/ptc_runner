@@ -3,11 +3,11 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.EventSink
-  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.StreamingInspection
 
   @tag :tmp_dir
   test "one-shot publication uses only frozen execution evidence", %{tmp_dir: directory} do
@@ -33,13 +33,13 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
 
     manifest_path = Path.join(directory, "ptc.json")
     trace_path = Path.join(directory, "run.jsonl")
-    inspection_path = Path.join(directory, "run.inspection.jsonl")
+    inspection_path = Path.join(directory, "run.ptcins")
     output_path = Path.join(directory, "result.json")
     File.write!(manifest_path, Jason.encode!(manifest))
     {:ok, registry} = ProviderRegistry.new()
 
     File.cd!(directory)
-    opts = [trace_path: "run.jsonl", inspect: "run.inspection.jsonl", output: "result.json"]
+    opts = [trace_path: "run.jsonl", inspect: "run.ptcins", output: "result.json"]
 
     assert {:ok, built} =
              manifest_path
@@ -104,7 +104,10 @@ defmodule PtcRunner.Kernel.RunBuilderPublicationTest do
       # policy is read exactly once, at the execution/publication checkpoint.
       assert_receive {:policy_call_count, 1}
       assert File.regular?(trace_path)
-      assert {:ok, [_record | _records]} = InspectionArtifact.load(inspection_path)
+
+      assert {:ok, [_record | _records]} =
+               StreamingInspection.read_path(inspection_path)
+
       assert Jason.decode!(File.read!(output_path)) == %{"answer" => 42}
     after
       :erlang.trace(self(), false, [:call])

@@ -1,4 +1,4 @@
-defmodule PtcRunner.Research.SealedEvidenceLog.Handle do
+defmodule PtcRunner.Kernel.InspectionArtifact.Handle do
   @moduledoc """
   Pinned reader for one sealed evidence artifact.
 
@@ -10,7 +10,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Handle do
   digest disagrees with admission, or during admission seal confirmation.
   """
 
-  alias PtcRunner.Research.SealedEvidenceLog.Format
+  alias PtcRunner.Kernel.InspectionArtifact.Format
 
   @type t :: %{
           io: :file.io_device(),
@@ -19,11 +19,48 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Handle do
           digest: binary()
         }
 
-  @spec open(Path.t()) :: {:ok, t()} | {:error, :malformed_source | :source_changed}
+  @spec open(Path.t()) ::
+          {:ok, t()} | {:error, :malformed_source | :source_changed | :source_unavailable}
   def open(path) when is_binary(path) do
+    case File.lstat(path, time: :posix) do
+      {:ok, %File.Stat{type: :regular} = expected} -> open(path, expected)
+      {:ok, %File.Stat{}} -> {:error, :malformed_source}
+      {:error, _reason} -> {:error, :source_unavailable}
+    end
+  end
+
+  def open(_path), do: {:error, :malformed_source}
+
+  @doc false
+  @spec open(Path.t(), File.Stat.t()) ::
+          {:ok, t()} | {:error, :malformed_source | :source_changed | :source_unavailable}
+  def open(path, %File.Stat{type: :regular} = expected) when is_binary(path) do
+    with {:ok, before_open} <- File.lstat(path, time: :posix),
+         :ok <- same_file(expected, before_open) do
+      open_verified(path, expected)
+    else
+      _changed -> {:error, :source_changed}
+    end
+  end
+
+  def open(_path, _expected), do: {:error, :malformed_source}
+
+  defp open_verified(path, expected) do
     case :file.open(path, [:read, :binary]) do
       {:ok, io} ->
-        case inspect_opened(io) do
+        result =
+          with {:ok, opened} <- opened_stat(io),
+               :ok <- same_file(expected, opened),
+               {:ok, after_open} <- File.lstat(path, time: :posix),
+               :ok <- same_file(expected, after_open),
+               {:ok, handle} <- inspect_opened(io) do
+            {:ok, handle}
+          else
+            {:error, :malformed_source} = error -> error
+            _changed -> {:error, :source_changed}
+          end
+
+        case result do
           {:ok, handle} ->
             {:ok, handle}
 
@@ -33,11 +70,9 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Handle do
         end
 
       {:error, _reason} ->
-        {:error, :malformed_source}
+        {:error, :source_unavailable}
     end
   end
-
-  def open(_path), do: {:error, :malformed_source}
 
   @spec close(t() | nil) :: :ok
   def close(%{io: io}) do
@@ -214,6 +249,33 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Handle do
       _other -> {:error, :malformed_source}
     end
   end
+
+  defp opened_stat(io) do
+    case :file.read_file_info(io, time: :posix) do
+      {:ok, file_info} -> {:ok, File.Stat.from_record(file_info)}
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp same_file(
+         %File.Stat{
+           type: :regular,
+           size: size,
+           major_device: major,
+           minor_device: minor,
+           inode: inode
+         },
+         %File.Stat{
+           type: :regular,
+           size: size,
+           major_device: major,
+           minor_device: minor,
+           inode: inode
+         }
+       ),
+       do: :ok
+
+  defp same_file(_expected, _opened), do: {:error, :source_changed}
 
   defp file_size(io) do
     case :file.position(io, {:eof, 0}) do

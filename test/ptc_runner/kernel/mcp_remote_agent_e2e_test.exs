@@ -16,12 +16,12 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
   @moduletag timeout: 180_000
 
   alias PtcRunner.Kernel.ApplicationPackage
-  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   if reason = TestHelpers.environment_skip_reason(["PTC_TEST_MCP_2026_ENDPOINT"]) do
@@ -116,7 +116,7 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
     manifest_path = Path.join(dir, "ptc.json")
     File.write!(manifest_path, Jason.encode!(manifest))
     trace_path = Path.join(dir, "run.jsonl")
-    inspection_path = Path.join(dir, "run.inspection.jsonl")
+    inspection_path = Path.join(dir, "run.ptcins")
 
     assert {:ok, result} =
              manifest_path
@@ -183,7 +183,7 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
     refute inspection =~ endpoint_host
     refute inspection =~ "mcp-session"
 
-    {:ok, records} = InspectionArtifact.load(inspection_path)
+    {:ok, records} = StreamingInspection.read_path(inspection_path)
 
     assert Enum.any?(records, fn record ->
              record["record_type"] == "capability-input" and

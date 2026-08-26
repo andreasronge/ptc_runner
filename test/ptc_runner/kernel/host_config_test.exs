@@ -347,7 +347,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
           "installation_revision" => "private-history-v1",
           "ceilings" => %{
             "max_files" => 100,
-            "max_source_bytes" => 64_000_000,
+            "max_source_bytes" => 536_871_120,
             "max_result_bytes" => 500_000
           }
         }
@@ -362,7 +362,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              installation_revision: "private-history-v1",
              ceilings: %{
                max_files: 100,
-               max_source_bytes: 64_000_000,
+               max_source_bytes: 536_871_120,
                max_result_bytes: 500_000
              }
            }

@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   describe "InspectionArtifact.preflight_destination/1" do
@@ -21,36 +22,34 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       assert {:error, :invalid_inspection_path} =
                InspectionArtifact.preflight_destination(Path.join(dir, "run.jsonl"))
 
-      file = Path.join(dir, "file.inspection.jsonl")
+      file = Path.join(dir, "file.ptcins")
       File.write!(file, "occupied")
 
       assert {:error, :inspection_destination_exists} =
                InspectionArtifact.preflight_destination(file)
 
-      symlink = Path.join(dir, "link.inspection.jsonl")
+      symlink = Path.join(dir, "link.ptcins")
       File.ln_s!(file, symlink)
 
       assert {:error, :inspection_destination_exists} =
                InspectionArtifact.preflight_destination(symlink)
 
-      directory = Path.join(dir, "dir.inspection.jsonl")
+      directory = Path.join(dir, "dir.ptcins")
       File.mkdir!(directory)
 
       assert {:error, :inspection_destination_exists} =
                InspectionArtifact.preflight_destination(directory)
 
-      under_file = Path.join(file, "nested.inspection.jsonl")
+      under_file = Path.join(file, "nested.ptcins")
 
       assert {:error, :inspection_destination_unavailable} =
                InspectionArtifact.preflight_destination(under_file)
 
       assert {:error, :inspection_destination_unavailable} =
-               InspectionArtifact.preflight_destination(
-                 Path.join([dir, "missing", "run.inspection.jsonl"])
-               )
+               InspectionArtifact.preflight_destination(Path.join([dir, "missing", "run.ptcins"]))
 
       assert :ok =
-               InspectionArtifact.preflight_destination(Path.join(dir, "free.inspection.jsonl"))
+               InspectionArtifact.preflight_destination(Path.join(dir, "free.ptcins"))
     end
 
     @tag :tmp_dir
@@ -60,9 +59,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.chmod!(replaceable, 0o777)
 
       assert {:error, :inspection_destination_unsafe} =
-               InspectionArtifact.preflight_destination(
-                 Path.join(replaceable, "run.inspection.jsonl")
-               )
+               InspectionArtifact.preflight_destination(Path.join(replaceable, "run.ptcins"))
     end
 
     @tag :tmp_dir
@@ -78,9 +75,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.ln_s!(protected_child, alias_path)
 
       assert {:error, :inspection_destination_unsafe} =
-               InspectionArtifact.preflight_destination(
-                 Path.join(alias_path, "run.inspection.jsonl")
-               )
+               InspectionArtifact.preflight_destination(Path.join(alias_path, "run.ptcins"))
     end
 
     @tag :tmp_dir
@@ -97,7 +92,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       assert {:error, :inspection_destination_unsafe} =
                InspectionArtifact.preflight_destination(
-                 Path.join([alias_path, "..", "run.inspection.jsonl"])
+                 Path.join([alias_path, "..", "run.ptcins"])
                )
     end
 
@@ -116,9 +111,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       File.ln_s!(hop, alias_path)
 
       assert {:error, :inspection_destination_unsafe} =
-               InspectionArtifact.preflight_destination(
-                 Path.join(alias_path, "run.inspection.jsonl")
-               )
+               InspectionArtifact.preflight_destination(Path.join(alias_path, "run.ptcins"))
     end
   end
 
@@ -137,7 +130,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
 
-      occupied = Path.join(dir, "run.inspection.jsonl")
+      occupied = Path.join(dir, "run.ptcins")
       File.write!(occupied, "occupied")
 
       assert {:error, {:inspection_preflight_failed, :inspection_destination_exists}} =
@@ -159,7 +152,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       tmp_dir: dir
     } do
       {:ok, registry} = ProviderRegistry.new()
-      occupied = Path.join(dir, "run.inspection.jsonl")
+      occupied = Path.join(dir, "run.ptcins")
       File.write!(occupied, "occupied")
 
       missing_manifest = Path.join(dir, "absent.json")
@@ -275,8 +268,8 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
               trace_path: Path.join(dir, "same.jsonl")
             ],
             [
-              output: Path.join(dir, "same.inspection.jsonl"),
-              inspect: Path.join(dir, "same.inspection.jsonl")
+              output: Path.join(dir, "same.ptcins"),
+              inspect: Path.join(dir, "same.ptcins")
             ],
             [
               output: Path.join(real_parent, "same.jsonl"),
@@ -316,7 +309,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       manifest_path =
         write_manifest(dir, %{"workflow" => [%{"name" => "probe", "config" => %{}}]})
 
-      destination = Path.join([dir, "missing", "run.inspection.jsonl"])
+      destination = Path.join([dir, "missing", "run.ptcins"])
 
       assert {:error, {:inspection_preflight_failed, :inspection_destination_unavailable}} =
                manifest_path
@@ -351,7 +344,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       cases = [
         {[output: Path.join(unwritable, "result.json")],
          {:result_preflight_failed, :invalid_result_destination}},
-        {[inspect: Path.join(unwritable, "run.inspection.jsonl")],
+        {[inspect: Path.join(unwritable, "run.ptcins")],
          {:inspection_preflight_failed, :inspection_destination_unavailable}},
         {[trace_path: Path.join(unwritable, "run.jsonl")],
          {:trace_preflight_failed, :trace_destination_unavailable}}
@@ -495,7 +488,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
           result_projection: :native
         )
 
-      occupied = Path.join(dir, "occupied.inspection.jsonl")
+      occupied = Path.join(dir, "occupied.ptcins")
       File.write!(occupied, "occupied")
 
       assert {:error, {:inspection_preflight_failed, :inspection_destination_exists}} =
@@ -503,7 +496,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
 
       refute_received :provider_prepared
 
-      shared = Path.join(dir, "shared.inspection.jsonl")
+      shared = Path.join(dir, "shared.ptcins")
 
       assert {:error, {:artifact_preflight_failed, :conflicting_destinations}} =
                RunBuilder.build(request, registry, inspect: shared, output: shared)
@@ -576,16 +569,16 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       assert {:ok, %{value: 42}} =
                manifest_path
                |> ApplicationPackage.request_directory(
-                 request_options(registry, inspect: "run.inspection.jsonl")
+                 request_options(registry, inspect: "run.ptcins")
                )
                |> RunLifecycle.build(registry,
                  output: "result.json",
                  trace_path: "trace.jsonl",
-                 inspect: "run.inspection.jsonl"
+                 inspect: "run.ptcins"
                )
                |> RunLifecycle.execute()
 
-      for name <- ["result.json", "trace.jsonl", "run.inspection.jsonl"] do
+      for name <- ["result.json", "trace.jsonl", "run.ptcins"] do
         assert File.regular?(Path.join(dir, name))
         refute File.exists?(Path.join(changed_cwd, name))
       end
@@ -772,7 +765,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
                )
 
       assert {:error, :inspection_persistence_failed} =
-               InspectionArtifact.preflight_destination(Path.join(dir, "run.inspection.jsonl"))
+               InspectionArtifact.preflight_destination(Path.join(dir, "run.ptcins"))
 
       assert {:error, :source_unavailable} =
                TraceLog.preflight_destination(
@@ -826,11 +819,14 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       tmp_dir: dir
     } do
       result_path = Path.join(dir, near_name_limit(".private.json"))
-      inspection_path = Path.join(dir, near_name_limit(".inspection.jsonl"))
+      inspection_path = Path.join(dir, near_name_limit(".ptcins"))
       trace_path = Path.join(dir, near_name_limit(".private.jsonl"))
 
       {:ok, inspection_sink} =
-        InspectionSink.start(run_id: "long-path-run", trace_id: "long-path-trace")
+        StreamingInspection.start(
+          run_id: "long-path-run",
+          trace_id: "long-path-trace"
+        )
 
       assert :ok =
                InspectionSink.emit(
@@ -845,10 +841,12 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
                  }
                )
 
-      assert {:ok, inspection_records} = InspectionSink.records(inspection_sink)
+      assert {:ok, inspection_records} =
+               StreamingInspection.records(inspection_sink)
+
       assert :ok = InspectionSink.stop(inspection_sink)
 
-      canonical_events = [
+      _canonical_events = [
         %{
           run_id: "long-path-run",
           trace_id: "long-path-trace",
@@ -892,10 +890,9 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
       assert :ok = InspectionArtifact.preflight_destination(inspection_path)
 
       assert :ok =
-               InspectionArtifact.persist(
+               StreamingInspection.write_path(
                  inspection_path,
-                 inspection_records,
-                 canonical_events
+                 inspection_records
                )
 
       assert :ok = TraceLog.preflight_destination(trace_path, true)
@@ -918,10 +915,11 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
         restore_env("PTC_TEST_REAL_LN", original_ln)
       end)
 
-      System.put_env("PATH", fake_bin)
-
       {:ok, inspection_sink} =
-        InspectionSink.start(run_id: "collision-run", trace_id: "collision-trace")
+        StreamingInspection.start(
+          run_id: "collision-run",
+          trace_id: "collision-trace"
+        )
 
       assert :ok =
                InspectionSink.emit(
@@ -936,10 +934,13 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
                  }
                )
 
-      assert {:ok, inspection_records} = InspectionSink.records(inspection_sink)
-      assert :ok = InspectionSink.stop(inspection_sink)
+      assert {:ok, inspection_records} =
+               StreamingInspection.records(inspection_sink)
 
-      canonical_events = [
+      assert :ok = InspectionSink.stop(inspection_sink)
+      System.put_env("PATH", fake_bin)
+
+      _canonical_events = [
         %{
           run_id: "collision-run",
           trace_id: "collision-trace",
@@ -972,7 +973,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
          end},
         {"inspection", "artifact",
          fn path ->
-           InspectionArtifact.persist(path, inspection_records, canonical_events)
+           StreamingInspection.write_path(path, inspection_records)
          end},
         {"trace", "trace",
          fn path ->
@@ -988,7 +989,7 @@ defmodule PtcRunner.Kernel.InspectionPreflightTest do
             dir,
             if(name == "trace",
               do: "#{name}.private.jsonl",
-              else: "#{name}.inspection.jsonl"
+              else: "#{name}.ptcins"
             )
           )
 

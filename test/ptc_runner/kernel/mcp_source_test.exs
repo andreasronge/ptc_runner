@@ -14,7 +14,6 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
-  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
@@ -35,6 +34,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.TestSupport.MCPHTTPFixture
   alias PtcRunner.TestSupport.ProviderSessionFixture
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   @owner_lifecycle_timeout_ms 30_000
@@ -466,7 +466,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     fixture = fixture(self(), capture_body?: true)
     on_exit(fixture.close)
 
-    inspection_path = Path.join(dir, "mcp.inspection.jsonl")
+    inspection_path = Path.join(dir, "mcp.ptcins")
     trace_path = Path.join(dir, "mcp.trace.jsonl")
     manifest_path = manifest(dir, Map.keys(public_mappings()))
 
@@ -484,7 +484,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert get_in(request_body, ["params", "_meta", "traceparent"]) =~
              ~r/\A00-[0-9a-f]{32}-[0-9a-f]{16}-01\z/
 
-    assert {:ok, records} = InspectionArtifact.load(inspection_path)
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
 
     requests = Enum.filter(records, &(&1["record_type"] == "mcp-request"))
     responses = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
@@ -662,7 +662,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
          tmp_dir: dir
        } do
     marker = Path.join(dir, "stdio-stderr-methods")
-    inspection_path = Path.join(dir, "stdio.inspection.jsonl")
+    inspection_path = Path.join(dir, "stdio.ptcins")
     tools = mappings_with_effect("fail", :write)
     registry = stdio_registry(dir, marker, "stderr-warn", tools: tools)
 
@@ -691,7 +691,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     refute Map.has_key?(failure, "mutation_state")
 
-    assert {:ok, records} = InspectionArtifact.load(inspection_path)
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
     stderrs = Enum.filter(records, &(&1["record_type"] == "mcp-stderr"))
 
     assert Enum.any?(stderrs, fn record ->

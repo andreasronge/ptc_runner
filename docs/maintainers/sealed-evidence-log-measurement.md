@@ -1,20 +1,16 @@
 # Sealed evidence log measurement
 
-> **Audience:** people and coding agents deciding the #1643 production
-> inspection format.
+> **Audience:** people and coding agents maintaining the production inspection
+> format selected by #1643.
 
 Issue #1646 asked whether a small sealed evidence log plus private
 admission-owned ETS indexes can support large artifacts without persisted
-secondary indexes, CubDB, or external sorting. Production inspection routing
-is unchanged. This page records the executable prototype, the measured
-workloads, the configuration inventory, and the recommendation for #1643.
-
-Reproduce the tables with `mix ptc.measure_sealed_evidence` (count rungs up
-to 10 000) or `mix ptc.measure_sealed_evidence --full` (128/256/512 MiB
-payload ladder plus count rungs up to `--max-records`, default 1 000 000).
-The 1 000 000-record rung is an experiment safety ceiling: it did not
-complete under the prototype heap envelope. Focused tests never invoke the
-large ladder.
+secondary indexes, CubDB, or external sorting. This page preserves the
+measurements and configuration inventory that selected ETS-only V1. The
+research module and measurement task were deliberately deleted when #1643
+cut production over to that design; production code and tests now own the
+format and behavior. The 1,000,000-record rung was an experiment safety
+ceiling and did not complete under the prototype heap envelope.
 
 ## Environment
 
@@ -26,8 +22,8 @@ size was 67 108 864 bytes (64 MiB) on every payload rung.
 
 ## Prototype
 
-The reference implementation lives under
-`PtcRunner.Research.SealedEvidenceLog`. Layout:
+The retired reference implementation used this layout, now owned by
+`PtcRunner.Kernel.InspectionArtifact`:
 
 ```text
 16-byte versioned header (PTCINS01)
@@ -63,8 +59,9 @@ deleted it.
 (2-frame rung). Verifying every omitted 64 MiB frame before computing
 exact `omitted_count` exceeded the 256 MiB query envelope at 4 and 8
 frames. That is a contract finding, not a measurement gap: a frame counted
-only in `omitted_count` is a query dependency in the current
-`InspectionQuery` rules.
+only in `omitted_count` was a query dependency in the research prototype's
+`InspectionQuery` rules. The production cutover deliberately replaces that
+behavior with the contract specified below.
 
 ## Record-count ladder
 
@@ -95,7 +92,7 @@ operations).
 
 ## Semantic workloads
 
-Differential parity against `InspectionQuery.compile/3` and `query/6`
+The research differential against the former eager `InspectionQuery` path
 passed for all twelve operations on the mixed corpus, including filter
 absence/`nil`/presence, legal conjunctions, the negative
 same-generated-source turn conjunction, ascending and descending order,
@@ -119,11 +116,16 @@ verified.
 | Relevant same-size overwrite | next query `source_changed` |
 | Unrelated same-size overwrite | `list_runs` may succeed; the dependent collection returns `source_changed` |
 | Path replacement after admission | queries continue against the pinned handle |
-| Admission caller death | admission worker cancelled; no snapshot |
+| Admission caller death | admission worker and snapshot terminate; tables/handles gone |
+| Query caller death | query worker cancelled; snapshot remains usable |
 | Quota / retained-ceiling refusal | no snapshot; tables deleted; input artifact remains |
 | Snapshot owner death | ETS tables undefined; handles unusable |
-| Normal close | tables deleted; handles unusable |
-| Query caller death | query worker cancelled; snapshot remains usable |
+| Normal close | tables deleted; handles unusable; input artifact remains |
+
+Focused tests ledger the snapshot PID, ETS table IDs, pinned handles, and
+scratch bytes for those rows. After cleanup they assert monitored process
+death, `:ets.info(table) == :undefined`, unusable handles, and zero
+prototype-created scratch bytes. The sealed input artifact remains.
 
 ## Configuration inventory
 
@@ -133,14 +135,22 @@ Class `host_facing` is the public JSON/API path under a
 | Path or “internal only” | Class | Phase | Unit | Compiled / installed / hard max | File meaning | Consumer |
 | --- | --- | --- | --- | ---: | --- | --- |
 | `install.ptc_inspection_snapshot.ceilings.max_files` | host_facing | admission | files | 1 024 / 1 024 / 1 024 | directory | `HostConfig` inspection snapshot ceilings |
-| `install.ptc_inspection_snapshot.ceilings.max_source_bytes` | host_facing | admission | bytes | 64 000 000 / 64 000 000 / 64 000 000 | aggregate | `HostConfig` inspection snapshot ceilings |
+| `install.ptc_inspection_snapshot.ceilings.max_source_bytes` | host_facing | admission | bytes | 536 871 120 / 536 871 120 / 536 871 120 | aggregate | `HostConfig` inspection snapshot ceilings |
 | `install.ptc_inspection_snapshot.ceilings.max_result_bytes` | host_facing | query | bytes | 1 048 576 / 1 048 576 / 1 048 576 | selected or directory | `HostConfig` inspection snapshot ceilings |
 | internal only | snapshot_internal | admission | bytes | 128 000 000 | selected or directory | `InspectionSnapshot` `max_retained_bytes` |
 | internal only | snapshot_internal | admission | files | 1 024 | directory | `InspectionSnapshot` `max_files` |
 | internal only | snapshot_internal | admission | entries | 4 096 | directory | `InspectionSnapshot` `max_directory_entries` |
-| internal only | snapshot_internal | admission | bytes | 16 000 000 | selected file | `InspectionSnapshot` `max_artifact_bytes` / `InspectionArtifact` |
+| internal only | snapshot_internal | admission | bytes | 536 871 120 | selected file | `InspectionSnapshot` / `InspectionArtifact` complete artifact maximum |
 | internal only | producer | producer | bytes | 2 000 000 | selected file | `InspectionSink` `max_record_bytes` |
-| internal only | producer | producer | bytes | 16 000 000 | selected file | `InspectionSink` `max_total_bytes` |
+| internal only | producer | producer | bytes | 536 870 912 | selected file | `InspectionSink` framed-evidence `max_total_bytes` |
+| internal only | production | admission | records | 16 384 / 65 536 | selected file | default / maintained `max_records` |
+| internal only | production | admission | entries | 1 000 000 | selected file | `max_index_entries` |
+| internal only | production | admission | bytes | 128 000 000 | selected file | `max_logical_index_bytes` |
+| internal only | production | admission | bytes | 128 000 000 | selected or directory | aggregate `max_retained_bytes` |
+| internal only | production | query | bytes | 2 000 000 | selected file | per-record verified range maximum |
+| internal only | production | admission/query | milliseconds | 15 000 | selected or directory | phase deadline |
+| internal only | production | cleanup | milliseconds | 5 000 | selected or directory | cleanup deadline |
+| internal only | production | admission/query | bytes | 65 536 | selected file | I/O buffer |
 | internal only | prototype | producer | bytes | 67 108 864 | selected file | research `max_record_bytes` |
 | internal only | prototype | producer | bytes | 536 871 120 | selected file | research `max_total_bytes` |
 | internal only | prototype | admission | records | 1 000 000 | selected file | research `max_records` (experiment ceiling; 1 000 000 did not complete) |
@@ -157,12 +167,13 @@ Class `host_facing` is the public JSON/API path under a
 | internal only | prototype | admission | milliseconds | 120 000 | selected file | research admission deadline |
 | internal only | prototype | cleanup | milliseconds | 5 000 | selected or directory | research cleanup deadline |
 | internal only | prototype | producer | bytes | 65 536 | selected file | research I/O buffer |
-| internal only | maintained_guard | admission | schema_version | 8 | selected file | `InspectionArtifact` / prototype schema |
+| internal only | maintained_guard | admission | schema_version | 8 | selected file | `InspectionArtifact` installed schema |
 | internal only | maintained_guard | query | items | 1 000 max / 100 default | selected or directory | `InspectionQuery` page limit |
 
-`Limits.inventory/0` is the executable copy of this table.
+The production constants in `InspectionArtifact.Limits` and the generated host
+schema are the executable authorities summarized by this retained table.
 
-### Mapping for #1643
+### Production mapping
 
 - Keep host-facing `max_files`, aggregate `max_source_bytes`, and
   `max_result_bytes`. Do not add ETS table type, key layout, concurrency,
@@ -174,8 +185,8 @@ Class `host_facing` is the public JSON/API path under a
 - Writer authority stays on the producer/sink internals
   (`max_record_bytes`, `max_total_bytes`), not on inspection-provider
   installation ceilings.
-- Add one internal admission guard `max_records`. Proposed production
-  **default 16 384**, **hard maximum 65 536** (about 50 MB ETS at the
+- The internal admission guard `max_records` has production
+  **default 16 384** and **hard maximum 65 536** (about 50 MB ETS at the
   measured ~760 B/record slope, under 128 MB `max_retained_bytes`, with
   headroom from the 100 000 successful rung). The 1 000 000 experiment
   ceiling is not a production authority.
@@ -184,10 +195,8 @@ Class `host_facing` is the public JSON/API path under a
 - Range-byte and query-deadline ceilings stay internal. 15 s covered
   exact `omitted_count` for 100 000 tiny records. Deadlines do not need to
   become host-facing for the environments measured here.
-- Selected-file `max_artifact_bytes` / producer `max_total_bytes`
-  (16 000 000 today) can remain the production per-artifact cap until a
-  later cutover raises them; the prototype proved 512 MiB artifacts under
-  a research envelope.
+- Selected-file complete artifact authority is 536 871 120 bytes and framed
+  evidence authority is 536 870 912 bytes, matching the measured 512 MiB rung.
 
 ## `omitted_count` contract
 
@@ -197,14 +206,14 @@ not acceptable for payload-heavy few-record artifacts: verifying four or
 eight omitted 64 MiB frames exceeds a 256 MiB query envelope, and a single
 returned 64 MiB item exceeds `max_result_bytes`.
 
-#1643 should keep exact dependency verification for **returned items and
+#1643 keeps exact dependency verification for **returned items and
 their join/turn dependencies**, and specify `omitted_count` as the ETS
 locator cardinality whose admission digests were already checked. A
 same-size overwrite of an omitted frame may remain latent until that
 frame is selected. That is a deliberate replacement for the current
 “every omitted frame is a query dependency” rule, justified by this
-ladder. Do not silently weaken the prototype: it still verifies omitted
-frames, and the harness records the resulting `heap_exceeded`.
+ladder. This is the production dependency contract, not a promise that an
+unread same-size mutation is detected by unrelated pages.
 
 ## Recommendation for #1643
 
@@ -219,7 +228,7 @@ The simple sealed log plus private ETS indexes supports:
 - the complete current query/filter surface on a mixed corpus;
 - pinned-handle mutation detection and deterministic cleanup.
 
-#1643 should restore `ready-for-implementation` on an ETS-only sealed log
-with the `omitted_count` contract change above, internal `max_records`,
-and the existing host-facing inspection ceilings. Persisted secondary
-indexes are not required for the measured workloads.
+#1643 cut production over to this ETS-only sealed log with the
+`omitted_count` contract above, internal `max_records`, and the raised
+host-facing source ceiling. Persisted secondary indexes remain unnecessary for
+the supported workload.

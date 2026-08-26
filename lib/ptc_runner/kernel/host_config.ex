@@ -74,7 +74,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_secret_bytes 65_536
   @max_result_bytes 1_048_576
   @max_trace_source_bytes 8_000_000
-  @max_inspection_source_bytes 64_000_000
+  @max_inspection_source_bytes 536_871_120
   @max_inspection_files 1_024
   @max_replay_entries 10_000
   # The accepted minimum must fit the complete smallest snapshot result under

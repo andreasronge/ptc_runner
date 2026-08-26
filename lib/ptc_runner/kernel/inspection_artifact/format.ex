@@ -1,9 +1,8 @@
-defmodule PtcRunner.Research.SealedEvidenceLog.Format do
+defmodule PtcRunner.Kernel.InspectionArtifact.Format do
   @moduledoc """
-  Header, length-framed evidence, and terminal footer for the ETS-index prototype.
+  Physical V1 contract for a sealed private inspection artifact.
 
-  This is a test/benchmark-only container. Production inspection routing still
-  uses JSONL. The layout is the simple candidate from issue #1646:
+  The layout is:
 
   ```text
   16-byte versioned header
@@ -13,7 +12,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Format do
 
   Multibyte integers are unsigned big-endian. Offsets are absolute. A reader
   rejects a size that does not match the opened file, a header/footer version
-  mismatch, overlap, or nonzero reserved bytes before following any range.
+  mismatch, overlap, gaps, or trailing bytes before following any range.
   """
 
   @header_magic "PTCINS01"

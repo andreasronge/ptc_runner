@@ -2,16 +2,19 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.InspectionArtifact.Indexes
   alias PtcRunner.Kernel.InspectionQuery
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.TraceSnapshot
@@ -21,6 +24,172 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
   @source "(return 42)"
   @source_hash :crypto.hash(:sha256, @source) |> Base.encode16(case: :lower)
+
+  @tag :tmp_dir
+  test "admits a sealed zero-frame artifact by its footer identities", %{tmp_dir: root} do
+    {trace, inspection} = source_directories(root)
+    run_id = "empty-run"
+
+    File.write!(
+      Path.join(trace, "#{run_id}.jsonl"),
+      encode_jsonl([event(run_id, 1, "run-started", %{"missions" => %{}})])
+    )
+
+    {sink, handle} = start_inspection!(inspection, run_id)
+    persist_inspection!(sink, handle)
+
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
+    end)
+
+    assert {:ok, %{"run_id" => ^run_id, "record_count" => 0}} =
+             InspectionSnapshot.query(snapshot, :get_run, %{"run_id" => run_id})
+  end
+
+  @tag :tmp_dir
+  test "binds admission to the regular file inventoried before open", %{tmp_dir: root} do
+    {trace, inspection} = source_directories(root)
+    write_run(trace, inspection, "pinned-inventory", :basic)
+    path = Path.join(inspection, "pinned-inventory.ptcins")
+    moved = Path.join(root, "moved.ptcins")
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
+    on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
+
+    assert {:error, :source_changed} =
+             InspectionSnapshot.start(
+               {:file, path, "pinned-inventory"},
+               trace_snapshot,
+               owner: self(),
+               open_hook: fn ->
+                 File.rename!(path, moved)
+                 File.ln_s!(moved, path)
+                 :ok
+               end
+             )
+  end
+
+  @tag :tmp_dir
+  test "duplicate generated-program calls associate each matching evidence record once", %{
+    tmp_dir: root
+  } do
+    {trace, inspection} = source_directories(root)
+    run_id = "duplicate-programs"
+
+    events = [
+      event(run_id, 1, "run-started", %{"missions" => %{"default" => %{}}}),
+      event(run_id, 2, "capability-started", %{
+        "capability_id" => "llm-#{run_id}",
+        "environment" => "workflow",
+        "name" => "llm-request"
+      }),
+      event(run_id, 3, "evaluation-started", %{
+        "evaluation_id" => "eval-one",
+        "environment" => "mission",
+        "mission_name" => "default",
+        "program_kind" => "ptc-lisp",
+        "source_hash" => @source_hash,
+        "source_bytes" => byte_size(@source)
+      }),
+      event(run_id, 4, "evaluation-started", %{
+        "evaluation_id" => "eval-two",
+        "environment" => "mission",
+        "mission_name" => "default",
+        "program_kind" => "ptc-lisp",
+        "source_hash" => @source_hash,
+        "source_bytes" => byte_size(@source)
+      }),
+      event(run_id, 5, "run-stopped", %{"outcome" => "ok"})
+    ]
+
+    File.write!(Path.join(trace, "#{run_id}.jsonl"), encode_jsonl(events))
+    {sink, handle} = start_inspection!(inspection, run_id)
+
+    emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
+      environment: :workflow,
+      name: "llm-request",
+      arguments: %{"messages" => [%{"role" => "user", "content" => "run it"}]}
+    })
+
+    calls = List.duplicate(%{"args" => %{"program" => @source}}, 2)
+
+    emit!(sink, "capability-output", %{capability_id: "llm-#{run_id}"}, %{
+      environment: :workflow,
+      name: "llm-request",
+      result: %{status: :ok, value: %{"tool_calls" => calls}}
+    })
+
+    for evaluation_id <- ["eval-one", "eval-two"] do
+      emit!(sink, "evaluation-source", %{evaluation_id: evaluation_id}, %{
+        environment: :mission,
+        mission_name: "default",
+        program_kind: :"ptc-lisp",
+        source: @source,
+        source_hash: @source_hash,
+        source_bytes: byte_size(@source)
+      })
+    end
+
+    persist_inspection!(sink, handle)
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
+    end)
+
+    assert {:ok, %{"items" => [%{"generated" => generated}], "evidence" => evidence}} =
+             InspectionSnapshot.query(snapshot, :turns, %{"run_id" => run_id})
+
+    assert Enum.map(generated, & &1["evaluation_id"]) == ["eval-one", "eval-two"]
+    assert Enum.all?(generated, & &1["association_ambiguous?"])
+    assert evidence["ambiguity_count"] == 1
+  end
+
+  test "query workers carry one copy of retained admission metadata" do
+    facts = Map.new(1..50_000, &{Integer.to_string(&1), %{evaluation_id: &1}})
+
+    indexes =
+      self()
+      |> Indexes.create()
+      |> Indexes.put_trace_facts(%{"run" => facts})
+      |> Indexes.put_turn_evidence(%{"run" => facts})
+
+    on_exit(fn -> Indexes.delete_all(indexes) end)
+
+    snapshot = %{
+      indexes: indexes,
+      handles: %{},
+      snapshot_digest: "single-retained-copy",
+      trace_snapshot_hash: "trace-snapshot",
+      limits: %{max_range_bytes: 2_000_000},
+      query_hook: nil
+    }
+
+    duplicated =
+      Map.merge(snapshot, %{
+        trace_facts: indexes.trace_facts,
+        turn_evidence: indexes.turn_evidence
+      })
+
+    {:ok, {single_result, single_words}} = query_worker_probe(snapshot)
+    {:ok, {_duplicate_result, duplicate_words}} = query_worker_probe(duplicated)
+
+    assert {:ok, %{"items" => []}, _metrics} = single_result
+    assert duplicate_words > single_words
+
+    boundary = single_words + div(duplicate_words - single_words, 2)
+    assert single_words < boundary
+    assert duplicate_words > boundary
+  end
 
   @tag :tmp_dir
   test "exposes one canonical terminal result through the singular query", %{tmp_dir: root} do
@@ -39,7 +208,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     File.write!(Path.join(trace, "#{run_id}.jsonl"), encode_jsonl(events))
 
-    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+    {sink, handle} = start_inspection!(inspection, run_id)
 
     assert :ok =
              InspectionSink.emit(
@@ -49,14 +218,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                %{result_hash: result_hash, value: value}
              )
 
-    {:ok, records} = InspectionSink.records(sink)
-
-    assert :ok =
-             InspectionArtifact.persist(
-               Path.join(inspection, "#{run_id}.inspection.jsonl"),
-               records,
-               events
-             )
+    persist_inspection!(sink, handle)
 
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
 
@@ -176,109 +338,6 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     refute Map.has_key?(model_exchange, "exception")
     refute Map.has_key?(model_exchange, "exception_sequence")
-  end
-
-  test "effective preludes qualify repeated component IDs by mission" do
-    records =
-      ["reader", "writer"]
-      |> Enum.with_index(1)
-      |> Enum.map(fn {mission_name, sequence} ->
-        %{
-          "schema_version" => 8,
-          "run_id" => "qualified-preludes",
-          "trace_id" => "trace-qualified-preludes",
-          "sequence" => sequence,
-          "timestamp" => "2026-08-11T12:00:00Z",
-          "record_type" => "prelude-source",
-          "correlation" => %{"component_id" => "shared.api"},
-          "payload" => %{
-            "environment" => "mission",
-            "mission_name" => mission_name,
-            "source" => @source,
-            "source_hash" => @source_hash,
-            "source_bytes" => byte_size(@source)
-          }
-        }
-      end)
-
-    assert {:ok, %{source_id: source_id, collections: collections}} =
-             InspectionQuery.compile([records], "trace-source", %{
-               "trace_snapshot_hash" => "trace-source",
-               "runs" => %{"qualified-preludes" => %{}}
-             })
-
-    assert {:ok, %{"items" => items}} =
-             InspectionQuery.query(
-               collections,
-               source_id,
-               :effective_preludes,
-               %{"run_id" => "qualified-preludes"},
-               100_000
-             )
-
-    assert Enum.map(items, &{&1["component_id"], &1["mission_name"]}) == [
-             {"shared.api", "reader"},
-             {"shared.api", "writer"}
-           ]
-  end
-
-  test "turn filters must match the same generated source" do
-    run_id = "conjunctive-turn-filters"
-    trace_id = "trace-conjunctive-turn-filters"
-    first_source = "(return 1)"
-    second_source = "(return 2)"
-
-    records = [
-      inspection_record(run_id, trace_id, 1, "capability-input", %{"capability_id" => "llm"}, %{
-        "environment" => "workflow",
-        "name" => "llm-request",
-        "arguments" => %{"messages" => [%{"role" => "user", "content" => "run both"}]}
-      }),
-      inspection_record(run_id, trace_id, 2, "capability-output", %{"capability_id" => "llm"}, %{
-        "environment" => "workflow",
-        "name" => "llm-request",
-        "result" => %{
-          "status" => "ok",
-          "value" => %{
-            "tool_calls" => [
-              %{"args" => %{"program" => first_source}},
-              %{"args" => %{"program" => second_source}}
-            ]
-          }
-        }
-      }),
-      evaluation_source_record(run_id, trace_id, 3, "evaluation-1", first_source),
-      evaluation_source_record(run_id, trace_id, 4, "evaluation-2", second_source)
-    ]
-
-    assert {:ok, %{source_id: source_id, collections: collections}} =
-             InspectionQuery.compile([records], "trace-source", %{
-               "trace_snapshot_hash" => "trace-source",
-               "runs" => %{
-                 run_id => %{
-                   "terminal?" => true,
-                   "events_dropped?" => false,
-                   "expected_model_exchange_ids" => ["llm"],
-                   "parent_evaluation_ids" => %{
-                     "evaluation-1" => "workflow-1",
-                     "evaluation-2" => "workflow-2"
-                   }
-                 }
-               }
-             })
-
-    assert {:ok, %{"items" => []}} =
-             InspectionQuery.query(
-               collections,
-               source_id,
-               :turns,
-               %{
-                 "run_id" => run_id,
-                 "evaluation_id" => "evaluation-1",
-                 "parent_evaluation_id" => "workflow-2"
-               },
-               100_000
-             )
   end
 
   @tag :tmp_dir
@@ -447,6 +506,13 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
              })
 
     assert {:error, :invalid_query} =
+             InspectionSnapshot.query(snapshot, :provider_exchanges, %{
+               "run_id" => "mcp-run",
+               "limit" => 2,
+               "cursor" => provider_cursor
+             })
+
+    assert {:error, :invalid_query} =
              InspectionSnapshot.query(snapshot, :capability_calls, %{
                "run_id" => "mcp-run",
                "cursor" => provider_cursor
@@ -486,7 +552,9 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       assert profile.callback.(query) == manifest.callback.(query)
     end)
 
-    File.write!(Path.join(inspection, "mcp-run.inspection.jsonl"), "replaced")
+    replacement = Path.join(inspection, "replacement.ptcins")
+    File.write!(replacement, "replaced")
+    File.rename!(replacement, Path.join(inspection, "mcp-run.ptcins"))
 
     assert {:ok, %{"items" => [%{"request_id" => 7}]}} =
              InspectionSnapshot.query(snapshot, :provider_exchanges, %{
@@ -925,15 +993,15 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
           :duplicate ->
             File.cp!(
-              Path.join(inspection, "valid.inspection.jsonl"),
-              Path.join(inspection, "duplicate.inspection.jsonl")
+              Path.join(inspection, "valid.ptcins"),
+              Path.join(inspection, "duplicate.ptcins")
             )
 
             InspectionSnapshot.start({:directory, inspection}, trace_snapshot)
 
           :malformed ->
             File.write!(
-              Path.join(inspection, "broken.inspection.jsonl"),
+              Path.join(inspection, "broken.ptcins"),
               ~s({"private":"private-marker")
             )
 
@@ -941,14 +1009,14 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
           :symlink ->
             File.ln_s!(
-              Path.join(inspection, "valid.inspection.jsonl"),
-              Path.join(inspection, "linked.inspection.jsonl")
+              Path.join(inspection, "valid.ptcins"),
+              Path.join(inspection, "linked.ptcins")
             )
 
             InspectionSnapshot.start({:directory, inspection}, trace_snapshot)
 
           :replacement ->
-            path = Path.join(inspection, "valid.inspection.jsonl")
+            path = Path.join(inspection, "valid.ptcins")
 
             InspectionSnapshot.start({:directory, inspection}, trace_snapshot,
               capture_hook: fn ->
@@ -966,15 +1034,14 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "an unsupported inspection schema remains distinguishable during capture", %{tmp_dir: root} do
+  test "a non-V1 inspection schema is malformed with no legacy reader", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
     write_run(trace, inspection, "unsupported", :basic)
     PrivateInspectionFixture.rewrite_schema!(inspection, 4)
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
     on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
 
-    assert {:error,
-            {:unsupported_inspection_schema_version, %{artifact_version: 4, supported_version: 8}}} =
+    assert {:error, :malformed_source} =
              InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
   end
 
@@ -990,6 +1057,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:ok, %{retained_bytes: expected_retained_bytes}} =
              InspectionSnapshot.info(retained_snapshot)
+
+    owner_state = :sys.get_state(retained_snapshot.pid)
+    refute Map.has_key?(owner_state, :trace_facts)
+    refute Map.has_key?(owner_state, :turn_evidence)
 
     assert :ok = InspectionSnapshot.stop(retained_snapshot)
 
@@ -1011,8 +1082,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert measured_bytes == expected_retained_bytes
 
-    duplicate = Path.join(inspection, "second.inspection.jsonl")
-    File.cp!(Path.join(inspection, "bounded.inspection.jsonl"), duplicate)
+    duplicate = Path.join(inspection, "second.ptcins")
+    File.cp!(Path.join(inspection, "bounded.ptcins"), duplicate)
 
     assert {:error, :source_limit_exceeded} =
              InspectionSnapshot.start({:directory, inspection}, trace_snapshot, max_files: 1)
@@ -1040,13 +1111,13 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "capture heap exhaustion has the stable retained-limit error", %{tmp_dir: root} do
+  test "the removed public capture heap override is rejected", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
     write_run(trace, inspection, "heap-bounded", :basic)
     {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
     on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
 
-    assert {:error, :source_retained_limit_exceeded} =
+    assert {:error, :invalid_snapshot} =
              InspectionSnapshot.start({:directory, inspection}, trace_snapshot,
                capture_heap_words: 233
              )
@@ -1172,8 +1243,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   # ex_dna:disable-for-next-line — Explicit records keep snapshot fixture failures local.
-  defp write_inspection(directory, run_id, variant, events) do
-    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+  defp write_inspection(directory, run_id, variant, _events) do
+    {sink, handle} = start_inspection!(directory, run_id)
 
     emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
       environment: :workflow,
@@ -1295,45 +1366,31 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       PrivateInspectionFixture.emit_execution_diagnostics!(sink, run_id)
     end
 
-    {:ok, records} = InspectionSink.records(sink)
-    path = Path.join(directory, "#{run_id}.inspection.jsonl")
-    :ok = InspectionArtifact.persist(path, records, events)
+    persist_inspection!(sink, handle)
+  end
+
+  defp start_inspection!(directory, run_id) do
+    path = Path.join(directory, "#{run_id}.ptcins")
+    {:ok, handle} = PublicationHandle.reserve_stream_for(path, :inspection, 0o600, self())
+
+    {:ok, sink} =
+      InspectionSink.start(
+        run_id: run_id,
+        trace_id: "trace-#{run_id}",
+        publication_handle: handle
+      )
+
+    {sink, handle}
+  end
+
+  defp persist_inspection!(sink, handle) do
+    {:ok, seal} = InspectionSink.seal(sink)
+    :ok = InspectionArtifact.publish_handle(handle, seal)
     :ok = InspectionSink.stop(sink)
   end
 
   defp emit!(sink, type, correlation, payload),
     do: :ok = InspectionSink.emit(sink, type, correlation, payload)
-
-  defp evaluation_source_record(run_id, trace_id, sequence, evaluation_id, source) do
-    inspection_record(
-      run_id,
-      trace_id,
-      sequence,
-      "evaluation-source",
-      %{"evaluation_id" => evaluation_id},
-      %{
-        "environment" => "mission",
-        "mission_name" => "default",
-        "program_kind" => "ptc-lisp",
-        "source" => source,
-        "source_hash" => Base.encode16(:crypto.hash(:sha256, source), case: :lower),
-        "source_bytes" => byte_size(source)
-      }
-    )
-  end
-
-  defp inspection_record(run_id, trace_id, sequence, record_type, correlation, payload) do
-    %{
-      "schema_version" => 8,
-      "run_id" => run_id,
-      "trace_id" => trace_id,
-      "sequence" => sequence,
-      "timestamp" => "2026-08-14T12:00:0#{sequence}Z",
-      "record_type" => record_type,
-      "correlation" => correlation,
-      "payload" => payload
-    }
-  end
 
   # ex_dna:disable-for-next-line — Keep the compared snapshot-local trace readable here.
   defp canonical_events(run_id) do
@@ -1409,5 +1466,18 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   defp result_hash(value) do
     {:ok, encoded} = DeterministicJSON.encode(value)
     "sha256:" <> Base.encode16(:crypto.hash(:sha256, encoded), case: :lower)
+  end
+
+  defp query_worker_probe(snapshot) do
+    BoundedWorker.run(
+      fn ->
+        :erlang.garbage_collect()
+        words = Process.info(self(), :total_heap_size) |> elem(1)
+        result = InspectionQuery.run(snapshot, :list_runs, %{}, 1_048_576)
+        {result, words}
+      end,
+      timeout_ms: 5_000,
+      max_heap_words: 10_000_000
+    )
   end
 end

@@ -63,7 +63,7 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSourceTest do
     run_ref = PrivateInspectionFixture.command_run_ref()
     inspection = Path.join(root, "inspection")
     File.mkdir!(inspection)
-    path = Path.join(inspection, "#{run_ref}.inspection.jsonl")
+    path = Path.join(inspection, "#{run_ref}.ptcins")
     File.touch!(path)
 
     assert {:ok, resolved} = SelectedCanonicalSource.resolve_inspection(inspection, run_ref)
@@ -99,12 +99,6 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSourceTest do
     assert {:error, :selected_run_mismatch} =
              SelectedCanonicalSource.prove_trace_events(
                [%{"run_id" => other, "trace_id" => "trace-#{other}"}],
-               run_ref
-             )
-
-    assert {:ok, "trace-" <> ^run_ref} =
-             SelectedCanonicalSource.prove_inspection_records(
-               [%{"run_id" => run_ref, "trace_id" => "trace-#{run_ref}"}],
                run_ref
              )
   end

@@ -194,7 +194,7 @@ defmodule Mix.Tasks.PtcTest do
     message = failed_message(["run", manifest_path, "--inspect", invalid_inspection])
 
     assert message =~ "destination/invalid_inspection_destination:"
-    assert message =~ ".inspection.jsonl"
+    assert message =~ ".ptcins"
     refute message =~ invalid_inspection
   end
 

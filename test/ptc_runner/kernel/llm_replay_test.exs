@@ -945,7 +945,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       write(dir, [%{"request_hash" => unrelated_hash, "response" => %{"content" => "unused"}}])
       paths = write_application(dir)
       private_input = Path.join(dir, "private-input.json")
-      inspection = Path.join(dir, "private-run.inspection.jsonl")
+      inspection = Path.join(dir, "private-run.ptcins")
       secret = "PRIVATE_REPLAY_PROMPT"
 
       File.write!(private_input, Jason.encode!(%{"secret" => secret}))

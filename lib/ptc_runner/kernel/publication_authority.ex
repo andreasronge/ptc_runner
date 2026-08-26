@@ -231,6 +231,17 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   def inspection_requested?(_authority), do: false
 
   @doc false
+  @spec inspection_handle(t()) :: PublicationHandle.t() | nil
+  def inspection_handle(%__MODULE__{} = authority) do
+    if authorized?(authority) do
+      case authority.inspect do
+        %PublicationHandle{kind: :inspection} = handle -> handle
+        _other -> nil
+      end
+    end
+  end
+
+  @doc false
   @spec destination_options(t()) :: keyword()
   def destination_options(%__MODULE__{} = authority) do
     if valid?(authority) do
@@ -680,7 +691,12 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   defp reserve_optional(nil, _kind, _mode, _claim_owner), do: {:ok, nil}
 
   defp reserve_optional(path, kind, mode, claim_owner) do
-    case PublicationHandle.reserve_for(path, kind, mode, claim_owner) do
+    reserve =
+      if kind == :inspection,
+        do: PublicationHandle.reserve_stream_for(path, kind, mode, claim_owner),
+        else: PublicationHandle.reserve_for(path, kind, mode, claim_owner)
+
+    case reserve do
       {:ok, handle} -> register_handle(claim_owner, handle)
       {:error, :destination_exists} -> {:error, :destination_exists}
       {:error, reason} -> {:error, reason}

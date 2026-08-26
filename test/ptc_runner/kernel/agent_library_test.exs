@@ -7,7 +7,6 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.EvaluationObservation
   alias PtcRunner.Kernel.EventSink
-  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
@@ -22,6 +21,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Lisp.Format
   alias PtcRunner.Lisp.TrustedTool
   alias PtcRunner.TestSupport.ProviderSessionFixture
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.ValuePreviewFixture
 
   test "llm/request is an ordinary bounded workflow capability" do
@@ -1153,7 +1153,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         end)
 
       {:ok, inspection_sink} =
-        InspectionSink.start(
+        StreamingInspection.start(
           run_id: "contract-exhaustion-#{max_turns}",
           trace_id: "contract-exhaustion-#{max_turns}"
         )
@@ -1186,7 +1186,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
       assert path.segments == [{:property, "sum"}]
 
-      assert {:ok, records} = InspectionSink.records(inspection_sink)
+      assert {:ok, records} = StreamingInspection.records(inspection_sink)
       diagnostic = Enum.find(records, &(&1["record_type"] == "execution-error"))
       assert diagnostic["payload"]["reason"] == "result_contract_failed"
 
@@ -1208,7 +1208,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       # `CommandPath` structs. Publishing them verbatim used to poison the
       # inspection sink, replacing the real outcome with an
       # `inspection_sink_error` and destroying the evidence the failed run needs.
-      assert {:ok, records} = InspectionSink.records(inspection_sink)
+      assert {:ok, records} = StreamingInspection.records(inspection_sink)
       assert diagnostic = Enum.find(records, &(&1["record_type"] == "execution-error"))
       assert diagnostic["payload"]["reason"] == "result_contract_failed"
 
@@ -1411,7 +1411,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     responses = [agent_return("invalid-envelope", ~S|(return {})|)]
 
     {:ok, inspection_sink} =
-      InspectionSink.start(
+      StreamingInspection.start(
         run_id: "core-run-envelope-exhaustion",
         trace_id: "core-run-envelope-exhaustion"
       )
@@ -1441,7 +1441,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:agent_request, _request}
     refute_receive {:agent_request, _second_request}
 
-    assert {:ok, records} = InspectionSink.records(inspection_sink)
+    assert {:ok, records} = StreamingInspection.records(inspection_sink)
     diagnostic = Enum.find(records, &(&1["record_type"] == "execution-error"))
     assert diagnostic["payload"]["reason"] == "result_contract_failed"
 
@@ -2789,7 +2789,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert String.length(Jason.encode!(exact_request)) == encoded_chars
 
     {:ok, inspection_sink} =
-      InspectionSink.start(run_id: "transcript-rejected", trace_id: "transcript-rejected")
+      StreamingInspection.start(
+        run_id: "transcript-rejected",
+        trace_id: "transcript-rejected"
+      )
 
     {:ok, rejected_config} =
       agent_config([response], [],
@@ -2808,7 +2811,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _request}
     assert_receive {:provider_closed, :transcript_rejected}
     refute_receive {:provider_closed, :transcript_rejected}
-    assert {:ok, [diagnostic]} = InspectionSink.records(inspection_sink)
+
+    assert {:ok, [diagnostic]} =
+             StreamingInspection.records(inspection_sink)
+
     assert diagnostic["record_type"] == "execution-error"
     # The ceiling names itself: a bound the caller set in its own input document
     # reports the limit and its value rather than a generic explicit failure.
@@ -2876,7 +2882,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert second_chars > first_chars
 
     {:ok, inspection_sink} =
-      InspectionSink.start(run_id: "protocol-blocked", trace_id: "protocol-blocked")
+      StreamingInspection.start(
+        run_id: "protocol-blocked",
+        trace_id: "protocol-blocked"
+      )
 
     {:ok, limited} =
       agent_config([protocol, recovered], [],
@@ -2901,7 +2910,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:provider_closed, :protocol_blocked}
     refute_receive {:provider_closed, :protocol_blocked}
 
-    assert {:ok, records} = InspectionSink.records(inspection_sink)
+    assert {:ok, records} = StreamingInspection.records(inspection_sink)
     assert diagnostic = Enum.find(records, &(&1["record_type"] == "execution-error"))
     assert diagnostic["payload"]["reason"] == "runtime_limit_exceeded"
 
@@ -2921,7 +2930,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     }
 
     {:ok, inspection_sink} =
-      InspectionSink.start(run_id: "encoding-rejected", trace_id: "encoding-rejected")
+      StreamingInspection.start(
+        run_id: "encoding-rejected",
+        trace_id: "encoding-rejected"
+      )
 
     {:ok, config} =
       agent_config([response], [],
@@ -2940,7 +2952,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _request}
     assert_receive {:provider_closed, :encoding_rejected}
     refute_receive {:provider_closed, :encoding_rejected}
-    assert {:ok, [diagnostic]} = InspectionSink.records(inspection_sink)
+
+    assert {:ok, [diagnostic]} =
+             StreamingInspection.records(inspection_sink)
+
     assert diagnostic["record_type"] == "execution-error"
     assert diagnostic["payload"]["reason"] == "prelude_contract_error"
 

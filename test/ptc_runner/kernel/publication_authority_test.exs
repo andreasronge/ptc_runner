@@ -443,7 +443,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   @tag :tmp_dir
   test "a later reservation failure releases earlier exclusive handles", %{tmp_dir: dir} do
     trace = Path.join(dir, "run.jsonl")
-    inspection = Path.join(dir, "run.inspection.jsonl")
+    inspection = Path.join(dir, "run.ptcins")
     File.write!(inspection, "occupied")
 
     assert {:error, :destination_exists} =
@@ -455,13 +455,13 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
              )
 
     assert File.lstat(trace) == {:error, :enoent}
-    assert File.ls!(dir) == ["run.inspection.jsonl"]
+    assert File.ls!(dir) == ["run.ptcins"]
   end
 
   @tag :tmp_dir
   test "a target-specific reservation failure releases earlier exclusive handles", %{tmp_dir: dir} do
     trace = Path.join(dir, "run.jsonl")
-    inspection = Path.join([dir, "missing", "run.inspection.jsonl"])
+    inspection = Path.join([dir, "missing", "run.ptcins"])
 
     assert {:error, {:destination_directory_missing, :inspection}} =
              PublicationAuthority.authorize(
@@ -510,7 +510,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
        "the trace destination is invalid"},
       {[
          "--inspect",
-         Path.join([dir, "missing-inspection-parent", "run.inspection.jsonl"])
+         Path.join([dir, "missing-inspection-parent", "run.ptcins"])
        ], "inspection_directory_missing", "--inspect must name a file in an existing directory"},
       {[
          "--output",
@@ -563,7 +563,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   @tag :tmp_dir
   test "artifact destination collisions are conflicting arguments", %{tmp_dir: dir} do
     application = application!(dir, "artifact-destination-collision")
-    destination = Path.join(dir, "shared.inspection.jsonl")
+    destination = Path.join(dir, "shared.ptcins")
 
     assert {:ok, preparation} =
              CommandEngine.prepare([

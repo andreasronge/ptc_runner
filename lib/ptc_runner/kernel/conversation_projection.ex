@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.ConversationProjection do
   @moduledoc false
 
-  alias PtcRunner.Lisp.Runtime.String, as: RuntimeString
+  alias PtcRunner.Kernel.ConversationMessage
 
   @spec compile([map()], [map()], map()) :: map()
   def compile(exchanges, programs, trace_facts)
@@ -211,7 +211,7 @@ defmodule PtcRunner.Kernel.ConversationProjection do
 
   defp add_turn(exchange, messages, predecessor, state) do
     {stream_id, turn, added, state} = stream_position(messages, predecessor, state)
-    assistant = assistant_message(exchange["result"])
+    assistant = ConversationMessage.assistant(exchange["result"])
 
     item = %{
       "turn" => turn,
@@ -255,50 +255,16 @@ defmodule PtcRunner.Kernel.ConversationProjection do
     {predecessor.stream_id, predecessor.turn + 1, added, state}
   end
 
-  defp assistant_message(%{"value" => value}) when is_map(value) do
-    value
-    |> Map.take(["content", "tool_calls"])
-    |> Map.put("role", "assistant")
-    |> ensure_assistant_content(value)
-  end
-
-  defp assistant_message(result), do: %{"role" => "assistant", "content" => result}
-
-  defp ensure_assistant_content(%{"role" => "assistant"} = message, value)
-       when map_size(message) == 1,
-       do: Map.put(message, "content", value)
-
-  defp ensure_assistant_content(message, _value), do: message
-
   defp prefix?(prefix, messages) when length(prefix) < length(messages) do
     messages
     |> Enum.take(length(prefix))
     |> Enum.zip(prefix)
     |> Enum.all?(fn {message, expected} ->
-      comparable_message(message) == comparable_message(expected)
+      ConversationMessage.comparable(message) == ConversationMessage.comparable(expected)
     end)
   end
 
   defp prefix?(_prefix, _messages), do: false
-
-  # The agent loop carries blank tool-call narration forward as nil. Compare
-  # that known provider/agent representation difference without rewriting the
-  # raw request or response retained in the projection.
-  defp comparable_message(%{"role" => "assistant", "tool_calls" => [_ | _]} = message) do
-    case Map.get(message, "content") do
-      nil -> Map.put(message, "content", nil)
-      content when is_binary(content) -> normalize_blank_content(message, content)
-      _other -> message
-    end
-  end
-
-  defp comparable_message(message), do: message
-
-  defp normalize_blank_content(message, content) do
-    if RuntimeString.blank?(content),
-      do: Map.put(message, "content", nil),
-      else: message
-  end
 
   defp add_ambiguous(exchange, reason, state) do
     entry = %{

@@ -15,6 +15,12 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
   def reserve(owner, path, kind, mode),
     do: GenServer.call(owner, {:reserve, path, kind, mode}, :infinity)
 
+  @doc false
+  @spec reserve_stream(pid(), binary(), :inspection, non_neg_integer()) ::
+          {:ok, PublicationHandle.t()} | {:error, atom()}
+  def reserve_stream(owner, path, kind, mode),
+    do: GenServer.call(owner, {:reserve_stream, path, kind, mode}, :infinity)
+
   @spec reserve_visible(pid(), binary(), PublicationHandle.kind(), non_neg_integer()) ::
           {:ok, PublicationHandle.t()} | {:error, atom()}
   def reserve_visible(owner, path, kind, mode),
@@ -49,6 +55,16 @@ defmodule PtcRunner.Kernel.PublicationHandleOwner do
   end
 
   def handle_call({:reserve, _path, _kind, _mode}, _from, state),
+    do: {:reply, {:error, :destination_unavailable}, state}
+
+  def handle_call({:reserve_stream, path, :inspection, mode}, _from, %{handle: nil} = state) do
+    case PublicationHandle.reserve_direct(path, :inspection, mode, self()) do
+      {:ok, handle} -> {:reply, {:ok, handle}, %{state | handle: handle}}
+      {:error, _reason} = error -> {:stop, :normal, error, state}
+    end
+  end
+
+  def handle_call({:reserve_stream, _path, _kind, _mode}, _from, state),
     do: {:reply, {:error, :destination_unavailable}, state}
 
   def handle_call({:reserve_visible, path, kind, mode}, _from, %{handle: nil} = state) do

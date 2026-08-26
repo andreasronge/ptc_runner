@@ -196,7 +196,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
     do: {:error, publication_failure(report, :inspection, reason)}
 
   defp publish_inspection(
-         %{inspection: {:ok, records}, terminal_batch: {:ok, events}},
+         %{inspection: {:ok, seal}, terminal_batch: {:ok, _events}},
          authority,
          report,
          hooks
@@ -206,10 +206,9 @@ defmodule PtcRunner.Kernel.ArtifactPublisher do
         {:error, publication_failure(report, :inspection, :missing_destination)}
 
       inspection ->
-        case InspectionArtifact.persist_handle(
+        case InspectionArtifact.publish_handle(
                inspection,
-               records,
-               events,
+               seal,
                hook(hooks, :inspection)
              ) do
           :ok -> {:ok, with_written(report, :inspection)}

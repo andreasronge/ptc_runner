@@ -122,7 +122,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the trace destination is unavailable"},
     {:destination, :trace_destination_unsafe, 7, false, "the trace destination is unsafe"},
     {:destination, :invalid_inspection_destination, 7, false,
-     "--inspect must name a valid destination ending in .inspection.jsonl"},
+     "--inspect must name a valid destination ending in .ptcins"},
     {:destination, :inspection_destination_unavailable, 7, false,
      "the inspection destination is unavailable"},
     {:destination, :inspection_directory_missing, 7, false,

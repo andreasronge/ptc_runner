@@ -137,7 +137,7 @@ The host supplies a module or three-argument function implementing
   PtcViewer.start(
     trace_dir: "traces",
     kernel_trace_adapter: PtcRunner.Kernel.ViewerAdapter,
-    inspection_file: "traces/run.inspection.jsonl",
+    inspection_file: "traces/run.ptcins",
     inspection_adapter: PtcRunner.Kernel.ViewerAdapter,
     open: false
   )

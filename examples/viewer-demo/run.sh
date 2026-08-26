@@ -47,7 +47,7 @@ cd "$repo_root"
 
 run_journey() {
   local journey=$1 expect=$2
-  rm -f "$artifacts/traces/$journey.jsonl" "$artifacts/inspection/$journey.inspection.jsonl"
+  rm -f "$artifacts/traces/$journey.jsonl" "$artifacts/inspection/$journey.ptcins"
   echo "=== $journey ==="
   local marker="$out/.${journey}.started"
   touch "$marker"
@@ -57,7 +57,7 @@ run_journey() {
     --env-file "$repo_root/.env" \
     --host-config "$demo_dir/ptc-host.json" \
     --trace-dir "$artifacts/traces" \
-    --inspect "$artifacts/inspection/$journey.inspection.jsonl" || status=$?
+    --inspect "$artifacts/inspection/$journey.ptcins" || status=$?
 
   local generated_trace
   generated_trace="$(find "$artifacts/traces" -maxdepth 1 -type f -name 'cmd-*.jsonl' -newer "$marker" -print)"
@@ -86,7 +86,7 @@ run_journey() {
     any) ;;
   esac
 
-  for artifact in "$artifacts/traces/$journey.jsonl" "$artifacts/inspection/$journey.inspection.jsonl"; do
+  for artifact in "$artifacts/traces/$journey.jsonl" "$artifacts/inspection/$journey.ptcins"; do
     if [ ! -s "$artifact" ]; then
       echo "FAIL: $journey produced no $artifact" >&2
       exit 1
@@ -112,10 +112,10 @@ require_evidence 03-limits "$artifacts/traces/03-limits.jsonl" '"limit-exceeded"
 # outcome and the private feedback must carry the intended error code.
 run_journey 04-loop-limit error
 require_evidence 04-loop-limit "$artifacts/traces/04-loop-limit.jsonl" '"outcome":"error"' "an error run outcome"
-require_evidence 04-loop-limit "$artifacts/inspection/04-loop-limit.inspection.jsonl" 'loop_limit_exceeded' "loop-limit feedback"
+require_evidence 04-loop-limit "$artifacts/inspection/04-loop-limit.ptcins" 'loop_limit_exceeded' "loop-limit feedback"
 run_journey 05-memory error
 require_evidence 05-memory "$artifacts/traces/05-memory.jsonl" '"outcome":"error"' "an error run outcome"
-require_evidence 05-memory "$artifacts/inspection/05-memory.inspection.jsonl" 'memory_exceeded' "heap-budget feedback"
+require_evidence 05-memory "$artifacts/inspection/05-memory.ptcins" 'memory_exceeded' "heap-budget feedback"
 
 # The project document must name an application, and it must be a portable
 # path beneath the document -- so one journey manifest is copied next to it.

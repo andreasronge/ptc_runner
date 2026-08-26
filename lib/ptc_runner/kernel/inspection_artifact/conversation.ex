@@ -1,4 +1,4 @@
-defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
+defmodule PtcRunner.Kernel.InspectionArtifact.Conversation do
   @moduledoc """
   Digest-based turn reconstruction that never retains evidence payloads.
 
@@ -7,8 +7,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
   In-flight request messages are staged only until the matching output arrives.
   """
 
+  alias PtcRunner.Kernel.ConversationMessage
   alias PtcRunner.Kernel.DeterministicJSON
-  alias PtcRunner.Lisp.Runtime.String, as: RuntimeString
 
   @type node_row :: %{
           complete_hash: binary(),
@@ -50,7 +50,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
   end
 
   @spec observe_source(map(), map()) :: map()
-  def observe_source(state, record) when is_map(state) and is_map(record) do
+  def observe_source(state, %{"record_type" => "evaluation-source"} = record)
+      when is_map(state) do
     source = get_in(record, ["payload", "source"])
 
     if is_binary(source) do
@@ -73,6 +74,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
     end
   end
 
+  def observe_source(state, _record), do: state
+
   @spec finish(map(), map()) :: map()
   def finish(state, trace_facts) when is_map(state) and is_map(trace_facts) do
     source_counts = Enum.frequencies_by(state.source_hashes, & &1.hash)
@@ -91,8 +94,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
     expected = MapSet.new(Map.get(trace_facts, "expected_model_exchange_ids", []))
 
     captured =
-      turns
-      |> Enum.map(& &1.capability_id)
+      (Enum.map(turns, & &1.capability_id) ++
+         Enum.map(state.ambiguous, & &1["capability_id"]))
       |> MapSet.new()
 
     missing_exchange_count = expected |> MapSet.difference(captured) |> MapSet.size()
@@ -125,7 +128,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
   def assemble_turn(turn_meta, input, output, generated) do
     exchange = capability_pair(input, output)
     messages = get_in(exchange, ["arguments", "messages"]) || []
-    assistant = assistant_message(exchange["result"])
+    assistant = ConversationMessage.assistant(exchange["result"])
     predecessor_count = max(length(messages) - added_count(turn_meta), 0)
     added = Enum.drop(messages, predecessor_count)
 
@@ -153,7 +156,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
     messages = get_in(record, ["payload", "arguments", "messages"])
 
     if is_list(messages) do
-      comparable = Enum.map(messages, &comparable_message/1)
+      comparable = Enum.map(messages, &ConversationMessage.comparable/1)
       {stream_id, turn, added_count, state} = choose_predecessor(state, comparable)
 
       pending = %{
@@ -219,8 +222,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
             "multiple_maximal_predecessors"
           )
         else
-          assistant = assistant_message(record["payload"]["result"])
-          complete = pending.comparable ++ [comparable_message(assistant)]
+          assistant = ConversationMessage.assistant(record["payload"]["result"])
+          complete = pending.comparable ++ [ConversationMessage.comparable(assistant)]
           {:ok, encoded} = DeterministicJSON.encode(complete)
           program_hashes = program_hashes(record["payload"]["result"])
 
@@ -254,18 +257,19 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
   end
 
   defp attach_generated(turn, source_hashes, source_counts) do
-    generated =
-      Enum.flat_map(turn.program_hashes, fn hash ->
-        matches = Enum.filter(source_hashes, &(&1.hash == hash))
+    requested = MapSet.new(turn.program_hashes)
 
-        Enum.map(matches, fn source ->
-          %{
-            sequence: source.sequence,
-            evaluation_id: source.evaluation_id,
-            association: "source_match",
-            association_ambiguous?: Map.get(source_counts, hash, 0) > 1
-          }
-        end)
+    generated =
+      source_hashes
+      |> Enum.reverse()
+      |> Enum.filter(&MapSet.member?(requested, &1.hash))
+      |> Enum.map(fn source ->
+        %{
+          sequence: source.sequence,
+          evaluation_id: source.evaluation_id,
+          association: "source_match",
+          association_ambiguous?: Map.get(source_counts, source.hash, 0) > 1
+        }
       end)
 
     Map.put(turn, :generated, generated)
@@ -312,39 +316,6 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Conversation do
   defp program_hashes(_result), do: []
 
   defp hash_value(value) when is_binary(value), do: :crypto.hash(:sha256, value)
-
-  # ex_dna:disable-for-next-line — research prototype mirrors ConversationProjection for the differential oracle
-  defp comparable_message(%{"role" => "assistant", "tool_calls" => [_ | _]} = message) do
-    case Map.get(message, "content") do
-      nil -> Map.put(message, "content", nil)
-      content when is_binary(content) -> normalize_blank_content(message, content)
-      _other -> message
-    end
-  end
-
-  defp comparable_message(message), do: message
-
-  defp normalize_blank_content(message, content) do
-    if RuntimeString.blank?(content),
-      do: Map.put(message, "content", nil),
-      else: message
-  end
-
-  # ex_dna:disable-for-next-line — research prototype mirrors ConversationProjection for the differential oracle
-  defp assistant_message(%{"value" => value}) when is_map(value) do
-    value
-    |> Map.take(["content", "tool_calls"])
-    |> Map.put("role", "assistant")
-    |> ensure_assistant_content(value)
-  end
-
-  defp assistant_message(result), do: %{"role" => "assistant", "content" => result}
-
-  defp ensure_assistant_content(%{"role" => "assistant"} = message, value)
-       when map_size(message) == 1,
-       do: Map.put(message, "content", value)
-
-  defp ensure_assistant_content(message, _value), do: message
 
   defp added_count(%{messages_added_count: count}) when is_integer(count) and count >= 0,
     do: count

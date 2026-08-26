@@ -1,10 +1,10 @@
-defmodule PtcRunner.Research.SealedEvidenceLog.Items do
+defmodule PtcRunner.Kernel.InspectionArtifact.Items do
   @moduledoc false
 
-  alias PtcRunner.Research.SealedEvidenceLog.Codec
-  alias PtcRunner.Research.SealedEvidenceLog.Conversation
-  alias PtcRunner.Research.SealedEvidenceLog.Handle
-  alias PtcRunner.Research.SealedEvidenceLog.Indexes
+  alias PtcRunner.Kernel.InspectionArtifact.Codec
+  alias PtcRunner.Kernel.InspectionArtifact.Conversation
+  alias PtcRunner.Kernel.InspectionArtifact.Handle
+  alias PtcRunner.Kernel.InspectionArtifact.Indexes
 
   @spec read_record(Handle.t(), Indexes.t(), binary(), pos_integer(), pos_integer()) ::
           {:ok, map(), non_neg_integer()} | {:error, atom()}
@@ -115,7 +115,6 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Items do
   end
 
   @spec execution_item(map(), term()) :: map()
-  # ex_dna:disable-for-next-line — research prototype mirrors InspectionQuery for the differential oracle
   def execution_item(record, relationships) do
     %{
       "run_id" => record["run_id"],
@@ -129,7 +128,6 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Items do
   end
 
   @spec result_item(map()) :: map()
-  # ex_dna:disable-for-next-line — research prototype mirrors InspectionQuery for the differential oracle
   def result_item(record) do
     payload = record["payload"]
 

@@ -91,7 +91,7 @@ relationship, and discloses no path.
 
 `RUN_ID` must be a canonical PTC command run reference. The command then
 captures exactly `RUN_ID.jsonl` or `RUN_ID.private.jsonl` under `--traces` and
-`RUN_ID.inspection.jsonl` under `--inspection`. It does not list those
+`RUN_ID.ptcins` under `--inspection`. It does not list those
 directories, so unrelated, malformed, or oversized history cannot reject a
 valid selected pair. Selected files still keep their individual source,
 record, retained-memory, heap, deadline, and result ceilings. Both trace

@@ -5,6 +5,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.MixCommandAdapter
   alias PtcRunner.TestSupport.PrivateInspectionFixture
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TranscriptFrontend
 
   defp canonical_create!(root, seed \\ 0) do
@@ -302,7 +303,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "reports an unsupported private artifact schema without publishing output", %{
+  test "reports a non-V1 private artifact as malformed without a legacy reader", %{
     tmp_dir: root
   } do
     fixture = canonical_create!(root)
@@ -325,9 +326,8 @@ defmodule Mix.Tasks.PtcTranscriptTest do
       ])
 
     assert presentation.exit_status == 1
-    assert presentation.stderr =~ "error: transcript/unsupported_schema:"
-    assert presentation.stderr =~ "schema version 4 is unsupported"
-    assert presentation.stderr =~ "supports version 8"
+    assert presentation.stderr =~ "error: transcript/malformed_source:"
+    assert presentation.stderr =~ "selected transcript source is malformed"
     refute File.exists?(output)
   end
 
@@ -381,7 +381,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     ]
 
     assert {:ok, entry} = CommandEntry.open(argv, :standalone)
-    [inspection_path] = Path.wildcard(Path.join(fixture.inspection, "*.inspection.jsonl"))
+    [inspection_path] = Path.wildcard(Path.join(fixture.inspection, "*.ptcins"))
 
     assert {:error, :source_changed, "analysis source changed during capture"} =
              TranscriptFrontend.run(entry.arguments, CommandRuntime.standalone(),
@@ -394,19 +394,20 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
-  test "removing the selected inspection during verification is a source change", %{tmp_dir: root} do
+  test "a pinned selected inspection survives path removal during admission", %{tmp_dir: root} do
     fixture = canonical_create!(root)
     output = Path.join(fixture.output, "removed-inspection.json")
     argv = transcript_argv(fixture, output)
     assert {:ok, entry} = CommandEntry.open(argv, :standalone)
-    inspection_path = Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl")
+    inspection_path = Path.join(fixture.inspection, "#{fixture.run_id}.ptcins")
 
-    assert {:error, :source_changed, "analysis source changed during capture"} =
+    assert :ok =
              TranscriptFrontend.run(entry.arguments, CommandRuntime.standalone(),
                inspection_artifact_verification_hook: fn -> File.rm!(inspection_path) end
              )
 
-    refute File.exists?(output)
+    assert File.regular?(output)
+    refute File.exists?(inspection_path)
   end
 
   test "every missing required argument reports the complete transcript command shape" do
@@ -457,7 +458,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     File.write!(Path.join(fixture.traces, "broken.jsonl"), "{not-json\n")
 
     File.write!(
-      Path.join(fixture.inspection, "broken.inspection.jsonl"),
+      Path.join(fixture.inspection, "broken.ptcins"),
       ~s({"schema_version":4}\n)
     )
 
@@ -520,7 +521,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   @tag :tmp_dir
   test "a missing selected inspection is distinct from a missing selected trace", %{tmp_dir: root} do
     fixture = canonical_create!(root)
-    File.rm!(Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl"))
+    File.rm!(Path.join(fixture.inspection, "#{fixture.run_id}.ptcins"))
     output = Path.join(fixture.output, "missing-inspection.json")
 
     presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
@@ -564,8 +565,8 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     )
 
     File.rename!(
-      Path.join(embedded.inspection, "#{embedded.run_id}.inspection.jsonl"),
-      Path.join(embedded.inspection, "#{selector}.inspection.jsonl")
+      Path.join(embedded.inspection, "#{embedded.run_id}.ptcins"),
+      Path.join(embedded.inspection, "#{selector}.ptcins")
     )
 
     output = Path.join(embedded.output, "mismatch.json")
@@ -599,7 +600,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   @tag :tmp_dir
   test "a malformed selected inspection fails without publishing output", %{tmp_dir: root} do
     fixture = canonical_create!(root)
-    File.write!(Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl"), "not-json\n")
+    File.write!(Path.join(fixture.inspection, "#{fixture.run_id}.ptcins"), "not-json\n")
     output = Path.join(fixture.output, "malformed-inspection.json")
 
     presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
@@ -614,8 +615,8 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   @tag :tmp_dir
   test "a selected inspection symlink is refused without disclosing the path", %{tmp_dir: root} do
     fixture = canonical_create!(root)
-    real = Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl")
-    linked = Path.join(root, "linked.inspection.jsonl")
+    real = Path.join(fixture.inspection, "#{fixture.run_id}.ptcins")
+    linked = Path.join(root, "linked.ptcins")
     File.rename!(real, linked)
     File.ln_s!(linked, real)
     output = Path.join(fixture.output, "symlink-inspection.json")
@@ -660,20 +661,11 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   @tag :tmp_dir
   test "a selected correlation mismatch fails without disclosing identities", %{tmp_dir: root} do
     fixture = canonical_create!(root)
-    path = Path.join(fixture.inspection, "#{fixture.run_id}.inspection.jsonl")
+    path = Path.join(fixture.inspection, "#{fixture.run_id}.ptcins")
 
-    rewritten =
-      path
-      |> File.stream!()
-      |> Enum.map_join(fn line ->
-        line
-        |> Jason.decode!()
-        |> Map.put("trace_id", "trace-unrelated")
-        |> Jason.encode!()
-        |> Kernel.<>("\n")
-      end)
-
-    File.write!(path, rewritten)
+    {:ok, records} = StreamingInspection.read_path(path)
+    rewritten = Enum.map(records, &Map.put(&1, "trace_id", "trace-unrelated"))
+    StreamingInspection.rewrite_path(path, rewritten)
     output = Path.join(fixture.output, "correlation-mismatch.json")
 
     presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))

@@ -718,17 +718,7 @@ defmodule PtcRunner.ReplFrontend do
     do: empty_resource_error("traces", "*.jsonl trace files")
 
   defp profile_setup_error(:empty_inspection_resource),
-    do: empty_resource_error("inspection", "*.inspection.jsonl records")
-
-  defp profile_setup_error(
-         {:unsupported_inspection_schema_version,
-          %{artifact_version: artifact_version, supported_version: supported_version}}
-       )
-       when is_integer(artifact_version) and is_integer(supported_version) do
-    "ptc repl profile setup failed: an inspection artifact declares schema version " <>
-      "#{artifact_version}; this build supports version #{supported_version}. " <>
-      "Use a matching PtcRunner build or regenerate the artifact."
-  end
+    do: empty_resource_error("inspection", "*.ptcins records")
 
   defp profile_setup_error(reason) when is_atom(reason),
     do: "ptc repl profile setup failed: #{reason}"

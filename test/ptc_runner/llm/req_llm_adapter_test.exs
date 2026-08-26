@@ -2,7 +2,6 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Kernel.Dispatcher
-  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.ProviderError
@@ -10,6 +9,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
   alias ReqLLM.Message
   alias ReqLLM.ToolCall
@@ -215,7 +215,10 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       {:ok, state} = RunState.start(Limits.defaults())
 
       {:ok, inspection_sink} =
-        InspectionSink.start(run_id: "llm-provider-error", trace_id: "llm-provider-error-trace")
+        StreamingInspection.start(
+          run_id: "llm-provider-error",
+          trace_id: "llm-provider-error-trace"
+        )
 
       assert %{
                status: :error,
@@ -240,7 +243,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                )
 
       assert details =~ provider_message
-      assert {:ok, records} = InspectionSink.records(inspection_sink)
+      assert {:ok, records} = StreamingInspection.records(inspection_sink)
 
       assert Enum.any?(records, fn record ->
                record["record_type"] == "capability-output" and

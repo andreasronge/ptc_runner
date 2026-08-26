@@ -111,7 +111,7 @@ For `run`, enabled project artifacts derive from the command run reference:
 ```text
 .ptc/traces/<run-ref>.jsonl
 .ptc/traces/<run-ref>.private.jsonl
-.ptc/inspection/<run-ref>.inspection.jsonl
+.ptc/inspection/<run-ref>.ptcins
 .ptc/results/<run-ref>.json
 .ptc/results/<run-ref>.private.json
 .ptc/envelopes/<run-ref>.json

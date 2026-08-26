@@ -3,8 +3,6 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.EventSink
-  alias PtcRunner.Kernel.InspectionArtifact
-  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -16,6 +14,7 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.TrustedError
+  alias PtcRunner.TestSupport.StreamingInspection
 
   test "kernel JSON results project atom-backed and struct-backed keywords uniformly" do
     source =
@@ -182,7 +181,7 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
 
   test "private inspection names the JSON projection failure without widening the public error" do
     {:ok, inspection} =
-      InspectionSink.start(
+      StreamingInspection.start(
         run_id: "keyword-projection-inspection",
         trace_id: "keyword-projection-inspection"
       )
@@ -193,7 +192,7 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
               details: %{result_projection: true}
             }} = run(~S|(return #{1 2})|, :json, inspection_sink: inspection)
 
-    assert {:ok, [record]} = InspectionSink.records(inspection)
+    assert {:ok, [record]} = StreamingInspection.records(inspection)
     assert record["record_type"] == "execution-error"
 
     assert record["payload"]["details"] == %{
@@ -214,7 +213,7 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
                config
              )
 
-    assert {:ok, records} = InspectionSink.records(inspection)
+    assert {:ok, records} = StreamingInspection.records(inspection)
     source = Enum.find(records, &(&1["record_type"] == "evaluation-source"))
     error = Enum.find(records, &(&1["record_type"] == "execution-error"))
 
@@ -238,9 +237,9 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
     File.chmod!(inspection_dir, 0o700)
 
     trace_path = Path.join(trace_dir, "boundary-producer.jsonl")
-    inspection_path = Path.join(inspection_dir, "boundary-producer.inspection.jsonl")
+    inspection_path = Path.join(inspection_dir, "boundary-producer.ptcins")
     File.write!(trace_path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
-    assert :ok = InspectionArtifact.persist(inspection_path, records, events)
+    assert :ok = StreamingInspection.write_path(inspection_path, records)
 
     assert {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, trace_dir})
     assert {:ok, snapshot} = InspectionSnapshot.start({:directory, inspection_dir}, trace)
@@ -277,7 +276,7 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
                config
              )
 
-    assert {:ok, records} = InspectionSink.records(inspection)
+    assert {:ok, records} = StreamingInspection.records(inspection)
     error = Enum.find(records, &(&1["record_type"] == "execution-error"))
 
     # The breached ceiling records itself so the failure names its own limit,
@@ -294,7 +293,9 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new(terminal_result_bytes: 1)
     {:ok, events} = EventSink.start(:normal, limits, run_id: run_id)
-    {:ok, inspection} = InspectionSink.start(run_id: run_id, trace_id: run_id)
+
+    {:ok, inspection} =
+      StreamingInspection.start(run_id: run_id, trace_id: run_id)
 
     {:ok, config} =
       RunConfig.new(

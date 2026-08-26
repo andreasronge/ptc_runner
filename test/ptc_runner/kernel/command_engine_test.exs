@@ -30,7 +30,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
@@ -44,6 +43,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ValueContractClassification
   alias PtcRunner.StandaloneCLI
   alias PtcRunner.TestSupport.MCPHTTPFixture
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   @zero_entropy <<0::128>>
@@ -593,7 +593,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     tmp_dir: directory
   } do
     application = write_application(directory, "explicit-fail-inspect", valid_manifest())
-    inspection = Path.join(directory, "run.inspection.jsonl")
+    inspection = Path.join(directory, "run.ptcins")
 
     File.write!(
       Path.join(Path.dirname(application), "main.clj"),
@@ -608,7 +608,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     refute Jason.encode!(outcome.envelope) =~ "must-not-escape"
     assert_schema_valid(outcome.envelope)
 
-    assert {:ok, records} = InspectionArtifact.load(inspection)
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
     error_record = Enum.find(records, &(&1["record_type"] == "execution-error"))
     fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
 
@@ -651,7 +651,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     application = write_application(directory, "private-not-callable", valid_manifest())
     input = Path.join(Path.dirname(application), "private-input.json")
     output = Path.join(directory, "private-result.json")
-    inspection = Path.join(directory, "run.inspection.jsonl")
+    inspection = Path.join(directory, "run.ptcins")
     File.write!(input, ~s({}))
 
     File.write!(
@@ -675,7 +675,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["execution"]["last_evaluation_error"] == nil
     assert_schema_valid(outcome.envelope)
 
-    assert {:ok, records} = InspectionArtifact.load(inspection)
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
     error_record = Enum.find(records, &(&1["record_type"] == "execution-error"))
     assert error_record["payload"]["kind"] == "workflow_failed"
     assert error_record["payload"]["reason"] == "not_callable"
@@ -685,7 +685,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   @tag :tmp_dir
   test "fail nil retains a dedicated inspection record", %{tmp_dir: directory} do
     application = write_application(directory, "explicit-fail-nil", valid_manifest())
-    inspection = Path.join(directory, "run.inspection.jsonl")
+    inspection = Path.join(directory, "run.ptcins")
 
     File.write!(
       Path.join(Path.dirname(application), "main.clj"),
@@ -699,7 +699,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["execution"]["last_evaluation_error"] == nil
     assert_schema_valid(outcome.envelope)
 
-    assert {:ok, records} = InspectionArtifact.load(inspection)
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
     fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
     assert fail_record["payload"]["environment"] == "workflow"
     assert fail_record["payload"]["value"] == nil
@@ -710,7 +710,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     tmp_dir: directory
   } do
     application = write_application(directory, "explicit-fail-sentinel", valid_manifest())
-    inspection = Path.join(directory, "run.inspection.jsonl")
+    inspection = Path.join(directory, "run.ptcins")
 
     File.write!(
       Path.join(Path.dirname(application), "main.clj"),
@@ -725,7 +725,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     refute Jason.encode!(outcome.envelope) =~ "__ptc_no_explicit_failure__"
     assert_schema_valid(outcome.envelope)
 
-    assert {:ok, records} = InspectionArtifact.load(inspection)
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
     fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
     assert fail_record["payload"]["environment"] == "workflow"
     assert fail_record["payload"]["value"] == "__ptc_no_explicit_failure__"
@@ -1784,7 +1784,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     for {switch, destination, code} <- [
           {"--output", Path.join(absent, "result.json"), "result_directory_missing"},
           {"--private-output", Path.join(absent, "result.json"), "result_directory_missing"},
-          {"--inspect", Path.join(absent, "run.inspection.jsonl"), "inspection_directory_missing"}
+          {"--inspect", Path.join(absent, "run.ptcins"), "inspection_directory_missing"}
         ] do
       assert {:error, %CommandOutcome{} = outcome} =
                CommandEngine.dispatch(["run", application, switch, destination])
@@ -5340,10 +5340,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert {:error, :invalid_execution_policy} =
              RunBuilder.build(request, registry,
-               inspect: Path.join(directory, "unexpected-inspection.jsonl")
+               inspect: Path.join(directory, "unexpected.ptcins")
              )
 
-    occupied = Path.join(directory, "occupied-inspection.jsonl")
+    occupied = Path.join(directory, "occupied.ptcins")
     File.write!(occupied, "occupied")
 
     assert {:ok, inspection_request} =
@@ -5990,7 +5990,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   } do
     application = write_application(directory, "continuation-state", valid_manifest())
     output = Path.join(directory, "result.json")
-    inspection = Path.join(directory, "inspection.jsonl")
+    inspection = Path.join(directory, "inspection.ptcins")
 
     assert {:ok, preparation} =
              CommandEngine.prepare([
@@ -6052,7 +6052,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     }
 
     for {catalog, destinations} <- [
-          {preparation.catalog, %{inspect: "inspection.jsonl"}},
+          {preparation.catalog, %{inspect: "inspection.ptcins"}},
           {preparation.catalog, %{trace_dir: "trace"}},
           {preparation.catalog, %{output: "normal.json", private_output: "private.json"}},
           {invalid_catalog, %{}},

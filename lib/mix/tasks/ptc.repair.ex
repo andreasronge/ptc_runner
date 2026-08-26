@@ -477,7 +477,7 @@ defmodule Mix.Tasks.Ptc.Repair do
     case_root = Path.join(root, prefix)
     inspection_root = Path.join(case_root, "inspection")
     output = Path.join(case_root, "result.private.json")
-    inspection = Path.join(inspection_root, "run.inspection.jsonl")
+    inspection = Path.join(inspection_root, "run.ptcins")
     envelope = Path.join(case_root, "envelope.private.json")
     traces = Path.join(case_root, "traces")
 
