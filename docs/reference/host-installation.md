@@ -185,6 +185,18 @@ with `config.max_calls`; asking above the host ceiling is refused rather than
 clamped. When that selected cap is at or above the run's per-name
 `llm-request` budget, the public per-name quota still binds first.
 
+`ceilings.request_timeout_ms` is the selected installation's whole-call
+deadline. Omitted, it defaults to 120000 ms, clamped by the host
+`limits.llm_request_timeout_ms` ceiling (also 120000 unless the host document
+widens or narrows it). The accepted range is 100 through that host ceiling.
+Applications may only narrow `limits.llm_request_timeout_ms`; they cannot raise
+the installation ceiling. Changing `ceilings.request_timeout_ms` requires a new
+`installation_revision`. Dispatcher samples one absolute deadline immediately
+before admission and enforces it through the provider worker and structured
+output validation. When that LLM clock wins over the enclosing run or workflow
+clocks, the public result is retryable `timeout/llm_request_timeout`. Replay
+installations do not carry this deadline.
+
 ```json
 "deepseek": {
   "source": "llm",

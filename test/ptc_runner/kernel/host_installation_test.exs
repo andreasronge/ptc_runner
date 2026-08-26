@@ -973,7 +973,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              installation_revision: "model-policy-v2",
              default: false,
              max_calls: 128,
-             structured_output_mode: :unsupported
+             structured_output_mode: :unsupported,
+             request_timeout_ms: 120_000
            }
 
     assert {:error, :provider_destination_denied} =
@@ -1057,10 +1058,13 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
             }} = ProviderSnapshot.llm_identity(built.snapshot)
 
     assert {:ok, response} =
-             capability.callback.(%{
-               "messages" => [%{"role" => "user", "content" => "hello"}],
-               "cache" => true
-             })
+             capability.callback.(
+               %{
+                 "messages" => [%{"role" => "user", "content" => "hello"}],
+                 "cache" => true
+               },
+               LLMSupport.llm_context()
+             )
 
     assert response["content"] == "ok"
 
@@ -1142,7 +1146,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert [%{callback: requester}] = built.capabilities
 
     assert {:ok, %{"content" => "ok"}} =
-             requester.(%{"messages" => [%{"role" => "user", "content" => "hello"}]})
+             requester.(
+               %{"messages" => [%{"role" => "user", "content" => "hello"}]},
+               LLMSupport.llm_context()
+             )
 
     assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", request}
     assert request.exact_options.max_tokens == 100
@@ -1338,9 +1345,12 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
         for content <- ["first", "second"] do
           assert {:ok, %{"content" => "ok"}} =
-                   requester.(%{
-                     "messages" => [%{"role" => "user", "content" => content}]
-                   })
+                   requester.(
+                     %{
+                       "messages" => [%{"role" => "user", "content" => content}]
+                     },
+                     LLMSupport.llm_context()
+                   )
         end
       end)
 
@@ -1894,7 +1904,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     )
 
     assert {:error, %PtcRunner.Kernel.ProviderError{} = stopped} =
-             build_capability.().callback.(request)
+             build_capability.().callback.(request, LLMSupport.llm_context())
 
     assert stopped.kind == :internal
     assert stopped.retryable? == false
@@ -1905,7 +1915,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     Application.put_env(:ptc_runner, :host_llm_test_provider_application, nil)
 
     assert {:error, %PtcRunner.Kernel.ProviderError{} = running} =
-             build_capability.().callback.(request)
+             build_capability.().callback.(request, LLMSupport.llm_context())
 
     assert running.kind == :unavailable
     assert running.retryable? == true
@@ -1935,7 +1945,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     )
 
     assert {:error, %PtcRunner.Kernel.ProviderError{} = raised} =
-             build_capability.().callback.(request)
+             build_capability.().callback.(request, LLMSupport.llm_context())
 
     assert raised.kind == :internal
     assert raised.retryable? == false

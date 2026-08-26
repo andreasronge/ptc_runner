@@ -104,6 +104,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :provider_heap_exceeded,
     :provider_result_limit,
     :provider_timeout,
+    :llm_request_timeout,
     :rate_limited,
     :reservation_held,
     :resolver_unavailable,

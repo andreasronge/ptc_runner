@@ -31,12 +31,17 @@ defmodule PtcRunner.Kernel.LLMCapability do
 
   @spec new(keyword()) :: {:ok, Capability.t()} | {:error, :invalid_llm_capability}
   @doc """
-  Constructs `llm-request` from a required one-argument `:requester` and
-  optional positive `:max_request_bytes` and `:max_response_bytes` limits.
+  Constructs `llm-request` from a required `:requester` and optional positive
+  `:max_request_bytes` and `:max_response_bytes` limits.
+
+  The requester is arity two: a provider-neutral request plus
+  `%{llm_request_deadline_ms: integer() | nil}`. Arity one is accepted for
+  callers that ignore the deadline context.
   """
   def new(opts) when is_list(opts) do
     with true <- Keyword.keys(opts) -- [:requester, :max_request_bytes, :max_response_bytes] == [],
-         requester when is_function(requester, 1) <- Keyword.get(opts, :requester),
+         requester when is_function(requester, 1) or is_function(requester, 2) <-
+           Keyword.get(opts, :requester),
          request_limit when is_integer(request_limit) and request_limit > 0 <-
            Keyword.get(opts, :max_request_bytes, @default_max_bytes),
          response_limit when is_integer(response_limit) and response_limit > 0 <-
@@ -67,7 +72,7 @@ defmodule PtcRunner.Kernel.LLMCapability do
              },
              output_schema: %{"type" => "object", "additionalProperties" => true},
              validate: fn request -> validate_request(request, request_limit) end,
-             callback: fn request -> invoke(requester, request, response_limit) end
+             callback: requester_callback(requester, response_limit)
            ) do
       {:ok, capability}
     else
@@ -85,10 +90,40 @@ defmodule PtcRunner.Kernel.LLMCapability do
       else: {:error, "invalid or oversized LLM request"}
   end
 
-  defp invoke(requester, request, response_limit) do
+  defp requester_callback(requester, response_limit) when is_function(requester, 2) do
+    fn request, context ->
+      invoke(requester, request, requester_context(context), response_limit)
+    end
+  end
+
+  defp requester_callback(requester, response_limit) when is_function(requester, 1) do
+    fn request -> invoke(requester, request, %{llm_request_deadline_ms: nil}, response_limit) end
+  end
+
+  defp requester_context(%{llm_request_deadline_ms: deadline})
+       when is_integer(deadline) or is_nil(deadline),
+       do: %{llm_request_deadline_ms: deadline}
+
+  defp requester_context(_context), do: %{llm_request_deadline_ms: nil}
+
+  defp invoke(requester, request, context, response_limit) when is_function(requester, 2) do
     schema_request? = schema_request?(request)
 
-    case requester.(request) do
+    classify_requester_result(
+      requester.(request, context),
+      request,
+      response_limit,
+      schema_request?
+    )
+  end
+
+  defp invoke(requester, request, _context, response_limit) when is_function(requester, 1) do
+    schema_request? = schema_request?(request)
+    classify_requester_result(requester.(request), request, response_limit, schema_request?)
+  end
+
+  defp classify_requester_result(result, _request, response_limit, schema_request?) do
+    case result do
       {:ok, response} ->
         normalize_response(response, response_limit, schema_request?)
 

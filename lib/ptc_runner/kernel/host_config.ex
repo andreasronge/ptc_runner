@@ -8,8 +8,8 @@ defmodule PtcRunner.Kernel.HostConfig do
   effects; live LLM installations fix the model, structured-output mode, cache
   policy, and optional sampling parameters. A manifest may later select an
   installed alias and narrow its authority; it cannot introduce or replace any
-  field decoded here. Changing `structured_output_mode` requires a new
-  `installation_revision`.
+  field decoded here. Changing `structured_output_mode` or an installation
+  `ceilings.request_timeout_ms` requires a new `installation_revision`.
 
   An optional `limits` block replaces cataloged installed ceilings, so an
   operator can permit work measured in hours rather than in one bounded run.
@@ -181,7 +181,8 @@ defmodule PtcRunner.Kernel.HostConfig do
               ceilings: %{
                 max_request_bytes: pos_integer(),
                 max_response_bytes: pos_integer(),
-                max_calls: pos_integer()
+                max_calls: pos_integer(),
+                request_timeout_ms: pos_integer()
               },
               data_class: :normal | :private_inspection,
               accepts_data: [:normal | :private_inspection]
@@ -356,7 +357,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          {:ok, runtime} <- runtime(Map.get(value, "runtime", %{})),
          {:ok, limits} <- limits(Map.get(value, "limits", %{})),
          {:ok, credentials} <- credentials(Map.get(value, "credentials", %{})),
-         {:ok, install} <- installations(value["install"], credentials) do
+         {:ok, install} <- installations(value["install"], credentials, limits) do
       {:ok, %{runtime: runtime, limits: limits, credentials: credentials, install: install}}
     else
       _reason -> {:error, :invalid_host_config}
@@ -382,7 +383,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          {:ok, credentials} <-
            command_semantic_result(credentials(Map.get(value, "credentials", %{}))),
          {:ok, install} <-
-           command_semantic_result(installations(value["install"], credentials)) do
+           command_semantic_result(installations(value["install"], credentials, limits)) do
       {:ok, %{runtime: runtime, limits: limits, credentials: credentials, install: install}}
     end
   end
@@ -631,14 +632,14 @@ defmodule PtcRunner.Kernel.HostConfig do
     end
   end
 
-  defp installations(value, _credentials) when is_map(value) and map_size(value) == 0,
+  defp installations(value, _credentials, _limits) when is_map(value) and map_size(value) == 0,
     do: {:ok, %{}}
 
-  defp installations(value, credentials)
+  defp installations(value, credentials, limits)
        when is_map(value) and map_size(value) in 1..@max_installations do
     with {:ok, installations} <-
            reduce_named_map(value, fn name, installation ->
-             installation(name, installation, credentials)
+             installation(name, installation, credentials, limits)
            end),
          ids =
            for(
@@ -654,9 +655,9 @@ defmodule PtcRunner.Kernel.HostConfig do
     end
   end
 
-  defp installations(_value, _credentials), do: {:error, :invalid_installations}
+  defp installations(_value, _credentials, _limits), do: {:error, :invalid_installations}
 
-  defp installation(name, value, credentials) do
+  defp installation(name, value, credentials, limits) do
     with true <- valid_name?(name),
          true <- is_map(value) do
       case value["source"] do
@@ -664,7 +665,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           mcp_installation(value, credentials)
 
         "llm" ->
-          llm_installation(value, credentials)
+          llm_installation(value, credentials, limits)
 
         "ptc_trace_snapshot" ->
           trace_snapshot_installation(value, :ptc_trace_snapshot)
@@ -722,7 +723,7 @@ defmodule PtcRunner.Kernel.HostConfig do
     end
   end
 
-  defp llm_installation(value, credentials) do
+  defp llm_installation(value, credentials, limits) do
     allowed =
       ~w(source model credential cache params structured_output_mode installation_revision ceilings data_class accepts_data)
 
@@ -742,7 +743,7 @@ defmodule PtcRunner.Kernel.HostConfig do
            structured_output_mode(value["structured_output_mode"]),
          {:ok, installation_revision} <-
            revision(value["installation_revision"]),
-         {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{})),
+         {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{}), limits),
          {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
          {:ok, accepts_data} <-
            accepts_data(Map.get(value, "accepts_data", ["normal"])) do
@@ -1190,27 +1191,51 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp ceilings(_value), do: {:error, :invalid_ceilings}
 
-  defp llm_ceilings(value) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(max_request_bytes max_response_bytes max_calls), []),
+  defp llm_ceilings(value, %Limits{} = limits) when is_map(value) do
+    {:ok, row} = LimitCatalog.fetch(:llm_request_timeout_ms)
+    host_ceiling = limits.llm_request_timeout_ms
+    default_timeout_ms = min(row.compiled_default, host_ceiling)
+
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(max_request_bytes max_response_bytes max_calls request_timeout_ms),
+             []
+           ),
          max_request_bytes
          when is_integer(max_request_bytes) and max_request_bytes in 1..@max_result_bytes <-
            Map.get(value, "max_request_bytes", 1_000_000),
          max_response_bytes
          when is_integer(max_response_bytes) and max_response_bytes in 1..@max_result_bytes <-
            Map.get(value, "max_response_bytes", 1_000_000),
-         {:ok, max_calls} <- optional_max_calls(value) do
+         {:ok, max_calls} <- optional_max_calls(value),
+         {:ok, request_timeout_ms} <-
+           optional_request_timeout_ms(value, default_timeout_ms, host_ceiling, row) do
       {:ok,
        %{
          max_request_bytes: max_request_bytes,
          max_response_bytes: max_response_bytes,
-         max_calls: max_calls
+         max_calls: max_calls,
+         request_timeout_ms: request_timeout_ms
        }}
     else
       _reason -> {:error, :invalid_ceilings}
     end
   end
 
-  defp llm_ceilings(_value), do: {:error, :invalid_ceilings}
+  defp llm_ceilings(_value, _limits), do: {:error, :invalid_ceilings}
+
+  defp optional_request_timeout_ms(value, default_timeout_ms, host_ceiling, row) do
+    case Map.get(value, "request_timeout_ms", default_timeout_ms) do
+      request_timeout_ms
+      when is_integer(request_timeout_ms) and request_timeout_ms >= row.minimum and
+             request_timeout_ms <= host_ceiling ->
+        {:ok, request_timeout_ms}
+
+      _invalid ->
+        :error
+    end
+  end
 
   # A ceiling above the per-name installed ceiling can never bind, because the
   # alias cap applies only when stricter than the run's per-name quota. Refuse
@@ -1844,10 +1869,13 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp llm_ceilings_schema do
+    {:ok, row} = LimitCatalog.fetch(:llm_request_timeout_ms)
+
     closed_object(%{
       "max_request_bytes" => integer_schema(1, @max_result_bytes, 1_000_000),
       "max_response_bytes" => integer_schema(1, @max_result_bytes, 1_000_000),
-      "max_calls" => llm_max_calls_schema()
+      "max_calls" => llm_max_calls_schema(),
+      "request_timeout_ms" => integer_schema(row.minimum, row.maximum, row.compiled_default)
     })
   end
 

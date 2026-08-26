@@ -44,7 +44,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
   `structured_output` envelope then reaches Lisp. If bounded output
   validation itself becomes unavailable after dispatch, Dispatcher returns
   `capability_unavailable/output_validation_unavailable` rather than treating
-  the provider result as invalid.
+  the provider result as invalid. A live `llm-request` also carries one
+  absolute `llm_request_deadline_ms` sampled immediately before admission.
+  Dispatcher enforces that cutoff through the provider worker and structured
+  output validation; when it wins over enclosing run/workflow clocks the
+  public result is retryable `timeout/llm_request_timeout`. Replay calls
+  receive `nil` and stay on the enclosing provider-worker clocks.
   """
 
   alias PtcRunner.Kernel.Capability
@@ -191,6 +196,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
              validation_deadline_ms
            ) do
       invocation = put_mission_name(invocation, environment, mission_name)
+      invocation = bind_llm_deadline(invocation, state, timeout_ms)
 
       validation =
         output_validation(validation_heap_words, validation_deadline_ms, evaluation_lease)
@@ -364,6 +370,98 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp put_mission_name(invocation, _environment, _mission_name), do: invocation
 
+  defp bind_llm_deadline(
+         %CapabilityInvocation{request_timeout_ms: request_timeout_ms} = invocation,
+         state,
+         requested_timeout_ms
+       )
+       when is_integer(request_timeout_ms) do
+    now = System.monotonic_time(:millisecond)
+    limits = state_limits(state)
+
+    enclosing_remaining =
+      requested_timeout_ms
+      |> min(RunState.remaining_ms(state))
+      |> max(0)
+
+    llm_remaining =
+      request_timeout_ms
+      |> min(limits.llm_request_timeout_ms)
+      |> max(0)
+
+    %{
+      invocation
+      | enclosing_deadline_ms: now + enclosing_remaining,
+        llm_request_deadline_ms: now + min(enclosing_remaining, llm_remaining)
+    }
+  end
+
+  defp bind_llm_deadline(%CapabilityInvocation{} = invocation, _state, _requested_timeout_ms),
+    do: %{invocation | llm_request_deadline_ms: nil, enclosing_deadline_ms: nil}
+
+  defp put_llm_requester_deadline(
+         %CapabilityInvocation{
+           capability: %Capability{name: "llm-request"},
+           llm_request_deadline_ms: deadline
+         },
+         context
+       )
+       when is_integer(deadline) or is_nil(deadline),
+       do: Map.put(context, :llm_request_deadline_ms, deadline)
+
+  defp put_llm_requester_deadline(_invocation, context), do: context
+
+  defp llm_remaining_ms(%CapabilityInvocation{llm_request_deadline_ms: deadline})
+       when is_integer(deadline),
+       do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  defp llm_remaining_ms(_invocation), do: 1_000_000_000
+
+  defp enclosing_remaining_ms(%CapabilityInvocation{enclosing_deadline_ms: deadline})
+       when is_integer(deadline),
+       do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  defp enclosing_remaining_ms(_invocation), do: 1_000_000_000
+
+  defp llm_deadline_wins?(%CapabilityInvocation{llm_request_deadline_ms: deadline} = invocation)
+       when is_integer(deadline),
+       do: llm_remaining_ms(invocation) == 0 and enclosing_remaining_ms(invocation) > 0
+
+  defp llm_deadline_wins?(_invocation), do: false
+
+  defp await_timeout_result(invocation) do
+    if llm_deadline_wins?(invocation) do
+      llm_request_timeout()
+    else
+      %{status: :error, kind: :timeout, reason: :provider_timeout, retryable?: true}
+    end
+  end
+
+  defp llm_request_timeout do
+    %{status: :error, kind: :timeout, reason: :llm_request_timeout, retryable?: true}
+  end
+
+  defp provider_error_result(environment, invocation, %ProviderError{} = error) do
+    if error.kind == :timeout and llm_deadline_wins?(invocation) do
+      post_invocation_failure(
+        llm_request_timeout(),
+        environment,
+        invocation.capability,
+        error.dispatch_provenance
+      )
+    else
+      %{
+        status: :error,
+        kind: :provider_error,
+        reason: error.kind,
+        details: error.details,
+        retryable?: error.retryable?
+      }
+      |> maybe_put_mutation_state(error.mutation_state)
+      |> post_invocation_failure(environment, invocation.capability, error.dispatch_provenance)
+    end
+  end
+
   defp route_reservation(%CapabilityInvocation{route_key: route_key, max_calls: max_calls})
        when is_binary(route_key) and is_integer(max_calls) and max_calls > 0,
        do: %{route_key: route_key, max_calls: max_calls}
@@ -436,11 +534,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
                ) do
             :ok ->
               context =
-                invocation_context(
-                  event_sink,
-                  inspection_sink,
-                  capability_id,
-                  invocation.event_attributes[:mission_name]
+                invocation
+                |> put_llm_requester_deadline(
+                  invocation_context(
+                    event_sink,
+                    inspection_sink,
+                    capability_id,
+                    invocation.event_attributes[:mission_name]
+                  )
                 )
 
               {invoke(state, invocation, timeout_ms, context, environment, validation), true}
@@ -688,12 +789,22 @@ defmodule PtcRunner.Kernel.Dispatcher do
     capability = invocation.capability
     arguments = invocation.arguments
     remaining = RunState.usage(state).remaining_ms
-    timeout_ms = min(requested_timeout_ms, remaining)
+
+    timeout_ms =
+      requested_timeout_ms
+      |> min(remaining)
+      |> min(llm_remaining_ms(invocation))
+
     limits = state_limits(state)
 
     if timeout_ms <= 0 do
       RunState.release_provider_slot(state)
-      limit_error(state, nil, :run_deadline)
+
+      if llm_deadline_wins?(invocation) do
+        llm_request_timeout()
+      else
+        limit_error(state, nil, :run_deadline)
+      end
     else
       parent = self()
       go = make_ref()
@@ -785,7 +896,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         RunState.release_provider_slot(state)
 
         post_invocation_failure(
-          %{status: :error, kind: :timeout, reason: :provider_timeout, retryable?: true},
+          await_timeout_result(invocation),
           environment,
           capability
         )
@@ -860,15 +971,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     capability = invocation.capability
 
     if ProviderError.valid?(error) do
-      %{
-        status: :error,
-        kind: :provider_error,
-        reason: error.kind,
-        details: error.details,
-        retryable?: error.retryable?
-      }
-      |> maybe_put_mutation_state(error.mutation_state)
-      |> post_invocation_failure(environment, capability, error.dispatch_provenance)
+      provider_error_result(environment, invocation, error)
     else
       invalid_provider_result(environment, capability)
     end
@@ -919,31 +1022,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
         :ok ->
           %{status: :ok, value: RetainedSize.detach_binaries(value)}
 
-        {:error, :output_schema_mismatch} ->
-          post_invocation_failure(
-            %{
-              status: :error,
-              kind: :invalid_result,
-              reason: :output_schema_mismatch,
-              retryable?: false
-            },
-            environment,
-            capability
-          )
-
-        {:error, :output_validation_unavailable} ->
-          _ = mark_terminal_host_failure(state, environment, validation.evaluation_lease)
-
-          post_invocation_failure(
-            %{
-              status: :error,
-              kind: :capability_unavailable,
-              reason: :output_validation_unavailable,
-              retryable?: false
-            },
-            environment,
-            capability
-          )
+        {:error, reason} ->
+          output_admission_error(state, environment, invocation, validation, reason)
       end
     else
       post_invocation_failure(
@@ -975,6 +1055,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
           invocation.request_validator,
           invocation.request_schema,
           candidate,
+          invocation,
           validation
         )
 
@@ -990,34 +1071,45 @@ defmodule PtcRunner.Kernel.Dispatcher do
       capability.output_validator,
       capability.output_schema,
       value,
+      invocation,
       validation
     )
   end
 
-  defp validate_compiled_output(nil, _schema, _value, _validation), do: :ok
+  defp validate_compiled_output(nil, _schema, _value, _invocation, _validation), do: :ok
 
-  defp validate_compiled_output(validator, schema, value, validation)
+  defp validate_compiled_output(validator, schema, value, invocation, validation)
        when is_map(schema) and not is_struct(schema) do
-    timeout_ms = remaining_output_validation_ms(validation)
+    timeout_ms = remaining_output_validation_ms(invocation, validation)
 
     if timeout_ms <= 0 do
-      {:error, :output_validation_unavailable}
+      {:error, output_clock_failure(invocation)}
     else
       case JSONSchema.validate(validator, schema, value, timeout_ms, validation.heap_words) do
         :ok -> :ok
         {:invalid, _violations} -> {:error, :output_schema_mismatch}
-        {:unavailable, _cause} -> {:error, :output_validation_unavailable}
+        {:unavailable, _cause} -> {:error, output_clock_failure(invocation)}
       end
     end
   end
 
-  defp remaining_output_validation_ms(%{deadline_ms: deadline_ms}) do
+  defp remaining_output_validation_ms(invocation, validation) do
+    min(shared_output_validation_ms(validation), llm_remaining_ms(invocation))
+  end
+
+  defp shared_output_validation_ms(%{deadline_ms: deadline_ms}) do
     # Input validation reserves `@validation_handoff_ms` so a refusal can still
     # persist terminal host provenance. Output admission runs after dispatch,
     # so that reserve must not turn a still-open deadline into unavailability.
     # Once the shared deadline has expired, remaining time is zero and the
     # value is not admitted.
     max(deadline_ms - System.monotonic_time(:millisecond), 0)
+  end
+
+  defp output_clock_failure(invocation) do
+    if llm_deadline_wins?(invocation),
+      do: :llm_request_timeout,
+      else: :output_validation_unavailable
   end
 
   defp output_validation(heap_words, deadline_ms, evaluation_lease) do
@@ -1448,7 +1540,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         admitted_object(object)
 
       {:json_object, %{"json" => json}} ->
-        decode_structured_json(json, validation)
+        decode_structured_json(json, invocation, validation)
 
       {nil, %{"structured_output" => object}} ->
         admitted_object(object)
@@ -1457,7 +1549,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         admitted_object(object)
 
       {nil, %{"json" => json}} ->
-        decode_structured_json(json, validation)
+        decode_structured_json(json, invocation, validation)
 
       _wrong_branch ->
         {:error, :output_schema_mismatch}
@@ -1467,11 +1559,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
   defp admitted_object(object) when is_map(object) and not is_struct(object), do: {:ok, object}
   defp admitted_object(_value), do: {:error, :output_schema_mismatch}
 
-  defp decode_structured_json(json, validation) when is_binary(json) do
-    timeout_ms = remaining_output_validation_ms(validation)
+  defp decode_structured_json(json, invocation, validation) when is_binary(json) do
+    timeout_ms = remaining_output_validation_ms(invocation, validation)
 
     if timeout_ms <= 0 do
-      {:error, :output_validation_unavailable}
+      {:error, output_clock_failure(invocation)}
     else
       case StrictJSON.decode_classified(json,
              timeout_ms: timeout_ms,
@@ -1484,12 +1576,13 @@ defmodule PtcRunner.Kernel.Dispatcher do
           {:error, :output_schema_mismatch}
 
         {:unavailable, _cause} ->
-          {:error, :output_validation_unavailable}
+          {:error, output_clock_failure(invocation)}
       end
     end
   end
 
-  defp decode_structured_json(_json, _validation), do: {:error, :output_schema_mismatch}
+  defp decode_structured_json(_json, _invocation, _validation),
+    do: {:error, :output_schema_mismatch}
 
   defp promote_structured_output(object, value) do
     envelope = %{"structured_output" => object}
@@ -1511,7 +1604,16 @@ defmodule PtcRunner.Kernel.Dispatcher do
       {:ok, value} ->
         admit_output(state, environment, invocation, validation, value, [:request, :static])
 
-      {:error, :output_schema_mismatch} ->
+      {:error, reason} ->
+        output_admission_error(state, environment, invocation, validation, reason)
+    end
+  end
+
+  defp admit_success_output(result, _state, _environment, _invocation, _validation), do: result
+
+  defp output_admission_error(state, environment, invocation, validation, reason) do
+    case reason do
+      :output_schema_mismatch ->
         post_invocation_failure(
           %{
             status: :error,
@@ -1523,7 +1625,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
           invocation.capability
         )
 
-      {:error, :output_validation_unavailable} ->
+      :output_validation_unavailable ->
         _ = mark_terminal_host_failure(state, environment, validation.evaluation_lease)
 
         post_invocation_failure(
@@ -1536,10 +1638,11 @@ defmodule PtcRunner.Kernel.Dispatcher do
           environment,
           invocation.capability
         )
+
+      :llm_request_timeout ->
+        post_invocation_failure(llm_request_timeout(), environment, invocation.capability)
     end
   end
-
-  defp admit_success_output(result, _state, _environment, _invocation, _validation), do: result
 
   defp maybe_put_llm_result_metadata(data, %{status: :ok, value: value}, :llm_tokens)
        when is_map(value) do

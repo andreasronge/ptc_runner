@@ -18,7 +18,10 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
                 max_calls: nil,
                 request_schema: nil,
                 request_validator: nil,
-                structured_output_mode: nil
+                structured_output_mode: nil,
+                request_timeout_ms: nil,
+                llm_request_deadline_ms: nil,
+                enclosing_deadline_ms: nil
               ]
 
   @type t :: %__MODULE__{
@@ -32,7 +35,10 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
           usage_projection: nil | :llm_tokens,
           request_schema: map() | nil,
           request_validator: JSONSchema.compiled() | nil,
-          structured_output_mode: :json_schema | :json_object | :unsupported | nil
+          structured_output_mode: :json_schema | :json_object | :unsupported | nil,
+          request_timeout_ms: pos_integer() | nil,
+          llm_request_deadline_ms: integer() | nil,
+          enclosing_deadline_ms: integer() | nil
         }
 
   @doc false

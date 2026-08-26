@@ -1,0 +1,268 @@
+defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
+  use ExUnit.Case, async: true
+
+  alias PtcRunner.Kernel.Dispatcher
+  alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.LLMRouter
+  alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.TestSupport.TestHelpers
+
+  @schema %{
+    "type" => "object",
+    "properties" => %{"ok" => %{"type" => "boolean"}},
+    "required" => ["ok"]
+  }
+
+  test "a live requester receives an integer whole-call deadline" do
+    parent = self()
+
+    {result, _state, _sink} =
+      dispatch_llm(parent,
+        requester: fn _request, context ->
+          send(parent, {:called, context})
+          {:ok, %{content: "ok", tokens: %{}}}
+        end
+      )
+
+    assert %{status: :ok} = result
+    assert_received {:called, %{llm_request_deadline_ms: deadline}}
+    assert is_integer(deadline)
+    assert deadline > System.monotonic_time(:millisecond)
+  end
+
+  test "a replay requester receives a nil whole-call deadline" do
+    parent = self()
+
+    {result, _state, _sink} =
+      dispatch_llm(parent,
+        source: "llm_replay",
+        requester: fn _request, context ->
+          send(parent, {:called, context})
+          {:ok, %{content: "ok", tokens: %{}}}
+        end
+      )
+
+    assert %{status: :ok} = result
+    assert_received {:called, %{llm_request_deadline_ms: nil}}
+  end
+
+  test "Dispatcher kills a hung live call when the LLM clock wins" do
+    parent = self()
+
+    {result, state, sink} =
+      dispatch_llm(parent,
+        request_timeout_ms: 500,
+        timeout_ms: 5_000,
+        requester: fn _request, context ->
+          send(parent, {:called, context, self()})
+
+          receive do
+            :never -> {:ok, %{content: "ok", tokens: %{}}}
+          end
+        end
+      )
+
+    assert %{
+             status: :error,
+             kind: :timeout,
+             reason: :llm_request_timeout,
+             retryable?: true
+           } = result
+
+    assert_received {:called, %{llm_request_deadline_ms: deadline}, _worker}
+    assert is_integer(deadline)
+    assert RunState.usage(state).capability_calls.workflow["llm-request"] == 1
+
+    assert Enum.any?(EventSink.events(sink), &(&1.type == "capability-started"))
+
+    assert Enum.any?(EventSink.events(sink), fn event ->
+             event.type == "capability-stopped" and event.data.reason == :llm_request_timeout
+           end)
+  end
+
+  test "an equal enclosing dispatch timeout keeps provider_timeout" do
+    parent = self()
+
+    {result, _state, _sink} =
+      dispatch_llm(parent,
+        timeout_ms: 500,
+        requester: fn _request, _context ->
+          send(parent, {:called, :hung})
+
+          receive do
+            :never -> {:ok, %{content: "ok", tokens: %{}}}
+          end
+        end
+      )
+
+    assert %{
+             status: :error,
+             kind: :timeout,
+             reason: :provider_timeout,
+             retryable?: true
+           } = result
+
+    assert_received {:called, :hung}
+  end
+
+  test "an adapter timeout after the LLM clock wins is llm_request_timeout" do
+    parent = self()
+
+    {result, _state, _sink} =
+      dispatch_llm(parent,
+        request_timeout_ms: 200,
+        timeout_ms: 5_000,
+        requester: fn _request, %{llm_request_deadline_ms: deadline} ->
+          wait_ms = max(deadline - System.monotonic_time(:millisecond) + 1, 0)
+
+          if wait_ms > 0 do
+            receive do
+            after
+              wait_ms -> :ok
+            end
+          end
+
+          {:error, ProviderError.new(:timeout, "LLM request deadline elapsed", retryable?: true)}
+        end
+      )
+
+    assert %{
+             status: :error,
+             kind: :timeout,
+             reason: :llm_request_timeout,
+             retryable?: true
+           } = result
+  end
+
+  test "equal LLM and shared validation clocks keep LLM timeout" do
+    parent = self()
+    deadline_ms = System.monotonic_time(:millisecond) + 500
+
+    {result, _state, _sink} =
+      dispatch_llm(parent,
+        request_timeout_ms: 500,
+        timeout_ms: 5_000,
+        validation_deadline_ms: deadline_ms,
+        requester: fn _request, _context ->
+          send(parent, {:called, :hung})
+
+          receive do
+            :never -> {:ok, %{json: ~s({"ok":true}), tokens: %{}}}
+          end
+        end,
+        structured_output_mode: :json_object,
+        arguments: %{"schema" => @schema}
+      )
+
+    assert %{
+             status: :error,
+             kind: :timeout,
+             reason: :llm_request_timeout,
+             retryable?: true
+           } = result
+
+    assert_received {:called, :hung}
+  end
+
+  test "json_object decode unavailability is not reclassified as an LLM timeout" do
+    parent = self()
+    deadline_ms = System.monotonic_time(:millisecond) + 200
+
+    task =
+      Task.async(fn ->
+        dispatch_llm(parent,
+          timeout_ms: 1_000,
+          validation_deadline_ms: deadline_ms,
+          structured_output_mode: :json_object,
+          arguments: %{"schema" => @schema},
+          requester: fn _request, _context ->
+            send(parent, {:in_callback, self()})
+
+            receive do
+              :continue -> {:ok, %{json: ~s({"ok":true}), tokens: %{}}}
+            end
+          end
+        )
+      end)
+
+    assert_receive {:in_callback, worker}
+
+    wait_ms = max(deadline_ms - System.monotonic_time(:millisecond) + 1, 0)
+
+    if wait_ms > 0 do
+      receive do
+      after
+        wait_ms -> :ok
+      end
+    end
+
+    send(worker, :continue)
+
+    assert {result, _state, _sink} = Task.await(task)
+
+    assert %{
+             status: :error,
+             kind: :capability_unavailable,
+             reason: :output_validation_unavailable,
+             retryable?: false
+           } = result
+  end
+
+  defp dispatch_llm(_parent, opts) do
+    requester = Keyword.fetch!(opts, :requester)
+    {:ok, capability} = LLMCapability.new(requester: requester)
+
+    route = %{
+      alias: "model",
+      source: Keyword.get(opts, :source, "llm"),
+      installation_revision: "model-v1",
+      default?: true,
+      capability: capability,
+      max_calls: nil
+    }
+
+    route =
+      case Keyword.get(opts, :structured_output_mode) do
+        nil -> route
+        mode -> Map.put(route, :structured_output_mode, mode)
+      end
+
+    route =
+      case Keyword.get(opts, :request_timeout_ms) do
+        nil -> route
+        timeout_ms -> Map.put(route, :request_timeout_ms, timeout_ms)
+      end
+
+    assert {:ok, router} = LLMRouter.new([route])
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [router])
+    {:ok, limits} = Limits.new()
+    {:ok, state} = RunState.start(limits)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "llm-deadline")
+    timeout_ms = Keyword.get(opts, :timeout_ms, 1_000)
+    arguments = Keyword.get(opts, :arguments, %{})
+
+    dispatch_opts =
+      case Keyword.get(opts, :validation_deadline_ms) do
+        nil -> []
+        deadline_ms -> [validation_deadline_ms: deadline_ms]
+      end
+
+    result =
+      Dispatcher.dispatch(
+        state,
+        :workflow,
+        environment,
+        "llm-request",
+        arguments,
+        TestHelpers.dispatch_context(state, :workflow, timeout_ms, dispatch_opts),
+        sink,
+        nil
+      )
+
+    {result, state, sink}
+  end
+end

@@ -12,9 +12,10 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
   7 to run the callback behind it before provider activity is marked. A
   `:custom` registration declares `:unverified` instead, and its check becomes
   active work after the phase-8 marker.
-  Live LLM installations also seal `structured_output_mode` here so acquisition
-  can reconstruct the same workflow route the prepare callback reports.
-  Public snapshots and `models` rows omit that field.
+  Live LLM installations also seal `structured_output_mode` and
+  `request_timeout_ms` here so acquisition can reconstruct the same workflow
+  route the prepare callback reports. Public snapshots and `models` rows omit
+  those fields.
   `PtcRunner.Kernel.InstallationCatalog` completes the rule: an
   `:audited_local` declaration also requires a host runtime binding. Both rules
   bound what may be declared; neither attests where an admitted implementation
@@ -22,6 +23,7 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
   """
 
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.SelectionRules
 
   @sources [
@@ -55,7 +57,8 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
     :selection_rules,
     :authority_fingerprint,
     :local_preflight,
-    :structured_output_mode
+    :structured_output_mode,
+    :request_timeout_ms
   ]
   defstruct @enforce_keys ++ [attestation: nil]
   @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
@@ -91,6 +94,7 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
           authority_fingerprint: binary() | nil,
           local_preflight: :none | :audited_local | :unverified,
           structured_output_mode: :json_schema | :json_object | :unsupported | nil,
+          request_timeout_ms: pos_integer() | nil,
           attestation: binary() | nil
         }
 
@@ -99,11 +103,11 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
   def new(opts) when is_list(opts) do
     opts =
       if Keyword.keyword?(opts) do
-        Keyword.put_new(
-          opts,
-          :structured_output_mode,
-          default_structured_output_mode(Keyword.get(opts, :source))
-        )
+        source = Keyword.get(opts, :source)
+
+        opts
+        |> Keyword.put_new(:structured_output_mode, default_structured_output_mode(source))
+        |> Keyword.put_new(:request_timeout_ms, default_request_timeout_ms(source))
       else
         opts
       end
@@ -218,7 +222,8 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
         descriptor.selection_validation in [:declarative, :active] and
         SelectionRules.valid?(descriptor.selection_rules) and
         descriptor.local_preflight in [:none, :audited_local, :unverified] and
-        valid_structured_output_mode?(descriptor.source, descriptor.structured_output_mode)
+        valid_structured_output_mode?(descriptor.source, descriptor.structured_output_mode) and
+        valid_request_timeout_ms?(descriptor.source, descriptor.request_timeout_ms)
 
   defp valid_structured_output_mode?(:llm, mode) when mode in @structured_output_modes,
     do: true
@@ -226,8 +231,21 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
   defp valid_structured_output_mode?(source, nil) when source != :llm, do: true
   defp valid_structured_output_mode?(_source, _mode), do: false
 
+  defp valid_request_timeout_ms?(:llm, timeout_ms),
+    do: LimitCatalog.llm_request_timeout_ms?(timeout_ms)
+
+  defp valid_request_timeout_ms?(source, nil) when source != :llm, do: true
+  defp valid_request_timeout_ms?(_source, _timeout_ms), do: false
+
   defp default_structured_output_mode(:llm), do: :unsupported
   defp default_structured_output_mode(_source), do: nil
+
+  defp default_request_timeout_ms(:llm) do
+    {:ok, row} = LimitCatalog.fetch(:llm_request_timeout_ms)
+    row.compiled_default
+  end
+
+  defp default_request_timeout_ms(_source), do: nil
 
   defp valid_names?(names, maximum) when is_list(names) and length(names) <= maximum,
     do:

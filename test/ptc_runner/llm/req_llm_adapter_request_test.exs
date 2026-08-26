@@ -3,6 +3,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
   import ExUnit.CaptureIO
 
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.LLM.ReqLLMPreparedModel
@@ -113,6 +114,66 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     assert get_in(body, ["response_format", "type"]) == "json_object"
     refute Map.has_key?(body, "tools")
     refute Map.has_key?(body, "tool_choice")
+  end
+
+  test "an elapsed Kernel deadline is a timeout without dispatching" do
+    plug = fn _conn ->
+      flunk("elapsed LLM deadline must not dispatch")
+    end
+
+    schema = %{
+      "type" => "object",
+      "properties" => %{"ok" => %{"type" => "boolean"}},
+      "required" => ["ok"]
+    }
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               Requirements.interim(%{max_tokens: 64}, :json_object)
+             )
+
+    {:ok, invocation} =
+      Invocation.new(
+        %{messages: [%{role: :user, content: "hi"}], schema: schema},
+        false,
+        "test",
+        System.monotonic_time(:millisecond) - 1
+      )
+
+    assert {:error,
+            %ProviderError{
+              kind: :timeout,
+              retryable?: true,
+              dispatch_provenance: :not_dispatched
+            }} = ReqLLMAdapter.call(put_test_http_options(target, plug), invocation)
+  end
+
+  test "a live Kernel deadline still dispatches while time remains", %{test: test} do
+    schema = %{
+      "type" => "object",
+      "properties" => %{"ok" => %{"type" => "boolean"}},
+      "required" => ["ok"]
+    }
+
+    expect_request(test, "deepseek/deepseek-v4-flash-0731", content: ~s({"ok":true}))
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               Requirements.interim(%{max_tokens: 64}, :json_object)
+             )
+
+    {:ok, invocation} =
+      Invocation.new(
+        %{messages: [%{role: :user, content: "hi"}], schema: schema},
+        false,
+        "test",
+        System.monotonic_time(:millisecond) + 60_000
+      )
+
+    assert {:ok, %{json: ~s({"ok":true})}} =
+             ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
   end
 
   test "json_object does not dispatch Anthropic or Bedrock through OpenAI response_format" do
