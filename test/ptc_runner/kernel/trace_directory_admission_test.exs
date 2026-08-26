@@ -47,7 +47,11 @@ defmodule PtcRunner.Kernel.TraceDirectoryAdmissionTest do
 
   test "malformed syntax retains only the filename claim" do
     assert {:ok, evidence} =
-             TraceDirectoryAdmission.evidence("claimed.jsonl", :sanitized, :malformed_jsonl)
+             TraceDirectoryAdmission.evidence(
+               "claimed.jsonl",
+               :sanitized,
+               :malformed_jsonl
+             )
 
     assert evidence.filename_run_claim == "claimed"
     assert evidence.embedded_run_claims == []
@@ -222,11 +226,13 @@ defmodule PtcRunner.Kernel.TraceDirectoryAdmissionTest do
 
   test "classify refuses forged evidence without raising" do
     assert {:ok, valid} = evidence("valid.jsonl", :sanitized, [event("valid", "trace")])
+    unsupported = Map.put(event("valid", "trace"), "schema_version", 3)
 
     for forged <- [
           Map.delete(valid, :status),
           %{valid | source_name: <<255>>},
-          %{valid | reasons: [:unknown_reason]}
+          %{valid | reasons: [:unknown_reason]},
+          %{valid | events: [unsupported], status: {:decoded, [unsupported]}}
         ] do
       assert {:error, :invalid_evidence} = TraceDirectoryAdmission.classify([forged])
     end

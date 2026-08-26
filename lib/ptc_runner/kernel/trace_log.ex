@@ -3,11 +3,13 @@ defmodule PtcRunner.Kernel.TraceLog do
   Bounded canonical trace loading, validation, filtering, and pagination.
 
   A source is an in-memory `PtcRunner.Kernel.EventSink`, one JSONL file, or a
-  directory of JSONL files. Loading validates the complete event envelope,
-  schema version, JSON-like data, run/trace identity, timestamps, and monotonic
-  sequence before deriving query results. Each run must begin with exactly one
-  `run-started`; it may remain open or end with exactly one final
-  `run-stopped`.
+  directory of JSONL files. Explicit files validate one complete aggregate.
+  Immutable directory capture instead treats each
+  `<run-id>[.private].jsonl` member as one filename-bound run, proves the
+  selected namespace and bytes stable, and isolates a damaged connected
+  identity component without hiding disjoint healthy runs. Each admitted run
+  validates the complete event envelope, schema version, JSON-like data,
+  run/trace identity, timestamps, monotonic sequence, and lifecycle.
 
   Supported query operations are:
 
@@ -25,6 +27,10 @@ defmodule PtcRunner.Kernel.TraceLog do
   suffix; private files require an explicit source.
   Internal immutable capture may use a private authority that admits both
   normal and private trace files while retaining accurate per-run provenance.
+  Its `directory_admission_v1` identity commits to every selected raw name,
+  content digest, classification, admitted event, provenance claim, and full
+  isolation component, but excludes absolute paths, opposite-class names, and
+  advisory exclusion counts.
 
   The internal trace-snapshot owner uses this module's canonical validation and
   query execution against one immutable directory capture or one exact selected
@@ -40,8 +46,9 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationHandle
-  alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Kernel.ResultLimit
+  alias PtcRunner.Kernel.TraceDirectoryAdmission
+  alias PtcRunner.Kernel.TraceEventValidation
   alias PtcRunner.Kernel.TracePublication
 
   @default_source_bytes 8_000_000
@@ -54,9 +61,6 @@ defmodule PtcRunner.Kernel.TraceLog do
   @max_limit 100
   @max_cursor_bytes 1_024
   @max_string_bytes 256
-  @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
-  @bundle_hash ~r/\A[0-9a-f]{64}\z/
-  @event_keys ~w(schema_version run_id trace_id sequence timestamp type data)
   @append_lock_timeout_ms 30_000
   @append_lock_helper ~S"""
   set -eu
@@ -1877,8 +1881,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     do: trace_file_name?(name) and private_path?(name) == (source_kind == :private)
 
   defp trace_file_name?(name) do
-    Path.basename(name) == name and String.ends_with?(name, ".jsonl") and
-      not inspection_path?(name)
+    TraceDirectoryAdmission.source_kind(name) in [:sanitized, :private]
   end
 
   defp capture_directory_files(
@@ -1891,7 +1894,7 @@ defmodule PtcRunner.Kernel.TraceLog do
          capture_hook,
          listing_hook
        ) do
-    with {:ok, before_inventory, excluded} <-
+    with {:ok, before_inventory, _initial_excluded} <-
            directory_inventory(
              directory,
              source_kind,
@@ -1900,8 +1903,8 @@ defmodule PtcRunner.Kernel.TraceLog do
              include_sanitized,
              listing_hook
            ) do
-      directory
-      |> capture_inventory(
+      capture_directory_inventory(
+        directory,
         before_inventory,
         max_source_bytes,
         capture_hook,
@@ -1914,19 +1917,113 @@ defmodule PtcRunner.Kernel.TraceLog do
             include_sanitized,
             listing_hook
           )
-        end
+        end,
+        directory_grant_class(source_kind, include_sanitized)
       )
-      |> put_excluded_trace_files(excluded)
     end
   end
 
-  # The exclusion count is reported beside the capture, never inside the
-  # inventory the capture re-verifies: a concurrent write to the kind this
-  # capture does not read must not fail it as a changed source.
-  defp put_excluded_trace_files({:ok, capture}, excluded),
-    do: {:ok, %{capture | excluded_trace_files: excluded}}
+  defp directory_grant_class(:sanitized, _include_sanitized), do: :sanitized
+  defp directory_grant_class(:private, false), do: :private
+  defp directory_grant_class(:private, true), do: :mixed_private_authorized
 
-  defp put_excluded_trace_files({:error, _reason} = error, _excluded), do: error
+  defp capture_directory_inventory(
+         directory,
+         before_inventory,
+         max_source_bytes,
+         capture_hook,
+         refresh_inventory,
+         grant_class
+       ) do
+    with {:ok, captured_sources, source_bytes} <-
+           read_directory_inventory(directory, before_inventory.files, max_source_bytes),
+         :ok <- run_capture_hook(capture_hook),
+         {:ok, after_read_inventory, _after_read_excluded} <- refresh_inventory.(),
+         :ok <- same_inventory(before_inventory, after_read_inventory),
+         :ok <- verify_directory_sources(directory, after_read_inventory.files, captured_sources),
+         {:ok, after_verify_inventory, final_excluded} <- refresh_inventory.(),
+         :ok <- same_inventory(after_read_inventory, after_verify_inventory),
+         :ok <-
+           verify_directory_sources(directory, after_verify_inventory.files, captured_sources),
+         {:ok, evidence, source_proofs} <- directory_evidence(captured_sources),
+         {:ok, classification} <- TraceDirectoryAdmission.classify(evidence) do
+      build_directory_admission(
+        grant_class,
+        classification,
+        source_proofs,
+        source_bytes,
+        final_excluded
+      )
+    end
+  end
+
+  defp build_directory_admission(
+         grant_class,
+         classification,
+         source_proofs,
+         source_bytes,
+         excluded_trace_files
+       ) do
+    events = Enum.flat_map(classification.admitted, & &1.events)
+
+    run_sources =
+      Map.new(classification.admitted, fn evidence ->
+        [run_id] = evidence.embedded_run_claims
+        {run_id, evidence.source_kind}
+      end)
+
+    analysis = compile_analysis(events, run_sources)
+
+    identity = %{
+      version: :directory_admission_v1,
+      grant_class: grant_class,
+      sources: directory_identity_sources(source_proofs, classification.components),
+      events: events,
+      run_sources: run_sources,
+      isolated_components: classification.isolated
+    }
+
+    admission = %{
+      version: :directory_admission_v1,
+      grant_class: grant_class,
+      events: events,
+      run_sources: run_sources,
+      analysis: analysis,
+      source_id: digest(identity),
+      source_bytes: source_bytes,
+      file_count: length(source_proofs),
+      excluded_trace_files: excluded_trace_files,
+      source_proofs: source_proofs,
+      components: classification.components,
+      isolated_components: classification.isolated,
+      known_isolated_run_ids: classification.known_isolated_run_ids
+    }
+
+    {:ok, admission}
+  end
+
+  defp directory_identity_sources(source_proofs, components) do
+    classifications =
+      components
+      |> Enum.flat_map(& &1.sources)
+      |> Map.new(&{&1.raw_name, &1})
+
+    Enum.map(source_proofs, fn proof ->
+      evidence = Map.fetch!(classifications, proof.raw_name)
+
+      %{
+        raw_name: proof.raw_name,
+        source_kind: proof.source_kind,
+        byte_length: proof.byte_length,
+        content_digest: proof.content_digest,
+        status: evidence.status,
+        filename_run_claim: evidence.filename_run_claim,
+        embedded_run_claims: evidence.embedded_run_claims,
+        embedded_trace_claims: evidence.embedded_trace_claims,
+        reasons: evidence.reasons
+      }
+    end)
+  end
 
   defp capture_inventory(
          directory,
@@ -1995,7 +2092,7 @@ defmodule PtcRunner.Kernel.TraceLog do
          {:ok, names} <-
            bounded_capture_names(listed, source_kind, include_sanitized, max_trace_files),
          {:ok, files} <- inventory_files(directory, names) do
-      {:ok, %{directory: stat_identity(directory_stat), files: files},
+      {:ok, %{directory: directory_root_identity(directory_stat), files: files},
        excluded_trace_files(listed, names, source_kind)}
     else
       {:ok, %File.Stat{}} -> {:error, :malformed_source}
@@ -2020,7 +2117,8 @@ defmodule PtcRunner.Kernel.TraceLog do
            include_sanitized,
            listing_hook
          ) do
-      {:ok, inventory, _excluded} -> {:ok, inventory}
+      {:ok, inventory, excluded} -> {:ok, inventory, excluded}
+      {:error, :source_limit_exceeded} = error -> error
       {:error, _reason} -> {:error, :source_changed}
     end
   end
@@ -2057,12 +2155,13 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp capture_name?(name, :sanitized, _include_sanitized),
-    do: supported_name?(name, :sanitized)
+    do: TraceDirectoryAdmission.source_kind(name) == :sanitized
 
   defp capture_name?(name, :private, true),
-    do: supported_name?(name, :sanitized) or supported_name?(name, :private)
+    do: TraceDirectoryAdmission.source_kind(name) in [:sanitized, :private]
 
-  defp capture_name?(name, :private, false), do: supported_name?(name, :private)
+  defp capture_name?(name, :private, false),
+    do: TraceDirectoryAdmission.source_kind(name) == :private
 
   defp capture_file_name?(name, :sanitized),
     do: Path.basename(name) == name and not reserved_path?(name)
@@ -2072,12 +2171,9 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp inventory_files(directory, names) do
     Enum.reduce_while(names, {:ok, []}, fn name, {:ok, files} ->
-      case File.lstat(Path.join(directory, name), time: :posix) do
-        {:ok, %File.Stat{type: :regular} = stat} ->
+      case File.lstat(directory_member_path(directory, name), time: :posix) do
+        {:ok, %File.Stat{} = stat} ->
           {:cont, {:ok, [{name, stat_identity(stat)} | files]}}
-
-        {:ok, %File.Stat{}} ->
-          {:halt, {:error, :malformed_source}}
 
         {:error, _reason} ->
           {:halt, {:error, :source_unavailable}}
@@ -2086,6 +2182,151 @@ defmodule PtcRunner.Kernel.TraceLog do
     |> case do
       {:ok, files} -> {:ok, Enum.reverse(files)}
       {:error, _reason} = error -> error
+    end
+  end
+
+  defp read_directory_inventory(directory, files, max_source_bytes) do
+    source_bytes =
+      Enum.reduce(files, 0, fn
+        {_name, %{type: :regular, size: size}}, bytes -> bytes + size
+        {_name, _identity}, bytes -> bytes
+      end)
+
+    if source_bytes <= max_source_bytes do
+      Enum.reduce_while(files, {:ok, []}, fn {name, expected}, {:ok, sources} ->
+        case read_directory_member(directory, name, expected) do
+          {:ok, status} ->
+            source = %{raw_name: name, stat_identity: expected, read_status: status}
+            {:cont, {:ok, [source | sources]}}
+
+          {:error, _reason} = error ->
+            {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, sources} -> {:ok, Enum.reverse(sources), source_bytes}
+        {:error, _reason} = error -> error
+      end
+    else
+      {:error, :source_limit_exceeded}
+    end
+  end
+
+  defp read_directory_member(directory, name, %{type: type} = expected) when type != :regular do
+    path = directory_member_path(directory, name)
+
+    with {:ok, %File.Stat{} = current} <- File.lstat(path, time: :posix),
+         :ok <- same_stat_identity(expected, stat_identity(current)) do
+      {:ok, :not_regular}
+    else
+      _changed -> {:error, :source_changed}
+    end
+  end
+
+  defp read_directory_member(directory, name, expected) do
+    path = directory_member_path(directory, name)
+
+    with {:ok, %File.Stat{type: :regular} = current} <- File.lstat(path, time: :posix),
+         :ok <- same_stat_identity(expected, stat_identity(current)) do
+      case :file.open(path, [:read, :binary, :raw]) do
+        {:ok, device} ->
+          try do
+            case read_inventory_device(device, expected) do
+              {:ok, source} -> {:ok, {:read, source}}
+              {:error, _reason} = error -> error
+            end
+          after
+            :file.close(device)
+          end
+
+        {:error, reason} when reason in [:eacces, :eperm] ->
+          confirm_unreadable_member(path, expected)
+
+        {:error, _reason} ->
+          confirm_open_failure(path, expected)
+      end
+    else
+      {:ok, %File.Stat{}} -> {:error, :source_changed}
+      {:error, :source_changed} = error -> error
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp confirm_unreadable_member(path, expected) do
+    with {:ok, %File.Stat{type: :regular} = current} <- File.lstat(path, time: :posix),
+         :ok <- same_stat_identity(expected, stat_identity(current)) do
+      {:ok, :unreadable}
+    else
+      _changed -> {:error, :source_changed}
+    end
+  end
+
+  defp confirm_open_failure(path, expected) do
+    with {:ok, %File.Stat{type: :regular} = current} <- File.lstat(path, time: :posix),
+         :ok <- same_stat_identity(expected, stat_identity(current)) do
+      {:error, :source_unavailable}
+    else
+      _changed -> {:error, :source_changed}
+    end
+  end
+
+  defp verify_directory_sources(directory, files, captured_sources) do
+    expected_sources = Map.new(captured_sources, &{&1.raw_name, &1})
+
+    Enum.reduce_while(files, :ok, fn {name, expected}, :ok ->
+      captured = Map.fetch!(expected_sources, name)
+
+      case verify_directory_source(directory, name, expected, captured.read_status) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp verify_directory_source(directory, name, expected, expected_status) do
+    case read_directory_member(directory, name, expected) do
+      {:ok, ^expected_status} -> :ok
+      {:ok, _changed_status} -> {:error, :source_changed}
+      {:error, :source_unavailable} = error -> error
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp directory_evidence(captured_sources) do
+    Enum.reduce_while(captured_sources, {:ok, [], []}, fn source, {:ok, evidence, proofs} ->
+      with {:ok, status, digest} <- directory_evidence_status(source.read_status),
+           source_kind when source_kind in [:sanitized, :private] <-
+             TraceDirectoryAdmission.source_kind(source.raw_name),
+           {:ok, file_evidence} <-
+             TraceDirectoryAdmission.evidence(source.raw_name, source_kind, status) do
+        proof = %{
+          raw_name: source.raw_name,
+          source_kind: source_kind,
+          byte_length: source.stat_identity.size,
+          content_digest: digest,
+          stat_identity: source.stat_identity
+        }
+
+        {:cont, {:ok, [file_evidence | evidence], [proof | proofs]}}
+      else
+        _invalid -> {:halt, {:error, :source_unavailable}}
+      end
+    end)
+    |> case do
+      {:ok, evidence, proofs} -> {:ok, Enum.reverse(evidence), Enum.reverse(proofs)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp directory_evidence_status(:not_regular), do: {:ok, :not_regular, nil}
+  defp directory_evidence_status(:unreadable), do: {:ok, :unreadable, nil}
+
+  defp directory_evidence_status({:read, source}) do
+    digest = :crypto.hash(:sha256, source)
+
+    case decode_jsonl(source) do
+      {:ok, events} -> {:ok, {:decoded, events}, digest}
+      {:error, :malformed_source} -> {:ok, :malformed_jsonl, digest}
     end
   end
 
@@ -2211,6 +2452,17 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp same_stat_identity(identity, identity), do: :ok
   defp same_stat_identity(_expected, _current), do: {:error, :source_changed}
+
+  defp directory_root_identity(%File.Stat{} = stat) do
+    %{
+      major_device: stat.major_device,
+      minor_device: stat.minor_device,
+      inode: stat.inode,
+      type: stat.type
+    }
+  end
+
+  defp directory_member_path(directory, raw_name), do: directory <> "/" <> raw_name
 
   # ex_dna:disable-for-next-line — TraceLog keeps its source identity contract independent from inspection snapshots.
   defp stat_identity(%File.Stat{} = stat) do
@@ -2350,7 +2602,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     encoded_bytes = Enum.reduce(events, 0, &(&2 + byte_size(Jason.encode!(&1))))
 
     with true <- encoded_bytes <= max_bytes,
-         :ok <- validate_events(events) do
+         :ok <- TraceEventValidation.validate(events) do
       source_id = digest(events)
 
       {:ok, events, source_id}
@@ -2360,449 +2612,6 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   rescue
     Jason.EncodeError -> {:error, :malformed_source}
-  end
-
-  defp validate_events(events) do
-    initial = %{
-      sequences: %{},
-      run_traces: %{},
-      trace_runs: %{},
-      run_lifecycles: %{},
-      evaluation_lifecycles: %{}
-    }
-
-    Enum.reduce_while(events, {:ok, initial}, fn event, {:ok, state} ->
-      with :ok <- validate_event(event),
-           trace_id = event["trace_id"],
-           run_id = event["run_id"],
-           sequence = event["sequence"],
-           previous = Map.get(state.sequences, trace_id, 0),
-           true <- sequence > previous,
-           :ok <- same_identity(state, run_id, trace_id),
-           {:ok, run_lifecycles} <-
-             advance_run_lifecycle(state.run_lifecycles, run_id, event["type"]),
-           {:ok, evaluation_lifecycles} <-
-             advance_evaluation_lifecycle(state.evaluation_lifecycles, run_id, event) do
-        {:cont,
-         {:ok,
-          %{
-            sequences: Map.put(state.sequences, trace_id, sequence),
-            run_traces: Map.put(state.run_traces, run_id, trace_id),
-            trace_runs: Map.put(state.trace_runs, trace_id, run_id),
-            run_lifecycles: run_lifecycles,
-            evaluation_lifecycles: evaluation_lifecycles
-          }}}
-      else
-        {:error, reason} -> {:halt, {:error, reason}}
-        _ -> {:halt, {:error, :malformed_source}}
-      end
-    end)
-    |> case do
-      {:ok, _state} ->
-        :ok
-
-      {:error, _reason} = error ->
-        error
-    end
-  end
-
-  @doc false
-  @spec directory_event_reasons([map()]) ::
-          [
-            :unsupported_version
-            | :sequence_conflict
-            | :lifecycle_conflict
-            | :malformed_event
-          ]
-  def directory_event_reasons(events) when is_list(events) do
-    []
-    |> maybe_directory_reason(unsupported_directory_version?(events), :unsupported_version)
-    |> maybe_directory_reason(directory_sequence_conflict?(events), :sequence_conflict)
-    |> maybe_directory_reason(directory_lifecycle_conflict?(events), :lifecycle_conflict)
-    |> maybe_directory_reason(directory_malformed_event?(events), :malformed_event)
-  end
-
-  defp unsupported_directory_version?(events) do
-    Enum.any?(events, fn event ->
-      case Map.fetch(event, "schema_version") do
-        {:ok, version} when is_integer(version) -> version != 2
-        _other -> false
-      end
-    end)
-  end
-
-  defp directory_sequence_conflict?(events) do
-    Enum.reduce_while(events, %{}, fn event, sequences ->
-      case {event["trace_id"], event["sequence"]} do
-        {trace_id, sequence} when is_binary(trace_id) and is_integer(sequence) and sequence > 0 ->
-          cond do
-            valid_event_id(trace_id) != :ok ->
-              {:cont, sequences}
-
-            sequence > Map.get(sequences, trace_id, 0) ->
-              {:cont, Map.put(sequences, trace_id, sequence)}
-
-            true ->
-              {:halt, :conflict}
-          end
-
-        {trace_id, _sequence} when is_binary(trace_id) ->
-          if valid_event_id(trace_id) == :ok,
-            do: {:halt, :conflict},
-            else: {:cont, sequences}
-
-        _invalid_identity ->
-          {:cont, sequences}
-      end
-    end) == :conflict
-  end
-
-  defp directory_lifecycle_conflict?(events) do
-    directory_run_lifecycle_conflict?(events) or
-      directory_evaluation_lifecycle_conflict?(events)
-  end
-
-  defp directory_run_lifecycle_conflict?(events) do
-    Enum.reduce_while(events, %{}, &advance_directory_run_lifecycle/2) == :conflict
-  end
-
-  defp directory_evaluation_lifecycle_conflict?(events) do
-    Enum.reduce_while(events, %{}, &advance_directory_evaluation_lifecycle/2) == :conflict
-  end
-
-  defp advance_directory_run_lifecycle(
-         %{"run_id" => run_id, "type" => type},
-         lifecycles
-       )
-       when is_binary(run_id) and is_binary(type) do
-    if directory_lifecycle_identity?(run_id, type),
-      do: lifecycle_reduction(advance_run_lifecycle(lifecycles, run_id, type)),
-      else: {:cont, lifecycles}
-  end
-
-  defp advance_directory_run_lifecycle(_event, lifecycles), do: {:cont, lifecycles}
-
-  defp advance_directory_evaluation_lifecycle(
-         %{"run_id" => run_id, "type" => type, "data" => data} = event,
-         lifecycles
-       )
-       when is_binary(run_id) and is_binary(type) and is_map(data) do
-    if directory_lifecycle_identity?(run_id, type),
-      do: lifecycle_reduction(advance_evaluation_lifecycle(lifecycles, run_id, event)),
-      else: {:cont, lifecycles}
-  end
-
-  defp advance_directory_evaluation_lifecycle(_event, lifecycles),
-    do: {:cont, lifecycles}
-
-  defp lifecycle_reduction({:ok, advanced}), do: {:cont, advanced}
-  defp lifecycle_reduction({:error, _reason}), do: {:halt, :conflict}
-
-  defp directory_lifecycle_identity?(run_id, type),
-    do: valid_event_id(run_id) == :ok and type =~ @event_type
-
-  defp directory_malformed_event?(events),
-    do: Enum.any?(events, &match?({:error, _reason}, directory_event_shape(&1)))
-
-  defp directory_event_shape(event) when is_map(event) do
-    event
-    |> Map.put("schema_version", normalized_directory_version(event["schema_version"]))
-    |> Map.put("sequence", normalized_directory_sequence(event["sequence"]))
-    |> validate_event()
-    |> case do
-      :ok -> :ok
-      {:error, _reason} -> {:error, :malformed_event}
-    end
-  end
-
-  defp directory_event_shape(_event), do: {:error, :malformed_event}
-
-  defp normalized_directory_version(version) when is_integer(version) and version != 2, do: 2
-  defp normalized_directory_version(version), do: version
-
-  defp normalized_directory_sequence(sequence)
-       when not is_integer(sequence) or sequence <= 0,
-       do: 1
-
-  defp normalized_directory_sequence(sequence), do: sequence
-
-  defp maybe_directory_reason(reasons, true, reason), do: reasons ++ [reason]
-  defp maybe_directory_reason(reasons, false, _reason), do: reasons
-
-  defp advance_run_lifecycle(run_lifecycles, run_id, type) do
-    case {Map.get(run_lifecycles, run_id), type} do
-      {nil, "run-started"} ->
-        {:ok, Map.put(run_lifecycles, run_id, :open)}
-
-      {:open, "run-stopped"} ->
-        {:ok, Map.put(run_lifecycles, run_id, :stopped)}
-
-      {:open, "run-started"} ->
-        {:error, :malformed_source}
-
-      {:open, _type} ->
-        {:ok, run_lifecycles}
-
-      {_lifecycle, _type} ->
-        {:error, :malformed_source}
-    end
-  end
-
-  defp advance_evaluation_lifecycle(evaluations, run_id, %{
-         "type" => "evaluation-started",
-         "data" => data
-       }) do
-    evaluation_id = data["evaluation_id"]
-    environment = stringify(data["environment"])
-    parent_evaluation_id = data["parent_evaluation_id"]
-    key = {run_id, evaluation_id}
-
-    with :ok <- valid_event_id(evaluation_id),
-         false <- Map.has_key?(evaluations, key),
-         :ok <-
-           validate_parent_evaluation(
-             evaluations,
-             run_id,
-             environment,
-             parent_evaluation_id
-           ) do
-      {:ok,
-       Map.put(evaluations, key, %{
-         environment: environment,
-         parent_evaluation_id: parent_evaluation_id,
-         lifecycle: :open
-       })}
-    else
-      _invalid -> {:error, :malformed_source}
-    end
-  end
-
-  defp advance_evaluation_lifecycle(evaluations, run_id, %{
-         "type" => "evaluation-stopped",
-         "data" => data
-       }) do
-    evaluation_id = data["evaluation_id"]
-    environment = stringify(data["environment"])
-    parent_evaluation_id = data["parent_evaluation_id"]
-    key = {run_id, evaluation_id}
-
-    with :ok <- valid_event_id(evaluation_id),
-         %{lifecycle: :open} = started <- Map.get(evaluations, key),
-         true <- started.environment == environment,
-         true <- started.parent_evaluation_id == parent_evaluation_id do
-      {:ok, put_in(evaluations, [key, :lifecycle], :stopped)}
-    else
-      nil when is_nil(parent_evaluation_id) -> {:ok, evaluations}
-      _invalid -> {:error, :malformed_source}
-    end
-  end
-
-  defp advance_evaluation_lifecycle(evaluations, _run_id, %{"data" => data}) do
-    if Map.has_key?(data, "parent_evaluation_id"),
-      do: {:error, :malformed_source},
-      else: {:ok, evaluations}
-  end
-
-  defp validate_parent_evaluation(_evaluations, _run_id, _environment, nil), do: :ok
-
-  defp validate_parent_evaluation(
-         evaluations,
-         run_id,
-         "mission",
-         parent_evaluation_id
-       ) do
-    with :ok <- valid_event_id(parent_evaluation_id),
-         %{environment: "workflow", lifecycle: :open, parent_evaluation_id: nil} <-
-           Map.get(evaluations, {run_id, parent_evaluation_id}) do
-      :ok
-    else
-      _invalid -> {:error, :malformed_source}
-    end
-  end
-
-  defp validate_parent_evaluation(
-         _evaluations,
-         _run_id,
-         _environment,
-         _parent_evaluation_id
-       ),
-       do: {:error, :malformed_source}
-
-  defp valid_event_id(value)
-       when is_binary(value) and byte_size(value) in 1..256,
-       do: if(String.valid?(value), do: :ok, else: {:error, :malformed_source})
-
-  defp valid_event_id(_value), do: {:error, :malformed_source}
-
-  defp same_identity(state, run_id, trace_id) do
-    with existing_trace when existing_trace in [nil, trace_id] <-
-           Map.get(state.run_traces, run_id),
-         existing_run when existing_run in [nil, run_id] <- Map.get(state.trace_runs, trace_id) do
-      :ok
-    else
-      _other -> {:error, :malformed_source}
-    end
-  end
-
-  defp validate_event(event) when is_map(event) do
-    with true <- Enum.sort(Map.keys(event)) == Enum.sort(@event_keys),
-         2 <- event["schema_version"],
-         :ok <- valid_string(event["run_id"]),
-         :ok <- valid_string(event["trace_id"]),
-         sequence when is_integer(sequence) and sequence > 0 <- event["sequence"],
-         timestamp when is_binary(timestamp) <- event["timestamp"],
-         {:ok, _datetime, 0} <- DateTime.from_iso8601(timestamp),
-         type when is_binary(type) <- event["type"],
-         true <- type =~ @event_type,
-         true <- JSONValue.map?(event["data"]),
-         :ok <- validate_event_data(type, event["data"]) do
-      :ok
-    else
-      version when is_integer(version) and version != 2 -> {:error, :unsupported_version}
-      _ -> {:error, :malformed_source}
-    end
-  end
-
-  defp validate_event(_event), do: {:error, :malformed_source}
-
-  defp validate_event_data(type, data) do
-    with :ok <- validate_current_event_data(type, data),
-         :ok <- validate_run_stopped_usage(type, data) do
-      validate_run_stopped_result_hash(type, data)
-    end
-  end
-
-  defp validate_run_stopped_result_hash("run-stopped", data) do
-    case Map.fetch(data, "result_hash") do
-      :error ->
-        :ok
-
-      {:ok, result_hash} ->
-        if stringify(data["outcome"]) == "ok" and ResultIdentity.valid_hash?(result_hash),
-          do: :ok,
-          else: {:error, :malformed_source}
-    end
-  end
-
-  defp validate_run_stopped_result_hash(_type, _data), do: :ok
-
-  defp validate_current_event_data("run-started", data) do
-    singular =
-      ~w(mission_prelude mission_inventory_hash mission_inventory_bytes mission_model_context_hash mission_model_context_bytes)
-
-    if is_map(data["missions"]) and Enum.all?(singular, &(not Map.has_key?(data, &1))) and
-         not Map.has_key?(data, "mission_name") and
-         valid_prelude_projection?(data["workflow_prelude"]) and
-         valid_mission_preludes?(data["missions"]) do
-      :ok
-    else
-      {:error, :malformed_source}
-    end
-  end
-
-  defp validate_current_event_data(type, data)
-       when type in ["run-stopped", "events-dropped"] do
-    if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
-  end
-
-  defp validate_current_event_data(_type, data) do
-    environment = stringify(data["environment"])
-
-    case environment do
-      "mission" ->
-        if valid_string(data["mission_name"]) == :ok,
-          do: :ok,
-          else: {:error, :malformed_source}
-
-      "workflow" ->
-        if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
-
-      _other ->
-        if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
-    end
-  end
-
-  defp valid_mission_preludes?(missions) do
-    Enum.all?(missions, fn {_name, metadata} ->
-      is_map(metadata) and valid_prelude_projection?(metadata["prelude"])
-    end)
-  end
-
-  # The prelude projection is the only canonical commitment a private
-  # `prelude-source` record can be proven against, so it is validated to
-  # producer grade here rather than interpreted leniently later. A component
-  # list without an aligned dependency list, or an identity that is not a bare
-  # digest, cannot be reconstructed and is rejected as malformed.
-  defp valid_prelude_projection?(nil), do: true
-
-  defp valid_prelude_projection?(prelude) when is_map(prelude) do
-    component_ids = prelude["component_ids"]
-
-    is_list(component_ids) and Enum.all?(component_ids, &(valid_string(&1) == :ok)) and
-      component_ids == Enum.uniq(component_ids) and
-      valid_prelude_hash?(prelude["hash"], component_ids) and
-      valid_dependency_indices?(prelude["dependency_indices"], length(component_ids))
-  end
-
-  defp valid_prelude_projection?(_prelude), do: false
-
-  # A nil identity means no bundle at all, which can name no components. A
-  # bundle always carries a digest, whether or not it compiled any component.
-  defp valid_prelude_hash?(nil, component_ids), do: component_ids == []
-  defp valid_prelude_hash?(hash, _component_ids) when is_binary(hash), do: hash =~ @bundle_hash
-  defp valid_prelude_hash?(_hash, _component_ids), do: false
-
-  defp valid_dependency_indices?(dependency_indices, count) when is_list(dependency_indices) do
-    length(dependency_indices) == count and
-      dependency_indices
-      |> Enum.with_index()
-      |> Enum.all?(fn {indices, position} -> valid_dependency_list?(indices, position) end)
-  end
-
-  defp valid_dependency_indices?(_dependency_indices, _count), do: false
-
-  defp valid_dependency_list?(indices, position) when is_list(indices) do
-    Enum.all?(indices, &(is_integer(&1) and &1 >= 0 and &1 < position)) and
-      indices == Enum.sort(indices) and indices == Enum.uniq(indices)
-  end
-
-  defp valid_dependency_list?(_indices, _position), do: false
-
-  defp validate_run_stopped_usage("run-stopped", data) do
-    case Map.fetch(data, "usage") do
-      :error ->
-        :ok
-
-      {:ok, usage} when is_map(usage) ->
-        with :ok <- validate_subordinate_source_checks(usage),
-             do: validate_terminal_llm_spend(usage)
-
-      _invalid_usage ->
-        {:error, :malformed_source}
-    end
-  end
-
-  defp validate_run_stopped_usage(_type, _data), do: :ok
-
-  defp validate_subordinate_source_checks(usage) do
-    case Map.fetch(usage, "subordinate_source_checks") do
-      :error -> :ok
-      {:ok, count} when is_integer(count) and count >= 0 -> :ok
-      _invalid_count -> {:error, :malformed_source}
-    end
-  end
-
-  defp validate_terminal_llm_spend(usage) do
-    case Map.fetch(usage, "llm_spend") do
-      :error ->
-        :ok
-
-      {:ok, spend} ->
-        case LLMUsageSummary.validate_spend(spend) do
-          {:ok, _spend} -> :ok
-          {:error, :invalid_llm_spend} -> {:error, :malformed_source}
-        end
-    end
   end
 
   defp runs(events, source_kind) do

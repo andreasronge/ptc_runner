@@ -652,10 +652,13 @@ suites must keep proving, concretely:
   inventory, direct `Evaluation` parity, exact continuation behavior, bounded
   result and accounting projection, terminal-budget lifecycle, and path and
   source redaction;
-- an immutable capture verifies pre/post inventory and content, enforces its
-  encoded and retained ceilings independently, redacts the path from ownership
-  and errors, keeps snapshot cursors stable after the original directory
-  mutates, and cleans up idempotently under owner death;
+- an immutable directory capture verifies the root plus selected raw names,
+  identities, sizes, and bytes around classification; retains one complete
+  `directory_admission_v1` value containing admitted events, provenance,
+  compiled analysis, and all isolation evidence; enforces encoded and retained
+  ceilings independently; redacts paths and unsafe names from public metadata;
+  keeps snapshot cursors stable after the original directory mutates; and
+  cleans up idempotently under owner death;
 - saturating event count and byte capacity still retains one dropped summary
   plus exactly one terminal event through a reloadable persisted batch;
 - atomic publication faulted before, during, and after write and at cleanup

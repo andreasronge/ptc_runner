@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.TraceDirectoryAdmission do
   @moduledoc false
 
-  alias PtcRunner.Kernel.TraceLog
+  alias PtcRunner.Kernel.TraceEventValidation
 
   @reason_order [
     :invalid_filename,
@@ -48,6 +48,7 @@ defmodule PtcRunner.Kernel.TraceDirectoryAdmission do
           required(:embedded_trace_claims) => [binary()],
           required(:events) => [map()],
           required(:status) => evidence_status(),
+          required(:semantic_reasons) => [reason()],
           required(:reasons) => [reason()]
         }
 
@@ -77,38 +78,20 @@ defmodule PtcRunner.Kernel.TraceDirectoryAdmission do
   def evidence(raw_name, source_kind, status)
       when is_binary(raw_name) and source_kind in [:sanitized, :private] do
     with ^source_kind <- filename_source_kind(raw_name),
-         {:ok, events, status_reasons} <- status_evidence(status) do
-      filename_run_claim = filename_run_claim(raw_name, source_kind)
-      source_name = if filename_run_claim, do: raw_name
-      embedded_run_claims = claims(events, "run_id")
-      embedded_trace_claims = claims(events, "trace_id")
-
-      reasons =
-        []
-        |> maybe_add(is_nil(filename_run_claim), :invalid_filename)
-        |> Kernel.++(status_reasons)
-        |> Kernel.++(decoded_reasons(status, events, filename_run_claim, embedded_run_claims))
-        |> Kernel.++(semantic_reasons(status, events))
-        |> order_reasons()
-
-      {:ok,
-       %{
-         raw_name: raw_name,
-         source_name: source_name,
-         source_kind: source_kind,
-         filename_run_claim: filename_run_claim,
-         embedded_run_claims: embedded_run_claims,
-         embedded_trace_claims: embedded_trace_claims,
-         events: events,
-         status: status,
-         reasons: reasons
-       }}
+         {:ok, events, _status_reasons} <- status_evidence(status),
+         semantic_reasons = validate_semantics(status, events),
+         true <- valid_semantic_reasons?(semantic_reasons) do
+      {:ok, build_evidence(raw_name, source_kind, status, semantic_reasons)}
     else
       _invalid -> {:error, :invalid_evidence}
     end
   end
 
   def evidence(_raw_name, _source_kind, _status), do: {:error, :invalid_evidence}
+
+  @spec source_kind(binary()) :: source_kind() | nil
+  def source_kind(raw_name) when is_binary(raw_name), do: filename_source_kind(raw_name)
+  def source_kind(_raw_name), do: nil
 
   @spec classify([file_evidence()]) :: {:ok, classification()} | {:error, :invalid_evidence}
   def classify(evidence) when is_list(evidence) do
@@ -162,10 +145,46 @@ defmodule PtcRunner.Kernel.TraceDirectoryAdmission do
 
   defp decoded_reasons(_status, _events, _filename_claim, _run_claims), do: []
 
-  defp semantic_reasons({:decoded, [_ | _]}, events),
-    do: TraceLog.directory_event_reasons(events)
+  defp validate_semantics({:decoded, [_ | _]}, events),
+    do: TraceEventValidation.directory_reasons(events)
 
-  defp semantic_reasons(_status, _events), do: []
+  defp validate_semantics(_status, _events), do: []
+
+  defp valid_semantic_reasons?(reasons) when is_list(reasons) do
+    allowed = [:unsupported_version, :sequence_conflict, :lifecycle_conflict, :malformed_event]
+    Enum.all?(reasons, &(&1 in allowed)) and reasons == order_reasons(reasons)
+  end
+
+  defp valid_semantic_reasons?(_reasons), do: false
+
+  defp build_evidence(raw_name, source_kind, status, semantic_reasons) do
+    {:ok, events, status_reasons} = status_evidence(status)
+    filename_run_claim = filename_run_claim(raw_name, source_kind)
+    source_name = if filename_run_claim, do: raw_name
+    embedded_run_claims = claims(events, "run_id")
+    embedded_trace_claims = claims(events, "trace_id")
+
+    reasons =
+      []
+      |> maybe_add(is_nil(filename_run_claim), :invalid_filename)
+      |> Kernel.++(status_reasons)
+      |> Kernel.++(decoded_reasons(status, events, filename_run_claim, embedded_run_claims))
+      |> Kernel.++(semantic_reasons)
+      |> order_reasons()
+
+    %{
+      raw_name: raw_name,
+      source_name: source_name,
+      source_kind: source_kind,
+      filename_run_claim: filename_run_claim,
+      embedded_run_claims: embedded_run_claims,
+      embedded_trace_claims: embedded_trace_claims,
+      events: events,
+      status: status,
+      semantic_reasons: semantic_reasons,
+      reasons: reasons
+    }
+  end
 
   defp filename_mismatch?(_filename_claim, run_claims) when length(run_claims) != 1, do: true
   defp filename_mismatch?(nil, [_run_claim]), do: false
@@ -240,12 +259,19 @@ defmodule PtcRunner.Kernel.TraceDirectoryAdmission do
   defp has_suffix?(_value, _suffix), do: false
 
   defp valid_evidence?(
-         %{raw_name: raw_name, source_kind: source_kind, status: status} = candidate
+         %{
+           raw_name: raw_name,
+           source_kind: source_kind,
+           status: status,
+           events: events,
+           semantic_reasons: semantic_reasons
+         } = candidate
        ) do
-    case evidence(raw_name, source_kind, status) do
-      {:ok, expected} -> candidate == expected
-      {:error, :invalid_evidence} -> false
-    end
+    filename_source_kind(raw_name) == source_kind and valid_semantic_reasons?(semantic_reasons) and
+      candidate ==
+        build_evidence(raw_name, source_kind, status, validate_semantics(status, events))
+  rescue
+    _exception -> false
   end
 
   defp valid_evidence?(_evidence), do: false

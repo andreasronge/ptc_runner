@@ -1306,17 +1306,18 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     second = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:vendor/model-b")
     reviewer = TestHelpers.llm_snapshot("reviewer", "review-v2", "openrouter:vendor/model-a")
 
-    File.write!(
-      Path.join(directory, "counters.jsonl"),
-      Enum.map_join(
-        counter_run("first", first, "ok", %{"input" => 3, "output" => 2, "total_cost" => 0.25}) ++
-          counter_run("second", second, "ok", %{"input" => 5}) ++
-          counter_run("review", reviewer, "ok", %{"input" => 7}, "reviewer", "review-v2") ++
-          counter_run("private", nil, "error", nil),
-        "",
-        &(Jason.encode!(&1) <> "\n")
-      )
-    )
+    runs = [
+      {"first",
+       counter_run("first", first, "ok", %{"input" => 3, "output" => 2, "total_cost" => 0.25})},
+      {"second", counter_run("second", second, "ok", %{"input" => 5})},
+      {"review", counter_run("review", reviewer, "ok", %{"input" => 7}, "reviewer", "review-v2")},
+      {"private", counter_run("private", nil, "error", nil)}
+    ]
+
+    Enum.each(runs, fn {run_id, events} ->
+      encoded = Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n"))
+      File.write!(Path.join(directory, "#{run_id}.jsonl"), encoded)
+    end)
   end
 
   defp counter_run(

@@ -117,18 +117,28 @@ The current trace schema supports:
 - explicitly granted directories containing JSONL files;
 - a bounded in-memory sink for REPL, tests, and short-lived runs.
 
-JSONL files are written in canonical sequence order. Directory loading is
-deterministic: discover supported files, normalize paths, sort them, then load
-in sorted order under one aggregate byte cap. Exact selected capture is a
-distinct source variant used by `ptc transcript RUN_ID`: it resolves only
+JSONL files are written in canonical sequence order. A generated trace
+directory is a set of filename-bound canonical files:
+`<run-id>.jsonl` for sanitized evidence and
+`<run-id>.private.jsonl` for private evidence. Each selected directory member
+contains exactly one run ID and trace ID, and its embedded run ID equals the
+filename stem. The stem is 1–256 ASCII bytes matching
+`[A-Za-z0-9][A-Za-z0-9._-]*`. Directory admission bounds and sorts the raw
+selected basenames, inventories every selected member before reading any,
+proves the root/name/file/content selection stable, and classifies a complete
+run/trace claim graph. A damaged component is isolated as a unit while
+disjoint valid files remain admitted; no filename-ordered winner, repair, or
+partial run is selected.
+
+Exact selected capture is a distinct source variant used by
+`ptc transcript RUN_ID`: it resolves only
 `<run-ref>.jsonl` or `<run-ref>.private.jsonl` plus
 `<run-ref>.ptcins`, never lists the granted directory, and does not
 count unrelated members toward `max_directory_entries`, `max_files`, or the
 aggregate source-byte ceiling. Selected snapshot identity commits to the
 requested run reference, trace source class, exact evidence digests, and
-correlated trace ID. Filenames remain routing hints; embedded identities are
-authoritative. Directory snapshots keep their current fail-closed contract and
-still reject malformed or mismatched members.
+correlated trace ID. Explicit single-file sources remain filename-agnostic and
+may contain multiple complete disjoint runs; they never combine with siblings.
 
 One directory holds both sanitized and private trace files, and one source
 grant reads exactly one kind. A run listing and a counters query therefore
@@ -141,14 +151,26 @@ carry the field. The count is advisory evidence about the directory, not part
 of the source identity, so a concurrent write to the kind a grant does not read
 never invalidates the evidence it does read.
 
+The `directory_admission_v1` source identity commits to the grant class; every
+selected raw relative-name byte string, source class, length, and content
+digest; complete filename and embedded claims and reasons; admitted events and
+their per-run provenance; and untruncated isolation components. It never
+commits to an absolute path, opposite-class basename or bytes, advisory
+exclusion count, capture time, or presentation caps. Snapshots retain that
+complete detached admission value—including the compiled analysis
+projection—and charge it against the 32,000,000-byte retained ceiling.
+
 Normal trace sinks sanitize before persistence. Private canonical event sinks
 use the separate fail-closed policy specified by the event-sink section of the
 `PtcRunner.Kernel.EventSink` module documentation, but retain the same event
 vocabulary rather than capturing exact payloads or source.
 
-Malformed or unsupported canonical events fail closed by default. A debugging
-mode may report bounded per-file errors, but it never silently reinterprets
-malformed data as valid runs.
+Malformed or unsupported explicit single-file canonical events fail closed.
+For directory discovery, malformed JSONL, unsupported versions, filename
+mismatch, identity conflicts, sequence conflicts, lifecycle conflicts,
+non-regular members, and stably unreadable members isolate their complete
+connected component. Invalid raw basenames remain in immutable proof and
+counts but are never emitted as source metadata.
 
 ## Source grants and authority
 

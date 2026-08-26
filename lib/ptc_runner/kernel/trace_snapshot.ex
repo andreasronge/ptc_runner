@@ -490,18 +490,21 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   end
 
   defp retain_capture(capture, config) do
-    analysis = TraceLog.compile_analysis(capture.events, capture.run_sources)
+    capture =
+      Map.put_new_lazy(capture, :analysis, fn ->
+        TraceLog.compile_analysis(capture.events, capture.run_sources)
+      end)
 
-    retained_bytes =
-      RetainedSize.bytes({capture.events, capture.run_sources, analysis})
+    retained_value =
+      if capture[:version] == :directory_admission_v1,
+        do: capture,
+        else: {capture.events, capture.run_sources, capture.analysis}
+
+    retained_bytes = RetainedSize.bytes(retained_value)
 
     cond do
       is_integer(retained_bytes) and retained_bytes <= config.max_retained_bytes ->
-        retained_capture =
-          capture
-          |> Map.put(:events, RetainedSize.detach_binaries(capture.events))
-          |> Map.put(:run_sources, RetainedSize.detach_binaries(capture.run_sources))
-          |> Map.put(:analysis, RetainedSize.detach_binaries(analysis))
+        retained_capture = RetainedSize.detach_binaries(capture)
 
         {:ok, retained_capture, retained_bytes}
 
@@ -586,6 +589,8 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
       events: capture.events,
       run_sources: capture.run_sources,
       analysis: capture.analysis,
+      directory_admission:
+        if(capture[:version] == :directory_admission_v1, do: capture, else: nil),
       source_id: capture.source_id,
       max_result_bytes: max_result_bytes,
       info: %{
