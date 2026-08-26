@@ -176,7 +176,7 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
 
   @tag :tmp_dir
   test "viewer API and TraceLog return the same source-scoped projection", %{tmp_dir: directory} do
-    path = Path.join(directory, "kernel.jsonl")
+    path = Path.join(directory, "viewer-run.jsonl")
 
     connector = %{
       "provider" => "fixture-mcp",

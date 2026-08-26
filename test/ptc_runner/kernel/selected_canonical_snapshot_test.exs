@@ -47,7 +47,7 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
     on_exit(fn -> TraceSnapshot.stop(snapshot) end)
     assert {:ok, %{file_count: 2, run_count: 1}} = TraceSnapshot.info(snapshot)
     assert {:ok, true} = TraceSnapshot.run_exists?(snapshot, fixture.run_id)
-    assert {:ok, false} = TraceSnapshot.run_exists?(snapshot, "broken")
+    assert {:error, :run_isolated} = TraceSnapshot.run_exists?(snapshot, "broken")
   end
 
   @tag :tmp_dir

@@ -296,9 +296,12 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   def handle_call({token, {:run_exists, run_id}}, _from, %{token: token} = state) do
     result =
-      if valid_run_id?(run_id),
-        do: {:ok, Map.has_key?(state.analysis.runs_by_id, run_id)},
-        else: {:error, :invalid_query}
+      cond do
+        not valid_run_id?(run_id) -> {:error, :invalid_query}
+        Map.has_key?(state.analysis.runs_by_id, run_id) -> {:ok, true}
+        isolated_run?(state, run_id) -> {:error, :run_isolated}
+        true -> {:ok, false}
+      end
 
     {:reply, result, state}
   end
@@ -495,17 +498,17 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
         TraceLog.compile_analysis(capture.events, capture.run_sources)
       end)
 
+    retained_capture = RetainedSize.detach_binaries(capture)
+
     retained_value =
-      if capture[:version] == :directory_admission_v1,
-        do: capture,
-        else: {capture.events, capture.run_sources, capture.analysis}
+      if retained_capture[:version] == :directory_admission_v1,
+        do: retained_capture,
+        else: {retained_capture.events, retained_capture.run_sources, retained_capture.analysis}
 
     retained_bytes = RetainedSize.bytes(retained_value)
 
     cond do
       is_integer(retained_bytes) and retained_bytes <= config.max_retained_bytes ->
-        retained_capture = RetainedSize.detach_binaries(capture)
-
         {:ok, retained_capture, retained_bytes}
 
       is_integer(retained_bytes) ->
@@ -630,7 +633,9 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
         with :ok <- ResultLimit.validate(result, max_bytes), do: {:ok, result}
 
       :error ->
-        {:error, :not_found}
+        if isolated_run?(state, run_id),
+          do: {:error, :run_isolated},
+          else: {:error, :not_found}
     end
   end
 
@@ -642,9 +647,18 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
       arguments,
       max_bytes,
       state.run_sources,
-      metadata
+      metadata,
+      known_isolated_run_ids(state)
     )
   end
+
+  defp isolated_run?(state, run_id),
+    do: MapSet.member?(known_isolated_run_ids(state), run_id)
+
+  defp known_isolated_run_ids(%{directory_admission: %{known_isolated_run_ids: run_ids}}),
+    do: run_ids
+
+  defp known_isolated_run_ids(_state), do: MapSet.new()
 
   defp valid_run_id?(run_id),
     do: is_binary(run_id) and byte_size(run_id) in 1..4_096 and String.valid?(run_id)

@@ -5,9 +5,10 @@ defmodule PtcRunner.Kernel.BoundedWorker do
   Results use a process alias so timeout cleanup can invalidate and drain a
   late reply before returning to the caller. Callers that are themselves
   disposable workers may opt into `:cancel_with_caller`; the bounded worker is
-  then linked for the duration of the call so an untrappable caller kill also
-  terminates blocked work. A caller may also supply a `:cancel_with` process;
-  its termination cancels the worker without coupling the two owners.
+  then covered by a monitor-based guard so caller death terminates blocked work
+  without changing the caller's exit-trapping semantics. A caller may also
+  supply a `:cancel_with` process; its termination cancels the worker without
+  coupling the two owners.
   """
 
   @doc """
@@ -64,38 +65,21 @@ defmodule PtcRunner.Kernel.BoundedWorker do
     cancel_with = Keyword.get(opts, :cancel_with)
     timeout_cleanup_hook = Keyword.get(opts, :timeout_cleanup_hook)
 
-    if cancel_with_caller? do
-      previous_trap_exit = Process.flag(:trap_exit, true)
-
-      try do
-        run_worker(
-          function,
-          timeout_ms,
-          max_heap_words,
-          true,
-          cancel_with,
-          timeout_cleanup_hook
-        )
-      after
-        Process.flag(:trap_exit, previous_trap_exit)
-      end
-    else
-      run_worker(
-        function,
-        timeout_ms,
-        max_heap_words,
-        false,
-        cancel_with,
-        timeout_cleanup_hook
-      )
-    end
+    run_worker(
+      function,
+      timeout_ms,
+      max_heap_words,
+      cancel_with_caller?,
+      cancel_with,
+      timeout_cleanup_hook
+    )
   end
 
   defp run_worker(
          function,
          timeout_ms,
          max_heap_words,
-         linked?,
+         cancel_with_caller?,
          cancel_with,
          timeout_cleanup_hook
        ) do
@@ -103,62 +87,73 @@ defmodule PtcRunner.Kernel.BoundedWorker do
     reply_ref = make_ref()
     cancel_monitor = monitor_cancel_target(cancel_with)
 
-    spawn_options =
-      [
-        {:max_heap_size,
-         %{
-           size: max_heap_words,
-           kill: true,
-           error_logger: false,
-           include_shared_binaries: true
-         }},
-        :monitor
-      ] ++ if(linked?, do: [:link], else: [])
+    case start_worker(
+           function,
+           reply_alias,
+           reply_ref,
+           max_heap_words,
+           cancel_with_caller?
+         ) do
+      {:ok, pid, monitor_ref, caller_guard} ->
+        await_worker(
+          pid,
+          monitor_ref,
+          caller_guard,
+          reply_alias,
+          reply_ref,
+          cancel_monitor,
+          timeout_ms,
+          timeout_cleanup_hook
+        )
 
-    {pid, monitor_ref} =
-      Process.spawn(
-        fn -> send(reply_alias, {reply_ref, function.()}) end,
-        spawn_options
-      )
+      {:error, :worker_failed} ->
+        demonitor_cancel_target(cancel_monitor)
+        Process.unalias(reply_alias)
+        {:error, :worker_failed}
+    end
+  end
+
+  defp await_worker(
+         pid,
+         monitor_ref,
+         caller_guard,
+         reply_alias,
+         reply_ref,
+         cancel_monitor,
+         timeout_ms,
+         timeout_cleanup_hook
+       ) do
+    {guard, guard_monitor} = caller_guard_identity(caller_guard)
 
     receive do
       {^reply_ref, result} ->
         demonitor_cancel_target(cancel_monitor)
         Process.unalias(reply_alias)
         await_down(pid, monitor_ref)
-        unlink(pid, linked?)
-        drain_exit(pid, linked?)
+        release_caller_guard(caller_guard)
         {:ok, result}
 
       {:DOWN, ^monitor_ref, :process, ^pid, :killed} ->
         demonitor_cancel_target(cancel_monitor)
         Process.unalias(reply_alias)
-        unlink(pid, linked?)
-        drain_exit(pid, linked?)
+        release_caller_guard(caller_guard)
         {:error, :heap_exceeded}
 
       {:DOWN, ^monitor_ref, :process, ^pid, _reason} ->
         demonitor_cancel_target(cancel_monitor)
         Process.unalias(reply_alias)
-        unlink(pid, linked?)
-        drain_exit(pid, linked?)
+        release_caller_guard(caller_guard)
         {:error, :worker_failed}
 
-      {:EXIT, ^pid, reason} when linked? ->
+      {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
         demonitor_cancel_target(cancel_monitor)
-        await_down(pid, monitor_ref)
-        Process.unlink(pid)
-        drain_exit(pid, true)
-
-        if reason == :killed,
-          do: {:error, :heap_exceeded},
-          else: {:error, :worker_failed}
+        terminate(pid, monitor_ref, reply_alias, reply_ref)
+        {:error, :worker_failed}
 
       {:DOWN, cancel_ref, :process, cancel_pid, _reason}
       when cancel_monitor == {cancel_pid, cancel_ref} ->
-        if linked?,
-          do: terminate_linked(pid, monitor_ref, reply_alias, reply_ref),
-          else: terminate(pid, monitor_ref, reply_alias, reply_ref)
+        terminate(pid, monitor_ref, reply_alias, reply_ref)
+        release_caller_guard(caller_guard)
 
         {:error, :cancelled}
     after
@@ -166,16 +161,116 @@ defmodule PtcRunner.Kernel.BoundedWorker do
         demonitor_cancel_target(cancel_monitor)
         run_timeout_cleanup_hook(timeout_cleanup_hook)
 
-        if linked?,
-          do: terminate_linked(pid, monitor_ref, reply_alias, reply_ref),
-          else: terminate(pid, monitor_ref, reply_alias, reply_ref)
+        terminate(pid, monitor_ref, reply_alias, reply_ref)
+        release_caller_guard(caller_guard)
 
         {:error, :timeout}
     end
   end
 
-  defp unlink(pid, true), do: Process.unlink(pid)
-  defp unlink(_pid, false), do: true
+  defp start_worker(function, reply_alias, reply_ref, max_heap_words, false) do
+    {pid, monitor_ref} = spawn_worker(function, reply_alias, reply_ref, max_heap_words)
+    {:ok, pid, monitor_ref, nil}
+  end
+
+  defp start_worker(function, reply_alias, reply_ref, max_heap_words, true) do
+    caller = self()
+    guard_ref = make_ref()
+
+    {guard, guard_monitor} =
+      spawn_monitor(fn ->
+        caller_guard(caller, guard_ref, function, reply_alias, reply_ref, max_heap_words)
+      end)
+
+    receive do
+      {^guard_ref, pid, start_ref} ->
+        worker_monitor = Process.monitor(pid)
+        send(pid, {start_ref, :run})
+        {:ok, pid, worker_monitor, {guard, guard_monitor, guard_ref}}
+
+      {:DOWN, ^guard_monitor, :process, ^guard, _reason} ->
+        {:error, :worker_failed}
+    end
+  end
+
+  defp spawn_worker(function, reply_alias, reply_ref, max_heap_words) do
+    Process.spawn(
+      fn -> send(reply_alias, {reply_ref, function.()}) end,
+      worker_spawn_options(max_heap_words)
+    )
+  end
+
+  defp caller_guard(caller, guard_ref, function, reply_alias, reply_ref, max_heap_words) do
+    caller_ref = Process.monitor(caller)
+    start_ref = make_ref()
+
+    {worker, worker_ref} =
+      spawn_guarded_worker(function, reply_alias, reply_ref, max_heap_words, start_ref)
+
+    send(caller, {guard_ref, worker, start_ref})
+    guard_worker(caller, caller_ref, guard_ref, worker, worker_ref)
+  end
+
+  defp spawn_guarded_worker(function, reply_alias, reply_ref, max_heap_words, start_ref) do
+    Process.spawn(
+      fn ->
+        receive do
+          {^start_ref, :run} -> send(reply_alias, {reply_ref, function.()})
+        end
+      end,
+      worker_spawn_options(max_heap_words)
+    )
+  end
+
+  defp worker_spawn_options(max_heap_words) do
+    [
+      {:max_heap_size,
+       %{
+         size: max_heap_words,
+         kill: true,
+         error_logger: false,
+         include_shared_binaries: true
+       }},
+      :monitor
+    ]
+  end
+
+  defp guard_worker(caller, caller_ref, guard_ref, worker, worker_ref) do
+    receive do
+      {^guard_ref, :release} ->
+        Process.demonitor(caller_ref, [:flush])
+        Process.demonitor(worker_ref, [:flush])
+        :ok
+
+      {:DOWN, ^caller_ref, :process, ^caller, _reason} ->
+        Process.exit(worker, :kill)
+        await_down(worker, worker_ref)
+
+      {:DOWN, ^worker_ref, :process, ^worker, _reason} ->
+        guard_after_worker(caller, caller_ref, guard_ref)
+    end
+  end
+
+  defp guard_after_worker(caller, caller_ref, guard_ref) do
+    receive do
+      {^guard_ref, :release} ->
+        Process.demonitor(caller_ref, [:flush])
+        :ok
+
+      {:DOWN, ^caller_ref, :process, ^caller, _reason} ->
+        :ok
+    end
+  end
+
+  defp release_caller_guard(nil), do: :ok
+
+  defp release_caller_guard({guard, guard_monitor, guard_ref}) do
+    send(guard, {guard_ref, :release})
+    await_down(guard, guard_monitor)
+  end
+
+  defp caller_guard_identity(nil), do: {nil, nil}
+  defp caller_guard_identity({guard, guard_monitor, _guard_ref}), do: {guard, guard_monitor}
 
   defp monitor_cancel_target(nil), do: nil
   defp monitor_cancel_target(pid) when is_pid(pid), do: {pid, Process.monitor(pid)}
@@ -189,25 +284,6 @@ defmodule PtcRunner.Kernel.BoundedWorker do
     receive do
       {:DOWN, ^monitor_ref, :process, ^pid, _reason} -> :ok
     end
-  end
-
-  defp drain_exit(pid, true) do
-    receive do
-      {:EXIT, ^pid, _reason} -> :ok
-    after
-      0 -> :ok
-    end
-  end
-
-  defp drain_exit(_pid, false), do: :ok
-
-  defp terminate_linked(pid, monitor_ref, reply_alias, reply_ref) do
-    Process.unalias(reply_alias)
-    Process.exit(pid, :kill)
-    await_down(pid, monitor_ref)
-    Process.unlink(pid)
-    drain_exit(pid, true)
-    drain_result(reply_ref)
   end
 
   defp run_timeout_cleanup_hook(nil), do: :ok

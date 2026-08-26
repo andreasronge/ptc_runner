@@ -46,6 +46,17 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
              )
   end
 
+  test "guarded heap exhaustion keeps its classification across startup" do
+    for _iteration <- 1..100 do
+      assert {:error, :heap_exceeded} =
+               BoundedWorker.run(fn -> Enum.to_list(1..1_000_000) end,
+                 timeout_ms: 1_000,
+                 max_heap_words: 10_000,
+                 cancel_with_caller: true
+               )
+    end
+  end
+
   test "termination drains a result already ordered before worker DOWN" do
     parent = self()
     reply_alias = Process.alias()

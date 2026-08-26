@@ -73,7 +73,8 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     assert Map.delete(snapshot_counters, "snapshot_hash") == expected_counters
     assert snapshot_counters["snapshot_hash"] == snapshot_hash
 
-    write_events(path, [event("changed", 1, "run-started")])
+    File.rm!(path)
+    write_events(Path.join(directory, "changed.jsonl"), [event("changed", 1, "run-started")])
     write_events(Path.join(directory, "later.jsonl"), [event("later", 1, "run-started")])
 
     assert {:ok, frozen_runs} = TraceSnapshot.query(snapshot, :list_runs, %{})

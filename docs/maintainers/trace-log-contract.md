@@ -159,6 +159,10 @@ commits to an absolute path, opposite-class basename or bytes, advisory
 exclusion count, capture time, or presentation caps. Snapshots retain that
 complete detached admission value—including the compiled analysis
 projection—and charge it against the 32,000,000-byte retained ceiling.
+Direct directory queries build and charge the byte-identical detached value
+transiently for every call. Their cursors therefore invalidate when any
+selected admitted or isolated evidence changes; snapshot cursors remain bound
+to the retained value.
 
 Normal trace sinks sanitize before persistence. Private canonical event sinks
 use the separate fail-closed policy specified by the event-sink section of the
@@ -1070,11 +1074,14 @@ inspection does not wait for that work and does not change
 
 ## Failure algebra
 
-Trace queries surface two capability-envelope kinds — `:not_found` and
-`:invalid_request` (plus `:internal` for unexpected failures). The specific
-condition is carried in the bounded details string. `:invalid_request` covers
-`:invalid_query`, `:unsupported_version`, `:malformed_source`,
-`:source_limit_exceeded`, `:result_limit_exceeded`, and `:source_changed`.
+Trace queries surface three capability-envelope kinds — `:not_found`,
+`:invalid_request`, and non-retryable `:unavailable` (plus `:internal` for
+unexpected failures). The specific condition is carried in the bounded details
+string. `:unavailable` reports a grant-visible `:run_isolated` claim with the
+exact detail `analysis run is isolated by damaged trace evidence`.
+`:invalid_request` covers `:invalid_query`, `:unsupported_version`,
+`:malformed_source`, `:source_limit_exceeded`, `:result_limit_exceeded`, and
+`:source_changed`.
 
 Details are bounded and sanitized. Host paths are not exposed beyond safe
 grant-relative identifiers.

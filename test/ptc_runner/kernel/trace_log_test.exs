@@ -754,7 +754,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   @tag :tmp_dir
   test "private JSONL sources require reserved names and explicit grants", %{tmp_dir: directory} do
     normal_path = Path.join(directory, "normal.jsonl")
-    private_path = Path.join(directory, "secret.private.jsonl")
+    private_path = Path.join(directory, "private.private.jsonl")
     normal_event = decoded_event("normal", 1, "run-started")
     private_event = decoded_event("private", 1, "run-started")
 
@@ -795,7 +795,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
     assert :ok =
              TraceLog.append_jsonl(
-               Path.join(directory, "secret.private.jsonl"),
+               Path.join(directory, "private.private.jsonl"),
                [decoded_event("private", 1, "run-started")],
                private: true
              )
@@ -903,8 +903,8 @@ defmodule PtcRunner.Kernel.TraceLogTest do
 
   @tag :tmp_dir
   test "cursors are bound to their operation and filters", %{tmp_dir: directory} do
-    File.write!(Path.join(directory, "a.jsonl"), jsonl_event("first", 1, "run-started"))
-    File.write!(Path.join(directory, "b.jsonl"), jsonl_event("second", 1, "run-started"))
+    File.write!(Path.join(directory, "first.jsonl"), jsonl_event("first", 1, "run-started"))
+    File.write!(Path.join(directory, "second.jsonl"), jsonl_event("second", 1, "run-started"))
 
     {:ok, trace_log} = TraceLog.new(source: {:directory, directory})
 
