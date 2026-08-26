@@ -345,14 +345,25 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
   def env_credential_host do
     %{
       "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
-      "install" => %{
-        "model" => %{
-          "source" => "llm",
-          "installation_revision" => "model-v1",
-          "model" => "openrouter:test/model",
-          "credential" => "key"
-        }
-      }
+      "install" => %{"model" => live_llm_installation()}
+    }
+  end
+
+  def literal_credential_host(value, model \\ "openrouter:test/model")
+      when is_binary(value) and is_binary(model) do
+    %{
+      "credentials" => %{"key" => %{"literal" => value}},
+      "install" => %{"model" => live_llm_installation(model)}
+    }
+  end
+
+  defp live_llm_installation(model \\ "openrouter:test/model") do
+    %{
+      "source" => "llm",
+      "structured_output_mode" => "unsupported",
+      "installation_revision" => "model-v1",
+      "model" => model,
+      "credential" => "key"
     }
   end
 

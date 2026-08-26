@@ -35,7 +35,7 @@ defmodule PtcRunner.LLMTest do
 
     @impl true
     def call(_target, %Invocation{request: %{schema: _schema}}) do
-      {:ok, %{content: Jason.encode!(%{answer: "structured"}), tokens: %{input: 5, output: 3}}}
+      {:ok, %{object: %{answer: "structured"}, tokens: %{input: 5, output: 3}}}
     end
 
     def call(_target, %Invocation{request: req}) do
@@ -328,6 +328,15 @@ defmodule PtcRunner.LLMTest do
 
       assert {:ok, omitted} = Requirements.live(%{}, 1_024)
       assert omitted.exact_options == %{max_tokens: 1_024}
+
+      assert {:ok, structured} =
+               Requirements.live(%{max_tokens: 256}, 4_096, :json_schema)
+
+      assert structured.structured_output_mode == :json_schema
+      assert structured.exact_options == %{max_tokens: 256}
+
+      assert {:ok, probe} = Requirements.probe(%{max_tokens: 99})
+      assert probe.structured_output_mode == :unsupported
     end
 
     test "probe authorization forces max_tokens 1 and keeps other installation controls" do

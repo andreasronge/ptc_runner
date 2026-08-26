@@ -2,8 +2,10 @@ defmodule PtcRunner.Kernel.LLMCapability do
   @moduledoc """
   Constructs the provider-neutral `llm-request` workflow capability.
 
-  The supplied requester owns transport and credential handling. Requests and
-  normalized JSON-like responses are independently bounded. Requesters may
+  The supplied requester owns transport and credential handling.   Requests and
+  normalized JSON-like responses are independently bounded. A request may
+  include an optional `schema` object; success then returns a closed
+  `structured_output` envelope rather than encoded `content`. Requesters may
   return a classified `PtcRunner.Kernel.ProviderError`; unclassified failures
   become retryable `:unavailable` errors. Invalid or oversized responses do not
   cross back into Lisp.
@@ -55,7 +57,12 @@ defmodule PtcRunner.Kernel.LLMCapability do
                    "type" => "array",
                    "items" => %{"type" => "object", "additionalProperties" => true}
                  },
-                 "cache" => %{"type" => "boolean"}
+                 "cache" => %{"type" => "boolean"},
+                 "schema" => %{
+                   "type" => "object",
+                   "additionalProperties" => true,
+                   "description" => "Request-authored JSON Schema for structured output"
+                 }
                }
              },
              output_schema: %{"type" => "object", "additionalProperties" => true},
@@ -99,24 +106,122 @@ defmodule PtcRunner.Kernel.LLMCapability do
   end
 
   defp normalize_response(response, limit) do
-    response = stringify_json(response)
-    bytes = RetainedSize.bytes_with_cap(response, limit)
+    case classify_success(response) do
+      {:ok, classified} ->
+        classified = stringify_json(classified)
+        bytes = RetainedSize.bytes_with_cap(classified, limit)
 
-    cond do
-      not (JSONValue.map?(response) and is_integer(bytes) and bytes <= limit) ->
-        {:error, ProviderError.new(:invalid_request, "LLM response exceeded its boundary")}
-
-      Map.has_key?(response, "tokens") ->
-        case LLMUsage.normalize(response["tokens"]) do
-          {:ok, usage} ->
-            {:ok, response |> Map.put("tokens", usage) |> RetainedSize.detach_binaries()}
-
-          {:error, :invalid_llm_usage} ->
-            invalid_usage()
+        if JSONValue.map?(classified) and is_integer(bytes) and bytes <= limit do
+          admit_tokens(classified)
+        else
+          {:error, ProviderError.new(:invalid_request, "LLM response exceeded its boundary")}
         end
 
+      :error ->
+        {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
+    end
+  end
+
+  defp classify_success(response) when is_map(response) and not is_struct(response) do
+    cond do
+      structured_object?(response) ->
+        closed_structured(:object, fetch_success(response, :object), response)
+
+      structured_json?(response) ->
+        closed_structured(:json, fetch_success(response, :json), response)
+
+      public_structured?(response) ->
+        closed_public_structured(fetch_success(response, "structured_output"), response)
+
+      tool_calls?(response) ->
+        {:ok,
+         keep_success_keys(response, [
+           :content,
+           :tool_calls,
+           :tokens,
+           :finish_reason,
+           :output_limit
+         ])}
+
+      content_response?(response) ->
+        {:ok, keep_success_keys(response, [:content, :tokens, :finish_reason, :output_limit])}
+
       true ->
-        {:ok, RetainedSize.detach_binaries(response)}
+        :error
+    end
+  end
+
+  defp classify_success(_response), do: :error
+
+  defp structured_object?(response),
+    do: match?(%{object: object} when is_map(object) and not is_struct(object), response)
+
+  defp structured_json?(response),
+    do: match?(%{json: json} when is_binary(json), response)
+
+  defp public_structured?(response) do
+    match?(
+      %{"structured_output" => object} when is_map(object) and not is_struct(object),
+      response
+    )
+  end
+
+  defp tool_calls?(response) do
+    calls = Map.get(response, :tool_calls, Map.get(response, "tool_calls"))
+    is_list(calls) and calls != []
+  end
+
+  defp content_response?(response) do
+    Map.has_key?(response, :content) or Map.has_key?(response, "content")
+  end
+
+  defp closed_structured(field, value, response) do
+    {:ok, %{field => value} |> maybe_put_tokens(response)}
+  end
+
+  defp closed_public_structured(object, response) do
+    {:ok, %{"structured_output" => object} |> maybe_put_tokens(response)}
+  end
+
+  defp maybe_put_tokens(envelope, response) do
+    case fetch_success(response, :tokens) do
+      :missing -> envelope
+      tokens -> Map.put(envelope, :tokens, tokens)
+    end
+  end
+
+  defp keep_success_keys(response, keys) do
+    Enum.reduce(keys, %{}, fn key, acc ->
+      case fetch_success(response, key) do
+        :missing -> acc
+        value -> Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp fetch_success(response, key) when is_atom(key) do
+    cond do
+      Map.has_key?(response, key) -> Map.fetch!(response, key)
+      Map.has_key?(response, Atom.to_string(key)) -> Map.fetch!(response, Atom.to_string(key))
+      true -> :missing
+    end
+  end
+
+  defp fetch_success(response, key) when is_binary(key) do
+    if Map.has_key?(response, key), do: Map.fetch!(response, key), else: :missing
+  end
+
+  defp admit_tokens(response) do
+    if Map.has_key?(response, "tokens") do
+      case LLMUsage.normalize(response["tokens"]) do
+        {:ok, usage} ->
+          {:ok, response |> Map.put("tokens", usage) |> RetainedSize.detach_binaries()}
+
+        {:error, :invalid_llm_usage} ->
+          invalid_usage()
+      end
+    else
+      {:ok, RetainedSize.detach_binaries(response)}
     end
   end
 

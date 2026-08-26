@@ -28,9 +28,9 @@ defmodule PtcRunner.Kernel.LLMReplay do
   The hash is over the deterministic encoding of the provider-neutral request
   the workflow actually built, before any provider adapter sees it, so a
   fixture is not tied to the vendor that recorded it. That also makes the match
-  exact by construction: a run whose prompt, messages, or tools differ at all
-  produces a different hash and fails rather than silently replaying a response
-  recorded for a different question. A normal-data miss reports the computed
+  exact by construction: a run whose prompt, messages, tools, or schema differ
+  at all produces a different hash and fails rather than silently replaying a
+  response recorded for a different question. A normal-data miss reports the computed
   hash as
   `no replay fixture matches this request (request_hash: sha256:...)` in command
   output and private capability inspection. A private-data run keeps the hash

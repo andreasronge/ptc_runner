@@ -807,6 +807,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
         "install" => %{
           "model" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "manifest-repl-test-v1",
             "model" => "openrouter:test/model",
             "credential" => "key"
@@ -852,6 +853,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
         "install" => %{
           "model" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "manifest-mission-repl-test-v1",
             "model" => "openrouter:test/model",
             "credential" => "key"
@@ -916,6 +918,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   defp llm_installation(credential) do
     %{
       "source" => "llm",
+      "structured_output_mode" => "unsupported",
       "installation_revision" => "manifest-repl-missing-credential-v1",
       "model" => "openrouter:test/model",
       "credential" => credential

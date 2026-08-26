@@ -115,7 +115,7 @@ if Code.ensure_loaded?(ReqLLM) do
             | {:error, term()}
     def prepare_model(model, requirements) when is_binary(model) do
       with {:ok, canonical} <- Requirements.canonical(requirements),
-           :ok <- attest_slice2_requirements(canonical) do
+           :ok <- attest_structured_requirements(model, canonical) do
         case parse_provider(model) do
           {:req_llm, selector} ->
             prepare_req_llm_target(selector, canonical)
@@ -138,7 +138,7 @@ if Code.ensure_loaded?(ReqLLM) do
             :ok | {:error, :unsupported_model_option}
     def local_contract_attestation(model, requirements) when is_binary(model) do
       with {:ok, canonical} <- Requirements.canonical(requirements),
-           :ok <- attest_slice2_requirements(canonical) do
+           :ok <- attest_structured_requirements(model, canonical) do
         case parse_provider(model) do
           {:req_llm, selector} -> refuse_lossy_max_tokens(selector)
           _direct_http -> :ok
@@ -1208,15 +1208,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
       cond do
         is_map(Map.get(request, :schema)) ->
-          target
-          |> generate_object(messages, request.schema, opts)
-          |> case do
-            {:ok, %{object: object, tokens: tokens}} ->
-              {:ok, %{content: Jason.encode!(object), tokens: tokens}}
-
-            error ->
-              normalize_call_result(error)
-          end
+          dispatch_structured(target, messages, request.schema, opts)
 
         is_list(Map.get(request, :tools)) and request.tools != [] ->
           target
@@ -1229,6 +1221,97 @@ if Code.ensure_loaded?(ReqLLM) do
           |> normalize_call_result()
       end
     end
+
+    defp dispatch_structured(target, messages, schema, opts) do
+      case target.structured_output_mode do
+        :json_schema ->
+          target
+          |> generate_object(messages, schema, opts)
+          |> case do
+            {:ok, %{object: object, tokens: tokens}}
+            when is_map(object) and not is_struct(object) ->
+              {:ok, %{object: object, tokens: tokens}}
+
+            {:ok, _wrong_branch} ->
+              {:error,
+               ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
+
+            error ->
+              normalize_call_result(error)
+          end
+
+        :json_object ->
+          case generate_json(target, messages, opts) do
+            {:ok, %{json: json, tokens: tokens}} when is_binary(json) ->
+              {:ok, %{json: json, tokens: tokens}}
+
+            {:ok, _wrong_branch} ->
+              {:error,
+               ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
+
+            error ->
+              normalize_call_result(error)
+          end
+
+        _unsupported ->
+          {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
+      end
+    end
+
+    defp generate_json(%ReqLLMPreparedModel{model: %LLMDB.Model{}} = model, messages, opts) do
+      call_req_llm_json(model, messages, merge_exact_options(model, opts))
+    end
+
+    defp generate_json(%ReqLLMPreparedModel{selector: selector} = target, messages, opts) do
+      generate_json(selector, messages, merge_exact_options(target, opts))
+    end
+
+    defp generate_json(model, messages, opts) when is_binary(model) do
+      case parse_provider(model) do
+        {:ollama, _model_name} ->
+          {:error, :structured_output_not_supported}
+
+        {:openai_compat, _base_url, _model_name} ->
+          {:error, :structured_output_not_supported}
+
+        {:req_llm, model_id} ->
+          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
+               do: call_req_llm_json(prepared, messages, opts)
+      end
+    end
+
+    defp call_req_llm_json(%ReqLLMPreparedModel{} = prepared, messages, opts) do
+      json_opts = put_json_object_format(opts)
+
+      case call_req_llm(prepared, messages, json_opts) do
+        {:ok, %{content: content, tokens: tokens}} when is_binary(content) ->
+          {:ok, %{json: content, tokens: tokens}}
+
+        {:ok, _wrong_branch} ->
+          {:error, ProviderError.new(:invalid_result, "LLM provider returned an invalid result")}
+
+        error ->
+          normalize_call_result(error)
+      end
+    end
+
+    defp put_json_object_format(opts) do
+      provider_options =
+        opts
+        |> Keyword.get(:provider_options, [])
+        |> json_object_provider_options()
+
+      Keyword.put(opts, :provider_options, provider_options)
+    end
+
+    defp json_object_provider_options(options) when is_list(options),
+      do: Keyword.put(options, :response_format, %{type: "json_object"})
+
+    defp json_object_provider_options(options) when is_map(options),
+      do: Map.put(options, :response_format, %{type: "json_object"})
+
+    defp json_object_provider_options(_options),
+      do: [response_format: %{type: "json_object"}]
 
     defp invocation_opts(%ReqLLMPreparedModel{} = target, invocation) do
       opts =
@@ -1248,19 +1331,32 @@ if Code.ensure_loaded?(ReqLLM) do
       |> Keyword.merge(opts)
     end
 
-    defp attest_slice2_requirements(%{
-           structured_output_mode: :unsupported,
+    defp attest_structured_requirements(model, %{
+           structured_output_mode: mode,
            usage_guarantees: %{tokens: false, cost_currency: nil},
            reservation: %{total_tokens?: false, cost_tariff: nil}
-         }),
-         do: :ok
+         })
+         when mode in [:json_schema, :json_object, :unsupported] do
+      attest_structured_mode(model, mode)
+    end
 
-    defp attest_slice2_requirements(_requirements), do: {:error, :unsupported_model_option}
+    defp attest_structured_requirements(_model, _requirements),
+      do: {:error, :unsupported_model_option}
+
+    defp attest_structured_mode(_model, :unsupported), do: :ok
+
+    defp attest_structured_mode(model, mode) when mode in [:json_schema, :json_object] do
+      case parse_provider(model) do
+        {:req_llm, _selector} -> :ok
+        _unsupported_route -> {:error, :unsupported_model_option}
+      end
+    end
 
     defp direct_target(selector, canonical) do
       %ReqLLMPreparedModel{
         selector: selector,
         exact_options: canonical.exact_options,
+        structured_output_mode: canonical.structured_output_mode,
         model: nil
       }
     end
@@ -1268,7 +1364,12 @@ if Code.ensure_loaded?(ReqLLM) do
     defp prepare_req_llm_target(selector, canonical) do
       with :ok <- refuse_lossy_max_tokens(selector),
            {:ok, prepared, status} <- prepare_req_llm_model(selector) do
-        {:ok, %{prepared | exact_options: canonical.exact_options}, status, canonical}
+        {:ok,
+         %{
+           prepared
+           | exact_options: canonical.exact_options,
+             structured_output_mode: canonical.structured_output_mode
+         }, status, canonical}
       end
     end
 

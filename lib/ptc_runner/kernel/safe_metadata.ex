@@ -110,6 +110,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :run_closed,
     :run_deadline,
     :stale_evaluation,
+    :structured_output_unsupported,
     :throw,
     :timeout,
     :tool_calling_unsupported,

@@ -118,6 +118,7 @@ diagnostic. For example, an excessive installation timeout is located at
   &quot;install&quot;: {
     &quot;deepseek&quot;: {
       &quot;source&quot;: &quot;llm&quot;,
+      &quot;structured_output_mode&quot;: &quot;unsupported&quot;,
       &quot;installation_revision&quot;: &quot;deepseek-policy-v1&quot;,
       &quot;model&quot;: &quot;openrouter:deepseek/deepseek-v4-flash&quot;,
       &quot;credential&quot;: &quot;openrouter_key&quot;,
@@ -203,6 +204,7 @@ with <code class="inline">config.max_calls</code>; asking above the host ceiling
 clamped. When that selected cap is at or above the run's per-name
 <code class="inline">llm-request</code> budget, the public per-name quota still binds first.</p><pre><code class="json language-json">&quot;deepseek&quot;: {
   &quot;source&quot;: &quot;llm&quot;,
+  &quot;structured_output_mode&quot;: &quot;unsupported&quot;,
   &quot;installation_revision&quot;: &quot;deepseek-policy-v1&quot;,
   &quot;model&quot;: &quot;openrouter:deepseek/deepseek-v4-flash&quot;,
   &quot;credential&quot;: &quot;openrouter_key&quot;,
@@ -219,7 +221,14 @@ requester. A selector absent from the bundled model catalog remains usable when
 ReqLLM supports its provider, but PtcRunner emits one <code class="inline">model_uncataloged</code>
 warning for that requester. Catalog metadata such as pricing, limits, token
 estimation, and capability detection may then be incomplete; the warning does
-not mean the provider request itself is known to fail.</p><p>Model selectors are provider-qualified strings. These are the provider paths
+not mean the provider request itself is known to fail.</p><p>Every live model installation must declare <code class="inline">structured_output_mode</code> as
+<code class="inline">json_schema</code>, <code class="inline">json_object</code>, or <code class="inline">unsupported</code>. <code class="inline">json_schema</code> asks the provider
+to enforce the request schema. <code class="inline">json_object</code> asks the provider only for a JSON
+object, then the Kernel decodes and validates it. <code class="inline">unsupported</code> refuses a
+request <code class="inline">schema</code> before dispatch. Changing the mode requires a new
+<code class="inline">installation_revision</code>. A schema together with a non-empty <code class="inline">tools</code> list is
+invalid. Success is a <code class="inline">structured_output</code> object; encoded <code class="inline">content</code> is not
+duplicated.</p><p>Model selectors are provider-qualified strings. These are the provider paths
 PtcRunner configures and exercises directly:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Prefix</th><th style="text-align: left;">Example selector</th><th style="text-align: left;">Credential binding normally backed by</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">openrouter:</code></td><td style="text-align: left;"><code class="inline">openrouter:deepseek/deepseek-v4-flash</code></td><td style="text-align: left;"><code class="inline">OPENROUTER_API_KEY</code></td></tr><tr><td style="text-align: left;"><code class="inline">anthropic:</code></td><td style="text-align: left;"><code class="inline">anthropic:claude-sonnet-4-6</code></td><td style="text-align: left;"><code class="inline">ANTHROPIC_API_KEY</code></td></tr><tr><td style="text-align: left;"><code class="inline">openai:</code></td><td style="text-align: left;"><code class="inline">openai:gpt-5-mini</code></td><td style="text-align: left;"><code class="inline">OPENAI_API_KEY</code></td></tr><tr><td style="text-align: left;"><code class="inline">google:</code></td><td style="text-align: left;"><code class="inline">google:gemini-2.5-flash</code></td><td style="text-align: left;"><code class="inline">GOOGLE_API_KEY</code></td></tr><tr><td style="text-align: left;"><code class="inline">groq:</code></td><td style="text-align: left;"><code class="inline">groq:openai/gpt-oss-20b</code></td><td style="text-align: left;"><code class="inline">GROQ_API_KEY</code></td></tr><tr><td style="text-align: left;"><code class="inline">amazon_bedrock:</code></td><td style="text-align: left;"><code class="inline">amazon_bedrock:anthropic.claude-sonnet-4-5-20250929-v1:0</code></td><td style="text-align: left;">AWS credentials</td></tr></tbody></table></div><p>The examples are release-catalog examples, not promises that a provider still
 serves an alias. A requester emits <code class="inline">model_uncataloged</code> when its selector misses
 the bundled catalog; <code class="inline">ptc doctor PROJECT --connect --show-model-selectors</code>
@@ -235,9 +244,10 @@ the adapter attests that the resolved model is safe public identity, provider
 snapshots and model-grouped usage include it. Endpoint-bearing or otherwise
 private targets remain absent, while alias/revision usage stays attributable.</p><p>Use <code class="inline">source: &quot;llm_replay&quot;</code> when responses must be deterministic. The
 <a href="/guides/evaluating-with-replay/">replay evaluation guide</a> owns fixture authoring, the
-network-free example, candidate materialization, and component overrides.</p><p>Fixture matching is exact: changed messages, tools, or provider-neutral
+network-free example, candidate materialization, and component overrides.</p><p>Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another <code class="inline">request_hash</code> rather than silently consuming
-unrelated evidence. A miss is a provider error — <code class="inline">kind</code> <code class="inline">provider_error</code>,
+unrelated evidence. A structured-output fixture uses the public
+<code class="inline">structured_output</code> object rather than encoded <code class="inline">content</code>. A miss is a provider error — <code class="inline">kind</code> <code class="inline">provider_error</code>,
 <code class="inline">reason</code> <code class="inline">not_found</code> — and <code class="inline">llm/request</code> returns that envelope as a value with
 <code class="inline">:status :error</code> rather than failing the evaluation, so a workflow that wants a
 miss to be fatal calls <code class="inline">cap/unwrap!</code> on the raw <code class="inline">tool/llm-request</code> envelope. The

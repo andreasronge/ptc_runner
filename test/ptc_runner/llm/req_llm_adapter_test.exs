@@ -10,6 +10,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.LLM.Requirements
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
@@ -167,7 +168,28 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
               }} = classified_http(@openrouter_model, request(plug))
     end
 
-    test "routes schema mode to generate_object for ollama" do
+    test "refuses json_schema preparation for ollama" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_schema)
+
+      assert {:error, :unsupported_model_option} =
+               ReqLLMAdapter.prepare_model("ollama:test", requirements)
+    end
+
+    test "attests json_schema and json_object on a cataloged ReqLLM selector" do
+      selector = "openrouter:deepseek/deepseek-v4-flash-0731"
+
+      for mode <- [:json_schema, :json_object] do
+        requirements = Requirements.interim(%{max_tokens: 64}, mode)
+
+        assert {:ok, target, _status, attestation} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+
+        assert target.structured_output_mode == mode
+        assert attestation.structured_output_mode == mode
+      end
+    end
+
+    test "does not prompt-and-parse a schema request under unsupported mode" do
       req = %{
         system: "You are helpful",
         messages: [%{role: :user, content: "test"}],
@@ -176,8 +198,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
 
       assert {:error,
               %ProviderError{
-                kind: :invalid_request,
-                details: "LLM provider does not support structured output",
+                kind: :invalid_result,
                 retryable?: false
               }} = adapter_call("ollama:test", req)
     end

@@ -9,12 +9,13 @@ if Code.ensure_loaded?(LLMDB.Model) do
     """
 
     @enforce_keys [:selector, :exact_options]
-    defstruct [:selector, :exact_options, model: nil]
+    defstruct [:selector, :exact_options, model: nil, structured_output_mode: :unsupported]
 
     @type t :: %__MODULE__{
             selector: String.t(),
             exact_options: map(),
-            model: LLMDB.Model.t() | nil
+            model: LLMDB.Model.t() | nil,
+            structured_output_mode: :json_schema | :json_object | :unsupported
           }
   end
 end

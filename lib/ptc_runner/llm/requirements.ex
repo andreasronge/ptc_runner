@@ -44,32 +44,42 @@ defmodule PtcRunner.LLM.Requirements do
   @doc """
   Returns the slice-2 interim contract around authorized `exact_options`.
 
-  Later slices replace the explicit unsupported/disabled fields with their
-  public installation declarations.
+  Slice 3 replaces the unsupported structured-output field with the live
+  installation declaration. Usage and reservation remain explicitly disabled
+  until later slices.
   """
   @spec interim(exact_options()) :: t()
-  def interim(exact_options) when is_map(exact_options) do
+  def interim(exact_options) when is_map(exact_options), do: interim(exact_options, :unsupported)
+
+  @spec interim(exact_options(), :json_schema | :json_object | :unsupported) :: t()
+  def interim(exact_options, mode)
+      when is_map(exact_options) and mode in @structured_modes do
     %{
       exact_options: exact_options,
-      structured_output_mode: :unsupported,
+      structured_output_mode: mode,
       usage_guarantees: %{tokens: false, cost_currency: nil},
       reservation: %{total_tokens?: false, cost_tariff: nil}
     }
   end
 
   @spec live(map(), pos_integer()) :: {:ok, t()} | :error
-  def live(params, output_tokens)
-      when is_map(params) and is_integer(output_tokens) and output_tokens in 1..@max_tokens do
+  @spec live(map(), pos_integer(), :json_schema | :json_object | :unsupported) ::
+          {:ok, t()} | :error
+  def live(params, output_tokens, structured_output_mode \\ :unsupported)
+
+  def live(params, output_tokens, structured_output_mode)
+      when is_map(params) and is_integer(output_tokens) and output_tokens in 1..@max_tokens and
+             structured_output_mode in @structured_modes do
     max_tokens =
       case Map.get(params, :max_tokens) do
         nil -> output_tokens
         installed when is_integer(installed) -> min(output_tokens, installed)
       end
 
-    canonical(interim(authorized_options(params, max_tokens)))
+    canonical(interim(authorized_options(params, max_tokens), structured_output_mode))
   end
 
-  def live(_params, _output_tokens), do: :error
+  def live(_params, _output_tokens, _structured_output_mode), do: :error
 
   @spec probe(map()) :: {:ok, t()} | :error
   def probe(params) when is_map(params), do: canonical(interim(authorized_options(params, 1)))

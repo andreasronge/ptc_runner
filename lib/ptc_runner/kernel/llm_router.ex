@@ -8,14 +8,17 @@ defmodule PtcRunner.Kernel.LLMRouter do
   @alias ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @sources ~w(llm llm_replay custom)
   @route_keys [:alias, :source, :installation_revision, :default?, :capability, :max_calls]
+  @optional_route_keys [:structured_output_mode]
+  @structured_output_modes [:json_schema, :json_object, :unsupported]
 
   @type route :: %{
-          alias: binary(),
-          source: binary(),
-          installation_revision: binary(),
-          default?: boolean(),
-          capability: Capability.t(),
-          max_calls: pos_integer() | nil
+          required(:alias) => binary(),
+          required(:source) => binary(),
+          required(:installation_revision) => binary(),
+          required(:default?) => boolean(),
+          required(:capability) => Capability.t(),
+          required(:max_calls) => pos_integer() | nil,
+          optional(:structured_output_mode) => :json_schema | :json_object | :unsupported
         }
 
   @spec new([route()]) :: {:ok, RoutedCapability.t()} | {:error, :invalid_llm_router}
@@ -56,14 +59,24 @@ defmodule PtcRunner.Kernel.LLMRouter do
   def new(_routes), do: {:error, :invalid_llm_router}
 
   defp valid_route?(route) when is_map(route) do
-    Map.keys(route) |> Enum.sort() == Enum.sort(@route_keys) and
+    keys = Map.keys(route)
+
+    keys -- (@route_keys ++ @optional_route_keys) == [] and
+      @route_keys -- keys == [] and
       is_binary(route.alias) and route.alias =~ @alias and route.source in @sources and
       is_binary(route.installation_revision) and route.installation_revision =~ @alias and
       is_boolean(route.default?) and match?(%Capability{name: "llm-request"}, route.capability) and
-      valid_max_calls?(route.max_calls)
+      valid_max_calls?(route.max_calls) and
+      valid_structured_output_mode?(Map.get(route, :structured_output_mode))
   end
 
   defp valid_route?(_route), do: false
+
+  defp valid_structured_output_mode?(nil), do: true
+
+  defp valid_structured_output_mode?(mode) when mode in @structured_output_modes, do: true
+
+  defp valid_structured_output_mode?(_mode), do: false
 
   defp valid_max_calls?(nil), do: true
   defp valid_max_calls?(max_calls) when is_integer(max_calls) and max_calls > 0, do: true
@@ -149,7 +162,8 @@ defmodule PtcRunner.Kernel.LLMRouter do
        },
        error_attributes: %{model: route.alias},
        result_attributes: %{"model" => route.alias},
-       usage_projection: :llm_tokens
+       usage_projection: :llm_tokens,
+       structured_output_mode: Map.get(route, :structured_output_mode)
      }}
   end
 

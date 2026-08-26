@@ -4,10 +4,12 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   The host document is operator-owned and separate from an application
   manifest. It fixes provider sources, credentials, data classes, and outer
-  ceilings. MCP installations additionally fix transports, tool mappings, and
-  effects; live LLM installations fix the model, cache policy, and optional
-  sampling parameters. A manifest may later select an installed alias and
-  narrow its authority; it cannot introduce or replace any field decoded here.
+  ceilings.   MCP installations additionally fix transports, tool mappings, and
+  effects; live LLM installations fix the model, structured-output mode, cache
+  policy, and optional sampling parameters. A manifest may later select an
+  installed alias and narrow its authority; it cannot introduce or replace any
+  field decoded here. Changing `structured_output_mode` requires a new
+  `installation_revision`.
 
   An optional `limits` block replaces cataloged installed ceilings, so an
   operator can permit work measured in hours rather than in one bounded run.
@@ -173,6 +175,7 @@ defmodule PtcRunner.Kernel.HostConfig do
                 optional(:seed) => non_neg_integer(),
                 optional(:max_tokens) => pos_integer()
               },
+              structured_output_mode: :json_schema | :json_object | :unsupported,
               installation_revision: binary(),
               installation_config_digest: binary(),
               ceilings: %{
@@ -721,13 +724,13 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp llm_installation(value, credentials) do
     allowed =
-      ~w(source model credential cache params installation_revision ceilings data_class accepts_data)
+      ~w(source model credential cache params structured_output_mode installation_revision ceilings data_class accepts_data)
 
     with :ok <-
            exact_keys(
              value,
              allowed,
-             ~w(source model credential installation_revision)
+             ~w(source model credential structured_output_mode installation_revision)
            ),
          model when is_binary(model) <- value["model"],
          true <- valid_string?(model, 256),
@@ -735,6 +738,8 @@ defmodule PtcRunner.Kernel.HostConfig do
          true <- Map.has_key?(credentials, credential),
          cache when is_boolean(cache) <- Map.get(value, "cache", false),
          {:ok, params} <- llm_params(Map.get(value, "params", %{})),
+         {:ok, structured_output_mode} <-
+           structured_output_mode(value["structured_output_mode"]),
          {:ok, installation_revision} <-
            revision(value["installation_revision"]),
          {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{})),
@@ -748,6 +753,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          credential: credential,
          cache: cache,
          params: params,
+         structured_output_mode: structured_output_mode,
          installation_revision: installation_revision,
          ceilings: ceilings,
          data_class: data_class,
@@ -779,6 +785,11 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp llm_params(_value), do: {:error, :invalid_llm_params}
+
+  defp structured_output_mode("json_schema"), do: {:ok, :json_schema}
+  defp structured_output_mode("json_object"), do: {:ok, :json_object}
+  defp structured_output_mode("unsupported"), do: {:ok, :unsupported}
+  defp structured_output_mode(_value), do: {:error, :invalid_structured_output_mode}
 
   defp maybe_put_param(params, atom_key, value, string_key, normalized) do
     if Map.has_key?(value, string_key), do: Map.put(params, atom_key, normalized), else: params
@@ -1441,12 +1452,16 @@ defmodule PtcRunner.Kernel.HostConfig do
               "maximum" => @max_llm_tokens
             }
           }),
+        "structured_output_mode" => %{
+          "type" => "string",
+          "enum" => ["json_schema", "json_object", "unsupported"]
+        },
         "installation_revision" => installation_revision_schema(),
         "ceilings" => llm_ceilings_schema(),
         "data_class" => data_class_schema(),
         "accepts_data" => accepts_data_schema()
       },
-      ["source", "model", "credential", "installation_revision"]
+      ["source", "model", "credential", "structured_output_mode", "installation_revision"]
     )
   end
 

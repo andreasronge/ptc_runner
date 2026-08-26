@@ -65,7 +65,8 @@ defmodule PtcRunner.LLM do
   The `request` map contains:
   - `:system` - System prompt string
   - `:messages` - List of message maps
-  - `:schema` - JSON Schema map (triggers structured output)
+  - `:schema` - JSON Schema map (triggers structured output when the
+    sealed installation mode is `json_schema` or `json_object`)
   - `:tools` - Tool definitions (triggers tool calling)
   - `:cache` - Boolean for prompt caching
 

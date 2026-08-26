@@ -669,6 +669,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "live" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
           "installation_revision" => "live-v1",
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "key"
@@ -797,6 +798,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "invalid-model" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
           "installation_revision" => "invalid-model-v1",
           "model" => "definitely-not-a-model",
           "credential" => "missing_key"
@@ -824,6 +826,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "install" => %{
           "live" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "live-v1",
             "model" => "logger:future-model",
             "credential" => "key"
@@ -856,6 +859,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "install" => %{
           "live" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "live-v1",
             "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
             "credential" => "key"
@@ -921,6 +925,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "params" => %{"temperature" => 0.15, "seed" => 73, "max_tokens" => 2_048},
@@ -967,7 +972,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              source: "llm",
              installation_revision: "model-policy-v2",
              default: false,
-             max_calls: 128
+             max_calls: 128,
+             structured_output_mode: :unsupported
            }
 
     assert {:error, :provider_destination_denied} =
@@ -1112,6 +1118,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "install" => %{
           "deepseek" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
             "credential" => "openrouter_key",
             "params" => %{"max_tokens" => 2_048},
@@ -1156,6 +1163,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "install" => %{
           "deepseek" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
             "credential" => "openrouter_key",
             "installation_revision" => "model-policy-v2"
@@ -1179,6 +1187,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "install" => %{
           "codex" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "model" => "openai_codex:future-chat-1408",
             "credential" => "key",
             "installation_revision" => "codex-v1"
@@ -1209,6 +1218,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "install" => %{
           "live" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "model" => "openrouter:test/model",
             "credential" => "key",
             "installation_revision" => "mismatch-v1"
@@ -1232,6 +1242,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "install" => %{
           "deepseek" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
             "credential" => "openrouter_key",
             "installation_revision" => "model-policy-v2",
@@ -1257,6 +1268,31 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "live structured_output_mode is copied onto the workflow LLM route", %{tmp_dir: dir} do
+    host =
+      load_host(dir, %{
+        "credentials" => %{"openrouter_key" => %{"literal" => "test-llm-secret"}},
+        "install" => %{
+          "deepseek" => %{
+            "source" => "llm",
+            "structured_output_mode" => "json_schema",
+            "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+            "credential" => "openrouter_key",
+            "installation_revision" => "model-policy-v3"
+          }
+        }
+      })
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(registry, "deepseek", %{}, context(dir, :workflow))
+
+    assert prepared.workflow_llm_route.structured_output_mode == :json_schema
+  end
+
+  @tag :tmp_dir
   test "a live LLM requester binds one prepared target across turns", %{tmp_dir: dir} do
     previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
     previous_owner = Application.get_env(:ptc_runner, :host_preparing_llm_owner)
@@ -1274,6 +1310,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "install" => %{
           "live" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
             "installation_revision" => "live-v1",
             "model" => "provider:future-model",
             "credential" => "key"
@@ -1345,6 +1382,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "install" => %{
           "live" => %{
             "source" => "llm",
+            "structured_output_mode" => "json_schema",
             "installation_revision" => "live-v1",
             "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
             "credential" => "key",
@@ -1395,6 +1433,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert request.exact_options.max_tokens == 1
     assert request.llm_request_deadline_ms == nil
     assert [%{role: :user, content: "Health check."}] = request.messages
+    refute Map.has_key?(request, :schema)
     refute_receive {:host_llm_request, _, _}
 
     Application.put_env(:ptc_runner, :host_llm_test_result, {:error, :unavailable})
@@ -1823,6 +1862,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "key",
           "installation_revision" => "unstarted-v1"

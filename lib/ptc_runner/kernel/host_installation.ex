@@ -706,6 +706,16 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  defp workflow_llm_route(%{source: :llm} = installation, selected) do
+    %{
+      source: "llm",
+      installation_revision: installation.installation_revision,
+      default: selected.default,
+      max_calls: selected.max_calls,
+      structured_output_mode: installation.structured_output_mode
+    }
+  end
+
   defp workflow_llm_route(installation, selected) do
     %{
       source: Atom.to_string(installation.source),
@@ -902,7 +912,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp live_llm_requirements(installation, %{limits: limits}) do
-    case Requirements.live(installation.params, limits.llm_request_output_tokens) do
+    case Requirements.live(
+           installation.params,
+           limits.llm_request_output_tokens,
+           installation.structured_output_mode
+         ) do
       {:ok, requirements} -> {:ok, requirements}
       :error -> {:error, :invalid_llm_model}
     end

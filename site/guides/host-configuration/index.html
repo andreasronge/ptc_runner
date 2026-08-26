@@ -107,18 +107,17 @@ command, effects, or ceilings.</p><h2 id="how-do-i-install-a-model">How do I ins
   &quot;install&quot;: {
     &quot;model&quot;: {
       &quot;source&quot;: &quot;llm&quot;,
+      &quot;structured_output_mode&quot;: &quot;unsupported&quot;,
       &quot;installation_revision&quot;: &quot;model-v1&quot;,
       &quot;model&quot;: &quot;openrouter:deepseek/deepseek-v4-flash&quot;,
       &quot;credential&quot;: &quot;model_key&quot;,
-      &quot;cache&quot;: false,
       &quot;params&quot;: {&quot;max_tokens&quot;: 4096}
     }
   }
 }</code></pre><p>Keep its path in <code class="inline">ptc-project.json</code>, then verify the selected application:</p><pre><code class="console language-console">ptc doctor ptc-project.json
 ptc doctor ptc-project.json --connect
 ptc models ptc-project.json</code></pre><p>Plain <code class="inline">doctor</code> validates configuration without loading credentials or dialing
-providers. <code class="inline">--connect</code> is an explicit connectivity probe and may consume remote
-resources.</p><h2 id="how-do-i-install-an-mcp-server">How do I install an MCP server?</h2><p>Install MCP tools with the same separation: the host fixes the transport and
+providers. <code class="inline">--connect</code> is a connectivity probe and may consume resources.</p><h2 id="how-do-i-install-an-mcp-server">How do I install an MCP server?</h2><p>Install MCP tools with the same separation: the host fixes the transport and
 public tool mapping, while the application selects the alias and may narrow a
 write-bearing tool set. The <code class="inline">workspace</code> alias selected in
 <a href="/guides/manifests-and-capabilities/">Configure an application</a> is installed as a

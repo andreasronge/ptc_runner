@@ -28,13 +28,19 @@ defmodule PtcRunner.Kernel.Dispatcher do
   A pre-callback input-schema rejection may add up to three schema-authored
   argument violations to the Lisp error envelope. The rejected arguments,
   undeclared property names, and opaque semantic-validator reasons remain
-  withheld. Enum and const literals are never included. After static input
+  withheld. Enum and const literals are never included.   After static input
   validation, a request `schema` is compiled with
   `PtcRunner.Kernel.JSONSchema.compile_bounded/3` and stored only on the
-  private invocation. Compiler unavailability uses the same
+  private invocation. A schema together with a non-empty `tools` list is
+  `invalid_arguments` before reservation. A live alias whose
+  `structured_output_mode` is `unsupported` refuses schema requests as
+  `provider_error/structured_output_unsupported` before reservation.
+  Compiler unavailability uses the same
   `capability_unavailable/input_validation_unavailable` category, with no
-  dispatch. If bounded output validation itself becomes unavailable after
-  dispatch, Dispatcher returns
+  dispatch. Provider JSON-object bytes are decoded in a bounded worker
+  before the compiled request schema validates the object; only a
+  `structured_output` envelope then reaches Lisp. If bounded output
+  validation itself becomes unavailable after dispatch, Dispatcher returns
   `capability_unavailable/output_validation_unavailable` rather than treating
   the provider result as invalid.
   """
@@ -51,6 +57,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.LLM.OutputLimit
@@ -332,6 +339,18 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
       {:error, :run_closed} ->
         limit_error(state, event_sink, :run_closed, environment, mission_name)
+
+      {:error, :structured_output_unsupported, invocation} ->
+        maybe_merge_error_attributes(
+          %{
+            status: :error,
+            kind: :provider_error,
+            reason: :structured_output_unsupported,
+            retryable?: false
+          },
+          %{status: :error},
+          invocation.error_attributes
+        )
     end
   end
 
@@ -450,8 +469,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
         result =
           result
-          |> merge_result_attributes(invocation.result_attributes)
           |> admit_success_output(state, environment, invocation, validation)
+          |> merge_result_attributes(invocation.result_attributes)
 
         result =
           if output_allowed? do
@@ -948,12 +967,18 @@ defmodule PtcRunner.Kernel.Dispatcher do
   end
 
   defp validate_output_stage(invocation, validation, value, :request) do
-    validate_compiled_output(
-      invocation.request_validator,
-      invocation.request_schema,
-      value,
-      validation
-    )
+    case request_schema_value(invocation, value) do
+      {:ok, candidate} ->
+        validate_compiled_output(
+          invocation.request_validator,
+          invocation.request_schema,
+          candidate,
+          validation
+        )
+
+      {:error, _reason} = error ->
+        error
+    end
   end
 
   defp validate_output_stage(invocation, validation, value, :static) do
@@ -1010,32 +1035,23 @@ defmodule PtcRunner.Kernel.Dispatcher do
         {:ok, invocation}
 
       {:ok, schema} ->
-        compile_timeout_ms =
-          request_schema_timeout_ms(
-            state,
-            environment,
-            requested_timeout_ms,
-            validation_deadline_ms
-          )
-
         cond do
-          compile_timeout_ms == :run_closed ->
-            {:error, :run_closed}
+          tools_with_schema?(invocation.arguments) ->
+            {:error, :invalid_arguments}
 
-          compile_timeout_ms <= 0 ->
-            {:error, :input_validation_unavailable}
+          invocation.structured_output_mode == :unsupported ->
+            {:error, :structured_output_unsupported, invocation}
 
           true ->
-            case JSONSchema.compile_bounded(schema, compile_timeout_ms, validation_heap_words) do
-              {:ok, normalized, compiled} ->
-                put_compiled_request_schema(invocation, normalized, compiled, state)
-
-              {:error, {:invalid_schema, _rejection}} ->
-                {:error, :invalid_arguments}
-
-              {:unavailable, _cause} ->
-                {:error, :input_validation_unavailable}
-            end
+            compile_live_request_schema(
+              invocation,
+              schema,
+              state,
+              environment,
+              requested_timeout_ms,
+              validation_heap_words,
+              validation_deadline_ms
+            )
         end
     end
   end
@@ -1049,6 +1065,51 @@ defmodule PtcRunner.Kernel.Dispatcher do
          _deadline_ms
        ),
        do: {:ok, invocation}
+
+  defp compile_live_request_schema(
+         invocation,
+         schema,
+         state,
+         environment,
+         requested_timeout_ms,
+         validation_heap_words,
+         validation_deadline_ms
+       ) do
+    compile_timeout_ms =
+      request_schema_timeout_ms(
+        state,
+        environment,
+        requested_timeout_ms,
+        validation_deadline_ms
+      )
+
+    cond do
+      compile_timeout_ms == :run_closed ->
+        {:error, :run_closed}
+
+      compile_timeout_ms <= 0 ->
+        {:error, :input_validation_unavailable}
+
+      true ->
+        case JSONSchema.compile_bounded(schema, compile_timeout_ms, validation_heap_words) do
+          {:ok, normalized, compiled} ->
+            put_compiled_request_schema(invocation, normalized, compiled, state)
+
+          {:error, {:invalid_schema, _rejection}} ->
+            {:error, :invalid_arguments}
+
+          {:unavailable, _cause} ->
+            {:error, :input_validation_unavailable}
+        end
+    end
+  end
+
+  defp tools_with_schema?(arguments) do
+    case Map.get(arguments, "tools") do
+      tools when is_list(tools) and tools != [] -> true
+      _absent -> false
+    end
+  end
 
   defp put_compiled_request_schema(invocation, normalized, compiled, state) do
     invocation = CapabilityInvocation.put_request_schema(invocation, normalized, compiled)
@@ -1342,6 +1403,93 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp merge_result_attributes(result, _attributes), do: result
 
+  defp request_schema_value(%CapabilityInvocation{request_validator: nil}, value),
+    do: {:ok, value}
+
+  defp request_schema_value(
+         %CapabilityInvocation{capability: %Capability{name: "llm-request"}},
+         value
+       ) do
+    case Map.get(value, "structured_output") do
+      object when is_map(object) and not is_struct(object) -> {:ok, object}
+      _missing -> {:error, :output_schema_mismatch}
+    end
+  end
+
+  defp request_schema_value(_invocation, value), do: {:ok, value}
+
+  defp normalize_structured_output(
+         %CapabilityInvocation{request_validator: validator} = invocation,
+         value,
+         validation
+       )
+       when validator != nil do
+    case structured_provider_object(invocation, value, validation) do
+      {:ok, object} -> promote_structured_output(object, value)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp normalize_structured_output(_invocation, value, _validation), do: {:ok, value}
+
+  defp structured_provider_object(invocation, value, validation) do
+    case {invocation.structured_output_mode, value} do
+      {:json_schema, %{"object" => object}} ->
+        admitted_object(object)
+
+      {:json_object, %{"json" => json}} ->
+        decode_structured_json(json, validation)
+
+      {nil, %{"structured_output" => object}} ->
+        admitted_object(object)
+
+      {nil, %{"object" => object}} ->
+        admitted_object(object)
+
+      {nil, %{"json" => json}} ->
+        decode_structured_json(json, validation)
+
+      _wrong_branch ->
+        {:error, :output_schema_mismatch}
+    end
+  end
+
+  defp admitted_object(object) when is_map(object) and not is_struct(object), do: {:ok, object}
+  defp admitted_object(_value), do: {:error, :output_schema_mismatch}
+
+  defp decode_structured_json(json, validation) when is_binary(json) do
+    timeout_ms = remaining_output_validation_ms(validation)
+
+    if timeout_ms <= 0 do
+      {:error, :output_validation_unavailable}
+    else
+      case StrictJSON.decode_classified(json,
+             timeout_ms: timeout_ms,
+             max_heap_words: validation.heap_words
+           ) do
+        {:ok, object} ->
+          admitted_object(object)
+
+        {:invalid, _reason} ->
+          {:error, :output_schema_mismatch}
+
+        {:unavailable, _cause} ->
+          {:error, :output_validation_unavailable}
+      end
+    end
+  end
+
+  defp decode_structured_json(_json, _validation), do: {:error, :output_schema_mismatch}
+
+  defp promote_structured_output(object, value) do
+    envelope = %{"structured_output" => object}
+
+    case Map.fetch(value, "tokens") do
+      :error -> {:ok, envelope}
+      {:ok, tokens} -> {:ok, Map.put(envelope, "tokens", tokens)}
+    end
+  end
+
   defp admit_success_output(
          %{status: :ok, value: value},
          state,
@@ -1349,10 +1497,36 @@ defmodule PtcRunner.Kernel.Dispatcher do
          invocation,
          validation
        ) do
-    # Request-schema validation sees this merged envelope, including host-injected
-    # `result_attributes`. A request schema that omits those keys (the profile
-    # normalizes missing `additionalProperties` to `false`) will mismatch.
-    admit_output(state, environment, invocation, validation, value, [:request, :static])
+    case normalize_structured_output(invocation, value, validation) do
+      {:ok, value} ->
+        admit_output(state, environment, invocation, validation, value, [:request, :static])
+
+      {:error, :output_schema_mismatch} ->
+        post_invocation_failure(
+          %{
+            status: :error,
+            kind: :invalid_result,
+            reason: :output_schema_mismatch,
+            retryable?: false
+          },
+          environment,
+          invocation.capability
+        )
+
+      {:error, :output_validation_unavailable} ->
+        _ = mark_terminal_host_failure(state, environment, validation.evaluation_lease)
+
+        post_invocation_failure(
+          %{
+            status: :error,
+            kind: :capability_unavailable,
+            reason: :output_validation_unavailable,
+            retryable?: false
+          },
+          environment,
+          invocation.capability
+        )
+    end
   end
 
   defp admit_success_output(result, _state, _environment, _invocation, _validation), do: result
