@@ -353,7 +353,7 @@ The loop interprets mission evaluation outcomes as follows:
 | Retryable evaluation error | Sends bounded correction feedback if a turn remains. |
 | `:busy` or `:limit_exceeded` admission | Fails the workflow as `evaluation-unavailable`; correcting source cannot clear a host condition. |
 | Terminal provider-originated mission failure | Becomes a model-program subject failure. |
-| Host input validation unavailable | Fails the workflow as `capability-unavailable/input-validation-unavailable`. |
+| Host input or output validation unavailable | Fails the workflow as `capability-unavailable/input-validation-unavailable` or `capability-unavailable/output-validation-unavailable`. |
 
 An ordinary successful turn commits definitions and adds its native value to
 the bounded `*1`/`*2`/`*3` history. A terminal return commits definitions but

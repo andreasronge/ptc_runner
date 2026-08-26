@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
   @moduledoc false
 
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.JSONSchema
 
   @enforce_keys [
     :capability,
@@ -12,7 +13,7 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
     :result_attributes,
     :usage_projection
   ]
-  defstruct @enforce_keys ++ [max_calls: nil]
+  defstruct @enforce_keys ++ [max_calls: nil, request_schema: nil, request_validator: nil]
 
   @type t :: %__MODULE__{
           capability: Capability.t(),
@@ -22,7 +23,9 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
           event_attributes: map(),
           error_attributes: map(),
           result_attributes: map(),
-          usage_projection: nil | :llm_tokens
+          usage_projection: nil | :llm_tokens,
+          request_schema: map() | nil,
+          request_validator: JSONSchema.compiled() | nil
         }
 
   @doc false
@@ -36,6 +39,18 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
       error_attributes: %{},
       result_attributes: %{},
       usage_projection: nil
+    }
+  end
+
+  @doc false
+  @spec put_request_schema(t(), map(), JSONSchema.compiled()) :: t()
+  def put_request_schema(%__MODULE__{} = invocation, schema, validator)
+      when is_map(schema) and not is_struct(schema) do
+    %{
+      invocation
+      | arguments: Map.put(invocation.arguments, "schema", schema),
+        request_schema: schema,
+        request_validator: validator
     }
   end
 end

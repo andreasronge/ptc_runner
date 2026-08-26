@@ -371,6 +371,13 @@
          (or (true? (get error :retryable?))
              (false? (get error :retryable?))))))
 
+(defn- host-validation-unavailable-reason [evaluation]
+  (let [reason (get evaluation :terminal-host-failure-reason)]
+    (if (or (= reason :output_validation_unavailable)
+            (= reason :output-validation-unavailable))
+      :output-validation-unavailable
+      :input-validation-unavailable)))
+
 (defn- evaluate-agent-source [mission-name source max-observation-chars]
   (let [response
         (tool/kernel-eval {:kind :source
@@ -476,7 +483,7 @@
                 ;; so it applies even when a later expression fails.
                 (if (true? (get evaluation :terminal-host-failure?))
                   (fail (result/error :capability-unavailable
-                                      :input-validation-unavailable))
+                                      (host-validation-unavailable-reason evaluation)))
                   (if (true? (get evaluation :terminal-provider-failure?))
                     (subject-failure
                       :model-program-failed

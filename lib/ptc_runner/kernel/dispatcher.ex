@@ -28,10 +28,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
   A pre-callback input-schema rejection may add up to three schema-authored
   argument violations to the Lisp error envelope. The rejected arguments,
   undeclared property names, and opaque semantic-validator reasons remain
-  withheld. Enum and const literals are never included. If bounded schema
-  validation itself becomes unavailable, Dispatcher returns the distinct
-  `capability_unavailable/input_validation_unavailable` category without
-  charging protocol or capability-call budgets or emitting capability events.
+  withheld. Enum and const literals are never included. After static input
+  validation, a request `schema` is compiled with
+  `PtcRunner.Kernel.JSONSchema.compile_bounded/3` and stored only on the
+  private invocation. Compiler unavailability uses the same
+  `capability_unavailable/input_validation_unavailable` category, with no
+  dispatch. If bounded output validation itself becomes unavailable after
+  dispatch, Dispatcher returns
+  `capability_unavailable/output_validation_unavailable` rather than treating
+  the provider result as invalid.
   """
 
   alias PtcRunner.Kernel.Capability
@@ -166,8 +171,20 @@ defmodule PtcRunner.Kernel.Dispatcher do
              timeout_ms,
              validation_heap_words,
              validation_deadline_ms
+           ),
+         {:ok, invocation} <-
+           compile_request_schema(
+             invocation,
+             state,
+             environment,
+             timeout_ms,
+             validation_heap_words,
+             validation_deadline_ms
            ) do
       invocation = put_mission_name(invocation, environment, mission_name)
+
+      validation =
+        output_validation(validation_heap_words, validation_deadline_ms, evaluation_lease)
 
       case RunState.reserve_capability(
              state,
@@ -184,7 +201,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
             timeout_ms,
             environment,
             event_sink,
-            inspection_sink
+            inspection_sink,
+            validation
           )
 
         {:error, :route_call_limit} ->
@@ -311,6 +329,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
       {:error, :stale_evaluation} ->
         stale_evaluation_error()
+
+      {:error, :run_closed} ->
+        limit_error(state, event_sink, :run_closed, environment, mission_name)
     end
   end
 
@@ -355,7 +376,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
          timeout_ms,
          environment,
          event_sink,
-         inspection_sink
+         inspection_sink,
+         validation
        ) do
     capability = invocation.capability
     arguments = invocation.arguments
@@ -400,7 +422,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
                   invocation.event_attributes[:mission_name]
                 )
 
-              {invoke(state, capability, arguments, timeout_ms, context, environment), true}
+              {invoke(state, invocation, timeout_ms, context, environment, validation), true}
 
             {:error, :inspection_sink_error} ->
               {inspection_failure(state), false}
@@ -427,13 +449,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
           )
 
         result =
-          merge_result_attributes(
-            state,
-            environment,
-            capability,
-            result,
-            invocation.result_attributes
-          )
+          result
+          |> merge_result_attributes(invocation.result_attributes)
+          |> admit_success_output(state, environment, invocation, validation)
 
         result =
           if output_allowed? do
@@ -645,7 +663,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end)
   end
 
-  defp invoke(state, capability, arguments, requested_timeout_ms, context, environment) do
+  defp invoke(state, invocation, requested_timeout_ms, context, environment, validation) do
+    capability = invocation.capability
+    arguments = invocation.arguments
     remaining = RunState.usage(state).remaining_ms
     timeout_ms = min(requested_timeout_ms, remaining)
     limits = state_limits(state)
@@ -688,7 +708,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
       case RunState.attach_provider(state, pid) do
         :ok ->
           send(pid, go)
-          await_provider(state, capability, pid, ref, timeout_ms, environment)
+          await_provider(state, invocation, pid, ref, timeout_ms, environment, validation)
 
         {:error, :provider_down} ->
           reason = await_down(pid, ref)
@@ -711,7 +731,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp await_provider(state, capability, pid, ref, timeout_ms, environment) do
+  defp await_provider(state, invocation, pid, ref, timeout_ms, environment, validation) do
+    capability = invocation.capability
+
     receive do
       {:provider_result, ^pid, result} ->
         await_down(pid, ref)
@@ -722,7 +744,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
                llm_provider_error(capability, result)
              ) do
           :ok ->
-            normalize_result(state, environment, capability, result)
+            normalize_result(state, environment, invocation, validation, result)
 
           {:error, :run_closed} ->
             cancel_exception_diagnostic(result)
@@ -803,46 +825,19 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp cancel_exception_diagnostic(_result), do: :ok
 
-  defp normalize_result(state, environment, capability, {:ok, value}) do
-    cap = capability_result_limit(state)
-    bytes = RetainedSize.bytes_with_cap(value, cap)
-
-    cond do
-      not (json_value?(value) and is_integer(bytes) and bytes <= cap) ->
-        post_invocation_failure(
-          %{
-            status: :error,
-            kind: :result_exceeded,
-            reason: :provider_result_limit,
-            retryable?: false
-          },
-          environment,
-          capability
-        )
-
-      not valid_output?(capability, value) ->
-        post_invocation_failure(
-          %{
-            status: :error,
-            kind: :invalid_result,
-            reason: :output_schema_mismatch,
-            retryable?: false
-          },
-          environment,
-          capability
-        )
-
-      true ->
-        %{status: :ok, value: RetainedSize.detach_binaries(value)}
-    end
+  defp normalize_result(_state, _environment, _invocation, _validation, {:ok, value}) do
+    %{status: :ok, value: value}
   end
 
   defp normalize_result(
          _state,
          environment,
-         capability,
+         invocation,
+         _validation,
          {:error, %ProviderError{} = error}
        ) do
+    capability = invocation.capability
+
     if ProviderError.valid?(error) do
       %{
         status: :error,
@@ -858,38 +853,227 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp normalize_result(_state, environment, capability, {:raised, reason}) do
+  defp normalize_result(_state, environment, invocation, _validation, {:raised, reason}) do
     post_invocation_failure(
       %{status: :error, kind: :provider_error, reason: reason, retryable?: false},
       environment,
-      capability
+      invocation.capability
     )
   end
 
   defp normalize_result(
          state,
          environment,
-         capability,
+         invocation,
+         validation,
          {:raised, :exception, {:diagnostic_worker, pid, exception_class}}
        ) do
     {:with_exception_diagnostic,
-     normalize_result(state, environment, capability, {:raised, :exception}),
+     normalize_result(state, environment, invocation, validation, {:raised, :exception}),
      CapabilityExceptionDiagnostic.await(pid, exception_class)}
   end
 
   defp normalize_result(
          state,
          environment,
-         capability,
+         invocation,
+         validation,
          {:raised, :exception, {:diagnostic_unavailable, exception_class}}
        ) do
     {:with_exception_diagnostic,
-     normalize_result(state, environment, capability, {:raised, :exception}),
+     normalize_result(state, environment, invocation, validation, {:raised, :exception}),
      CapabilityExceptionDiagnostic.unavailable(exception_class)}
   end
 
-  defp normalize_result(_state, environment, capability, _result),
-    do: invalid_provider_result(environment, capability)
+  defp normalize_result(_state, environment, invocation, _validation, _result),
+    do: invalid_provider_result(environment, invocation.capability)
+
+  defp admit_output(state, environment, invocation, validation, value, stages) do
+    capability = invocation.capability
+    cap = capability_result_limit(state)
+    bytes = RetainedSize.bytes_with_cap(value, cap)
+
+    if json_value?(value) and is_integer(bytes) and bytes <= cap do
+      case validate_output_stages(invocation, validation, value, stages) do
+        :ok ->
+          %{status: :ok, value: RetainedSize.detach_binaries(value)}
+
+        {:error, :output_schema_mismatch} ->
+          post_invocation_failure(
+            %{
+              status: :error,
+              kind: :invalid_result,
+              reason: :output_schema_mismatch,
+              retryable?: false
+            },
+            environment,
+            capability
+          )
+
+        {:error, :output_validation_unavailable} ->
+          _ = mark_terminal_host_failure(state, environment, validation.evaluation_lease)
+
+          post_invocation_failure(
+            %{
+              status: :error,
+              kind: :capability_unavailable,
+              reason: :output_validation_unavailable,
+              retryable?: false
+            },
+            environment,
+            capability
+          )
+      end
+    else
+      post_invocation_failure(
+        %{
+          status: :error,
+          kind: :result_exceeded,
+          reason: :provider_result_limit,
+          retryable?: false
+        },
+        environment,
+        capability
+      )
+    end
+  end
+
+  defp validate_output_stages(invocation, validation, value, stages) do
+    Enum.reduce_while(stages, :ok, fn stage, :ok ->
+      case validate_output_stage(invocation, validation, value, stage) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_output_stage(invocation, validation, value, :request) do
+    validate_compiled_output(
+      invocation.request_validator,
+      invocation.request_schema,
+      value,
+      validation
+    )
+  end
+
+  defp validate_output_stage(invocation, validation, value, :static) do
+    capability = invocation.capability
+
+    validate_compiled_output(
+      capability.output_validator,
+      capability.output_schema,
+      value,
+      validation
+    )
+  end
+
+  defp validate_compiled_output(nil, _schema, _value, _validation), do: :ok
+
+  defp validate_compiled_output(validator, schema, value, validation)
+       when is_map(schema) and not is_struct(schema) do
+    timeout_ms = remaining_output_validation_ms(validation)
+
+    if timeout_ms <= 0 do
+      {:error, :output_validation_unavailable}
+    else
+      case JSONSchema.validate(validator, schema, value, timeout_ms, validation.heap_words) do
+        :ok -> :ok
+        {:invalid, _violations} -> {:error, :output_schema_mismatch}
+        {:unavailable, _cause} -> {:error, :output_validation_unavailable}
+      end
+    end
+  end
+
+  defp remaining_output_validation_ms(%{deadline_ms: deadline_ms}) do
+    # Input validation reserves `@validation_handoff_ms` so a refusal can still
+    # persist terminal host provenance. Output admission runs after dispatch,
+    # so that reserve must not turn a still-open deadline into unavailability.
+    # Once the shared deadline has expired, remaining time is zero and the
+    # value is not admitted.
+    max(deadline_ms - System.monotonic_time(:millisecond), 0)
+  end
+
+  defp output_validation(heap_words, deadline_ms, evaluation_lease) do
+    %{heap_words: heap_words, deadline_ms: deadline_ms, evaluation_lease: evaluation_lease}
+  end
+
+  defp compile_request_schema(
+         %CapabilityInvocation{capability: %Capability{name: "llm-request"}} = invocation,
+         state,
+         environment,
+         requested_timeout_ms,
+         validation_heap_words,
+         validation_deadline_ms
+       ) do
+    case Map.fetch(invocation.arguments, "schema") do
+      :error ->
+        {:ok, invocation}
+
+      {:ok, schema} ->
+        compile_timeout_ms =
+          request_schema_timeout_ms(
+            state,
+            environment,
+            requested_timeout_ms,
+            validation_deadline_ms
+          )
+
+        cond do
+          compile_timeout_ms == :run_closed ->
+            {:error, :run_closed}
+
+          compile_timeout_ms <= 0 ->
+            {:error, :input_validation_unavailable}
+
+          true ->
+            case JSONSchema.compile_bounded(schema, compile_timeout_ms, validation_heap_words) do
+              {:ok, normalized, compiled} ->
+                put_compiled_request_schema(invocation, normalized, compiled, state)
+
+              {:error, {:invalid_schema, _rejection}} ->
+                {:error, :invalid_arguments}
+
+              {:unavailable, _cause} ->
+                {:error, :input_validation_unavailable}
+            end
+        end
+    end
+  end
+
+  defp compile_request_schema(
+         invocation,
+         _state,
+         _environment,
+         _timeout_ms,
+         _heap_words,
+         _deadline_ms
+       ),
+       do: {:ok, invocation}
+
+  defp put_compiled_request_schema(invocation, normalized, compiled, state) do
+    invocation = CapabilityInvocation.put_request_schema(invocation, normalized, compiled)
+
+    case validate_size(invocation.arguments, capability_argument_limit(state)) do
+      :ok -> {:ok, invocation}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp request_schema_timeout_ms(state, environment, requested_timeout_ms, validation_deadline_ms) do
+    limits = state_limits(state)
+
+    dispatch_timeout_ms =
+      min(
+        requested_timeout_ms,
+        min(validation_timeout_ms(limits, environment), RunState.remaining_ms(state))
+      )
+
+    if dispatch_timeout_ms <= 0 do
+      :run_closed
+    else
+      validation_worker_timeout_ms(dispatch_timeout_ms, validation_deadline_ms)
+    end
+  end
 
   defp invalid_provider_result(environment, capability) do
     post_invocation_failure(
@@ -1152,19 +1336,26 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp maybe_put_usage(data, _result, nil), do: data
 
-  defp merge_result_attributes(
+  defp merge_result_attributes(%{status: :ok, value: value}, attributes)
+       when is_map(value) and is_map(attributes) and map_size(attributes) > 0,
+       do: %{status: :ok, value: Map.merge(value, attributes)}
+
+  defp merge_result_attributes(result, _attributes), do: result
+
+  defp admit_success_output(
+         %{status: :ok, value: value},
          state,
          environment,
-         capability,
-         %{status: :ok, value: value},
-         attributes
-       )
-       when is_map(value) and is_map(attributes) do
-    normalize_result(state, environment, capability, {:ok, Map.merge(value, attributes)})
+         invocation,
+         validation
+       ) do
+    # Request-schema validation sees this merged envelope, including host-injected
+    # `result_attributes`. A request schema that omits those keys (the profile
+    # normalizes missing `additionalProperties` to `false`) will mismatch.
+    admit_output(state, environment, invocation, validation, value, [:request, :static])
   end
 
-  defp merge_result_attributes(_state, _environment, _capability, result, _attributes),
-    do: result
+  defp admit_success_output(result, _state, _environment, _invocation, _validation), do: result
 
   defp maybe_put_llm_result_metadata(data, %{status: :ok, value: value}, :llm_tokens)
        when is_map(value) do
@@ -1234,11 +1425,6 @@ defmodule PtcRunner.Kernel.Dispatcher do
   defp spend_status(status) when status in [:ok, "ok"], do: :ok
   defp spend_status(status) when status in [:error, "error"], do: :error
   defp spend_status(_status), do: nil
-
-  defp valid_output?(%Capability{output_validator: nil}, _value), do: true
-
-  defp valid_output?(%Capability{output_validator: validator}, value),
-    do: JSONSchema.valid?(validator, value)
 
   defp validate_size(value, cap) do
     case RetainedSize.bytes_with_cap(value, cap) do

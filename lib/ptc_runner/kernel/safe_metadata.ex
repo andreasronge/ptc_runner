@@ -97,6 +97,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :model_alias_required,
     :not_found,
     :output_schema_mismatch,
+    :output_validation_unavailable,
     :payment_required,
     :protocol_errors,
     :provider_exit,

@@ -4299,7 +4299,18 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     unstable = %{unstable | input_validator: :forced_validator_failure}
-    {:ok, config} = agent_config([response, @recovered], [], mission_capabilities: [unstable])
+
+    {:ok, inspection_sink} =
+      StreamingInspection.start(
+        run_id: "input-validator-unavailable",
+        trace_id: "input-validator-unavailable"
+      )
+
+    {:ok, config} =
+      agent_config([response, @recovered], [],
+        mission_capabilities: [unstable],
+        inspection_sink: inspection_sink
+      )
 
     assert {:error,
             %{
@@ -4310,6 +4321,58 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert_receive {:agent_request, _first}
     refute_receive {:agent_request, _second}
+    assert_host_validation_unavailable_reason(inspection_sink, "input-validation-unavailable")
+  end
+
+  test "agent.core fails output validation unavailability without another provider turn" do
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{
+          id: "output-validator-unavailable",
+          name: "run_ptc_lisp",
+          args: %{"program" => ~S|(fail (tool/unstable {}))|}
+        }
+      ]
+    }
+
+    {:ok, unstable} =
+      Capability.new(
+        name: "unstable",
+        effect: :read,
+        input_schema: %{"type" => "object"},
+        output_schema: %{
+          "type" => "object",
+          "properties" => %{"ok" => %{"type" => "boolean"}},
+          "required" => ["ok"]
+        },
+        callback: fn _ -> {:ok, %{"ok" => true}} end
+      )
+
+    unstable = %{unstable | output_validator: :forced_validator_failure}
+
+    {:ok, inspection_sink} =
+      StreamingInspection.start(
+        run_id: "output-validator-unavailable",
+        trace_id: "output-validator-unavailable"
+      )
+
+    {:ok, config} =
+      agent_config([response, @recovered], [],
+        mission_capabilities: [unstable],
+        inspection_sink: inspection_sink
+      )
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :explicit_failure,
+              details: %{failure_kind: "capability-unavailable"}
+            }} = Kernel.run(~S|(agent.core/run "Read once" {"max_turns" 3})|, config)
+
+    assert_receive {:agent_request, _first}
+    refute_receive {:agent_request, _second}
+    assert_host_validation_unavailable_reason(inspection_sink, "output-validation-unavailable")
   end
 
   test "default prompt renders nested direct-capability schema documentation" do
@@ -4786,6 +4849,15 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         "value" => %{"type" => "string", "enum" => country_enum_values()}
       }
     })
+  end
+
+  defp assert_host_validation_unavailable_reason(inspection_sink, reason) do
+    assert {:ok, records} = StreamingInspection.records(inspection_sink)
+
+    fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
+
+    assert %{"kind" => "capability-unavailable", "ok" => false, "reason" => ^reason} =
+             fail_record["payload"]["value"]
   end
 
   defp agent_config(responses, limit_overrides \\ [], opts \\ []) do
