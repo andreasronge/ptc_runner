@@ -59,6 +59,25 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
              )
   end
 
+  test "json_schema generate_object does not dispatch Azure through a synthetic tool" do
+    plug = fn _conn ->
+      flunk("json_schema must not dispatch an Azure tool-fallback request")
+    end
+
+    assert {:error, :unsupported_model_option} =
+             ReqLLMAdapter.generate_object(
+               "azure:gpt-4o",
+               [%{role: :user, content: "hi"}],
+               %{
+                 "type" => "object",
+                 "properties" => %{"ok" => %{"type" => "boolean"}},
+                 "required" => ["ok"]
+               },
+               api_key: "test",
+               req_http_options: [plug: plug, retry: false]
+             )
+  end
+
   test "bounds an omitted output budget below a model's full context window", %{test: test} do
     expect_request(test, "x-ai/grok-4.3")
 

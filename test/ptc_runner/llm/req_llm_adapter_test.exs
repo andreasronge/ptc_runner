@@ -181,7 +181,8 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       for selector <- [
             "groq:openai/gpt-oss-20b",
             "amazon_bedrock:amazon.nova-pro-v1:0",
-            "google_vertex:zai-org/glm-4.7-maas"
+            "google_vertex:zai-org/glm-4.7-maas",
+            "azure:gpt-4o"
           ] do
         assert {:error, :unsupported_model_option} =
                  ReqLLMAdapter.prepare_model(selector, requirements)

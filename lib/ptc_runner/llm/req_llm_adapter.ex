@@ -69,7 +69,6 @@ if Code.ensure_loaded?(ReqLLM) do
     @req_llm_special_fallback_providers [:github_copilot, :minimax, :mistral, :openai_codex]
     @native_json_schema_providers [
       :anthropic,
-      :azure,
       :fireworks_ai,
       :google,
       :ollama,
@@ -1332,7 +1331,6 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp json_schema_mode_key(:openrouter), do: :openrouter_structured_output_mode
     defp json_schema_mode_key(:openai), do: :openai_structured_output_mode
-    defp json_schema_mode_key(:azure), do: :openai_structured_output_mode
     defp json_schema_mode_key(:anthropic), do: :anthropic_structured_output_mode
     defp json_schema_mode_key(:google_vertex), do: :anthropic_structured_output_mode
     defp json_schema_mode_key(:xai), do: :xai_structured_output_mode
@@ -1446,9 +1444,8 @@ if Code.ensure_loaded?(ReqLLM) do
         else: {:error, :unsupported_model_option}
     end
 
-    defp native_json_schema_model?(%LLMDB.Model{provider: provider} = model)
-         when provider in [:openai, :azure],
-         do: ModelHelpers.json_schema?(model)
+    defp native_json_schema_model?(%LLMDB.Model{provider: :openai} = model),
+      do: ModelHelpers.json_schema?(model)
 
     defp native_json_schema_model?(%LLMDB.Model{provider: :xai} = model),
       do: XAI.supports_native_structured_outputs?(model)
