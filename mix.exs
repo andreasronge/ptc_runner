@@ -92,11 +92,7 @@ defmodule PtcRunner.MixProject do
         packaged_or_git_revision()
 
     if revision do
-      dirty =
-        case explicit_dirty_state() do
-          nil -> git_dirty_state()
-          explicit -> explicit
-        end
+      dirty = source_dirty_state()
 
       unless Regex.match?(~r/\A[0-9a-f]{40}\z/, revision) do
         Mix.raise("PTC source revision must be a lowercase, full 40-character Git SHA")
@@ -114,9 +110,16 @@ defmodule PtcRunner.MixProject do
     packaged = Path.join(__DIR__, "priv/source_revision")
 
     cond do
-      File.regular?(packaged) -> packaged |> File.read!() |> String.trim()
       File.exists?(Path.join(__DIR__, ".git")) -> git!(~w(rev-parse HEAD))
+      File.regular?(packaged) -> packaged |> File.read!() |> String.trim()
       true -> nil
+    end
+  end
+
+  defp source_dirty_state do
+    case explicit_dirty_state() do
+      nil -> packaged_or_git_dirty_state!()
+      explicit -> explicit
     end
   end
 
@@ -129,11 +132,22 @@ defmodule PtcRunner.MixProject do
     end
   end
 
-  defp git_dirty_state do
-    if File.exists?(Path.join(__DIR__, ".git")) do
-      git!(~w(status --porcelain --untracked-files=normal)) != ""
-    else
-      Mix.raise("source dirty state unavailable; set PTC_SOURCE_DIRTY")
+  defp packaged_or_git_dirty_state! do
+    packaged = Path.join(__DIR__, "priv/source_dirty")
+
+    cond do
+      File.exists?(Path.join(__DIR__, ".git")) ->
+        git!(~w(status --porcelain --untracked-files=normal)) != ""
+
+      File.regular?(packaged) ->
+        case packaged |> File.read!() |> String.trim() do
+          "true" -> true
+          "false" -> false
+          _invalid -> Mix.raise("packaged PTC source dirty state must be true or false")
+        end
+
+      true ->
+        Mix.raise("source dirty state unavailable; set PTC_SOURCE_DIRTY")
     end
   end
 
@@ -598,20 +612,23 @@ defmodule PtcRunner.MixProject do
   # Hex consumers compile without this checkout's Git metadata. Materialize the
   # publication revision immediately before Hex collects the declared files;
   # ordinary source builds continue to read Git directly.
-  defp ensure_package_source_revision! do
-    revision = System.get_env("PTC_SOURCE_REVISION") || System.get_env("GITHUB_SHA")
+  defp ensure_package_source_identity! do
+    case source_identity() do
+      %{revision: revision, dirty: dirty} ->
+        File.write!(Path.join(__DIR__, "priv/source_revision"), revision <> "\n")
+        File.write!(Path.join(__DIR__, "priv/source_dirty"), "#{dirty}\n")
 
-    if is_binary(revision) do
-      File.write!(Path.join(__DIR__, "priv/source_revision"), revision <> "\n")
+      nil ->
+        Mix.raise("source identity unavailable; set PTC_SOURCE_REVISION and PTC_SOURCE_DIRTY")
     end
   end
 
   defp package do
-    ensure_package_source_revision!()
+    ensure_package_source_identity!()
 
     [
       files:
-        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run examples/support-triage site/schemas/mcp-2026-07-28.schema.json .formatter.exs mix.exs README.md usage-rules.md LICENSE LICENSES THIRD_PARTY_NOTICES.md CHANGELOG.md priv/source_revision priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run examples/support-triage site/schemas/mcp-2026-07-28.schema.json .formatter.exs mix.exs README.md usage-rules.md LICENSE LICENSES THIRD_PARTY_NOTICES.md CHANGELOG.md priv/source_revision priv/source_dirty priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
       # Hex expands the directories above from the working tree, not from
       # git, so anything ignored but present -- a `.ptc` run directory left by
       # a tutorial walk, a `.env` beside an example -- is published. Ship no
