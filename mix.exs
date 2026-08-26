@@ -619,7 +619,7 @@ defmodule PtcRunner.MixProject do
         File.write!(Path.join(__DIR__, "priv/source_dirty"), "#{dirty}\n")
 
       nil ->
-        Mix.raise("source identity unavailable; set PTC_SOURCE_REVISION and PTC_SOURCE_DIRTY")
+        :ok
     end
   end
 
