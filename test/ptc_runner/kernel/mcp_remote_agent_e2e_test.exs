@@ -205,16 +205,20 @@ defmodule PtcRunner.Kernel.MCPRemoteAgentE2ETest do
          preflight: fn ->
            {:ok,
             fn %{} ->
-              with {:ok, requester} <-
-                     PtcRunner.LLM.callback(model,
-                       api_key: System.get_env("OPENROUTER_API_KEY")
-                     ),
+              requirements = LLMSupport.interim_requirements()
+
+              with {:ok, prepared} <- PtcRunner.LLM.prepare(model, requirements),
+                   {:ok, requester} <-
+                     PtcRunner.LLM.callback(prepared, %{
+                       credential: System.get_env("OPENROUTER_API_KEY"),
+                       cache: false
+                     }),
                    {:ok, capability} <-
                      LLMCapability.new(
                        requester: fn request ->
                          request
                          |> ProviderRegistry.adapter_request()
-                         |> requester.()
+                         |> requester.(%{llm_request_deadline_ms: nil})
                        end
                      ),
                    do: {:ok, %{capabilities: [capability]}}

@@ -2,10 +2,17 @@ defmodule PtcRunner.LLM do
   @moduledoc """
   Provider-neutral LLM adapter boundary used by trusted Kernel provider builders.
 
-  `callback/2` binds a configured full model identifier into a one-argument
-  provider callback. Kernel policy, retries, prompt construction, and protocol
-  recovery live in shipped Lisp libraries rather than this transport adapter.
+  `prepare/2` seals a model selector into an immutable prepared target under a
+  closed requirements map. `callback/2` binds that target to a credential and
+  cache flag and returns an arity-two requester. Kernel policy, retries, prompt
+  construction, and protocol recovery live in shipped Lisp libraries rather than
+  this transport adapter.
   """
+
+  alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.LLM.Invocation
+  alias PtcRunner.LLM.PreparedModel
+  alias PtcRunner.LLM.Requirements
 
   @type message :: %{role: :system | :user | :assistant | :tool, content: String.t()}
 
@@ -45,6 +52,13 @@ defmodule PtcRunner.LLM do
   @type chunk :: %{delta: String.t()} | %{done: true, tokens: tokens()}
   @type catalog_status :: :cataloged | :uncataloged | :unavailable
 
+  @type runtime_binding :: %{
+          credential: binary() | nil,
+          cache: boolean()
+        }
+
+  @type requester_context :: %{llm_request_deadline_ms: integer() | nil}
+
   @doc """
   Make an LLM call.
 
@@ -57,27 +71,18 @@ defmodule PtcRunner.LLM do
 
   Returns `{:ok, response}` or `{:error, reason}`.
   """
-  @callback call(model :: term(), request :: map()) :: {:ok, map()} | {:error, term()}
+  @callback call(model :: term(), invocation :: Invocation.t()) ::
+              {:ok, map()} | {:error, ProviderError.t()}
 
   @doc """
-  Stream an LLM response.
+  Prepares an adapter-owned request target and attests the sealed requirements.
 
-  Returns `{:ok, stream}` where stream is an `Enumerable` of chunk maps:
-  - `%{delta: "text"}` for content chunks
-  - `%{done: true, tokens: %{...}}` for the final chunk
+  The returned attestation must be exactly the canonical requirements map. An
+  adapter that cannot preserve the requested options, mode, reporting
+  guarantees, or reservation authority returns `{:error, :unsupported_model_option}`.
   """
-  @callback stream(model :: term(), request :: map()) ::
-              {:ok, Enumerable.t()} | {:error, term()}
-
-  @doc """
-  Prepares an adapter-owned request target and reports its catalog status.
-
-  Optional. Adapters without an external model catalog may omit this callback;
-  PtcRunner then passes the original selector to requests and records the status
-  as `:unavailable`.
-  """
-  @callback prepare_model(model :: String.t()) ::
-              {:ok, target :: term(), catalog_status()} | {:error, term()}
+  @callback prepare_model(model :: String.t(), requirements :: Requirements.t()) ::
+              {:ok, target :: term(), catalog_status(), Requirements.t()} | {:error, term()}
 
   @doc """
   Preload adapter-owned model metadata into a shared, process-independent store
@@ -118,14 +123,10 @@ defmodule PtcRunner.LLM do
   @callback public_model(model :: String.t()) :: {:ok, String.t()} | :private
 
   @optional_callbacks [
-    stream: 2,
-    prepare_model: 1,
     ensure_ready: 0,
     provider_application: 1,
     public_model: 1
   ]
-
-  alias PtcRunner.LLM.PreparedModel
 
   @doc false
   @spec attested_public_model(module(), String.t()) :: String.t() | nil
@@ -151,28 +152,31 @@ defmodule PtcRunner.LLM do
   @doc """
   Resolves a configured selector into an immutable adapter-owned request target.
 
-  Preparation runs adapter warmup and model resolution once. It returns a typed
-  error immediately when either operation cannot produce a valid prepared value.
+  Generated `prepare/2` means `(model, requirements)`. Explicit `prepare/3`
+  means `(model, requirements, adapter)`. Preparation runs adapter warmup and
+  model resolution once, validates exact requirements/attestation equality, and
+  returns a typed error immediately when either operation cannot produce a valid
+  prepared value.
   """
-  @spec prepare(String.t(), module()) :: {:ok, PreparedModel.t()} | {:error, term()}
-  def prepare(model, adapter \\ adapter!())
+  @spec prepare(String.t(), Requirements.t()) :: {:ok, PreparedModel.t()} | {:error, term()}
+  @spec prepare(String.t(), Requirements.t(), module()) ::
+          {:ok, PreparedModel.t()} | {:error, term()}
+  def prepare(model, requirements, adapter \\ adapter!())
 
-  def prepare(model, adapter) when is_binary(model) and is_atom(adapter) do
-    if Code.ensure_loaded?(adapter) do
+  def prepare(model, requirements, adapter)
+      when is_binary(model) and is_atom(adapter) do
+    with true <- Code.ensure_loaded?(adapter),
+         {:ok, canonical} <- Requirements.canonical(requirements) do
       if function_exported?(adapter, :ensure_ready, 0), do: adapter.ensure_ready()
 
-      result =
-        if function_exported?(adapter, :prepare_model, 1),
-          do: adapter.prepare_model(model),
-          else: {:ok, model, :unavailable}
-
-      case result do
-        {:ok, target, status} -> PreparedModel.new(adapter, model, target, status)
-        {:error, _reason} = error -> error
-        _invalid -> {:error, :invalid_model_preparation}
+      if function_exported?(adapter, :prepare_model, 2) do
+        seal_prepared(adapter, model, canonical, adapter.prepare_model(model, canonical))
+      else
+        {:error, :invalid_model_preparation}
       end
     else
-      {:error, :invalid_model_preparation}
+      :error -> {:error, :invalid_model_preparation}
+      false -> {:error, :invalid_model_preparation}
     end
   rescue
     _exception -> {:error, :invalid_model_preparation}
@@ -180,120 +184,31 @@ defmodule PtcRunner.LLM do
     _kind, _reason -> {:error, :invalid_model_preparation}
   end
 
-  def prepare(_model, _adapter), do: {:error, :invalid_model_preparation}
+  def prepare(_model, _requirements, _adapter), do: {:error, :invalid_model_preparation}
 
   @doc """
-  Creates a normalized requester for a configured or prepared model.
+  Creates a normalized requester for a prepared model.
 
-  A selector is prepared once while this function constructs the requester. A
-  prepared value is bound directly. The optional `:adapter` setting selects a
-  transport explicitly; other options are merged into every request.
-
-  Returns `{:ok, requester}` or an error before any request can run. An
-  uncataloged selector emits one concise warning while the requester is built.
+  The binding is a closed map of `credential` and `cache`. The returned
+  requester is arity two: a provider-neutral request plus
+  `%{llm_request_deadline_ms: integer() | nil}`. An uncataloged selector emits
+  one concise warning while the requester is built.
   """
-  @spec callback(String.t() | PreparedModel.t(), keyword()) ::
-          {:ok, (map() -> {:ok, map()} | {:error, term()})} | {:error, term()}
-  def callback(model, opts \\ []) do
-    {adapter_override, opts} = Keyword.pop(opts, :adapter)
-
-    with {:ok, prepared} <- prepared_model(model, adapter_override),
+  @spec callback(PreparedModel.t(), runtime_binding()) ::
+          {:ok, (map(), requester_context() -> {:ok, map()} | {:error, ProviderError.t()})}
+          | {:error, :invalid_prepared_model | :invalid_llm_binding}
+  def callback(%PreparedModel{} = prepared, binding) do
+    with :ok <- validate_prepared(prepared),
+         {:ok, credential, cache} <- validate_binding(binding),
          :ok <- warn_catalog_status(prepared) do
-      merged_opts = Map.new(opts)
-
       {:ok,
-       fn req ->
-         {stream_fn, clean_req} = Map.pop(req, :stream)
-         final_req = if merged_opts == %{}, do: clean_req, else: Map.merge(clean_req, merged_opts)
-
-         if stream_fn && not tool_request?(final_req) &&
-              function_exported?(prepared.adapter, :stream, 2) do
-           case prepared.adapter.stream(prepared.target, final_req) do
-             {:ok, stream} ->
-               consume_stream(stream, stream_fn)
-
-             {:error, :streaming_not_supported} ->
-               prepared.adapter.call(prepared.target, final_req)
-
-             error ->
-               error
-           end
-         else
-           prepared.adapter.call(prepared.target, final_req)
-         end
+       fn request, context ->
+         invoke_prepared(prepared, request, credential, cache, context)
        end}
     end
   end
 
-  defp prepared_model(%PreparedModel{} = prepared, nil) do
-    if PreparedModel.valid?(prepared),
-      do: {:ok, prepared},
-      else: {:error, :invalid_prepared_model}
-  end
-
-  defp prepared_model(%PreparedModel{adapter: adapter} = prepared, adapter) do
-    if PreparedModel.valid?(prepared),
-      do: {:ok, prepared},
-      else: {:error, :invalid_prepared_model}
-  end
-
-  defp prepared_model(%PreparedModel{}, _different_adapter),
-    do: {:error, :invalid_prepared_model}
-
-  defp prepared_model(model, adapter_override) when is_binary(model),
-    do: prepare(model, adapter_override || adapter!())
-
-  defp prepared_model(_model, _adapter), do: {:error, :invalid_prepared_model}
-
-  defp warn_catalog_status(%PreparedModel{catalog_status: :uncataloged} = prepared) do
-    public_model = attested_public_model(prepared.adapter, prepared.selector)
-    identity = if public_model, do: " #{inspect(public_model)}", else: ""
-
-    IO.warn(
-      "model_uncataloged: configured model#{identity} is not an exact catalog entry; " <>
-        "pricing, limits, token estimation, and capability detection may be incomplete",
-      []
-    )
-  end
-
-  defp warn_catalog_status(%PreparedModel{}), do: :ok
-
-  defp tool_request?(%{tools: tools}) when is_list(tools), do: tools != []
-  defp tool_request?(_request), do: false
-
-  defp consume_stream(stream, on_chunk) do
-    {content, tokens} =
-      Enum.reduce(stream, {"", nil}, fn
-        %{delta: text}, {acc, tok} ->
-          on_chunk.(%{delta: text})
-          {acc <> text, tok}
-
-        %{done: true, tokens: tokens}, {acc, _tok} ->
-          {acc, tokens}
-
-        _other, acc ->
-          acc
-      end)
-
-    {:ok, %{content: content, tokens: tokens || %{}}}
-  rescue
-    e -> {:error, {:stream_error, e}}
-  end
-
-  @doc """
-  Make a direct LLM call using the configured adapter.
-
-  ## Examples
-
-      {:ok, response} = PtcRunner.LLM.call("amazon_bedrock:anthropic.claude-haiku-4-5-20251001-v1:0", %{
-        system: "You are helpful.",
-        messages: [%{role: :user, content: "Hello"}]
-      })
-  """
-  @spec call(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def call(model, request) do
-    with {:ok, requester} <- callback(model), do: requester.(request)
-  end
+  def callback(_prepared, _binding), do: {:error, :invalid_prepared_model}
 
   @doc """
   Returns the configured LLM adapter module.
@@ -320,6 +235,79 @@ defmodule PtcRunner.LLM do
             )
     end
   end
+
+  defp seal_prepared(adapter, model, canonical, {:ok, target, status, attestation}) do
+    case Requirements.canonical(attestation) do
+      {:ok, attested} ->
+        if Requirements.equal?(canonical, attested) do
+          PreparedModel.new(adapter, model, target, status, canonical, attested)
+        else
+          {:error, :unsupported_model_option}
+        end
+
+      :error ->
+        {:error, :unsupported_model_option}
+    end
+  end
+
+  defp seal_prepared(_adapter, _model, _canonical, {:error, :unsupported_model_option}),
+    do: {:error, :unsupported_model_option}
+
+  defp seal_prepared(_adapter, _model, _canonical, {:error, _reason} = error), do: error
+
+  defp seal_prepared(_adapter, _model, _canonical, _invalid),
+    do: {:error, :invalid_model_preparation}
+
+  defp validate_prepared(prepared) do
+    if PreparedModel.valid?(prepared), do: :ok, else: {:error, :invalid_prepared_model}
+  end
+
+  defp validate_binding(%{credential: credential, cache: cache} = binding)
+       when map_size(binding) == 2 and is_boolean(cache) do
+    cond do
+      is_nil(credential) ->
+        {:ok, credential, cache}
+
+      is_binary(credential) and byte_size(credential) in 1..65_536 ->
+        {:ok, credential, cache}
+
+      true ->
+        {:error, :invalid_llm_binding}
+    end
+  end
+
+  defp validate_binding(_binding), do: {:error, :invalid_llm_binding}
+
+  defp invoke_prepared(prepared, request, credential, cache, context) do
+    with :ok <- validate_prepared(prepared),
+         {:ok, deadline_ms} <- requester_deadline(context),
+         {:ok, invocation} <- Invocation.new(request, cache, credential, deadline_ms) do
+      prepared.adapter.call(prepared.target, invocation)
+    else
+      {:error, :invalid_prepared_model} = error -> error
+      {:error, :invalid_llm_binding} = error -> error
+      :error -> {:error, :invalid_llm_binding}
+    end
+  end
+
+  defp requester_deadline(%{llm_request_deadline_ms: deadline_ms} = context)
+       when map_size(context) == 1 and (is_integer(deadline_ms) or is_nil(deadline_ms)),
+       do: {:ok, deadline_ms}
+
+  defp requester_deadline(_context), do: :error
+
+  defp warn_catalog_status(%PreparedModel{catalog_status: :uncataloged} = prepared) do
+    public_model = attested_public_model(prepared.adapter, prepared.selector)
+    identity = if public_model, do: " #{inspect(public_model)}", else: ""
+
+    IO.warn(
+      "model_uncataloged: configured model#{identity} is not an exact catalog entry; " <>
+        "pricing, limits, token estimation, and capability detection may be incomplete",
+      []
+    )
+  end
+
+  defp warn_catalog_status(%PreparedModel{}), do: :ok
 
   defp raise_no_adapter do
     raise """

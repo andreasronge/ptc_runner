@@ -8,12 +8,13 @@ if Code.ensure_loaded?(LLMDB.Model) do
     detail and should be treated as opaque.
     """
 
-    @enforce_keys [:selector, :model]
-    defstruct @enforce_keys
+    @enforce_keys [:selector, :exact_options]
+    defstruct [:selector, :exact_options, model: nil]
 
     @type t :: %__MODULE__{
             selector: String.t(),
-            model: LLMDB.Model.t()
+            exact_options: map(),
+            model: LLMDB.Model.t() | nil
           }
   end
 end

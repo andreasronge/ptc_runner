@@ -40,6 +40,7 @@ defmodule PtcRunner.Kernel.Limits do
           evaluation_heap_words: pos_integer(),
           provider_heap_words: pos_integer(),
           live_provider_tasks: pos_integer(),
+          llm_request_output_tokens: pos_integer(),
           workflow_capability_calls: pos_integer(),
           workflow_capability_calls_per_name: pos_integer(),
           mission_capability_calls: pos_integer(),

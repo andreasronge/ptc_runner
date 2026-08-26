@@ -66,6 +66,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.LLM.Requirements
 
   @inherited_compatibility_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
   @stdio_locale_environment %{"LC_ALL" => "C.UTF-8"}
@@ -741,7 +742,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- llm_selection(installation, selection, context),
          {:ok, model, adapter} <- preflight_llm(installation.model),
-         {:ok, prepared_model} <- prepare_llm_model(model, adapter) do
+         {:ok, requirements} <- live_llm_requirements(installation, context),
+         {:ok, prepared_model} <- prepare_llm_model(model, requirements, adapter) do
       public_model = PtcRunner.LLM.attested_public_model(adapter, model)
 
       {:ok,
@@ -821,12 +823,30 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   # Adapter preparation has a deliberately rich direct-embedding error
   # vocabulary. An installed provider crosses the Kernel's closed diagnostic
-  # boundary instead, where every invalid or unsupported target is represented
-  # by the existing adapter-unavailable reason.
-  defp prepare_llm_model(model, adapter) do
-    case PtcRunner.LLM.prepare(model, adapter) do
+  # boundary instead: an unsupported sealed contract is
+  # `model_contract_unsupported`, and every other invalid or unavailable target
+  # remains adapter-unavailable.
+  defp prepare_llm_model(model, requirements, adapter) do
+    case PtcRunner.LLM.prepare(model, requirements, adapter) do
       {:ok, prepared_model} -> {:ok, prepared_model}
+      {:error, :unsupported_model_option} -> {:error, :unsupported_model_option}
       {:error, _reason} -> {:error, :invalid_llm_model}
+    end
+  end
+
+  defp live_llm_requirements(installation, %{limits: limits}) do
+    case Requirements.live(installation.params, limits.llm_request_output_tokens) do
+      {:ok, requirements} -> {:ok, requirements}
+      :error -> {:error, :invalid_llm_model}
+    end
+  end
+
+  defp live_llm_requirements(_installation, _context), do: {:error, :invalid_llm_model}
+
+  defp probe_llm_requirements(installation) do
+    case Requirements.probe(installation.params) do
+      {:ok, requirements} -> {:ok, requirements}
+      :error -> {:error, :llm_connectivity_unavailable}
     end
   end
 
@@ -917,7 +937,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp local_preflight(_host, %{source: :llm} = installation, selection, context) do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
-         {:ok, _model, _adapter} <- preflight_llm(installation.model) do
+         {:ok, model, adapter} <- preflight_llm(installation.model),
+         {:ok, requirements} <- live_llm_requirements(installation, context),
+         {:ok, _prepared_model} <- prepare_llm_model(model, requirements, adapter) do
       :ok
     end
   end
@@ -942,7 +964,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
          {:ok, model, adapter} <- preflight_llm(installation.model),
-         {:ok, prepared_model} <- prepare_llm_model(model, adapter),
+         {:ok, requirements} <- probe_llm_requirements(installation),
+         {:ok, prepared_model} <- prepare_llm_model(model, requirements, adapter),
          {:ok, credential} <-
            Map.fetch(Map.get(context, :credentials, %{}), installation.credential),
          {:ok, timeout_ms, max_heap_words} <- connectivity_probe_bounds(context) do
@@ -950,9 +973,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
        %{
          model: model,
          prepared_model: prepared_model,
-         adapter: adapter,
          credential: credential,
-         params: installation.params,
+         cache: installation.cache,
          timeout_ms: timeout_ms,
          max_heap_words: max_heap_words
        }}
@@ -989,34 +1011,26 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp connectivity_probe_bounds(_context), do: {:error, :llm_connectivity_unavailable}
 
   # The probe bills a real request, so what it spent travels back with the
-  # success rather than being pattern-matched away: `max_tokens: 1` bounds the
-  # magnitude, not the attribution. The tokens are the adapter's own map and are
-  # closed by `ConnectivityProbe` before they become reportable evidence; a
-  # response without them still answers `:ok`, because unreachable and
-  # unattributed are different facts.
+  # success rather than being pattern-matched away: `max_tokens: 1` is sealed
+  # into a separate prepared target and bounds the magnitude, not the
+  # attribution. The tokens are the adapter's own map and are closed by
+  # `ConnectivityProbe` before they become reportable evidence; a response
+  # without them still answers `:ok`, because unreachable and unattributed are
+  # different facts. The doctor connectivity deadline remains the outer
+  # `BoundedWorker` bound; the LLM invocation deadline stays nil until the
+  # ordinary whole-call slice.
   defp run_llm_connectivity_probe(probe) do
-    options =
-      probe.params
-      |> Map.to_list()
-      |> Keyword.merge(
-        adapter: probe.adapter,
-        api_key: probe.credential,
-        cache: false,
-        max_tokens: 1,
-        max_retries: 0,
-        receive_timeout: probe.timeout_ms,
-        req_http_options: [retry: false, redirect: false, max_retries: 0]
-      )
+    binding = %{credential: probe.credential, cache: probe.cache}
 
-    case PtcRunner.LLM.callback(probe.prepared_model, options) do
+    case PtcRunner.LLM.callback(probe.prepared_model, binding) do
       {:ok, requester} ->
         result =
           BoundedWorker.run(
             fn ->
-              requester.(%{
-                messages: [%{role: :user, content: "Health check."}],
-                cache: false
-              })
+              requester.(
+                %{messages: [%{role: :user, content: "Health check."}]},
+                %{llm_request_deadline_ms: nil}
+              )
             end,
             timeout_ms: probe.timeout_ms,
             max_heap_words: probe.max_heap_words,
@@ -1250,21 +1264,17 @@ defmodule PtcRunner.Kernel.HostInstallation do
        ) do
     with {:ok, credential} <- Map.fetch(credentials, installation.credential),
          {:ok, requester} <-
-           PtcRunner.LLM.callback(
-             prepared_model,
-             [
-               adapter: adapter,
-               cache: installation.cache,
-               api_key: credential
-             ] ++ Map.to_list(installation.params)
-           ),
+           PtcRunner.LLM.callback(prepared_model, %{
+             credential: credential,
+             cache: installation.cache
+           }),
          {:ok, capability} <-
            LLMCapability.new(
              requester: fn request ->
                with :ok <- provider_application_ready(adapter, model) do
                  request
                  |> ProviderRegistry.adapter_request()
-                 |> requester.()
+                 |> requester.(%{llm_request_deadline_ms: nil})
                end
              end,
              max_request_bytes: selected.max_request_bytes,

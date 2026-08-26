@@ -204,7 +204,8 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
           {:invalid_mcp_executable, :environment_unavailable},
           {:mcp_stdio_launcher_unavailable, :launcher_unavailable},
           {:unsupported_mcp_stdio_platform, :launcher_unavailable},
-          {:invalid_llm_model, :adapter_unavailable}
+          {:invalid_llm_model, :adapter_unavailable},
+          {:unsupported_model_option, :model_contract_unsupported}
         ] do
       assert %CommandDiagnostic{phase: :local_preflight, code: ^code} = refuse(reason)
     end
@@ -314,6 +315,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     # collapse into.
     for {reason, phase, code} <- [
           {:invalid_llm_model, :local_preflight, :adapter_unavailable},
+          {:unsupported_model_option, :local_preflight, :model_contract_unsupported},
           {:invalid_mcp_executable, :local_preflight, :environment_unavailable},
           {:mcp_stdio_launcher_unavailable, :local_preflight, :launcher_unavailable},
           {:provider_destination_denied, :active_preflight, :selection_rejected},
@@ -545,6 +547,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     for code <- [
           :environment_unavailable,
           :adapter_unavailable,
+          :model_contract_unsupported,
           :launcher_unavailable,
           :local_check_timeout
         ] do

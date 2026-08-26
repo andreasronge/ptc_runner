@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   """
 
   @generic_maximum 2_592_000_000
+  @maximums %{llm_request_output_tokens: 1_000_000}
 
   # `{field, effective default, installed ceiling}`.
   #
@@ -47,6 +48,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     {:evaluation_heap_words, 1_250_000, 1_250_000},
     {:provider_heap_words, 5_000_000, 5_000_000},
     {:live_provider_tasks, 8, 8},
+    {:llm_request_output_tokens, 4_096, 65_536},
     {:workflow_capability_calls, 256, 4_096},
     {:workflow_capability_calls_per_name, 128, 2_048},
     {:mission_capability_calls, 256, 4_096},
@@ -111,6 +113,8 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     provider_heap_words: "Heap of each provider callback process.",
     live_provider_tasks:
       "Concurrent provider callback processes and Kernel-owned parallel Lisp workers.",
+    llm_request_output_tokens:
+      "Authorized output tokens for one live language-model call, supplied as that call's max_tokens.",
     workflow_capability_calls: "Total workflow capability calls in one run.",
     workflow_capability_calls_per_name:
       "Workflow capability calls to any one public name in one run.",
@@ -147,6 +151,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     evaluation_heap_words: :heap_words,
     provider_heap_words: :heap_words,
     live_provider_tasks: :count,
+    llm_request_output_tokens: :count,
     workflow_capability_calls: :count,
     workflow_capability_calls_per_name: :count,
     mission_capability_calls: :count,
@@ -178,7 +183,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
              compiled_default: compiled_default,
              installed_default: installed_default,
              minimum: 1,
-             maximum: @generic_maximum,
+             maximum: Map.get(@maximums, field, @generic_maximum),
              identity: true,
              unit: Map.fetch!(@units, field),
              description: Map.fetch!(@descriptions, field)

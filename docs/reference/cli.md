@@ -450,6 +450,7 @@ Every classified diagnostic and the status it exits with:
 | 4 | `local_preflight` | `fixtures_unreadable` | no | provider fixtures could not be read |
 | 4 | `local_preflight` | `launcher_unavailable` | no | a required provider launcher is unavailable |
 | 4 | `local_preflight` | `local_check_timeout` | no | a local provider check timed out |
+| 4 | `local_preflight` | `model_contract_unsupported` | no | the selected model cannot honor its installed model contract |
 | 4 | `provider_acquisition` | `capability_requirement_missing` | no | a component requires a capability that the selected providers did not supply |
 | 4 | `provider_acquisition` | `provider_acquisition_timeout` | yes | the selected provider exceeded its acquisition timeout budget |
 | 4 | `provider_acquisition` | `provider_endpoint_connection_refused` | yes | the installed endpoint refused the connection |
