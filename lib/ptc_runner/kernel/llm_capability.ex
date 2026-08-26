@@ -128,7 +128,7 @@ defmodule PtcRunner.Kernel.LLMCapability do
         bytes = RetainedSize.bytes_with_cap(classified, limit)
 
         if JSONValue.map?(classified) and is_integer(bytes) and bytes <= limit do
-          admit_tokens(classified)
+          admit_tokens(classified, schema_request?)
         else
           schema_output_mismatch(schema_request?, :invalid_request)
         end
@@ -242,14 +242,22 @@ defmodule PtcRunner.Kernel.LLMCapability do
     if Map.has_key?(response, key), do: Map.fetch!(response, key), else: :missing
   end
 
-  defp admit_tokens(response) do
+  defp admit_tokens(response, schema_request?) do
     if Map.has_key?(response, "tokens") do
       case LLMUsage.normalize(response["tokens"]) do
         {:ok, usage} ->
           {:ok, response |> Map.put("tokens", usage) |> RetainedSize.detach_binaries()}
 
         {:error, :invalid_llm_usage} ->
-          invalid_usage()
+          if schema_request? do
+            # Usage guarantees are interim-disabled in this slice, so malformed
+            # tokens on a schema response are provider output that failed the
+            # closed structured envelope (`output_schema_mismatch`), not
+            # promised-usage settlement (`promised_usage_missing`).
+            schema_output_mismatch(true, :invalid_result)
+          else
+            invalid_usage()
+          end
       end
     else
       {:ok, RetainedSize.detach_binaries(response)}

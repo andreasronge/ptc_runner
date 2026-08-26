@@ -67,11 +67,13 @@ if Code.ensure_loaded?(ReqLLM) do
     # ReqLLM's public string resolver construct each target. Generic providers
     # use the documented inline form so the dependency warning never escapes.
     @req_llm_special_fallback_providers [:github_copilot, :minimax, :mistral, :openai_codex]
+    # Consulted only for `{:req_llm, selector}` routes. Direct `ollama:` and
+    # `openai-compat:` HTTP routes never reach this list and are refused for
+    # both structured modes.
     @native_json_schema_providers [
       :anthropic,
       :fireworks_ai,
       :google,
-      :ollama,
       :openai,
       :openrouter,
       :xai
@@ -234,7 +236,8 @@ if Code.ensure_loaded?(ReqLLM) do
     @doc """
     Generate a structured JSON object from an LLM.
 
-    Only supported for ReqLLM providers. Local providers return
+    Only supported for ReqLLM providers whose sealed mode is attested.
+    Direct `ollama:` and `openai-compat:` routes return
     `{:error, :structured_output_not_supported}`.
     """
     @spec generate_object(String.t() | ReqLLMPreparedModel.t(), [map()], map(), keyword()) ::
@@ -1417,6 +1420,9 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp native_json_object_selector?(selector) do
       case split_req_llm_selector(selector) do
+        # Vertex Claude/Gemini strip `response_format`. Every other Vertex MaaS
+        # family uses the OpenAI-compatible wire, so json_object is admitted
+        # unless the id is one of those native families.
         {:ok, :google_vertex, model_id} -> not vertex_native_json_schema_id?(model_id)
         {:ok, :azure, model_id} -> azure_json_object_id?(model_id)
         {:ok, provider, _model_id} -> provider in @native_json_object_providers

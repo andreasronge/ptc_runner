@@ -222,7 +222,8 @@ that provider's actual JSON-object control: OpenAI-style `response_format`
 `json_object` on OpenRouter, OpenAI, Groq, Fireworks, xAI, Azure OpenAI, and
 Vertex OpenAI-compatible MaaS. Anthropic, Bedrock, Google AI Studio, Vertex
 Claude/Gemini, and Azure Claude have no such control and stay `unsupported` or
-`json_schema`. `unsupported` refuses a request `schema` before dispatch.
+`json_schema`. Direct `ollama:` and `openai-compat:` selectors are refused for
+both structured modes. `unsupported` refuses a request `schema` before dispatch.
 Changing the mode requires a new `installation_revision`. A schema
 together with a non-empty `tools` list is invalid. Success is a
 `structured_output` object; encoded `content` is not duplicated.

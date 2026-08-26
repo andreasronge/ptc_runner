@@ -168,11 +168,13 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
               }} = classified_http(@openrouter_model, request(plug))
     end
 
-    test "refuses json_schema preparation for ollama" do
-      requirements = Requirements.interim(%{max_tokens: 64}, :json_schema)
+    test "refuses both structured modes on the direct ollama HTTP route" do
+      for mode <- [:json_schema, :json_object] do
+        requirements = Requirements.interim(%{max_tokens: 64}, mode)
 
-      assert {:error, :unsupported_model_option} =
-               ReqLLMAdapter.prepare_model("ollama:test", requirements)
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model("ollama:test", requirements)
+      end
     end
 
     test "refuses json_schema preparation for tool-fallback providers" do

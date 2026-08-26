@@ -231,7 +231,8 @@ that provider's actual JSON-object control: OpenAI-style <code class="inline">re
 <code class="inline">json_object</code> on OpenRouter, OpenAI, Groq, Fireworks, xAI, Azure OpenAI, and
 Vertex OpenAI-compatible MaaS. Anthropic, Bedrock, Google AI Studio, Vertex
 Claude/Gemini, and Azure Claude have no such control and stay <code class="inline">unsupported</code> or
-<code class="inline">json_schema</code>. <code class="inline">unsupported</code> refuses a request <code class="inline">schema</code> before dispatch.
+<code class="inline">json_schema</code>. Direct <code class="inline">ollama:</code> and <code class="inline">openai-compat:</code> selectors are refused for
+both structured modes. <code class="inline">unsupported</code> refuses a request <code class="inline">schema</code> before dispatch.
 Changing the mode requires a new <code class="inline">installation_revision</code>. A schema
 together with a non-empty <code class="inline">tools</code> list is invalid. Success is a
 <code class="inline">structured_output</code> object; encoded <code class="inline">content</code> is not duplicated.</p><p>Model selectors are provider-qualified strings. These are the provider paths

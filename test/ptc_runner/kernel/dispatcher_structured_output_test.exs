@@ -289,6 +289,22 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
            } = result
   end
 
+  test "malformed tokens on a structured object is output_schema_mismatch" do
+    {result, _state, _sink} =
+      dispatch_structured(
+        self(),
+        :json_schema,
+        %{object: %{"ok" => true}, tokens: %{"input" => "nope"}}
+      )
+
+    assert %{
+             status: :error,
+             kind: :invalid_result,
+             reason: :output_schema_mismatch,
+             retryable?: false
+           } = result
+  end
+
   test "an oversized structured response is output_schema_mismatch" do
     parent = self()
     payload = String.duplicate("x", 256)
