@@ -72,43 +72,51 @@ defmodule PtcRunner.MixProject do
 
   # Run "mix help compile.app" to learn about applications.
   def application do
-    identity = source_identity()
-
-    [
-      id: ~c"ptc_runner:#{identity.revision}:#{identity.dirty}",
+    application = [
       mod: {PtcRunner.Application, []},
       extra_applications: [:crypto, :logger, :public_key, :ssl],
       env: [
         llm_adapter: PtcRunner.LLM.ReqLLMAdapter
       ]
     ]
+
+    case source_identity() do
+      nil -> application
+      identity -> [{:id, ~c"ptc_runner:#{identity.revision}:#{identity.dirty}"} | application]
+    end
   end
 
   defp source_identity do
     revision =
       System.get_env("PTC_SOURCE_REVISION") || System.get_env("GITHUB_SHA") ||
-        packaged_or_git_revision!()
+        packaged_or_git_revision()
 
-    dirty =
-      case explicit_dirty_state() do
-        nil -> git_dirty_state()
-        explicit -> explicit
+    if revision do
+      dirty =
+        case explicit_dirty_state() do
+          nil -> git_dirty_state()
+          explicit -> explicit
+        end
+
+      unless Regex.match?(~r/\A[0-9a-f]{40}\z/, revision) do
+        Mix.raise("PTC source revision must be a lowercase, full 40-character Git SHA")
       end
 
-    unless Regex.match?(~r/\A[0-9a-f]{40}\z/, revision) do
-      Mix.raise("PTC source revision must be a lowercase, full 40-character Git SHA")
+      %{revision: revision, dirty: dirty}
     end
-
-    %{revision: revision, dirty: dirty}
   end
 
-  defp packaged_or_git_revision! do
+  # Dependency updaters load only the fetched Mix files in a scratch directory.
+  # That is project inspection, not a build, so let configuration load without
+  # application identity metadata. Supported no-Git builds carry the packaged
+  # revision or provide the explicit hermetic-build inputs documented below.
+  defp packaged_or_git_revision do
     packaged = Path.join(__DIR__, "priv/source_revision")
 
     cond do
       File.regular?(packaged) -> packaged |> File.read!() |> String.trim()
       File.exists?(Path.join(__DIR__, ".git")) -> git!(~w(rev-parse HEAD))
-      true -> Mix.raise("source revision unavailable; set PTC_SOURCE_REVISION")
+      true -> nil
     end
   end
 
