@@ -255,7 +255,14 @@ the failure it is rather than as a setting the reader could change.
 return. It never reports evidence withheld by policy. A source grant that
 withheld trace files of the other kind reports that separately, as
 <code class="inline">excluded_private_trace_files</code> or <code class="inline">excluded_sanitized_trace_files</code> on a run
-listing or counters query.</p><h3 id="join-on-correlation-ids-never-on-sequence-numbers">Join on correlation ids, never on sequence numbers</h3><p>A transcript turn and a trace event live in different sequence
+listing or counters query.</p><p>Damaged evidence is also separate from pagination and policy exclusion.
+<code class="inline">list_runs</code> and <code class="inline">counters</code> carry the same bounded <code class="inline">isolation</code> summary with
+exact component, source, known-run, and reason totals plus capped examples.
+The Viewer renders that object as a damaged-source notice without hiding the
+source-kind exclusion notice. Opening a grant-visible run claim that belongs
+only to an isolated component answers <code class="inline">422 run_isolated</code>; a direct trace
+capture that exceeds its retained-memory ceiling answers
+<code class="inline">413 Trace source retained size exceeded</code>.</p><h3 id="join-on-correlation-ids-never-on-sequence-numbers">Join on correlation ids, never on sequence numbers</h3><p>A transcript turn and a trace event live in different sequence
 spaces. Turn <code class="inline">request_sequence</code> orders records inside the inspection snapshot;
 canonical <code class="inline">sequence</code> orders the run's event stream. Turn 1 reporting request
 sequence 12 says nothing about trace event 12, which is an unrelated

@@ -20,9 +20,11 @@ examples/viewer-demo/run.sh /path/out  # or an explicit directory
 The script regenerates the granted `files/` root, launches
 `ptc-fs-mcp@0.1.0` through `ptc-host.json`, runs each journey with
 `--trace-dir` and `--inspect` into one owner-only project artifact root, writes
+each trace and inspection artifact under its generated run-reference filename,
 the project document beside it, and prints the `mix ptc viewer` command that
 opens it. Node.js and `npx` are required; the first run may download that
-package. That
+package. A rerun removes only the generated artifacts recorded by the prior
+pass, so the Viewer continues to contain exactly the five current journeys. That
 project grants the Viewer the private inspection artifacts, so treat the
 browser tab as a private sink.
 

@@ -94,12 +94,36 @@ export function excludedTraceNote(page) {
   return null;
 }
 
+export function damagedTraceNote(page) {
+  const isolation = page?.isolation;
+  if (!isolation || typeof isolation !== 'object' || Array.isArray(isolation)) return null;
+
+  const components = countedIsolation(isolation.component_count);
+  const sources = countedIsolation(isolation.source_count);
+  const runs = nonNegativeIsolation(isolation.known_run_count);
+  if (!components || !sources || runs === null) return null;
+
+  return `${sources} damaged trace ${plural(sources, 'source')} isolated in ${components} ${plural(components, 'component')}; ${runs} known ${plural(runs, 'run')} ${runs === 1 ? 'is' : 'are'} unavailable.`;
+}
+
+export function traceSourceNotes(page) {
+  return [damagedTraceNote(page), excludedTraceNote(page)].filter(Boolean);
+}
+
 export function emptyRunsMessage(page) {
-  return excludedTraceNote(page) || 'No canonical runs in this trace directory.';
+  return traceSourceNotes(page).join(' ') || 'No canonical runs in this trace directory.';
 }
 
 function countedExclusion(value) {
   return Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+function countedIsolation(value) {
+  return Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+function nonNegativeIsolation(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 
 function plural(count, noun) {

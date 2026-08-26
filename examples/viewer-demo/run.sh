@@ -23,6 +23,21 @@ for child in envelopes inspection results traces; do
   chmod 700 "$artifacts/$child"
 done
 
+# Generated run-reference filenames cannot be rediscovered from journey names.
+# Journal only names produced by this script, then remove those exact artifacts
+# on the next pass so a rerun still presents exactly five journeys.
+run_refs="$out/.viewer-demo-run-refs"
+if [ -f "$run_refs" ]; then
+  while IFS= read -r previous_run_ref; do
+    if [[ "$previous_run_ref" =~ ^cmd-[A-Za-z0-9._-]+$ ]]; then
+      rm -f \
+        "$artifacts/traces/$previous_run_ref.jsonl" \
+        "$artifacts/inspection/$previous_run_ref.ptcins"
+    fi
+  done < "$run_refs"
+fi
+: > "$run_refs"
+
 cat > "$out/ptc-project.json" <<'PROJECT'
 {
   "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
@@ -68,7 +83,17 @@ run_journey() {
     exit 1
   fi
 
-  mv "$generated_trace" "$artifacts/traces/$journey.jsonl"
+  local run_ref generated_inspection
+  run_ref="$(basename "$generated_trace" .jsonl)"
+  generated_inspection="$artifacts/inspection/$run_ref.ptcins"
+  printf '%s\n' "$run_ref" >> "$run_refs"
+  mv "$artifacts/inspection/$journey.ptcins" "$generated_inspection"
+
+  # Directory admission binds canonical trace and inspection artifacts to the
+  # generated run reference. Keep that producer-owned filename instead of
+  # relabeling the bytes with the human-facing journey name.
+  journey_trace="$generated_trace"
+  journey_inspection="$generated_inspection"
 
   case "$expect" in
     ok)
@@ -86,7 +111,7 @@ run_journey() {
     any) ;;
   esac
 
-  for artifact in "$artifacts/traces/$journey.jsonl" "$artifacts/inspection/$journey.ptcins"; do
+  for artifact in "$journey_trace" "$journey_inspection"; do
     if [ ! -s "$artifact" ]; then
       echo "FAIL: $journey produced no $artifact" >&2
       exit 1
@@ -105,17 +130,17 @@ require_evidence() {
 run_journey 01-recovery ok
 run_journey 02-bulk ok
 run_journey 03-limits any
-require_evidence 03-limits "$artifacts/traces/03-limits.jsonl" '"limit-exceeded"' "limit-exceeded events"
+require_evidence 03-limits "$journey_trace" '"limit-exceeded"' "limit-exceeded events"
 
 # 04/05 must fail for the advertised reason, not from an unrelated
 # provider or runtime error: the canonical trace must end in an error
 # outcome and the private feedback must carry the intended error code.
 run_journey 04-loop-limit error
-require_evidence 04-loop-limit "$artifacts/traces/04-loop-limit.jsonl" '"outcome":"error"' "an error run outcome"
-require_evidence 04-loop-limit "$artifacts/inspection/04-loop-limit.ptcins" 'loop_limit_exceeded' "loop-limit feedback"
+require_evidence 04-loop-limit "$journey_trace" '"outcome":"error"' "an error run outcome"
+require_evidence 04-loop-limit "$journey_inspection" 'loop_limit_exceeded' "loop-limit feedback"
 run_journey 05-memory error
-require_evidence 05-memory "$artifacts/traces/05-memory.jsonl" '"outcome":"error"' "an error run outcome"
-require_evidence 05-memory "$artifacts/inspection/05-memory.ptcins" 'memory_exceeded' "heap-budget feedback"
+require_evidence 05-memory "$journey_trace" '"outcome":"error"' "an error run outcome"
+require_evidence 05-memory "$journey_inspection" 'memory_exceeded' "heap-budget feedback"
 
 # The project document must name an application, and it must be a portable
 # path beneath the document -- so one journey manifest is copied next to it.

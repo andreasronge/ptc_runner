@@ -167,7 +167,12 @@ creates the complete layout atomically; an existing incomplete, permissive, or
 symlinked layout is refused. When a pre-existing directory fails the owner-only
 (0700) check, the command names the path and the <code class="inline">chmod 700</code> remedy rather than
 a bare publication failure. Artifact files retain the normal no-replace and
-privacy rules.</p><h2 id="overrides-and-lazy-environment-loading">Overrides and lazy environment loading</h2><p>An explicit command value wins over the corresponding project default for host,
+privacy rules.</p><p>The trace filenames are also the canonical directory-discovery contract. Each
+file contains exactly the run ID named by its stem and one trace identity;
+arbitrary aggregate filenames and split histories remain supported only when a
+caller explicitly selects one file, not when Viewer or run analysis discovers a
+directory. Stable damaged components are isolated without hiding unrelated
+valid runs.</p><h2 id="overrides-and-lazy-environment-loading">Overrides and lazy environment loading</h2><p>An explicit command value wins over the corresponding project default for host,
 environment, and trace/inspection/result destinations:</p><pre><code class="console language-console">ptc run ptc-project.json --host-config deployment/staging-host.json
 ptc run ptc-project.json --trace-dir tmp/one-off-traces
 ptc repl --project ptc-project.json --env-file deployment/staging.env

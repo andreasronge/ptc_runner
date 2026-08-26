@@ -16,7 +16,7 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
   @tag :tmp_dir
   test "viewer conversation preserves the canonical analysis snapshot identity", %{tmp_dir: root} do
     fixture = PrivateInspectionFixture.create!(root)
-    {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, fixture.traces})
+    {:ok, trace} = TraceSnapshot.start({:directory, fixture.traces})
     {:ok, inspection} = InspectionSnapshot.start({:directory, fixture.inspection}, trace)
     on_exit(fn -> InspectionSnapshot.stop(inspection) end)
     on_exit(fn -> TraceSnapshot.stop(trace) end)
@@ -176,7 +176,7 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
 
   @tag :tmp_dir
   test "viewer API and TraceLog return the same source-scoped projection", %{tmp_dir: directory} do
-    path = Path.join(directory, "kernel.jsonl")
+    path = Path.join(directory, "viewer-run.jsonl")
 
     connector = %{
       "provider" => "fixture-mcp",

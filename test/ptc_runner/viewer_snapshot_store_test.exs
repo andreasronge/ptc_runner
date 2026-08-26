@@ -5,8 +5,7 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
 
   @tag :tmp_dir
   test "a requested refresh atomically exposes a newly completed run", %{tmp_dir: directory} do
-    path = Path.join(directory, "runs.jsonl")
-    write_events(path, [event("first", 1, "run-started")])
+    write_events(Path.join(directory, "first.jsonl"), [event("first", 1, "run-started")])
 
     assert {:ok, store} =
              ViewerSnapshotStore.start({:directory, directory}, fn _trace, _deadline ->
@@ -21,8 +20,7 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
     assert {:error, :not_found} =
              ViewerSnapshotStore.query(store, :get_run, %{"run_id" => "second"})
 
-    write_events(path, [
-      event("first", 1, "run-started"),
+    write_events(Path.join(directory, "second.jsonl"), [
       event("second", 1, "run-started"),
       event("second", 2, "run-stopped")
     ])

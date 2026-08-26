@@ -690,8 +690,10 @@ remain authoritative, and unrelated directory members are not listed, opened,
 sized, decoded, or counted toward directory or aggregate source limits. The
 selected files still keep their individual source, record, retained-memory,
 heap, deadline, and result ceilings. Whole-directory snapshots used by
-`private-run-analysis-v1` stay a distinct source variant and still fail closed
-on malformed or mismatched members.
+`private-run-analysis-v1` stay a distinct source variant: they admit only
+filename-bound one-run files, isolate a stable damaged connected component,
+and keep disjoint healthy runs queryable. Namespace or selected-file mutation
+still rejects the whole capture.
 
 The parent of `--private-output` must already exist and be reached without a
 symbolic link — on macOS `/tmp` is a symlink, so `/tmp/out.json` is refused.
@@ -731,6 +733,13 @@ probes loopback: another PTC Viewer is reported with its exact project document
 path, while any other listener is reported as an occupied service. The command
 runs in the foreground until `Ctrl+C`, and opens a browser only when the project
 asks for it *and* a terminal is attached.
+
+Directory discovery expects producer-owned `<run-id>.jsonl` and
+`<run-id>.private.jsonl` names, each containing exactly that one run and one
+trace identity. The run list reports bounded damaged-source evidence when a
+stable malformed, mismatched, split, or conflicting component is isolated;
+unrelated valid runs remain available. A selected namespace change during
+capture fails the refresh rather than installing a partial generation.
 
 The Viewer does not search the invocation directory or its parents for a
 `.env` file. Environment-backed provider credentials come from the inherited

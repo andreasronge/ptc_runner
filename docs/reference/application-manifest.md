@@ -242,10 +242,14 @@ its required trace snapshot with authorized private records. Set the
 trace dependency's config to `{"expose": false}` when only the aggregate
 inspection namespace should be callable.
 
-Snapshot acquisition is fail closed and immutable: malformed, duplicate,
-orphaned, or oversized evidence rejects the capture rather than exposing a
-partial catalog. Private inspection also requires every selected provider to
-accept the `private_inspection` data class before any directory opens.
+Trace-directory acquisition is immutable: stable malformed, duplicate, or
+identity-conflicting trace files isolate their connected component while
+disjoint valid runs remain available. Namespace mutation and whole-source
+limits reject the capture rather than installing a partial generation.
+Inspection snapshots remain fail closed for malformed, duplicate, orphaned, or
+oversized private inspection records. Private inspection also requires every
+selected provider to accept the `private_inspection` data class before any
+directory opens.
 
 Treat the workflow bundle and manifest as application code. Treat
 model-generated source, mission input, file content, and provider output as

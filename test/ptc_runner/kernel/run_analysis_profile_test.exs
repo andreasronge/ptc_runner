@@ -776,13 +776,32 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
-  test "a directory whose only artifact holds no runs is captured, not refused", %{tmp_dir: root} do
+  test "a directory whose only artifact is empty is captured with isolation evidence", %{
+    tmp_dir: root
+  } do
     traces = Path.join(root, "traces")
     File.mkdir_p!(traces)
     File.write!(Path.join(traces, "empty.jsonl"), "")
 
     assert {:ok, resources} = PublicRunAnalysisProfile.capture(%{"traces" => traces}, [])
     assert {:ok, %{file_count: 1, run_count: 0}} = AnalysisResources.info(resources)
+
+    trace = AnalysisResources.handle(resources, :traces)
+
+    assert {:ok, %{"items" => [], "isolation" => isolation}} =
+             TraceSnapshot.query(trace, :list_runs, %{})
+
+    assert isolation["component_count"] == 1
+    assert isolation["known_run_count"] == 1
+
+    assert isolation["reasons"] == [
+             %{
+               "reason" => "malformed_jsonl",
+               "component_count" => 1,
+               "source_count" => 1
+             }
+           ]
+
     AnalysisResources.stop(resources)
   end
 

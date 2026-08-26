@@ -37,12 +37,17 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "directory capture still fails closed on an unselected malformed member", %{tmp_dir: root} do
+  test "directory capture isolates an unrelated malformed member", %{tmp_dir: root} do
     fixture = fixture!(root)
     File.write!(Path.join(fixture.traces, "broken.jsonl"), "{not-json\n")
 
-    assert {:error, :malformed_source} =
+    assert {:ok, snapshot} =
              TraceSnapshot.start({:private_authorized_directory, fixture.traces}, owner: self())
+
+    on_exit(fn -> TraceSnapshot.stop(snapshot) end)
+    assert {:ok, %{file_count: 2, run_count: 1}} = TraceSnapshot.info(snapshot)
+    assert {:ok, true} = TraceSnapshot.run_exists?(snapshot, fixture.run_id)
+    assert {:error, :run_isolated} = TraceSnapshot.run_exists?(snapshot, "broken")
   end
 
   @tag :tmp_dir

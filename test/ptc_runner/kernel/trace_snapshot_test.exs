@@ -11,8 +11,6 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   test "the accepted minimum result ceiling can return an empty page", %{
     tmp_dir: directory
   } do
-    File.write!(Path.join(directory, "empty.jsonl"), "")
-
     assert {:ok, snapshot} =
              TraceSnapshot.start({:directory, directory},
                owner: self(),
@@ -35,7 +33,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   test "captures one immutable normal directory and reuses canonical queries", %{
     tmp_dir: directory
   } do
-    path = Path.join(directory, "normal.jsonl")
+    path = Path.join(directory, "first.jsonl")
     private_path = Path.join(directory, "hidden.private.jsonl")
     inspection_path = Path.join(directory, "hidden.ptcins")
 
@@ -73,7 +71,8 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     assert Map.delete(snapshot_counters, "snapshot_hash") == expected_counters
     assert snapshot_counters["snapshot_hash"] == snapshot_hash
 
-    write_events(path, [event("changed", 1, "run-started")])
+    File.rm!(path)
+    write_events(Path.join(directory, "changed.jsonl"), [event("changed", 1, "run-started")])
     write_events(Path.join(directory, "later.jsonl"), [event("later", 1, "run-started")])
 
     assert {:ok, frozen_runs} = TraceSnapshot.query(snapshot, :list_runs, %{})
@@ -162,17 +161,20 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "private-authorized capture rejects one run split across source classes", %{
+  test "private-authorized capture isolates one run split across source classes", %{
     tmp_dir: directory
   } do
-    write_events(Path.join(directory, "run.jsonl"), [event("split", 1, "run-started")])
+    write_events(Path.join(directory, "split.jsonl"), [event("split", 1, "run-started")])
 
-    write_events(Path.join(directory, "run.private.jsonl"), [
+    write_events(Path.join(directory, "split.private.jsonl"), [
       event("split", 2, "run-stopped")
     ])
 
-    assert {:error, :malformed_source} =
+    assert {:ok, snapshot} =
              TraceSnapshot.start({:private_authorized_directory, directory}, owner: self())
+
+    assert {:ok, %{run_count: 0, file_count: 2}} = TraceSnapshot.info(snapshot)
+    assert :ok = TraceSnapshot.stop(snapshot)
   end
 
   @tag :tmp_dir
@@ -202,8 +204,8 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   @tag :tmp_dir
   test "snapshot cursors remain bound to the immutable capture", %{tmp_dir: directory} do
-    write_events(Path.join(directory, "a.jsonl"), [event("first", 1, "run-started")])
-    write_events(Path.join(directory, "b.jsonl"), [event("second", 1, "run-started")])
+    write_events(Path.join(directory, "first.jsonl"), [event("first", 1, "run-started")])
+    write_events(Path.join(directory, "second.jsonl"), [event("second", 1, "run-started")])
 
     assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
     on_exit(fn -> TraceSnapshot.stop(snapshot) end)
@@ -211,7 +213,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     assert {:ok, %{"items" => [_], "next_cursor" => cursor}} =
              TraceSnapshot.query(snapshot, :list_runs, %{"limit" => 1})
 
-    write_events(Path.join(directory, "c.jsonl"), [event("third", 1, "run-started")])
+    write_events(Path.join(directory, "third.jsonl"), [event("third", 1, "run-started")])
 
     assert {:ok, %{"items" => [_], "next_cursor" => nil}} =
              TraceSnapshot.query(snapshot, :list_runs, %{"limit" => 1, "cursor" => cursor})
@@ -232,7 +234,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
       |> event(1, "run-started")
       |> put_in(["data", "labels"], %{"name" => String.duplicate("x", 1_024)})
 
-    write_events(Path.join(directory, "trace.jsonl"), [oversized])
+    write_events(Path.join(directory, "oversized.jsonl"), [oversized])
 
     assert {:ok, snapshot} =
              TraceSnapshot.start({:directory, directory},
@@ -257,7 +259,10 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
         |> put_in(["data", "labels"], %{"name" => "run-#{index}", "tags" => tags})
       end)
 
-    write_events(Path.join(directory, "runs.jsonl"), events)
+    Enum.each(events, fn event ->
+      write_events(Path.join(directory, event["run_id"] <> ".jsonl"), [event])
+    end)
+
     assert {:ok, trace_log} = TraceLog.new(source: {:directory, directory})
     assert {:ok, raw_page} = TraceLog.query(trace_log, :list_runs, %{})
 
@@ -299,7 +304,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   @tag :tmp_dir
   test "safe metadata is bounded and contains no source path", %{tmp_dir: directory} do
-    path = Path.join(directory, "trace.jsonl")
+    path = Path.join(directory, "visible.jsonl")
     write_events(path, [event("visible", 1, "run-started")])
 
     assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
@@ -329,7 +334,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   test "unexpected calls, casts, and messages do not terminate the snapshot", %{
     tmp_dir: directory
   } do
-    write_events(Path.join(directory, "trace.jsonl"), [event("stable", 1, "run-started")])
+    write_events(Path.join(directory, "stable.jsonl"), [event("stable", 1, "run-started")])
 
     assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
     on_exit(fn -> TraceSnapshot.stop(snapshot) end)
@@ -344,7 +349,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   @tag :tmp_dir
   test "encoded and retained capture ceilings fail independently", %{tmp_dir: directory} do
-    path = Path.join(directory, "trace.jsonl")
+    path = Path.join(directory, "bounded.jsonl")
     write_events(path, [event("bounded", 1, "run-started")])
 
     assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
@@ -374,7 +379,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   @tag :tmp_dir
   test "capture heap exhaustion returns a stable retained-limit error", %{tmp_dir: directory} do
-    write_events(Path.join(directory, "trace.jsonl"), [event("bounded", 1, "run-started")])
+    write_events(Path.join(directory, "bounded.jsonl"), [event("bounded", 1, "run-started")])
 
     assert {:error, :source_retained_limit_exceeded} =
              TraceSnapshot.start({:directory, directory},
@@ -385,7 +390,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   @tag :tmp_dir
   test "construction limits may be lowered but not raised", %{tmp_dir: directory} do
-    write_events(Path.join(directory, "trace.jsonl"), [event("bounded", 1, "run-started")])
+    write_events(Path.join(directory, "bounded.jsonl"), [event("bounded", 1, "run-started")])
 
     raised_limits = [
       max_source_bytes: 8_000_001,
@@ -406,7 +411,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   test "directory entry and trace file ceilings bound capture work", %{tmp_dir: directory} do
     File.write!(Path.join(directory, "ignored-a"), "")
     File.write!(Path.join(directory, "ignored-b"), "")
-    write_events(Path.join(directory, "trace.jsonl"), [event("bounded", 1, "run-started")])
+    write_events(Path.join(directory, "bounded.jsonl"), [event("bounded", 1, "run-started")])
 
     assert {:error, :source_limit_exceeded} =
              TraceSnapshot.start({:directory, directory},
@@ -429,7 +434,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   test "snapshot and live directories agree at the exact source byte ceiling", %{
     tmp_dir: directory
   } do
-    path = Path.join(directory, "a.jsonl")
+    path = Path.join(directory, "exact.jsonl")
     write_events(path, [event("exact", 1, "run-started")])
     File.write!(Path.join(directory, "z.jsonl"), "")
     source_bytes = File.stat!(path).size
@@ -451,23 +456,29 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   end
 
   @tag :tmp_dir
-  test "fails closed on malformed and unsupported canonical input", %{tmp_dir: directory} do
-    path = Path.join(directory, "trace.jsonl")
+  test "isolates malformed and unsupported canonical input", %{tmp_dir: directory} do
+    path = Path.join(directory, "version.jsonl")
     unsupported = Map.put(event("version", 1, "run-started"), "schema_version", 3)
     write_events(path, [unsupported])
 
-    assert {:error, :unsupported_version} =
+    assert {:ok, unsupported_snapshot} =
              TraceSnapshot.start({:directory, directory}, owner: self())
+
+    assert {:ok, %{run_count: 0}} = TraceSnapshot.info(unsupported_snapshot)
+    assert :ok = TraceSnapshot.stop(unsupported_snapshot)
 
     File.write!(path, ~s({"schema_version":2,"schema_version":2}\n))
 
-    assert {:error, :malformed_source} =
+    assert {:ok, malformed_snapshot} =
              TraceSnapshot.start({:directory, directory}, owner: self())
+
+    assert {:ok, %{run_count: 0}} = TraceSnapshot.info(malformed_snapshot)
+    assert :ok = TraceSnapshot.stop(malformed_snapshot)
   end
 
   @tag :tmp_dir
   test "detects a directory file change between inventory and capture", %{tmp_dir: directory} do
-    path = Path.join(directory, "trace.jsonl")
+    path = Path.join(directory, "before.jsonl")
     write_events(path, [event("before", 1, "run-started")])
     test = self()
 
@@ -494,7 +505,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   @tag :tmp_dir
   test "detects a same-size rewrite after the baseline content read", %{tmp_dir: directory} do
-    path = Path.join(directory, "trace.jsonl")
+    path = Path.join(directory, "before.jsonl")
     before = event("before", 1, "run-started")
     after_rewrite = event("change", 1, "run-started")
     assert byte_size(Jason.encode!(before)) == byte_size(Jason.encode!(after_rewrite))
@@ -524,7 +535,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   @tag :tmp_dir
   test "detects a same-size rewrite during the final inventory", %{tmp_dir: directory} do
-    path = Path.join(directory, "trace.jsonl")
+    path = Path.join(directory, "before.jsonl")
     before = event("before", 1, "run-started")
     after_rewrite = event("change", 1, "run-started")
     assert byte_size(Jason.encode!(before)) == byte_size(Jason.encode!(after_rewrite))
@@ -559,7 +570,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   @tag :tmp_dir
   test "the token and owner control snapshot lifetime", %{tmp_dir: directory} do
-    write_events(Path.join(directory, "trace.jsonl"), [event("owned", 1, "run-started")])
+    write_events(Path.join(directory, "owned.jsonl"), [event("owned", 1, "run-started")])
 
     owner =
       spawn(fn ->
@@ -590,7 +601,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   @tag :tmp_dir
   test "owner death cancels snapshot construction", %{tmp_dir: directory} do
-    write_events(Path.join(directory, "trace.jsonl"), [event("owned", 1, "run-started")])
+    write_events(Path.join(directory, "owned.jsonl"), [event("owned", 1, "run-started")])
     test = self()
 
     owner =
@@ -638,7 +649,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   @tag :tmp_dir
   test "owner death cancels bounded directory enumeration", %{tmp_dir: directory} do
-    write_events(Path.join(directory, "trace.jsonl"), [event("owned", 1, "run-started")])
+    write_events(Path.join(directory, "owned.jsonl"), [event("owned", 1, "run-started")])
     test = self()
 
     owner =
@@ -672,7 +683,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
 
   @tag :tmp_dir
   test "snapshot-backed capabilities retain only the opaque handle", %{tmp_dir: directory} do
-    write_events(Path.join(directory, "trace.jsonl"), [event("capability", 1, "run-started")])
+    write_events(Path.join(directory, "capability.jsonl"), [event("capability", 1, "run-started")])
 
     assert {:ok, snapshot} = TraceSnapshot.start({:directory, directory}, owner: self())
     on_exit(fn -> TraceSnapshot.stop(snapshot) end)

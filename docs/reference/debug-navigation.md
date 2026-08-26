@@ -318,6 +318,15 @@ withheld trace files of the other kind reports that separately, as
 `excluded_private_trace_files` or `excluded_sanitized_trace_files` on a run
 listing or counters query.
 
+Damaged evidence is also separate from pagination and policy exclusion.
+`list_runs` and `counters` carry the same bounded `isolation` summary with
+exact component, source, known-run, and reason totals plus capped examples.
+The Viewer renders that object as a damaged-source notice without hiding the
+source-kind exclusion notice. Opening a grant-visible run claim that belongs
+only to an isolated component answers `422 run_isolated`; a direct trace
+capture that exceeds its retained-memory ceiling answers
+`413 Trace source retained size exceeded`.
+
 ### Join on correlation ids, never on sequence numbers
 
 A transcript turn and a trace event live in different sequence

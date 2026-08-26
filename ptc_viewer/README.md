@@ -71,6 +71,13 @@ and canonical activity, plus one semantic `conversation` result when the Viewer
 was started with an authorized inspection artifact. The URL carries
 `#/run/<run-id>`, so a run view can be bookmarked and reloaded.
 
+Directory discovery accepts producer-owned `<run-id>.jsonl` and
+`<run-id>.private.jsonl` files with one matching run and trace identity per
+file. Stable damaged files and connected split/conflicting identities are
+isolated without hiding disjoint valid runs. The Runs tab renders the
+Kernel's bounded isolation evidence; it never rescans or reclassifies files in
+the browser.
+
 The canonical transcript keeps canonical events as its execution spine. With
 an authorized inspection artifact, it also shows each evaluation's exact
 generated program from the semantic conversation projection and the feedback
@@ -204,7 +211,11 @@ live ingestion and controls, not the trace browser as a whole.
 
 Query parameters are passed to `Kernel.TraceLog`; `limit` is decoded as an
 integer and `tags` as a JSON object. The routes preserve not-found, invalid
-query, unavailable-adapter, and adapter-failure classifications.
+query, unavailable-adapter, and adapter-failure classifications. Run listings
+render the Kernel's bounded `isolation` object as a damaged-source notice while
+retaining any separate source-kind exclusion notice. An isolated run claim is
+returned as `422 run_isolated`; direct retained-size refusal is returned as
+`413 Trace source retained size exceeded`.
 
 ## Architecture
 

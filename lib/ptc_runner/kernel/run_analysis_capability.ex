@@ -174,6 +174,9 @@ defmodule PtcRunner.Kernel.RunAnalysisCapability do
       {:error, :not_found} ->
         provider_error(:not_found, "analysis run not found")
 
+      {:error, :run_isolated} ->
+        provider_error(:unavailable, "analysis run is isolated by damaged trace evidence")
+
       {:error, :evidence_unavailable} ->
         provider_error(:invalid_request, "private evidence unavailable in this analysis recipe")
 

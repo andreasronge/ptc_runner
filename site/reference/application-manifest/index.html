@@ -240,10 +240,14 @@ trace sources provide the <code class="inline">activity</code> collection and re
 <code class="inline">evidence_unavailable</code> for private collections. An inspection alias composes
 its required trace snapshot with authorized private records. Set the
 trace dependency's config to <code class="inline">{&quot;expose&quot;: false}</code> when only the aggregate
-inspection namespace should be callable.</p><p>Snapshot acquisition is fail closed and immutable: malformed, duplicate,
-orphaned, or oversized evidence rejects the capture rather than exposing a
-partial catalog. Private inspection also requires every selected provider to
-accept the <code class="inline">private_inspection</code> data class before any directory opens.</p><p>Treat the workflow bundle and manifest as application code. Treat
+inspection namespace should be callable.</p><p>Trace-directory acquisition is immutable: stable malformed, duplicate, or
+identity-conflicting trace files isolate their connected component while
+disjoint valid runs remain available. Namespace mutation and whole-source
+limits reject the capture rather than installing a partial generation.
+Inspection snapshots remain fail closed for malformed, duplicate, orphaned, or
+oversized private inspection records. Private inspection also requires every
+selected provider to accept the <code class="inline">private_inspection</code> data class before any
+directory opens.</p><p>Treat the workflow bundle and manifest as application code. Treat
 model-generated source, mission input, file content, and provider output as
 untrusted data. <a href="/reference/host-installation/">Host configuration</a> documents the
 installed side of every provider source.</p><h2 id="narrow-installed-limits">Narrow installed limits</h2><p>Manifest limits are positive hard ceilings:</p><pre><code class="json language-json">&quot;limits&quot;: {

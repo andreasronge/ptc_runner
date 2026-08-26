@@ -298,6 +298,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     caller_ref = Process.monitor(caller)
 
     try do
+      assert_receive {:trace, ^authority_owner, :spawn, _callback_guard, _spawned}
       assert_receive {:trace, ^authority_owner, :spawn, callback_worker, _spawned}
       callback_ref = Process.monitor(callback_worker)
       assert true = :erlang.suspend_process(callback_worker)
@@ -1622,7 +1623,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     File.mkdir_p!(trace_directory)
 
     File.write!(
-      Path.join(trace_directory, "run.jsonl"),
+      Path.join(trace_directory, "captured.jsonl"),
       Jason.encode!(trace_event("captured", 1, "run-started")) <>
         "\n" <>
         Jason.encode!(trace_event("captured", 2, "run-stopped")) <> "\n"
@@ -1698,7 +1699,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
             }} = callbacks["history.runs"].(%{})
 
     File.write!(
-      Path.join(trace_directory, "run.jsonl"),
+      Path.join(trace_directory, "captured.jsonl"),
       Jason.encode!(trace_event("changed", 1, "run-started")) <> "\n"
     )
 
@@ -1726,7 +1727,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     File.mkdir_p!(trace_directory)
 
     File.write!(
-      Path.join(trace_directory, "captured.private.jsonl"),
+      Path.join(trace_directory, "private-run.private.jsonl"),
       Jason.encode!(trace_event("private-run", 1, "run-started")) <>
         "\n" <> Jason.encode!(trace_event("private-run", 2, "run-stopped")) <> "\n"
     )
