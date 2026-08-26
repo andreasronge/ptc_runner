@@ -66,6 +66,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.LLM.Requirements
 
   @inherited_compatibility_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
@@ -834,6 +835,37 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  # Contract attestation needs the adapter's backing application when one is
+  # required. Doctor and other declaration checks still report adapter
+  # availability from the selector/module, and do not start a provider
+  # application merely to ask whether a model can honor its options.
+  # Local preflight already admitted the selector and adapter module. Preparing
+  # here is only for a positive unsupported-contract refusal. An adapter that
+  # cannot resolve the target yet (backing application not started, catalog
+  # unavailable) is not a new local failure.
+  defp maybe_prepare_llm_contract(installation, context, model, adapter) do
+    case live_llm_requirements(installation, context) do
+      {:ok, requirements} -> attest_or_skip_local_contract(requirements, model, adapter)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp attest_or_skip_local_contract(requirements, model, adapter) do
+    case {adapter, provider_application(adapter, model)} do
+      {ReqLLMAdapter, _application} ->
+        :ok
+
+      {_adapter, nil} ->
+        finish_local_contract_prepare(prepare_llm_model(model, requirements, adapter))
+
+      {_adapter, _application} ->
+        :ok
+    end
+  end
+
+  defp finish_local_contract_prepare({:ok, _prepared_model}), do: :ok
+  defp finish_local_contract_prepare({:error, _reason} = error), do: error
+
   defp live_llm_requirements(installation, %{limits: limits}) do
     case Requirements.live(installation.params, limits.llm_request_output_tokens) do
       {:ok, requirements} -> {:ok, requirements}
@@ -937,10 +969,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp local_preflight(_host, %{source: :llm} = installation, selection, context) do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
-         {:ok, model, adapter} <- preflight_llm(installation.model),
-         {:ok, requirements} <- live_llm_requirements(installation, context),
-         {:ok, _prepared_model} <- prepare_llm_model(model, requirements, adapter) do
-      :ok
+         {:ok, model, adapter} <- preflight_llm(installation.model) do
+      maybe_prepare_llm_contract(installation, context, model, adapter)
     end
   end
 

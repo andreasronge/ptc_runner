@@ -543,6 +543,11 @@ if Code.ensure_loaded?(ReqLLM) do
     defp normalize_call_result({:error, reason}, mode), do: provider_failure(reason, mode)
     defp normalize_call_result(result, _mode), do: result
 
+    @doc false
+    @spec normalize_provider_call(term(), atom()) :: {:ok, map()} | {:error, ProviderError.t()}
+    def normalize_provider_call(result, mode \\ :ordinary),
+      do: normalize_call_result(result, mode)
+
     defp provider_failure(reason, mode), do: {:error, normalize_provider_error(reason, mode)}
 
     defp normalize_provider_error(reason, :tools) do
@@ -1205,15 +1210,9 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp invocation_opts(%ReqLLMPreparedModel{} = target, invocation) do
-      transport =
-        invocation.request
-        |> Map.take([:max_retries, :receive_timeout, :req_http_options])
-        |> Keyword.new()
-
       opts =
         target
-        |> merge_exact_options(transport)
-        |> Keyword.put(:cache, invocation.cache)
+        |> merge_exact_options(on_unsupported: :error, cache: invocation.cache)
 
       if is_binary(invocation.credential),
         do: Keyword.put(opts, :api_key, invocation.credential),

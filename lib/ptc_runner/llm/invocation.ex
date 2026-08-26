@@ -1,5 +1,12 @@
 defmodule PtcRunner.LLM.Invocation do
-  @moduledoc false
+  @moduledoc """
+  Closed per-call adapter request sealed by `PtcRunner.LLM.callback/2`.
+
+  Hosts receive an arity-two requester and do not construct this struct.
+  Adapter `call/2` receives the sealed request map, credential, cache flag, and
+  optional per-call deadline. A `nil` deadline means the call is not bound to a
+  live Kernel cutoff.
+  """
 
   @max_credential_bytes 65_536
   @keys [:request, :credential, :cache, :llm_request_deadline_ms]
@@ -14,6 +21,7 @@ defmodule PtcRunner.LLM.Invocation do
           llm_request_deadline_ms: integer() | nil
         }
 
+  @doc false
   @spec new(map(), boolean(), binary() | nil, integer() | nil) ::
           {:ok, t()} | {:error, :invalid_llm_binding}
   def new(request, cache, credential, deadline_ms)

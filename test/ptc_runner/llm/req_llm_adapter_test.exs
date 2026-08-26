@@ -126,7 +126,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                 kind: :tool_calling_unsupported,
                 details: details,
                 retryable?: false
-              }} = adapter_call(@openrouter_model, request)
+              }} = classified_http(@openrouter_model, request)
 
       assert details =~ provider_message
     end
@@ -164,7 +164,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
               %ProviderError{
                 kind: :timeout,
                 retryable?: true
-              }} = adapter_call(@openrouter_model, request(plug))
+              }} = classified_http(@openrouter_model, request(plug))
     end
 
     test "routes schema mode to generate_object for ollama" do
@@ -193,6 +193,17 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       # classification at the adapter boundary.
       assert {:error, %ProviderError{}} = adapter_call("ollama:test", req)
     end
+
+    test "does not honor request-authored HTTP plugs on the sealed call path" do
+      plug = fn _conn -> flunk("sealed call must not use request-authored HTTP options") end
+
+      assert {:error, %ProviderError{}} =
+               adapter_call("ollama:test", %{
+                 system: "test",
+                 messages: [%{role: :user, content: "hi"}],
+                 req_http_options: [plug: plug, retry: false]
+               })
+    end
   end
 
   describe "private inspection" do
@@ -209,7 +220,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
         request
         |> ProviderRegistry.adapter_request()
         |> Map.merge(provider_options(plug))
-        |> then(&adapter_call(@openrouter_model, &1))
+        |> then(&classified_http(@openrouter_model, &1))
       end
 
       {:ok, capability} = LLMCapability.new(requester: requester)
@@ -551,7 +562,28 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       |> Req.Test.json(%{"error" => %{"message" => message, "code" => status}})
     end
 
-    adapter_call(@openrouter_model, request(plug))
+    classified_http(@openrouter_model, request(plug))
+  end
+
+  defp classified_http(selector, request) do
+    messages = Map.get(request, :messages, [])
+
+    opts =
+      request
+      |> Map.take([:api_key, :cache, :max_retries, :max_tokens, :req_http_options])
+      |> Keyword.new()
+
+    result =
+      if is_list(Map.get(request, :tools)) and request.tools != [] do
+        ReqLLMAdapter.generate_with_tools(selector, messages, request.tools, opts)
+      else
+        ReqLLMAdapter.generate_text(selector, messages, opts)
+      end
+
+    mode =
+      if is_list(Map.get(request, :tools)) and request.tools != [], do: :tools, else: :ordinary
+
+    ReqLLMAdapter.normalize_provider_call(result, mode)
   end
 
   defp adapter_call(selector, request) do

@@ -431,6 +431,7 @@ defmodule PtcRunner.MixProject do
         ],
         LLM: [
           PtcRunner.LLM,
+          PtcRunner.LLM.Invocation,
           PtcRunner.LLM.PreparedModel,
           PtcRunner.LLM.Requirements,
           PtcRunner.LLM.ReqLLMAdapter
