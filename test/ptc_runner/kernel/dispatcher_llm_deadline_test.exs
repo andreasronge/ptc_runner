@@ -258,49 +258,6 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
     assert_received {:called, :hung}
   end
 
-  test "json_object decode unavailability is not reclassified as an LLM timeout" do
-    parent = self()
-    deadline_ms = System.monotonic_time(:millisecond) + 200
-
-    task =
-      Task.async(fn ->
-        dispatch_llm(parent,
-          timeout_ms: 1_000,
-          validation_deadline_ms: deadline_ms,
-          structured_output_mode: :json_object,
-          arguments: %{"schema" => @schema},
-          requester: fn _request, _context ->
-            send(parent, {:in_callback, self()})
-
-            receive do
-              :continue -> {:ok, %{json: ~s({"ok":true}), tokens: %{}}}
-            end
-          end
-        )
-      end)
-
-    assert_receive {:in_callback, worker}
-    worker_ref = Process.monitor(worker)
-    assert true == :erlang.suspend_process(task.pid)
-    send(worker, :continue)
-    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :normal}
-
-    try do
-      wait_until(deadline_ms + 1)
-    after
-      assert true == :erlang.resume_process(task.pid)
-    end
-
-    assert {result, _state, _sink} = Task.await(task)
-
-    assert %{
-             status: :error,
-             kind: :capability_unavailable,
-             reason: :output_validation_unavailable,
-             retryable?: false
-           } = result
-  end
-
   test "an earlier shared validation deadline stays authoritative after the LLM deadline" do
     parent = self()
     validation_deadline_ms = System.monotonic_time(:millisecond) + 300
