@@ -138,6 +138,40 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
            } = result
   end
 
+  test "a delayed Dispatcher preserves the earlier LLM deadline winner" do
+    parent = self()
+
+    task =
+      Task.async(fn ->
+        dispatch_llm(parent,
+          request_timeout_ms: 100,
+          timeout_ms: 200,
+          requester: fn _request, context ->
+            send(parent, {:called, context})
+
+            receive do
+              :never -> {:ok, %{content: "ok", tokens: %{}}}
+            end
+          end
+        )
+      end)
+
+    assert_receive {:called, %{llm_request_deadline_ms: deadline}}
+    assert true == :erlang.suspend_process(task.pid)
+
+    try do
+      wait_until(deadline + 125)
+    after
+      assert true == :erlang.resume_process(task.pid)
+    end
+
+    assert {
+             %{status: :error, kind: :timeout, reason: :llm_request_timeout, retryable?: true},
+             _state,
+             _sink
+           } = Task.await(task)
+  end
+
   test "equal LLM and shared validation clocks keep LLM timeout" do
     parent = self()
     deadline_ms = System.monotonic_time(:millisecond) + 500
@@ -212,6 +246,48 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
            } = result
   end
 
+  test "an earlier shared validation deadline stays authoritative after the LLM deadline" do
+    parent = self()
+    validation_deadline_ms = System.monotonic_time(:millisecond) + 300
+
+    task =
+      Task.async(fn ->
+        dispatch_llm(parent,
+          request_timeout_ms: 600,
+          timeout_ms: 3_000,
+          validation_deadline_ms: validation_deadline_ms,
+          structured_output_mode: :json_object,
+          arguments: %{"schema" => @schema},
+          requester: fn _request, context ->
+            send(parent, {:in_callback, context, self()})
+
+            receive do
+              :continue -> {:ok, %{json: ~s({"ok":true}), tokens: %{}}}
+            end
+          end
+        )
+      end)
+
+    assert_receive {:in_callback, %{llm_request_deadline_ms: deadline}, worker}
+    assert true == :erlang.suspend_process(task.pid)
+    send(worker, :continue)
+
+    try do
+      wait_until(deadline + 10)
+    after
+      assert true == :erlang.resume_process(task.pid)
+    end
+
+    assert {result, _state, _sink} = Task.await(task)
+
+    assert %{
+             status: :error,
+             kind: :capability_unavailable,
+             reason: :output_validation_unavailable,
+             retryable?: false
+           } = result
+  end
+
   defp dispatch_llm(_parent, opts) do
     requester = Keyword.fetch!(opts, :requester)
     {:ok, capability} = LLMCapability.new(requester: requester)
@@ -264,5 +340,12 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
       )
 
     {result, state, sink}
+  end
+
+  defp wait_until(deadline_ms) do
+    receive do
+    after
+      max(deadline_ms - System.monotonic_time(:millisecond), 0) -> :ok
+    end
   end
 end

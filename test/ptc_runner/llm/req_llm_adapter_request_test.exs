@@ -10,6 +10,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
   alias PtcRunner.LLM.Requirements
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.MCPHTTPFixture
+  alias ReqLLM.Error.API.Timeout, as: ReqLLMTimeout
 
   setup do
     LLMSupport.admit_provider_application!()
@@ -147,6 +148,13 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
               retryable?: true,
               dispatch_provenance: :not_dispatched
             }} = ReqLLMAdapter.call(put_test_http_options(target, plug), invocation)
+  end
+
+  test "ReqLLM whole-call timeout exceptions stay classified as timeouts" do
+    timeout = ReqLLMTimeout.exception(kind: :total, timeout: 10)
+
+    assert {:error, %ProviderError{kind: :timeout, retryable?: true}} =
+             ReqLLMAdapter.normalize_provider_call({:error, timeout})
   end
 
   test "a live Kernel deadline still dispatches while time remains", %{test: test} do

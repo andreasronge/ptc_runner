@@ -417,15 +417,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp llm_remaining_ms(_invocation), do: 1_000_000_000
 
-  defp enclosing_remaining_ms(%CapabilityInvocation{enclosing_deadline_ms: deadline})
-       when is_integer(deadline),
-       do: max(deadline - System.monotonic_time(:millisecond), 0)
-
-  defp enclosing_remaining_ms(_invocation), do: 1_000_000_000
-
-  defp llm_deadline_wins?(%CapabilityInvocation{llm_request_deadline_ms: deadline} = invocation)
-       when is_integer(deadline),
-       do: llm_remaining_ms(invocation) == 0 and enclosing_remaining_ms(invocation) > 0
+  defp llm_deadline_wins?(%CapabilityInvocation{
+         llm_request_deadline_ms: llm_deadline,
+         enclosing_deadline_ms: enclosing_deadline
+       })
+       when is_integer(llm_deadline) and is_integer(enclosing_deadline),
+       do:
+         System.monotonic_time(:millisecond) >= llm_deadline and
+           llm_deadline < enclosing_deadline
 
   defp llm_deadline_wins?(_invocation), do: false
 
@@ -1083,12 +1082,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
     timeout_ms = remaining_output_validation_ms(invocation, validation)
 
     if timeout_ms <= 0 do
-      {:error, output_clock_failure(invocation)}
+      {:error, output_clock_failure(invocation, validation)}
     else
       case JSONSchema.validate(validator, schema, value, timeout_ms, validation.heap_words) do
         :ok -> :ok
         {:invalid, _violations} -> {:error, :output_schema_mismatch}
-        {:unavailable, _cause} -> {:error, output_clock_failure(invocation)}
+        {:unavailable, _cause} -> {:error, output_clock_failure(invocation, validation)}
       end
     end
   end
@@ -1106,11 +1105,20 @@ defmodule PtcRunner.Kernel.Dispatcher do
     max(deadline_ms - System.monotonic_time(:millisecond), 0)
   end
 
-  defp output_clock_failure(invocation) do
-    if llm_deadline_wins?(invocation),
+  defp output_clock_failure(invocation, validation) do
+    if llm_output_deadline_wins?(invocation, validation),
       do: :llm_request_timeout,
       else: :output_validation_unavailable
   end
+
+  defp llm_output_deadline_wins?(
+         %CapabilityInvocation{llm_request_deadline_ms: llm_deadline} = invocation,
+         %{deadline_ms: validation_deadline}
+       )
+       when is_integer(llm_deadline) and is_integer(validation_deadline),
+       do: llm_deadline_wins?(invocation) and llm_deadline <= validation_deadline
+
+  defp llm_output_deadline_wins?(_invocation, _validation), do: false
 
   defp output_validation(heap_words, deadline_ms, evaluation_lease) do
     %{heap_words: heap_words, deadline_ms: deadline_ms, evaluation_lease: evaluation_lease}
@@ -1563,7 +1571,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     timeout_ms = remaining_output_validation_ms(invocation, validation)
 
     if timeout_ms <= 0 do
-      {:error, output_clock_failure(invocation)}
+      {:error, output_clock_failure(invocation, validation)}
     else
       case StrictJSON.decode_classified(json,
              timeout_ms: timeout_ms,
@@ -1576,7 +1584,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
           {:error, :output_schema_mismatch}
 
         {:unavailable, _cause} ->
-          {:error, output_clock_failure(invocation)}
+          {:error, output_clock_failure(invocation, validation)}
       end
     end
   end

@@ -319,7 +319,8 @@
                       (= reason "invalid-model-alias") (= reason "invalid_model_alias")
                       (= reason "model-alias-required") (= reason "model_alias_required")))
              (and (= kind "timeout")
-                  (or (= reason "provider-timeout") (= reason "provider_timeout")))))))
+                  (or (= reason "provider-timeout") (= reason "provider_timeout")
+                      (= reason "llm-request-timeout") (= reason "llm_request_timeout")))))))
 
 (defn- resolved-model [action cfg]
   (let [error (get action :error)

@@ -622,6 +622,10 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp normalize_provider_error(%ProviderError{} = error), do: error
 
+    defp normalize_provider_error(%ReqLLM.Error.API.Timeout{} = error) do
+      ProviderError.new(:timeout, Exception.message(error), retryable?: true)
+    end
+
     defp normalize_provider_error(%ReqLLM.Error.API.Request{status: status} = error)
          when is_integer(status) do
       ProviderError.new(

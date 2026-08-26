@@ -4641,6 +4641,51 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              )
   end
 
+  test "agent.core run-outcome returns whole-call LLM timeouts as provider failures" do
+    {:ok, hung} =
+      LLMCapability.new(
+        requester: fn _request, _context ->
+          receive do
+            :never -> {:ok, %{content: "late", tokens: %{}}}
+          end
+        end
+      )
+
+    assert {:ok, router} =
+             LLMRouter.new([
+               %{
+                 alias: "chosen",
+                 source: "llm",
+                 installation_revision: "chosen-v1",
+                 default?: true,
+                 capability: hung,
+                 max_calls: nil,
+                 request_timeout_ms: 100
+               }
+             ])
+
+    {:ok, config} = agent_router_config(router)
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "provider-failure",
+                "model" => "chosen",
+                "error" => %{
+                  "status" => "error",
+                  "kind" => "timeout",
+                  "reason" => "llm_request_timeout",
+                  "retryable?" => true,
+                  "model" => "chosen"
+                }
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Retry later" {"max_turns" 1}))|,
+               config
+             )
+  end
+
   test "agent.core run-outcome returns named quota and unknown-alias envelopes as provider failures" do
     continue = %{
       content: nil,
