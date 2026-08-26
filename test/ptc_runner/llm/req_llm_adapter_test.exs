@@ -8,7 +8,9 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
   alias ReqLLM.Message
@@ -75,7 +77,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                 details: "LLM adapter route does not support tool calling",
                 retryable?: false
               }} =
-               ReqLLMAdapter.call("ollama:model", %{
+               adapter_call("ollama:model", %{
                  system: "test",
                  messages: [],
                  tools: [%{"type" => "function"}]
@@ -124,7 +126,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                 kind: :tool_calling_unsupported,
                 details: details,
                 retryable?: false
-              }} = ReqLLMAdapter.call(@openrouter_model, request)
+              }} = classified_http(@openrouter_model, request)
 
       assert details =~ provider_message
     end
@@ -162,7 +164,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
               %ProviderError{
                 kind: :timeout,
                 retryable?: true
-              }} = ReqLLMAdapter.call(@openrouter_model, request(plug))
+              }} = classified_http(@openrouter_model, request(plug))
     end
 
     test "routes schema mode to generate_object for ollama" do
@@ -177,7 +179,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                 kind: :invalid_request,
                 details: "LLM provider does not support structured output",
                 retryable?: false
-              }} = ReqLLMAdapter.call("ollama:test", req)
+              }} = adapter_call("ollama:test", req)
     end
 
     test "routes text mode to generate_text" do
@@ -189,7 +191,18 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
 
       # A contained connection failure confirms routing to generate_text and
       # classification at the adapter boundary.
-      assert {:error, %ProviderError{}} = ReqLLMAdapter.call("ollama:test", req)
+      assert {:error, %ProviderError{}} = adapter_call("ollama:test", req)
+    end
+
+    test "does not honor request-authored HTTP plugs on the sealed call path" do
+      plug = fn _conn -> flunk("sealed call must not use request-authored HTTP options") end
+
+      assert {:error, %ProviderError{}} =
+               adapter_call("ollama:test", %{
+                 system: "test",
+                 messages: [%{role: :user, content: "hi"}],
+                 req_http_options: [plug: plug, retry: false]
+               })
     end
   end
 
@@ -207,7 +220,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
         request
         |> ProviderRegistry.adapter_request()
         |> Map.merge(provider_options(plug))
-        |> then(&ReqLLMAdapter.call(@openrouter_model, &1))
+        |> then(&classified_http(@openrouter_model, &1))
       end
 
       {:ok, capability} = LLMCapability.new(requester: requester)
@@ -280,21 +293,6 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
           ollama_base_url: "http://localhost:1"
         )
       end
-    end
-  end
-
-  describe "stream/2" do
-    test "returns error for ollama" do
-      assert {:error, :streaming_not_supported} =
-               ReqLLMAdapter.stream("ollama:model", %{system: "test", messages: []})
-    end
-
-    test "returns error for openai-compat" do
-      assert {:error, :streaming_not_supported} =
-               ReqLLMAdapter.stream("openai-compat:http://localhost|model", %{
-                 system: "test",
-                 messages: []
-               })
     end
   end
 
@@ -564,7 +562,45 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       |> Req.Test.json(%{"error" => %{"message" => message, "code" => status}})
     end
 
-    ReqLLMAdapter.call(@openrouter_model, request(plug))
+    classified_http(@openrouter_model, request(plug))
+  end
+
+  defp classified_http(selector, request) do
+    messages = Map.get(request, :messages, [])
+
+    opts =
+      request
+      |> Map.take([:api_key, :cache, :max_retries, :max_tokens, :req_http_options])
+      |> Keyword.new()
+
+    result =
+      if is_list(Map.get(request, :tools)) and request.tools != [] do
+        ReqLLMAdapter.generate_with_tools(selector, messages, request.tools, opts)
+      else
+        ReqLLMAdapter.generate_text(selector, messages, opts)
+      end
+
+    mode =
+      if is_list(Map.get(request, :tools)) and request.tools != [], do: :tools, else: :ordinary
+
+    ReqLLMAdapter.normalize_provider_call(result, mode)
+  end
+
+  defp adapter_call(selector, request) do
+    max_tokens = Map.get(request, :max_tokens, 4_096)
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(selector, LLMSupport.interim_requirements(max_tokens))
+
+    {:ok, invocation} =
+      Invocation.new(
+        Map.drop(request, [:api_key, :cache, :max_tokens, :seed, :temperature]),
+        Map.get(request, :cache, false),
+        Map.get(request, :api_key),
+        nil
+      )
+
+    ReqLLMAdapter.call(target, invocation)
   end
 
   defp request(plug) do

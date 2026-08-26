@@ -3,12 +3,32 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
 
   @behaviour PtcRunner.LLM
 
+  alias PtcRunner.LLM.Invocation
+  alias PtcRunner.LLM.Requirements
+
   @impl true
-  def call(model, request) do
+  def prepare_model(model, requirements) do
+    case Requirements.canonical(requirements) do
+      {:ok, canonical} ->
+        {:ok, %{selector: model, exact_options: canonical.exact_options}, :unavailable, canonical}
+
+      :error ->
+        {:error, :unsupported_model_option}
+    end
+  end
+
+  @impl true
+  def call(%{selector: model} = target, %Invocation{} = invocation) do
     send(Application.fetch_env!(:ptc_runner, :host_llm_test_owner), {
       :host_llm_request,
       model,
-      Map.put(request, :probe_pid, self())
+      Map.merge(invocation.request, %{
+        probe_pid: self(),
+        credential: invocation.credential,
+        cache: invocation.cache,
+        exact_options: Map.get(target, :exact_options, %{}),
+        llm_request_deadline_ms: invocation.llm_request_deadline_ms
+      })
     })
 
     # Mirrors an adapter whose backing application was started and then stopped:
@@ -30,8 +50,7 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
     )
   end
 
-  @impl true
-  def stream(_model, _request), do: {:error, :streaming_not_supported}
+  def call(_target, _invocation), do: {:error, :invalid_llm_invocation}
 
   # Defaults to nil so every other test keeps the unclassified transport path.
   @impl true

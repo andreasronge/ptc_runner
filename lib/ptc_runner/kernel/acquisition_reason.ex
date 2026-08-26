@@ -156,6 +156,7 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
 
   @launcher_reasons [:mcp_stdio_launcher_unavailable, :unsupported_mcp_stdio_platform]
   @adapter_reasons [:invalid_llm_model]
+  @model_contract_reasons [:unsupported_model_option]
 
   @selection_reasons [
     :provider_destination_denied,
@@ -247,6 +248,9 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
 
   def diagnostic(reason, occurrence) when reason in @adapter_reasons,
     do: subject_diagnostic(:local_preflight, :adapter_unavailable, :local, occurrence)
+
+  def diagnostic(reason, occurrence) when reason in @model_contract_reasons,
+    do: subject_diagnostic(:local_preflight, :model_contract_unsupported, :local, occurrence)
 
   def diagnostic(reason, occurrence) when reason in @selection_reasons,
     do: subject_diagnostic(:active_preflight, :selection_rejected, :selection, occurrence)

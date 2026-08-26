@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     {"evaluation_timeout_ms", :evaluation_timeout_ms, 30_000, 600_000},
     {"event_payload_bytes", :event_payload_bytes, 262_144, 4_000_000},
     {"live_provider_tasks", :live_provider_tasks, 8, 8},
+    {"llm_request_output_tokens", :llm_request_output_tokens, 4_096, 65_536},
     {"mission_capability_calls", :mission_capability_calls, 256, 4_096},
     {"mission_capability_calls_per_name", :mission_capability_calls_per_name, 128, 2_048},
     {"normal_event_bytes", :normal_event_bytes, 4_000_000, 64_000_000},
@@ -66,6 +67,12 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   @expected_catalog Map.new(
                       @manifest_narrowable,
                       fn {name, field, compiled_default, installed_default} ->
+                        maximum =
+                          case name do
+                            "llm_request_output_tokens" -> 1_000_000
+                            _other -> 2_592_000_000
+                          end
+
                         {name,
                          %{
                            field: field,
@@ -74,7 +81,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                            compiled_default: compiled_default,
                            installed_default: installed_default,
                            minimum: 1,
-                           maximum: 2_592_000_000,
+                           maximum: maximum,
                            identity: true
                          }}
                       end

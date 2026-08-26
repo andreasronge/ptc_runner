@@ -62,6 +62,7 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     {:mcp_stdio_launcher_unavailable, :local_preflight, :launcher_unavailable, :local},
     {:unsupported_mcp_stdio_platform, :local_preflight, :launcher_unavailable, :local},
     {:invalid_llm_model, :local_preflight, :adapter_unavailable, :local},
+    {:unsupported_model_option, :local_preflight, :model_contract_unsupported, :local},
     {:provider_destination_denied, :active_preflight, :selection_rejected, :selection},
     {:invalid_mcp_selection, :active_preflight, :selection_rejected, :selection}
   ]

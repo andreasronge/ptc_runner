@@ -12,10 +12,42 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderApplicationGate
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.LLM.Requirements
 
   @default_model "openrouter:deepseek/deepseek-v4-flash"
   @timeout 60_000
   @req_opts [retry: :transient, max_retries: 3]
+
+  @doc """
+  Returns the slice-2 interim requirements map for a prepared live call.
+  """
+  @spec interim_requirements(pos_integer() | map()) :: PtcRunner.LLM.Requirements.t()
+  def interim_requirements(max_tokens \\ 4_096)
+
+  def interim_requirements(max_tokens) when is_integer(max_tokens) do
+    Requirements.interim(%{max_tokens: max_tokens})
+  end
+
+  def interim_requirements(exact_options) when is_map(exact_options) do
+    Requirements.interim(exact_options)
+  end
+
+  @doc """
+  Returns the closed runtime binding used by `PtcRunner.LLM.callback/2`.
+  """
+  @spec llm_binding(keyword()) :: PtcRunner.LLM.runtime_binding()
+  def llm_binding(opts \\ []) do
+    %{
+      credential: Keyword.get(opts, :credential),
+      cache: Keyword.get(opts, :cache, false)
+    }
+  end
+
+  @doc """
+  Returns the slice-2 requester context. Live deadline propagation is later.
+  """
+  @spec llm_context() :: PtcRunner.LLM.requester_context()
+  def llm_context, do: %{llm_request_deadline_ms: nil}
 
   @doc """
   Admits the shipped LLM provider application for a test that builds providers

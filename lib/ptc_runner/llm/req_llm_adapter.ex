@@ -34,8 +34,10 @@ if Code.ensure_loaded?(ReqLLM) do
     @behaviour PtcRunner.LLM
 
     alias PtcRunner.Kernel.ProviderError
+    alias PtcRunner.LLM.Invocation
     alias PtcRunner.LLM.OutputLimit
     alias PtcRunner.LLM.ReqLLMPreparedModel
+    alias PtcRunner.LLM.Requirements
     alias ReqLLM.Message
     alias ReqLLM.Message.ContentPart
     alias ReqLLM.Provider.Options
@@ -51,12 +53,12 @@ if Code.ensure_loaded?(ReqLLM) do
       :api_key,
       :max_tokens,
       :max_retries,
+      :on_unsupported,
       :provider_options,
       :seed,
       :temperature,
       :tool_choice
     ]
-    @req_llm_stream_generation_options @req_llm_generation_options -- [:tool_choice]
     @token_limit_options [:max_tokens, :max_completion_tokens, :max_output_tokens]
     # ReqLLM gives these providers richer uncataloged fallbacks than its
     # documented generic inline form. Keep only the dispatch list here and let
@@ -108,69 +110,60 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     @impl true
-    @spec prepare_model(String.t()) ::
-            {:ok, String.t() | ReqLLMPreparedModel.t(), PtcRunner.LLM.catalog_status()}
+    @spec prepare_model(String.t(), Requirements.t()) ::
+            {:ok, ReqLLMPreparedModel.t(), PtcRunner.LLM.catalog_status(), Requirements.t()}
             | {:error, term()}
-    def prepare_model(model) when is_binary(model) do
-      case parse_provider(model) do
-        {:req_llm, selector} -> prepare_req_llm_model(selector)
-        _direct_http -> {:ok, model, :unavailable}
+    def prepare_model(model, requirements) when is_binary(model) do
+      with {:ok, canonical} <- Requirements.canonical(requirements),
+           :ok <- attest_slice2_requirements(canonical) do
+        case parse_provider(model) do
+          {:req_llm, selector} ->
+            prepare_req_llm_target(selector, canonical)
+
+          _direct_http ->
+            {:ok, direct_target(model, canonical), :unavailable, canonical}
+        end
+      else
+        :error -> {:error, :unsupported_model_option}
+        {:error, _reason} = error -> error
       end
     end
 
-    def prepare_model(_model), do: {:error, :invalid_model}
+    def prepare_model(_model, _requirements), do: {:error, :invalid_model}
+
+    # Catalog-free local preflight: refuse contracts this adapter already knows
+    # it cannot honor, without loading llm_db inside the audited-local worker.
+    @doc false
+    @spec local_contract_attestation(String.t(), Requirements.t()) ::
+            :ok | {:error, :unsupported_model_option}
+    def local_contract_attestation(model, requirements) when is_binary(model) do
+      with {:ok, canonical} <- Requirements.canonical(requirements),
+           :ok <- attest_slice2_requirements(canonical) do
+        case parse_provider(model) do
+          {:req_llm, selector} -> refuse_lossy_max_tokens(selector)
+          _direct_http -> :ok
+        end
+      else
+        :error -> {:error, :unsupported_model_option}
+        {:error, :unsupported_model_option} = error -> error
+      end
+    end
+
+    def local_contract_attestation(_model, _requirements), do: :ok
 
     @impl true
-    @spec call(String.t() | ReqLLMPreparedModel.t(), map()) ::
+    @spec call(ReqLLMPreparedModel.t(), Invocation.t()) ::
             {:ok, map()} | {:error, ProviderError.t()}
-    def call(model, %{schema: schema} = req) when is_map(schema) do
-      messages = build_messages(req)
-
-      model
-      |> generate_object(messages, schema, request_opts(req))
-      |> case do
-        {:ok, %{object: object, tokens: tokens}} ->
-          {:ok, %{content: Jason.encode!(object), tokens: tokens}}
-
-        error ->
-          normalize_call_result(error)
+    def call(%ReqLLMPreparedModel{} = target, %Invocation{} = invocation) do
+      if Invocation.valid?(invocation) do
+        dispatch_invocation(target, invocation)
+      else
+        {:error, ProviderError.new(:invalid_request, "invalid LLM invocation")}
       end
     end
 
-    def call(model, %{tools: tools} = req) when is_list(tools) and tools != [] do
-      messages = build_messages(req)
-
-      model
-      |> generate_with_tools(messages, tools, request_opts(req))
-      |> normalize_call_result(:tools)
-    end
-
-    def call(model, req) do
-      messages = build_messages(req)
-
-      model
-      |> generate_text(messages, request_opts(req))
-      |> normalize_call_result()
-    end
-
-    @impl true
-    @spec stream(String.t() | ReqLLMPreparedModel.t(), map()) ::
-            {:ok, Enumerable.t()} | {:error, :streaming_not_supported | ProviderError.t()}
-    def stream(%ReqLLMPreparedModel{} = model, req), do: stream_req_llm(model, req)
-
-    def stream(model, req) do
-      case parse_provider(model) do
-        {:ollama, _} ->
-          {:error, :streaming_not_supported}
-
-        {:openai_compat, _, _} ->
-          {:error, :streaming_not_supported}
-
-        {:req_llm, model_id} ->
-          with {:ok, prepared, _status} <- prepare_req_llm_model(model_id),
-               do: stream_req_llm(prepared, req)
-      end
-    end
+    def call(_target, _invocation),
+      do: {:error, ProviderError.new(:invalid_request, "invalid LLM invocation")}
 
     # --- Public API ---
 
@@ -188,8 +181,11 @@ if Code.ensure_loaded?(ReqLLM) do
             {:ok, PtcRunner.LLM.response()} | {:error, term()}
     def generate_text(model, messages, opts \\ [])
 
-    def generate_text(%ReqLLMPreparedModel{} = model, messages, opts),
-      do: call_req_llm(model, messages, opts)
+    def generate_text(%ReqLLMPreparedModel{model: %LLMDB.Model{}} = model, messages, opts),
+      do: call_req_llm(model, messages, merge_exact_options(model, opts))
+
+    def generate_text(%ReqLLMPreparedModel{selector: selector} = target, messages, opts),
+      do: generate_text(selector, messages, merge_exact_options(target, opts))
 
     def generate_text(model, messages, opts) do
       case parse_provider(model) do
@@ -226,8 +222,21 @@ if Code.ensure_loaded?(ReqLLM) do
             {:ok, map()} | {:error, term()}
     def generate_object(model, messages, schema, opts \\ [])
 
-    def generate_object(%ReqLLMPreparedModel{} = model, messages, schema, opts),
-      do: call_req_llm_object(model, messages, schema, opts)
+    def generate_object(
+          %ReqLLMPreparedModel{model: %LLMDB.Model{}} = model,
+          messages,
+          schema,
+          opts
+        ),
+        do: call_req_llm_object(model, messages, schema, merge_exact_options(model, opts))
+
+    def generate_object(
+          %ReqLLMPreparedModel{selector: selector} = target,
+          messages,
+          schema,
+          opts
+        ),
+        do: generate_object(selector, messages, schema, merge_exact_options(target, opts))
 
     def generate_object(model, messages, schema, opts) do
       case parse_provider(model) do
@@ -264,8 +273,21 @@ if Code.ensure_loaded?(ReqLLM) do
             {:ok, map()} | {:error, term()}
     def generate_with_tools(model, messages, tools, opts \\ [])
 
-    def generate_with_tools(%ReqLLMPreparedModel{} = model, messages, tools, opts),
-      do: call_req_llm_with_tools(model, messages, tools, opts)
+    def generate_with_tools(
+          %ReqLLMPreparedModel{model: %LLMDB.Model{}} = model,
+          messages,
+          tools,
+          opts
+        ),
+        do: call_req_llm_with_tools(model, messages, tools, merge_exact_options(model, opts))
+
+    def generate_with_tools(
+          %ReqLLMPreparedModel{selector: selector} = target,
+          messages,
+          tools,
+          opts
+        ),
+        do: generate_with_tools(selector, messages, tools, merge_exact_options(target, opts))
 
     def generate_with_tools(model, messages, tools, opts) do
       case parse_provider(model) do
@@ -346,75 +368,7 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    # --- Streaming ---
-
-    defp stream_req_llm(%ReqLLMPreparedModel{selector: model_id, model: req_llm_model}, req) do
-      messages = build_messages(req)
-      cache_enabled = req[:cache] || false
-
-      {messages, extra_opts} = apply_caching(model_id, messages, cache_enabled)
-      extra_opts = apply_bedrock_region(model_id, extra_opts)
-
-      generation_opts =
-        req
-        |> request_opts()
-        |> req_llm_generation_opts(
-          req_llm_model,
-          messages,
-          @req_llm_stream_generation_options
-        )
-
-      req_opts =
-        [receive_timeout: req[:receive_timeout] || @default_timeout]
-        |> Keyword.merge(generation_opts)
-        |> Keyword.merge(extra_opts)
-
-      case ReqLLM.Generation.stream_text(req_llm_model, messages, req_opts) do
-        {:ok, stream_response} ->
-          # Map ReqLLM.StreamChunk structs to %{delta: text} chunks
-          content_stream =
-            stream_response.stream
-            |> Stream.flat_map(fn
-              %{type: :content, text: text} when is_binary(text) and text != "" ->
-                [%{delta: text}]
-
-              _ ->
-                []
-            end)
-
-          # Lazy single-element stream that fetches real usage after content is consumed.
-          # ReqLLM.StreamResponse.usage/1 blocks until the content stream completes.
-          done_stream =
-            Stream.map([nil], fn _ ->
-              usage = ReqLLM.StreamResponse.usage(stream_response) || %{}
-              build_stream_done_chunk(usage)
-            end)
-
-          {:ok, Stream.concat(content_stream, done_stream)}
-
-        {:error, reason} ->
-          provider_failure(reason)
-      end
-    end
-
     # --- Provider Implementations ---
-
-    defp request_opts(req) do
-      req
-      |> Map.take([
-        :api_key,
-        :cache,
-        :max_tokens,
-        :max_retries,
-        :provider_options,
-        :receive_timeout,
-        :req_http_options,
-        :seed,
-        :temperature,
-        :tool_choice
-      ])
-      |> Enum.into([])
-    end
 
     defp call_ollama(model, messages, opts) do
       base_url = Keyword.get(opts, :ollama_base_url, @ollama_base_url)
@@ -610,7 +564,11 @@ if Code.ensure_loaded?(ReqLLM) do
     defp normalize_call_result({:error, reason}, mode), do: provider_failure(reason, mode)
     defp normalize_call_result(result, _mode), do: result
 
-    defp provider_failure(reason), do: provider_failure(reason, :ordinary)
+    @doc false
+    @spec normalize_provider_call(term(), atom()) :: {:ok, map()} | {:error, ProviderError.t()}
+    def normalize_provider_call(result, mode \\ :ordinary),
+      do: normalize_call_result(result, mode)
+
     defp provider_failure(reason, mode), do: {:error, normalize_provider_error(reason, mode)}
 
     defp normalize_provider_error(reason, :tools) do
@@ -1243,6 +1201,82 @@ if Code.ensure_loaded?(ReqLLM) do
       :erlang.external_size(request_payload) + @request_token_headroom
     end
 
+    defp dispatch_invocation(target, invocation) do
+      request = invocation.request
+      opts = invocation_opts(target, invocation)
+      messages = build_messages(request)
+
+      cond do
+        is_map(Map.get(request, :schema)) ->
+          target
+          |> generate_object(messages, request.schema, opts)
+          |> case do
+            {:ok, %{object: object, tokens: tokens}} ->
+              {:ok, %{content: Jason.encode!(object), tokens: tokens}}
+
+            error ->
+              normalize_call_result(error)
+          end
+
+        is_list(Map.get(request, :tools)) and request.tools != [] ->
+          target
+          |> generate_with_tools(messages, request.tools, opts)
+          |> normalize_call_result(:tools)
+
+        true ->
+          target
+          |> generate_text(messages, opts)
+          |> normalize_call_result()
+      end
+    end
+
+    defp invocation_opts(%ReqLLMPreparedModel{} = target, invocation) do
+      opts =
+        target
+        |> merge_exact_options(on_unsupported: :error, cache: invocation.cache)
+
+      if is_binary(invocation.credential),
+        do: Keyword.put(opts, :api_key, invocation.credential),
+        else: opts
+    end
+
+    defp merge_exact_options(%ReqLLMPreparedModel{exact_options: exact_options}, opts)
+         when is_map(exact_options) do
+      exact_options
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+      |> Keyword.new()
+      |> Keyword.merge(opts)
+    end
+
+    defp attest_slice2_requirements(%{
+           structured_output_mode: :unsupported,
+           usage_guarantees: %{tokens: false, cost_currency: nil},
+           reservation: %{total_tokens?: false, cost_tariff: nil}
+         }),
+         do: :ok
+
+    defp attest_slice2_requirements(_requirements), do: {:error, :unsupported_model_option}
+
+    defp direct_target(selector, canonical) do
+      %ReqLLMPreparedModel{
+        selector: selector,
+        exact_options: canonical.exact_options,
+        model: nil
+      }
+    end
+
+    defp prepare_req_llm_target(selector, canonical) do
+      with :ok <- refuse_lossy_max_tokens(selector),
+           {:ok, prepared, status} <- prepare_req_llm_model(selector) do
+        {:ok, %{prepared | exact_options: canonical.exact_options}, status, canonical}
+      end
+    end
+
+    defp refuse_lossy_max_tokens("openai_codex:" <> _rest),
+      do: {:error, :unsupported_model_option}
+
+    defp refuse_lossy_max_tokens(_selector), do: :ok
+
     defp prepare_req_llm_model(selector) do
       {effective_selector, provider_model_id} = inference_profile_resolution(selector)
       catalog_status = catalog_status(effective_selector)
@@ -1254,7 +1288,8 @@ if Code.ensure_loaded?(ReqLLM) do
               do: %{model | provider_model_id: provider_model_id},
               else: model
 
-          {:ok, %ReqLLMPreparedModel{selector: selector, model: model}, catalog_status}
+          {:ok, %ReqLLMPreparedModel{selector: selector, exact_options: %{}, model: model},
+           catalog_status}
 
         {:error, _reason} = error ->
           error

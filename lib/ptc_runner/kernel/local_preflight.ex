@@ -89,6 +89,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #   * `:local_preflight` / `:launcher_unavailable` —
   #     `mcp_stdio_launcher_unavailable`, `unsupported_mcp_stdio_platform`
   #   * `:local_preflight` / `:adapter_unavailable` — `invalid_llm_model`
+  #   * `:local_preflight` / `:model_contract_unsupported` — `unsupported_model_option`
   #
   # Doctor refines `mcp_command_not_found` to `command_not_found`, an existing
   # but unusable executable to `executable_unavailable`, and every replay-fixture
@@ -153,6 +154,7 @@ defmodule PtcRunner.Kernel.LocalPreflight do
 
   @launcher_reasons [:mcp_stdio_launcher_unavailable, :unsupported_mcp_stdio_platform]
   @adapter_reasons [:invalid_llm_model]
+  @model_contract_reasons [:unsupported_model_option]
   @selection_reasons [
     :invalid_mcp_selection,
     :invalid_llm_selection,
@@ -652,6 +654,9 @@ defmodule PtcRunner.Kernel.LocalPreflight do
 
   defp diagnostic(reason, occurrence, activity, _mode) when reason in @adapter_reasons,
     do: local_diagnostic(:adapter_unavailable, occurrence, activity)
+
+  defp diagnostic(reason, occurrence, activity, _mode) when reason in @model_contract_reasons,
+    do: local_diagnostic(:model_contract_unsupported, occurrence, activity)
 
   defp diagnostic(:provider_destination_denied, occurrence, activity, _mode),
     do: declaration_diagnostic(:placement_denied, occurrence, activity)

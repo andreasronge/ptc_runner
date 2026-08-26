@@ -112,7 +112,8 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
     prepared = %ReqLLMPreparedModel{
       selector: "fireworks_ai:accounts/fireworks/models/test-model",
-      model: model
+      model: model,
+      exact_options: %{max_tokens: 8_192}
     }
 
     expect_request(test, model.id, finish_reason: "length", content: "")
@@ -257,40 +258,25 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     assert max_tokens in 1..4_094
   end
 
-  test "one requester prepares an uncataloged model once and owns its warning", %{test: test} do
-    stub_requests(test, "vendor/new-model")
-
+  test "one requester prepares an uncataloged model once and owns its warning" do
     warnings =
       capture_io(:stderr, fn ->
-        {:ok, requester} =
-          PtcRunner.LLM.callback("openrouter:vendor/new-model",
-            adapter: ReqLLMAdapter,
-            api_key: "test",
-            req_http_options: [plug: {Req.Test, test}]
-          )
-
-        for content <- ["first", "second"] do
-          assert {:ok, %{content: "ok"}} =
-                   requester.(%{messages: [%{role: :user, content: content}]})
-        end
+        assert {:ok, prepared} = prepare_model("openrouter:vendor/new-model")
+        assert {:ok, requester} = PtcRunner.LLM.callback(prepared, LLMSupport.llm_binding())
+        assert is_function(requester, 2)
       end)
 
     assert length(Regex.scan(~r/model_uncataloged/, warnings)) == 1
     refute warnings =~ "Using unverified model"
     refute warnings =~ "ReqLLM.model"
     refute warnings =~ "req_llm.ex"
-
-    assert_receive {:request_body, %{"model" => "vendor/new-model"}}
-    assert_receive {:request_body, %{"model" => "vendor/new-model"}}
   end
 
   test "a cataloged model does not emit a catalog warning" do
     warnings =
       capture_io(:stderr, fn ->
-        assert {:ok, _requester} =
-                 PtcRunner.LLM.callback("openrouter:google/gemma-2-27b-it",
-                   adapter: ReqLLMAdapter
-                 )
+        assert {:ok, prepared} = prepare_model("openrouter:google/gemma-2-27b-it")
+        assert {:ok, _requester} = PtcRunner.LLM.callback(prepared, LLMSupport.llm_binding())
       end)
 
     refute warnings =~ "model_uncataloged"
@@ -298,14 +284,17 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
   test "direct HTTP routes report that catalog status is unavailable" do
     for selector <- ["ollama:local-model", "openai-compat:https://example.com/v1|deployment"] do
-      assert {:ok, %{catalog_status: :unavailable, selector: ^selector, target: ^selector}} =
-               PtcRunner.LLM.prepare(selector, ReqLLMAdapter)
+      assert {:ok,
+              %{
+                catalog_status: :unavailable,
+                selector: ^selector,
+                target: %{selector: ^selector}
+              }} = prepare_model(selector)
     end
   end
 
   test "special uncataloged fallbacks preserve ReqLLM's public resolver fields" do
     selectors = [
-      "openai_codex:future-chat-1408",
       "github_copilot:future-chat-1408",
       "mistral:future-chat-1408",
       "minimax:future-chat-1408"
@@ -318,11 +307,16 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
               %{
                 catalog_status: :uncataloged,
                 target: %{model: actual, selector: ^selector}
-              }} = PtcRunner.LLM.prepare(selector, ReqLLMAdapter)
+              }} = prepare_model(selector)
 
       fields = [:provider, :id, :model, :provider_model_id, :capabilities, :limits, :extra]
       assert Map.take(actual, fields) == Map.take(expected, fields)
     end
+  end
+
+  test "openai_codex is refused because it drops the sealed max_tokens field" do
+    assert {:error, :unsupported_model_option} =
+             prepare_model("openai_codex:future-chat-1408")
   end
 
   test "Bedrock preparation preserves and supplies inference-profile prefixes" do
@@ -331,14 +325,14 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     prefixed = "amazon_bedrock:eu.amazon.nova-pro-v1:0"
 
     assert {:ok, %{catalog_status: :cataloged, target: %{model: prefixed_model}}} =
-             PtcRunner.LLM.prepare(prefixed, ReqLLMAdapter)
+             prepare_model(prefixed)
 
     assert prefixed_model.provider_model_id == "eu.amazon.nova-pro-v1:0"
 
     unprefixed = "amazon_bedrock:amazon.nova-pro-v1:0"
 
     assert {:ok, %{catalog_status: :cataloged, target: %{model: unprefixed_model}}} =
-             PtcRunner.LLM.prepare(unprefixed, ReqLLMAdapter)
+             prepare_model(unprefixed)
 
     assert unprefixed_model.provider_model_id == "eu.amazon.nova-pro-v1:0"
   end
@@ -349,22 +343,22 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
     warning =
       capture_io(:stderr, fn ->
-        assert {:ok, _requester} = PtcRunner.LLM.callback(selector, adapter: ReqLLMAdapter)
+        assert {:ok, prepared} = prepare_model(selector)
+        assert {:ok, _requester} = PtcRunner.LLM.callback(prepared, LLMSupport.llm_binding())
       end)
 
     assert length(Regex.scan(~r/model_uncataloged/, warning)) == 1
     refute warning =~ "Using unverified model"
     refute warning =~ "ReqLLM.model"
 
-    assert {:ok, %{target: %{model: model}}} = PtcRunner.LLM.prepare(selector, ReqLLMAdapter)
+    assert {:ok, %{target: %{model: model}}} = prepare_model(selector)
     assert model.provider_model_id == "eu.amazon.future-1408-v1:0"
   end
 
   test "an invalid provider fails preparation without dependency warning frames" do
     warnings =
       capture_io(:stderr, fn ->
-        assert {:error, :invalid_model} =
-                 PtcRunner.LLM.callback("provider1408:future-model", adapter: ReqLLMAdapter)
+        assert {:error, :invalid_model} = prepare_model("provider1408:future-model")
       end)
 
     refute warnings =~ "ReqLLM"
@@ -375,8 +369,8 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     Req.Test.expect(test, request_handler(self(), response_model, opts))
   end
 
-  defp stub_requests(test, response_model) do
-    Req.Test.stub(test, request_handler(self(), response_model, []))
+  defp prepare_model(selector) do
+    PtcRunner.LLM.prepare(selector, LLMSupport.interim_requirements(), ReqLLMAdapter)
   end
 
   defp request_handler(test_pid, response_model, opts) do
