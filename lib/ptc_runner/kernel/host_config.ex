@@ -6,10 +6,11 @@ defmodule PtcRunner.Kernel.HostConfig do
   manifest. It fixes provider sources, credentials, data classes, and outer
   ceilings.   MCP installations additionally fix transports, tool mappings, and
   effects; live LLM installations fix the model, structured-output mode, cache
-  policy, and optional sampling parameters. A manifest may later select an
+  policy, and optional inference controls. A manifest may later select an
   installed alias and narrow its authority; it cannot introduce or replace any
-  field decoded here. Changing `structured_output_mode` or an installation
-  `ceilings.request_timeout_ms` requires a new `installation_revision`.
+  field decoded here. Changing `structured_output_mode`, an inference control,
+  or an installation `ceilings.request_timeout_ms` requires a new
+  `installation_revision`.
 
   An optional `limits` block replaces cataloged installed ceilings, so an
   operator can permit work measured in hours rather than in one bounded run.
@@ -173,7 +174,11 @@ defmodule PtcRunner.Kernel.HostConfig do
               params: %{
                 optional(:temperature) => float(),
                 optional(:seed) => non_neg_integer(),
-                optional(:max_tokens) => pos_integer()
+                optional(:max_tokens) => pos_integer(),
+                optional(:top_p) => float(),
+                optional(:presence_penalty) => float(),
+                optional(:frequency_penalty) => float(),
+                optional(:reasoning_effort) => :none | :minimal | :low | :medium | :high
               },
               structured_output_mode: :json_schema | :json_object | :unsupported,
               installation_revision: binary(),
@@ -766,18 +771,47 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp llm_params(value) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(temperature seed max_tokens), []),
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(temperature seed max_tokens top_p presence_penalty frequency_penalty reasoning_effort),
+             []
+           ),
          temperature when is_number(temperature) and temperature >= 0 and temperature <= 2 <-
            Map.get(value, "temperature", 0.0),
          seed when is_integer(seed) and seed in 0..@max_llm_seed <-
            Map.get(value, "seed", 0),
          max_tokens when is_integer(max_tokens) and max_tokens in 1..@max_llm_tokens <-
-           Map.get(value, "max_tokens", 1) do
+           Map.get(value, "max_tokens", 1),
+         top_p when is_number(top_p) and top_p > 0 and top_p <= 1 <-
+           Map.get(value, "top_p", 1.0),
+         presence_penalty
+         when is_number(presence_penalty) and presence_penalty >= -2 and presence_penalty <= 2 <-
+           Map.get(value, "presence_penalty", 0.0),
+         frequency_penalty
+         when is_number(frequency_penalty) and frequency_penalty >= -2 and frequency_penalty <= 2 <-
+           Map.get(value, "frequency_penalty", 0.0),
+         {:ok, reasoning_effort} <-
+           llm_reasoning_effort(Map.get(value, "reasoning_effort", :omitted)) do
       params =
         %{}
         |> maybe_put_param(:temperature, value, "temperature", temperature * 1.0)
         |> maybe_put_param(:seed, value, "seed", seed)
         |> maybe_put_param(:max_tokens, value, "max_tokens", max_tokens)
+        |> maybe_put_param(:top_p, value, "top_p", top_p * 1.0)
+        |> maybe_put_param(
+          :presence_penalty,
+          value,
+          "presence_penalty",
+          presence_penalty * 1.0
+        )
+        |> maybe_put_param(
+          :frequency_penalty,
+          value,
+          "frequency_penalty",
+          frequency_penalty * 1.0
+        )
+        |> maybe_put_param(:reasoning_effort, value, "reasoning_effort", reasoning_effort)
 
       {:ok, params}
     else
@@ -786,6 +820,14 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp llm_params(_value), do: {:error, :invalid_llm_params}
+
+  defp llm_reasoning_effort(:omitted), do: {:ok, nil}
+  defp llm_reasoning_effort("none"), do: {:ok, :none}
+  defp llm_reasoning_effort("minimal"), do: {:ok, :minimal}
+  defp llm_reasoning_effort("low"), do: {:ok, :low}
+  defp llm_reasoning_effort("medium"), do: {:ok, :medium}
+  defp llm_reasoning_effort("high"), do: {:ok, :high}
+  defp llm_reasoning_effort(_value), do: {:error, :invalid_reasoning_effort}
 
   defp structured_output_mode("json_schema"), do: {:ok, :json_schema}
   defp structured_output_mode("json_object"), do: {:ok, :json_object}
@@ -1475,6 +1517,25 @@ defmodule PtcRunner.Kernel.HostConfig do
               "type" => "integer",
               "minimum" => 1,
               "maximum" => @max_llm_tokens
+            },
+            "top_p" => %{
+              "type" => "number",
+              "exclusiveMinimum" => 0,
+              "maximum" => 1
+            },
+            "presence_penalty" => %{
+              "type" => "number",
+              "minimum" => -2,
+              "maximum" => 2
+            },
+            "frequency_penalty" => %{
+              "type" => "number",
+              "minimum" => -2,
+              "maximum" => 2
+            },
+            "reasoning_effort" => %{
+              "type" => "string",
+              "enum" => ["none", "minimal", "low", "medium", "high"]
             }
           }),
         "structured_output_mode" => %{

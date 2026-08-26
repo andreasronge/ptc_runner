@@ -928,7 +928,15 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
           "structured_output_mode" => "unsupported",
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
-          "params" => %{"temperature" => 0.15, "seed" => 73, "max_tokens" => 2_048},
+          "params" => %{
+            "temperature" => 0.15,
+            "seed" => 73,
+            "max_tokens" => 2_048,
+            "top_p" => 0.9,
+            "presence_penalty" => -0.5,
+            "frequency_penalty" => 0.75,
+            "reasoning_effort" => "medium"
+          },
           "installation_revision" => "model-policy-v2",
           "accepts_data" => ["normal", "private_inspection"],
           "ceilings" => %{
@@ -1075,6 +1083,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert request.exact_options.temperature == 0.15
     assert request.exact_options.seed == 73
     assert request.exact_options.max_tokens == 2_048
+    assert request.exact_options.top_p == 0.9
+    assert request.exact_options.presence_penalty == -0.5
+    assert request.exact_options.frequency_penalty == 0.75
+    assert request.exact_options.reasoning_effort == :medium
     assert request.llm_request_deadline_ms == nil
 
     Application.put_env(:ptc_runner, :host_llm_test_public_model, false)

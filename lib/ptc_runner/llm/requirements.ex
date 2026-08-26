@@ -10,7 +10,15 @@ defmodule PtcRunner.LLM.Requirements do
   @max_tariff_id_bytes 128
   @max_tokens 1_000_000
   @max_seed 2_147_483_647
-  @option_keys [:max_tokens, :temperature, :seed]
+  @option_keys [
+    :max_tokens,
+    :temperature,
+    :seed,
+    :top_p,
+    :presence_penalty,
+    :frequency_penalty,
+    :reasoning_effort
+  ]
   @requirement_keys [:exact_options, :structured_output_mode, :usage_guarantees, :reservation]
   @usage_keys [:tokens, :cost_currency]
   @reservation_keys [:total_tokens?, :cost_tariff]
@@ -19,7 +27,11 @@ defmodule PtcRunner.LLM.Requirements do
   @type exact_options :: %{
           required(:max_tokens) => pos_integer(),
           optional(:temperature) => float(),
-          optional(:seed) => non_neg_integer()
+          optional(:seed) => non_neg_integer(),
+          optional(:top_p) => float(),
+          optional(:presence_penalty) => float(),
+          optional(:frequency_penalty) => float(),
+          optional(:reasoning_effort) => :none | :minimal | :low | :medium | :high
         }
 
   @type usage_guarantees :: %{
@@ -42,11 +54,11 @@ defmodule PtcRunner.LLM.Requirements do
         }
 
   @doc """
-  Returns the slice-2 interim contract around authorized `exact_options`.
+  Returns the current contract around authorized `exact_options`.
 
-  Slice 3 replaces the unsupported structured-output field with the live
-  installation declaration. Usage and reservation remain explicitly disabled
-  until later slices.
+  Structured-output mode and the complete portable inference-control set are
+  active. Usage guarantees and reservation remain explicitly disabled until
+  their later protocol slices.
   """
   @spec interim(exact_options()) :: t()
   def interim(exact_options) when is_map(exact_options), do: interim(exact_options, :unsupported)
@@ -111,7 +123,7 @@ defmodule PtcRunner.LLM.Requirements do
 
   defp authorized_options(params, max_tokens) do
     params
-    |> Map.take([:temperature, :seed])
+    |> Map.take(@option_keys -- [:max_tokens])
     |> Map.put(:max_tokens, max_tokens)
   end
 
@@ -120,7 +132,11 @@ defmodule PtcRunner.LLM.Requirements do
          :ok <- subset_keys(options, @option_keys),
          {:ok, max_tokens} <- canonical_max_tokens(options.max_tokens),
          {:ok, exact} <- put_optional_temperature(%{max_tokens: max_tokens}, options),
-         {:ok, exact} <- put_optional_seed(exact, options) do
+         {:ok, exact} <- put_optional_seed(exact, options),
+         {:ok, exact} <- put_optional_number(exact, options, :top_p, 0, 1, false),
+         {:ok, exact} <- put_optional_number(exact, options, :presence_penalty, -2, 2, true),
+         {:ok, exact} <- put_optional_number(exact, options, :frequency_penalty, -2, 2, true),
+         {:ok, exact} <- put_optional_reasoning_effort(exact, options) do
       {:ok, exact}
     else
       _invalid -> :error
@@ -154,6 +170,34 @@ defmodule PtcRunner.LLM.Requirements do
 
       {:ok, seed} when is_integer(seed) and seed >= 0 and seed <= @max_seed ->
         {:ok, Map.put(exact, :seed, seed)}
+
+      {:ok, _invalid} ->
+        :error
+    end
+  end
+
+  defp put_optional_number(exact, options, key, minimum, maximum, include_minimum?) do
+    case Map.fetch(options, key) do
+      :error ->
+        {:ok, exact}
+
+      {:ok, value}
+      when is_number(value) and value <= maximum and
+             (value > minimum or (include_minimum? and value == minimum)) ->
+        {:ok, Map.put(exact, key, value * 1.0)}
+
+      {:ok, _invalid} ->
+        :error
+    end
+  end
+
+  defp put_optional_reasoning_effort(exact, options) do
+    case Map.fetch(options, :reasoning_effort) do
+      :error ->
+        {:ok, exact}
+
+      {:ok, effort} when effort in [:none, :minimal, :low, :medium, :high] ->
+        {:ok, Map.put(exact, :reasoning_effort, effort)}
 
       {:ok, _invalid} ->
         :error

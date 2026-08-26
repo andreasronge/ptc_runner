@@ -205,17 +205,41 @@ installations do not carry this deadline.
   "model": "openrouter:deepseek/deepseek-v4-flash",
   "credential": "openrouter_key",
   "cache": false,
-  "params": {"temperature": 0.2, "seed": 42, "max_tokens": 4096}
+  "params": {
+    "temperature": 0.2,
+    "seed": 42,
+    "max_tokens": 4096,
+    "top_p": 0.9,
+    "presence_penalty": 0.0,
+    "frequency_penalty": 0.0,
+    "reasoning_effort": "medium"
+  }
 }
 ```
 
-Set `params.max_tokens` explicitly when the installation needs a particular
-output budget. For catalog-backed models that omit it, PtcRunner's built-in
-ReqLLM adapter caps the default at 4096 tokens, the cataloged model output
-limit, and a conservative remainder of the context window after the request.
-This avoids turning a model's full context-window ceiling into an impossible
-output request once the prompt is included. The tutorial keeps the value
-explicit so changing only its model selector retains a bounded request.
+`params` is a closed installation-owned map. Except for `max_tokens`, omitted
+fields use the selected adapter/model default; an `llm/request` cannot add or
+replace them. The Kernel always supplies its effective output-token limit as
+`max_tokens`, bounded by an installed value when one is present.
+
+| Field | Accepted value |
+| --- | --- |
+| `temperature` | number from 0.0 through 2.0 |
+| `seed` | integer from 0 through 2147483647 |
+| `max_tokens` | integer from 1 through 1000000 |
+| `top_p` | number greater than 0.0 and at most 1.0 |
+| `presence_penalty` | number from -2.0 through 2.0 |
+| `frequency_penalty` | number from -2.0 through 2.0 |
+| `reasoning_effort` | `none`, `minimal`, `low`, `medium`, or `high` |
+
+These normalized controls are part of installation identity and the
+installation configuration digest. Change `installation_revision` whenever
+they change. Provider option maps, stop payloads, reasoning token budgets, and
+the `xhigh` and `max` reasoning levels are not admitted.
+
+Set `params.max_tokens` explicitly when the installation needs a narrower
+output budget than the effective Kernel limit. The tutorial keeps the value
+explicit so changing only its model selector retains the same request contract.
 
 The built-in adapter prepares the selected model once before constructing its
 requester. A selector absent from the bundled model catalog remains usable when
@@ -223,6 +247,20 @@ ReqLLM supports its provider, but PtcRunner emits one `model_uncataloged`
 warning for that requester. Catalog metadata such as pricing, limits, token
 estimation, and capability detection may then be incomplete; the warning does
 not mean the provider request itself is known to fail.
+
+Preparation seals the exact controls into the target and requires the adapter
+to attest the same canonical map. The built-in adapter uses ReqLLM's strict
+unsupported-option policy and also refuses known lossy routes during local
+preflight, before credential loading. For example, Anthropic cannot combine
+`temperature` with `top_p` or accept OpenAI-style presence/frequency penalties;
+several provider families translate reasoning effort to a fixed level or token
+budget; and Ollama's direct route admits `temperature`, `seed`, and `top_p` but
+not the two penalties or reasoning effort. The direct `openai-compat:` route
+transmits the complete admitted set. OpenRouter does the same for positive
+seeds; seed zero is refused because ReqLLM's current option boundary cannot
+encode it. A refused combination reports
+`local_preflight/model_contract_unsupported` without publishing the option
+value or contacting the provider.
 
 Every live model installation must declare `structured_output_mode` as
 `json_schema`, `json_object`, or `unsupported`. `json_schema` asks the provider

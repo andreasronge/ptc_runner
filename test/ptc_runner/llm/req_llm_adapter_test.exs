@@ -237,7 +237,8 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       selector = "openrouter:deepseek/deepseek-v4-flash-0731"
 
       for mode <- [:json_schema, :json_object] do
-        requirements = Requirements.interim(%{max_tokens: 64}, mode)
+        max_tokens = if mode == :json_schema, do: 200, else: 64
+        requirements = Requirements.interim(%{max_tokens: max_tokens}, mode)
 
         assert {:ok, target, _status, attestation} =
                  ReqLLMAdapter.prepare_model(selector, requirements)
@@ -245,6 +246,125 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
         assert target.structured_output_mode == mode
         assert attestation.structured_output_mode == mode
       end
+    end
+
+    test "attests the complete inference-control set on OpenRouter" do
+      exact_options = %{
+        max_tokens: 64,
+        temperature: 0.25,
+        seed: 7,
+        top_p: 0.9,
+        presence_penalty: -0.5,
+        frequency_penalty: 0.75,
+        reasoning_effort: :medium
+      }
+
+      requirements = Requirements.interim(exact_options)
+
+      assert {:ok, target, _status, attestation} =
+               ReqLLMAdapter.prepare_model(
+                 "openrouter:deepseek/deepseek-v4-flash-0731",
+                 requirements
+               )
+
+      assert target.exact_options == exact_options
+      assert attestation.exact_options == exact_options
+    end
+
+    test "refuses provider paths known to drop, clamp, or substitute exact controls" do
+      cases = [
+        {"ollama:test", %{presence_penalty: 0.5}},
+        {"anthropic:claude-sonnet-4-6", %{presence_penalty: 0.5}},
+        {"anthropic:claude-sonnet-4-6", %{seed: 7}},
+        {"anthropic:claude-sonnet-4-6", %{temperature: 0.5, top_p: 0.9}},
+        {"google:gemini-2.5-flash", %{frequency_penalty: 0.5}},
+        {"google:gemini-2.5-flash", %{seed: 7}},
+        {"google_vertex:gemini-2.5-flash", %{seed: 7}},
+        {"amazon_bedrock:anthropic.claude-sonnet-4-6", %{seed: 7}},
+        {"meta:muse-spark-1.1", %{temperature: 0.5}},
+        {"minimax:MiniMax-M2.1", %{seed: 7}},
+        {"moonshotai:kimi-k3", %{temperature: 0.5}},
+        {"xai:grok-4", %{presence_penalty: 0.5}},
+        {"xai:grok-4", %{frequency_penalty: 0.5}},
+        {"nearai:Qwen/Qwen3-30B-A3B-Instruct-2507", %{reasoning_effort: :low}},
+        {"mistral:mistral-large-latest", %{reasoning_effort: :medium}},
+        {"fireworks_ai:accounts/fireworks/models/test", %{reasoning_effort: :minimal}},
+        {"deepseek:deepseek-reasoner", %{reasoning_effort: :none}},
+        {"deepseek:deepseek-reasoner", %{reasoning_effort: :minimal}},
+        {"deepseek:deepseek-reasoner", %{reasoning_effort: :low}},
+        {"deepseek:deepseek-reasoner", %{reasoning_effort: :medium}},
+        {"cerebras:gpt-oss-120b", %{reasoning_effort: :high}},
+        {"openrouter:deepseek/deepseek-v4-flash-0731", %{seed: 0}}
+      ]
+
+      for {selector, controls} <- cases do
+        requirements = Requirements.interim(Map.put(controls, :max_tokens, 64))
+
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.local_contract_attestation(selector, requirements)
+
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+      end
+    end
+
+    test "refuses model-aware ReqLLM drops during prepared attestation" do
+      for {selector, controls} <- [
+            {"anthropic:claude-sonnet-5", %{temperature: 0.5}},
+            {"openai:gpt-5", %{top_p: 0.9}},
+            {"openai:gpt-4.1", %{temperature: 0.5}},
+            {"openai:gpt-4.1", %{reasoning_effort: :high}},
+            {"mistral:mistral-large-latest", %{reasoning_effort: :high}}
+          ] do
+        requirements = Requirements.interim(Map.put(controls, :max_tokens, 64))
+
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+      end
+    end
+
+    test "keeps lossless direct-route controls and Mistral reasoning values" do
+      for {selector, controls} <- [
+            {"ollama:test", %{top_p: 0.9}},
+            {"openai-compat:https://localhost|model",
+             %{
+               top_p: 0.9,
+               presence_penalty: -0.5,
+               frequency_penalty: 0.5,
+               reasoning_effort: :low
+             }}
+          ] do
+        requirements = Requirements.interim(Map.put(controls, :max_tokens, 64))
+
+        assert :ok = ReqLLMAdapter.local_contract_attestation(selector, requirements)
+
+        assert {:ok, target, _status, attestation} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+
+        assert target.exact_options == requirements.exact_options
+        assert attestation == requirements
+      end
+    end
+
+    test "normalizes a lossless ReqLLM token-limit rename for strict dispatch" do
+      requirements = Requirements.interim(%{max_tokens: 64, reasoning_effort: :high})
+
+      assert :ok =
+               ReqLLMAdapter.local_contract_attestation("openai:gpt-5", requirements)
+
+      assert {:ok, target, :cataloged, attestation} =
+               ReqLLMAdapter.prepare_model("openai:gpt-5", requirements)
+
+      assert target.exact_options == %{max_tokens: 64, reasoning_effort: :high}
+      assert target.request_options == %{max_completion_tokens: 64, reasoning_effort: :high}
+      assert attestation == requirements
+
+      max_only = Requirements.interim(%{max_tokens: 64})
+
+      assert {:ok, max_only_target, :cataloged, ^max_only} =
+               ReqLLMAdapter.prepare_model("openai:gpt-5", max_only)
+
+      assert max_only_target.request_options == %{max_completion_tokens: 64}
     end
 
     test "does not prompt-and-parse a schema request under unsupported mode" do
