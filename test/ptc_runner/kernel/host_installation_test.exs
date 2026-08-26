@@ -1286,6 +1286,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert {:ok, catalog} = HostInstallation.catalog(host)
     assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
 
+    assert catalog.descriptors["deepseek"].structured_output_mode == :json_schema
+
     assert {:ok, prepared} =
              ProviderRegistry.prepare(registry, "deepseek", %{}, context(dir, :workflow))
 
@@ -1407,6 +1409,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       |> Map.put(:credentials, %{"key" => "pre-resolved-secret"})
 
     assert is_binary(catalog.runtime_binding)
+    assert descriptor.structured_output_mode == :json_schema
     assert descriptor.local_preflight == :audited_local
     assert descriptor.connectivity_mode == :probe
     assert descriptor.probe_effect == :completion

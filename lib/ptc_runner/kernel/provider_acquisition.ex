@@ -251,13 +251,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           provides: descriptor.provides,
           credential_names: descriptor.credential_names,
           workflow_llm?: descriptor.workflow_llm?,
-          workflow_llm_route:
-            workflow_llm_route(
-              descriptor.workflow_llm?,
-              descriptor.source,
-              descriptor.installation_revision,
-              declaration.config
-            ),
+          workflow_llm_route: workflow_llm_route(descriptor, declaration.config),
           data_class: descriptor.data_class,
           accepts_data: descriptor.accepts_data
         }
@@ -807,18 +801,27 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     if defaults > 1, do: {:error, :ambiguous_workflow_llm_default}, else: :ok
   end
 
-  defp workflow_llm_route(false, _source, _revision, _config), do: nil
+  defp workflow_llm_route(%{workflow_llm?: false}, _config), do: nil
 
-  defp workflow_llm_route(true, source, revision, config) do
+  defp workflow_llm_route(descriptor, config) do
     route = %{
-      source: Atom.to_string(source),
-      installation_revision: revision,
+      source: Atom.to_string(descriptor.source),
+      installation_revision: descriptor.installation_revision,
       default: Map.get(config, "default", false)
     }
 
-    case Map.get(config, "max_calls") do
-      max_calls when is_integer(max_calls) and max_calls > 0 ->
-        Map.put(route, :max_calls, max_calls)
+    route =
+      case Map.get(config, "max_calls") do
+        max_calls when is_integer(max_calls) and max_calls > 0 ->
+          Map.put(route, :max_calls, max_calls)
+
+        _absent ->
+          route
+      end
+
+    case descriptor.structured_output_mode do
+      mode when mode in [:json_schema, :json_object, :unsupported] ->
+        Map.put(route, :structured_output_mode, mode)
 
       _absent ->
         route

@@ -12,6 +12,9 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
   7 to run the callback behind it before provider activity is marked. A
   `:custom` registration declares `:unverified` instead, and its check becomes
   active work after the phase-8 marker.
+  Live LLM installations also seal `structured_output_mode` here so acquisition
+  can reconstruct the same workflow route the prepare callback reports.
+  Public snapshots and `models` rows omit that field.
   `PtcRunner.Kernel.InstallationCatalog` completes the rule: an
   `:audited_local` declaration also requires a host runtime binding. Both rules
   bound what may be declared; neither attests where an admitted implementation
@@ -51,10 +54,12 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
     :selection_validation,
     :selection_rules,
     :authority_fingerprint,
-    :local_preflight
+    :local_preflight,
+    :structured_output_mode
   ]
   defstruct @enforce_keys ++ [attestation: nil]
   @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
+  @structured_output_modes [:json_schema, :json_object, :unsupported]
 
   @type source ::
           :mcp
@@ -85,12 +90,24 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
           selection_rules: SelectionRules.t(),
           authority_fingerprint: binary() | nil,
           local_preflight: :none | :audited_local | :unverified,
+          structured_output_mode: :json_schema | :json_object | :unsupported | nil,
           attestation: binary() | nil
         }
 
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_provider_descriptor}
   @doc "Validates and seals one provider declaration."
   def new(opts) when is_list(opts) do
+    opts =
+      if Keyword.keyword?(opts) do
+        Keyword.put_new(
+          opts,
+          :structured_output_mode,
+          default_structured_output_mode(Keyword.get(opts, :source))
+        )
+      else
+        opts
+      end
+
     if Keyword.keyword?(opts) and
          Enum.sort(Keyword.keys(opts)) == Enum.sort(@enforce_keys) and
          length(opts) == length(@enforce_keys) do
@@ -200,7 +217,17 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
         valid_probe_effect?(descriptor.connectivity_mode, descriptor.probe_effect) and
         descriptor.selection_validation in [:declarative, :active] and
         SelectionRules.valid?(descriptor.selection_rules) and
-        descriptor.local_preflight in [:none, :audited_local, :unverified]
+        descriptor.local_preflight in [:none, :audited_local, :unverified] and
+        valid_structured_output_mode?(descriptor.source, descriptor.structured_output_mode)
+
+  defp valid_structured_output_mode?(:llm, mode) when mode in @structured_output_modes,
+    do: true
+
+  defp valid_structured_output_mode?(source, nil) when source != :llm, do: true
+  defp valid_structured_output_mode?(_source, _mode), do: false
+
+  defp default_structured_output_mode(:llm), do: :unsupported
+  defp default_structured_output_mode(_source), do: nil
 
   defp valid_names?(names, maximum) when is_list(names) and length(names) <= maximum,
     do:
