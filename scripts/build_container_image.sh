@@ -54,6 +54,8 @@ done
 # Loading still limits this helper to one platform at a time; the publication
 # workflow assembles the independently verified native results afterward.
 docker buildx build \
+  --build-arg "PTC_SOURCE_REVISION=$(git rev-parse HEAD)" \
+  --build-arg "PTC_SOURCE_DIRTY=$([ -z "$(git status --porcelain)" ] && echo false || echo true)" \
   --output "type=docker,name=$image_tag" \
   "$@" \
   --target released \
@@ -103,7 +105,7 @@ cp test/support/mcp_stdio_source_fixture.sh "$probe_dir/mcp_stdio_source_fixture
 chmod 0755 "$probe_dir/mcp_stdio_source_fixture.sh"
 
 docker run --rm "${mounted_run[@]}" "$image_tag" --version > "$probe_dir/version.stdout"
-grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$probe_dir/version.stdout"
+grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+ \([0-9a-f]{8}, (clean|dirty)\)$' "$probe_dir/version.stdout"
 
 # Exercise the target-native C launcher through the release's real stdio
 # transport. Finding the optional application in the release is not enough:

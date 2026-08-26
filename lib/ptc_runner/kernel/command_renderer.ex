@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   request hash.
   """
 
+  alias PtcRunner.BuildIdentity
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandDiagnosticRenderer
@@ -45,8 +46,14 @@ defmodule PtcRunner.Kernel.CommandRenderer do
       %{"status" => "ok", "command" => "help", "result" => result} ->
         {:stdout, help_text(result)}
 
-      %{"status" => "ok", "command" => "version", "result" => %{"version" => version}} ->
-        {:stdout, version <> "\n"}
+      %{"status" => "ok", "command" => "version", "result" => result} ->
+        identity = %{
+          version: result["version"],
+          source_revision: result["source_revision"],
+          source_dirty: result["source_dirty"]
+        }
+
+        {:stdout, BuildIdentity.human(identity) <> "\n"}
 
       %{"status" => "ok", "command" => "docs", "result" => %{"content" => content}} ->
         {:stdout, content}

@@ -76,9 +76,63 @@ defmodule PtcRunner.MixProject do
       mod: {PtcRunner.Application, []},
       extra_applications: [:crypto, :logger, :public_key, :ssl],
       env: [
-        llm_adapter: PtcRunner.LLM.ReqLLMAdapter
+        llm_adapter: PtcRunner.LLM.ReqLLMAdapter,
+        build_identity: build_identity()
       ]
     ]
+  end
+
+  # This value lives in the generated .app metadata rather than a module
+  # attribute. Mix's app compiler therefore sees the checkout identity as a
+  # compilation input and refreshes it even when every source BEAM is reusable.
+  defp build_identity do
+    revision =
+      System.get_env("PTC_SOURCE_REVISION") ||
+        source_revision_file() ||
+        git_output(["rev-parse", "HEAD"])
+
+    unless is_binary(revision) and Regex.match?(~r/\A[0-9a-f]{40}\z/, revision) do
+      Mix.raise("build source revision is unavailable or invalid")
+    end
+
+    dirty =
+      case System.get_env("PTC_SOURCE_DIRTY") do
+        nil -> source_dirty?()
+        value when value in ["true", "1"] -> true
+        value when value in ["false", "0"] -> false
+        _value -> Mix.raise("PTC_SOURCE_DIRTY must be true, false, 1, or 0")
+      end
+
+    [source_revision: revision, source_dirty: dirty]
+  end
+
+  # A packaged revision describes an immutable published source archive. Do
+  # not walk upward into a downstream consumer's repository for dirty state.
+  defp source_dirty? do
+    if File.regular?(Path.join(__DIR__, "SOURCE_REVISION")) do
+      false
+    else
+      case git_output(["status", "--porcelain", "--untracked-files=normal"]) do
+        nil -> Mix.raise("build source dirty state is unavailable")
+        "" -> false
+        _changes -> true
+      end
+    end
+  end
+
+  defp source_revision_file do
+    case File.read(Path.join(__DIR__, "SOURCE_REVISION")) do
+      {:ok, revision} -> String.trim(revision)
+      {:error, :enoent} -> nil
+      {:error, reason} -> Mix.raise("cannot read SOURCE_REVISION: #{:file.format_error(reason)}")
+    end
+  end
+
+  defp git_output(arguments) do
+    case System.cmd("git", arguments, cd: __DIR__, stderr_to_stdout: true) do
+      {output, 0} -> String.trim(output)
+      {_output, _status} -> nil
+    end
   end
 
   def cli do
@@ -532,7 +586,8 @@ defmodule PtcRunner.MixProject do
   defp package do
     [
       files:
-        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run examples/support-triage site/schemas/mcp-2026-07-28.schema.json .formatter.exs mix.exs README.md usage-rules.md LICENSE LICENSES THIRD_PARTY_NOTICES.md CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run examples/support-triage site/schemas/mcp-2026-07-28.schema.json .formatter.exs mix.exs README.md usage-rules.md LICENSE LICENSES THIRD_PARTY_NOTICES.md CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json) ++
+          publication_revision_files(),
       # Hex expands the directories above from the working tree, not from
       # git, so anything ignored but present -- a `.ptc` run directory left by
       # a tutorial walk, a `.env` beside an example -- is published. Ship no
@@ -545,5 +600,28 @@ defmodule PtcRunner.MixProject do
         "Changelog" => "https://github.com/andreasronge/ptc_runner/blob/main/CHANGELOG.md"
       }
     ]
+  end
+
+  # The trusted Hex workflow supplies the already-verified immutable tag. Put
+  # its commit into the source archive so compilation outside this repository
+  # cannot fall through to a consuming checkout. Ordinary package checks omit
+  # the publication-only file and remain side-effect free.
+  defp publication_revision_files do
+    path = Path.join(__DIR__, "SOURCE_REVISION")
+
+    case System.get_env("RELEASE_TAG") do
+      nil ->
+        if File.regular?(path), do: ["SOURCE_REVISION"], else: []
+
+      tag ->
+        revision = git_output(["rev-parse", "#{tag}^{commit}"])
+
+        unless is_binary(revision) and Regex.match?(~r/\A[0-9a-f]{40}\z/, revision) do
+          Mix.raise("release tag source revision is unavailable or invalid")
+        end
+
+        File.write!(path, revision <> "\n")
+        ["SOURCE_REVISION"]
+    end
   end
 end

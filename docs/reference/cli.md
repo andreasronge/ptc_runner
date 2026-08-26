@@ -6,6 +6,12 @@ Every installation
 exposes the same command grammar and runtime path.
 Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 
+`ptc --version` and `mix ptc --version` print the application version, the
+first eight characters of the embedded source revision, and its clean or dirty
+state, for example `0.14.0 (0a4d062b, clean)`. A version command envelope keeps
+the full 40-character `source_revision` and a separate boolean `source_dirty`
+field for machine-readable provenance.
+
 ## Choose a command
 
 | Command | Purpose |

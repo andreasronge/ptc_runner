@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.CommandFrontendTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.BuildIdentity
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandDiagnosticRenderer
@@ -859,6 +860,13 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   end
 
   test "success projections match the byte-exact human fixtures" do
+    human_fixtures =
+      put_in(
+        @human_fixtures,
+        ["success", "version"],
+        BuildIdentity.current() |> BuildIdentity.human() |> Kernel.<>("\n")
+      )
+
     artifacts = %{
       "trace" => "not_requested",
       "inspection" => "not_requested",
@@ -915,7 +923,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     }
 
     for {name, outcome} <- rows do
-      assert CommandRenderer.render(outcome) == {:stdout, @human_fixtures["success"][name]}
+      assert CommandRenderer.render(outcome) == {:stdout, human_fixtures["success"][name]}
     end
   end
 

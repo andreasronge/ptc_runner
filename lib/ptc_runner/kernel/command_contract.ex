@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   root. `schema/0` still materializes the source map for generators and docs.
   """
 
+  alias PtcRunner.BuildIdentity
   alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.CommandDeclaration
@@ -95,7 +96,6 @@ defmodule PtcRunner.Kernel.CommandContract do
   @doctor_application_failure_codes DiagnosticCatalog.doctor_application_rows()
                                     |> Enum.map(& &1.code)
                                     |> Enum.map(&Atom.to_string/1)
-  @version Mix.Project.config() |> Keyword.fetch!(:version)
   @doctor_notice "doctor --connect may perform one or more real provider requests and may incur provider cost"
   @init_notices [
     "DIRECTORY must not already exist",
@@ -830,7 +830,15 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp help_notices(_topic), do: []
 
   @spec version_result() :: map()
-  def version_result, do: %{"version" => @version}
+  def version_result do
+    identity = BuildIdentity.current()
+
+    %{
+      "version" => identity.version,
+      "source_revision" => identity.source_revision,
+      "source_dirty" => identity.source_dirty
+    }
+  end
 
   @doc """
   Builds the `docs` result: the served listing, or one embedded page.
@@ -1664,7 +1672,16 @@ defmodule PtcRunner.Kernel.CommandContract do
     }
   end
 
-  defp version_result_schema, do: version_result() |> const_object()
+  defp version_result_schema do
+    closed(~w(version source_revision source_dirty), %{
+      "version" => %{
+        "type" => "string",
+        "pattern" => "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+      },
+      "source_revision" => %{"type" => "string", "pattern" => "^[0-9a-f]{40}$"},
+      "source_dirty" => %{"type" => "boolean"}
+    })
+  end
 
   # The listing is pinned by identity and order: one positional name constant
   # per served page, an exact length, and no additional entries, so an omitted,

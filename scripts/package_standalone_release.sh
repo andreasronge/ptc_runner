@@ -56,7 +56,7 @@ cd "$project_root"
 MIX_ENV=prod mix do deps.get --only prod --check-locked \
   + release ptc_runner --overwrite --path "$release_root"
 
-version="$("$release_root/bin/ptc" --version)"
+version="$(MIX_ENV=prod mix run --no-start --no-compile -e 'IO.write(Mix.Project.config()[:version])')"
 architecture="$(uname -m)"
 
 # The origin map is packaging bookkeeping, not part of the artifact.
