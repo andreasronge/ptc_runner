@@ -178,10 +178,24 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
     test "refuses json_schema preparation for tool-fallback providers" do
       requirements = Requirements.interim(%{max_tokens: 64}, :json_schema)
 
-      for selector <- ["groq:openai/gpt-oss-20b", "amazon_bedrock:amazon.nova-pro-v1:0"] do
+      for selector <- [
+            "groq:openai/gpt-oss-20b",
+            "amazon_bedrock:amazon.nova-pro-v1:0",
+            "google_vertex:zai-org/glm-4.7-maas"
+          ] do
         assert {:error, :unsupported_model_option} =
                  ReqLLMAdapter.prepare_model(selector, requirements)
       end
+    end
+
+    test "attests json_schema for Vertex Gemini" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_schema)
+
+      assert {:ok, target, _status, attestation} =
+               ReqLLMAdapter.prepare_model("google_vertex:gemini-2.5-flash", requirements)
+
+      assert target.structured_output_mode == :json_schema
+      assert attestation.structured_output_mode == :json_schema
     end
 
     test "attests json_schema and json_object on a cataloged ReqLLM selector" do

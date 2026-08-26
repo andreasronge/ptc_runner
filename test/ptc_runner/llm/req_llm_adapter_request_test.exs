@@ -40,6 +40,25 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     refute Map.has_key?(body, "tool_choice")
   end
 
+  test "json_schema generate_object does not dispatch a tool-fallback Vertex model" do
+    plug = fn _conn ->
+      flunk("json_schema must not dispatch a tool-fallback Vertex request")
+    end
+
+    assert {:error, :unsupported_model_option} =
+             ReqLLMAdapter.generate_object(
+               "google_vertex:zai-org/glm-4.7-maas",
+               [%{role: :user, content: "hi"}],
+               %{
+                 "type" => "object",
+                 "properties" => %{"ok" => %{"type" => "boolean"}},
+                 "required" => ["ok"]
+               },
+               api_key: "test",
+               req_http_options: [plug: plug, retry: false]
+             )
+  end
+
   test "bounds an omitted output budget below a model's full context window", %{test: test} do
     expect_request(test, "x-ai/grok-4.3")
 

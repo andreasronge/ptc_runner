@@ -72,7 +72,6 @@ if Code.ensure_loaded?(ReqLLM) do
       :azure,
       :fireworks_ai,
       :google,
-      :google_vertex,
       :ollama,
       :openai,
       :openrouter,
@@ -1410,6 +1409,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp native_json_schema_selector?(selector) do
       case split_req_llm_selector(selector) do
+        {:ok, :google_vertex, model_id} -> vertex_native_json_schema_id?(model_id)
         {:ok, provider, _model_id} -> provider in @native_json_schema_providers
         _invalid -> false
       end
@@ -1453,10 +1453,37 @@ if Code.ensure_loaded?(ReqLLM) do
     defp native_json_schema_model?(%LLMDB.Model{provider: :xai} = model),
       do: XAI.supports_native_structured_outputs?(model)
 
+    defp native_json_schema_model?(%LLMDB.Model{provider: :google_vertex} = model),
+      do: vertex_native_json_schema_model?(model)
+
     defp native_json_schema_model?(%LLMDB.Model{provider: provider}),
       do: provider in @native_json_schema_providers
 
     defp native_json_schema_model?(_model), do: false
+
+    defp vertex_native_json_schema_model?(%LLMDB.Model{} = model) do
+      id = model.provider_model_id || model.id
+
+      vertex_native_json_schema_id?(id) or
+        vertex_native_json_schema_family?(vertex_extra_family(model))
+    end
+
+    defp vertex_native_json_schema_id?(id) when is_binary(id) do
+      String.starts_with?(id, "claude-") or String.starts_with?(id, "gemini-")
+    end
+
+    defp vertex_native_json_schema_id?(_id), do: false
+
+    defp vertex_native_json_schema_family?(family) when is_binary(family) do
+      String.starts_with?(family, "claude") or String.starts_with?(family, "gemini")
+    end
+
+    defp vertex_native_json_schema_family?(_family), do: false
+
+    defp vertex_extra_family(%LLMDB.Model{extra: extra}) when is_map(extra),
+      do: Map.get(extra, :family) || Map.get(extra, "family")
+
+    defp vertex_extra_family(_model), do: nil
 
     defp refuse_lossy_max_tokens("openai_codex:" <> _rest),
       do: {:error, :unsupported_model_option}
