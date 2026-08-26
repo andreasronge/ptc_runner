@@ -4684,6 +4684,23 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                ~S|(return (agent.core/run-outcome "Retry later" {"max_turns" 1}))|,
                config
              )
+
+    {:ok, fail_fast_config} = agent_router_config(router)
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :llm_provider_failed,
+              details: %{
+                failure_kind: "llm-provider-error",
+                llm_provider_failure: :timeout,
+                llm_provider_retryable?: true
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-value "Retry later" {"max_turns" 1}))|,
+               fail_fast_config
+             )
   end
 
   test "agent.core run-outcome returns named quota and unknown-alias envelopes as provider failures" do

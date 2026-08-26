@@ -1395,9 +1395,7 @@ if Code.ensure_loaded?(ReqLLM) do
       remaining = max(deadline - System.monotonic_time(:millisecond), 0)
       receive_timeout = min(Keyword.get(opts, :receive_timeout, @default_timeout), remaining)
 
-      opts
-      |> Keyword.put(:total_timeout, remaining)
-      |> Keyword.put(:receive_timeout, receive_timeout)
+      Keyword.put(opts, :receive_timeout, receive_timeout)
     end
 
     defp req_timeout_opts(opts) do

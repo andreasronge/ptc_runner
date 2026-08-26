@@ -196,7 +196,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
              validation_deadline_ms
            ) do
       invocation = put_mission_name(invocation, environment, mission_name)
-      invocation = bind_llm_deadline(invocation, state, timeout_ms)
+      invocation = bind_llm_deadline(invocation, state, timeout_ms, validation_deadline_ms)
 
       validation =
         output_validation(validation_heap_words, validation_deadline_ms, evaluation_lease)
@@ -373,9 +373,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
   defp bind_llm_deadline(
          %CapabilityInvocation{request_timeout_ms: request_timeout_ms} = invocation,
          state,
-         requested_timeout_ms
+         requested_timeout_ms,
+         validation_deadline_ms
        )
-       when is_integer(request_timeout_ms) do
+       when is_integer(request_timeout_ms) and is_integer(validation_deadline_ms) do
     now = System.monotonic_time(:millisecond)
     limits = state_limits(state)
 
@@ -389,15 +390,22 @@ defmodule PtcRunner.Kernel.Dispatcher do
       |> min(limits.llm_request_timeout_ms)
       |> max(0)
 
+    enclosing_deadline_ms = min(now + enclosing_remaining, validation_deadline_ms)
+
     %{
       invocation
-      | enclosing_deadline_ms: now + enclosing_remaining,
-        llm_request_deadline_ms: now + min(enclosing_remaining, llm_remaining)
+      | enclosing_deadline_ms: enclosing_deadline_ms,
+        llm_request_deadline_ms: min(enclosing_deadline_ms, now + llm_remaining)
     }
   end
 
-  defp bind_llm_deadline(%CapabilityInvocation{} = invocation, _state, _requested_timeout_ms),
-    do: %{invocation | llm_request_deadline_ms: nil, enclosing_deadline_ms: nil}
+  defp bind_llm_deadline(
+         %CapabilityInvocation{} = invocation,
+         _state,
+         _requested_timeout_ms,
+         _validation_deadline_ms
+       ),
+       do: %{invocation | llm_request_deadline_ms: nil, enclosing_deadline_ms: nil}
 
   defp put_llm_requester_deadline(
          %CapabilityInvocation{
@@ -411,22 +419,22 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp put_llm_requester_deadline(_invocation, context), do: context
 
-  defp llm_remaining_ms(%CapabilityInvocation{llm_request_deadline_ms: deadline})
-       when is_integer(deadline),
-       do: max(deadline - System.monotonic_time(:millisecond), 0)
-
-  defp llm_remaining_ms(_invocation), do: 1_000_000_000
-
-  defp llm_deadline_wins?(%CapabilityInvocation{
-         llm_request_deadline_ms: llm_deadline,
-         enclosing_deadline_ms: enclosing_deadline
-       })
+  defp llm_deadline_wins?(
+         %CapabilityInvocation{
+           llm_request_deadline_ms: llm_deadline,
+           enclosing_deadline_ms: enclosing_deadline
+         },
+         observed_at_ms
+       )
        when is_integer(llm_deadline) and is_integer(enclosing_deadline),
        do:
-         System.monotonic_time(:millisecond) >= llm_deadline and
+         observed_at_ms >= llm_deadline and
            llm_deadline < enclosing_deadline
 
-  defp llm_deadline_wins?(_invocation), do: false
+  defp llm_deadline_wins?(_invocation, _observed_at_ms), do: false
+
+  defp llm_deadline_wins?(invocation),
+    do: llm_deadline_wins?(invocation, System.monotonic_time(:millisecond))
 
   defp await_timeout_result(invocation) do
     if llm_deadline_wins?(invocation) do
@@ -440,8 +448,13 @@ defmodule PtcRunner.Kernel.Dispatcher do
     %{status: :error, kind: :timeout, reason: :llm_request_timeout, retryable?: true}
   end
 
-  defp provider_error_result(environment, invocation, %ProviderError{} = error) do
-    if error.kind == :timeout and llm_deadline_wins?(invocation) do
+  defp provider_error_result(
+         environment,
+         invocation,
+         %ProviderError{} = error,
+         completed_at_ms
+       ) do
+    if error.kind == :timeout and llm_deadline_wins?(invocation, completed_at_ms) do
       post_invocation_failure(
         llm_request_timeout(),
         environment,
@@ -790,18 +803,17 @@ defmodule PtcRunner.Kernel.Dispatcher do
     remaining = RunState.usage(state).remaining_ms
 
     timeout_ms =
-      requested_timeout_ms
-      |> min(remaining)
-      |> min(llm_remaining_ms(invocation))
+      invocation
+      |> CapabilityInvocation.clamp_provider_timeout(min(requested_timeout_ms, remaining))
 
     limits = state_limits(state)
 
     if timeout_ms <= 0 do
-      RunState.release_provider_slot(state)
-
       if llm_deadline_wins?(invocation) do
+        finish_llm_timeout(state)
         llm_request_timeout()
       else
+        RunState.release_provider_slot(state)
         limit_error(state, nil, :run_deadline)
       end
     else
@@ -829,7 +841,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
               if terminal_provider_failure?(result),
                 do: RunState.mark_evaluation_terminal_provider_failure(state)
 
-              send(parent, {:provider_result, self(), result})
+              send(parent, {
+                :provider_result,
+                self(),
+                System.monotonic_time(:millisecond),
+                result
+              })
 
             {:DOWN, ^parent_ref, :process, _parent, _reason} ->
               :ok
@@ -866,7 +883,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     capability = invocation.capability
 
     receive do
-      {:provider_result, ^pid, result} ->
+      {:provider_result, ^pid, completed_at_ms, result} ->
         await_down(pid, ref)
 
         case RunState.finish_provider(
@@ -875,7 +892,13 @@ defmodule PtcRunner.Kernel.Dispatcher do
                llm_provider_error(capability, result)
              ) do
           :ok ->
-            normalize_result(state, environment, invocation, validation, result)
+            normalize_result(
+              state,
+              environment,
+              invocation,
+              validation,
+              {:provider_completed, completed_at_ms, result}
+            )
 
           {:error, :run_closed} ->
             cancel_exception_diagnostic(result)
@@ -892,10 +915,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
       timeout_ms ->
         Process.exit(pid, :kill)
         await_down(pid, ref)
-        RunState.release_provider_slot(state)
+        timeout_result = await_timeout_result(invocation)
+
+        if timeout_result.reason == :llm_request_timeout,
+          do: finish_llm_timeout(state),
+          else: finish_provider_timeout(state)
 
         post_invocation_failure(
-          await_timeout_result(invocation),
+          timeout_result,
           environment,
           capability
         )
@@ -956,24 +983,33 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp cancel_exception_diagnostic(_result), do: :ok
 
-  defp normalize_result(_state, _environment, _invocation, _validation, {:ok, value}) do
-    %{status: :ok, value: value}
-  end
-
   defp normalize_result(
          _state,
          environment,
          invocation,
          _validation,
-         {:error, %ProviderError{} = error}
+         {:provider_completed, completed_at_ms, {:error, %ProviderError{} = error}}
        ) do
     capability = invocation.capability
 
     if ProviderError.valid?(error) do
-      provider_error_result(environment, invocation, error)
+      provider_error_result(environment, invocation, error, completed_at_ms)
     else
       invalid_provider_result(environment, capability)
     end
+  end
+
+  defp normalize_result(
+         state,
+         environment,
+         invocation,
+         validation,
+         {:provider_completed, _completed_at_ms, result}
+       ),
+       do: normalize_result(state, environment, invocation, validation, result)
+
+  defp normalize_result(_state, _environment, _invocation, _validation, {:ok, value}) do
+    %{status: :ok, value: value}
   end
 
   defp normalize_result(_state, environment, invocation, _validation, {:raised, reason}) do
@@ -1093,7 +1129,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
   end
 
   defp remaining_output_validation_ms(invocation, validation) do
-    min(shared_output_validation_ms(validation), llm_remaining_ms(invocation))
+    CapabilityInvocation.clamp_provider_timeout(
+      invocation,
+      shared_output_validation_ms(validation)
+    )
   end
 
   defp shared_output_validation_ms(%{deadline_ms: deadline_ms}) do
@@ -1116,12 +1155,44 @@ defmodule PtcRunner.Kernel.Dispatcher do
          %{deadline_ms: validation_deadline}
        )
        when is_integer(llm_deadline) and is_integer(validation_deadline),
-       do: llm_deadline_wins?(invocation) and llm_deadline <= validation_deadline
+       do: llm_deadline_wins?(invocation) and llm_deadline < validation_deadline
 
   defp llm_output_deadline_wins?(_invocation, _validation), do: false
 
   defp output_validation(heap_words, deadline_ms, evaluation_lease) do
     %{heap_words: heap_words, deadline_ms: deadline_ms, evaluation_lease: evaluation_lease}
+  end
+
+  defp finish_llm_timeout(state) do
+    _ =
+      RunState.finish_provider(
+        state,
+        nil,
+        ProviderError.new(:timeout, "LLM request deadline elapsed", retryable?: true)
+      )
+
+    :ok
+  end
+
+  defp finish_provider_timeout(state) do
+    _ =
+      RunState.finish_provider(
+        state,
+        nil,
+        ProviderError.new(:timeout, "provider timeout", retryable?: true)
+      )
+
+    :ok
+  end
+
+  defp record_llm_timeout_evidence(state) do
+    _ =
+      RunState.record_llm_provider_failure(
+        state,
+        ProviderError.new(:timeout, "LLM request deadline elapsed", retryable?: true)
+      )
+
+    :ok
   end
 
   defp compile_request_schema(
@@ -1648,6 +1719,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         )
 
       :llm_request_timeout ->
+        record_llm_timeout_evidence(state)
         post_invocation_failure(llm_request_timeout(), environment, invocation.capability)
     end
   end

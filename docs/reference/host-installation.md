@@ -409,10 +409,13 @@ ceilings for an application that selects no providers:
 ```
 
 The four heap and concurrency rows (`workflow_heap_words`,
-`evaluation_heap_words`, `provider_heap_words`, `live_provider_tasks`) have no
-manifest headroom: raising them is a resource decision and needs both this
-host ceiling and a matching manifest request. Every other application-narrowable
-row can be raised from the manifest alone, up to its installed ceiling.
+`evaluation_heap_words`, `provider_heap_words`, `live_provider_tasks`) and
+`llm_request_timeout_ms` have no manifest headroom. Raising a heap or concurrency
+row needs both the host ceiling and a matching manifest request. Raising the LLM
+deadline needs three matching values: the host `llm_request_timeout_ms`, the
+selected live installation's `ceilings.request_timeout_ms`, and the manifest
+request. Every other application-narrowable row can be raised from the manifest
+alone, up to its installed ceiling.
 
 Four timeouts are host-only: `provider_cleanup_timeout_ms`,
 `local_preflight_timeout_ms`, `selection_validation_timeout_ms`, and

@@ -66,4 +66,18 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
         request_validator: validator
     }
   end
+
+  @doc false
+  @spec clamp_provider_timeout(t(), non_neg_integer()) :: non_neg_integer()
+  def clamp_provider_timeout(
+        %__MODULE__{llm_request_deadline_ms: deadline},
+        timeout_ms
+      )
+      when is_integer(deadline) and is_integer(timeout_ms) and timeout_ms >= 0 do
+    min(timeout_ms, max(deadline - System.monotonic_time(:millisecond), 0))
+  end
+
+  def clamp_provider_timeout(%__MODULE__{llm_request_deadline_ms: nil}, timeout_ms)
+      when is_integer(timeout_ms) and timeout_ms >= 0,
+      do: timeout_ms
 end

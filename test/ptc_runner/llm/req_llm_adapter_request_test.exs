@@ -184,6 +184,47 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
              ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
   end
 
+  test "terminating the adapter caller also terminates the active HTTP request" do
+    parent = self()
+
+    plug = fn conn ->
+      send(parent, {:request_started, self()})
+
+      receive do
+        :release -> Req.Test.json(conn, %{"choices" => []})
+      end
+    end
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               Requirements.interim(%{max_tokens: 64}, :unsupported)
+             )
+
+    {:ok, invocation} =
+      Invocation.new(
+        %{messages: [%{role: :user, content: "hi"}]},
+        false,
+        "test",
+        System.monotonic_time(:millisecond) + 5_000
+      )
+
+    caller =
+      spawn(fn -> ReqLLMAdapter.call(put_test_http_options(target, plug), invocation) end)
+
+    caller_ref = Process.monitor(caller)
+    assert_receive {:request_started, request_pid}
+    request_ref = Process.monitor(request_pid)
+
+    on_exit(fn ->
+      if Process.alive?(request_pid), do: send(request_pid, :release)
+    end)
+
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+    assert_receive {:DOWN, ^request_ref, :process, ^request_pid, _reason}, 500
+  end
+
   test "json_object does not dispatch Anthropic or Bedrock through OpenAI response_format" do
     plug = fn _conn ->
       flunk("json_object must not dispatch a provider that cannot honor JSON-object output")

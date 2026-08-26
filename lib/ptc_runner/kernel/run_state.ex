@@ -289,6 +289,18 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   @doc false
+  @spec record_llm_provider_failure(t(), ProviderError.t()) :: :ok | {:error, :run_closed}
+  def record_llm_provider_failure(state, %ProviderError{} = error) do
+    if ProviderError.valid?(error) do
+      safe_call(state, {:record_llm_provider_failure, error}, {:error, :run_closed})
+    else
+      {:error, :run_closed}
+    end
+  end
+
+  def record_llm_provider_failure(_state, _error), do: {:error, :run_closed}
+
+  @doc false
   @spec replay_miss?(t(), binary()) :: boolean()
   def replay_miss?(state, request_hash) when is_binary(request_hash),
     do: safe_call(state, {:replay_miss?, request_hash}, false)
@@ -737,6 +749,21 @@ defmodule PtcRunner.Kernel.RunState do
 
   def handle_call({token, {:replay_miss?, request_hash}}, _from, %{token: token} = state),
     do: {:reply, MapSet.member?(state.replay_misses, request_hash), state}
+
+  def handle_call(
+        {token, {:record_llm_provider_failure, %ProviderError{} = error}},
+        _from,
+        %{token: token} = state
+      ) do
+    if unavailable?(state) do
+      {:reply, {:error, :run_closed}, state}
+    else
+      evidence = {error.kind, error.retryable?}
+
+      {:reply, :ok,
+       %{state | llm_provider_failures: MapSet.put(state.llm_provider_failures, evidence)}}
+    end
+  end
 
   def handle_call(
         {token, {:consume_llm_provider_failure, kind, retryable?}},

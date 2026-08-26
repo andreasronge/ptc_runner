@@ -215,8 +215,10 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     applications may only narrow it; a host document owns any widening. Raising
     either exception requires both a host ceiling above the compiled default
     and a matching manifest request. A limits-only host document —
-    `{"install": {}, "limits": {...}}` — is enough; it does not need a
-    fabricated provider.
+    `{"install": {}, "limits": {...}}` — is enough for heap and concurrency
+    rows; it does not need a fabricated provider. A live LLM deadline also
+    requires the selected installation's `ceilings.request_timeout_ms` to be
+    raised to the requested value.
 
     A breached ceiling names itself, its configured value, and the manifest key that raises it, so the error at the point of failure carries this rule too. A request above the ceiling is refused by name, with both numbers.
 
