@@ -24,6 +24,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.RunCoordinator
+  alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.RunLifecycle
 
   @request %{"system" => "bounded", "messages" => [%{"role" => "user", "content" => "hi"}]}
@@ -56,8 +57,10 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       {:ok, replay} = start(dir)
       requester = LLMReplay.requester(replay)
 
-      assert {:ok, %{"content" => "only"}} = requester.(@request)
-      assert {:error, %ProviderError{kind: :not_found}} = requester.(@request)
+      assert {:ok, %{"content" => "only"}} = requester.(@request, LLMSupport.llm_context())
+
+      assert {:error, %ProviderError{kind: :not_found}} =
+               requester.(@request, LLMSupport.llm_context())
     end
 
     test "a request schema is part of the fixture hash" do
@@ -95,7 +98,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       {:ok, replay} = start(dir)
 
       assert {:ok, %{"structured_output" => %{"ok" => true}}} =
-               LLMReplay.requester(replay).(request)
+               LLMReplay.requester(replay).(request, LLMSupport.llm_context())
     end
 
     @tag :tmp_dir
@@ -109,11 +112,11 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       {:ok, replay} = start(dir)
       requester = LLMReplay.requester(replay)
 
-      assert {:ok, %{"turn" => 1}} = requester.(@request)
-      assert {:ok, %{"turn" => 2}} = requester.(@request)
+      assert {:ok, %{"turn" => 1}} = requester.(@request, LLMSupport.llm_context())
+      assert {:ok, %{"turn" => 2}} = requester.(@request, LLMSupport.llm_context())
 
       assert {:error, %ProviderError{kind: :not_found, retryable?: false} = error} =
-               requester.(@request)
+               requester.(@request, LLMSupport.llm_context())
 
       assert error.details =~ "exhausted"
     end
@@ -131,7 +134,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       {:ok, unmatched_hash} = LLMReplay.request_hash(unmatched)
 
       assert {:error, %ProviderError{kind: :not_found, retryable?: false} = error} =
-               LLMReplay.requester(replay).(unmatched)
+               LLMReplay.requester(replay).(unmatched, LLMSupport.llm_context())
 
       assert error.details ==
                "no replay fixture matches this request (request_hash: #{unmatched_hash})"
@@ -154,7 +157,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       # A frozen answer set cannot become available on a second attempt, so a
       # retryable classification would only spend the agent's turn budget.
       assert {:error, %ProviderError{retryable?: false}} =
-               LLMReplay.requester(replay).(%{"messages" => []})
+               LLMReplay.requester(replay).(%{"messages" => []}, LLMSupport.llm_context())
     end
 
     @tag :tmp_dir
@@ -366,7 +369,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       assert :ok = LLMReplay.stop(replay)
 
       assert {:error, %ProviderError{kind: :unavailable}} =
-               LLMReplay.requester(replay).(@request)
+               LLMReplay.requester(replay).(@request, LLMSupport.llm_context())
     end
 
     @tag :tmp_dir
