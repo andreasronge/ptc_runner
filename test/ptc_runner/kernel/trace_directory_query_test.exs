@@ -414,8 +414,8 @@ defmodule PtcRunner.Kernel.TraceDirectoryQueryTest do
     :erlang.trace(caller, true, [:procs, :set_on_spawn])
     send(caller, :query)
 
-    assert_receive {:trace, ^caller, :spawn, guard, _spawned}, 5_000
-    assert_receive {:trace, ^guard, :spawn, worker, _spawned}, 5_000
+    assert_receive {:trace, ^caller, :spawn, _guard, _spawned}, 5_000
+    assert_receive {:trace, ^caller, :spawn, worker, _spawned}, 5_000
     worker_ref = Process.monitor(worker)
     true = :erlang.suspend_process(worker)
     send(linked, :fail)

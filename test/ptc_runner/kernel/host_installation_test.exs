@@ -298,8 +298,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     caller_ref = Process.monitor(caller)
 
     try do
-      assert_receive {:trace, ^authority_owner, :spawn, callback_guard, _spawned}
-      assert_receive {:trace, ^callback_guard, :spawn, callback_worker, _spawned}
+      assert_receive {:trace, ^authority_owner, :spawn, _callback_guard, _spawned}
+      assert_receive {:trace, ^authority_owner, :spawn, callback_worker, _spawned}
       callback_ref = Process.monitor(callback_worker)
       assert true = :erlang.suspend_process(callback_worker)
 
