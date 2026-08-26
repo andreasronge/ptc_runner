@@ -186,6 +186,15 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
   test "terminating the adapter caller also terminates the active HTTP request" do
     parent = self()
+    previous_total_timeout = Application.fetch_env(:req_llm, :total_timeout)
+    Application.put_env(:req_llm, :total_timeout, 5_000)
+
+    on_exit(fn ->
+      case previous_total_timeout do
+        {:ok, timeout} -> Application.put_env(:req_llm, :total_timeout, timeout)
+        :error -> Application.delete_env(:req_llm, :total_timeout)
+      end
+    end)
 
     plug = fn conn ->
       send(parent, {:request_started, self()})

@@ -1395,7 +1395,9 @@ if Code.ensure_loaded?(ReqLLM) do
       remaining = max(deadline - System.monotonic_time(:millisecond), 0)
       receive_timeout = min(Keyword.get(opts, :receive_timeout, @default_timeout), remaining)
 
-      Keyword.put(opts, :receive_timeout, receive_timeout)
+      opts
+      |> Keyword.put(:receive_timeout, receive_timeout)
+      |> Keyword.put(:total_timeout, :infinity)
     end
 
     defp req_timeout_opts(opts) do
@@ -1404,6 +1406,9 @@ if Code.ensure_loaded?(ReqLLM) do
       case Keyword.get(opts, :total_timeout) do
         total when is_integer(total) and total > 0 ->
           [receive_timeout: min(receive_timeout, total), total_timeout: total]
+
+        :infinity ->
+          [receive_timeout: receive_timeout, total_timeout: :infinity]
 
         _omitted ->
           [receive_timeout: receive_timeout]
