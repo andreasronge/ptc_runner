@@ -376,9 +376,9 @@ defmodule PtcRunner.Kernel.EventSink do
 
   # Run identifiers must be unique across separate OS processes: traces from
   # independent CLI invocations commonly land in one directory, and
-  # `Kernel.TraceLog` fail-closes the whole directory source when two files
-  # reuse a run/trace identity with restarted sequences. A per-VM counter
-  # collides almost deterministically there, so the default carries entropy.
+  # `Kernel.TraceLog` isolates every connected file when two files reuse a
+  # run/trace identity with restarted sequences. A per-VM counter collides
+  # almost deterministically there, so the default carries entropy.
   defp default_run_id do
     "run-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
   end

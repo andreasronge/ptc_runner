@@ -276,7 +276,13 @@ immutable captures:</p><pre><code class="json language-json">&quot;history&quot;
 <code class="inline">ptc_private_trace_snapshot</code> reads ordinary and <code class="inline">.private.jsonl</code> traces and
 classifies the run as <code class="inline">private_inspection</code>. An inspection snapshot requires
 exactly one of those trace sources so it can validate every private artifact
-against the captured trace evidence.</p><p>Set a trace selection's manifest config to <code class="inline">{&quot;expose&quot;: false}</code> when it exists
+against the captured trace evidence.</p><p>Whole-directory trace snapshots admit filename-bound <code class="inline">&lt;run-id&gt;.jsonl</code> or
+<code class="inline">&lt;run-id&gt;.private.jsonl</code> members containing exactly one matching run and trace
+identity. Stable malformed, mismatched, split, or conflicting members are
+isolated by connected identity component while disjoint valid runs remain
+queryable. Selected namespace mutation rejects the complete capture; it never
+installs a partial snapshot. Explicit single-file trace sources remain a
+separate filename-agnostic aggregate contract.</p><p>Set a trace selection's manifest config to <code class="inline">{&quot;expose&quot;: false}</code> when it exists
 only as the inspection source's dependency. It still supplies the frozen trace
 capture without creating a second analysis namespace. The
 <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md#query-contract">TraceLog and run-analysis reference</a>

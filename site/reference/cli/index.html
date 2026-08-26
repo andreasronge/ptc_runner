@@ -379,8 +379,10 @@ remain authoritative, and unrelated directory members are not listed, opened,
 sized, decoded, or counted toward directory or aggregate source limits. The
 selected files still keep their individual source, record, retained-memory,
 heap, deadline, and result ceilings. Whole-directory snapshots used by
-<code class="inline">private-run-analysis-v1</code> stay a distinct source variant and still fail closed
-on malformed or mismatched members.</p><p>The parent of <code class="inline">--private-output</code> must already exist and be reached without a
+<code class="inline">private-run-analysis-v1</code> stay a distinct source variant: they admit only
+filename-bound one-run files, isolate a stable damaged connected component,
+and keep disjoint healthy runs queryable. Namespace or selected-file mutation
+still rejects the whole capture.</p><p>The parent of <code class="inline">--private-output</code> must already exist and be reached without a
 symbolic link — on macOS <code class="inline">/tmp</code> is a symlink, so <code class="inline">/tmp/out.json</code> is refused.
 Trace, inspection, and output directories must be pairwise physically separate:
 no directory may equal, contain, or be contained by either of the others. A
@@ -405,7 +407,12 @@ selected address. If an explicitly selected port is occupied, the command
 probes loopback: another PTC Viewer is reported with its exact project document
 path, while any other listener is reported as an occupied service. The command
 runs in the foreground until <code class="inline">Ctrl+C</code>, and opens a browser only when the project
-asks for it <em>and</em> a terminal is attached.</p><p>The Viewer does not search the invocation directory or its parents for a
+asks for it <em>and</em> a terminal is attached.</p><p>Directory discovery expects producer-owned <code class="inline">&lt;run-id&gt;.jsonl</code> and
+<code class="inline">&lt;run-id&gt;.private.jsonl</code> names, each containing exactly that one run and one
+trace identity. The run list reports bounded damaged-source evidence when a
+stable malformed, mismatched, split, or conflicting component is isolated;
+unrelated valid runs remain available. A selected namespace change during
+capture fails the refresh rather than installing a partial generation.</p><p>The Viewer does not search the invocation directory or its parents for a
 <code class="inline">.env</code> file. Environment-backed provider credentials come from the inherited
 process environment, the project's <code class="inline">host.env_file</code>, or an explicit
 <code class="inline">--env-file FILE</code>. The command-line file is resolved when the Viewer starts

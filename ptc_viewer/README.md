@@ -71,6 +71,13 @@ and canonical activity, plus one semantic `conversation` result when the Viewer
 was started with an authorized inspection artifact. The URL carries
 `#/run/<run-id>`, so a run view can be bookmarked and reloaded.
 
+Directory discovery accepts producer-owned `<run-id>.jsonl` and
+`<run-id>.private.jsonl` files with one matching run and trace identity per
+file. Stable damaged files and connected split/conflicting identities are
+isolated without hiding disjoint valid runs. The Runs tab renders the
+Kernel's bounded isolation evidence; it never rescans or reclassifies files in
+the browser.
+
 The canonical transcript keeps canonical events as its execution spine. With
 an authorized inspection artifact, it also shows each evaluation's exact
 generated program from the semantic conversation projection and the feedback

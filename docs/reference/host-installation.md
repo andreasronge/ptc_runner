@@ -313,6 +313,14 @@ classifies the run as `private_inspection`. An inspection snapshot requires
 exactly one of those trace sources so it can validate every private artifact
 against the captured trace evidence.
 
+Whole-directory trace snapshots admit filename-bound `<run-id>.jsonl` or
+`<run-id>.private.jsonl` members containing exactly one matching run and trace
+identity. Stable malformed, mismatched, split, or conflicting members are
+isolated by connected identity component while disjoint valid runs remain
+queryable. Selected namespace mutation rejects the complete capture; it never
+installs a partial snapshot. Explicit single-file trace sources remain a
+separate filename-agnostic aggregate contract.
+
 Set a trace selection's manifest config to `{"expose": false}` when it exists
 only as the inspection source's dependency. It still supplies the frozen trace
 capture without creating a second analysis namespace. The

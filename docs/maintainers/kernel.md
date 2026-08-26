@@ -401,19 +401,23 @@ fixes whether the directory is ordinary normal-only input or private-authorized
 canonical input; a caller cannot widen an existing handle or relabel it for
 another profile.
 
-Ordinary capture enumerates supported normal `.jsonl` names in canonical sorted
-order, records a pre-read directory and file inventory, opens only regular
-files, compares path and descriptor identity, retains the baseline bytes, and
-performs a second byte-for-byte verification around a final inventory check,
-followed by one last content verification after that inventory. Any name,
-identity, metadata, type, or content change between baseline and final
-verification returns `:source_changed`; a mixed capture is never installed. The
-decoded event set is normalized and validated exactly once before the owner
-becomes queryable. Private `.private.jsonl` and `.ptcins` artifacts
-stay excluded by normal discovery. The private-authorized capture instead
-selects both ordinary and `.private.jsonl` traces, records `sanitized` or
-`private` provenance per run, and still rejects inspection artifacts. A run
-cannot be split across the two trace classes.
+Ordinary capture selects normal `<run-id>.jsonl` names in raw-byte sorted order,
+records a pre-read directory and file inventory, compares path and descriptor
+identity, retains the baseline bytes, and performs repeated byte-for-byte and
+namespace verification before installation. Any selected name, identity,
+metadata, type, or content change between baseline and final verification
+returns `:source_changed`; a mixed capture is never installed. Stable damaged
+members instead enter one deterministic run/trace claim graph. The complete
+connected component is isolated for a malformed file, unsupported version,
+filename/run mismatch, non-regular or unreadable member, repeated identity, or
+sequence/lifecycle failure, while disjoint canonical files remain queryable.
+There is no filename-ordered winner or partial-run merge.
+
+Private `.private.jsonl` and `.ptcins` artifacts stay excluded by normal
+discovery. The private-authorized capture instead selects both ordinary and
+`<run-id>.private.jsonl` traces, records `sanitized` or `private` provenance per
+admitted run, and still excludes inspection artifacts. A run split across
+files or source classes is isolated as one connected component.
 
 The default aggregate encoded-source ceiling is 8,000,000 bytes. Snapshot
 retention independently limits the decoded representation to 32,000,000
@@ -422,12 +426,15 @@ enumerates under a fixed heap and time bound and rejects directories above
 4,096 total entries or 1,024 selected trace files before sorting, stating,
 opening, or verifying any selected file. Hosts may lower the construction
 limits but cannot raise them, and browser or Lisp input cannot select them.
-The owner retains only validated events, their digest, fixed query limits,
-safe capture metadata, and an owner monitor. Its tokenized handle carries only
-a PID and an unforgeable reference; neither owner state, status output,
-capability closures, safe metadata, nor errors retain or expose the directory
-path. Safe capture metadata is the capture digest, UTC capture time, visible
-run count, raw encoded source bytes, and retained decoded bytes. All four
+The owner retains the detached `directory_admission_v1` value: selected source
+proofs and classifications, admitted events and compiled projection, complete
+isolation components, and source identity. Fixed query limits, safe capture
+metadata, and the owner monitor live alongside that admission in owner state.
+Its tokenized handle carries only a PID and an unforgeable reference; neither
+owner state, status output, capability closures, safe metadata, nor errors
+retain or expose the directory path. Safe capture metadata is the capture
+digest, UTC capture time, visible run count, raw encoded source bytes, and
+retained admission bytes. All four
 snapshot queries execute the same `TraceLog` filtering,
 metadata, ordering, pagination, cursor, and result-limit code as ordinary
 sources, and cursors bind to the captured digest so they stay stable when the

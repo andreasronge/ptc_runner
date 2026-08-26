@@ -124,6 +124,13 @@ symlinked layout is refused. When a pre-existing directory fails the owner-only
 a bare publication failure. Artifact files retain the normal no-replace and
 privacy rules.
 
+The trace filenames are also the canonical directory-discovery contract. Each
+file contains exactly the run ID named by its stem and one trace identity;
+arbitrary aggregate filenames and split histories remain supported only when a
+caller explicitly selects one file, not when Viewer or run analysis discovers a
+directory. Stable damaged components are isolated without hiding unrelated
+valid runs.
+
 ## Overrides and lazy environment loading
 
 An explicit command value wins over the corresponding project default for host,
