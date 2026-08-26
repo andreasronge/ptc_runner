@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "observed_at": "2026-08-24",
+  "reanalyzed_at": "2026-08-26",
   "ptc_runner_version": "0.14.0",
   "task": {
     "benchmark": "DABStep",
@@ -33,7 +34,7 @@
     "deepseek": {
       "target": "openrouter:deepseek/deepseek-v4-flash",
       "exact_answer_successes": 3,
-      "evidence_backed_computation_successes": 2,
+      "evidence_backed_computation_successes": 3,
       "runs": 5,
       "total_observed_cost_usd": 0.006663
     },
@@ -119,8 +120,8 @@
       "status": "ok",
       "answer": "B. BE",
       "exact_answer_success": true,
-      "evidence_backed_computation_success": false,
-      "classification_reason": "After its streaming calculation exceeded the heap budget, the model authored the exact eight-country aggregates as unexplained numeric literals, divided them into rates, and returned B. BE. The transcript contains no earlier observation of those values, so the answer lacks trace-proven data provenance.",
+      "evidence_backed_computation_success": true,
+      "classification_reason": "After a retain-all program exceeded the heap budget, a separate streaming program completed successfully and returned all eight country aggregate pairs in the following model request. The model then reused those observed values, divided them into rates in generated PTC-Lisp, and returned B. BE.",
       "capability_calls": 200,
       "model_calls": 6,
       "turns": 6,
@@ -224,6 +225,6 @@
     "model_calls": 2,
     "capability_calls": 133,
     "duration_ms": 43322,
-    "fixture_sha256": "fd29503089132d8354215dcda438039c4729098c4172c5c7a786b65ec5eee188"
+    "fixture_sha256_at_observation": "fd29503089132d8354215dcda438039c4729098c4172c5c7a786b65ec5eee188"
   }
 }

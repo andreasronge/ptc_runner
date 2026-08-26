@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-08-26",
+  "runtime_base_commit": "31064232a1543a84b2a991d50bd4b781fc7751a6",
+  "application_content_digest": "sha256:e5f2382eb49c7567e9493fc3d6b2776c910907ec60b3d7f1c045cddb34c6e508",
+  "workflow_bundle_hash": "703c5912ba42e0edcec9482cedba5a01517b570a92c946e83d75f1e73cf4c7ac",
+  "purpose": "One current-main live smoke per model plus an offline replay portability check; not an extension of the original cohorts.",
+  "live_runs": [
+    {
+      "name": "luna-current-main-01",
+      "model": "openrouter:openai/gpt-5.6-luna",
+      "run_ref": "cmd-6rm65rkm8rdaxbkb7bsmj1473k",
+      "status": "error",
+      "error_phase": "execution",
+      "error_code": "turn_limit_exceeded",
+      "classification_reason": "The model first returned transaction-count aggregates, received result-contract correction feedback, and continued. Later attempts still used the wrong metric or invalid result shapes; its sixth program ended in an evaluation error.",
+      "model_calls": 6,
+      "mission_capability_calls": 158,
+      "cost_usd": 0.001561,
+      "resolved_model_attributed": true,
+      "sealed_inspection_recorded": true
+    },
+    {
+      "name": "deepseek-current-main-01",
+      "model": "openrouter:deepseek/deepseek-v4-flash",
+      "run_ref": "cmd-0r4qt589ezd9ffe2zzw41nq5b2",
+      "status": "error",
+      "error_phase": "result_cleanup",
+      "error_code": "result_contract_failed",
+      "error_path": "/value",
+      "classification_reason": "The final program streamed ip_country, eur_amount, and has_fraudulent_dispute and calculated rates, but returned a sorted rate vector instead of one permitted answer string with no correction turn remaining.",
+      "model_calls": 6,
+      "mission_capability_calls": 134,
+      "cost_usd": 0.001326,
+      "resolved_model_attributed": true,
+      "sealed_inspection_recorded": true,
+      "named_private_transcript_verified": true
+    }
+  ],
+  "replay": {
+    "run_ref": "cmd-7d13db67e4wf0rm221wd9pg5m2",
+    "status": "ok",
+    "answer": "B. BE",
+    "model_calls": 2,
+    "mission_capability_calls": 133,
+    "fixture_sha256": "29553b63360c3156b461aeab8907e92d01a0d504f16b73a4b5b3c4c046670198",
+    "verified_after_fresh_data_projection": true
+  }
+}

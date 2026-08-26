@@ -4,7 +4,7 @@ This example asks a model to solve DABStep dev task 49 over 138,236 synthetic
 payment transactions. The published answer is `B. BE`. In the observed
 five-run cohorts, DeepSeek returned the exact answer 3/5 times and GPT-5.6 Luna
 4/5 times—but private transcript inspection showed fully trace-proven
-computation in only 2/5 and 1/5 runs respectively.
+computation in 3/5 and 1/5 runs respectively.
 
 That distinction is the demo: a correct string is not proof that a model did
 the calculation. PtcRunner preserves the generated program and its bounded
@@ -39,9 +39,12 @@ result contract:
 
 ### Replay without a live model
 
-The checked-in replay freezes both model responses from the representative
-Luna run. It still executes the generated PTC-Lisp and all 133 local MCP reads
-against the checksum-pinned data projection.
+The checked-in replay preserves the representative Luna run's final analysis
+program. Its exploratory first program omits the unused `next_cursor` from its
+printed preview: upstream MCP cursors are intentionally opaque and may change
+when `fetch-data.sh` recreates checksum-identical files. The replay still uses
+exact request matching, executes the generated PTC-Lisp, and performs all 133
+local MCP reads against the checksum-pinned data projection.
 
 ```console
 ./fetch-data.sh
@@ -53,6 +56,9 @@ ptc run ptc-project.replay.json \
 No model credential is needed. Replay is exact-request matched: changing the
 task, tools, prompt, or continuation causes a fixture miss instead of silently
 using unrelated output.
+
+The portable fixture was verified again after deleting and rebuilding the
+column projection with `fetch-data.sh`.
 
 ## What the program computed
 
@@ -127,7 +133,7 @@ was disabled. They are observations of one task, not benchmark scores.
 
 | Model | Exact answer | Evidence-backed | Model calls | Observed cost |
 |---|---:|---:|---:|---:|
-| `openrouter:deepseek/deepseek-v4-flash` | 3/5 | 2/5 | 29 | $0.006663 |
+| `openrouter:deepseek/deepseek-v4-flash` | 3/5 | 3/5 | 29 | $0.006663 |
 | `openrouter:openai/gpt-5.6-luna` | 4/5 | 1/5 | 16 | $0.003161 |
 
 “Evidence-backed” was defined before classification and requires all of:
@@ -136,21 +142,45 @@ was disabled. They are observations of one task, not benchmark scores.
 - the three semantic columns above;
 - terminal cursor traversal;
 - per-country total and fraudulent EUR aggregation; and
-- traceable derivation of those aggregates from a successful scan rather than
-  unexplained model-authored literals; and
+- traceable derivation of those aggregates from a successful scan, including
+  values returned to a later turn as a model-visible observation; and
 - division into rates in generated PTC-Lisp before selecting BE.
 
 One Luna run got the right answer using transaction-count rate instead of the
 manual-defined EUR-volume rate. Two more computed EUR numerators and
 denominators but left the division to model reasoning. Those count as exact
-answers and fail the stricter computation criterion. A DeepSeek run attempted
-a streaming calculation, exceeded the heap budget, then authored all eight
-exact aggregate pairs as literals even though those values never appeared in
-its earlier visible transcript. It therefore fails the provenance-aware
-criterion despite performing the final division in PTC-Lisp. Two DeepSeek
-runs failed at the turn/result boundary. Every run, including failures, is
-recorded with its run reference, source hashes, calls, duration, cost, and
-classification in [`evidence/cohort.json`](evidence/cohort.json).
+answers and fail the stricter computation criterion. One DeepSeek run first
+exceeded the heap with a retain-all program, then completed a separate
+streaming aggregation. Its following model request contained all eight exact
+aggregate pairs; the model reused those observed values in a later program
+that performed the division. An earlier review associated the heap failure
+with the wrong generated program and incorrectly classified this run as
+unproven. Two DeepSeek runs failed at the turn/result boundary. Every run,
+including failures, is recorded with its run reference, source hashes, calls,
+duration, cost, and classification in
+[`evidence/cohort.json`](evidence/cohort.json).
+
+### Current-main smoke
+
+After the runtime fixes linked from the experiment were merged, one new live
+sample per model and a portable replay were run on 2026-08-26. These samples
+verify the current product path; they are not additions to the original
+five-run cohorts.
+
+| Path | Outcome | Model calls | Mission reads | Observed cost |
+|---|---|---:|---:|---:|
+| GPT-5.6 Luna live | turn limit after final evaluation error | 6 | 158 | $0.001561 |
+| DeepSeek V4 Flash live | result contract rejected a rate vector at `/value` | 6 | 134 | $0.001326 |
+| Luna replay | `B. BE` | 2 | 133 | — |
+
+Both live failures were model-authored rather than provider or artifact
+failures. Luna received result-contract feedback after invalid terminal
+candidates and continued within its remaining turns. DeepSeek completed a
+streaming EUR-volume calculation on its final turn but returned a sorted rate
+vector instead of one permitted answer string. The sealed inspection records,
+resolved-model counters, selected-run transcript check, costs, and run
+references are recorded in
+[`evidence/current-main-smoke.json`](evidence/current-main-smoke.json).
 
 ## Why the data is columnar
 
@@ -211,10 +241,18 @@ exact model exchanges and capability payloads and is intentionally gitignored.
 
 ```console
 run_ref=$(jq -r '.run_ref' out.json)
-jq -r 'select(.record_type == "evaluation-source") | .payload.source' \
-  ".ptc/inspection/${run_ref}.inspection.jsonl"
+mkdir -p .ptc/transcripts
+ptc transcript "$run_ref" \
+  --traces .ptc/traces \
+  --inspection .ptc/inspection \
+  --private-unattended \
+  --private-output ".ptc/transcripts/${run_ref}.private.json"
 ptc viewer ptc-project.json
 ```
+
+Current PtcRunner writes sealed private inspection evidence as
+`.ptc/inspection/<run-ref>.ptcins`; it is intentionally queried through the
+bounded analysis and transcript interfaces rather than parsed as JSONL.
 
 The checked-in evidence contains hashes and the selected generated source, not
 raw private inspection or credentials.
