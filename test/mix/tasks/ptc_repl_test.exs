@@ -1166,7 +1166,7 @@ defmodule PtcRunner.ReplFrontendTest do
     PrivateInspectionFixture.rewrite_schema!(fixture.inspection, 4)
 
     message =
-      ~r/ptc repl profile setup failed: an inspection artifact declares schema version 4; this build supports version 8/
+      ~r/ptc repl profile setup failed: malformed_source/
 
     capture_io(fn ->
       assert_raise Mix.Error, message, fn ->

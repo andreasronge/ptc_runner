@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.ProviderSessionFixture
+  alias PtcRunner.TestSupport.StreamingInspection
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
@@ -326,7 +327,10 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     inspection_owner =
       Task.async(fn ->
         {:ok, sink} =
-          InspectionSink.start(run_id: "foreign-inspection", trace_id: "foreign-inspection")
+          StreamingInspection.start(
+            run_id: "foreign-inspection",
+            trace_id: "foreign-inspection"
+          )
 
         send(parent, {:foreign_inspection_sink, sink})
         receive do: (:finish -> :ok)
@@ -413,7 +417,10 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         {:ok, event_sink} = EventSink.start(:private, limits, run_id: "mixed-dead-wedged")
 
         {:ok, inspection_sink} =
-          InspectionSink.start(run_id: "mixed-dead-wedged", trace_id: "mixed-dead-wedged")
+          StreamingInspection.start(
+            run_id: "mixed-dead-wedged",
+            trace_id: "mixed-dead-wedged"
+          )
 
         {:ok, config} =
           RunConfig.new(
@@ -456,7 +463,10 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
         {:ok, event_sink} = EventSink.start(:private, limits, run_id: "wedged-dead-mixed")
 
         {:ok, inspection_sink} =
-          InspectionSink.start(run_id: "wedged-dead-mixed", trace_id: "wedged-dead-mixed")
+          StreamingInspection.start(
+            run_id: "wedged-dead-mixed",
+            trace_id: "wedged-dead-mixed"
+          )
 
         {:ok, config} =
           RunConfig.new(

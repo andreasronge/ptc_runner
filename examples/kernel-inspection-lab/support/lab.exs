@@ -4,7 +4,6 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   alias PtcRunner.Examples.KernelInspectionLab.MCPFixture
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
-  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
@@ -70,7 +69,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     manifest = manifest(name, mission_components, wrapper?)
     manifest_path = Path.join(directory, "ptc.json")
     trace_path = Path.join(traces, "run.jsonl")
-    inspection_path = Path.join(inspection, "run.inspection.jsonl")
+    inspection_path = Path.join(inspection, "run.ptcins")
     :ok = File.write(manifest_path, Jason.encode!(manifest))
     registry = registry(endpoint, program, wrapper?, directory, cli)
 
@@ -84,15 +83,14 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
              trace_path: trace_path,
              inspect: inspection_path
            ),
-         {:ok, result} <- execute_and_publish(built),
-         {:ok, records} <- InspectionArtifact.load(inspection_path) do
+         {:ok, result} <- execute_and_publish(built) do
       {:ok,
        %{
          name: name,
          result: result,
          trace: trace_path,
          inspection: inspection_path,
-         run_id: records |> hd() |> Map.fetch!("run_id")
+         run_id: request.policy.run_id
        }}
     end
   end

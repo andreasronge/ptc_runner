@@ -1,4 +1,4 @@
-defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
+defmodule PtcRunner.Kernel.InspectionArtifact.Indexes do
   @moduledoc """
   Private ETS indexes and logical versus actual retained accounting.
 
@@ -11,8 +11,8 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
   row are charged in both places.
   """
 
+  alias PtcRunner.Kernel.InspectionArtifact.Limits
   alias PtcRunner.Lisp.RetainedSize
-  alias PtcRunner.Research.SealedEvidenceLog.Limits
 
   @table_names [
     :records,
@@ -57,7 +57,7 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
         tid =
           :ets.new(name, [
             type,
-            :public,
+            :protected,
             :compressed,
             {:read_concurrency, true},
             {:heir, heir, name}
@@ -143,6 +143,15 @@ defmodule PtcRunner.Research.SealedEvidenceLog.Indexes do
 
   @spec table_ids(t()) :: [reference()]
   def table_ids(%{tables: tables}), do: Map.values(tables)
+
+  @spec give_away(t(), pid()) :: :ok
+  def give_away(%{tables: tables}, owner) when is_pid(owner) do
+    Enum.each(tables, fn {name, tid} ->
+      if :ets.info(tid, :owner) == self(), do: :ets.give_away(tid, owner, name)
+    end)
+
+    :ok
+  end
 
   @spec accounting(t()) :: map()
   def accounting(indexes) when is_map(indexes) do

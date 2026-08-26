@@ -5,6 +5,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ResultIdentity
 
   @source "(return 42)"
@@ -89,7 +90,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
     requests = [[user], [user], [user, assistant, follow_up]]
 
-    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+    {sink, handle} = start_sink!(inspection, run_id)
 
     Enum.each(Enum.zip(ids, requests), fn {capability_id, messages} ->
       emit!(sink, "capability-input", %{capability_id: capability_id}, %{
@@ -105,7 +106,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       })
     end)
 
-    persist_inspection!(sink, inspection, run_id, events)
+    persist_inspection!(sink, handle)
 
     fixture
   end
@@ -121,19 +122,10 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
     File.write!(Path.join(traces, "#{run_id}.jsonl"), encode_jsonl(events))
 
-    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+    {sink, handle} = start_sink!(inspection, run_id)
 
     :ok = InspectionSink.emit(sink, "run-result", %{}, %{result_hash: result_hash, value: value})
-    {:ok, records} = InspectionSink.records(sink)
-
-    :ok =
-      InspectionArtifact.persist(
-        Path.join(inspection, "#{run_id}.inspection.jsonl"),
-        records,
-        events
-      )
-
-    :ok = InspectionSink.stop(sink)
+    persist_inspection!(sink, handle)
 
     Map.put(fixture, :result_hash, result_hash)
   end
@@ -173,7 +165,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     events = events ++ [event(run_id, count * 2 + 2, "run-stopped", %{"outcome" => "ok"})]
     File.write!(Path.join(traces, "#{run_id}.jsonl"), encode_jsonl(events))
 
-    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+    {sink, handle} = start_sink!(inspection, run_id)
 
     _messages =
       Enum.reduce(1..count, [], fn turn, messages ->
@@ -200,36 +192,22 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
         request_messages ++ [assistant]
       end)
 
-    {:ok, records} = InspectionSink.records(sink)
-
-    :ok =
-      InspectionArtifact.persist(
-        Path.join(inspection, "#{run_id}.inspection.jsonl"),
-        records,
-        events
-      )
-
-    :ok = InspectionSink.stop(sink)
+    persist_inspection!(sink, handle)
     Map.put(fixture, :model_exchange_count, count)
   end
 
   def rewrite_schema!(directory, schema_version) when is_integer(schema_version) do
     directory
-    |> Path.join("*.inspection.jsonl")
+    |> Path.join("*.ptcins")
     |> Path.wildcard()
     |> Enum.each(fn path ->
-      rewritten =
-        path
-        |> File.stream!()
-        |> Enum.map_join(fn line ->
-          line
-          |> Jason.decode!()
-          |> Map.put("schema_version", schema_version)
-          |> Jason.encode!()
-          |> Kernel.<>("\n")
-        end)
+      <<magic::binary-size(8), format::unsigned-big-16, _schema::unsigned-big-16, rest::binary>> =
+        File.read!(path)
 
-      File.write!(path, rewritten)
+      File.write!(
+        path,
+        <<magic::binary, format::unsigned-big-16, schema_version::unsigned-big-16, rest::binary>>
+      )
     end)
   end
 
@@ -308,8 +286,8 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     [started | rest]
   end
 
-  defp write_inspection!(directory, run_id, events) do
-    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+  defp write_inspection!(directory, run_id, _events) do
+    {sink, handle} = start_sink!(directory, run_id)
     emit_model_exchange!(sink, run_id)
 
     emit!(sink, "capability-input", %{capability_id: "tool-#{run_id}"}, %{
@@ -363,11 +341,11 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
 
     emit_execution_diagnostics!(sink, run_id)
 
-    persist_inspection!(sink, directory, run_id, events)
+    persist_inspection!(sink, handle)
   end
 
-  defp write_boundary_failure_inspection!(directory, run_id, events) do
-    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+  defp write_boundary_failure_inspection!(directory, run_id, _events) do
+    {sink, handle} = start_sink!(directory, run_id)
     emit_model_exchange!(sink, run_id)
     emit_evaluation_source!(sink, run_id)
 
@@ -406,7 +384,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       }
     })
 
-    persist_inspection!(sink, directory, run_id, events)
+    persist_inspection!(sink, handle)
   end
 
   defp emit_model_exchange!(sink, run_id) do
@@ -445,15 +423,14 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     })
   end
 
-  defp persist_inspection!(sink, directory, run_id, events) do
-    {:ok, records} = InspectionSink.records(sink)
-    path = Path.join(directory, "#{run_id}.inspection.jsonl")
-    :ok = InspectionArtifact.persist(path, records, events)
+  defp persist_inspection!(sink, handle) do
+    {:ok, seal} = InspectionSink.seal(sink)
+    :ok = InspectionArtifact.publish_handle(handle, seal)
     :ok = InspectionSink.stop(sink)
   end
 
-  defp write_interrupted_inspection!(directory, run_id, events) do
-    {:ok, sink} = InspectionSink.start(run_id: run_id, trace_id: "trace-#{run_id}")
+  defp write_interrupted_inspection!(directory, run_id, _events) do
+    {sink, handle} = start_sink!(directory, run_id)
 
     emit!(sink, "capability-input", %{capability_id: "llm-complete-#{run_id}"}, %{
       environment: :workflow,
@@ -507,16 +484,21 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       arguments: %{"path" => "INTERRUPTED_TOOL_SECRET_#{run_id}"}
     })
 
-    {:ok, records} = InspectionSink.records(sink)
+    persist_inspection!(sink, handle)
+  end
 
-    :ok =
-      InspectionArtifact.persist(
-        Path.join(directory, "#{run_id}.inspection.jsonl"),
-        records,
-        events
+  defp start_sink!(directory, run_id) do
+    path = Path.join(directory, "#{run_id}.ptcins")
+    {:ok, handle} = PublicationHandle.reserve_stream_for(path, :inspection, 0o600, self())
+
+    {:ok, sink} =
+      InspectionSink.start(
+        run_id: run_id,
+        trace_id: "trace-#{run_id}",
+        publication_handle: handle
       )
 
-    :ok = InspectionSink.stop(sink)
+    {sink, handle}
   end
 
   defp interrupted_events(run_id) do

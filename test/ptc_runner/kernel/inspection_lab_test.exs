@@ -9,9 +9,9 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Examples.KernelInspectionLab
-  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.ViewerAdapter
   alias PtcRunner.MixCommandAdapter
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   if reason = TestHelpers.executable_skip_reason(["node", "npm"]) do
@@ -34,7 +34,10 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
     for journey <- [direct, wrapper] do
       assert Path.basename(Path.dirname(journey.trace)) == "traces"
       assert Path.basename(Path.dirname(journey.inspection)) == "inspection"
-      assert {:ok, records} = InspectionArtifact.load(journey.inspection)
+
+      assert {:ok, records} =
+               StreamingInspection.read_path(journey.inspection)
+
       assert File.read!(journey.trace) =~ "mcp-2026-07-28"
 
       inspection_body = File.read!(journey.inspection)
@@ -209,7 +212,7 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
   end
 
   defp model_request(path) do
-    {:ok, records} = InspectionArtifact.load(path)
+    {:ok, records} = StreamingInspection.read_path(path)
 
     records
     |> Enum.find(

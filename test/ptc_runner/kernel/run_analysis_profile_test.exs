@@ -841,7 +841,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
       fixture = PrivateInspectionFixture.create!(Path.join(root, Atom.to_string(scenario)))
 
       inspection_path =
-        Path.join(fixture.inspection, fixture.run_id <> ".inspection.jsonl")
+        Path.join(fixture.inspection, fixture.run_id <> ".ptcins")
 
       result =
         case scenario do

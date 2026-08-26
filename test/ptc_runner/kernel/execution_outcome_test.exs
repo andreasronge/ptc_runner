@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
   alias PtcRunner.Kernel.Result
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Lisp.Format.SymbolRef
+  alias PtcRunner.TestSupport.StreamingInspection
 
   setup do
     {:ok, limits} = Limits.new([])
@@ -74,22 +75,25 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
     assert :ok = EventSink.stop(sink)
   end
 
-  test "freezes inspection records while their sink is live", %{
+  test "seals inspection evidence while its sink is live", %{
     limits: limits,
     authority: authority
   } do
     {:ok, sink} = EventSink.start(:private, limits)
 
     {:ok, inspection} =
-      InspectionSink.start(run_id: "outcome-inspection", trace_id: "outcome-inspection")
+      StreamingInspection.start(
+        run_id: "outcome-inspection",
+        trace_id: "outcome-inspection"
+      )
 
     assert {:ok, outcome} =
              ExecutionOutcome.capture(result(), {:ok, []}, sink, inspection, nil, nil, authority)
 
-    assert open!(outcome, authority).inspection == {:ok, []}
+    assert {:ok, %{record_count: 0}} = open!(outcome, authority).inspection
     assert :ok = InspectionSink.stop(inspection)
     assert :ok = EventSink.stop(sink)
-    assert open!(outcome, authority).inspection == {:ok, []}
+    assert {:ok, %{record_count: 0}} = open!(outcome, authority).inspection
   end
 
   test "captures one strict-JSON terminal result in the inspection sink", %{
@@ -101,7 +105,10 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
     {:ok, sink} = EventSink.start(:private, limits)
 
     {:ok, inspection} =
-      InspectionSink.start(run_id: "outcome-result", trace_id: "trace-outcome-result")
+      StreamingInspection.start(
+        run_id: "outcome-result",
+        trace_id: "trace-outcome-result"
+      )
 
     terminal_batch =
       {:ok,
@@ -125,7 +132,8 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
                authority
              )
 
-    assert {:ok, [record]} = open!(outcome, authority).inspection
+    assert {:ok, %{record_count: 1}} = open!(outcome, authority).inspection
+    assert {:ok, [record]} = StreamingInspection.records(inspection)
     assert record["record_type"] == "run-result"
     assert record["correlation"] == %{}
     assert record["payload"] == %{"result_hash" => result_hash, "value" => value}
@@ -143,7 +151,10 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
     {:ok, sink} = EventSink.start(:private, limits)
 
     {:ok, inspection} =
-      InspectionSink.start(run_id: "outcome-native", trace_id: "trace-outcome-native")
+      StreamingInspection.start(
+        run_id: "outcome-native",
+        trace_id: "trace-outcome-native"
+      )
 
     terminal_batch =
       {:ok,
@@ -165,7 +176,7 @@ defmodule PtcRunner.Kernel.ExecutionOutcomeTest do
                authority
              )
 
-    assert open!(outcome, authority).inspection == {:ok, []}
+    assert {:ok, %{record_count: 0}} = open!(outcome, authority).inspection
     assert :ok = InspectionSink.stop(inspection)
     assert :ok = EventSink.stop(sink)
   end

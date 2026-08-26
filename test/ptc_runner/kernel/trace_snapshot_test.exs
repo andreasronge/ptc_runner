@@ -37,7 +37,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   } do
     path = Path.join(directory, "normal.jsonl")
     private_path = Path.join(directory, "hidden.private.jsonl")
-    inspection_path = Path.join(directory, "hidden.inspection.jsonl")
+    inspection_path = Path.join(directory, "hidden.ptcins")
 
     write_events(path, [event("first", 1, "run-started"), event("first", 2, "run-stopped")])
     write_events(private_path, [event("private", 1, "run-started")])
@@ -90,7 +90,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   } do
     normal_path = Path.join(directory, "normal.jsonl")
     private_path = Path.join(directory, "private.private.jsonl")
-    inspection_path = Path.join(directory, "ignored.inspection.jsonl")
+    inspection_path = Path.join(directory, "ignored.ptcins")
 
     write_events(normal_path, [event("normal", 1, "run-started")])
     write_events(private_path, [event("private", 1, "run-started")])
@@ -132,7 +132,7 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
     write_events(Path.join(directory, "one.private.jsonl"), [event("one", 1, "run-started")])
     write_events(Path.join(directory, "two.private.jsonl"), [event("two", 1, "run-started")])
 
-    write_events(Path.join(directory, "ignored.inspection.jsonl"), [
+    write_events(Path.join(directory, "ignored.ptcins"), [
       event("inspection", 1, "run-started")
     ])
 

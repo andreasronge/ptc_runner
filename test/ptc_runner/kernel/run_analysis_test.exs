@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   alias PtcRunner.Kernel.RunAnalysisRelationships
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.TestSupport.PrivateInspectionFixture
+  alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   @tag :tmp_dir
@@ -1431,20 +1432,16 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
   end
 
   defp remove_capability_records!(directory, capability_id) do
-    [path] = Path.wildcard(Path.join(directory, "*.inspection.jsonl"))
+    [path] = Path.wildcard(Path.join(directory, "*.ptcins"))
+
+    {:ok, records} = StreamingInspection.read_path(path)
 
     retained =
-      path
-      |> File.stream!()
-      |> Enum.map(&Jason.decode!/1)
+      records
       |> Enum.reject(fn record ->
         get_in(record, ["correlation", "capability_id"]) == capability_id
       end)
-      |> Enum.with_index(1)
-      |> Enum.map_join(fn {record, sequence} ->
-        record |> Map.put("sequence", sequence) |> Jason.encode!() |> Kernel.<>("\n")
-      end)
 
-    File.write!(path, retained)
+    StreamingInspection.rewrite_path(path, retained)
   end
 end

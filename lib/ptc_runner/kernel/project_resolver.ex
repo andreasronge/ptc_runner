@@ -322,7 +322,7 @@ defmodule PtcRunner.Kernel.ProjectResolver do
         project.artifacts.inspection,
         "--inspect",
         :inspect,
-        Path.join([root, "inspection", run_ref <> ".inspection.jsonl"]),
+        Path.join([root, "inspection", run_ref <> ".ptcins"]),
         derived
       )
 

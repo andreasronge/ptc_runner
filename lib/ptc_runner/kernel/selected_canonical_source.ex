@@ -6,7 +6,7 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSource do
 
   - `<traces>/<run-ref>.jsonl`
   - `<traces>/<run-ref>.private.jsonl`
-  - `<inspection>/<run-ref>.inspection.jsonl`
+  - `<inspection>/<run-ref>.ptcins`
 
   Filenames are routing hints. Embedded run and trace identities remain
   authoritative, and snapshot identity commits to the selector, trace source
@@ -58,7 +58,7 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSource do
   def resolve_inspection(directory, run_ref) do
     with :ok <- require_run_ref(run_ref),
          {:ok, directory} <- existing_directory(directory) do
-      path = join_candidate(directory, run_ref <> ".inspection.jsonl")
+      path = join_candidate(directory, run_ref <> ".ptcins")
 
       case candidate_status(path) do
         :regular -> {:ok, path}
@@ -82,16 +82,6 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSource do
   end
 
   def prove_trace_events(_events, _run_ref), do: {:error, :selected_run_mismatch}
-
-  @spec prove_inspection_records(term(), term()) :: {:ok, binary()} | {:error, atom()}
-  def prove_inspection_records([%{"run_id" => run_id, "trace_id" => trace_id} | _rest], run_ref)
-      when is_binary(run_id) and is_binary(trace_id) do
-    if run_id == run_ref and CommandRunRef.valid?(run_ref),
-      do: {:ok, trace_id},
-      else: {:error, :selected_run_mismatch}
-  end
-
-  def prove_inspection_records(_records, _run_ref), do: {:error, :selected_run_mismatch}
 
   @spec trace_source_id(binary(), atom(), atom(), binary(), binary()) :: binary()
   def trace_source_id(run_ref, source, source_kind, evidence_digest, trace_id)

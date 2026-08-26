@@ -789,7 +789,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
     File.write!(Path.join(directory, "normal.jsonl"), jsonl_event("normal", 1, "run-started"))
 
     File.write!(
-      Path.join(directory, "run.inspection.jsonl"),
+      Path.join(directory, "run.ptcins"),
       jsonl_event("inspection", 1, "run-started")
     )
 
@@ -889,7 +889,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   test "inspection artifacts are never accepted as canonical or private trace sources", %{
     tmp_dir: directory
   } do
-    path = Path.join(directory, "run.inspection.jsonl")
+    path = Path.join(directory, "run.ptcins")
     File.write!(path, jsonl_event("inspection", 1, "run-started"))
 
     assert {:error, :invalid_trace_log} = TraceLog.new(source: {:file, path})

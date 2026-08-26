@@ -2,8 +2,11 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.ConversationProjection
+  alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.ProjectViewerAdapter
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.RunAnalysis
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.TraceSnapshot
@@ -31,7 +34,7 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
 
     inspection_path =
       fixture.inspection
-      |> Path.join("*.inspection.jsonl")
+      |> Path.join("*.ptcins")
       |> Path.wildcard()
       |> List.first()
 
@@ -76,6 +79,49 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
   end
 
   @tag :tmp_dir
+  test "viewer pins a valid zero-frame artifact through footer identities", %{tmp_dir: root} do
+    traces = Path.join(root, "traces")
+    inspection = Path.join(root, "inspection")
+    File.mkdir_p!(traces)
+    File.mkdir_p!(inspection)
+
+    assert :ok =
+             TraceLog.append_jsonl(Path.join(traces, "viewer-run.jsonl"), [
+               event(1, "run-started", %{"missions" => %{}})
+             ])
+
+    path = Path.join(inspection, "viewer-run.ptcins")
+    {:ok, handle} = PublicationHandle.reserve_stream_for(path, :inspection, 0o600, self())
+
+    {:ok, sink} =
+      InspectionSink.start(
+        run_id: "viewer-run",
+        trace_id: "viewer-trace",
+        publication_handle: handle
+      )
+
+    assert {:ok, seal} = InspectionSink.seal(sink)
+    assert seal.record_count == 0
+    assert :ok = InspectionArtifact.publish_handle(handle, seal)
+    assert :ok = InspectionSink.stop(sink)
+
+    assert {:ok, hashes} = InspectionArtifact.empty_identity_hashes(path)
+    assert {:ok, trace} = TraceSnapshot.start({:directory, traces})
+
+    assert {:ok, %{run_id: "viewer-run"}} =
+             TraceSnapshot.resolve_inspection_identity(
+               trace,
+               hashes.run_id_sha256,
+               hashes.trace_id_sha256
+             )
+
+    TraceSnapshot.stop(trace)
+
+    assert {:ok, grant} = ViewerAdapter.pin_inspection(path, {:directory, traces})
+    assert {:ok, %{"streams" => []}} = ViewerAdapter.conversation(grant, "viewer-run")
+  end
+
+  @tag :tmp_dir
   test "pinning an exact trace file cannot acquire authority from a sibling", %{tmp_dir: root} do
     inspected = PrivateInspectionFixture.create!(Path.join(root, "inspected"), "inspected-run")
     selected = PrivateInspectionFixture.create!(Path.join(root, "selected"), "selected-run")
@@ -85,7 +131,7 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
 
     inspection_path =
       inspected.inspection
-      |> Path.join("*.inspection.jsonl")
+      |> Path.join("*.ptcins")
       |> Path.wildcard()
       |> List.first()
 
@@ -99,7 +145,7 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
     jsonl_path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
     extensionless_path = Path.join(fixture.traces, "canonical-trace")
     File.rename!(jsonl_path, extensionless_path)
-    [inspection_path] = Path.wildcard(Path.join(fixture.inspection, "*.inspection.jsonl"))
+    [inspection_path] = Path.wildcard(Path.join(fixture.inspection, "*.ptcins"))
 
     assert {:ok, _grant} =
              ViewerAdapter.pin_inspection(inspection_path, {:file, extensionless_path})
@@ -119,7 +165,7 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
       Path.join(selected.traces, "#{inspected.run_id}.jsonl")
     )
 
-    [inspection_path] = Path.wildcard(Path.join(inspected.inspection, "*.inspection.jsonl"))
+    [inspection_path] = Path.wildcard(Path.join(inspected.inspection, "*.ptcins"))
 
     assert {:error, :inspection_correlation_missing} =
              ViewerAdapter.pin_inspection(

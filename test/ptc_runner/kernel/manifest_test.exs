@@ -575,8 +575,8 @@ defmodule PtcRunner.Kernel.ManifestTest do
         "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
-      "input" => %{"value" => %{"inspect" => "requested.inspection.jsonl"}},
-      "inspect" => "requested.inspection.jsonl"
+      "input" => %{"value" => %{"inspect" => "requested.ptcins"}},
+      "inspect" => "requested.ptcins"
     }
 
     path = Path.join(dir, "inspection.json")
@@ -596,7 +596,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
              |> RunLifecycle.build(registry)
              |> RunLifecycle.execute()
 
-    refute File.exists?(Path.join(dir, "requested.inspection.jsonl"))
+    refute File.exists?(Path.join(dir, "requested.ptcins"))
   end
 
   @tag :tmp_dir

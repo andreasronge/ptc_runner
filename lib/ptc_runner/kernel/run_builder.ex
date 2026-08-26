@@ -1543,7 +1543,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   # validation (so a bad output path never masks a more useful error) but
   # before provider preflight, credential resolution, acquisition, MCP
   # discovery, or model calls run.
-  # The atomic no-clobber creation in `InspectionArtifact.persist/3` remains
+  # The missing-destination publication in `InspectionArtifact.publish_handle/3` remains
   # authoritative for destinations that appear after this check.
   defp preflight_inspection(opts) do
     case Keyword.get(opts, :inspect) do
@@ -1692,7 +1692,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
           InspectionSink.start(
             run_id: identity.run_id,
             trace_id: identity.trace_id,
-            owner: owner
+            owner: owner,
+            publication_handle: PublicationAuthority.inspection_handle(authority)
           )
         end
 

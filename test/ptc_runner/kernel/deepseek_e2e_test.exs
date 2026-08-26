@@ -9,7 +9,6 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
-  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
@@ -17,6 +16,7 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.LLMSupport
+  alias PtcRunner.TestSupport.StreamingInspection
 
   @host Path.expand("../../../examples/kernel-tutorial/ptc-host.json", __DIR__)
 
@@ -117,7 +117,9 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
     run_id = "deepseek-generated-source-e2e"
     trace_id = "deepseek-generated-source-e2e-trace"
     {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id, trace_id: trace_id)
-    {:ok, inspection_sink} = InspectionSink.start(run_id: run_id, trace_id: trace_id)
+
+    {:ok, inspection_sink} =
+      StreamingInspection.start(run_id: run_id, trace_id: trace_id)
 
     prefix = "runtime-" <> Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false)
     <<random_number::unsigned-16>> = :crypto.strong_rand_bytes(2)
@@ -170,7 +172,7 @@ defmodule PtcRunner.Kernel.DeepSeekE2ETest do
     """
 
     assert {:ok, result} = Kernel.run(source, config)
-    {:ok, inspection_records} = InspectionSink.records(inspection_sink)
+    {:ok, inspection_records} = StreamingInspection.records(inspection_sink)
 
     assert result.value == "#{prefix}:#{number + 1}"
     assert result.usage.subordinate_source_checks == 1
