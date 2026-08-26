@@ -841,10 +841,9 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     refute presentation.stderr =~ traces
   end
 
-  test "help and version reject envelope as an undeclared switch" do
+  test "help and the --version shortcut reject envelope as an undeclared switch" do
     for argv <- [
           ["help", "run", "--envelope", "result.json"],
-          ["version", "--envelope", "result.json"],
           ["--version", "--envelope", "result.json"]
         ] do
       presentation =
@@ -910,13 +909,20 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       "docs_listing" => CommandOutcome.success(:docs, @run_ref, CommandContract.docs_result(nil)),
       "help_root" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:root)),
       "help_init" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:init)),
-      "help_run" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:run)),
-      "version" => CommandOutcome.success(:version, @run_ref, CommandContract.version_result())
+      "help_run" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:run))
     }
 
     for {name, outcome} <- rows do
       assert CommandRenderer.render(outcome) == {:stdout, @human_fixtures["success"][name]}
     end
+
+    identity = PtcRunner.BuildIdentity.current()
+    state = if identity.source_dirty, do: "dirty", else: "clean"
+    version = CommandOutcome.success(:version, @run_ref, CommandContract.version_result())
+
+    assert CommandRenderer.render(version) ==
+             {:stdout,
+              "#{identity.version} (#{String.slice(identity.source_revision, 0, 8)}, #{state})\n"}
   end
 
   test "successful run envelopes reject evaluator failure evidence" do
