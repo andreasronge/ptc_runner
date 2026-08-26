@@ -4,6 +4,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   alias PtcRunner.Examples.KernelInspectionLab.MCPFixture
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
@@ -68,15 +69,22 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
 
     manifest = manifest(name, mission_components, wrapper?)
     manifest_path = Path.join(directory, "ptc.json")
-    trace_path = Path.join(traces, "run.jsonl")
-    inspection_path = Path.join(inspection, "run.ptcins")
     :ok = File.write(manifest_path, Jason.encode!(manifest))
     registry = registry(endpoint, program, wrapper?, directory, cli)
 
-    with {:ok, request} <-
+    # Artifact discovery is filename-bound: `ptc transcript` selects
+    # `<run-ref>.jsonl` / `<run-ref>.ptcins`, and whole-directory admission
+    # isolates any trace whose stem is not its run ID. The lab therefore takes
+    # the same command run reference the CLI generates and names both artifacts
+    # after it, rather than inventing a run ID and a fixed filename.
+    with {:ok, run_ref} <- CommandRunRef.generate(),
+         trace_path = Path.join(traces, run_ref <> ".jsonl"),
+         inspection_path = Path.join(inspection, run_ref <> ".ptcins"),
+         {:ok, request} <-
            ApplicationPackage.request_directory(manifest_path,
              installed_limits: registry.installed_limits,
-             inspection_capture: true
+             inspection_capture: true,
+             event_identity: run_ref
            ),
          {:ok, built} <-
            RunBuilder.build(request, registry,
@@ -286,7 +294,6 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
         ]
       },
       "limits" => %{"evaluation_timeout_ms" => 10_000, "run_duration_ms" => 60_000},
-      "events" => %{"run_id" => "inspection-lab-#{name}"},
       "labels" => %{"name" => "inspection-lab-#{name}", "tags" => %{"mode" => name}}
     }
   end
