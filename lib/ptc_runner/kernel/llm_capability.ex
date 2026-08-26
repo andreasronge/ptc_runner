@@ -250,10 +250,11 @@ defmodule PtcRunner.Kernel.LLMCapability do
 
         {:error, :invalid_llm_usage} ->
           if schema_request? do
-            # Usage guarantees are interim-disabled in this slice, so malformed
-            # tokens on a schema response are provider output that failed the
-            # closed structured envelope (`output_schema_mismatch`), not
-            # promised-usage settlement (`promised_usage_missing`).
+            # Slice 3 chooses this taxonomy deliberately: usage guarantees are
+            # interim-disabled, so malformed tokens on a schema response are
+            # provider output that failed the closed structured envelope
+            # (`output_schema_mismatch`), not promised-usage settlement
+            # (`promised_usage_missing`).
             schema_output_mismatch(true, :invalid_result)
           else
             invalid_usage()
