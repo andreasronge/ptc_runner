@@ -34,6 +34,19 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     def call(_target, _invocation), do: raise("an unsupported contract must not reach call/2")
   end
 
+  defmodule MismatchedContractAdapter do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def prepare_model(model, requirements) do
+      {:ok, %{selector: model}, :unavailable,
+       %{requirements | structured_output_mode: :json_schema}}
+    end
+
+    @impl true
+    def call(_target, _invocation), do: raise("a mismatched contract must not reach call/2")
+  end
+
   @stdio_fixture Path.expand("../../support/mcp_stdio_fixture.exs", __DIR__)
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
@@ -1175,6 +1188,36 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert_local_preflight_parity(
       host,
       "codex",
+      :workflow,
+      {:error, :unsupported_model_option}
+    )
+  end
+
+  @tag :tmp_dir
+  test "a mismatched adapter attestation fails local preflight before credentials", %{
+    tmp_dir: dir
+  } do
+    previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
+    Application.put_env(:ptc_runner, :llm_adapter, MismatchedContractAdapter)
+
+    on_exit(fn -> restore_env(:llm_adapter, previous_adapter) end)
+
+    host =
+      load_host(dir, %{
+        "credentials" => %{"key" => %{"literal" => "test-llm-secret"}},
+        "install" => %{
+          "live" => %{
+            "source" => "llm",
+            "model" => "openrouter:test/model",
+            "credential" => "key",
+            "installation_revision" => "mismatch-v1"
+          }
+        }
+      })
+
+    assert_local_preflight_parity(
+      host,
+      "live",
       :workflow,
       {:error, :unsupported_model_option}
     )

@@ -53,6 +53,7 @@ if Code.ensure_loaded?(ReqLLM) do
       :api_key,
       :max_tokens,
       :max_retries,
+      :on_unsupported,
       :provider_options,
       :seed,
       :temperature,

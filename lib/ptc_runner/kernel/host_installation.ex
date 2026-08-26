@@ -66,7 +66,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.TraceSnapshot
-  alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.LLM.Requirements
 
   @inherited_compatibility_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
@@ -848,24 +847,20 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp attest_or_skip_local_contract(requirements, model, ReqLLMAdapter) do
-    case ReqLLMAdapter.local_contract_attestation(model, requirements) do
-      :ok -> :ok
-      {:error, :unsupported_model_option} = error -> error
-    end
-  end
-
   defp attest_or_skip_local_contract(requirements, model, adapter) do
-    adapter_local_prepare(adapter, model, requirements)
+    if function_exported?(adapter, :local_contract_attestation, 2) do
+      case adapter.local_contract_attestation(model, requirements) do
+        :ok -> :ok
+        {:error, :unsupported_model_option} = error -> error
+      end
+    else
+      adapter_local_prepare(adapter, model, requirements)
+    end
   end
 
   defp adapter_local_prepare(adapter, model, requirements) do
     if function_exported?(adapter, :prepare_model, 2) do
-      case adapter.prepare_model(model, requirements) do
-        {:ok, _target, _status, _attestation} -> :ok
-        {:error, :unsupported_model_option} = error -> error
-        {:error, _reason} -> {:error, :invalid_llm_model}
-      end
+      finish_adapter_local_prepare(adapter, model, requirements)
     else
       :ok
     end
@@ -873,6 +868,37 @@ defmodule PtcRunner.Kernel.HostInstallation do
     _exception -> {:error, :invalid_llm_model}
   catch
     _kind, _reason -> {:error, :invalid_llm_model}
+  end
+
+  defp finish_adapter_local_prepare(adapter, model, requirements) do
+    case Requirements.canonical(requirements) do
+      {:ok, canonical} ->
+        case adapter.prepare_model(model, canonical) do
+          {:ok, _target, _status, attestation} ->
+            match_local_attestation(canonical, attestation)
+
+          {:error, :unsupported_model_option} = error ->
+            error
+
+          {:error, _reason} ->
+            {:error, :invalid_llm_model}
+        end
+
+      :error ->
+        {:error, :invalid_llm_model}
+    end
+  end
+
+  defp match_local_attestation(canonical, attestation) do
+    case Requirements.canonical(attestation) do
+      {:ok, attested} ->
+        if Requirements.equal?(canonical, attested),
+          do: :ok,
+          else: {:error, :unsupported_model_option}
+
+      :error ->
+        {:error, :unsupported_model_option}
+    end
   end
 
   defp live_llm_requirements(installation, %{limits: limits}) do
