@@ -150,6 +150,17 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
             }} = ReqLLMAdapter.call(put_test_http_options(target, plug), invocation)
   end
 
+  test "a deadline expiring at final ReqLLM option assembly returns timeout" do
+    deadline = System.monotonic_time(:millisecond)
+
+    assert {:error,
+            %ProviderError{
+              kind: :timeout,
+              retryable?: true,
+              dispatch_provenance: :not_dispatched
+            }} = ReqLLMAdapter.request_deadline_opts([], deadline, deadline)
+  end
+
   test "ReqLLM whole-call timeout exceptions stay classified as timeouts" do
     timeout = ReqLLMTimeout.exception(kind: :total, timeout: 10)
 

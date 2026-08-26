@@ -179,11 +179,7 @@ if Code.ensure_loaded?(ReqLLM) do
       if Invocation.valid?(invocation) do
         case remaining_request_ms(invocation) do
           {:bounded, 0} ->
-            {:error,
-             ProviderError.new(:timeout, "LLM request deadline elapsed",
-               retryable?: true,
-               dispatch_provenance: :not_dispatched
-             )}
+            {:error, request_deadline_error()}
 
           _remaining ->
             dispatch_invocation(target, invocation)
@@ -1247,22 +1243,23 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp dispatch_invocation(target, invocation) do
       request = invocation.request
-      opts = invocation_opts(target, invocation)
       messages = build_messages(request)
 
-      cond do
-        is_map(Map.get(request, :schema)) ->
-          dispatch_structured(target, messages, request.schema, opts)
+      with {:ok, opts} <- invocation_opts(target, invocation) do
+        cond do
+          is_map(Map.get(request, :schema)) ->
+            dispatch_structured(target, messages, request.schema, opts)
 
-        is_list(Map.get(request, :tools)) and request.tools != [] ->
-          target
-          |> generate_with_tools(messages, request.tools, opts)
-          |> normalize_call_result(:tools)
+          is_list(Map.get(request, :tools)) and request.tools != [] ->
+            target
+            |> generate_with_tools(messages, request.tools, opts)
+            |> normalize_call_result(:tools)
 
-        true ->
-          target
-          |> generate_text(messages, opts)
-          |> normalize_call_result()
+          true ->
+            target
+            |> generate_text(messages, opts)
+            |> normalize_call_result()
+        end
       end
     end
 
@@ -1388,16 +1385,37 @@ if Code.ensure_loaded?(ReqLLM) do
          when is_integer(deadline),
          do: {:bounded, max(deadline - System.monotonic_time(:millisecond), 0)}
 
-    defp put_deadline_timeouts(opts, %Invocation{llm_request_deadline_ms: nil}), do: opts
+    defp put_deadline_timeouts(opts, %Invocation{llm_request_deadline_ms: nil}), do: {:ok, opts}
 
     defp put_deadline_timeouts(opts, %Invocation{llm_request_deadline_ms: deadline})
          when is_integer(deadline) do
-      remaining = max(deadline - System.monotonic_time(:millisecond), 0)
-      receive_timeout = min(Keyword.get(opts, :receive_timeout, @default_timeout), remaining)
+      request_deadline_opts(opts, deadline, System.monotonic_time(:millisecond))
+    end
 
-      opts
-      |> Keyword.put(:receive_timeout, receive_timeout)
-      |> Keyword.put(:total_timeout, :infinity)
+    @doc false
+    @spec request_deadline_opts(keyword(), integer(), integer()) ::
+            {:ok, keyword()} | {:error, ProviderError.t()}
+    def request_deadline_opts(opts, deadline, now)
+        when is_list(opts) and is_integer(deadline) and is_integer(now) do
+      remaining = max(deadline - now, 0)
+
+      if remaining == 0 do
+        {:error, request_deadline_error()}
+      else
+        receive_timeout = min(Keyword.get(opts, :receive_timeout, @default_timeout), remaining)
+
+        {:ok,
+         opts
+         |> Keyword.put(:receive_timeout, max(receive_timeout, 1))
+         |> Keyword.put(:total_timeout, :infinity)}
+      end
+    end
+
+    defp request_deadline_error do
+      ProviderError.new(:timeout, "LLM request deadline elapsed",
+        retryable?: true,
+        dispatch_provenance: :not_dispatched
+      )
     end
 
     defp req_timeout_opts(opts) do

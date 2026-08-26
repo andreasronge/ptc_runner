@@ -198,6 +198,47 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
            } = Task.await(task)
   end
 
+  test "a non-timeout result completed after the LLM deadline is relabeled" do
+    parent = self()
+
+    task =
+      Task.async(fn ->
+        {result, state, sink} =
+          dispatch_llm(parent,
+            request_timeout_ms: 100,
+            timeout_ms: 1_000,
+            requester: fn _request, %{llm_request_deadline_ms: deadline} ->
+              send(parent, {:ready, deadline, self()})
+
+              receive do
+                :return_after_deadline ->
+                  wait_until(deadline + 1)
+
+                  {:error,
+                   ProviderError.new(:rate_limited, "provider throttled", retryable?: true)}
+              end
+            end
+          )
+
+        evidence = RunState.consume_llm_provider_failure(state, :timeout, true)
+        {result, state, sink, evidence}
+      end)
+
+    assert_receive {:ready, _deadline, worker}
+    worker_ref = Process.monitor(worker)
+    assert true == :erlang.suspend_process(task.pid)
+    send(worker, :return_after_deadline)
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :normal}
+    assert true == :erlang.resume_process(task.pid)
+
+    assert {
+             %{status: :error, kind: :timeout, reason: :llm_request_timeout, retryable?: true},
+             _state,
+             _sink,
+             :ok
+           } = Task.await(task)
+  end
+
   test "a delayed Dispatcher preserves the earlier LLM deadline winner" do
     parent = self()
 

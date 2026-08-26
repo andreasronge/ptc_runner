@@ -885,6 +885,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     receive do
       {:provider_result, ^pid, completed_at_ms, result} ->
         await_down(pid, ref)
+        result = enforce_completion_deadline(invocation, completed_at_ms, result)
 
         case RunState.finish_provider(
                state,
@@ -932,6 +933,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
   defp await_down(pid, ref) do
     receive do
       {:DOWN, ^ref, :process, ^pid, reason} -> reason
+    end
+  end
+
+  defp enforce_completion_deadline(invocation, completed_at_ms, result) do
+    if llm_deadline_wins?(invocation, completed_at_ms) do
+      {:error, ProviderError.new(:timeout, "LLM request deadline elapsed", retryable?: true)}
+    else
+      result
     end
   end
 
