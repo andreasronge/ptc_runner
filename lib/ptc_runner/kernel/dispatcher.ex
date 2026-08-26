@@ -56,7 +56,6 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.LLM.OutputLimit
 
   @validation_handoff_ms 25
-  @output_validation_floor_ms @validation_handoff_ms
 
   @doc "Dispatches one capability through the bounded, context-aware boundary."
   @spec dispatch(
@@ -989,13 +988,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
     # Input validation reserves `@validation_handoff_ms` so a refusal can still
     # persist terminal host provenance. Output admission runs after dispatch,
     # so that reserve must not turn a still-open deadline into unavailability.
-    # Provider work may still consume the shared evaluation deadline; admission
-    # keeps a bounded floor so a valid result is not classified as validator
-    # unavailability. The worker remains heap- and time-capped.
-    max(
-      deadline_ms - System.monotonic_time(:millisecond),
-      @output_validation_floor_ms
-    )
+    # Once the shared deadline has expired, remaining time is zero and the
+    # value is not admitted.
+    max(deadline_ms - System.monotonic_time(:millisecond), 0)
   end
 
   defp output_validation(heap_words, deadline_ms, evaluation_lease) do

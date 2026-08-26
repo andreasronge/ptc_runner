@@ -127,15 +127,21 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
            end)
   end
 
-  test "valid output is admitted after the shared validation deadline" do
+  test "an expired shared validation deadline does not admit valid output" do
     parent = self()
     deadline_ms = System.monotonic_time(:millisecond) + 200
 
     {:ok, capability} =
       Capability.new(
-        name: "checked-output",
+        name: request_schema_name(),
         effect: :read,
-        input_schema: %{"type" => "object"},
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{
+            "schema" => %{"type" => "object", "additionalProperties" => true}
+          },
+          "required" => ["schema"]
+        },
         output_schema: %{
           "type" => "object",
           "properties" => %{"ok" => %{"type" => "boolean"}},
@@ -152,7 +158,11 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
 
     task =
       Task.async(fn ->
-        dispatch_capability(capability, %{}, validation_deadline_ms: deadline_ms)
+        dispatch_capability(
+          capability,
+          %{"schema" => @request_schema},
+          validation_deadline_ms: deadline_ms
+        )
       end)
 
     assert_receive {:in_callback, worker}
@@ -169,7 +179,13 @@ defmodule PtcRunner.Kernel.DispatcherBoundedSchemaTest do
     send(worker, :continue)
 
     assert {result, _state, _sink} = Task.await(task)
-    assert %{status: :ok, value: %{"ok" => true}} = result
+
+    assert %{
+             status: :error,
+             kind: :capability_unavailable,
+             reason: :output_validation_unavailable,
+             retryable?: false
+           } = result
   end
 
   test "output validator unavailability is distinct from invalid provider output" do

@@ -4301,7 +4301,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     unstable = %{unstable | input_validator: :forced_validator_failure}
 
     {:ok, inspection_sink} =
-      InspectionSink.start(
+      StreamingInspection.start(
         run_id: "input-validator-unavailable",
         trace_id: "input-validator-unavailable"
       )
@@ -4352,7 +4352,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     unstable = %{unstable | output_validator: :forced_validator_failure}
 
     {:ok, inspection_sink} =
-      InspectionSink.start(
+      StreamingInspection.start(
         run_id: "output-validator-unavailable",
         trace_id: "output-validator-unavailable"
       )
@@ -4852,7 +4852,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   end
 
   defp assert_host_validation_unavailable_reason(inspection_sink, reason) do
-    assert {:ok, records} = InspectionSink.records(inspection_sink)
+    assert {:ok, records} = StreamingInspection.records(inspection_sink)
 
     fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
 
