@@ -31,10 +31,11 @@ defmodule PtcRunner.ViewerSnapshotStore do
 
   @opaque t :: %__MODULE__{pid: pid(), token: reference()}
 
+  @typedoc false
   @type capture_inspection ::
-          (TraceSnapshot.t(), integer() ->
+          (term(), integer() ->
              {:ok, InspectionSnapshot.t() | nil} | {:error, term()})
-          | (ProjectConfig.t() | nil, TraceSnapshot.t(), integer() ->
+          | (ProjectConfig.t() | nil, term(), integer() ->
                {:ok, InspectionSnapshot.t() | nil} | {:error, term()})
 
   @spec start(
