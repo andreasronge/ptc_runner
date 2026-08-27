@@ -196,54 +196,79 @@
          consolidate-at-turns-remaining
          has-next-phase?)))
 
-(defn- transitioned-state
-  [phases phase-index messages action content effective-cfg
-   consolidate-at-turns-remaining closing?]
-  (if (next-phase? phases phase-index)
-    (let [next-index (inc phase-index)
-          next-phase (get phases next-index)
-          next-cfg (phase-effective-cfg effective-cfg next-phase)
-          retained (append-agent-feedback messages action content)]
-      {:phase-index next-index
-       :turn 0
-       :messages
-       (conj retained
-             {"role" "user"
-              "content"
-              (phase-transition-message
-                next-phase
-                consolidate-at-turns-remaining
-                (next-phase? phases next-index))})
-       :prompt-state (agent.prompt/initial-state next-cfg)
-       :closing? closing?})
-    nil))
+(defn- command-continue [state next-state]
+  {:op :continue
+   :state (assoc next-state :agent-turn (inc (get state :agent-turn)))})
 
-(defn- continuation-state
-  [phases phase-index turn messages action content prompt-state effective-cfg
-   consolidate-at-turns-remaining closing? event-type]
-  (let [phase (get phases phase-index)
-        max-turns (get phase "max_turns")
-        event (completed-event event-type turn max-turns)]
-    (if (agent.retry/retry? turn max-turns)
+(defn- command-done [outcome]
+  {:op :done :outcome outcome})
+
+(defn- current-phase [context state]
+  (get (get context :phases) (get state :phase-index)))
+
+(defn- current-cfg [context state]
+  (phase-effective-cfg (get context :effective-cfg) (current-phase context state)))
+
+(defn- event-completed [type state phase]
+  (completed-event type (get state :phase-turn) (get phase "max_turns")))
+
+(defn- event-action [action]
+  {:type :action :kind (get action :kind) :action action})
+
+(defn- transitioned-state [context state action content]
+  (let [phases (get context :phases)
+        phase-index (get state :phase-index)]
+    (if (next-phase? phases phase-index)
+      (let [next-index (inc phase-index)
+            next-phase (get phases next-index)
+            next-cfg (phase-effective-cfg (get context :effective-cfg) next-phase)
+            retained (append-agent-feedback (get state :messages) action content)]
+        {:phase-index next-index
+         :phase-turn 0
+         :messages
+         (conj retained
+               {"role" "user"
+                "content"
+                (phase-transition-message
+                  next-phase
+                  (get context :consolidate-at-turns-remaining)
+                  (next-phase? phases next-index))})
+         :prompt-state (agent.prompt/initial-state next-cfg)
+         :closing? (get state :closing?)})
+      nil)))
+
+(defn- continuation-state [context state action content event-type]
+  (let [phases (get context :phases)
+        phase-index (get state :phase-index)
+        phase (current-phase context state)
+        event (event-completed event-type state phase)]
+    (if (agent.retry/retry? (get state :phase-turn) (get phase "max_turns"))
       {:phase-index phase-index
-       :turn (inc turn)
+       :phase-turn (inc (get state :phase-turn))
        :messages
        (append-agent-feedback
-         messages
+         (get state :messages)
          action
          (with-phase-budget
            content
            (get event :turns-remaining)
-           consolidate-at-turns-remaining
+           (get context :consolidate-at-turns-remaining)
            (next-phase? phases phase-index)))
-       :prompt-state (transition-prompt prompt-state event)
-       :closing? closing?}
-      (transitioned-state
-        phases phase-index messages action content effective-cfg
-        consolidate-at-turns-remaining closing?))))
+       :prompt-state (transition-prompt (get state :prompt-state) event)
+       :closing? (get state :closing?)}
+      (transitioned-state context state action content))))
 
-(defn- bounded-request [prompt-state messages cfg max-transcript-chars]
-  (let [base-request {"system" (system-message prompt-state)
+(defn- continue-or [state next-state fallback]
+  (if next-state
+    (command-continue state next-state)
+    fallback))
+
+(defn- bounded-request [context state]
+  (let [cfg (current-cfg context state)
+        prompt-state (get state :prompt-state)
+        messages (get state :messages)
+        max-transcript-chars (get context :max-transcript-chars)
+        base-request {"system" (system-message prompt-state)
                       "messages" messages
                       "tools" [(agent.native/tool-schema)]}
         request (if (contains? cfg "model")
@@ -365,6 +390,257 @@
 (defn- project-ok [value]
   (result/ok value))
 
+(defn- annotate-action [context state action]
+  (let [phase (current-phase context state)]
+    (workflow.event/annotate
+      "agent-action"
+      (if (get context :phased?)
+        {:turn (get state :agent-turn)
+         :phase (get state :phase-index)
+         :phase-turn (get state :phase-turn)
+         :mission (get phase "mission")
+         :kind (get action :kind)}
+        {:turn (get state :phase-turn) :kind (get action :kind)}))))
+
+(defn- dispatch-request [context state]
+  (let [action (agent.native/normalize
+                 (llm/request (bounded-request context state))
+                 (get context :max-program-chars))]
+    (annotate-action context state action)
+    action))
+
+(defn- unsafe-closing-state [context state action evaluation]
+  (let [event (event-completed :evaluation-error state (current-phase context state))]
+    {:phase-index (get state :phase-index)
+     :phase-turn (inc (get state :phase-turn))
+     :messages
+     (append-correlated
+       (get state :messages)
+       action
+       ;; The closing instruction must remain the last and strongest
+       ;; direction even when the hard turn limit has more runway.
+       (str (agent.feedback/turn-budget
+              (get event :turns-remaining)
+              (get context :consolidate-at-turns-remaining))
+            "\n\n"
+            (agent.feedback/non-retryable evaluation)))
+     :prompt-state (transition-prompt (get state :prompt-state) event)
+     :closing? true}))
+
+(defn- decide-protocol-and-limits [context state event]
+  (let [action (get event :action)
+        kind (get event :kind)
+        total-max-turns (get context :total-max-turns)]
+    (cond
+      (= :protocol-error kind)
+      (let [_counted (tool/kernel-agent-protocol-error {})]
+        (continue-or
+          state
+          (continuation-state
+            context state action (agent.feedback/protocol-error action) :protocol-error)
+          (command-done (turn-limit-failure :protocol-error total-max-turns))))
+
+      (= :model-output-truncated kind)
+      (let [limit (get action :output-limit)]
+        (command-done
+          (if (map? limit)
+            (tool/kernel-runtime-limit-failure
+              {"max_tokens" (get limit "value")
+               "bindings" (get limit "bindings")
+               "alias" (get action :model)})
+            (tool/kernel-runtime-limit-failure
+              {"alias" (get action :model)}))))
+
+      (= :max-calls kind)
+      (command-done
+        (provider-failure
+          (get action :error)
+          (resolved-model action (current-cfg context state))))
+
+      (= :provider-error kind)
+      (if (agent.failure/classify (get action :error))
+        (command-done
+          (provider-failure
+            (get action :error)
+            (resolved-model action (current-cfg context state))))
+        (fail
+          (tool/kernel-llm-provider-failure
+            (result/error :llm-provider-error (get action :error)))))
+
+      :else nil)))
+
+(defn- decide-source-admission [context state event]
+  (when (= :tool-call (get event :kind))
+    (let [action (get event :action)
+          phase (current-phase context state)
+          source-check (terminal-source-check
+                         phase
+                         (get phase "mission")
+                         (get action :program))]
+      (if (= :valid (get source-check :outcome))
+        nil
+        (if (= :invalid (get source-check :outcome))
+          (continue-or
+            state
+            (continuation-state
+              context state action
+              (agent.feedback/terminal-source-required source-check)
+              :terminal-source-required)
+            (command-done
+              (turn-limit-failure
+                :terminal-source-required
+                (get context :total-max-turns))))
+          (fail (result/error :evaluation-unavailable
+                              (or (get source-check :reason)
+                                  (get source-check :outcome)))))))))
+
+(defn- decide-result-validation [context state action evaluation]
+  (let [projector (get context :projector)
+        total-max-turns (get context :total-max-turns)
+        value (get evaluation :value)]
+    (if (nil? projector)
+      (command-done (returned-outcome value))
+      (let [projected (projector value)
+            validation (kernel/validate-result projected)]
+        (if (true? (get validation :valid?))
+          (command-done (returned-outcome projected))
+          ;; `kernel-result-contract-failure` aborts; it must not be evaluated
+          ;; unless this is actually the last correction turn.
+          (let [next-state
+                (continuation-state
+                  context state action
+                  (agent.feedback/result-contract validation)
+                  :result-contract-error)]
+            (if next-state
+              (command-continue state next-state)
+              (command-done
+                (result-contract-failure projected total-max-turns)))))))))
+
+(defn- decide-returned [context state action evaluation]
+  (if (next-phase? (get context :phases) (get state :phase-index))
+    (command-continue
+      state
+      (transitioned-state
+        context state action
+        (agent.feedback/success evaluation (get context :max-observation-chars))))
+    (decide-result-validation context state action evaluation)))
+
+(defn- decide-retryable-evaluation [context state action evaluation]
+  (let [phase (current-phase context state)
+        total-max-turns (get context :total-max-turns)]
+    (if (false? (get evaluation :retryable?))
+      ;; An unsafe failure forbids repeating the program, not salvaging the
+      ;; run. Spend one closing turn asking for a decision from evidence
+      ;; already gathered rather than discarding every prior evaluation; a
+      ;; second unsafe failure ends it.
+      (if (get state :closing?)
+        (command-done
+          (subject-failure :non-retryable-evaluation (get evaluation :kind)))
+        (if (agent.retry/retry? (get state :phase-turn) (get phase "max_turns"))
+          (command-continue state (unsafe-closing-state context state action evaluation))
+          (let [closing-state (assoc state :closing? true)]
+            (continue-or
+              closing-state
+              (continuation-state
+                context closing-state action
+                (agent.feedback/non-retryable evaluation)
+                :evaluation-error)
+              (command-done
+                (subject-failure :non-retryable-evaluation (get evaluation :kind)))))))
+      (continue-or
+        state
+        (continuation-state
+          context state action
+          (agent.feedback/evaluation-error evaluation)
+          :evaluation-error)
+        (command-done (turn-limit-failure :evaluation-error total-max-turns))))))
+
+(defn- decide-evaluation [context state event]
+  (let [action (get event :action)
+        phase (current-phase context state)
+        evaluation (evaluate-agent-source
+                     (get phase "mission")
+                     (get action :program)
+                     (get context :max-observation-chars))
+        total-max-turns (get context :total-max-turns)
+        max-observation-chars (get context :max-observation-chars)]
+    ;; Host policy and malformed/provider-initiated MCP exchanges are not
+    ;; argument mistakes the model can correct. The Kernel derives this
+    ;; provenance from the private capability ledger, so it applies even when
+    ;; a later expression fails.
+    (cond
+      (true? (get evaluation :terminal-host-failure?))
+      (fail (result/error :capability-unavailable
+                          (host-validation-unavailable-reason evaluation)))
+
+      (true? (get evaluation :terminal-provider-failure?))
+      (command-done
+        (subject-failure
+          :model-program-failed
+          (if (= :failed (get evaluation :outcome))
+            (get evaluation :value)
+            :terminal-provider-failure)))
+
+      :else
+      (case (get evaluation :outcome)
+        :returned
+        (decide-returned context state action evaluation)
+
+        :failed
+        (if (correctable-capability-failure? evaluation)
+          (continue-or
+            state
+            (continuation-state
+              context state action
+              (agent.feedback/capability-error evaluation)
+              :evaluation-error)
+            (command-done
+              (subject-failure :model-program-failed (get evaluation :value))))
+          (command-done
+            (subject-failure :model-program-failed (get evaluation :value))))
+
+        :continued
+        (continue-or
+          state
+          (continuation-state
+            context state action
+            (agent.feedback/success evaluation max-observation-chars)
+            :evaluation-success)
+          (command-done (turn-limit-failure :intermediate-result total-max-turns)))
+
+        ;; A refused admission is a host condition, not something the model
+        ;; wrote: either another caller holds the run's single evaluation
+        ;; lease, or the run has spent its evaluation budget. Correcting the
+        ;; program cannot clear either one, so this fails the outer workflow
+        ;; rather than spending a turn and a model call on feedback the model
+        ;; cannot act on.
+        :busy
+        (fail (result/error :evaluation-unavailable (get evaluation :reason)))
+
+        :limit_exceeded
+        (if (= :subordinate_evaluations (get evaluation :reason))
+          (command-done
+            (tool/kernel-runtime-limit-failure
+              {:proof (get evaluation :limit_proof)}))
+          (fail (result/error :evaluation-unavailable (get evaluation :reason))))
+
+        (decide-retryable-evaluation context state action evaluation)))))
+
+(defn- decide-action [context state action]
+  (let [event (event-action action)]
+    (or (decide-protocol-and-limits context state event)
+        (decide-source-admission context state event)
+        (when (= :tool-call (get event :kind))
+          (decide-evaluation context state event))
+        (fail (result/error :unknown-action (get action :kind))))))
+
+(defn- step [context state]
+  (let [phase (current-phase context state)]
+    (if (>= (get state :phase-turn) (get phase "max_turns"))
+      (command-done
+        (turn-limit-failure :turn-limit-exceeded (get context :total-max-turns)))
+      (decide-action context state (dispatch-request context state)))))
+
 (defn- run-outcome*
   "Runs the agent loop and distinguishes model-authored completion, a bounded
   subject-attributable failure, and a bounded provider failure.
@@ -395,286 +671,39 @@
         initial-phase (first phases)
         initial-effective-cfg (phase-effective-cfg effective-cfg initial-phase)
         initial-prompt-state (agent.prompt/initial-state initial-effective-cfg)
-        phased? (contains? cfg "phases")]
+        context {:effective-cfg effective-cfg
+                 :phases phases
+                 :total-max-turns total-max-turns
+                 :consolidate-at-turns-remaining consolidate-at-turns-remaining
+                 :max-program-chars max-program-chars
+                 :max-observation-chars max-observation-chars
+                 :max-transcript-chars max-transcript-chars
+                 :projector projector
+                 :phased? (contains? cfg "phases")}
+        ;; An instruction is delivered when its phase begins. Later phases
+        ;; receive it in the transition message; the first phase has no
+        ;; transition, so it rides with the initial task.
+        initial-state {:phase-index 0
+                       :phase-turn 0
+                       :agent-turn 0
+                       :messages [{"role" "user"
+                                   "content"
+                                   (with-phase-budget
+                                     (if (nonblank-string? (get initial-phase "instruction"))
+                                       (str task "\n\n" (get initial-phase "instruction"))
+                                       task)
+                                     (get initial-phase "max_turns")
+                                     consolidate-at-turns-remaining
+                                     (next-phase? phases 0))}]
+                       :prompt-state initial-prompt-state
+                       :closing? false}]
     (if (not (map? initial-prompt-state))
       (fail (result/error :invalid-prompt :invalid-initial-state))
-      (loop [turn 0
-             agent-turn 0
-             phase-index 0
-             ;; An instruction is delivered when its phase begins. Later
-             ;; phases receive it in the transition message; the first phase
-             ;; has no transition, so it rides with the initial task.
-             messages [{"role" "user"
-                        "content"
-                        (with-phase-budget
-                          (if (nonblank-string? (get initial-phase "instruction"))
-                            (str task "\n\n" (get initial-phase "instruction"))
-                            task)
-                          (get initial-phase "max_turns")
-                          consolidate-at-turns-remaining
-                          (next-phase? phases 0))}]
-             prompt-state initial-prompt-state
-             closing? false]
-        (let [phase (get phases phase-index)
-              max-turns (get phase "max_turns")
-              mission-name (get phase "mission")
-              current-effective-cfg (phase-effective-cfg effective-cfg phase)]
-          (if (>= turn max-turns)
-          (turn-limit-failure :turn-limit-exceeded total-max-turns)
-          (let [request (bounded-request
-                          prompt-state
-                          messages
-                          current-effective-cfg
-                          max-transcript-chars)
-                response (llm/request request)
-                action (agent.native/normalize response max-program-chars)]
-            (workflow.event/annotate
-              "agent-action"
-              (if phased?
-                {:turn agent-turn
-                 :phase phase-index
-                 :phase-turn turn
-                 :mission mission-name
-                 :kind (get action :kind)}
-                {:turn turn :kind (get action :kind)}))
-            (case (get action :kind)
-              :tool-call
-              (let [source-check
-                    (terminal-source-check phase mission-name (get action :program))]
-                (if (= :valid (get source-check :outcome))
-                  (let [evaluation (evaluate-agent-source
-                                     mission-name
-                                     (get action :program)
-                                     max-observation-chars)]
-                ;; Host policy and malformed/provider-initiated MCP exchanges
-                ;; are not argument mistakes the model can correct. The Kernel
-                ;; derives this provenance from the private capability ledger,
-                ;; so it applies even when a later expression fails.
-                (if (true? (get evaluation :terminal-host-failure?))
-                  (fail (result/error :capability-unavailable
-                                      (host-validation-unavailable-reason evaluation)))
-                  (if (true? (get evaluation :terminal-provider-failure?))
-                    (subject-failure
-                      :model-program-failed
-                      (if (= :failed (get evaluation :outcome))
-                        (get evaluation :value)
-                        :terminal-provider-failure))
-                    (case (get evaluation :outcome)
-                    :returned
-                    (if (next-phase? phases phase-index)
-                      (let [next-state
-                            (transitioned-state
-                              phases phase-index messages action
-                              (agent.feedback/success evaluation max-observation-chars)
-                              effective-cfg consolidate-at-turns-remaining closing?)]
-                        (recur (get next-state :turn)
-                               (inc agent-turn)
-                               (get next-state :phase-index)
-                               (get next-state :messages)
-                               (get next-state :prompt-state)
-                               (get next-state :closing?)))
-                      (if (nil? projector)
-                        (returned-outcome (get evaluation :value))
-                        (let [projected (projector (get evaluation :value))
-                              validation (kernel/validate-result projected)]
-                          (if (true? (get validation :valid?))
-                            (returned-outcome projected)
-                            (let [next-state
-                                  (continuation-state
-                                    phases phase-index turn messages action
-                                    (agent.feedback/result-contract validation)
-                                    prompt-state effective-cfg
-                                    consolidate-at-turns-remaining closing?
-                                    :result-contract-error)]
-                              (if next-state
-                                (recur (get next-state :turn)
-                                       (inc agent-turn)
-                                       (get next-state :phase-index)
-                                       (get next-state :messages)
-                                       (get next-state :prompt-state)
-                                       (get next-state :closing?))
-                                (result-contract-failure
-                                  projected
-                                  total-max-turns)))))))
-                    :failed
-                    (if (correctable-capability-failure? evaluation)
-                      (let [next-state
-                            (continuation-state
-                              phases phase-index turn messages action
-                              (agent.feedback/capability-error evaluation)
-                              prompt-state effective-cfg
-                              consolidate-at-turns-remaining closing?
-                              :evaluation-error)]
-                        (if next-state
-                          (recur (get next-state :turn)
-                                 (inc agent-turn)
-                                 (get next-state :phase-index)
-                                 (get next-state :messages)
-                                 (get next-state :prompt-state)
-                                 (get next-state :closing?))
-                          (subject-failure :model-program-failed (get evaluation :value))))
-                      (subject-failure :model-program-failed (get evaluation :value)))
-                    :continued
-                    (let [next-state
-                          (continuation-state
-                            phases phase-index turn messages action
-                            (agent.feedback/success evaluation max-observation-chars)
-                            prompt-state effective-cfg
-                            consolidate-at-turns-remaining closing?
-                            :evaluation-success)]
-                      (if next-state
-                        (recur (get next-state :turn)
-                               (inc agent-turn)
-                               (get next-state :phase-index)
-                               (get next-state :messages)
-                               (get next-state :prompt-state)
-                               (get next-state :closing?))
-                        (turn-limit-failure :intermediate-result total-max-turns)))
-
-                    ;; A refused admission is a host condition, not something
-                    ;; the model wrote: either another caller holds the run's
-                    ;; single evaluation lease, or the run has spent its
-                    ;; evaluation budget. Correcting the program cannot clear
-                    ;; either one, so this fails the outer workflow rather than
-                    ;; spending a turn and a model call on feedback the model
-                    ;; cannot act on.
-                    :busy
-                    (fail (result/error :evaluation-unavailable
-                                        (get evaluation :reason)))
-
-                    :limit_exceeded
-                    (if (= :subordinate_evaluations (get evaluation :reason))
-                      (tool/kernel-runtime-limit-failure
-                        {:proof (get evaluation :limit_proof)})
-                      (fail (result/error :evaluation-unavailable
-                                          (get evaluation :reason))))
-
-                    (if (false? (get evaluation :retryable?))
-                      ;; An unsafe failure forbids repeating the program, not
-                      ;; salvaging the run. Spend one closing turn asking for a
-                      ;; decision from evidence already gathered rather than
-                      ;; discarding every prior evaluation; a second unsafe
-                      ;; failure ends it.
-                      (if closing?
-                        (subject-failure :non-retryable-evaluation (get evaluation :kind))
-                        (if (agent.retry/retry? turn max-turns)
-                          (let [event (completed-event :evaluation-error turn max-turns)
-                                next-prompt-state (transition-prompt prompt-state event)]
-                            (recur (inc turn)
-                                   (inc agent-turn)
-                                   phase-index
-                                   (append-correlated
-                                     messages
-                                     action
-                                     ;; The closing instruction must remain the last
-                                     ;; and strongest direction even when the hard
-                                     ;; turn limit has more runway.
-                                     (str (agent.feedback/turn-budget
-                                            (get event :turns-remaining)
-                                            consolidate-at-turns-remaining)
-                                          "\n\n"
-                                          (agent.feedback/non-retryable evaluation)))
-                                   next-prompt-state
-                                   true))
-                          (let [next-state
-                                (continuation-state
-                                  phases phase-index turn messages action
-                                  (agent.feedback/non-retryable evaluation)
-                                  prompt-state effective-cfg
-                                  consolidate-at-turns-remaining true
-                                  :evaluation-error)]
-                            (if next-state
-                              (recur (get next-state :turn)
-                                     (inc agent-turn)
-                                     (get next-state :phase-index)
-                                     (get next-state :messages)
-                                     (get next-state :prompt-state)
-                                     (get next-state :closing?))
-                              (subject-failure
-                                :non-retryable-evaluation
-                                (get evaluation :kind))))))
-                      (let [next-state
-                            (continuation-state
-                              phases phase-index turn messages action
-                              (agent.feedback/evaluation-error evaluation)
-                              prompt-state effective-cfg
-                              consolidate-at-turns-remaining closing?
-                              :evaluation-error)]
-                        (if next-state
-                          (recur (get next-state :turn)
-                                 (inc agent-turn)
-                                 (get next-state :phase-index)
-                                 (get next-state :messages)
-                                 (get next-state :prompt-state)
-                                 (get next-state :closing?))
-                          (turn-limit-failure
-                            :evaluation-error
-                            total-max-turns))))))))
-                  (if (= :invalid (get source-check :outcome))
-                    (let [next-state
-                          (continuation-state
-                            phases phase-index turn messages action
-                            (agent.feedback/terminal-source-required source-check)
-                            prompt-state effective-cfg
-                            consolidate-at-turns-remaining closing?
-                            :terminal-source-required)]
-                      (if next-state
-                        (recur (get next-state :turn)
-                               (inc agent-turn)
-                               (get next-state :phase-index)
-                               (get next-state :messages)
-                               (get next-state :prompt-state)
-                               (get next-state :closing?))
-                        (turn-limit-failure
-                          :terminal-source-required
-                          total-max-turns)))
-                    (fail (result/error :evaluation-unavailable
-                                        (or (get source-check :reason)
-                                            (get source-check :outcome)))))))
-
-              :protocol-error
-              (let [_counted (tool/kernel-agent-protocol-error {})
-                    next-state
-                    (continuation-state
-                      phases phase-index turn messages action
-                      (agent.feedback/protocol-error action)
-                      prompt-state effective-cfg
-                      consolidate-at-turns-remaining closing?
-                      :protocol-error)]
-                (if next-state
-                  (recur (get next-state :turn)
-                         (inc agent-turn)
-                         (get next-state :phase-index)
-                         (get next-state :messages)
-                         (get next-state :prompt-state)
-                         (get next-state :closing?))
-                  (turn-limit-failure :protocol-error total-max-turns)))
-
-              :model-output-truncated
-              (let [limit (get action :output-limit)]
-                (if (map? limit)
-                  (tool/kernel-runtime-limit-failure
-                    {"max_tokens" (get limit "value")
-                     "bindings" (get limit "bindings")
-                     "alias" (get action :model)})
-                  (tool/kernel-runtime-limit-failure
-                    {"alias" (get action :model)})))
-
-              :max-calls
-              (provider-failure
-                (get action :error)
-                (resolved-model action current-effective-cfg))
-
-              :provider-error
-              (if (agent.failure/classify (get action :error))
-                (provider-failure
-                  (get action :error)
-                  (resolved-model action current-effective-cfg))
-                (fail
-                  (tool/kernel-llm-provider-failure
-                    (result/error :llm-provider-error (get action :error)))))
-
-              (fail (result/error :unknown-action (get action :kind)))))))))))
+      (loop [state initial-state]
+        (let [decision (step context state)]
+          (if (= :continue (get decision :op))
+            (recur (get decision :state))
+            (get decision :outcome)))))))
 
 (defn run-outcome
   "Runs the agent loop and distinguishes model-authored completion from a
