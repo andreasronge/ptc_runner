@@ -704,6 +704,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
           "model" => %{
             "source" => "llm",
             "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
             "installation_revision" => "model-v1",
             "model" => "openrouter:test/model",
             "credential" => "key"

@@ -837,6 +837,12 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           route
       end
 
+    route =
+      case descriptor.usage_guarantees do
+        guarantees when is_map(guarantees) -> Map.put(route, :usage_guarantees, guarantees)
+        _absent -> route
+      end
+
     case descriptor.request_timeout_ms do
       timeout_ms when is_integer(timeout_ms) ->
         Map.put(route, :request_timeout_ms, timeout_ms)

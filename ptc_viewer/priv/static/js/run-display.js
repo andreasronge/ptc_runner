@@ -10,17 +10,17 @@ export function displayRunName(run, project) {
 }
 
 export function formatRunSpend(spend) {
-  if (spendExceedsDisplayRange(spend)) return ['usage exceeds display range'];
   if (!validSpend(spend)) return [];
   if (spend.state === 'empty') return [];
   if (spend.state === 'incomplete') return ['usage incomplete'];
+  if (spend.state === 'overflow') return ['usage overflow'];
 
   const fields = [];
   fields.push(`${spend.input.toLocaleString('en-US')} in`);
   fields.push(`${spend.output.toLocaleString('en-US')} out`);
 
   if (spend.state === 'available') {
-    fields.push(`cost ${spend.total_cost.toLocaleString('en-US', { maximumSignificantDigits: 6 })}`);
+    fields.push(`cost ${formatMicrousd(spend.total_cost.microunits)}`);
   } else {
     fields.push('cost unavailable');
   }
@@ -32,7 +32,7 @@ export function validSpend(spend) {
   if (!spend || typeof spend !== 'object' || Array.isArray(spend)) return false;
   const keys = Object.keys(spend).sort();
 
-  if (spend.state === 'empty' || spend.state === 'incomplete') {
+  if (spend.state === 'empty' || spend.state === 'incomplete' || spend.state === 'overflow') {
     return keys.length === 1 && keys[0] === 'state';
   }
 
@@ -45,21 +45,21 @@ export function validSpend(spend) {
 
   return spend.state === 'available' &&
     keys.join(',') === 'input,output,state,total_cost' &&
-    typeof spend.total_cost === 'number' && Number.isFinite(spend.total_cost) && spend.total_cost >= 0;
+    validUsdCost(spend.total_cost);
 }
 
-function spendExceedsDisplayRange(spend) {
-  if (!spend || typeof spend !== 'object' || Array.isArray(spend)) return false;
-  const keys = Object.keys(spend).sort().join(',');
-  const tokens = [spend.input, spend.output];
-  const integerTokens = tokens.every(value => Number.isInteger(value) && value >= 0);
-  const unsafeTokens = tokens.some(value => !Number.isSafeInteger(value));
+function validUsdCost(cost) {
+  if (!cost || typeof cost !== 'object' || Array.isArray(cost)) return false;
+  const keys = Object.keys(cost).sort().join(',');
+  return keys === 'currency,microunits' && cost.currency === 'USD' &&
+    Number.isSafeInteger(cost.microunits) && cost.microunits >= 0;
+}
 
-  if (!integerTokens || !unsafeTokens) return false;
-  if (spend.state === 'unpriced') return keys === 'input,output,state';
-
-  return spend.state === 'available' && keys === 'input,output,state,total_cost' &&
-    typeof spend.total_cost === 'number' && Number.isFinite(spend.total_cost) && spend.total_cost >= 0;
+function formatMicrousd(microunits) {
+  const whole = Math.trunc(microunits / 1_000_000);
+  const fraction = String(microunits % 1_000_000).padStart(6, '0').replace(/0+$/, '');
+  const dollars = whole.toLocaleString('en-US');
+  return fraction === '' ? dollars : `${dollars}.${fraction}`;
 }
 
 export function searchableRunFields(run, project) {

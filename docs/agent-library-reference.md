@@ -491,9 +491,10 @@ A schema request succeeds only as `structured_output` plus optional `tokens`
 and `model`; there is no encoded `content` duplicate. Normalized tool calls
 use `id`, `name`, and `args`. Invalid provider
 arguments may include a bounded `args_error` classification. Token usage may
-include `input`, `output`, `cache_creation`, `cache_read`, and `total_cost`.
-When provider pricing is unavailable, `total_cost` is absent; a present zero is
-a measured zero-cost response.
+include `input`, `output`, `cache_creation`, `cache_read`, and fixed-point
+`total_cost` as a USD currency and integer microunits object. When provider
+pricing is unavailable, `total_cost` is absent; a present zero-microunit object
+is a measured zero-cost response.
 
 For non-streaming ReqLLM tool calls, `finish_reason` uses ReqLLM's normalized
 vocabulary rather than raw provider stop metadata. A `length` response carries

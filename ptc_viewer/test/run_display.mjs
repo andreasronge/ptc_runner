@@ -14,7 +14,10 @@ const run = {
   run_id: 'cmd-616240gsqd5q3hrzd857ar9xzh',
   name: `sha256:${'a'.repeat(64)}`,
   tags: { mode: 'agent' },
-  llm_spend: { state: 'available', input: 12345, output: 678, total_cost: 0.0042 }
+  llm_spend: {
+    state: 'available', input: 12345, output: 678,
+    total_cost: { currency: 'USD', microunits: 4200 }
+  }
 };
 
 const matchingProject = { name: 'chief-of-staff-02-granting-data', name_fingerprint: run.name };
@@ -28,15 +31,13 @@ assert.deepEqual(formatRunSpend(run.llm_spend), [
   'cost 0.0042'
 ]);
 
-const overflowSpend = {
-  state: 'available',
-  input: 18_014_398_509_481_981,
-  output: 18_014_398_509_481_982,
-  total_cost: 2e12
-};
-assert.equal(validSpend(overflowSpend), false);
-assert.deepEqual(formatRunSpend(overflowSpend), ['usage exceeds display range']);
-assert.deepEqual(formatRunSpend({ state: 'available', input: 0, output: 0, total_cost: 0 }), [
+const overflowSpend = { state: 'overflow' };
+assert.equal(validSpend(overflowSpend), true);
+assert.deepEqual(formatRunSpend(overflowSpend), ['usage overflow']);
+assert.deepEqual(formatRunSpend({
+  state: 'available', input: 0, output: 0,
+  total_cost: { currency: 'USD', microunits: 0 }
+}), [
   '0 in',
   '0 out',
   'cost 0'
@@ -48,7 +49,10 @@ assert.deepEqual(formatRunSpend({ state: 'unpriced', input: 7, output: 2 }), [
 ]);
 assert.deepEqual(formatRunSpend({ state: 'incomplete' }), ['usage incomplete']);
 assert.deepEqual(formatRunSpend({ state: 'empty' }), []);
-assert.deepEqual(formatRunSpend({ state: 'unpriced', input: 7, output: 2, total_cost: 0 }), []);
+assert.deepEqual(formatRunSpend({
+  state: 'unpriced', input: 7, output: 2,
+  total_cost: { currency: 'USD', microunits: 0 }
+}), []);
 assert.deepEqual(formatRunSpend(null), []);
 
 assert(searchableRunFields(run, matchingProject).includes('chief-of-staff-02-granting-data'));

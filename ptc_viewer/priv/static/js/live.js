@@ -758,6 +758,9 @@ export function formatLiveSpend(spend) {
   if (state === 'incomplete') {
     return { state, value: 'incomplete', fields: [] };
   }
+  if (state === 'overflow') {
+    return { state, value: fields.join(' · '), fields };
+  }
   if (state === 'available' || state === 'unpriced') {
     return {
       state,

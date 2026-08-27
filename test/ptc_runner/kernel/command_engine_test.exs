@@ -2014,6 +2014,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           "cataloged" => %{
             "source" => "llm",
             "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
             "installation_revision" => "cataloged-v1",
             "model" => "openrouter:test/model",
             "credential" => "key"
@@ -2021,6 +2022,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           "endpoint" => %{
             "source" => "llm",
             "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
             "installation_revision" => "endpoint-v1",
             "model" => "openai-compat:https://private.example/v1|deployment",
             "credential" => "key"
@@ -2068,6 +2070,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           "cataloged" => %{
             "source" => "llm",
             "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
             "installation_revision" => "cataloged-v1",
             "model" => "openrouter:test/model",
             "credential" => "key"
@@ -2075,6 +2078,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           "endpoint" => %{
             "source" => "llm",
             "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
             "installation_revision" => "endpoint-v1",
             "model" => "openai-compat:https://private.example/v1|deployment",
             "credential" => "key"
@@ -3764,6 +3768,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "model" => %{
           "source" => "llm",
           "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "model" => "provider:model",
           "credential" => "key",
           "installation_revision" => host_revision
@@ -4815,8 +4820,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     for spend <- [
           %{"state" => "empty"},
           %{"state" => "incomplete"},
+          %{"state" => "overflow"},
           %{"state" => "unpriced", "input" => 1, "output" => 2},
-          %{"state" => "available", "input" => 1, "output" => 2, "total_cost" => 0}
+          %{
+            "state" => "available",
+            "input" => 1,
+            "output" => 2,
+            "total_cost" => %{"currency" => "USD", "microunits" => 0}
+          }
         ] do
       assert_schema_valid(put_in(classified, ["execution", "usage", "llm_spend"], spend))
     end
@@ -4870,6 +4881,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "successful_calls" => 1,
       "usage_calls" => 1,
       "missing_usage_calls" => 0,
+      "usage_overflow" => false,
       "usage" => %{"input" => 4}
     }
 
@@ -4880,6 +4892,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "successful_calls" => 0,
       "usage_calls" => 0,
       "missing_usage_calls" => 1,
+      "usage_overflow" => false,
       "usage" => %{}
     }
 
@@ -5570,6 +5583,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           "model" => %{
             "source" => "llm",
             "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
             "installation_revision" => "model-v1",
             "model" => "provider:model",
             "credential" => "missing"

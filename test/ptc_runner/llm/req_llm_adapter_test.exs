@@ -248,6 +248,21 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
       end
     end
 
+    test "attests exact token and USD cost reporting guarantees" do
+      requirements = %{
+        Requirements.interim(%{max_tokens: 64})
+        | usage_guarantees: %{tokens: true, cost_currency: "USD"}
+      }
+
+      assert {:ok, _target, _status, attestation} =
+               ReqLLMAdapter.prepare_model(
+                 "openrouter:deepseek/deepseek-v4-flash-0731",
+                 requirements
+               )
+
+      assert attestation.usage_guarantees == %{tokens: true, cost_currency: "USD"}
+    end
+
     test "attests the complete inference-control set on OpenRouter" do
       exact_options = %{
         max_tokens: 64,
@@ -596,7 +611,9 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
         total_cost: 0.5
       }
 
-      assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, %{}) == %{
+      meta = %{ptc_runner_usage_observation: :reported}
+
+      assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, meta) == %{
                input: 100,
                output: 50,
                cache_read: 20,
@@ -608,7 +625,9 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
     test "reads string-keyed usage and falls back to cached_tokens for cache reads" do
       usage = %{"input_tokens" => 7, "output_tokens" => 3, "cached_tokens" => 2}
 
-      assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, %{}) == %{
+      meta = %{ptc_runner_usage_observation: :reported}
+
+      assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, meta) == %{
                input: 7,
                output: 3,
                cache_read: 2,
@@ -618,20 +637,21 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
 
     test "derives cache_creation from provider_meta cache_write_tokens when usage omits it" do
       usage = %{input_tokens: 1}
-      meta = %{"usage" => %{"prompt_tokens_details" => %{"cache_write_tokens" => 42}}}
+
+      meta = %{
+        "usage" => %{"prompt_tokens_details" => %{"cache_write_tokens" => 42}},
+        ptc_runner_usage_observation: :reported
+      }
 
       assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, meta) == %{
                input: 1,
-               output: 0,
                cache_read: 0,
                cache_creation: 42
              }
     end
 
-    test "defaults all fields to zero for empty usage and meta" do
+    test "does not invent missing input or output usage" do
       assert ReqLLMAdapter.build_tokens_from_req_llm_response(%{}, %{}) == %{
-               input: 0,
-               output: 0,
                cache_read: 0,
                cache_creation: 0
              }

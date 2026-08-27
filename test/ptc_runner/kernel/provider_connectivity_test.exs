@@ -167,7 +167,11 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
                name: "metered",
                destination: :workflow,
                index: 1,
-               usage: %{"input" => 8, "output" => 1, "total_cost" => 3.0e-6}
+               usage: %{
+                 "input" => 8,
+                 "output" => 1,
+                 "total_cost" => %{"currency" => "USD", "microunits" => 3}
+               }
              },
              %{name: "silent", destination: :workflow, index: 2, usage: nil}
            ]

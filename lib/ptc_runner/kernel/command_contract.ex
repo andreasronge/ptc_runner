@@ -608,10 +608,11 @@ defmodule PtcRunner.Kernel.CommandContract do
          "successful_calls" => successful,
          "usage_calls" => measured,
          "missing_usage_calls" => missing,
+         "usage_overflow" => usage_overflow,
          "usage" => usage
        })
        when is_map(usage) do
-    calls >= 1 and successful <= calls and measured <= successful and
+    is_boolean(usage_overflow) and calls >= 1 and successful <= calls and measured <= successful and
       successful <= measured + missing and measured + missing <= calls and
       (measured > 0 or usage == %{}) and
       (missing == 0 or not Map.has_key?(usage, "total_cost"))
@@ -1559,16 +1560,17 @@ defmodule PtcRunner.Kernel.CommandContract do
       "oneOf" => [
         closed(["state"], %{"state" => %{"const" => "empty"}}),
         closed(["state"], %{"state" => %{"const" => "incomplete"}}),
+        closed(["state"], %{"state" => %{"const" => "overflow"}}),
         closed(~w(state input output), %{
           "state" => %{"const" => "unpriced"},
-          "input" => nonnegative_integer(),
-          "output" => nonnegative_integer()
+          "input" => usage_integer(),
+          "output" => usage_integer()
         }),
         closed(~w(state input output total_cost), %{
           "state" => %{"const" => "available"},
-          "input" => nonnegative_integer(),
-          "output" => nonnegative_integer(),
-          "total_cost" => %{"type" => "number", "minimum" => 0}
+          "input" => usage_integer(),
+          "output" => usage_integer(),
+          "total_cost" => usd_cost_schema()
         })
       ]
     }
@@ -1607,9 +1609,10 @@ defmodule PtcRunner.Kernel.CommandContract do
       end)
 
     closed(
-      identity_fields ++ Map.keys(counters) ++ ["usage"],
+      identity_fields ++ Map.keys(counters) ++ ["usage_overflow", "usage"],
       identity_properties
       |> Map.merge(counters)
+      |> Map.put("usage_overflow", %{"type" => "boolean"})
       |> Map.put("usage", llm_usage_values_schema())
     )
   end
@@ -1617,13 +1620,20 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp llm_usage_values_schema do
     token_properties =
       Map.new(~w(input output cache_creation cache_read), fn name ->
-        {name, nonnegative_integer()}
+        {name, usage_integer()}
       end)
 
-    closed(
-      [],
-      Map.put(token_properties, "total_cost", %{"type" => "number", "minimum" => 0})
-    )
+    closed([], Map.put(token_properties, "total_cost", usd_cost_schema()))
+  end
+
+  defp usage_integer,
+    do: %{"type" => "integer", "minimum" => 0, "maximum" => 9_007_199_254_740_991}
+
+  defp usd_cost_schema do
+    closed(~w(currency microunits), %{
+      "currency" => %{"const" => "USD"},
+      "microunits" => usage_integer()
+    })
   end
 
   defp count_map(name_pattern, exceptions \\ [], max_properties \\ 512) do

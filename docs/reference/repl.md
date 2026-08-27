@@ -267,12 +267,16 @@ One session can build an investigation incrementally:
 `analysis/counters` is one bounded aggregate, not a page. Filter a cohort in
 one call, or call once per selected `run_id` and reduce the returned
 `llm_usage_by_model` rows in PTC-Lisp. Those rows carry `calls`,
-`successful_calls`, `usage_calls`, `missing_usage_calls`, and a nested
-`usage` map with `input`, `output`, and optional `total_cost`. Group by
+`successful_calls`, `usage_calls`, `missing_usage_calls`, `usage_overflow`, and
+a nested `usage` map with `input`, `output`, and optional fixed-point
+`total_cost`. Group by
 `resolved_model` and sum the call counters plus nested token keys. Sum
 `unattributed_model_calls` across the same pages so unprovable identities are
-not dropped from the cohort. Absent `total_cost` is unknown spend, not zero:
-omit it from the merged `usage` map whenever any contributing row withholds it.
+not dropped from the cohort. Absent `total_cost` is unknown spend, not zero.
+Costs add through their `microunits` fields, never by adding the objects
+themselves. Preserve `usage_overflow`, check sums against
+`9_007_199_254_740_991`, and omit cost whenever any contributing row withholds
+it.
 
 ```clojure
 (analysis/counters
@@ -283,19 +287,37 @@ omit it from the merged `usage` map whenever any contributing row withholds it.
 (defn withheld-cost? [rows]
   (some #(not (contains? (get % "usage") "total_cost")) rows))
 
+(defn cost-microunits [row]
+  (get-in row ["usage" "total_cost" "microunits"]))
+
+(def max-usage 9007199254740991)
+(def token-keys ["input" "output" "cache_creation" "cache_read"])
+
 (defn reduce-model-rows [rows]
   (->> rows
        (group-by #(get % "resolved_model"))
        (map (fn [[model group]]
-              (let [usage (apply merge-with + (map #(get % "usage") group))
-                    usage (if (withheld-cost? group)
-                            (dissoc usage "total_cost")
-                            usage)]
+              (let [withheld? (withheld-cost? group)
+                    keys (filter (fn [key] (some #(contains? (get % "usage") key) group))
+                                 token-keys)
+                    sums (into {} (map (fn [key]
+                                         [key (reduce + (map #(get (get % "usage") key 0) group))])
+                                       keys))
+                    cost (if withheld? 0 (reduce + (map cost-microunits group)))
+                    overflow? (or (some #(get % "usage_overflow") group)
+                                  (some #(> % max-usage) (vals sums))
+                                  (and (not withheld?) (> cost max-usage)))
+                    usage (into {} (map (fn [[key value]] [key (min value max-usage)]) sums))
+                    usage (if withheld?
+                            usage
+                            (assoc usage "total_cost"
+                              {"currency" "USD" "microunits" (min cost max-usage)}))]
                 {"resolved_model" model
                  "calls" (reduce + (map #(get % "calls") group))
                  "successful_calls" (reduce + (map #(get % "successful_calls") group))
                  "usage_calls" (reduce + (map #(get % "usage_calls") group))
                  "missing_usage_calls" (reduce + (map #(get % "missing_usage_calls") group))
+                 "usage_overflow" (boolean overflow?)
                  "usage" usage})))))
 
 (def selected ["run-a" "run-b"])

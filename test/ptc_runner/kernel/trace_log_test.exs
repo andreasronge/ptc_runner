@@ -1168,6 +1168,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                "successful_calls" => 1,
                "usage_calls" => 1,
                "missing_usage_calls" => 0,
+               "usage_overflow" => false,
                "usage" => %{"input" => 7}
              },
              %{
@@ -1177,6 +1178,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                "successful_calls" => 2,
                "usage_calls" => 2,
                "missing_usage_calls" => 0,
+               "usage_overflow" => false,
                "usage" => %{"input" => 8, "output" => 2}
              }
            ]
@@ -1188,6 +1190,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                "successful_calls" => 2,
                "usage_calls" => 2,
                "missing_usage_calls" => 0,
+               "usage_overflow" => false,
                "usage" => %{"input" => 10, "output" => 2}
              },
              %{
@@ -1196,6 +1199,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                "successful_calls" => 1,
                "usage_calls" => 1,
                "missing_usage_calls" => 0,
+               "usage_overflow" => false,
                "usage" => %{"input" => 5}
              }
            ]
@@ -1233,7 +1237,11 @@ defmodule PtcRunner.Kernel.TraceLogTest do
         "alias" => "writer",
         "installation_revision" => "stable-v1",
         "status" => "ok",
-        "usage" => %{"input" => 120, "output" => 30, "total_cost" => 0.0042}
+        "usage" => %{
+          "input" => 120,
+          "output" => 30,
+          "total_cost" => %{"currency" => "USD", "microunits" => 4_200}
+        }
       }),
       decoded_event("usage-total", 3, "run-stopped", %{
         "outcome" => "ok",
@@ -1242,7 +1250,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
             "state" => "available",
             "input" => 120,
             "output" => 30,
-            "total_cost" => 0.0042
+            "total_cost" => %{"currency" => "USD", "microunits" => 4_200}
           }
         }
       })
@@ -1262,7 +1270,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
              "state" => "available",
              "input" => 120,
              "output" => 30,
-             "total_cost" => 0.0042
+             "total_cost" => %{"currency" => "USD", "microunits" => 4_200}
            }
   end
 

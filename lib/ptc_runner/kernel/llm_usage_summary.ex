@@ -100,27 +100,33 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
   @doc """
   Projects live spend from an `accumulate/5` map.
 
-  Exactly four states, and none of `unpriced`, `incomplete`, or `empty` may
-  render as zero cost:
+  Exactly five states, and none of `unpriced`, `incomplete`, `overflow`, or
+  `empty` may render as zero cost:
 
   * `available` — successful usage complete and priced
   * `unpriced` — successful usage exists, tokens valid, cost absent
   * `incomplete` — at least one successful call has missing or invalid usage
+  * `overflow` — at least one aggregate token or cost sum exceeded the ceiling
   * `empty` — no successful LLM call yet
   """
   @spec spend(map()) :: map()
   def spend(counters) when is_map(counters) do
-    {successful, missing, tokens_complete?, cost_complete?, usage} =
-      Enum.reduce(counters, {0, 0, true, true, %{}}, fn
+    {successful, missing, tokens_complete?, cost_complete?, usage, usage_overflow?} =
+      Enum.reduce(counters, {0, 0, true, true, %{}, false}, fn
         {_key, {row, row_tokens_complete?, row_cost_complete?}},
-        {successful, missing, tokens_complete?, cost_complete?, usage} ->
+        {successful, missing, tokens_complete?, cost_complete?, usage, usage_overflow?} ->
+          {usage, aggregate_overflow?} = sum_usage(usage, Map.fetch!(row, "usage"))
+
           {successful + Map.fetch!(row, "successful_calls"),
            missing + Map.fetch!(row, "missing_usage_calls"),
            tokens_complete? and row_tokens_complete?, cost_complete? and row_cost_complete?,
-           sum_usage(usage, Map.fetch!(row, "usage"))}
+           usage, usage_overflow? or Map.fetch!(row, "usage_overflow") or aggregate_overflow?}
       end)
 
     cond do
+      usage_overflow? ->
+        %{"state" => "overflow"}
+
       successful == 0 ->
         %{"state" => "empty"}
 
@@ -138,7 +144,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
   @doc false
   @spec validate_spend(term()) :: {:ok, map()} | {:error, :invalid_llm_spend}
   def validate_spend(%{"state" => state} = spend)
-      when state in ["empty", "incomplete"] and map_size(spend) == 1,
+      when state in ["empty", "incomplete", "overflow"] and map_size(spend) == 1,
       do: {:ok, spend}
 
   def validate_spend(%{"state" => "unpriced", "input" => input, "output" => output} = spend)
@@ -426,6 +432,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
       "successful_calls" => 0,
       "usage_calls" => 0,
       "missing_usage_calls" => 0,
+      "usage_overflow" => false,
       "usage" => %{}
     }
   end
@@ -446,12 +453,13 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
        when is_map(usage) do
     case LLMUsage.normalize(usage) do
       {:ok, normalized} ->
-        normalized = drop_nil_cost(normalized)
+        {usage, overflow?} = sum_usage(Map.fetch!(row, "usage"), normalized)
 
         row =
           row
           |> Map.update!("usage_calls", &(&1 + 1))
-          |> Map.update!("usage", &sum_usage(&1, normalized))
+          |> Map.put("usage", usage)
+          |> Map.update!("usage_overflow", &(&1 or overflow?))
 
         {row, tokens_complete? and Enum.all?(~w(input output), &Map.has_key?(normalized, &1)),
          cost_complete? and Map.has_key?(normalized, "total_cost")}
@@ -470,7 +478,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
 
   defp validate_spend_usage(spend, usage) do
     if Enum.all?(usage, fn
-         {key, value} when key in ["input", "output"] -> is_integer(value) and value >= 0
+         {key, value} when key in ["input", "output"] -> valid_aggregate_integer?(value)
          {"total_cost", value} -> valid_aggregate_cost?(value)
        end) do
       {:ok, spend}
@@ -479,19 +487,45 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
     end
   end
 
-  defp valid_aggregate_cost?(value) when is_integer(value), do: value >= 0
+  defp valid_aggregate_integer?(value),
+    do: is_integer(value) and value in 0..LLMUsage.maximum_integer()
 
-  defp valid_aggregate_cost?(value) when is_float(value) and value >= 0.0 do
-    :erlang.float_to_binary(value, [:short]) not in ["nan", "inf", "-inf"]
-  end
+  defp valid_aggregate_cost?(%{"currency" => "USD", "microunits" => microunits} = cost),
+    do: map_size(cost) == 2 and valid_aggregate_integer?(microunits)
 
   defp valid_aggregate_cost?(_value), do: false
 
-  defp drop_nil_cost(%{"total_cost" => nil} = usage), do: Map.delete(usage, "total_cost")
-  defp drop_nil_cost(usage), do: usage
+  defp sum_usage(left, right) do
+    Enum.reduce(right, {left, false}, fn {key, value}, {usage, overflow?} ->
+      case Map.fetch(usage, key) do
+        :error ->
+          {Map.put(usage, key, value), overflow?}
 
-  defp sum_usage(left, right),
-    do: Map.merge(left, right, fn _key, first, second -> first + second end)
+        {:ok, existing} ->
+          {sum, addition_overflow?} = add_usage_value(key, existing, value)
+          {Map.put(usage, key, sum), overflow? or addition_overflow?}
+      end
+    end)
+  end
+
+  defp add_usage_value(
+         "total_cost",
+         %{"currency" => "USD", "microunits" => left},
+         %{"currency" => "USD", "microunits" => right}
+       ) do
+    {microunits, overflow?} = saturating_add(left, right)
+    {%{"currency" => "USD", "microunits" => microunits}, overflow?}
+  end
+
+  defp add_usage_value(_key, left, right), do: saturating_add(left, right)
+
+  defp saturating_add(left, right) when is_integer(left) and is_integer(right) do
+    maximum = LLMUsage.maximum_integer()
+
+    if left > maximum - right,
+      do: {maximum, true},
+      else: {left + right, false}
+  end
 
   defp model_lookup(events) do
     events

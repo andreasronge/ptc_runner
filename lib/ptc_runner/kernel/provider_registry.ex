@@ -151,6 +151,10 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
                 optional(:max_calls) => pos_integer() | nil,
                 optional(:structured_output_mode) =>
                   :json_schema | :json_object | :unsupported | nil,
+                optional(:usage_guarantees) => %{
+                  tokens: boolean(),
+                  cost_currency: String.t() | nil
+                },
                 optional(:request_timeout_ms) => pos_integer() | nil
               },
           preflight: (-> {:ok, acquire()}
@@ -524,6 +528,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           :max_calls,
           :source,
           :structured_output_mode,
+          :usage_guarantees,
           :request_timeout_ms
         ]
 
@@ -535,6 +540,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
       is_binary(route.installation_revision) and valid_name?(route.installation_revision) and
       is_boolean(route.default) and valid_optional_max_calls?(Map.get(route, :max_calls)) and
       valid_structured_output_mode?(Map.get(route, :structured_output_mode), route.source) and
+      valid_usage_guarantees?(Map.get(route, :usage_guarantees), route.source) and
       LLMRouter.valid_route_timeout_ms?(Map.get(route, :request_timeout_ms), route.source)
   end
 
@@ -548,6 +554,14 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
        do: true
 
   defp valid_structured_output_mode?(_mode, _source), do: false
+
+  defp valid_usage_guarantees?(nil, source) when source in ["llm_replay", "custom"], do: true
+
+  defp valid_usage_guarantees?(%{tokens: tokens, cost_currency: currency} = guarantees, "llm")
+       when map_size(guarantees) == 2 and is_boolean(tokens) and currency in ["USD", nil],
+       do: true
+
+  defp valid_usage_guarantees?(_guarantees, _source), do: false
 
   defp valid_optional_max_calls?(nil), do: true
   defp valid_optional_max_calls?(max_calls) when is_integer(max_calls) and max_calls > 0, do: true

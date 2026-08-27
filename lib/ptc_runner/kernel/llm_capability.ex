@@ -28,20 +28,27 @@ defmodule PtcRunner.Kernel.LLMCapability do
   alias PtcRunner.Lisp.RetainedSize
 
   @default_max_bytes 1_000_000
+  @no_usage_guarantees %{tokens: false, cost_currency: nil}
 
   @spec new(keyword()) :: {:ok, Capability.t()} | {:error, :invalid_llm_capability}
   @doc """
   Constructs `llm-request` from a required `:requester` and optional positive
-  `:max_request_bytes` and `:max_response_bytes` limits.
+  `:max_request_bytes` and `:max_response_bytes` limits. The optional closed
+  `:usage_guarantees` map makes missing promised token or USD cost usage a
+  non-retryable invalid provider result.
 
   The requester is arity two: a provider-neutral request plus
   `%{llm_request_deadline_ms: integer() | nil}`. Arity one is accepted for
   callers that ignore the deadline context.
   """
   def new(opts) when is_list(opts) do
-    with true <- Keyword.keys(opts) -- [:requester, :max_request_bytes, :max_response_bytes] == [],
+    with true <-
+           Keyword.keys(opts) --
+             [:requester, :usage_guarantees, :max_request_bytes, :max_response_bytes] == [],
          requester when is_function(requester, 1) or is_function(requester, 2) <-
            Keyword.get(opts, :requester),
+         {:ok, usage_guarantees} <-
+           usage_guarantees(Keyword.get(opts, :usage_guarantees, @no_usage_guarantees)),
          request_limit when is_integer(request_limit) and request_limit > 0 <-
            Keyword.get(opts, :max_request_bytes, @default_max_bytes),
          response_limit when is_integer(response_limit) and response_limit > 0 <-
@@ -72,7 +79,7 @@ defmodule PtcRunner.Kernel.LLMCapability do
              },
              output_schema: %{"type" => "object", "additionalProperties" => true},
              validate: fn request -> validate_request(request, request_limit) end,
-             callback: requester_callback(requester, response_limit)
+             callback: requester_callback(requester, response_limit, usage_guarantees)
            ) do
       {:ok, capability}
     else
@@ -90,14 +97,24 @@ defmodule PtcRunner.Kernel.LLMCapability do
       else: {:error, "invalid or oversized LLM request"}
   end
 
-  defp requester_callback(requester, response_limit) when is_function(requester, 2) do
+  defp requester_callback(requester, response_limit, usage_guarantees)
+       when is_function(requester, 2) do
     fn request, context ->
-      invoke(requester, request, requester_context(context), response_limit)
+      invoke(requester, request, requester_context(context), response_limit, usage_guarantees)
     end
   end
 
-  defp requester_callback(requester, response_limit) when is_function(requester, 1) do
-    fn request -> invoke(requester, request, %{llm_request_deadline_ms: nil}, response_limit) end
+  defp requester_callback(requester, response_limit, usage_guarantees)
+       when is_function(requester, 1) do
+    fn request ->
+      invoke(
+        requester,
+        request,
+        %{llm_request_deadline_ms: nil},
+        response_limit,
+        usage_guarantees
+      )
+    end
   end
 
   defp requester_context(%{llm_request_deadline_ms: deadline})
@@ -106,26 +123,42 @@ defmodule PtcRunner.Kernel.LLMCapability do
 
   defp requester_context(_context), do: %{llm_request_deadline_ms: nil}
 
-  defp invoke(requester, request, context, response_limit) when is_function(requester, 2) do
+  defp invoke(requester, request, context, response_limit, usage_guarantees)
+       when is_function(requester, 2) do
     schema_request? = schema_request?(request)
 
     classify_requester_result(
       requester.(request, context),
       request,
       response_limit,
-      schema_request?
+      schema_request?,
+      usage_guarantees
     )
   end
 
-  defp invoke(requester, request, _context, response_limit) when is_function(requester, 1) do
+  defp invoke(requester, request, _context, response_limit, usage_guarantees)
+       when is_function(requester, 1) do
     schema_request? = schema_request?(request)
-    classify_requester_result(requester.(request), request, response_limit, schema_request?)
+
+    classify_requester_result(
+      requester.(request),
+      request,
+      response_limit,
+      schema_request?,
+      usage_guarantees
+    )
   end
 
-  defp classify_requester_result(result, _request, response_limit, schema_request?) do
+  defp classify_requester_result(
+         result,
+         _request,
+         response_limit,
+         schema_request?,
+         usage_guarantees
+       ) do
     case result do
       {:ok, response} ->
-        normalize_response(response, response_limit, schema_request?)
+        normalize_response(response, response_limit, schema_request?, usage_guarantees)
 
       # Adapter-branch and Kernel-side structured rejections are invalid
       # results, not provider errors. Admit an empty candidate so Dispatcher
@@ -156,20 +189,39 @@ defmodule PtcRunner.Kernel.LLMCapability do
     Map.has_key?(request, "schema") or Map.has_key?(request, :schema)
   end
 
-  defp normalize_response(response, limit, schema_request?) do
+  defp normalize_response(response, limit, schema_request?, usage_guarantees) do
     case classify_success(response, schema_request?) do
       {:ok, classified} ->
-        classified = stringify_json(classified)
-        bytes = RetainedSize.bytes_with_cap(classified, limit)
-
-        if JSONValue.map?(classified) and is_integer(bytes) and bytes <= limit do
-          admit_tokens(classified, schema_request?)
-        else
-          schema_output_mismatch(schema_request?, :invalid_request)
-        end
+        normalize_classified_response(classified, limit, schema_request?, usage_guarantees)
 
       :error ->
         schema_output_mismatch(schema_request?, :invalid_result)
+    end
+  end
+
+  defp normalize_classified_response(classified, limit, schema_request?, usage_guarantees) do
+    classified = stringify_json(classified)
+    initial_bytes = RetainedSize.bytes_with_cap(classified, limit)
+
+    if JSONValue.map?(classified) and is_integer(initial_bytes) and initial_bytes <= limit,
+      do: admit_bounded_response(classified, limit, schema_request?, usage_guarantees),
+      else: schema_output_mismatch(schema_request?, :invalid_request)
+  end
+
+  defp admit_bounded_response(classified, limit, schema_request?, usage_guarantees) do
+    case admit_tokens(classified, usage_guarantees) do
+      {:ok, admitted} -> admit_final_response(admitted, limit, schema_request?)
+      {:error, %ProviderError{}} = error -> error
+    end
+  end
+
+  defp admit_final_response(admitted, limit, schema_request?) do
+    case RetainedSize.bytes_with_cap(admitted, limit) do
+      bytes when is_integer(bytes) and bytes <= limit ->
+        {:ok, RetainedSize.detach_binaries(admitted)}
+
+      _oversized ->
+        schema_output_mismatch(schema_request?, :invalid_request)
     end
   end
 
@@ -277,32 +329,38 @@ defmodule PtcRunner.Kernel.LLMCapability do
     if Map.has_key?(response, key), do: Map.fetch!(response, key), else: :missing
   end
 
-  defp admit_tokens(response, schema_request?) do
-    if Map.has_key?(response, "tokens") do
-      case LLMUsage.normalize(response["tokens"]) do
-        {:ok, usage} ->
-          {:ok, response |> Map.put("tokens", usage) |> RetainedSize.detach_binaries()}
+  defp admit_tokens(response, usage_guarantees) do
+    case Map.fetch(response, "tokens") do
+      {:ok, tokens} ->
+        case LLMUsage.normalize(tokens, usage_guarantees) do
+          {:ok, usage} ->
+            {:ok, Map.put(response, "tokens", usage)}
 
-        {:error, :invalid_llm_usage} ->
-          if schema_request? do
-            # Slice 3 chooses this taxonomy deliberately: usage guarantees are
-            # interim-disabled, so malformed tokens on a schema response are
-            # provider output that failed the closed structured envelope
-            # (`output_schema_mismatch`), not promised-usage settlement
-            # (`promised_usage_missing`).
-            schema_output_mismatch(true, :invalid_result)
-          else
+          {:error, :invalid_llm_usage} ->
             invalid_usage()
-          end
-      end
-    else
-      {:ok, RetainedSize.detach_binaries(response)}
+        end
+
+      :error ->
+        if usage_required?(usage_guarantees),
+          do: promised_usage_missing(),
+          else: {:ok, response}
     end
   end
 
   defp invalid_usage,
-    do:
-      {:error, ProviderError.new(:invalid_request, "LLM response contained invalid token usage")}
+    do: {:error, ProviderError.new(:invalid_result, "LLM response contained invalid token usage")}
+
+  defp promised_usage_missing,
+    do: {:error, ProviderError.new(:invalid_result, "LLM provider omitted promised usage")}
+
+  defp usage_guarantees(%{tokens: tokens, cost_currency: currency} = guarantees)
+       when map_size(guarantees) == 2 and is_boolean(tokens) and currency in ["USD", nil],
+       do: {:ok, guarantees}
+
+  defp usage_guarantees(_guarantees), do: :error
+
+  defp usage_required?(%{tokens: tokens, cost_currency: currency}),
+    do: tokens or currency == "USD"
 
   defp stringify_json(nil), do: nil
 

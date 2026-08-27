@@ -170,6 +170,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
           "model" => %{
             "source" => "llm",
             "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
             "installation_revision" => "model-v1",
             "model" => "openrouter:test/model",
             "credential" => "key"
@@ -213,7 +214,12 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
                  "successful_calls" => 1,
                  "usage_calls" => 1,
                  "missing_usage_calls" => 0,
-                 "usage" => %{"input" => 8, "output" => 1, "total_cost" => 3.0e-6}
+                 "usage_overflow" => false,
+                 "usage" => %{
+                   "input" => 8,
+                   "output" => 1,
+                   "total_cost" => %{"currency" => "USD", "microunits" => 3}
+                 }
                }
              ]
            }

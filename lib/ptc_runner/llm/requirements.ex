@@ -54,11 +54,8 @@ defmodule PtcRunner.LLM.Requirements do
         }
 
   @doc """
-  Returns the current contract around authorized `exact_options`.
-
-  Structured-output mode and the complete portable inference-control set are
-  active. Usage guarantees and reservation remain explicitly disabled until
-  their later protocol slices.
+  Returns a requirement map for direct embedders that do not request reporting
+  guarantees or reservation authority.
   """
   @spec interim(exact_options()) :: t()
   def interim(exact_options) when is_map(exact_options), do: interim(exact_options, :unsupported)
@@ -74,12 +71,13 @@ defmodule PtcRunner.LLM.Requirements do
     }
   end
 
-  @spec live(map(), pos_integer()) :: {:ok, t()} | :error
-  @spec live(map(), pos_integer(), :json_schema | :json_object | :unsupported) ::
-          {:ok, t()} | :error
-  def live(params, output_tokens, structured_output_mode \\ :unsupported)
-
-  def live(params, output_tokens, structured_output_mode)
+  @spec live(
+          map(),
+          pos_integer(),
+          :json_schema | :json_object | :unsupported,
+          usage_guarantees()
+        ) :: {:ok, t()} | :error
+  def live(params, output_tokens, structured_output_mode, usage_guarantees)
       when is_map(params) and is_integer(output_tokens) and output_tokens in 1..@max_tokens and
              structured_output_mode in @structured_modes do
     max_tokens =
@@ -88,14 +86,27 @@ defmodule PtcRunner.LLM.Requirements do
         installed when is_integer(installed) -> min(output_tokens, installed)
       end
 
-    canonical(interim(authorized_options(params, max_tokens), structured_output_mode))
+    canonical(%{
+      exact_options: authorized_options(params, max_tokens),
+      structured_output_mode: structured_output_mode,
+      usage_guarantees: usage_guarantees,
+      reservation: %{total_tokens?: false, cost_tariff: nil}
+    })
   end
 
-  def live(_params, _output_tokens, _structured_output_mode), do: :error
+  def live(_params, _output_tokens, _structured_output_mode, _usage_guarantees), do: :error
 
-  @spec probe(map()) :: {:ok, t()} | :error
-  def probe(params) when is_map(params), do: canonical(interim(authorized_options(params, 1)))
-  def probe(_params), do: :error
+  @spec probe(map(), usage_guarantees()) :: {:ok, t()} | :error
+  def probe(params, usage_guarantees) when is_map(params) do
+    canonical(%{
+      exact_options: authorized_options(params, 1),
+      structured_output_mode: :unsupported,
+      usage_guarantees: usage_guarantees,
+      reservation: %{total_tokens?: false, cost_tariff: nil}
+    })
+  end
+
+  def probe(_params, _usage_guarantees), do: :error
 
   @spec canonical(term()) :: {:ok, t()} | :error
   def canonical(requirements) when is_map(requirements) and not is_struct(requirements) do

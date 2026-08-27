@@ -91,7 +91,8 @@ cat > "$fixture_root/provider-host.json" <<'EOF'
     "model": {
       "source": "llm",
       "structured_output_mode": "unsupported",
-      "installation_revision": "release-smoke-v1",
+      "usage_guarantees": {"tokens": true, "cost_currency": "USD"},
+      "installation_revision": "release-smoke-v2",
       "model": "openrouter:release-smoke/invalid-model",
       "credential": "key"
     }
