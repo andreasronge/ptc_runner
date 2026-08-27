@@ -431,17 +431,15 @@ defmodule PtcRunner.Kernel.MCPSource do
         error_feedback = Map.get(mapping, :error_feedback, :closed)
         inspection_capture = Map.get(mapping, :inspection_capture, :full)
 
-        if valid_installed_mapping?(
-             upstream,
-             public,
-             mapping,
-             public_names,
-             description,
-             model_visible,
-             error_feedback,
-             inspection_capture,
-             effect
-           ) do
+        validation = %{
+          description: description,
+          model_visible: model_visible,
+          error_feedback: error_feedback,
+          inspection_capture: inspection_capture,
+          effect: effect
+        }
+
+        if valid_installed_mapping?(upstream, public, mapping, public_names, validation) do
           {:cont,
            {:ok,
             Map.put(normalized, upstream, %{
@@ -467,25 +465,15 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp installed_tools(_tools), do: {:error, :invalid_tools}
 
-  defp valid_installed_mapping?(
-         upstream,
-         public,
-         mapping,
-         public_names,
-         description,
-         model_visible,
-         error_feedback,
-         inspection_capture,
-         effect
-       ) do
+  defp valid_installed_mapping?(upstream, public, mapping, public_names, validation) do
     Map.keys(mapping) --
       [:as, :effect, :description, :model_visible, :error_feedback, :inspection_capture] == [] and
       MCPProtocol.valid_tool_name?(upstream) and public =~ @name and
       not MapSet.member?(public_names, public) and
-      (is_nil(description) or valid_string?(description, 4_096)) and
-      is_boolean(model_visible) and error_feedback in [:closed, :bounded] and
-      inspection_capture in [:full, :digest_results] and
-      (inspection_capture == :full or effect == :read)
+      (is_nil(validation.description) or valid_string?(validation.description, 4_096)) and
+      is_boolean(validation.model_visible) and validation.error_feedback in [:closed, :bounded] and
+      validation.inspection_capture in [:full, :digest_results] and
+      (validation.inspection_capture == :full or validation.effect == :read)
   end
 
   defp installed_snapshot_identity(nil, _tools), do: {:ok, nil}

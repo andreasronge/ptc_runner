@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
                  effect: :read,
                  description: nil,
                  error_feedback: :closed,
+                 inspection_capture: :full,
                  model_visible: false
                }
              },
