@@ -131,27 +131,14 @@ second entry under the same <code class="inline">install</code> object:</p><pre>
       &quot;args&quot;: [&quot;server.js&quot;]
     },
     &quot;tools&quot;: {
-      &quot;read_text_file&quot;: {
-        &quot;as&quot;: &quot;workspace.read&quot;,
-        &quot;effect&quot;: &quot;read&quot;,
-        &quot;inspection_capture&quot;: &quot;digest_results&quot;
-      }
+      &quot;read_text_file&quot;: {&quot;as&quot;: &quot;workspace.read&quot;, &quot;effect&quot;: &quot;read&quot;}
     },
     &quot;ceilings&quot;: {&quot;timeout_ms&quot;: 15000, &quot;max_result_bytes&quot;: 262144}
   }
 }</code></pre><p>The upstream operation name and server command belong to the server you run.
 You choose the public <code class="inline">as</code> name and its <code class="inline">read</code> or <code class="inline">write</code> effect. Follow
 <a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a> for one complete workflow
-against a checked-in server.</p><p><code class="inline">inspection_capture: &quot;digest_results&quot;</code> is an optional host-owned policy for an
-MCP read mapping. It retains full arguments and MCP requests, but replaces MCP
-responses and capability results in private inspection with deterministic JSON
-identities. The default, including an omitted field, is <code class="inline">&quot;full&quot;</code>; digest result
-capture is invalid for write tools. Digest capture is irreversible inside the
-artifact, so recovering content requires rerunning with full capture. A digest
-does not provide confidentiality for low-entropy, guessable values. MCP stderr
-remains fully captured within its separately configured bound. Configure the
-provider's page size and the run's call, event, and clock limits for the actual
-source volume; digest capture does not raise execution limits.</p><p><code class="inline">ptc validate</code> reports <code class="inline">installation_config_digests</code> for the selected aliases so
+against a checked-in server.</p><p><code class="inline">ptc validate</code> reports <code class="inline">installation_config_digests</code> for the selected aliases so
 you can compare the host declaration you reviewed with the one a later
 validation or run actually named. The digest is configuration identity, not
 proof of live server scope; see the

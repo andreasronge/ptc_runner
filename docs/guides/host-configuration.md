@@ -59,11 +59,7 @@ second entry under the same `install` object:
       "args": ["server.js"]
     },
     "tools": {
-      "read_text_file": {
-        "as": "workspace.read",
-        "effect": "read",
-        "inspection_capture": "digest_results"
-      }
+      "read_text_file": {"as": "workspace.read", "effect": "read"}
     },
     "ceilings": {"timeout_ms": 15000, "max_result_bytes": 262144}
   }
@@ -74,17 +70,6 @@ The upstream operation name and server command belong to the server you run.
 You choose the public `as` name and its `read` or `write` effect. Follow
 [Connect an MCP tool](connecting-tools-with-mcp.md) for one complete workflow
 against a checked-in server.
-
-`inspection_capture: "digest_results"` is an optional host-owned policy for an
-MCP read mapping. It retains full arguments and MCP requests, but replaces MCP
-responses and capability results in private inspection with deterministic JSON
-identities. The default, including an omitted field, is `"full"`; digest result
-capture is invalid for write tools. Digest capture is irreversible inside the
-artifact, so recovering content requires rerunning with full capture. A digest
-does not provide confidentiality for low-entropy, guessable values. MCP stderr
-remains fully captured within its separately configured bound. Configure the
-provider's page size and the run's call, event, and clock limits for the actual
-source volume; digest capture does not raise execution limits.
 
 `ptc validate` reports `installation_config_digests` for the selected aliases so
 you can compare the host declaration you reviewed with the one a later
