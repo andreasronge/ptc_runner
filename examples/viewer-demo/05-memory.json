@@ -13,7 +13,7 @@
         "library": "agent.core"
       }
     ],
-    "entry": "demo.agent/run"
+    "entry": "demo.agent/run-terminal-error"
   },
   "input": {
     "value": {
@@ -50,7 +50,10 @@
         }
       ],
       "data": {
-      }
+      },
+      "providers": [
+        "workspace"
+      ]
     }
   }
 }

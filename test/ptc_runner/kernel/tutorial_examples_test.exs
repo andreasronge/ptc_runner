@@ -167,6 +167,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
 
       assert Enum.map(manifest.providers.workflow, & &1["name"]) == ["deepseek"]
       assert Enum.map(manifest.providers.mission, & &1["name"]) == ["workspace"]
+      assert manifest.missions["default"].provider_occurrences == [0]
     end
   end
 

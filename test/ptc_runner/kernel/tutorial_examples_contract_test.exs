@@ -65,5 +65,12 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
     end
   end
 
+  test "the viewer memory journey preserves feedback and forces a terminal demo error" do
+    manifest = decode!(Path.join(@viewer_examples, "05-memory.json"))
+
+    assert manifest["input"]["value"]["max_turns"] == 2
+    assert manifest["workflow"]["entry"] == "demo.agent/run-terminal-error"
+  end
+
   defp decode!(path), do: path |> File.read!() |> Jason.decode!()
 end

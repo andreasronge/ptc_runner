@@ -22,8 +22,8 @@ The script regenerates the granted `files/` root, launches
 `--trace-dir` and `--inspect` into one owner-only project artifact root, writes
 each trace and inspection artifact under its generated run-reference filename,
 the project document beside it, and prints the `mix ptc viewer` command that
-opens it. Node.js and `npx` are required; the first run may download that
-package. A rerun removes only the generated artifacts recorded by the prior
+opens it. Node.js, `npx`, and `jq` are required; the first run may download the
+MCP package. A rerun removes only the generated artifacts recorded by the prior
 pass, so the Viewer continues to contain exactly the five current journeys. That
 project grants the Viewer the private inspection artifacts, so treat the
 browser tab as a private sink.
@@ -36,7 +36,7 @@ browser tab as a private sink.
 | `02-bulk` | The task calls `demo.files/sum-values`, which itself reads `index.txt` plus all 30 listed record files (31 `workspace.read` calls, just under the installed per-name quota of 32) and computes a sum the model cannot fabricate (3255). | Long capability lists in the transcript, per-call private payloads, deterministic bulk event volume (~76 events), ok status. |
 | `03-limits` | Same task, but the manifest lowers `mission_capability_calls_per_name` to 6, so `sum-values` exhausts the quota mid-evaluation and the model receives the failure as feedback. | `limit-exceeded` events, error feedback turns, quota-error envelopes in private payloads. |
 | `04-loop-limit` | The task calls `demo.files/spin-forever`, an unbounded `loop`/`recur`, which hits the evaluator's deterministic loop-iteration bound. | Error-outcome runs in the picker, `:loop_limit_exceeded` feedback turns, `explicit_failure` terminal reason. |
-| `05-memory` | The task calls `demo.files/exhaust-memory`, which doubles a string until the in-evaluator heap budget rejects it. | `:memory_exceeded` error feedback, error-outcome run, heap-budget message in the dialogue. |
+| `05-memory` | The task calls `demo.files/exhaust-memory`, which doubles a string until the in-evaluator heap budget rejects it. A second turn retains that feedback in the dialogue; the dedicated workflow entry then fails the demo even if the model turns the failure into a successful prose result. | `:memory_exceeded` error feedback, error-outcome run, heap-budget message in the dialogue. |
 
 The bulk read volume and journey 03's quota trigger are deterministic (the
 reads happen inside the mission prelude, not at the model's discretion); turn
