@@ -100,6 +100,10 @@ defmodule PtcViewer.Router do
     send_kernel_query(conn, :list_runs, query_arguments(conn))
   end
 
+  post "/api/kernel/refresh" do
+    refresh_snapshot(conn)
+  end
+
   get "/api/kernel/runs/:run_id" do
     send_kernel_query(conn, :get_run, %{"run_id" => run_id})
   end
@@ -330,6 +334,21 @@ defmodule PtcViewer.Router do
   end
 
   defp refresh_live_trace(_conn, _run_id), do: {:error, :not_found}
+
+  defp refresh_snapshot(conn) do
+    case Keyword.get(viewer_config(conn), :live_trace_refresh) do
+      callback when is_function(callback, 1) ->
+        case invoke_trace_refresh(callback, nil) do
+          :ok -> send_json(conn, %{"status" => "ok"})
+          {:error, :not_found} -> send_resp(conn, 404, "Not found")
+          {:error, :refresh_unavailable} -> send_resp(conn, 503, "Trace refresh unavailable")
+          {:error, _reason} -> send_resp(conn, 500, "Trace refresh failed")
+        end
+
+      _none ->
+        send_resp(conn, 503, "Trace refresh unavailable")
+    end
+  end
 
   defp invoke_trace_refresh(callback, run_id) do
     case callback.(run_id) do

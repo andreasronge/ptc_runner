@@ -74,11 +74,25 @@ async function fetchRunsPage(cursor = null) {
   const suffix = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
   const response = await fetch(`/api/kernel/runs?limit=100${suffix}`);
 
+  if (response.status === 409) {
+    const error = new Error('Trace source changed');
+    error.code = 'source_changed';
+    throw error;
+  }
+
   if (!response.ok) {
     throw new Error(`Canonical run listing failed (HTTP ${response.status}: ${await safeBodyText(response)}).`);
   }
 
   return response.json();
+}
+
+async function refreshCapturedRuns() {
+  const response = await fetch('/api/kernel/refresh', { method: 'POST' });
+  if (!response.ok) {
+    throw new Error(`Run snapshot refresh failed (HTTP ${response.status}: ${await safeBodyText(response)}).`);
+  }
+  return runCatalog.refresh();
 }
 
 // --- Run picker -----------------------------------------------------------
@@ -137,10 +151,18 @@ function RunPicker() {
   }
 
   return html`
-    <div class="file-picker-panel">
+      <div class="file-picker-panel">
       <div class="file-picker-header">
         <h3>Kernel runs <span class="file-picker-count">${runs.length}${page?.truncated ? '+' : ''}</span></h3>
+        <button type="button" class="btn secondary compact" onClick=${event => {
+          const button = event.currentTarget;
+          button.disabled = true;
+          refreshCapturedRuns()
+            .catch(error => showNotice(error instanceof Error ? error.message : 'Run snapshot refresh failed.', 'run-catalog'))
+            .finally(() => { if (button.isConnected) button.disabled = false; });
+        }}>Refresh</button>
         ${runs.length > 0 && sourceNotes.map(note => html`<p class="file-picker-note" key=${note}>${note}</p>`)}
+        <p class="file-picker-note">Captured snapshot — Refresh to include runs that finished after this Viewer started.</p>
         <input type="search" class="file-picker-search" placeholder="Filter by run id, status or bundle"
                aria-label="Filter runs" value=${query}
                onInput=${event => { state.query = event.currentTarget.value; renderRunPicker(); }} />

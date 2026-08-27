@@ -105,8 +105,8 @@ ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ptc models kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>Use <code class="inline">--connect</code> only when an active provider probe is intended:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect</code></pre><h2 id="how-do-i-browse-completed-runs">How do I browse completed runs?</h2><p>Browse completed runs locally:</p><pre><code class="console language-console">ptc viewer hello-ptc/ptc-project.json</code></pre><p>The Runs list uses a matching project <code class="inline">labels.name</code> as its readable headline,
 keeps the command run ID underneath, and shows finite label tags. When every
 successful model call reported a metric, the row also shows full-run input and
-output tokens and provider-reported cost. Missing prices or usage stay absent
-rather than being presented as zero or as a partial total.</p><p>When the Live tab launches provider-backed work, pass an exact dotenv file
+output tokens and provider-reported cost. Refresh includes runs that finished
+after this captured snapshot.</p><p>When the Live tab launches provider-backed work, pass an exact dotenv file
 with <code class="inline">--env-file FILE</code> or declare <code class="inline">host.env_file</code> in the project. The Viewer
 does not search implicitly for <code class="inline">.env</code>.</p><p>The Viewer binds to loopback by default, where Live controls need no token.
 Do not expose it to a network without setting <code class="inline">PTC_VIEWER_TOKEN</code>, especially

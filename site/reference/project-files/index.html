@@ -194,7 +194,11 @@ their ordinary command preparation.</p><p>Direct manifest invocation remains the
   --envelope build/command.json</code></pre><h2 id="viewer">Viewer</h2><p><code class="inline">ptc viewer ptc-project.json</code> uses the project's trace root, port,
 browser-opening preference, REPL setting, and private-data authorization. Trace
 and correlated inspection directories are captured before the listener starts;
-HTTP requests select only a run ID and never a filesystem path. Browser opening
+HTTP requests select only a run ID and never a filesystem path. Revoking
+<code class="inline">viewer.private</code> takes effect on the next request and drops held private
+evidence. Turning the grant on, and discovering runs that finished after
+startup, require Refresh on the Runs list. Other project fields stay boot-read.
+Browser opening
 is a bounded convenience, and additionally requires an attached terminal:
 missing or failing platform openers do not stop Viewer.</p><p>The Viewer port defaults to <code class="inline">0</code>, which asks the operating system for a free
 port; startup prints the selected address before opening a browser. Set a fixed
@@ -208,7 +212,8 @@ inspection authority to the evaluation session.</p><p>Because <code class="inlin
 routes distinguish which one is missing: <code class="inline">inspection_not_configured</code> for a
 project that records no inspection artifact, <code class="inline">inspection_not_private</code> for one
 that records it and withheld the grant. The second needs no re-run — the
-artifact on disk is already usable once the Viewer restarts with the grant.</p><p>A run can also fall outside evidence the Viewer does hold, which the routes
+artifact on disk is already usable once the Viewer refreshes after the grant.
+Revoking the grant takes effect on the next request without Refresh.</p><p>A run can also fall outside evidence the Viewer does hold, which the routes
 name separately from the project settings: <code class="inline">inspection_run_not_recorded</code> for a
 run made before <code class="inline">artifacts.inspection</code> was set, and <code class="inline">inspection_run_mismatch</code>
 for a Viewer pinned to one other run's artifact. The

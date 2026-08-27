@@ -26,6 +26,12 @@ defmodule PtcRunner.ViewerFrontend do
 
   The command runs in the foreground until the Viewer stops or the process is
   signalled; `SIGINT` and `SIGTERM` both end it cleanly.
+
+  The Runs list and private inspection grant are a captured snapshot.
+  Revoking `viewer.private` takes effect on the next request and drops held
+  private evidence. Turning the grant on, and discovering runs that finished
+  after startup, require an explicit Refresh. Other project fields stay
+  boot-read.
   """
 
   alias PtcRunner.Kernel.AnalysisTerminal
@@ -217,11 +223,15 @@ defmodule PtcRunner.ViewerFrontend do
   defp capture_inspection(_project, _trace, _capture_deadline_ms), do: {:ok, nil}
 
   defp start_captured(project, overrides, callbacks) do
-    capture_inspection = fn trace, deadline ->
-      invoke_capture(callbacks.capture_inspection, project, trace, deadline)
+    capture_inspection = fn current, trace, deadline ->
+      invoke_capture(callbacks.capture_inspection, current || project, trace, deadline)
     end
 
-    case ViewerSnapshotStore.start(trace_source(project), capture_inspection) do
+    case ViewerSnapshotStore.start(trace_source(project), capture_inspection,
+           project: project,
+           project_path: project.path,
+           project_loader: callbacks.project_loader
+         ) do
       {:ok, snapshots} -> start_viewer(project, overrides, snapshots, callbacks)
       {:error, _reason} = error -> error
     end
@@ -354,6 +364,7 @@ defmodule PtcRunner.ViewerFrontend do
   defp viewer_options(project, overrides, snapshots, callbacks) do
     private? = project.viewer.private
     source = {:viewer_snapshot_store, snapshots}
+    recorded? = match?(%{artifacts: %{inspection: true}}, project)
     inspection? = ViewerSnapshotStore.inspection?(snapshots)
 
     [
@@ -363,15 +374,18 @@ defmodule PtcRunner.ViewerFrontend do
       private_traces: private?,
       open: project.viewer.open and AnalysisTerminal.attached?(),
       trace_source: source,
-      inspection_source: if(inspection?, do: source),
+      inspection_source: if(recorded?, do: source),
       kernel_trace_adapter: PtcRunner.Kernel.ProjectViewerAdapter,
       inspection_adapter:
-        if(inspection?,
+        if(recorded?,
           do: PtcRunner.Kernel.ProjectViewerAdapter
         ),
       inspection_absence: inspection_absence(project, inspection?),
       live_token: System.get_env("PTC_VIEWER_TOKEN"),
-      live_trace_refresh: fn run_id -> ViewerSnapshotStore.refresh(snapshots, run_id) end,
+      live_trace_refresh: fn
+        nil -> ViewerSnapshotStore.refresh(snapshots)
+        run_id -> ViewerSnapshotStore.refresh(snapshots, run_id)
+      end,
       launch: launch_spec(project, callbacks.frontend, callbacks.env_file),
       project_adapter: fn -> describe_project(project) end,
       repl_adapter: repl_adapter(project),

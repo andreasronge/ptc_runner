@@ -40,8 +40,10 @@ defmodule PtcViewer do
   - `:project_adapter` — a zero-arity function or module returning the project
     details displayed above the launch panel.
   - `:live_trace_refresh` — a one-arity host callback returning `:ok` or
-    `{:error, reason}`. It atomically refreshes the pinned trace source and
-    confirms the requested completed run exists.
+    `{:error, reason}`. With a run id it atomically refreshes the pinned
+    trace source and confirms the requested completed run exists. With
+    `nil` it retains the new capture without naming a run, which is how
+    the Runs list picks up work that finished after Viewer start.
   - `:live_token` — at least 32 bytes. External reporters send the same value in
     `PTC_VIEWER_TOKEN`; in-process host adapters use the direct sink instead.
     Without a token, only loopback reporter connections are accepted.
