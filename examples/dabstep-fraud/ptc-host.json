@@ -30,13 +30,13 @@
     },
     "payments_data": {
       "source": "mcp",
-      "installation_revision": "ptc-fs-mcp-0.1.0-payments-only",
+      "installation_revision": "ptc-fs-mcp-0.2.0-payments-only",
       "accepts_data": ["normal", "private_inspection"],
       "transport": {
         "type": "stdio",
         "command": "npx",
         "cwd": ".",
-        "args": ["-y", "ptc-fs-mcp@0.1.0", "--root", "data", "--include", "columns/*.txt"],
+        "args": ["-y", "ptc-fs-mcp@0.2.0", "--root", "data", "--include", "columns/*.txt"],
         "inherit_environment": true,
         "env": {},
         "start_timeout_ms": 60000
