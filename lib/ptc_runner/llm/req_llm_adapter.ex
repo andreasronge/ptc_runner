@@ -53,15 +53,28 @@ if Code.ensure_loaded?(ReqLLM) do
     @default_bedrock_region "eu-north-1"
     @req_llm_generation_options [
       :api_key,
+      :frequency_penalty,
+      :max_completion_tokens,
+      :max_output_tokens,
       :max_tokens,
       :max_retries,
       :on_unsupported,
+      :presence_penalty,
       :provider_options,
+      :reasoning_effort,
       :seed,
       :temperature,
+      :top_p,
       :tool_choice
     ]
     @token_limit_options [:max_tokens, :max_completion_tokens, :max_output_tokens]
+    @exact_scalar_options [
+      :temperature,
+      :seed,
+      :top_p,
+      :presence_penalty,
+      :frequency_penalty
+    ]
     # ReqLLM gives these providers richer uncataloged fallbacks than its
     # documented generic inline form. Keep only the dispatch list here and let
     # ReqLLM's public string resolver construct each target. Generic providers
@@ -139,10 +152,14 @@ if Code.ensure_loaded?(ReqLLM) do
            :ok <- attest_structured_requirements(model, canonical) do
         case parse_provider(model) do
           {:req_llm, selector} ->
-            prepare_req_llm_target(selector, canonical)
+            with :ok <- attest_inference_controls(model, canonical.exact_options) do
+              prepare_req_llm_target(selector, canonical)
+            end
 
           _direct_http ->
-            {:ok, direct_target(model, canonical), :unavailable, canonical}
+            with :ok <- attest_inference_controls(model, canonical.exact_options) do
+              {:ok, direct_target(model, canonical), :unavailable, canonical}
+            end
         end
       else
         :error -> {:error, :unsupported_model_option}
@@ -159,7 +176,8 @@ if Code.ensure_loaded?(ReqLLM) do
             :ok | {:error, :unsupported_model_option}
     def local_contract_attestation(model, requirements) when is_binary(model) do
       with {:ok, canonical} <- Requirements.canonical(requirements),
-           :ok <- attest_structured_requirements(model, canonical) do
+           :ok <- attest_structured_requirements(model, canonical),
+           :ok <- attest_inference_controls(model, canonical.exact_options) do
         case parse_provider(model) do
           {:req_llm, selector} -> refuse_lossy_max_tokens(selector)
           _direct_http -> :ok
@@ -409,7 +427,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
       options =
         opts
-        |> Keyword.take([:temperature, :seed])
+        |> Keyword.take([:temperature, :seed, :top_p])
         |> Enum.into(%{})
         |> maybe_put_ollama_max_tokens(opts)
 
@@ -438,7 +456,17 @@ if Code.ensure_loaded?(ReqLLM) do
     defp call_openai_compat(base_url, model, messages, opts) do
       timeout = Keyword.get(opts, :receive_timeout, @default_timeout)
       http_opts = Keyword.get(opts, :req_http_options, [])
-      generation_opts = Keyword.take(opts, [:max_tokens, :seed, :temperature])
+
+      generation_opts =
+        Keyword.take(opts, [
+          :max_tokens,
+          :seed,
+          :temperature,
+          :top_p,
+          :presence_penalty,
+          :frequency_penalty,
+          :reasoning_effort
+        ])
 
       formatted_messages =
         Enum.map(messages, fn msg ->
@@ -1141,7 +1169,7 @@ if Code.ensure_loaded?(ReqLLM) do
     defp wire_output_limit_supported?(provider), do: is_atom(provider)
 
     defp configured_output_limit_values(opts, model) do
-      ([Keyword.get(opts, :max_tokens)] ++
+      (Keyword.values(Keyword.take(opts, @token_limit_options)) ++
          provider_token_limit_values(
            Keyword.get(opts, :provider_options, []),
            model_provider(model)
@@ -1433,9 +1461,8 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp merge_exact_options(%ReqLLMPreparedModel{exact_options: exact_options}, opts)
-         when is_map(exact_options) do
-      exact_options
+    defp merge_exact_options(%ReqLLMPreparedModel{} = target, opts) do
+      (target.request_options || target.exact_options)
       |> Enum.reject(fn {_key, value} -> is_nil(value) end)
       |> Keyword.new()
       |> Keyword.merge(opts)
@@ -1511,11 +1538,18 @@ if Code.ensure_loaded?(ReqLLM) do
     defp prepare_req_llm_target(selector, canonical) do
       with :ok <- refuse_lossy_max_tokens(selector),
            {:ok, prepared, status} <- prepare_req_llm_model(selector),
+           {:ok, request_options} <-
+             attest_prepared_inference_controls(
+               prepared.model,
+               canonical.exact_options,
+               canonical.structured_output_mode
+             ),
            :ok <- attest_prepared_json_schema(prepared, canonical.structured_output_mode) do
         {:ok,
          %{
            prepared
            | exact_options: canonical.exact_options,
+             request_options: request_options,
              structured_output_mode: canonical.structured_output_mode
          }, status, canonical}
       end
@@ -1608,6 +1642,267 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp refuse_lossy_max_tokens(_selector), do: :ok
 
+    defp attest_inference_controls(model, exact_options) do
+      case parse_provider(model) do
+        {:ollama, _model_id} ->
+          require_option_subset(exact_options, [:max_tokens, :temperature, :seed, :top_p])
+
+        {:openai_compat, _base_url, _model_id} ->
+          :ok
+
+        {:req_llm, selector} ->
+          attest_req_llm_inference_controls(selector, exact_options)
+      end
+    end
+
+    defp attest_req_llm_inference_controls(selector, exact_options) do
+      case split_req_llm_selector(selector) do
+        {:ok, provider, model_id} ->
+          with :ok <- refuse_req_llm_seed_zero(exact_options),
+               :ok <- refuse_known_lossy_sampling(provider, model_id, exact_options),
+               :ok <- refuse_known_lossy_reasoning(provider, model_id, exact_options) do
+            :ok
+          else
+            _unsupported -> {:error, :unsupported_model_option}
+          end
+
+        {:error, :invalid_model} ->
+          :ok
+      end
+    end
+
+    defp refuse_req_llm_seed_zero(%{seed: 0}), do: {:error, :unsupported_model_option}
+    defp refuse_req_llm_seed_zero(_exact_options), do: :ok
+
+    defp refuse_known_lossy_sampling(:anthropic, _model_id, exact_options) do
+      cond do
+        has_any_option?(exact_options, [:presence_penalty, :frequency_penalty, :seed]) ->
+          {:error, :unsupported_model_option}
+
+        Map.has_key?(exact_options, :temperature) and Map.has_key?(exact_options, :top_p) ->
+          {:error, :unsupported_model_option}
+
+        true ->
+          :ok
+      end
+    end
+
+    defp refuse_known_lossy_sampling(provider, _model_id, exact_options)
+         when provider in [:google, :google_vertex, :amazon_bedrock, :minimax] do
+      refuse_if_any_option(exact_options, [:presence_penalty, :frequency_penalty, :seed])
+    end
+
+    defp refuse_known_lossy_sampling(:meta, _model_id, exact_options),
+      do: refuse_if_any_option(exact_options, @exact_scalar_options)
+
+    defp refuse_known_lossy_sampling(:moonshotai, <<"kimi-k3", _::binary>>, exact_options) do
+      refuse_if_any_option(exact_options, [
+        :temperature,
+        :top_p,
+        :presence_penalty,
+        :frequency_penalty
+      ])
+    end
+
+    defp refuse_known_lossy_sampling(:xai, <<"grok-4", _::binary>>, exact_options) do
+      refuse_if_any_option(exact_options, [:presence_penalty, :frequency_penalty])
+    end
+
+    defp refuse_known_lossy_sampling(_provider, _model_id, _exact_options), do: :ok
+
+    defp refuse_known_lossy_reasoning(_provider, _model_id, exact_options)
+         when not is_map_key(exact_options, :reasoning_effort),
+         do: :ok
+
+    defp refuse_known_lossy_reasoning(provider, _model_id, _exact_options)
+         when provider not in [
+                :deepseek,
+                :fireworks_ai,
+                :meta,
+                :mistral,
+                :openai,
+                :openrouter,
+                :zenmux
+              ],
+         do: {:error, :unsupported_model_option}
+
+    defp refuse_known_lossy_reasoning(:mistral, _model_id, %{reasoning_effort: effort})
+         when effort in [:none, :high],
+         do: :ok
+
+    defp refuse_known_lossy_reasoning(:mistral, _model_id, _exact_options),
+      do: {:error, :unsupported_model_option}
+
+    defp refuse_known_lossy_reasoning(:fireworks_ai, _model_id, %{reasoning_effort: :minimal}),
+      do: {:error, :unsupported_model_option}
+
+    defp refuse_known_lossy_reasoning(:deepseek, _model_id, %{reasoning_effort: effort})
+         when effort != :high,
+         do: {:error, :unsupported_model_option}
+
+    defp refuse_known_lossy_reasoning(:meta, _model_id, %{reasoning_effort: :none}),
+      do: {:error, :unsupported_model_option}
+
+    defp refuse_known_lossy_reasoning(_provider, _model_id, _exact_options), do: :ok
+
+    defp require_option_subset(options, allowed) do
+      if Enum.all?(Map.keys(options), &(&1 in allowed)),
+        do: :ok,
+        else: {:error, :unsupported_model_option}
+    end
+
+    defp refuse_if_any_option(options, keys) do
+      if has_any_option?(options, keys),
+        do: {:error, :unsupported_model_option},
+        else: :ok
+    end
+
+    defp has_any_option?(options, keys), do: Enum.any?(keys, &Map.has_key?(options, &1))
+
+    # ReqLLM applies model-aware option profiles after resolving the target.
+    # Run that exact translation during preparation so silent drops and
+    # substitutions cannot be hidden behind an unchanged requirements map.
+    # Lossless token-limit renames are sealed separately for request dispatch;
+    # every other admitted control stays in its canonical form.
+    defp attest_prepared_inference_controls(
+           %LLMDB.Model{provider: provider} = model,
+           exact_options,
+           structured_output_mode
+         ) do
+      opts = exact_options |> Map.to_list() |> Keyword.put(:on_unsupported, :ignore)
+
+      with {:ok, provider_module} <- ReqLLM.provider(provider),
+           :ok <-
+             attest_prepared_structured_token_limit(
+               model,
+               exact_options,
+               structured_output_mode
+             ),
+           :ok <- attest_prepared_reasoning_capability(model, exact_options),
+           :ok <- attest_prepared_encoder_support(model, exact_options),
+           {:ok, processed} <- Options.process(provider_module, :chat, model, opts),
+           :ok <- attest_translated_scalar_options(processed, exact_options),
+           {:ok, token_limit_key} <- attest_translated_max_tokens(processed, exact_options),
+           :ok <- attest_translated_reasoning(processed, exact_options) do
+        {:ok, translated_request_options(exact_options, token_limit_key)}
+      else
+        _unsupported_or_lossy -> {:error, :unsupported_model_option}
+      end
+    end
+
+    # These ReqLLM object paths silently raise low output budgets to 200.
+    # Refuse the combination because the Kernel must never dispatch beyond the
+    # exact budget sealed at installation.
+    defp attest_prepared_structured_token_limit(
+           %LLMDB.Model{provider: provider},
+           %{max_tokens: max_tokens},
+           :json_schema
+         )
+         when provider in [:google, :openrouter, :xai] and max_tokens < 200,
+         do: {:error, :unsupported_model_option}
+
+    defp attest_prepared_structured_token_limit(_model, _exact_options, _mode), do: :ok
+
+    defp attest_prepared_reasoning_capability(_model, exact_options)
+         when not is_map_key(exact_options, :reasoning_effort),
+         do: :ok
+
+    # OpenRouter is a transparent catalog-free gateway: its encoder preserves
+    # reasoning_effort even when the routed model is absent from the snapshot.
+    defp attest_prepared_reasoning_capability(
+           %LLMDB.Model{provider: :openrouter},
+           _exact_options
+         ),
+         do: :ok
+
+    defp attest_prepared_reasoning_capability(%LLMDB.Model{} = model, _exact_options) do
+      if ModelHelpers.reasoning_enabled?(model),
+        do: :ok,
+        else: {:error, :unsupported_model_option}
+    end
+
+    defp attest_prepared_encoder_support(
+           %LLMDB.Model{provider: :openai} = model,
+           exact_options
+         ) do
+      case ReqLLM.RequestPlan.openai_surface(model) do
+        {:ok, :openai_responses, _provider_module, _warnings} ->
+          refuse_if_any_option(exact_options, @exact_scalar_options)
+
+        {:ok, :openai_chat_completions, _provider_module, _warnings} ->
+          :ok
+
+        _unresolved ->
+          {:error, :unsupported_model_option}
+      end
+    end
+
+    defp attest_prepared_encoder_support(_model, _exact_options), do: :ok
+
+    defp attest_translated_scalar_options(processed, exact_options) do
+      if Enum.all?(@exact_scalar_options, fn key ->
+           not Map.has_key?(exact_options, key) or
+             processed_option(processed, key) == {:ok, Map.fetch!(exact_options, key)}
+         end),
+         do: :ok,
+         else: {:error, :unsupported_model_option}
+    end
+
+    defp attest_translated_max_tokens(processed, %{max_tokens: requested}) do
+      case Enum.find(@token_limit_options, &(Keyword.get(processed, &1) == requested)) do
+        nil -> {:error, :unsupported_model_option}
+        key -> {:ok, key}
+      end
+    end
+
+    defp translated_request_options(exact_options, :max_tokens), do: exact_options
+
+    defp translated_request_options(%{max_tokens: max_tokens} = exact_options, token_limit_key) do
+      exact_options
+      |> Map.delete(:max_tokens)
+      |> Map.put(token_limit_key, max_tokens)
+    end
+
+    defp attest_translated_reasoning(processed, %{reasoning_effort: requested}) do
+      translated =
+        case processed_option(processed, :reasoning_effort) do
+          :error -> processed_option(processed, :fireworks_reasoning_effort)
+          result -> result
+        end
+
+      if translated_reasoning_effort(translated) == {:ok, requested},
+        do: :ok,
+        else: {:error, :unsupported_model_option}
+    end
+
+    defp attest_translated_reasoning(_processed, _exact_options), do: :ok
+
+    defp translated_reasoning_effort({:ok, effort}) when is_atom(effort), do: {:ok, effort}
+
+    defp translated_reasoning_effort({:ok, effort}) when is_binary(effort) do
+      case effort do
+        "none" -> {:ok, :none}
+        "minimal" -> {:ok, :minimal}
+        "low" -> {:ok, :low}
+        "medium" -> {:ok, :medium}
+        "high" -> {:ok, :high}
+        _other -> :error
+      end
+    end
+
+    defp translated_reasoning_effort(_missing_or_invalid), do: :error
+
+    defp processed_option(processed, key) do
+      case Keyword.fetch(processed, key) do
+        {:ok, _value} = found -> found
+        :error -> provider_option(Keyword.get(processed, :provider_options), key)
+      end
+    end
+
+    defp provider_option(options, key) when is_list(options), do: Keyword.fetch(options, key)
+    defp provider_option(options, key) when is_map(options), do: Map.fetch(options, key)
+    defp provider_option(_options, _key), do: :error
+
     defp prepare_req_llm_model(selector) do
       {effective_selector, provider_model_id} = inference_profile_resolution(selector)
       catalog_status = catalog_status(effective_selector)
@@ -1672,7 +1967,7 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp token_limit_present?(opts, model) do
-      Keyword.has_key?(opts, :max_tokens) or
+      Enum.any?(@token_limit_options, &Keyword.has_key?(opts, &1)) or
         provider_token_limit_present?(
           Keyword.get(opts, :provider_options, []),
           model_provider(model)

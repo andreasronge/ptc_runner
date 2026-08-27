@@ -219,19 +219,41 @@ installations do not carry this deadline.</p><pre><code class="json language-jso
   &quot;model&quot;: &quot;openrouter:deepseek/deepseek-v4-flash&quot;,
   &quot;credential&quot;: &quot;openrouter_key&quot;,
   &quot;cache&quot;: false,
-  &quot;params&quot;: {&quot;temperature&quot;: 0.2, &quot;seed&quot;: 42, &quot;max_tokens&quot;: 4096}
-}</code></pre><p>Set <code class="inline">params.max_tokens</code> explicitly when the installation needs a particular
-output budget. For catalog-backed models that omit it, PtcRunner's built-in
-ReqLLM adapter caps the default at 4096 tokens, the cataloged model output
-limit, and a conservative remainder of the context window after the request.
-This avoids turning a model's full context-window ceiling into an impossible
-output request once the prompt is included. The tutorial keeps the value
-explicit so changing only its model selector retains a bounded request.</p><p>The built-in adapter prepares the selected model once before constructing its
+  &quot;params&quot;: {
+    &quot;temperature&quot;: 0.2,
+    &quot;seed&quot;: 42,
+    &quot;max_tokens&quot;: 4096,
+    &quot;top_p&quot;: 0.9,
+    &quot;presence_penalty&quot;: 0.0,
+    &quot;frequency_penalty&quot;: 0.0,
+    &quot;reasoning_effort&quot;: &quot;medium&quot;
+  }
+}</code></pre><p><code class="inline">params</code> is a closed installation-owned map. Except for <code class="inline">max_tokens</code>, omitted
+fields use the selected adapter/model default; an <code class="inline">llm/request</code> cannot add or
+replace them. The Kernel always supplies its effective output-token limit as
+<code class="inline">max_tokens</code>, bounded by an installed value when one is present.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Field</th><th style="text-align: left;">Accepted value</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">temperature</code></td><td style="text-align: left;">number from 0.0 through 2.0</td></tr><tr><td style="text-align: left;"><code class="inline">seed</code></td><td style="text-align: left;">integer from 0 through 2147483647</td></tr><tr><td style="text-align: left;"><code class="inline">max_tokens</code></td><td style="text-align: left;">integer from 1 through 1000000</td></tr><tr><td style="text-align: left;"><code class="inline">top_p</code></td><td style="text-align: left;">number greater than 0.0 and at most 1.0</td></tr><tr><td style="text-align: left;"><code class="inline">presence_penalty</code></td><td style="text-align: left;">number from -2.0 through 2.0</td></tr><tr><td style="text-align: left;"><code class="inline">frequency_penalty</code></td><td style="text-align: left;">number from -2.0 through 2.0</td></tr><tr><td style="text-align: left;"><code class="inline">reasoning_effort</code></td><td style="text-align: left;"><code class="inline">none</code>, <code class="inline">minimal</code>, <code class="inline">low</code>, <code class="inline">medium</code>, or <code class="inline">high</code></td></tr></tbody></table></div><p>These normalized controls are part of installation identity and the
+installation configuration digest. Change <code class="inline">installation_revision</code> whenever
+they change. Provider option maps, stop payloads, reasoning token budgets, and
+the <code class="inline">xhigh</code> and <code class="inline">max</code> reasoning levels are not admitted.</p><p>Set <code class="inline">params.max_tokens</code> explicitly when the installation needs a narrower
+output budget than the effective Kernel limit. The tutorial keeps the value
+explicit so changing only its model selector retains the same request contract.</p><p>The built-in adapter prepares the selected model once before constructing its
 requester. A selector absent from the bundled model catalog remains usable when
 ReqLLM supports its provider, but PtcRunner emits one <code class="inline">model_uncataloged</code>
 warning for that requester. Catalog metadata such as pricing, limits, token
 estimation, and capability detection may then be incomplete; the warning does
-not mean the provider request itself is known to fail.</p><p>Every live model installation must declare <code class="inline">structured_output_mode</code> as
+not mean the provider request itself is known to fail.</p><p>Preparation seals the exact controls into the target and requires the adapter
+to attest the same canonical map. The built-in adapter uses ReqLLM's strict
+unsupported-option policy and also refuses known lossy routes during local
+preflight, before credential loading. For example, Anthropic cannot combine
+<code class="inline">temperature</code> with <code class="inline">top_p</code> or accept OpenAI-style presence/frequency penalties;
+several provider families translate reasoning effort to a fixed level or token
+budget; and Ollama's direct route admits <code class="inline">temperature</code>, <code class="inline">seed</code>, and <code class="inline">top_p</code> but
+not the two penalties or reasoning effort. The direct <code class="inline">openai-compat:</code> route
+transmits the complete admitted set. OpenRouter does the same for positive
+seeds; seed zero is refused because ReqLLM's current option boundary cannot
+encode it. A refused combination reports
+<code class="inline">local_preflight/model_contract_unsupported</code> without publishing the option
+value or contacting the provider.</p><p>Every live model installation must declare <code class="inline">structured_output_mode</code> as
 <code class="inline">json_schema</code>, <code class="inline">json_object</code>, or <code class="inline">unsupported</code>. <code class="inline">json_schema</code> asks the provider
 to enforce the request schema with its native schema mechanism and is refused
 at prepare when the adapter can only fall back to a synthetic tool.

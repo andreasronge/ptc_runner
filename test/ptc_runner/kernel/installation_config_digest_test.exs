@@ -131,6 +131,16 @@ defmodule PtcRunner.Kernel.InstallationConfigDigestTest do
     with_zero = put_in(llm, ["install", "deepseek", "params"], %{"temperature" => 0.0})
     refute digest(llm, "deepseek") == digest(with_zero, "deepseek")
 
+    for {field, value} <- [
+          {"top_p", 0.9},
+          {"presence_penalty", -0.5},
+          {"frequency_penalty", 0.5},
+          {"reasoning_effort", "medium"}
+        ] do
+      with_control = put_in(llm, ["install", "deepseek", "params"], %{field => value})
+      refute digest(llm, "deepseek") == digest(with_control, "deepseek")
+    end
+
     json_schema =
       put_in(llm, ["install", "deepseek", "structured_output_mode"], "json_schema")
 

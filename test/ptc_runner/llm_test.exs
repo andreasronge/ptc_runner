@@ -340,8 +340,50 @@ defmodule PtcRunner.LLMTest do
     end
 
     test "probe authorization forces max_tokens 1 and keeps other installation controls" do
-      assert {:ok, probe} = Requirements.probe(%{max_tokens: 99, seed: 7})
-      assert probe.exact_options == %{max_tokens: 1, seed: 7}
+      params = %{
+        max_tokens: 99,
+        seed: 7,
+        top_p: 0.9,
+        presence_penalty: -0.5,
+        frequency_penalty: 0.75,
+        reasoning_effort: :medium
+      }
+
+      assert {:ok, probe} = Requirements.probe(params)
+      assert probe.exact_options == Map.put(params, :max_tokens, 1)
+    end
+
+    test "canonicalizes the complete closed inference-control set" do
+      exact = %{
+        max_tokens: 512,
+        temperature: 1,
+        seed: 0,
+        top_p: 1,
+        presence_penalty: -2,
+        frequency_penalty: 2,
+        reasoning_effort: :high
+      }
+
+      assert {:ok, canonical} = exact |> Requirements.interim() |> Requirements.canonical()
+
+      assert canonical.exact_options == %{
+               exact
+               | temperature: 1.0,
+                 top_p: 1.0,
+                 presence_penalty: -2.0,
+                 frequency_penalty: 2.0
+             }
+
+      for invalid <- [
+            %{exact | top_p: 0},
+            %{exact | top_p: 1.01},
+            %{exact | presence_penalty: -2.01},
+            %{exact | frequency_penalty: 2.01},
+            %{exact | reasoning_effort: :xhigh},
+            Map.put(exact, :provider_options, %{})
+          ] do
+        assert :error = invalid |> Requirements.interim() |> Requirements.canonical()
+      end
     end
   end
 

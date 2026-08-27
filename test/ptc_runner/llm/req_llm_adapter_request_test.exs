@@ -17,6 +17,103 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     :ok
   end
 
+  test "sends every attested inference control on the OpenRouter wire", %{test: test} do
+    exact_options = %{
+      max_tokens: 64,
+      temperature: 0.25,
+      seed: 7,
+      top_p: 0.9,
+      presence_penalty: -0.5,
+      frequency_penalty: 0.75,
+      reasoning_effort: :medium
+    }
+
+    expect_request(test, "deepseek/deepseek-v4-flash-0731")
+
+    assert {:ok, target, _status, attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               Requirements.interim(exact_options)
+             )
+
+    {:ok, invocation} =
+      Invocation.new(%{messages: [%{role: :user, content: "hi"}]}, false, "test", nil)
+
+    assert {:ok, %{content: "ok"}} =
+             ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
+
+    assert attestation.exact_options == exact_options
+    assert_receive {:request_body, body}
+    assert body["max_tokens"] == 64
+    assert body["temperature"] == 0.25
+    assert body["seed"] == 7
+    assert body["top_p"] == 0.9
+    assert body["presence_penalty"] == -0.5
+    assert body["frequency_penalty"] == 0.75
+    assert body["reasoning_effort"] == "medium"
+  end
+
+  test "sends every attested inference control on the direct OpenAI-compatible wire", %{
+    test: test
+  } do
+    exact_options = %{
+      max_tokens: 64,
+      temperature: 0.25,
+      seed: 0,
+      top_p: 0.9,
+      presence_penalty: -0.5,
+      frequency_penalty: 0.75,
+      reasoning_effort: :high
+    }
+
+    expect_request(test, "deployment")
+
+    assert {:ok, target, :unavailable, attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openai-compat:https://example.com/v1|deployment",
+               Requirements.interim(exact_options)
+             )
+
+    {:ok, invocation} =
+      Invocation.new(%{messages: [%{role: :user, content: "hi"}]}, false, "test", nil)
+
+    assert {:ok, %{content: "ok"}} =
+             ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
+
+    assert attestation.exact_options == exact_options
+    assert_receive {:request_body, body}
+    assert body["model"] == "deployment"
+    assert body["max_tokens"] == 64
+    assert body["temperature"] == 0.25
+    assert body["seed"] == 0
+    assert body["top_p"] == 0.9
+    assert body["presence_penalty"] == -0.5
+    assert body["frequency_penalty"] == 0.75
+    assert body["reasoning_effort"] == "high"
+  end
+
+  test "preserves an attested token-limit alias through ReqLLM dispatch", %{test: test} do
+    Req.Test.expect(test, responses_request_handler(self(), "gpt-5"))
+
+    assert {:ok, target, :cataloged, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openai:gpt-5",
+               Requirements.interim(%{max_tokens: 64, reasoning_effort: :high})
+             )
+
+    {:ok, invocation} =
+      Invocation.new(%{messages: [%{role: :user, content: "hi"}]}, false, "test", nil)
+
+    assert {:ok, %{content: "ok"}} =
+             ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
+
+    assert_receive {:request_body, body}
+    assert body["max_output_tokens"] == 64
+    assert body["reasoning"] == %{"effort" => "high"}
+    refute Map.has_key?(body, "max_tokens")
+    refute Map.has_key?(body, "max_completion_tokens")
+  end
+
   test "json_schema generate_object uses provider-native response_format", %{test: test} do
     schema = %{
       "type" => "object",
@@ -42,6 +139,44 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     assert get_in(body, ["response_format", "json_schema", "schema", "type"]) == "object"
     refute Map.has_key?(body, "tools")
     refute Map.has_key?(body, "tool_choice")
+  end
+
+  test "json_schema refuses a token budget that ReqLLM would raise on the wire" do
+    assert {:error, :unsupported_model_option} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               Requirements.interim(%{max_tokens: 64}, :json_schema)
+             )
+  end
+
+  test "json_schema preserves the minimum admitted token budget on the wire", %{test: test} do
+    schema = %{
+      "type" => "object",
+      "properties" => %{"ok" => %{"type" => "boolean"}},
+      "required" => ["ok"]
+    }
+
+    expect_object_request(test, "deepseek/deepseek-v4-flash-0731", ~s({"ok":true}))
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               Requirements.interim(%{max_tokens: 200}, :json_schema)
+             )
+
+    {:ok, invocation} =
+      Invocation.new(
+        %{messages: [%{role: :user, content: "hi"}], schema: schema},
+        false,
+        "test",
+        nil
+      )
+
+    assert {:ok, %{object: %{"ok" => true}}} =
+             ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
+
+    assert_receive {:request_body, body}
+    assert body["max_tokens"] == 200
   end
 
   test "json_schema generate_object does not dispatch a tool-fallback Vertex model" do
@@ -656,7 +791,12 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
         plug when is_function(plug, 1) -> [plug: plug, retry: false]
       end
 
-    %{target | exact_options: Map.put(target.exact_options, :req_http_options, http_options)}
+    %{
+      target
+      | exact_options: Map.put(target.exact_options, :req_http_options, http_options),
+        request_options:
+          Map.put(target.request_options || target.exact_options, :req_http_options, http_options)
+    }
   end
 
   defp prepare_model(selector) do
@@ -682,6 +822,22 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
           }
         ],
         "usage" => %{"prompt_tokens" => 1, "completion_tokens" => 1, "total_tokens" => 2}
+      })
+    end
+  end
+
+  defp responses_request_handler(test_pid, response_model) do
+    fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:request_body, Jason.decode!(body)})
+
+      Req.Test.json(conn, %{
+        "id" => "resp-test",
+        "model" => response_model,
+        "status" => "completed",
+        "output_text" => "ok",
+        "output" => [],
+        "usage" => %{"input_tokens" => 1, "output_tokens" => 1}
       })
     end
   end

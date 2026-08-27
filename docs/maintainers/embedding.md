@@ -134,6 +134,12 @@ selector once before requester construction. The callback receives the closed
 requirements map and must return an immutable request target, catalog status,
 and an attestation that is exactly that requirements map. Do not return
 processes, ports, credentials, or other resources that need cleanup.
+`requirements.exact_options` is the final closed inference-control map: it
+always contains the effective `max_tokens` authorization and may contain only
+`temperature`, `seed`, `top_p`, `presence_penalty`, `frequency_penalty`, and
+`reasoning_effort`. An adapter must refuse preparation when its exact target
+would drop, clamp, substitute, or lossily translate any value; warnings and
+best-effort provider behavior are not attestation.
 `PtcRunner.LLM.prepare/2` is the sole supported `PreparedModel` constructor.
 `PtcRunner.LLM.callback/2` binds a prepared target to a closed
 `%{credential: binary() | nil, cache: boolean()}` map and returns

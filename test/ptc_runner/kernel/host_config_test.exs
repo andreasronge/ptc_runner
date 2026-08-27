@@ -76,7 +76,15 @@ defmodule PtcRunner.Kernel.HostConfigTest do
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "cache" => false,
-          "params" => %{"temperature" => 0.2, "seed" => 42, "max_tokens" => 4_096},
+          "params" => %{
+            "temperature" => 0.2,
+            "seed" => 42,
+            "max_tokens" => 4_096,
+            "top_p" => 0.85,
+            "presence_penalty" => -0.25,
+            "frequency_penalty" => 1.5,
+            "reasoning_effort" => "medium"
+          },
           "installation_revision" => "model-policy-v2",
           "accepts_data" => ["normal", "private_inspection"],
           "ceilings" => %{
@@ -94,7 +102,15 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              model: "openrouter:deepseek/deepseek-v4-flash-0731",
              credential: "openrouter_key",
              cache: false,
-             params: %{temperature: 0.2, seed: 42, max_tokens: 4_096},
+             params: %{
+               temperature: 0.2,
+               seed: 42,
+               max_tokens: 4_096,
+               top_p: 0.85,
+               presence_penalty: -0.25,
+               frequency_penalty: 1.5,
+               reasoning_effort: :medium
+             },
              structured_output_mode: :unsupported,
              installation_revision: "model-policy-v2",
              ceilings: %{
@@ -655,7 +671,12 @@ defmodule PtcRunner.Kernel.HostConfigTest do
           %{"temperature" => 2.1},
           %{"seed" => -1},
           %{"max_tokens" => 0},
-          %{"top_p" => 0.9}
+          %{"top_p" => 0},
+          %{"top_p" => 1.1},
+          %{"presence_penalty" => -2.1},
+          %{"frequency_penalty" => 2.1},
+          %{"reasoning_effort" => "xhigh"},
+          %{"reasoning_effort" => nil}
         ] do
       invalid = put_in(llm, ["install", "deepseek", "params"], invalid_params)
       assert {:error, :invalid_host_config} = HostConfig.decode(invalid, "/tmp")
