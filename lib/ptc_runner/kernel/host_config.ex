@@ -1206,7 +1206,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          description: description,
          error_feedback: error_feedback(feedback),
          model_visible: model_visible,
-         inspection_capture: String.to_existing_atom(capture)
+         inspection_capture: inspection_capture(capture)
        }}
     else
       _reason -> {:error, :invalid_tool}
@@ -1339,6 +1339,9 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp error_feedback("closed"), do: :closed
   defp error_feedback("bounded"), do: :bounded
+
+  defp inspection_capture("full"), do: :full
+  defp inspection_capture("digest_results"), do: :digest_results
 
   defp accepts_data_class("normal"), do: :normal
   defp accepts_data_class("private_inspection"), do: :private_inspection

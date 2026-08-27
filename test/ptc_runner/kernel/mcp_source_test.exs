@@ -509,6 +509,45 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "digest result capture keeps the record lifecycle a full run produces", %{tmp_dir: dir} do
+    fixture = fixture(self())
+    on_exit(fixture.close)
+
+    # Issue #1670 requires digest capture to add no segmented records: the two
+    # modes must agree on record order, correlation, joins, and counts, and
+    # differ only in which value key each digested record carries.
+    shape = fn tools, name ->
+      path = Path.join(dir, "#{name}.ptcins")
+
+      assert {:ok, %PtcRunner.Kernel.Result{}} =
+               dir
+               |> manifest(Map.keys(public_mappings()))
+               |> directory_request(registry(fixture.endpoint, tools: tools), inspect: path)
+               |> RunLifecycle.build()
+               |> RunLifecycle.execute()
+
+      assert {:ok, records} = StreamingInspection.read_path(path)
+
+      # Capability ids carry run entropy, so compare the join structure rather
+      # than the literal ids: records sharing an id must keep sharing one.
+      ids = records |> Enum.map(& &1["correlation"]["capability_id"]) |> Enum.uniq()
+      slot = Map.new(Enum.with_index(ids), fn {id, index} -> {id, index} end)
+
+      Enum.map(records, fn record ->
+        {record["sequence"], record["record_type"], slot[record["correlation"]["capability_id"]],
+         record["correlation"]["request_id"]}
+      end)
+    end
+
+    digest_tools =
+      Map.new(mappings(), fn {name, m} ->
+        {name, Map.put(m, :inspection_capture, :digest_results)}
+      end)
+
+    assert shape.(digest_tools, "digest-parity") == shape.(mappings(), "full-parity")
+  end
+
+  @tag :tmp_dir
   test "digest result capture retains identities for successes and bodies for failures", %{
     tmp_dir: dir
   } do

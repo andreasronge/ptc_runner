@@ -592,7 +592,17 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     owned = MapSet.new(atoms, fn {_index, atom} -> atom end)
 
-    for atom <- [:bearer, :basic, :closed, :bounded, :write, :normal, :private_inspection] do
+    for atom <- [
+          :bearer,
+          :basic,
+          :closed,
+          :bounded,
+          :write,
+          :normal,
+          :private_inspection,
+          :full,
+          :digest_results
+        ] do
       assert MapSet.member?(owned, atom),
              "#{inspect(atom)} must be a literal in HostConfig, not borrowed from another module"
     end
