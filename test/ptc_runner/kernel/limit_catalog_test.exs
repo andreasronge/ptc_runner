@@ -106,6 +106,16 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                          })}
                       end)
                     )
+                    |> Map.put("llm_total_tokens", %{
+                      field: :llm_total_tokens,
+                      name: "llm_total_tokens",
+                      scope: :optional_manifest_narrowable,
+                      compiled_default: nil,
+                      installed_default: nil,
+                      minimum: 1,
+                      maximum: 9_007_199_254_740_991,
+                      identity: true
+                    })
 
   # A ceiling equal to the default leaves a manifest no way to raise its own
   # value except by writing a host document. Twenty-one rows were in that
@@ -224,6 +234,13 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                    "maximum" => ^maximum
                  } = Map.fetch!(manifest_properties, row.name)
 
+        :optional_manifest_narrowable ->
+          assert %{
+                   "type" => "integer",
+                   "minimum" => ^minimum,
+                   "maximum" => ^maximum
+                 } = Map.fetch!(manifest_properties, row.name)
+
         :installed_only ->
           refute Map.has_key?(manifest_properties, row.name)
       end
@@ -294,7 +311,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
             "provider_cleanup_timeout_ms" -> 100
             "selection_validation_timeout_ms" -> 30_000
             "doctor_connectivity_timeout_ms" -> 100
-            _manifest_narrowable -> row.maximum
+            _other -> if row.scope == :optional_manifest_narrowable, do: nil, else: row.maximum
           end
 
         {row.field, value}

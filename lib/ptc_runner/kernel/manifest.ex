@@ -1071,7 +1071,10 @@ defmodule PtcRunner.Kernel.Manifest do
   defp limits(value, %Limits{} = installed_limits) when is_map(value) do
     ceilings = Map.from_struct(installed_limits)
     defaults = Limits.defaults() |> Map.from_struct()
-    manifest_rows = LimitCatalog.rows(:manifest_narrowable)
+
+    manifest_rows =
+      LimitCatalog.rows(:manifest_narrowable) ++
+        LimitCatalog.rows(:optional_manifest_narrowable)
 
     bounds_by_name =
       Map.new(manifest_rows, fn row ->
@@ -1085,6 +1088,9 @@ defmodule PtcRunner.Kernel.Manifest do
             :manifest_narrowable ->
               min(Map.fetch!(defaults, row.field), Map.fetch!(ceilings, row.field))
 
+            :optional_manifest_narrowable ->
+              Map.fetch!(ceilings, row.field)
+
             :installed_only ->
               Map.fetch!(ceilings, row.field)
           end
@@ -1092,7 +1098,14 @@ defmodule PtcRunner.Kernel.Manifest do
         {row.field, value}
       end)
 
-    with :ok <- section_keys(value, "limits", LimitCatalog.names(:manifest_narrowable), []) do
+    with :ok <-
+           section_keys(
+             value,
+             "limits",
+             LimitCatalog.names(:manifest_narrowable) ++
+               LimitCatalog.names(:optional_manifest_narrowable),
+             []
+           ) do
       value
       |> Map.to_list()
       |> Enum.sort_by(&elem(&1, 0))
@@ -1107,6 +1120,12 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp normalize_limits([{key, number} | rest], bounds, normalized) do
     case {Map.fetch(bounds, key), number} do
+      {{:ok, {_name, nil, _maximum}}, number} when is_integer(number) and number > 0 ->
+        manifest_value_error(
+          [{:property, "limits"}, {:property, key}],
+          {:limit_unavailable, key, number}
+        )
+
       {{:ok, {name, ceiling, _maximum}}, number}
       when is_integer(number) and number > 0 and number <= ceiling ->
         normalize_limits(rest, bounds, Map.put(normalized, name, number))

@@ -17,8 +17,9 @@ defmodule PtcRunner.Kernel.Limits do
   narrower values. `installed_defaults/0` are the larger host-controlled
   ceilings used by manifest-backed frontends. A host may supply another
   complete `Limits` value as its installation ceiling. Manifests can narrow
-  only catalog rows scoped `:manifest_narrowable`; installed-only values are
-  copied from the host unchanged.
+  only catalog rows scoped `:manifest_narrowable` or
+  `:optional_manifest_narrowable`; installed-only values are copied from the
+  host unchanged.
   """
 
   alias PtcRunner.Kernel.LimitCatalog
@@ -42,6 +43,7 @@ defmodule PtcRunner.Kernel.Limits do
           live_provider_tasks: pos_integer(),
           llm_request_output_tokens: pos_integer(),
           llm_request_timeout_ms: pos_integer(),
+          llm_total_tokens: pos_integer() | nil,
           workflow_capability_calls: pos_integer(),
           workflow_capability_calls_per_name: pos_integer(),
           mission_capability_calls: pos_integer(),
@@ -96,7 +98,7 @@ defmodule PtcRunner.Kernel.Limits do
     end
   end
 
-  @spec fetch(t(), binary() | atom()) :: {:ok, pos_integer()} | :error
+  @spec fetch(t(), binary() | atom()) :: {:ok, pos_integer() | nil} | :error
   @doc "Reads one cataloged field from a valid limits value."
   def fetch(%__MODULE__{} = limits, name) do
     with true <- valid?(limits),
