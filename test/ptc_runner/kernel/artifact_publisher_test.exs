@@ -113,7 +113,10 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
         "outcome" => "ok",
         "reason" => nil,
         "result_hash" => result_hash,
-        "usage" => %{"events_dropped" => counts}
+        "usage" => %{
+          "events_dropped" => counts,
+          "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+        }
       })
     ]
 

@@ -5,7 +5,7 @@ import { createAnalyzeButton, createReplController, nextTabName, readViewerConfi
 import { createRunCatalog } from './run-catalog.js';
 import { createLiveController, liveTokenFromSearch } from './live.js';
 import { commitCurrentLoad } from './current-load.js';
-import { displayRunName, emptyRunsMessage, formatRunSpend, searchableRunFields, traceSourceNotes } from './run-display.js';
+import { displayRunName, emptyRunsMessage, formatRunBudget, formatRunSpend, searchableRunFields, traceSourceNotes } from './run-display.js';
 import { truncate } from './utils.js';
 
 function formatDate(isoString) {
@@ -180,7 +180,7 @@ function RunPicker() {
 
 function RunRow({ run }) {
   const displayName = displayRunName(run, state.project);
-  const usage = formatRunSpend(run.llm_spend);
+  const usage = [...formatRunSpend(run.llm_spend), ...formatRunBudget(run.llm_budget)];
 
   return html`
     <button type="button" class="file-picker-item" onClick=${() => selectRun(run.run_id)}>

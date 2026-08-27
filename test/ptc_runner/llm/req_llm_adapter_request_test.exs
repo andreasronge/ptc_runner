@@ -119,6 +119,44 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     refute Map.has_key?(tokens, :output)
   end
 
+  test "budgeted live calls disable hidden ReqLLM retries" do
+    parent = self()
+
+    plug = fn conn ->
+      send(parent, :budgeted_attempt)
+      Req.Test.transport_error(conn, :closed)
+    end
+
+    requirements = %{
+      Requirements.interim(%{max_tokens: 64})
+      | usage_guarantees: %{tokens: true, cost_currency: nil},
+        reservation: %{total_tokens?: true, cost_tariff: nil}
+    }
+
+    assert {:ok, target, _status, ^requirements} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               requirements
+             )
+
+    target =
+      %{
+        target
+        | exact_options: Map.put(target.exact_options, :req_http_options, plug: plug),
+          request_options:
+            Map.put(target.request_options || target.exact_options, :req_http_options, plug: plug)
+      }
+
+    {:ok, invocation} =
+      Invocation.new(%{messages: [%{role: :user, content: "hi"}]}, false, "test", nil)
+
+    assert {:error, %ProviderError{kind: :transport_error}} =
+             ReqLLMAdapter.call(target, invocation)
+
+    assert_receive :budgeted_attempt
+    refute_receive :budgeted_attempt, 50
+  end
+
   test "preserves numeric and decimal-string cost on the direct OpenAI-compatible path", %{
     test: test
   } do

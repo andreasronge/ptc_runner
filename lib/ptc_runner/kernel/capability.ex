@@ -30,9 +30,10 @@ defmodule PtcRunner.Kernel.Capability do
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.LLM.Requirements
 
   @effects [:read, :write, :unknown]
-  @options ~w(name callback validate description model_visible input_schema output_schema effect inspection_capture)a
+  @options ~w(name callback validate description model_visible input_schema output_schema effect inspection_capture llm_reservation)a
   @enforce_keys [:name, :callback, :input_schema]
   defstruct [
     :name,
@@ -43,6 +44,7 @@ defmodule PtcRunner.Kernel.Capability do
     :output_schema,
     :input_validator,
     :output_validator,
+    :llm_reservation,
     model_visible: true,
     effect: :unknown,
     inspection_capture: :full
@@ -66,6 +68,7 @@ defmodule PtcRunner.Kernel.Capability do
           output_schema: map() | nil,
           input_validator: JSONSchema.compiled(),
           output_validator: JSONSchema.compiled() | nil,
+          llm_reservation: map() | nil,
           effect: :read | :write | :unknown,
           inspection_capture: :full | :digest_results
         }
@@ -74,8 +77,8 @@ defmodule PtcRunner.Kernel.Capability do
   @doc """
   Constructs a capability from required `:name`, `:callback`, and
   `:input_schema` options plus optional `:output_schema`, `:effect`,
-  `:validate`, `:description`, `:model_visible`, and `:inspection_capture`
-  options.
+  `:validate`, `:description`, `:model_visible`, `:inspection_capture`, and
+  `:llm_reservation` options.
 
   Names are bounded lower-case identifiers and may contain `.`, `_`, `/`, and
   `-`. Descriptions are limited to 4,096 bytes. Schemas use the bounded JSON
@@ -100,6 +103,7 @@ defmodule PtcRunner.Kernel.Capability do
          inspection_capture when inspection_capture in [:full, :digest_results] <-
            Keyword.get(opts, :inspection_capture, :full),
          true <- inspection_capture == :full or effect == :read,
+         :ok <- valid_llm_reservation(Keyword.get(opts, :llm_reservation)),
          {:ok, input_schema, input_validator} <-
            JSONSchema.compile(Keyword.get(opts, :input_schema)),
          true <- callable_input_schema?(input_schema),
@@ -116,6 +120,7 @@ defmodule PtcRunner.Kernel.Capability do
          output_schema: output_schema,
          input_validator: input_validator,
          output_validator: output_validator,
+         llm_reservation: Keyword.get(opts, :llm_reservation),
          effect: effect,
          inspection_capture: inspection_capture
        }}
@@ -147,6 +152,28 @@ defmodule PtcRunner.Kernel.Capability do
   defp valid_validator(nil), do: :ok
   defp valid_validator(validate) when is_function(validate, 1), do: :ok
   defp valid_validator(_validate), do: {:error, :invalid_capability}
+  defp valid_llm_reservation(nil), do: :ok
+
+  defp valid_llm_reservation(%{source: "llm_replay"} = reservation)
+       when map_size(reservation) == 1,
+       do: :ok
+
+  defp valid_llm_reservation(
+         %{
+           source: "llm",
+           output_tokens: output_tokens,
+           tariff: tariff,
+           bound: bound
+         } = reservation
+       )
+       when map_size(reservation) == 4 and is_integer(output_tokens) and output_tokens > 0 and
+              is_function(bound, 2) do
+    if Requirements.valid_cost_tariff?(tariff),
+      do: :ok,
+      else: {:error, :invalid_capability}
+  end
+
+  defp valid_llm_reservation(_reservation), do: {:error, :invalid_capability}
   defp valid_description(nil), do: {:ok, nil}
 
   defp valid_description(description)

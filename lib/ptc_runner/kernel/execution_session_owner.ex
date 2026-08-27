@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionSessionResources
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.MCPOAuth.LoopbackListener
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Kernel.OwnerFailure
@@ -566,22 +567,23 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   end
 
   defp release_sinks(%{built: %{config: config}} = state) do
-    finalize_and_stop_sinks(config.event_sink, config.inspection_sink)
+    finalize_and_stop_sinks(config.event_sink, config.inspection_sink, config.limits)
     %{state | opened_sinks: nil}
   end
 
   defp release_sinks(%{opened_sinks: opened_sinks} = state) do
-    finalize_and_stop_sinks(opened_sinks.event_sink, opened_sinks.inspection_sink)
+    limits = state.prepared.request.package.limits
+    finalize_and_stop_sinks(opened_sinks.event_sink, opened_sinks.inspection_sink, limits)
     %{state | opened_sinks: nil}
   end
 
-  defp finalize_and_stop_sinks(event_sink, inspection_sink) do
+  defp finalize_and_stop_sinks(event_sink, inspection_sink, limits) do
     if Process.alive?(event_sink.pid) do
       _result =
         EventSink.finalize_and_events(event_sink, %{
           outcome: :error,
           reason: :session_owner_failed,
-          usage: %{}
+          usage: %{llm_budget: LLMBudget.unavailable_terminal_projection(limits)}
         })
     end
 

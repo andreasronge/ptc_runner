@@ -1514,7 +1514,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       )
 
     required =
-      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors agent_protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped capability_refusals llm_spend llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
+      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors agent_protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped capability_refusals llm_budget llm_spend llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
 
     common = %{
       "remaining_ms" => nonnegative_integer(),
@@ -1528,6 +1528,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       "evaluation_continuation_bytes" => nonnegative_integer(),
       "events_dropped" => event_counts,
       "capability_refusals" => refusal_counts,
+      "llm_budget" => llm_budget_schema(),
       "llm_spend" => llm_spend_schema()
     }
 
@@ -1553,6 +1554,43 @@ defmodule PtcRunner.Kernel.CommandContract do
         )
       ]
     }
+  end
+
+  defp llm_budget_schema do
+    closed(~w(total_tokens cost), %{
+      "total_tokens" => %{
+        "oneOf" => [%{"type" => "null"}, total_tokens_budget_schema()]
+      },
+      "cost" => %{
+        "oneOf" => [%{"type" => "null"}, cost_budget_schema()]
+      }
+    })
+  end
+
+  defp total_tokens_budget_schema do
+    closed(~w(state limit reserved charged remaining refused), %{
+      "state" => %{"enum" => ~w(available incomplete overrun)},
+      "limit" => positive_usage_integer(),
+      "reserved" => %{"const" => 0},
+      "charged" => usage_integer(),
+      "remaining" => usage_integer(),
+      "refused" => usage_integer()
+    })
+  end
+
+  defp cost_budget_schema do
+    closed(
+      ~w(state currency limit_microusd reserved_microusd charged_microusd remaining_microusd refused),
+      %{
+        "state" => %{"enum" => ~w(available incomplete overrun)},
+        "currency" => %{"const" => "USD"},
+        "limit_microusd" => positive_usage_integer(),
+        "reserved_microusd" => %{"const" => 0},
+        "charged_microusd" => usage_integer(),
+        "remaining_microusd" => usage_integer(),
+        "refused" => usage_integer()
+      }
+    )
   end
 
   defp llm_spend_schema do
@@ -1628,6 +1666,9 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp usage_integer,
     do: %{"type" => "integer", "minimum" => 0, "maximum" => 9_007_199_254_740_991}
+
+  defp positive_usage_integer,
+    do: %{"type" => "integer", "minimum" => 1, "maximum" => 9_007_199_254_740_991}
 
   defp usd_cost_schema do
     closed(~w(currency microunits), %{

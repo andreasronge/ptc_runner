@@ -750,7 +750,9 @@ defmodule PtcRunner.Kernel.HostConfig do
          {:ok, structured_output_mode} <-
            structured_output_mode(value["structured_output_mode"]),
          {:ok, usage_guarantees} <- usage_guarantees(value["usage_guarantees"]),
+         :ok <- usage_guarantee_requirements(usage_guarantees, limits),
          {:ok, reservation_tariff} <- reservation_tariff(Map.get(value, "reservation_tariff")),
+         :ok <- reservation_tariff_requirement(reservation_tariff, limits),
          {:ok, installation_revision} <-
            revision(value["installation_revision"]),
          {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{}), limits),
@@ -847,6 +849,29 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp usage_guarantees(_value), do: {:error, :invalid_usage_guarantees}
 
+  defp usage_guarantee_requirements(
+         %{tokens: true, cost_currency: "USD"},
+         %Limits{llm_cost_microusd: limit}
+       )
+       when is_integer(limit),
+       do: :ok
+
+  defp usage_guarantee_requirements(
+         %{tokens: true},
+         %Limits{llm_total_tokens: limit, llm_cost_microusd: nil}
+       )
+       when is_integer(limit),
+       do: :ok
+
+  defp usage_guarantee_requirements(_guarantees, %Limits{
+         llm_total_tokens: nil,
+         llm_cost_microusd: nil
+       }),
+       do: :ok
+
+  defp usage_guarantee_requirements(_guarantees, %Limits{}),
+    do: {:error, :insufficient_usage_guarantees}
+
   defp reservation_tariff(nil), do: {:ok, nil}
 
   defp reservation_tariff(%{"currency" => "USD", "id" => id} = tariff)
@@ -857,6 +882,12 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp reservation_tariff(_value), do: {:error, :invalid_reservation_tariff}
+
+  defp reservation_tariff_requirement(_tariff, %Limits{llm_cost_microusd: nil}), do: :ok
+  defp reservation_tariff_requirement(%{} = _tariff, %Limits{}), do: :ok
+
+  defp reservation_tariff_requirement(_tariff, %Limits{}),
+    do: {:error, :missing_reservation_tariff}
 
   defp maybe_put_param(params, atom_key, value, string_key, normalized) do
     if Map.has_key?(value, string_key), do: Map.put(params, atom_key, normalized), else: params
@@ -1583,6 +1614,14 @@ defmodule PtcRunner.Kernel.HostConfig do
               "cost_currency" => %{"type" => ["string", "null"], "enum" => ["USD", nil]}
             },
             ["tokens", "cost_currency"]
+          ),
+        "reservation_tariff" =>
+          required_object(
+            %{
+              "currency" => %{"const" => "USD"},
+              "id" => %{"type" => "string", "minLength" => 1, "maxLength" => 128}
+            },
+            ["currency", "id"]
           ),
         "installation_revision" => installation_revision_schema(),
         "ceilings" => llm_ceilings_schema(),

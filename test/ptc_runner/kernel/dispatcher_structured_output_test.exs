@@ -386,6 +386,10 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
                  default?: true,
                  capability: capability,
                  max_calls: nil,
+                 output_tokens: 4_096,
+                 reservation_bound: fn _request, _tariff ->
+                   {:ok, %{total_tokens: 4_096, cost: nil}}
+                 end,
                  structured_output_mode: :json_object
                }
              ])
@@ -452,7 +456,11 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
       installation_revision: "model-v1",
       default?: true,
       capability: capability,
-      max_calls: nil
+      max_calls: nil,
+      output_tokens: 4_096,
+      reservation_bound: fn _request, _tariff ->
+        {:ok, %{total_tokens: 4_096, cost: nil}}
+      end
     }
 
     route =
@@ -490,6 +498,10 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
       default?: true,
       capability: capability,
       max_calls: nil,
+      output_tokens: 4_096,
+      reservation_bound: fn _request, _tariff ->
+        {:ok, %{total_tokens: 4_096, cost: nil}}
+      end,
       structured_output_mode: mode
     }
 

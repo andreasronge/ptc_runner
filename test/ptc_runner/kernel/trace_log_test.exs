@@ -1246,6 +1246,25 @@ defmodule PtcRunner.Kernel.TraceLogTest do
       decoded_event("usage-total", 3, "run-stopped", %{
         "outcome" => "ok",
         "usage" => %{
+          "llm_budget" => %{
+            "total_tokens" => %{
+              "state" => "available",
+              "limit" => 1_000,
+              "reserved" => 0,
+              "charged" => 150,
+              "remaining" => 850,
+              "refused" => 0
+            },
+            "cost" => %{
+              "state" => "available",
+              "currency" => "USD",
+              "limit_microusd" => 10_000,
+              "reserved_microusd" => 0,
+              "charged_microusd" => 4_200,
+              "remaining_microusd" => 5_800,
+              "refused" => 0
+            }
+          },
           "llm_spend" => %{
             "state" => "available",
             "input" => 120,
@@ -1272,6 +1291,9 @@ defmodule PtcRunner.Kernel.TraceLogTest do
              "output" => 30,
              "total_cost" => %{"currency" => "USD", "microunits" => 4_200}
            }
+
+    assert run["llm_budget"]["total_tokens"]["charged"] == 150
+    assert run["llm_budget"]["cost"]["charged_microusd"] == 4_200
   end
 
   test "invalid or ambiguous LLM snapshots make calls unattributed without failing counters" do
@@ -1330,6 +1352,22 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   end
 
   @tag :tmp_dir
+  test "canonical validation rejects terminal events without usage", %{tmp_dir: directory} do
+    path = Path.join(directory, "missing-terminal-usage.jsonl")
+
+    stopped =
+      "missing-terminal-usage"
+      |> decoded_event(2, "run-stopped", %{"outcome" => "ok"})
+      |> update_in(["data"], &Map.delete(&1, "usage"))
+
+    events = [decoded_event("missing-terminal-usage", 1, "run-started"), stopped]
+    File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+    {:ok, trace_log} = TraceLog.new(source: {:file, path})
+
+    assert {:error, :malformed_source} = TraceLog.query(trace_log, :list_runs, %{})
+  end
+
+  @tag :tmp_dir
   test "canonical validation rejects malformed terminal LLM spend", %{tmp_dir: directory} do
     path = Path.join(directory, "invalid-llm-spend.jsonl")
 
@@ -1371,9 +1409,19 @@ defmodule PtcRunner.Kernel.TraceLogTest do
   defp decoded_event(run_id, sequence, type, data \\ %{}) do
     data =
       case {type, data["environment"]} do
-        {"run-started", _environment} -> Map.put_new(data, "missions", %{})
-        {_type, "mission"} -> Map.put_new(data, "mission_name", "default")
-        _other -> data
+        {"run-started", _environment} ->
+          Map.put_new(data, "missions", %{})
+
+        {"run-stopped", _environment} ->
+          Map.put_new(data, "usage", %{
+            "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+          })
+
+        {_type, "mission"} ->
+          Map.put_new(data, "mission_name", "default")
+
+        _other ->
+          data
       end
 
     %{

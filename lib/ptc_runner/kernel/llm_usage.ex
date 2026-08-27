@@ -59,6 +59,30 @@ defmodule PtcRunner.Kernel.LLMUsage do
 
   def from_response(_result), do: nil
 
+  @doc false
+  @spec ceil_scaled_decimal(term(), non_neg_integer(), pos_integer()) ::
+          {:ok, non_neg_integer()} | :error
+  def ceil_scaled_decimal(value, multiplier, divisor)
+      when is_integer(multiplier) and multiplier >= 0 and is_integer(divisor) and divisor > 0 do
+    with {:ok, decimal} <- decimal_value(value),
+         true <- byte_size(decimal) <= @decimal_bytes,
+         %{"whole" => whole, "fraction" => fraction, "exponent" => exponent} <-
+           Regex.named_captures(@decimal, decimal) do
+      coefficient = String.trim_leading(whole <> fraction, "0")
+
+      if coefficient == "" or multiplier == 0 do
+        {:ok, 0}
+      else
+        exponent = if exponent == "", do: 0, else: String.to_integer(exponent)
+        scale_decimal(coefficient, exponent - byte_size(fraction), multiplier, divisor)
+      end
+    else
+      _invalid -> :error
+    end
+  end
+
+  def ceil_scaled_decimal(_value, _multiplier, _divisor), do: :error
+
   defp stringify_key(key) when is_binary(key), do: key
   defp stringify_key(key) when is_atom(key), do: Atom.to_string(key)
   defp stringify_key(key), do: key
@@ -102,55 +126,56 @@ defmodule PtcRunner.Kernel.LLMUsage do
        do: {:ok, microunits}
 
   defp cost_microunits(value) when is_integer(value) and value >= 0,
-    do: decimal_microunits(Integer.to_string(value))
+    do: ceil_scaled_decimal(value, 1_000_000, 1)
 
-  defp cost_microunits(value) when is_float(value) and value >= 0.0 do
-    decimal = if value == 0.0, do: "0", else: :erlang.float_to_binary(value, [:short])
-    decimal_microunits(decimal)
-  end
+  defp cost_microunits(value) when is_float(value) and value >= 0.0,
+    do: ceil_scaled_decimal(value, 1_000_000, 1)
 
-  defp cost_microunits(value) when is_binary(value), do: decimal_microunits(value)
+  defp cost_microunits(value) when is_binary(value),
+    do: ceil_scaled_decimal(value, 1_000_000, 1)
+
   defp cost_microunits(_value), do: :error
 
-  defp decimal_microunits(decimal) when byte_size(decimal) <= @decimal_bytes do
-    case Regex.named_captures(@decimal, decimal) do
-      %{"whole" => whole, "fraction" => fraction, "exponent" => exponent} ->
-        coefficient = String.trim_leading(whole <> fraction, "0")
+  defp decimal_value(value) when is_integer(value) and value >= 0,
+    do: {:ok, Integer.to_string(value)}
 
-        if coefficient == "" do
-          {:ok, 0}
-        else
-          exponent = if exponent == "", do: 0, else: String.to_integer(exponent)
-          scaled_integer(coefficient, 6 + exponent - byte_size(fraction))
-        end
+  defp decimal_value(value) when is_float(value) and value >= 0.0,
+    do: {:ok, if(value == 0.0, do: "0", else: :erlang.float_to_binary(value, [:short]))}
 
-      nil ->
+  defp decimal_value(value) when is_binary(value), do: {:ok, value}
+  defp decimal_value(_value), do: :error
+
+  defp scale_decimal(coefficient, power, multiplier, divisor) do
+    value = String.to_integer(coefficient) * multiplier
+
+    if power >= 0 do
+      maximum_numerator = @maximum_integer * divisor
+      available_digits = decimal_digits(maximum_numerator) - decimal_digits(value)
+
+      if power > max(available_digits, 0) do
         :error
-    end
-  end
-
-  defp decimal_microunits(_decimal), do: :error
-
-  defp scaled_integer(coefficient, power) when power >= 0 do
-    if byte_size(coefficient) + power > byte_size(Integer.to_string(@maximum_integer)) do
-      :error
+      else
+        ceil_quotient(value * Integer.pow(10, power), divisor)
+      end
     else
-      bounded_microunits(String.to_integer(coefficient) * Integer.pow(10, power))
+      places = -power
+
+      if places >= decimal_digits(value) do
+        {:ok, 1}
+      else
+        ceil_quotient(value, divisor * Integer.pow(10, places))
+      end
     end
   end
 
-  defp scaled_integer(coefficient, power) do
-    places = -power
+  defp ceil_quotient(numerator, denominator) do
+    rounded =
+      div(numerator, denominator) + if(rem(numerator, denominator) == 0, do: 0, else: 1)
 
-    if places >= byte_size(coefficient) do
-      {:ok, 1}
-    else
-      divisor = Integer.pow(10, places)
-      value = String.to_integer(coefficient)
-      rounded = div(value, divisor) + if(rem(value, divisor) == 0, do: 0, else: 1)
-      bounded_microunits(rounded)
-    end
+    bounded_microunits(rounded)
   end
+
+  defp decimal_digits(value), do: value |> Integer.to_string() |> byte_size()
 
   defp bounded_microunits(value) when value in 0..@maximum_integer, do: {:ok, value}
   defp bounded_microunits(_value), do: :error

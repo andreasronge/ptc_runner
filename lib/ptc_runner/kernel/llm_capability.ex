@@ -44,7 +44,13 @@ defmodule PtcRunner.Kernel.LLMCapability do
   def new(opts) when is_list(opts) do
     with true <-
            Keyword.keys(opts) --
-             [:requester, :usage_guarantees, :max_request_bytes, :max_response_bytes] == [],
+             [
+               :requester,
+               :usage_guarantees,
+               :max_request_bytes,
+               :max_response_bytes,
+               :llm_reservation
+             ] == [],
          requester when is_function(requester, 1) or is_function(requester, 2) <-
            Keyword.get(opts, :requester),
          {:ok, usage_guarantees} <-
@@ -78,6 +84,7 @@ defmodule PtcRunner.Kernel.LLMCapability do
                }
              },
              output_schema: %{"type" => "object", "additionalProperties" => true},
+             llm_reservation: Keyword.get(opts, :llm_reservation),
              validate: fn request -> validate_request(request, request_limit) end,
              callback: requester_callback(requester, response_limit, usage_guarantees)
            ) do

@@ -308,6 +308,8 @@
                       (= reason "internal")
                       (= reason "domain-error") (= reason "domain_error")
                       (= reason "invalid-result") (= reason "invalid_result")
+                      (= reason "reservation-bound-exceeded")
+                      (= reason "reservation_bound_exceeded")
                       (= reason "authentication-failed") (= reason "authentication_failed")
                       (= reason "payment-required") (= reason "payment_required")
                       (= reason "rate-limited") (= reason "rate_limited")

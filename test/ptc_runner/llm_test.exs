@@ -134,6 +134,27 @@ defmodule PtcRunner.LLMTest do
     def public_model(_model), do: raise("private adapter detail")
   end
 
+  defmodule ReservationAdapter do
+    use PtcRunner.LLMTest.StubAdapter
+
+    @impl true
+    def reservation_bound(_target, request, tariff) do
+      send(self(), {:reservation_bound, request, tariff})
+
+      %{
+        total_tokens: 17,
+        cost: %{currency: "USD", microunits: 23, tariff_id: tariff.id}
+      }
+    end
+  end
+
+  defmodule RaisingReservationAdapter do
+    use PtcRunner.LLMTest.StubAdapter
+
+    @impl true
+    def reservation_bound(_target, _request, _tariff), do: raise("private tariff detail")
+  end
+
   setup do
     prev = Application.get_env(:ptc_runner, :llm_adapter)
     Application.put_env(:ptc_runner, :llm_adapter, MockAdapter)
@@ -219,6 +240,62 @@ defmodule PtcRunner.LLMTest do
 
       assert {:error, :invalid_prepared_model} =
                PtcRunner.LLM.callback(copied, LLMSupport.llm_binding())
+    end
+  end
+
+  describe "reservation_bound/3" do
+    test "delegates only with the tariff sealed into the prepared model" do
+      tariff = %{currency: "USD", id: "fixture-v1"}
+
+      requested = %{
+        requirements()
+        | usage_guarantees: %{tokens: true, cost_currency: "USD"},
+          reservation: %{total_tokens?: true, cost_tariff: tariff}
+      }
+
+      assert {:ok, prepared} =
+               PtcRunner.LLM.prepare("provider:model", requested, ReservationAdapter)
+
+      request = %{"messages" => []}
+
+      assert {:ok,
+              %{
+                total_tokens: 17,
+                cost: %{currency: "USD", microunits: 23, tariff_id: "fixture-v1"}
+              }} = PtcRunner.LLM.reservation_bound(prepared, request, tariff)
+
+      assert_receive {:reservation_bound, ^request, ^tariff}
+
+      assert {:error, :reservation_attestation_unavailable} =
+               PtcRunner.LLM.reservation_bound(
+                 prepared,
+                 request,
+                 %{currency: "USD", id: "other-v1"}
+               )
+
+      refute_receive {:reservation_bound, _, _}
+    end
+
+    test "fails closed when the adapter omits or raises in reservation attestation" do
+      tariff = %{currency: "USD", id: "fixture-v1"}
+
+      requested = %{
+        requirements()
+        | usage_guarantees: %{tokens: true, cost_currency: "USD"},
+          reservation: %{total_tokens?: true, cost_tariff: tariff}
+      }
+
+      assert {:ok, missing} =
+               PtcRunner.LLM.prepare("provider:model", requested, PreparingAdapter)
+
+      assert {:ok, raising} =
+               PtcRunner.LLM.prepare("provider:model", requested, RaisingReservationAdapter)
+
+      assert {:error, :reservation_attestation_unavailable} =
+               PtcRunner.LLM.reservation_bound(missing, %{}, tariff)
+
+      assert {:error, :reservation_attestation_unavailable} =
+               PtcRunner.LLM.reservation_bound(raising, %{}, tariff)
     end
   end
 

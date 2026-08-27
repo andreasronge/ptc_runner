@@ -767,6 +767,8 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       max_calls: Map.get(entry.workflow_llm_route, :max_calls)
     }
 
+    route = Map.merge(route, llm_reservation_route(List.first(entry.capabilities)))
+
     route =
       case Map.get(entry.workflow_llm_route, :structured_output_mode) do
         nil -> route
@@ -781,6 +783,17 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         route
     end
   end
+
+  defp llm_reservation_route(%{llm_reservation: %{source: "llm"} = reservation}) do
+    %{
+      output_tokens: reservation.output_tokens,
+      reservation_tariff: reservation.tariff,
+      reservation_bound: reservation.bound
+    }
+  end
+
+  defp llm_reservation_route(%{llm_reservation: %{source: "llm_replay"}}), do: %{}
+  defp llm_reservation_route(_capability), do: %{}
 
   defp validate_provider_dependencies(preparations) do
     provided = Enum.flat_map(preparations, & &1.provides)

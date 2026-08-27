@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.TraceEventValidation
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.LLM.ReqLLMAdapter
@@ -914,7 +915,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert :ok =
              ProviderSession.bind_lifecycle(session, self(), state.pid, state.provider_tracker)
 
-    provider = start_provider_task(state, "wedged")
+    {provider, reservation_id} = start_provider_task(state, "wedged")
     provider_monitor = Process.monitor(provider)
     root_monitor = Process.monitor(root)
     session_monitor = Process.monitor(session.pid)
@@ -926,7 +927,9 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert_receive {:DOWN, ^session_monitor, :process, _, :killed}
     assert_receive {:DOWN, ^provider_monitor, :process, ^provider, :killed}
     assert_receive {:DOWN, ^root_monitor, :process, ^root, _reason}
-    assert {:error, :closed} = RunState.attach_provider(state, spawn(fn -> :ok end))
+
+    assert {:error, :closed} =
+             RunState.attach_provider(state, reservation_id, spawn(fn -> :ok end))
 
     RunState.close(state)
     RunState.stop(state)
@@ -944,7 +947,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert :ok =
              ProviderSession.bind_lifecycle(session, self(), state.pid, state.provider_tracker)
 
-    provider = start_provider_task(state, "drained")
+    {provider, _reservation_id} = start_provider_task(state, "drained")
 
     assert :ok =
              ResourceRegistrar.commit(registrar, fn ->
@@ -1023,6 +1026,10 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
       assert_receive {:preflight_resource_closed, ^close_result}
       refute_receive {:preflight_resource_closed, ^close_result}
+
+      events = sink |> EventSink.events() |> Jason.encode!() |> Jason.decode!()
+      assert :ok = TraceEventValidation.validate(events)
+
       EventSink.stop(sink)
     end
   end
@@ -1519,8 +1526,8 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     Task.async(fn ->
       task = spawn(fn -> receive do: (:stop -> :ok) end)
       monitor = Process.monitor(task)
-      :ok = RunState.reserve_capability(state, :workflow, "late")
-      attached = RunState.attach_provider(state, task)
+      {:ok, reservation_id} = RunState.reserve_capability(state, :workflow, "late")
+      attached = RunState.attach_provider(state, reservation_id, task)
       if attached == :ok, do: Process.exit(task, :kill)
 
       receive do
@@ -1532,9 +1539,9 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
   defp start_provider_task(state, name) do
     provider = spawn(fn -> receive do: (:stop -> :ok) end)
-    assert :ok = RunState.reserve_capability(state, :workflow, name)
-    assert :ok = RunState.attach_provider(state, provider)
-    provider
+    assert {:ok, reservation_id} = RunState.reserve_capability(state, :workflow, name)
+    assert :ok = RunState.attach_provider(state, reservation_id, provider)
+    {provider, reservation_id}
   end
 
   defp limits do

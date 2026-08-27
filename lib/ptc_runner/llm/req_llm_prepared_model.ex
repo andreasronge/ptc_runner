@@ -14,6 +14,7 @@ if Code.ensure_loaded?(LLMDB.Model) do
       :exact_options,
       model: nil,
       request_options: nil,
+      budgeted?: false,
       structured_output_mode: :unsupported
     ]
 
@@ -22,6 +23,7 @@ if Code.ensure_loaded?(LLMDB.Model) do
             exact_options: map(),
             model: LLMDB.Model.t() | nil,
             request_options: map() | nil,
+            budgeted?: boolean(),
             structured_output_mode: :json_schema | :json_object | :unsupported
           }
   end

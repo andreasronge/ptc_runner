@@ -473,7 +473,40 @@ defmodule PtcRunner.Kernel.RunConfig do
       evaluation_busy?: true,
       evaluation_missions: Map.keys(missions) |> Enum.sort(),
       errors: @maximum_repl_errors,
-      capability_refusals: maximum_capability_refusals()
+      capability_refusals: maximum_capability_refusals(),
+      llm_budget: maximum_llm_budget(limits)
+    }
+  end
+
+  defp maximum_llm_budget(limits) do
+    maximum = 9_007_199_254_740_991
+
+    %{
+      "total_tokens" =>
+        if(is_nil(limits.llm_total_tokens),
+          do: nil,
+          else: %{
+            "state" => "incomplete",
+            "limit" => limits.llm_total_tokens,
+            "reserved" => 0,
+            "charged" => maximum,
+            "remaining" => 0,
+            "refused" => maximum
+          }
+        ),
+      "cost" =>
+        if(is_nil(limits.llm_cost_microusd),
+          do: nil,
+          else: %{
+            "state" => "incomplete",
+            "currency" => "USD",
+            "limit_microusd" => limits.llm_cost_microusd,
+            "reserved_microusd" => 0,
+            "charged_microusd" => maximum,
+            "remaining_microusd" => 0,
+            "refused" => maximum
+          }
+        )
     }
   end
 

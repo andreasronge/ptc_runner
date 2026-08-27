@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.EvaluatorEvidence
   alias PtcRunner.Kernel.ExecutionOutcome
+  alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.ModelOutputDiagnostic
@@ -751,6 +752,8 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
 
   defp usage_projection(usage, terminal_batch) when is_map(usage) do
     with {:ok, capability_calls} <- capability_calls(Map.get(usage, :capability_calls)),
+         {:ok, llm_budget} <-
+           LLMBudget.validate_terminal_projection(Map.get(usage, :llm_budget)),
          {:ok, llm_spend} <- LLMUsageSummary.validate_spend(Map.get(usage, :llm_spend)),
          {:ok, evaluations_by_mission} <-
            count_map(Map.get(usage, :evaluations_by_mission, %{})),
@@ -770,6 +773,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
              "evaluation_continuation_bytes" => Map.get(usage, :evaluation_continuation_bytes),
              "events_dropped" => events_dropped,
              "capability_refusals" => capability_refusals,
+             "llm_budget" => llm_budget,
              "llm_spend" => llm_spend
            }
            |> Map.merge(llm_usage_projection(terminal_batch)),

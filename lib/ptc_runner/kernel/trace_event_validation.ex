@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
   @moduledoc false
 
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.ResultIdentity
 
@@ -378,10 +379,11 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
   defp validate_run_stopped_usage("run-stopped", data) do
     case Map.fetch(data, "usage") do
       :error ->
-        :ok
+        {:error, :malformed_source}
 
       {:ok, usage} when is_map(usage) ->
         with :ok <- validate_subordinate_source_checks(usage),
+             :ok <- validate_terminal_llm_budget(usage),
              do: validate_terminal_llm_spend(usage)
 
       _invalid_usage ->
@@ -396,6 +398,13 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
       :error -> :ok
       {:ok, count} when is_integer(count) and count >= 0 -> :ok
       _invalid_count -> {:error, :malformed_source}
+    end
+  end
+
+  defp validate_terminal_llm_budget(usage) do
+    case LLMBudget.validate_terminal_projection(Map.get(usage, "llm_budget")) do
+      {:ok, _budget} -> :ok
+      {:error, :invalid_llm_budget} -> {:error, :malformed_source}
     end
   end
 
