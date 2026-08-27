@@ -1441,16 +1441,19 @@ defmodule PtcRunner.Kernel.MCPSource do
       end)
     end
 
-    InspectionSink.emit_mcp_exchange(
-      sink,
-      correlation,
-      payload.(:body, request),
-      case Map.get(context, :inspection_capture, :full) do
-        :full -> payload.(:body, response)
-        :digest_results -> payload.(:body_identity, inspection_identity!(response))
-      end,
-      stderr_payload(context, stderr)
-    )
+    case response_capture(context, response, request_id) do
+      {:ok, key, body} ->
+        InspectionSink.emit_mcp_exchange(
+          sink,
+          correlation,
+          payload.(:body, request),
+          payload.(key, body),
+          stderr_payload(context, stderr)
+        )
+
+      :error ->
+        InspectionSink.emit(sink, "mcp-response", %{}, %{})
+    end
   end
 
   defp capture_exchange(
@@ -1461,6 +1464,32 @@ defmodule PtcRunner.Kernel.MCPSource do
          _stderr
        ),
        do: InspectionSink.emit(sink, "mcp-request", %{}, %{})
+
+  defp response_capture(context, response, request_id) do
+    # Digest capture removes bulk read output. A failed call is what an operator
+    # reads afterwards and may not reproduce on a rerun, so its body stays full.
+    if Map.get(context, :inspection_capture, :full) == :digest_results and
+         not error_response?(response) do
+      digested_response(response, request_id)
+    else
+      {:ok, :body, response}
+    end
+  end
+
+  defp error_response?(%{"error" => _error}), do: true
+  defp error_response?(%{"result" => %{"isError" => true}}), do: true
+  defp error_response?(_response), do: false
+
+  # An identity cannot be re-checked against the request once the body is gone,
+  # so the exchange is validated here, while full capture still could.
+  defp digested_response(response, request_id) do
+    with true <- MCPProtocol.valid_inspection_exchange?("mcp-response", response, request_id),
+         {:ok, identity} <- InspectionValueIdentity.identity(response) do
+      {:ok, :body_identity, identity}
+    else
+      _ -> :error
+    end
+  end
 
   defp stderr_capture(%{stderr: stderr, stderr_truncated?: truncated?})
        when is_binary(stderr) and stderr != "" do
@@ -1477,11 +1506,6 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp stderr_payload(_context, _stderr), do: nil
-
-  defp inspection_identity!(value) do
-    {:ok, identity} = InspectionValueIdentity.identity(value)
-    identity
-  end
 
   defp bounded_outcome(body, method, max_result_bytes) do
     with {:ok, result} <- MCPProtocol.outcome(body, method),

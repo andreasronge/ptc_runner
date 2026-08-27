@@ -438,13 +438,21 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
       )
   end
 
-  defp valid_exception_output?(_state, _id, _payload, :digest_results), do: true
+  # An exception result is captured in full even under `:digest_results`, so a
+  # digested output can never satisfy an exception join.
+  defp valid_exception_output?(state, id, _payload, :digest_results),
+    do: not Map.has_key?(state.exceptions, id)
 
   defp capture_mode(payload, value_key),
     do: if(Map.has_key?(payload, value_key), do: :full, else: :digest_results)
 
-  defp compatible_capture?(state, id, mode),
-    do: Map.get(state.capture_modes, id, mode) == mode
+  # A full record carries strictly more evidence than the digest mode promised,
+  # so it always joins. Only a digested record arriving where full capture was
+  # already observed for the same capability indicates selective omission.
+  defp compatible_capture?(_state, _id, :full), do: true
+
+  defp compatible_capture?(state, id, :digest_results),
+    do: Map.get(state.capture_modes, id, :digest_results) == :digest_results
 
   defp mcp_key(record) do
     correlation = record["correlation"]

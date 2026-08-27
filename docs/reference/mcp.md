@@ -201,11 +201,13 @@ the server cannot return secrets, paths, or stack traces.
 `inspection_capture` is the closed host-only enum `"full"` (the default) or
 `"digest_results"`. The latter is accepted only for read mappings. Private
 inspection then keeps arguments and requests but stores deterministic JSON
-identity metadata for responses and results. It cannot recover the content;
-rerun with full capture when content is needed. Digests of guessable values are
-not confidential, and MCP stderr remains full within `stderr_bytes`. Select
-provider page sizes and configured call, event, and clock limits suitable for
-the source volume.
+identity metadata in place of successful responses and results. Every error
+path stays fully captured: MCP error responses, capability error envelopes,
+capability exceptions, and MCP stderr within `stderr_bytes`. An identity cannot
+recover the content; rerun with full capture when content is needed, and note
+that digests of guessable values are not confidential. Select provider page
+sizes and configured call, event, and clock limits suitable for the source
+volume.
 
 ## Select less authority in the manifest
 

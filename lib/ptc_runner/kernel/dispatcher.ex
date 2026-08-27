@@ -690,21 +690,36 @@ defmodule PtcRunner.Kernel.Dispatcher do
        do: :ok
 
   defp inspection_output(sink, capability_id, environment, name, result, mission_name, capture) do
-    value =
-      case capture do
-        :full -> {:result, result}
-        :digest_results -> {:result_identity, result}
-      end
+    case output_value(result, capture) do
+      {:ok, key, value} ->
+        InspectionSink.emit(
+          sink,
+          "capability-output",
+          %{capability_id: capability_id},
+          capability_inspection_payload(environment, name, key, value, mission_name)
+        )
 
-    InspectionSink.emit(
-      sink,
-      "capability-output",
-      %{capability_id: capability_id},
-      then(value, fn {key, value} ->
-        value = if key == :result_identity, do: identity!(value), else: value
-        capability_inspection_payload(environment, name, key, value, mission_name)
-      end)
-    )
+      :error ->
+        {:error, :inspection_sink_error}
+    end
+  end
+
+  defp output_value(result, :full), do: {:ok, :result, result}
+
+  # Digest capture removes bulk read output. Error envelopes are small and are
+  # the record an operator reads when a run fails, so they stay full; so does
+  # any result shape full capture would not have admitted as a record.
+  defp output_value(%{status: :error} = result, :digest_results),
+    do: {:ok, :result, result}
+
+  defp output_value(result, :digest_results) when not is_map(result),
+    do: {:ok, :result, result}
+
+  defp output_value(result, :digest_results) do
+    case InspectionValueIdentity.identity(result) do
+      {:ok, identity} -> {:ok, :result_identity, identity}
+      {:error, _reason} -> :error
+    end
   end
 
   defp maybe_capture_exception(
@@ -816,11 +831,6 @@ defmodule PtcRunner.Kernel.Dispatcher do
     |> then(fn context ->
       if is_binary(mission_name), do: Map.put(context, :mission_name, mission_name), else: context
     end)
-  end
-
-  defp identity!(value) do
-    {:ok, identity} = InspectionValueIdentity.identity(value)
-    identity
   end
 
   defp invoke(state, invocation, requested_timeout_ms, context, environment, validation) do

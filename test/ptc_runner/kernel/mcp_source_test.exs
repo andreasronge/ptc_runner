@@ -509,6 +509,79 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "digest result capture retains identities for successes and bodies for failures", %{
+    tmp_dir: dir
+  } do
+    fixture = fixture(self())
+    on_exit(fixture.close)
+
+    tools =
+      Map.new(mappings(), fn {name, m} ->
+        {name, Map.put(m, :inspection_capture, :digest_results)}
+      end)
+
+    inspection_path = Path.join(dir, "digest.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{}} =
+             dir
+             |> manifest(Map.keys(public_mappings()))
+             |> directory_request(registry(fixture.endpoint, tools: tools),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    by_type = Enum.group_by(records, & &1["record_type"])
+    assert length(by_type["mcp-request"]) == 3
+
+    # `remote.fail` answers with `isError`, so its body survives while the two
+    # successful reads are reduced to identities.
+    {digested, full} =
+      Enum.split_with(by_type["mcp-response"], &Map.has_key?(&1["payload"], "body_identity"))
+
+    assert length(digested) == 2
+    assert [%{"payload" => %{"body" => %{"result" => %{"isError" => true}}}}] = full
+
+    # Arguments are never digested: the traversal the program performed stays
+    # readable even when what came back does not.
+    assert Enum.all?(by_type["capability-input"], &is_map(&1["payload"]["arguments"]))
+    assert Enum.all?(by_type["mcp-request"], &Map.has_key?(&1["payload"], "body"))
+
+    outputs = by_type["capability-output"]
+
+    for record <-
+          digested ++ Enum.filter(outputs, &Map.has_key?(&1["payload"], "result_identity")) do
+      identity = record["payload"]["body_identity"] || record["payload"]["result_identity"]
+
+      assert %{
+               "encoding" => "ptc-deterministic-json-v1",
+               "sha256" => "sha256:" <> hex,
+               "encoded_bytes" => bytes
+             } = identity
+
+      assert byte_size(hex) == 64
+      assert bytes > 0
+    end
+
+    # The workflow result and the failed capability's error envelope are the
+    # records an operator reads after a bad run, so neither is digested.
+    assert Enum.any?(outputs, fn record ->
+             match?(
+               %{"result" => %{"status" => "error", "reason" => "domain_error"}},
+               record["payload"]
+             )
+           end)
+
+    refute Enum.empty?(Enum.filter(outputs, &Map.has_key?(&1["payload"], "result_identity")))
+
+    encoded = File.read!(inspection_path)
+    refute encoded =~ "structuredContent"
+    refute encoded =~ "Bearer fixture-secret"
+  end
+
+  @tag :tmp_dir
   test "the common MCP source discovers and calls the same tools over stdio", %{tmp_dir: dir} do
     marker = Path.join(dir, "stdio-methods")
     fixture = fixture(self())
