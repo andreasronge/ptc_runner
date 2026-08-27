@@ -45,7 +45,6 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.InspectionValueIdentity
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPHTTPAdapter
@@ -1460,9 +1459,8 @@ defmodule PtcRunner.Kernel.MCPSource do
        ) do
     correlation = %{capability_id: capability_id, request_id: request_id}
 
-    payload = fn key, body ->
-      %{transport: transport}
-      |> Map.put(key, body)
+    payload = fn body ->
+      %{transport: transport, body: body}
       |> then(fn payload ->
         case Map.get(context, :mission_name) do
           name when is_binary(name) -> Map.put(payload, :mission_name, name)
@@ -1471,19 +1469,14 @@ defmodule PtcRunner.Kernel.MCPSource do
       end)
     end
 
-    case response_capture(context, response, request_id, outcome) do
-      {:ok, key, body} ->
-        InspectionSink.emit_mcp_exchange(
-          sink,
-          correlation,
-          payload.(:body, request),
-          payload.(key, body),
-          stderr_payload(context, stderr)
-        )
-
-      :error ->
-        InspectionSink.emit(sink, "mcp-response", %{}, %{})
-    end
+    InspectionSink.emit_mcp_exchange(
+      sink,
+      correlation,
+      payload.(request),
+      payload.(response),
+      stderr_payload(context, stderr),
+      response_capture(context, response, outcome)
+    )
   end
 
   defp capture_exchange(
@@ -1496,16 +1489,22 @@ defmodule PtcRunner.Kernel.MCPSource do
        ),
        do: InspectionSink.emit(sink, "mcp-request", %{}, %{})
 
-  defp response_capture(context, response, request_id, outcome) do
-    # Digest capture removes bulk read output. A failed call is what an operator
-    # reads afterwards and may not reproduce on a rerun, so its body stays full
-    # -- including a body this run went on to reject as oversized or malformed,
-    # which is why the outcome is decided before the exchange is captured.
+  # Digest capture removes bulk read output. The decision is made here, at the
+  # provider boundary, with everything decidable at this moment: a body the
+  # provider marked failed or that this boundary rejected stays full, because
+  # a failed call is what an operator reads afterwards and may not reproduce
+  # on a rerun. A rejection the runtime makes after this boundary retains its
+  # full error envelope in `capability-output` while the wire body remains an
+  # identity; the mapping is a read, so a full-capture rerun recovers the
+  # value and the identity attests it is the same one. The identity itself is
+  # computed by the sink, so this heap-limited process sends the same message
+  # in both modes.
+  defp response_capture(context, response, outcome) do
     if Map.get(context, :inspection_capture, :full) == :digest_results and
          not error_response?(response) and accepted_outcome?(context, outcome) do
-      digested_response(response, request_id)
+      [response_capture: :digest_results]
     else
-      {:ok, :body, response}
+      []
     end
   end
 
@@ -1523,17 +1522,6 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp error_response?(%{"error" => _error}), do: true
   defp error_response?(%{"result" => %{"isError" => true}}), do: true
   defp error_response?(_response), do: false
-
-  # An identity cannot be re-checked against the request once the body is gone,
-  # so the exchange is validated here, while full capture still could.
-  defp digested_response(response, request_id) do
-    with true <- MCPProtocol.valid_inspection_exchange?("mcp-response", response, request_id),
-         {:ok, identity} <- InspectionValueIdentity.identity(response) do
-      {:ok, :body_identity, identity}
-    else
-      _ -> :error
-    end
-  end
 
   defp stderr_capture(%{stderr: stderr, stderr_truncated?: truncated?})
        when is_binary(stderr) and stderr != "" do

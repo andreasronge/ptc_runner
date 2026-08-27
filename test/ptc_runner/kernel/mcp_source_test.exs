@@ -509,6 +509,64 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "a runtime-rejected result keeps its full error envelope while the wire body stays a digest",
+       %{tmp_dir: dir} do
+    # The provider boundary accepts this response -- well-formed, within
+    # `max_result_bytes`, and its structured content satisfies the output
+    # schema -- and only the dispatcher's retained-size admission rejects it
+    # afterwards: 28,000 small strings retain far more BEAM memory than their
+    # encoded bytes. The digest decision is made at the boundary, so the wire
+    # body remains an identity; the rejection itself is retained in full in
+    # `capability-output`, and because the mapping is a read, rerunning with
+    # full capture recovers the value the identity attests.
+    marker = Path.join(dir, "stdio-padded")
+
+    tools = %{
+      "structured" => %{
+        as: "remote.structured",
+        effect: :read,
+        inspection_capture: :digest_results
+      }
+    }
+
+    inspection_path = Path.join(dir, "admission.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: value}} =
+             dir
+             |> manifest(["remote.structured"],
+               program: single_call_program("remote.structured", "x"),
+               max_result_bytes: 1_000_000,
+               timeout_ms: 5_000,
+               evaluation_timeout_ms: 5_000
+             )
+             |> directory_request(
+               stdio_registry(dir, marker, "structured-padded",
+                 tools: tools,
+                 max_result_bytes: 1_000_000
+               ),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert %{"status" => "error", "reason" => "provider_result_limit"} =
+             get_in(value, ["value", "value"])
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert %{"body_identity" => %{"sha256" => "sha256:" <> _}} = response["payload"]
+    refute Map.has_key?(response["payload"], "body")
+
+    assert [output] = Enum.filter(records, &(&1["record_type"] == "capability-output"))
+
+    assert %{"result" => %{"status" => "error", "reason" => "provider_result_limit"}} =
+             output["payload"]
+
+    refute Map.has_key?(output["payload"], "result_identity")
+  end
+
+  @tag :tmp_dir
   test "digest result capture keeps a body this run rejected as an invalid result", %{
     tmp_dir: dir
   } do

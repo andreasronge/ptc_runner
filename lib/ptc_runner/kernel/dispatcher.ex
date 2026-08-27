@@ -58,7 +58,6 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.InspectionValueIdentity
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMUsage
@@ -690,37 +689,22 @@ defmodule PtcRunner.Kernel.Dispatcher do
        do: :ok
 
   defp inspection_output(sink, capability_id, environment, name, result, mission_name, capture) do
-    case output_value(result, capture) do
-      {:ok, key, value} ->
-        InspectionSink.emit(
-          sink,
-          "capability-output",
-          %{capability_id: capability_id},
-          capability_inspection_payload(environment, name, key, value, mission_name)
-        )
-
-      :error ->
-        {:error, :inspection_sink_error}
-    end
+    InspectionSink.emit(
+      sink,
+      "capability-output",
+      %{capability_id: capability_id},
+      capability_inspection_payload(environment, name, :result, result, mission_name),
+      output_capture(result, capture)
+    )
   end
-
-  defp output_value(result, :full), do: {:ok, :result, result}
 
   # Digest capture removes bulk read output. Error envelopes are small and are
   # the record an operator reads when a run fails, so they stay full; so does
-  # any result shape full capture would not have admitted as a record.
-  defp output_value(%{status: :error} = result, :digest_results),
-    do: {:ok, :result, result}
-
-  defp output_value(result, :digest_results) when not is_map(result),
-    do: {:ok, :result, result}
-
-  defp output_value(result, :digest_results) do
-    case InspectionValueIdentity.identity(result) do
-      {:ok, identity} -> {:ok, :result_identity, identity}
-      {:error, _reason} -> :error
-    end
-  end
+  # any result shape full capture would not have admitted as a record. The
+  # identity itself is computed by the sink, so this process sends the same
+  # message in both modes.
+  defp output_capture(%{status: :ok}, :digest_results), do: [capture: :digest_results]
+  defp output_capture(_result, _capture), do: []
 
   defp maybe_capture_exception(
          result,

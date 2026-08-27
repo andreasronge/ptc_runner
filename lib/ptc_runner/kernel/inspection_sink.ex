@@ -7,6 +7,11 @@ defmodule PtcRunner.Kernel.InspectionSink do
   reservation. It retains only incremental digests, identities, counts, and
   limits. `seal/1` appends and synchronizes the terminal footer; it never
   returns or retains a complete record collection.
+
+  A record emitted with digest-results capture has its value replaced by a
+  deterministic value identity. The sink computes the identity, so an emitter
+  sends the same message in both capture modes and enabling digest capture
+  cannot change the emitting process's heap behaviour.
   """
 
   use GenServer
@@ -14,6 +19,8 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   alias PtcRunner.Kernel.InspectionArtifact.Limits
   alias PtcRunner.Kernel.InspectionArtifact.Writer
+  alias PtcRunner.Kernel.InspectionValueIdentity
+  alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.OwnerHandoff
   alias PtcRunner.Kernel.PublicationHandle
 
@@ -63,26 +70,37 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   def start(_opts), do: {:error, :invalid_inspection_sink}
 
-  @spec emit(t(), binary(), map(), map()) :: :ok | {:error, :inspection_sink_error}
-  def emit(%__MODULE__{} = sink, record_type, correlation, payload)
-      when is_binary(record_type) and is_map(correlation) and is_map(payload),
-      do: call(sink, {:emit, record_type, correlation, payload})
+  @spec emit(t(), binary(), map(), map(), keyword()) :: :ok | {:error, :inspection_sink_error}
+  def emit(sink, record_type, correlation, payload, opts \\ [])
 
-  def emit(%__MODULE__{} = sink, _record_type, _correlation, _payload),
+  def emit(%__MODULE__{} = sink, record_type, correlation, payload, opts)
+      when is_binary(record_type) and is_map(correlation) and is_map(payload) and
+             opts in [[], [capture: :digest_results]],
+      do: call(sink, {:emit, record_type, correlation, payload, capture_mode(opts)})
+
+  def emit(%__MODULE__{} = sink, _record_type, _correlation, _payload, _opts),
     do: call(sink, :fail)
 
   @doc false
-  @spec emit_mcp_exchange(t(), map(), map(), map(), map() | nil) ::
+  @spec emit_mcp_exchange(t(), map(), map(), map(), map() | nil, keyword()) ::
           :ok | {:error, :inspection_sink_error}
-  def emit_mcp_exchange(sink, correlation, request, response, stderr \\ nil)
+  def emit_mcp_exchange(sink, correlation, request, response, stderr \\ nil, opts \\ [])
 
-  def emit_mcp_exchange(%__MODULE__{} = sink, correlation, request, response, stderr)
+  def emit_mcp_exchange(%__MODULE__{} = sink, correlation, request, response, stderr, opts)
       when is_map(correlation) and is_map(request) and is_map(response) and
-             (is_nil(stderr) or is_map(stderr)),
-      do: call(sink, {:emit_mcp_exchange, correlation, request, response, stderr})
+             (is_nil(stderr) or is_map(stderr)) and
+             opts in [[], [response_capture: :digest_results]],
+      do:
+        call(
+          sink,
+          {:emit_mcp_exchange, correlation, request, response, stderr, response_mode(opts)}
+        )
 
-  def emit_mcp_exchange(%__MODULE__{} = sink, _correlation, _request, _response, _stderr),
+  def emit_mcp_exchange(%__MODULE__{} = sink, _correlation, _request, _response, _stderr, _opts),
     do: call(sink, :fail)
+
+  defp capture_mode(opts), do: Keyword.get(opts, :capture, :full)
+  defp response_mode(opts), do: Keyword.get(opts, :response_capture, :full)
 
   @spec seal(t()) :: {:ok, map()} | {:error, :inspection_sink_error}
   @doc "Seals and synchronizes the streamed artifact and returns bounded publication metadata."
@@ -178,24 +196,33 @@ defmodule PtcRunner.Kernel.InspectionSink do
   end
 
   def handle_call(
-        {token, {:emit, record_type, correlation, payload}},
+        {token, {:emit, record_type, correlation, payload, capture}},
         _from,
         %{token: token} = state
       ) do
-    append_one(state, record_type, correlation, payload)
+    case digest_payload(record_type, correlation, payload, capture) do
+      {:ok, payload} -> append_one(state, record_type, correlation, payload)
+      :error -> failed_reply(state)
+    end
   end
 
   def handle_call(
-        {token, {:emit_mcp_exchange, correlation, request, response, stderr}},
+        {token, {:emit_mcp_exchange, correlation, request, response, stderr, capture}},
         _from,
         %{token: token} = state
       ) do
-    with {:ok, state} <- append(state, "mcp-request", correlation, request),
-         {:ok, state} <- append(state, "mcp-response", correlation, response),
-         {:ok, state} <- append_stderr(state, correlation, stderr) do
-      {:reply, :ok, state}
-    else
-      {:error, state} -> failed_reply(state)
+    case digest_payload("mcp-response", correlation, response, capture) do
+      {:ok, response} ->
+        with {:ok, state} <- append(state, "mcp-request", correlation, request),
+             {:ok, state} <- append(state, "mcp-response", correlation, response),
+             {:ok, state} <- append_stderr(state, correlation, stderr) do
+          {:reply, :ok, state}
+        else
+          {:error, state} -> failed_reply(state)
+        end
+
+      :error ->
+        failed_reply(state)
     end
   end
 
@@ -259,6 +286,44 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
       _empty ->
         {:ok, state}
+    end
+  end
+
+  # Digest-results capture replaces the record's value with its identity here,
+  # after validating the full value exactly as full capture would, because an
+  # identity can no longer be checked against its exchange once the value is
+  # gone. A digest request for any other record type, a missing value, or a
+  # value the identity rejects fails the sink, the same channel an invalid
+  # full payload uses.
+  defp digest_payload(_record_type, _correlation, payload, :full), do: {:ok, payload}
+
+  defp digest_payload("capability-output", _correlation, payload, :digest_results) do
+    case Map.fetch(payload, :result) do
+      {:ok, result} when is_map(result) -> swap_value(payload, :result, :result_identity)
+      _invalid -> :error
+    end
+  end
+
+  defp digest_payload("mcp-response", correlation, payload, :digest_results) do
+    if MCPProtocol.valid_inspection_exchange?(
+         "mcp-response",
+         Map.get(payload, :body),
+         correlation[:request_id]
+       ) do
+      swap_value(payload, :body, :body_identity)
+    else
+      :error
+    end
+  end
+
+  defp digest_payload(_record_type, _correlation, _payload, _capture), do: :error
+
+  defp swap_value(payload, key, identity_key) do
+    with {:ok, value} <- Map.fetch(payload, key),
+         {:ok, identity} <- InspectionValueIdentity.identity(value) do
+      {:ok, payload |> Map.delete(key) |> Map.put(identity_key, identity)}
+    else
+      _invalid -> :error
     end
   end
 
