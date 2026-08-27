@@ -482,6 +482,44 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
+  test "a selected healthy run ignores an adjacent legacy-cost artifact", %{tmp_dir: root} do
+    healthy = canonical_create!(root)
+    damaged_run_id = PrivateInspectionFixture.command_run_ref(1)
+
+    damaged =
+      PrivateInspectionFixture.create!(Path.join(root, "damaged"), damaged_run_id)
+
+    PrivateInspectionFixture.rewrite_legacy_float_cost!(damaged)
+
+    File.cp!(
+      Path.join(damaged.traces, "#{damaged_run_id}.jsonl"),
+      Path.join(healthy.traces, "#{damaged_run_id}.jsonl")
+    )
+
+    File.cp!(
+      Path.join(damaged.inspection, "#{damaged_run_id}.ptcins"),
+      Path.join(healthy.inspection, "#{damaged_run_id}.ptcins")
+    )
+
+    output = Path.join(healthy.output, "healthy-among-damaged.private.json")
+    presentation = MixCommandAdapter.execute(transcript_argv(healthy, output))
+
+    assert presentation.exit_status == 0
+    assert presentation.stderr == ""
+    assert %{"run_id" => run_id} = output |> File.read!() |> Jason.decode!()
+    assert run_id == healthy.run_id
+
+    damaged_output = Path.join(healthy.output, "damaged.private.json")
+
+    damaged_presentation =
+      MixCommandAdapter.execute(transcript_argv(healthy, damaged_output, run_id: damaged_run_id))
+
+    assert damaged_presentation.exit_status == 1
+    assert damaged_presentation.stderr =~ "transcript/malformed_source"
+    refute File.exists?(damaged_output)
+  end
+
+  @tag :tmp_dir
   test "the private canonical trace suffix works when it is the only candidate", %{tmp_dir: root} do
     fixture = canonical_create!(root)
 

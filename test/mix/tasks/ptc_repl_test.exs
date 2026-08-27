@@ -1161,6 +1161,52 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "private analysis isolates inspection paired with a damaged trace", %{
+    tmp_dir: directory
+  } do
+    healthy = PrivateInspectionFixture.create!(directory, "healthy")
+    damaged = PrivateInspectionFixture.create!(directory, "damaged")
+    PrivateInspectionFixture.rewrite_legacy_float_cost!(damaged)
+
+    output =
+      capture_io(fn ->
+        run_repl([
+          "--profile",
+          "private-run-analysis-v1",
+          "--resource",
+          "traces=#{healthy.traces}",
+          "--resource",
+          "inspection=#{healthy.inspection}",
+          "--session-trace-dir",
+          healthy.output,
+          "--private-unattended",
+          "--format",
+          "jsonl",
+          "-e",
+          "(analysis/runs {})"
+        ])
+      end)
+
+    records = decode_jsonl(output)
+    assert Enum.map(records, & &1["type"]) == ["session-started", "evaluation", "session-closed"]
+
+    assert List.first(records)["capture"] == %{
+             "inspection" => %{"file_count" => 2, "run_count" => 1},
+             "traces" => %{"file_count" => 2, "run_count" => 1}
+           }
+
+    assert %{
+             "items" => [%{"run_id" => "healthy"}],
+             "isolation" => %{
+               "component_count" => 1,
+               "known_run_count" => 1,
+               "reasons" => [%{"reason" => "malformed_event"}],
+               "examples" => [%{"sources" => ["damaged.jsonl"]}]
+             }
+           } = Enum.at(records, 1)["result"]["value"]
+  end
+
+  @tag :tmp_dir
   test "inspection profile setup explains an unsupported artifact schema", %{
     tmp_dir: directory
   } do

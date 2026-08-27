@@ -5,7 +5,10 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Admission do
   inserts bounded ETS rows; and releases each evidence payload before the next
   frame is read. After that ingest scan, seal confirmation rehashes evidence
   bytes without decoding records so a same-size overwrite cannot publish a
-  snapshot.
+  snapshot. A caller that has already proven the artifact identity belongs to
+  an isolated trace component may return `:run_isolated` at the trace-facts
+  boundary; admission then returns the sealed frame indexes for disposal
+  without materializing trace-dependent projections.
   """
 
   alias PtcRunner.Kernel.InspectionArtifact.Assembler
@@ -22,7 +25,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Admission do
           map(),
           keyword()
         ) ::
-          {:ok, map()} | {:error, atom()}
+          {:ok, map()} | {:isolated, map()} | {:error, atom()}
   def run(handle, indexes, trace_facts, limits, opts \\ [])
       when is_map(handle) and is_map(indexes) and is_function(trace_facts, 2) and is_map(limits) and
              is_list(opts) do
@@ -63,18 +66,39 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Admission do
              },
              limits.io_buffer_bytes
            ),
-         :ok <- Handle.assert_stable(handle),
-         {:ok, trace_facts} <- trace_facts.(state.run_id, state.trace_id),
-         {:ok, state} <- Assembler.finish(state, trace_facts) do
-      {:ok,
-       %{
-         indexes: state.indexes,
-         run_id: state.run_id,
-         trace_id: state.trace_id,
-         record_count: state.record_count,
-         trace_facts: trace_facts,
-         turn_evidence: state.evidence
-       }}
+         :ok <- Handle.assert_stable(handle) do
+      finish_admission(state, trace_facts)
+    end
+  end
+
+  defp finish_admission(state, trace_facts) do
+    case trace_facts.(state.run_id, state.trace_id) do
+      {:ok, trace_facts} ->
+        with {:ok, state} <- Assembler.finish(state, trace_facts) do
+          {:ok,
+           %{
+             indexes: state.indexes,
+             run_id: state.run_id,
+             trace_id: state.trace_id,
+             record_count: state.record_count,
+             trace_facts: trace_facts,
+             turn_evidence: state.evidence
+           }}
+        end
+
+      {:error, :run_isolated} ->
+        with :ok <- Assembler.validate_complete(state) do
+          {:isolated,
+           %{
+             indexes: state.indexes,
+             run_id: state.run_id,
+             trace_id: state.trace_id,
+             record_count: state.record_count
+           }}
+        end
+
+      {:error, _reason} = error ->
+        error
     end
   end
 

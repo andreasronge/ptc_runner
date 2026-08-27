@@ -419,6 +419,13 @@ discovery. The private-authorized capture instead selects both ordinary and
 admitted run, and still excludes inspection artifacts. A run split across
 files or source classes is isolated as one connected component.
 
+The private inspection snapshot carries that decision forward: a sealed
+`.ptcins` artifact whose exact run and trace footer identity belongs to an
+isolated trace component is validated into disposable indexes and dropped with
+the component. Its digest remains part of inspection snapshot identity, while
+disjoint healthy trace and inspection pairs remain queryable and retain the
+trace classifier's bounded isolation metadata.
+
 The default aggregate encoded-source ceiling is 8,000,000 bytes. Snapshot
 retention independently limits the decoded representation to 32,000,000
 retained bytes, and query results keep the 1,000,000-byte default. Capture

@@ -364,10 +364,13 @@ stdin remain unattended input and require `--private-unattended` instead.
 
 The trace, inspection, and analysis-trace directories must be physically
 separate, including through ancestors and symlink aliases. Capture validates
-every private artifact against its matching run. A malformed, changed,
-uncorrelated, oversized, or unsupported artifact rejects the complete private
-source. Use the PtcRunner build matching the artifact's reported schema when
-versions differ.
+every private artifact against its matching run. When trace directory
+admission isolates a damaged run, a sealed inspection artifact carrying that
+same run and trace identity is isolated with it; healthy correlated runs remain
+available, and `(analysis/runs {})` reports the trace source and isolation
+reason. Other malformed, changed, uncorrelated, oversized, or unsupported
+inspection artifacts still reject the complete private source. Use the
+PtcRunner build matching the artifact's reported schema when versions differ.
 
 Private authority adds collections to the same navigation surface rather than
 adding smart diagnosis APIs:
