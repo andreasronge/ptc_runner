@@ -17,6 +17,10 @@ belongs in guides or retained specifications.
 
 ## Remaining Kernel product work
 
+- [`lisp-kernel/agent-core-modularity.md`](lisp-kernel/agent-core-modularity.md)
+  proposes a characterized functional state machine and bounded policy seam so
+  applications can adapt the shipped agent loop without copying its protocol
+  and Kernel-enforcement code.
 - [`lisp-kernel/stable-cli-contract.md`](lisp-kernel/stable-cli-contract.md)
   retains only the first GHCR publication, macOS x86_64 evidence, and final
   acceptance work for the completed standalone command.
