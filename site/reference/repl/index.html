@@ -303,10 +303,13 @@ authorization:</p><pre><code class="console language-console">ptc repl \
 interactive terminal with those definitions available. <code class="inline">--eval</code>, scripts, and
 stdin remain unattended input and require <code class="inline">--private-unattended</code> instead.</p><p>The trace, inspection, and analysis-trace directories must be physically
 separate, including through ancestors and symlink aliases. Capture validates
-every private artifact against its matching run. A malformed, changed,
-uncorrelated, oversized, or unsupported artifact rejects the complete private
-source. Use the PtcRunner build matching the artifact's reported schema when
-versions differ.</p><p>Private authority adds collections to the same navigation surface rather than
+every private artifact against its matching run. When trace directory
+admission isolates a damaged run, a sealed inspection artifact carrying that
+same run and trace identity is isolated with it; healthy correlated runs remain
+available, and <code class="inline">(analysis/runs {})</code> reports the trace source and isolation
+reason. Other malformed, changed, uncorrelated, oversized, or unsupported
+inspection artifacts still reject the complete private source. Use the
+PtcRunner build matching the artifact's reported schema when versions differ.</p><p>Private authority adds collections to the same navigation surface rather than
 adding smart diagnosis APIs:</p><pre><code class="clojure language-clojure">(def runs (analysis/runs {&quot;limit&quot; 20}))
 (def run-id (get (first (get runs &quot;items&quot;)) &quot;run_id&quot;))
 (analysis/open run-id)

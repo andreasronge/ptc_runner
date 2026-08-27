@@ -122,6 +122,34 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
   end
 
   @tag :tmp_dir
+  test "zero-frame Viewer admission rejects an isolated trace without crashing", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root, "isolated-viewer-run")
+    PrivateInspectionFixture.rewrite_legacy_float_cost!(fixture)
+
+    trace_path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
+    File.rename!(trace_path, Path.join(fixture.traces, "#{fixture.run_id}.private.jsonl"))
+
+    inspection_path = Path.join(fixture.inspection, "empty-isolated-viewer-run.ptcins")
+
+    {:ok, handle} =
+      PublicationHandle.reserve_stream_for(inspection_path, :inspection, 0o600, self())
+
+    {:ok, sink} =
+      InspectionSink.start(
+        run_id: fixture.run_id,
+        trace_id: "trace-#{fixture.run_id}",
+        publication_handle: handle
+      )
+
+    assert {:ok, %{record_count: 0} = seal} = InspectionSink.seal(sink)
+    assert :ok = InspectionArtifact.publish_handle(handle, seal)
+    assert :ok = InspectionSink.stop(sink)
+
+    assert {:error, :inspection_correlation_missing} =
+             ViewerAdapter.pin_inspection(inspection_path, {:private_directory, fixture.traces})
+  end
+
+  @tag :tmp_dir
   test "pinning an exact trace file cannot acquire authority from a sibling", %{tmp_dir: root} do
     inspected = PrivateInspectionFixture.create!(Path.join(root, "inspected"), "inspected-run")
     selected = PrivateInspectionFixture.create!(Path.join(root, "selected"), "selected-run")

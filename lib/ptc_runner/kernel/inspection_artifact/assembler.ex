@@ -77,7 +77,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
   def finish(state, trace_facts) do
     state = Map.put(state, :pending_parents, Map.get(trace_facts, "parent_evaluation_ids", %{}))
 
-    with :ok <- closed_joins(state),
+    with :ok <- validate_complete(state),
          :ok <- validate_trace(state, trace_facts),
          conversation <- Conversation.finish(state.conversation, trace_facts),
          {:ok, state} <- materialize_pairs(state),
@@ -93,6 +93,10 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
       {:ok, Map.put(state, :evidence, conversation.evidence)}
     end
   end
+
+  @doc false
+  @spec validate_complete(map()) :: :ok | {:error, atom()}
+  def validate_complete(state), do: closed_joins(state)
 
   defp schema_version(%{"schema_version" => version}) do
     if version == Format.schema_version(), do: :ok, else: {:error, :invalid_record}

@@ -195,7 +195,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
          {:ok, admitted} <-
            open_and_admit(inventory.files, source, trace_snapshot, limits, config, owner),
          :ok <- capture_hook(config.capture_hook),
-         :ok <- verify_all_handles(admitted.handles),
+         :ok <- verify_all_handles(admission_handles(admitted)),
+         :ok <- close_isolated_handles(admitted),
          true <- Indexes.within_retained?(admitted.indexes, limits) do
       digest = snapshot_digest(trace_info.snapshot_hash, admitted.digests)
       source_id = selected_source_id(source, digest, admitted)
@@ -371,23 +372,22 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   defp admit_all(opened, source, trace_snapshot, indexes, limits, config) do
     result =
       Enum.reduce_while(opened, {:ok, empty_admission(indexes)}, fn {_path, handle}, {:ok, acc} ->
-        facts = fn run_id, trace_id -> paired_facts(trace_snapshot, run_id, trace_id) end
-
         opts = [
           during_admission_hook: config.admission_hook,
-          expected_identity: empty_identity(handle, trace_snapshot)
+          expected_identity: inspection_identity(handle, source, trace_snapshot)
         ]
 
         case opts[:expected_identity] do
+          {:isolated, identity} ->
+            opts = Keyword.put(opts, :expected_identity, identity)
+            admit_isolated(handle, acc, source, limits, opts)
+
           {:error, reason} ->
-            {:halt, {:error, reason, acc.handles}}
+            {:halt, {:error, reason, admission_handles(acc)}}
 
           {:ok, identity} ->
             opts = Keyword.put(opts, :expected_identity, identity)
-
-            admit_one(handle, acc, source, facts, limits, opts)
-
-          nil ->
+            facts = fn run_id, trace_id -> paired_facts(trace_snapshot, run_id, trace_id) end
             admit_one(handle, acc, source, facts, limits, opts)
         end
       end)
@@ -407,13 +407,38 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
       {:ok, admitted} ->
         case add_admitted(acc, admitted, handle, source) do
           {:ok, next} -> {:cont, {:ok, next}}
-          {:error, reason} -> {:halt, {:error, reason, acc.handles}}
+          {:error, reason} -> {:halt, {:error, reason, admission_handles(acc)}}
         end
 
       {:error, reason} ->
-        {:halt, {:error, reason, acc.handles}}
+        {:halt, {:error, reason, admission_handles(acc)}}
     end
   end
+
+  defp admit_isolated(handle, acc, {:directory, _directory}, limits, opts) do
+    isolated_indexes = Indexes.create(self())
+    isolated_facts = fn _run_id, _trace_id -> {:error, :run_isolated} end
+
+    result = Admission.run(handle, isolated_indexes, isolated_facts, limits, opts)
+    Indexes.delete_all(isolated_indexes)
+
+    case result do
+      {:isolated, isolated} ->
+        case add_isolated(acc, isolated, handle) do
+          {:ok, next} ->
+            {:cont, {:ok, next}}
+
+          {:error, reason} ->
+            {:halt, {:error, reason, admission_handles(acc)}}
+        end
+
+      {:error, reason} ->
+        {:halt, {:error, reason, admission_handles(acc)}}
+    end
+  end
+
+  defp admit_isolated(_handle, acc, _source, _limits, _opts),
+    do: {:halt, {:error, :inspection_correlation_missing, admission_handles(acc)}}
 
   defp open_and_admit(files, source, trace_snapshot, limits, config, owner) do
     with {:ok, opened} <- open_all(files) do
@@ -459,7 +484,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
             if accounting.charged_retained_bytes <= limits.max_retained_bytes do
               {:ok, admitted}
             else
-              cleanup_failed(admitted.indexes, admitted.handles)
+              cleanup_failed(admitted.indexes, admission_handles(admitted))
 
               {:error,
                {:source_retained_limit_exceeded,
@@ -512,14 +537,36 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   end
 
   defp empty_admission(indexes) do
-    %{indexes: indexes, handles: %{}, trace_facts: %{}, turn_evidence: %{}, digests: %{}}
+    %{
+      indexes: indexes,
+      handles: %{},
+      isolated_handles: %{},
+      trace_facts: %{},
+      turn_evidence: %{},
+      digests: %{}
+    }
+  end
+
+  defp add_isolated(acc, isolated, handle) do
+    run_id = isolated.run_id
+
+    if Map.has_key?(acc.digests, run_id) do
+      {:error, :duplicate_inspection_run}
+    else
+      {:ok,
+       %{
+         acc
+         | isolated_handles: Map.put(acc.isolated_handles, run_id, handle),
+           digests: Map.put(acc.digests, run_id, handle.digest)
+       }}
+    end
   end
 
   defp add_admitted(acc, admitted, handle, source) do
     run_id = admitted.run_id
 
     cond do
-      Map.has_key?(acc.handles, run_id) ->
+      Map.has_key?(acc.digests, run_id) ->
         {:error, :duplicate_inspection_run}
 
       match?({:file, _path, requested} when requested != run_id, source) ->
@@ -550,15 +597,21 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     end
   end
 
-  defp empty_identity(%{footer: %{record_count: 0} = footer}, trace_snapshot) do
-    TraceSnapshot.resolve_inspection_identity(
+  defp inspection_identity(%{footer: footer}, {:directory, _directory}, trace_snapshot) do
+    TraceSnapshot.resolve_directory_inspection_identity(
       trace_snapshot,
       footer.run_id_sha256,
       footer.trace_id_sha256
     )
   end
 
-  defp empty_identity(_handle, _trace_snapshot), do: nil
+  defp inspection_identity(%{footer: footer}, _source, trace_snapshot) do
+    TraceSnapshot.resolve_inspection_identity(
+      trace_snapshot,
+      footer.run_id_sha256,
+      footer.trace_id_sha256
+    )
+  end
 
   defp selected_source_id({:file, _path, run_ref}, digest, admitted) do
     case Map.fetch(admitted.indexes.trace_facts, run_ref) do
@@ -644,6 +697,14 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
         Process.exit(cleaner, :kill)
         :ok
     end
+  end
+
+  defp admission_handles(admitted),
+    do: Map.merge(admitted.handles, admitted.isolated_handles)
+
+  defp close_isolated_handles(admitted) do
+    admitted.isolated_handles |> Map.values() |> Enum.each(&Handle.close/1)
+    :ok
   end
 
   defp normalize_error(reason)

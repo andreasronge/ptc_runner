@@ -53,6 +53,59 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   end
 
   @tag :tmp_dir
+  test "isolates a sealed artifact paired with an isolated trace and keeps it pinned", %{
+    tmp_dir: root
+  } do
+    healthy = PrivateInspectionFixture.create!(root, "healthy")
+    damaged = PrivateInspectionFixture.create!(root, "damaged")
+    PrivateInspectionFixture.rewrite_legacy_float_cost!(damaged)
+
+    {:ok, trace_snapshot} =
+      TraceSnapshot.start({:private_authorized_directory, healthy.traces}, owner: self())
+
+    on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
+
+    assert {:ok, snapshot} =
+             InspectionSnapshot.start({:directory, healthy.inspection}, trace_snapshot,
+               owner: self()
+             )
+
+    assert {:ok, %{file_count: 2, run_count: 1}} = InspectionSnapshot.info(snapshot)
+
+    assert {:ok, %{"items" => [%{"run_id" => "healthy"}]}} =
+             InspectionSnapshot.query(snapshot, :list_runs, %{})
+
+    assert :ok = InspectionSnapshot.stop(snapshot)
+
+    damaged_inspection = Path.join(healthy.inspection, "damaged.ptcins")
+
+    assert {:error, :source_changed} =
+             InspectionSnapshot.start({:directory, healthy.inspection}, trace_snapshot,
+               owner: self(),
+               capture_hook: fn -> File.write!(damaged_inspection, "\n", [:append]) end
+             )
+  end
+
+  @tag :tmp_dir
+  test "an isolated artifact still rejects an incomplete private join", %{tmp_dir: root} do
+    {trace, inspection} = source_directories(root)
+    write_run(trace, inspection, "damaged", :mcp_unclosed)
+
+    PrivateInspectionFixture.rewrite_legacy_float_cost!(%{
+      traces: trace,
+      run_id: "damaged"
+    })
+
+    {:ok, trace_snapshot} =
+      TraceSnapshot.start({:private_authorized_directory, trace}, owner: self())
+
+    on_exit(fn -> TraceSnapshot.stop(trace_snapshot) end)
+
+    assert {:error, :incomplete_inspection_correlation} =
+             InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
+  end
+
+  @tag :tmp_dir
   test "binds admission to the regular file inventoried before open", %{tmp_dir: root} do
     {trace, inspection} = source_directories(root)
     write_run(trace, inspection, "pinned-inventory", :basic)
@@ -1265,7 +1318,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
       arguments: %{"path" => "private-#{run_id}.txt"}
     })
 
-    if variant in [:mcp, :diagnostics] do
+    if variant in [:mcp, :diagnostics, :mcp_unclosed] do
       emit!(sink, "mcp-request", %{capability_id: "tool-#{run_id}", request_id: 7}, %{
         mission_name: "default",
         transport: :stdio,
@@ -1314,6 +1367,22 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
           "id" => 8,
           "result" => %{
             "content" => [%{"type" => "text", "text" => "second-secret-#{run_id}"}]
+          }
+        }
+      })
+    end
+
+    if variant == :mcp_unclosed do
+      emit!(sink, "mcp-request", %{capability_id: "tool-#{run_id}", request_id: 9}, %{
+        mission_name: "default",
+        transport: :stdio,
+        body: %{
+          "jsonrpc" => "2.0",
+          "id" => 9,
+          "method" => "tools/call",
+          "params" => %{
+            "name" => "read",
+            "arguments" => %{"path" => "unclosed-#{run_id}.txt"}
           }
         }
       })

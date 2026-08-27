@@ -27,6 +27,30 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     fixture
   end
 
+  @doc false
+  def rewrite_legacy_float_cost!(%{traces: traces, run_id: run_id}) do
+    path = Path.join(traces, "#{run_id}.jsonl")
+
+    events =
+      path
+      |> File.stream!()
+      |> Enum.map(&Jason.decode!/1)
+
+    events =
+      update_in(events, [Access.at(-1), "data"], fn data ->
+        Map.put(data, "usage", %{
+          "llm_spend" => %{
+            "state" => "available",
+            "input" => 1,
+            "output" => 2,
+            "total_cost" => 0.001326
+          }
+        })
+      end)
+
+    File.write!(path, encode_jsonl(events))
+  end
+
   def create_boundary_failure!(root, run_id \\ "boundary-failure-run") do
     %{traces: traces, inspection: inspection} = fixture = create_directories(root, run_id)
 

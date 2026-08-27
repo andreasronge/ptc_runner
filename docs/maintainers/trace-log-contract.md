@@ -1070,6 +1070,16 @@ canonical event source, local Viewer access, or the active run does not imply
 inspection authority. Calls emit ordinary bounded capability facts without
 copying returned payloads into the trace.
 
+Directory-backed private analysis carries trace isolation across the
+correlation boundary. When an inspection footer's exact run and trace digests
+resolve to one isolated trace component, admission checks its record frames and
+complete seal in disposable indexes, commits the artifact digest to inspection
+snapshot identity, and discards those private rows. Other inspection artifacts
+continue through normal trace correlation, so a healthy run remains navigable
+and the trace run listing reports the isolated source and classifier reason.
+This is isolation, not a legacy trace reader: the rejected trace representation
+never enters the canonical analysis projection.
+
 Active-run trace self-query remains unsupported. Every trace capability call
 adds events to the same sink, while pagination cursors are source-digest-bound;
 the query would mutate the source it is paging. Same-run correction retains the

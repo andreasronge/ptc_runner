@@ -215,13 +215,27 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   @doc false
   @spec resolve_inspection_identity(t(), binary(), binary()) ::
-          {:ok, %{run_id: binary(), trace_id: binary()}} | {:error, atom()}
+          {:ok, %{run_id: binary(), trace_id: binary()}}
+          | {:error, atom()}
   def resolve_inspection_identity(%__MODULE__{} = snapshot, run_digest, trace_digest)
       when is_binary(run_digest) and byte_size(run_digest) == 32 and is_binary(trace_digest) and
              byte_size(trace_digest) == 32,
       do: call(snapshot, {:resolve_inspection_identity, run_digest, trace_digest})
 
   def resolve_inspection_identity(_snapshot, _run_digest, _trace_digest),
+    do: {:error, :invalid_snapshot}
+
+  @doc false
+  @spec resolve_directory_inspection_identity(t(), binary(), binary()) ::
+          {:ok, %{run_id: binary(), trace_id: binary()}}
+          | {:isolated, %{run_id: binary(), trace_id: binary()}}
+          | {:error, atom()}
+  def resolve_directory_inspection_identity(%__MODULE__{} = snapshot, run_digest, trace_digest)
+      when is_binary(run_digest) and byte_size(run_digest) == 32 and is_binary(trace_digest) and
+             byte_size(trace_digest) == 32,
+      do: call(snapshot, {:resolve_directory_inspection_identity, run_digest, trace_digest})
+
+  def resolve_directory_inspection_identity(_snapshot, _run_digest, _trace_digest),
     do: {:error, :invalid_snapshot}
 
   @doc false
@@ -331,16 +345,21 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
         _from,
         %{token: token} = state
       ) do
-    matches =
-      Enum.filter(state.analysis.facts_by_run_id, fn {run_id, facts} ->
-        :crypto.hash(:sha256, run_id) == run_digest and
-          :crypto.hash(:sha256, facts["trace_id"]) == trace_digest
-      end)
+    {:reply, admitted_inspection_identity(state, run_digest, trace_digest), state}
+  end
 
+  def handle_call(
+        {token, {:resolve_directory_inspection_identity, run_digest, trace_digest}},
+        _from,
+        %{token: token} = state
+      ) do
     result =
-      case matches do
-        [{run_id, %{"trace_id" => trace_id}}] -> {:ok, %{run_id: run_id, trace_id: trace_id}}
-        _none_or_ambiguous -> {:error, :inspection_correlation_missing}
+      case admitted_inspection_identity(state, run_digest, trace_digest) do
+        {:ok, _identity} = ok ->
+          ok
+
+        {:error, :inspection_correlation_missing} ->
+          isolated_inspection_identity(state, run_digest, trace_digest)
       end
 
     {:reply, result, state}
@@ -664,6 +683,47 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     do: run_ids
 
   defp known_isolated_run_ids(_state), do: MapSet.new()
+
+  defp admitted_inspection_identity(state, run_digest, trace_digest) do
+    matches =
+      Enum.filter(state.analysis.facts_by_run_id, fn {run_id, facts} ->
+        :crypto.hash(:sha256, run_id) == run_digest and
+          :crypto.hash(:sha256, facts["trace_id"]) == trace_digest
+      end)
+
+    case matches do
+      [{run_id, %{"trace_id" => trace_id}}] -> {:ok, %{run_id: run_id, trace_id: trace_id}}
+      _none_or_ambiguous -> {:error, :inspection_correlation_missing}
+    end
+  end
+
+  defp isolated_inspection_identity(
+         %{directory_admission: %{isolated_components: components}},
+         run_digest,
+         trace_digest
+       ) do
+    Enum.reduce_while(components, {:error, :inspection_correlation_missing}, fn component,
+                                                                                _missing ->
+      case {digest_match(component.run_claims, run_digest),
+            digest_match(component.trace_claims, trace_digest)} do
+        {{:ok, run_id}, {:ok, trace_id}} ->
+          {:halt, {:isolated, %{run_id: run_id, trace_id: trace_id}}}
+
+        _not_this_component ->
+          {:cont, {:error, :inspection_correlation_missing}}
+      end
+    end)
+  end
+
+  defp isolated_inspection_identity(_state, _run_digest, _trace_digest),
+    do: {:error, :inspection_correlation_missing}
+
+  defp digest_match(claims, expected) do
+    case Enum.filter(claims, &(:crypto.hash(:sha256, &1) == expected)) do
+      [claim] -> {:ok, claim}
+      _none_or_ambiguous -> :error
+    end
+  end
 
   defp valid_run_id?(run_id),
     do: is_binary(run_id) and byte_size(run_id) in 1..4_096 and String.valid?(run_id)
