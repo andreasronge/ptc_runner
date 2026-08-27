@@ -24,6 +24,9 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.ValuePreviewFixture
 
+  import PtcRunner.TestSupport.AgentFixtures,
+    only: [mission_with_source: 2, replay_alias_router: 2]
+
   test "llm/request is an ordinary bounded workflow capability" do
     parent = self()
 
@@ -4998,24 +5001,6 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     )
   end
 
-  defp replay_alias_router(chosen_capability, other_capability) do
-    LLMRouter.new([
-      replay_alias_route("chosen", true, chosen_capability),
-      replay_alias_route("other", false, other_capability)
-    ])
-  end
-
-  defp replay_alias_route(alias_name, default?, capability) do
-    %{
-      alias: alias_name,
-      source: "llm_replay",
-      installation_revision: alias_name <> "-v1",
-      default?: default?,
-      capability: capability,
-      max_calls: nil
-    }
-  end
-
   defp agent_router_config(router) do
     {:ok, bundle} = agent_bundle([])
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [router])
@@ -5169,15 +5154,6 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
       :error ->
         MissionEnvironment.new(capabilities: capabilities, data: data)
-    end
-  end
-
-  defp mission_with_source(namespace, body) do
-    source = "(ns #{namespace})\n#{body}\n"
-
-    with {:ok, component} <- Component.new(id: namespace, source: source, origin: "test"),
-         {:ok, bundle} <- Kernel.compile_bundle([component]) do
-      MissionEnvironment.new(bundle: bundle)
     end
   end
 
