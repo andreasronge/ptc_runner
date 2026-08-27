@@ -936,7 +936,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
     {:ok, components} =
       Library.components(
-        ~w(agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+        ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry kernel llm result workflow.event)
       )
 
     assert {:ok, config} = run_config(router, run_id, components, limits: limits)
@@ -1716,7 +1716,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   defp agent_router_config(router, run_id, opts \\ []) do
     {:ok, components} =
       Library.components(
-        ~w(agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+        ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry kernel llm result workflow.event)
       )
 
     run_config(router, run_id, components, opts)

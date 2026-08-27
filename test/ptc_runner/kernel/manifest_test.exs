@@ -741,6 +741,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
              "agent.prompt",
              "llm",
              "result",
+             "agent.machine",
              "workflow.event",
              "agent.core",
              "agent.main"

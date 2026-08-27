@@ -6,7 +6,7 @@ defmodule PtcRunner.Kernel.LibraryResolutionTest do
 
   test "lists every shipped component in lexical order" do
     assert Library.component_ids() ==
-             ~w(agent.core agent.failure agent.feedback agent.main agent.native agent.prompt agent.retry analysis cap debug.nav kernel llm result runtime workflow.event)
+             ~w(agent.core agent.failure agent.feedback agent.machine agent.main agent.native agent.prompt agent.retry analysis cap debug.nav kernel llm result runtime workflow.event)
 
     assert {:ok, components} = Library.components(Library.component_ids())
     assert Enum.map(components, & &1.id) == Library.component_ids()
@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.LibraryResolutionTest do
              "agent.core",
              "agent.failure",
              "agent.feedback",
+             "agent.machine",
              "agent.native",
              "agent.prompt",
              "agent.retry",

@@ -40,7 +40,7 @@ defmodule PtcRunner.Kernel.FrozenBundleTest do
 
     {:ok, components} =
       Library.components(
-        ~w(agent.failure agent.feedback agent.native agent.prompt agent.retry kernel llm result
+        ~w(agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry kernel llm result
         workflow.event agent.core)
       )
 
@@ -56,7 +56,7 @@ defmodule PtcRunner.Kernel.FrozenBundleTest do
     agent_core_indices = Enum.at(metadata.dependency_indices, agent_core_position)
 
     expected =
-      ~w(agent.failure agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      ~w(agent.machine agent.native agent.prompt kernel llm result workflow.event)
       |> Enum.map(&Map.fetch!(positions, &1))
       |> Enum.sort()
 

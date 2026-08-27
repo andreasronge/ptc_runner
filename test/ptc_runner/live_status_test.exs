@@ -579,7 +579,7 @@ defmodule PtcRunner.LiveStatusTest do
   defp agent_bundle do
     {:ok, components} =
       Library.components(
-        ~w(agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry
+        ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry
            kernel llm result workflow.event)
       )
 

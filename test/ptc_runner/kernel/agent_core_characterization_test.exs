@@ -850,7 +850,7 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
   defp compile_agent do
     {:ok, components} =
       Library.components(
-        ~w(agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+        ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry kernel llm result workflow.event)
       )
 
     Kernel.compile_bundle(components)

@@ -110,10 +110,14 @@ manifest must select the shipped library:</p><pre><code class="json language-jso
   &quot;path&quot;: &quot;agent.clj&quot;,
   &quot;dependencies&quot;: [&quot;agent.core&quot;]
 },
-{&quot;library&quot;: &quot;agent.core&quot;}</code></pre><p>The resolved closure includes <code class="inline">agent.failure</code>, <code class="inline">agent.feedback</code>, <code class="inline">agent.native</code>,
-<code class="inline">agent.prompt</code>, <code class="inline">agent.retry</code>, <code class="inline">kernel</code>, <code class="inline">llm</code>, <code class="inline">result</code>, and <code class="inline">workflow.event</code>.
-<code class="inline">agent.failure</code> is a generated <code class="inline">:discoverable</code> classifier over the existing
-bounded LLM envelope; it does not change public outcomes or fail-fast evidence.</p><p>Select <code class="inline">{&quot;library&quot;: &quot;agent.main&quot;}</code> when the manifest entry is
+{&quot;library&quot;: &quot;agent.core&quot;}</code></pre><p>The resolved closure includes <code class="inline">agent.failure</code>, <code class="inline">agent.feedback</code>, <code class="inline">agent.machine</code>,
+<code class="inline">agent.native</code>, <code class="inline">agent.prompt</code>, <code class="inline">agent.retry</code>, <code class="inline">kernel</code>, <code class="inline">llm</code>, <code class="inline">result</code>, and
+<code class="inline">workflow.event</code>. <code class="inline">agent.failure</code> is a generated <code class="inline">:discoverable</code> classifier over
+the existing bounded LLM envelope; it does not change public outcomes or
+fail-fast evidence. <code class="inline">agent.machine</code> is a <code class="inline">:discoverable</code> pure constructor/advance
+reducer for the shipped loop. Discoverable visibility is not an authority
+boundary; the exports remain callable and are not an application customization
+API.</p><p>Select <code class="inline">{&quot;library&quot;: &quot;agent.main&quot;}</code> when the manifest entry is
 <code class="inline">agent.main/run</code>; its dependency closure includes <code class="inline">agent.core</code>.</p><h2 id="entry-functions">Entry functions</h2><p>All <code class="inline">agent.core</code> entries take a task string and configuration map.</p><h3 id="agent-core-run"><code class="inline">agent.core/run</code></h3><pre><code class="clojure language-clojure">(agent.core/run task config)</code></pre><p>Runs the loop as a terminal workflow entry. By default it completes the outer
 program with:</p><pre><code class="clojure language-clojure">{:ok true :value application-value}</code></pre><p>Set <code class="inline">&quot;result_envelope&quot;</code> to <code class="inline">false</code> to complete with the raw application value.
 The exact value this entry returns is the application result: a manifest
