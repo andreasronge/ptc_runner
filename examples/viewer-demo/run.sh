@@ -9,6 +9,11 @@
 # fails the script.
 set -euo pipefail
 
+if ! command -v jq >/dev/null 2>&1; then
+  echo "FAIL: jq is required to validate private model feedback" >&2
+  exit 1
+fi
+
 demo_dir="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(cd "$demo_dir/../.." && pwd)"
 out="${1:-$repo_root/tmp/viewer-demo}"
@@ -127,6 +132,35 @@ require_evidence() {
   fi
 }
 
+require_private_feedback() {
+  local journey=$1 pattern=$2 label=$3
+  local run_ref private_analysis
+  run_ref="$(basename "$journey_trace" .jsonl)"
+
+  if ! private_analysis="$(
+    mix ptc repl \
+      --profile private-run-analysis-v1 \
+      --resource "traces=$artifacts/traces" \
+      --resource "inspection=$artifacts/inspection" \
+      --private-unattended \
+      --format jsonl \
+      -e "(analysis/read \"$run_ref\" {\"collection\" \"turns\" \"limit\" 100})"
+  )"; then
+    echo "FAIL: $journey could not query private feedback" >&2
+    exit 1
+  fi
+
+  if ! jq -s -e --arg pattern "$pattern" \
+    'any(.[]
+         | select(.type == "evaluation")
+         | .result.value.items[]?.feedback[]?.content
+         | strings;
+         contains($pattern))' <<<"$private_analysis" >/dev/null; then
+    echo "FAIL: $journey missing $label in its reconstructed model feedback" >&2
+    exit 1
+  fi
+}
+
 run_journey 01-recovery ok
 run_journey 02-bulk ok
 run_journey 03-limits any
@@ -134,13 +168,13 @@ require_evidence 03-limits "$journey_trace" '"limit-exceeded"' "limit-exceeded e
 
 # 04/05 must fail for the advertised reason, not from an unrelated
 # provider or runtime error: the canonical trace must end in an error
-# outcome and the private feedback must carry the intended error code.
+# outcome and a private semantic query must find the intended feedback.
 run_journey 04-loop-limit error
 require_evidence 04-loop-limit "$journey_trace" '"outcome":"error"' "an error run outcome"
-require_evidence 04-loop-limit "$journey_inspection" 'loop_limit_exceeded' "loop-limit feedback"
+require_private_feedback 04-loop-limit 'loop_limit_exceeded' "loop-limit feedback"
 run_journey 05-memory error
 require_evidence 05-memory "$journey_trace" '"outcome":"error"' "an error run outcome"
-require_evidence 05-memory "$journey_inspection" 'memory_exceeded' "heap-budget feedback"
+require_private_feedback 05-memory 'mission heap budget' "heap-budget feedback"
 
 # The project document must name an application, and it must be a portable
 # path beneath the document -- so one journey manifest is copied next to it.
