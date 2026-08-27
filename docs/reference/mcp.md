@@ -201,16 +201,16 @@ the server cannot return secrets, paths, or stack traces.
 `inspection_capture` is the closed host-only enum `"full"` (the default) or
 `"digest_results"`. The latter is accepted only for read mappings. Private
 inspection then keeps arguments and requests but stores deterministic JSON
-identity metadata in place of responses and results the provider boundary
-accepted. A response that boundary rejects -- an MCP error, an `isError`
-result, or one that is oversized or malformed -- keeps its body, as do
-capability error envelopes, capability exceptions, and MCP stderr within
-`stderr_bytes`. A result the runtime rejects after the boundary keeps its full
-error envelope while the wire body remains an identity; the mapping is a read,
-so rerunning with full capture recovers the value and the identity confirms it
-is the same one. Digests of guessable values are not confidential. Select
-provider page sizes and configured call, event, and clock limits suitable for
-the source volume.
+identity metadata in place of responses and results the transport accepted. A
+response the transport rejects -- an MCP error, an `isError` result, or one
+that is oversized or malformed -- keeps its body, as do capability error
+envelopes, capability exceptions, and MCP stderr within `stderr_bytes`. A
+result rejected after that point -- tool-result normalization, retained-size
+admission, output validation -- keeps its full error envelope while the wire
+body remains an identity; the mapping is a read, so rerunning with full
+capture recovers the value and the identity confirms it is the same one.
+Digests of guessable values are not confidential. Select provider page sizes
+and configured call, event, and clock limits suitable for the source volume.
 
 ## Select less authority in the manifest
 

@@ -567,12 +567,14 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "digest result capture keeps a body this run rejected as an invalid result", %{
+  test "a normalization-rejected result keeps its full error envelope while the body digests", %{
     tmp_dir: dir
   } do
-    # The JSON-RPC layer accepts this body and it is well within the byte
-    # bound; only the installed output schema rejects it. Capture therefore
-    # cannot be decided until tool-result normalization has run.
+    # The transport accepts this body -- well-formed, within the byte bound --
+    # and only tool-result normalization rejects it, after the exchange is
+    # already captured. Like every post-capture rejection, the error envelope
+    # is retained in full while the wire body remains an identity; the read
+    # reproduces under a full-capture rerun.
     fixture = fixture(self(), structured_value: "wrong")
     on_exit(fixture.close)
 
@@ -603,8 +605,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert {:ok, records} = StreamingInspection.read_path(inspection_path)
 
     assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
-    assert %{"body" => %{"result" => _result}} = response["payload"]
-    refute Map.has_key?(response["payload"], "body_identity")
+    assert %{"body_identity" => %{"sha256" => "sha256:" <> _}} = response["payload"]
+    refute Map.has_key?(response["payload"], "body")
+
+    assert [output] = Enum.filter(records, &(&1["record_type"] == "capability-output"))
+    assert %{"result" => %{"status" => "error", "reason" => "invalid_result"}} = output["payload"]
   end
 
   @tag :tmp_dir

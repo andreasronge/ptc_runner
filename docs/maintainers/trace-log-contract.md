@@ -802,14 +802,14 @@ is the size of that deterministic JSON encoding, not the MCP wire size.
 
 The alternatives are per record, not per artifact: record types, ordering,
 correlation, joins, and counts are identical to a fully captured run. The
-digest decision is made at the provider boundary with what is decidable there:
-MCP error and `isError` bodies, bodies rejected as oversized or malformed or
-failing tool-result normalization, capability error envelopes,
-`capability-exception`, and `mcp-stderr` stay full. A value that boundary
-accepted and the runtime later rejected -- retained-size admission or bounded
-output validation -- keeps its full error envelope while the wire body remains
-an identity; the mapping is a read, so a full-capture rerun recovers the value
-and its identity proves it is the same one. The sink computes the identity, so
+digest decision uses only what the transport has already computed: MCP error
+and `isError` bodies, bodies rejected as oversized or malformed, capability
+error envelopes, `capability-exception`, and `mcp-stderr` stay full. A value
+the transport accepted and a later stage rejected -- tool-result
+normalization, retained-size admission, bounded output validation -- keeps its
+full error envelope while the wire body remains an identity; the mapping is a
+read, so a full-capture rerun recovers the value and its identity proves it is
+the same one. The sink computes the identity and the decision adds no work, so
 digest capture cannot change an emitting process's heap behaviour. An identity
 attests that a specific normalized value crossed the boundary at that record's
 position in the observed order. It does not retain the value, prove derivation

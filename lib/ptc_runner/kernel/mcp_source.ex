@@ -1040,7 +1040,7 @@ defmodule PtcRunner.Kernel.MCPSource do
              %{"name" => upstream, "arguments" => arguments},
              selected.max_result_bytes,
              header_parameters,
-             capture_gate(context, output_validator, error_feedback)
+             context
            ) do
         {:ok, result} ->
           normalize_result(result, output_validator, error_feedback, effect)
@@ -1050,22 +1050,6 @@ defmodule PtcRunner.Kernel.MCPSource do
       end
     end
   end
-
-  # `bounded_outcome/3` only bounds the RPC result. A `resultType: "complete"`
-  # body can still fail tool-result normalization -- malformed content, or
-  # structured content violating the installed output schema -- so the capture
-  # decision has to carry the same check this caller is about to apply, or a
-  # rejected body survives as an identity.
-  defp capture_gate(context, output_validator, error_feedback) when is_map(context) do
-    Map.put(context, :inspection_result_check, fn result ->
-      match?(
-        {:ok, _value},
-        MCPProtocol.normalize_tool_result(result, output_validator, error_feedback)
-      )
-    end)
-  end
-
-  defp capture_gate(context, _output_validator, _error_feedback), do: context
 
   defp normalize_result(result, output_validator, error_feedback, effect) do
     case MCPProtocol.normalize_tool_result(result, output_validator, error_feedback) do
@@ -1489,35 +1473,25 @@ defmodule PtcRunner.Kernel.MCPSource do
        ),
        do: InspectionSink.emit(sink, "mcp-request", %{}, %{})
 
-  # Digest capture removes bulk read output. The decision is made here, at the
-  # provider boundary, with everything decidable at this moment: a body the
-  # provider marked failed or that this boundary rejected stays full, because
-  # a failed call is what an operator reads afterwards and may not reproduce
-  # on a rerun. A rejection the runtime makes after this boundary retains its
-  # full error envelope in `capability-output` while the wire body remains an
-  # identity; the mapping is a read, so a full-capture rerun recovers the
-  # value and the identity attests it is the same one. The identity itself is
-  # computed by the sink, so this heap-limited process sends the same message
-  # in both modes.
+  # Digest capture removes bulk read output. The decision uses only what the
+  # transport has already computed -- the bounded RPC outcome and the provider's
+  # own error marking -- so digest capture adds no work to this heap-limited
+  # process (the sink computes the identity). A body the provider marked failed
+  # or the transport rejected stays full, because a failed call is what an
+  # operator reads afterwards and may not reproduce on a rerun. A rejection made
+  # after this point -- tool-result normalization, retained-size admission,
+  # bounded output validation -- retains its full error envelope in
+  # `capability-output` while the wire body remains an identity; the mapping is
+  # a read, so a full-capture rerun recovers the value and the identity attests
+  # it is the same one.
   defp response_capture(context, response, outcome) do
     if Map.get(context, :inspection_capture, :full) == :digest_results and
-         not error_response?(response) and accepted_outcome?(context, outcome) do
+         match?({:ok, _result}, outcome) and not error_response?(response) do
       [response_capture: :digest_results]
     else
       []
     end
   end
-
-  # Fail closed: without a registered check there is no evidence this body
-  # survives validation, so it is captured in full.
-  defp accepted_outcome?(context, {:ok, result}) do
-    case Map.get(context, :inspection_result_check) do
-      check when is_function(check, 1) -> check.(result)
-      _absent -> false
-    end
-  end
-
-  defp accepted_outcome?(_context, _outcome), do: false
 
   defp error_response?(%{"error" => _error}), do: true
   defp error_response?(%{"result" => %{"isError" => true}}), do: true

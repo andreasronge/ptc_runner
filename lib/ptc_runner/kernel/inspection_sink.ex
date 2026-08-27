@@ -195,6 +195,15 @@ defmodule PtcRunner.Kernel.InspectionSink do
     end
   end
 
+  # A failed sink stays failed; answer before computing an identity the
+  # append would discard anyway.
+  def handle_call(
+        {token, {:emit, _record_type, _correlation, _payload, _capture}},
+        _from,
+        %{token: token, failed?: true} = state
+      ),
+      do: {:reply, {:error, :inspection_sink_error}, state}
+
   def handle_call(
         {token, {:emit, record_type, correlation, payload, capture}},
         _from,
@@ -205,6 +214,13 @@ defmodule PtcRunner.Kernel.InspectionSink do
       :error -> failed_reply(state)
     end
   end
+
+  def handle_call(
+        {token, {:emit_mcp_exchange, _correlation, _request, _response, _stderr, _capture}},
+        _from,
+        %{token: token, failed?: true} = state
+      ),
+      do: {:reply, {:error, :inspection_sink_error}, state}
 
   def handle_call(
         {token, {:emit_mcp_exchange, correlation, request, response, stderr, capture}},

@@ -208,16 +208,16 @@ validated server error text as untrusted model feedback, so enable it only when
 the server cannot return secrets, paths, or stack traces.</p><p><code class="inline">inspection_capture</code> is the closed host-only enum <code class="inline">&quot;full&quot;</code> (the default) or
 <code class="inline">&quot;digest_results&quot;</code>. The latter is accepted only for read mappings. Private
 inspection then keeps arguments and requests but stores deterministic JSON
-identity metadata in place of responses and results the provider boundary
-accepted. A response that boundary rejects -- an MCP error, an <code class="inline">isError</code>
-result, or one that is oversized or malformed -- keeps its body, as do
-capability error envelopes, capability exceptions, and MCP stderr within
-<code class="inline">stderr_bytes</code>. A result the runtime rejects after the boundary keeps its full
-error envelope while the wire body remains an identity; the mapping is a read,
-so rerunning with full capture recovers the value and the identity confirms it
-is the same one. Digests of guessable values are not confidential. Select
-provider page sizes and configured call, event, and clock limits suitable for
-the source volume.</p><h2 id="select-less-authority-in-the-manifest">Select less authority in the manifest</h2><p>The application selects the installed alias in its mission provider list:</p><pre><code class="json language-json">&quot;providers&quot;: {
+identity metadata in place of responses and results the transport accepted. A
+response the transport rejects -- an MCP error, an <code class="inline">isError</code> result, or one
+that is oversized or malformed -- keeps its body, as do capability error
+envelopes, capability exceptions, and MCP stderr within <code class="inline">stderr_bytes</code>. A
+result rejected after that point -- tool-result normalization, retained-size
+admission, output validation -- keeps its full error envelope while the wire
+body remains an identity; the mapping is a read, so rerunning with full
+capture recovers the value and the identity confirms it is the same one.
+Digests of guessable values are not confidential. Select provider page sizes
+and configured call, event, and clock limits suitable for the source volume.</p><h2 id="select-less-authority-in-the-manifest">Select less authority in the manifest</h2><p>The application selects the installed alias in its mission provider list:</p><pre><code class="json language-json">&quot;providers&quot;: {
   &quot;mission&quot;: [
     {&quot;name&quot;: &quot;workspace&quot;, &quot;config&quot;: {&quot;allow&quot;: [&quot;workspace.read&quot;]}}
   ]

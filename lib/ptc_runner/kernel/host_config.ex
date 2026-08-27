@@ -1954,23 +1954,28 @@ defmodule PtcRunner.Kernel.HostConfig do
       "maxProperties" => @max_tools,
       "propertyNames" => upstream_tool_name_schema(),
       "additionalProperties" =>
-        required_object(
-          %{
-            "as" => name_schema(),
-            "effect" => %{"enum" => ["read", "write"]},
-            "description" => bounded_string(4_096),
-            "error_feedback" => %{
-              "enum" => ["closed", "bounded"],
-              "default" => "closed"
-            },
-            "inspection_capture" => %{
-              "enum" => ["full", "digest_results"],
-              "default" => "full"
-            },
-            "model_visible" => %{"type" => "boolean", "default" => false}
+        %{
+          "as" => name_schema(),
+          "effect" => %{"enum" => ["read", "write"]},
+          "description" => bounded_string(4_096),
+          "error_feedback" => %{
+            "enum" => ["closed", "bounded"],
+            "default" => "closed"
           },
-          ["as", "effect"]
-        )
+          "inspection_capture" => %{
+            "enum" => ["full", "digest_results"],
+            "default" => "full"
+          },
+          "model_visible" => %{"type" => "boolean", "default" => false}
+        }
+        |> required_object(["as", "effect"])
+        |> Map.merge(%{
+          "if" => %{
+            "properties" => %{"inspection_capture" => %{"const" => "digest_results"}},
+            "required" => ["inspection_capture"]
+          },
+          "then" => %{"properties" => %{"effect" => %{"const" => "read"}}}
+        })
     }
   end
 
