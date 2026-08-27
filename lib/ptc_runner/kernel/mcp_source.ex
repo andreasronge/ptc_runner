@@ -1866,8 +1866,8 @@ defmodule PtcRunner.Kernel.MCPSource do
           end
         end
 
-      {:error, :mcp_protocol_error} ->
-        {:halt, %{response | body: :mcp_protocol_error}}
+      {:error, reason} when reason in [:mcp_protocol_error, :mcp_response_exceeded] ->
+        {:halt, %{response | body: reason}}
     end
   end
 
@@ -1892,6 +1892,10 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp response_body(%{body: {:mcp_sse_response, response}}, _id), do: {:ok, response}
   defp response_body(%{body: :mcp_protocol_error}, _id), do: {:error, :mcp_protocol_error}
+
+  defp response_body(%{body: :mcp_response_exceeded}, _id),
+    do: {:error, :mcp_response_exceeded}
+
   defp response_body(%{body: {:mcp_sse, _state}}, _id), do: {:error, :mcp_protocol_error}
 
   defp response_body(%{body: body} = response, id) when is_binary(body) do
@@ -1914,6 +1918,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          true <- MCPProtocol.discovery_method_unsupported_error?(body, method) do
       {:error, :mcp_discovery_method_unsupported}
     else
+      {:error, :mcp_response_exceeded} -> {:error, :mcp_response_exceeded}
       _invalid -> {:error, :mcp_protocol_error}
     end
   end

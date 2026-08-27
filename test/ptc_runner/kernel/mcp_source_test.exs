@@ -2354,6 +2354,50 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "an SSE decode the host cannot process within bounds is response excess", %{tmp_dir: dir} do
+    # Issue #1676: a well-formed SSE body whose decode exceeds the worker
+    # budget must surface as `mcp_response_exceeded`, not crash the SSE
+    # accumulator or masquerade as a protocol or transport fault. Both
+    # deliveries reach `accumulate_sse/4`; chunked also exercises buffer
+    # reassembly across stream chunks.
+    parent = self()
+
+    dense_result = %{
+      "resultType" => "complete",
+      "structuredContent" => %{"value" => 42},
+      "content" => List.duplicate(1, 900_000)
+    }
+
+    for chunked? <- [false, true] do
+      fixture =
+        fixture(parent, sse?: true, sse_chunked?: chunked?, structured_result: dense_result)
+
+      on_exit(fixture.close)
+
+      {:ok, built} =
+        dir
+        |> manifest(["remote.structured"],
+          program: single_call_program("remote.structured", "x"),
+          timeout_ms: 5_000,
+          evaluation_timeout_ms: 5_000
+        )
+        |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000))
+        |> RunLifecycle.build()
+
+      assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+
+      assert %{
+               "status" => "error",
+               "kind" => "provider_error",
+               "reason" => "invalid_result",
+               "details" => "mcp_response_exceeded"
+             } = get_in(result.value, ["value", "value"])
+
+      EventSink.stop(built.config.event_sink)
+    end
+  end
+
+  @tag :tmp_dir
   test "accepts bounded SSE responses and rejects malformed pagination and selection keys", %{
     tmp_dir: dir
   } do
