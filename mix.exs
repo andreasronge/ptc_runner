@@ -87,9 +87,7 @@ defmodule PtcRunner.MixProject do
   end
 
   defp source_identity do
-    revision =
-      System.get_env("PTC_SOURCE_REVISION") || System.get_env("GITHUB_SHA") ||
-        packaged_or_git_revision()
+    revision = System.get_env("PTC_SOURCE_REVISION") || packaged_or_git_revision()
 
     if revision do
       dirty = source_dirty_state()
