@@ -1,16 +1,20 @@
 # Make the shipped agent loop understandable and adaptable
 
-**Status:** proposed; no implementation has started. Written 2026-08-27 from
-the current `origin/main`, the August CodeScene report, source-history analysis,
-the component/public-export contract, and focused test runs described below.
+**Status:** core refactor proposed; no implementation has started. The
+customization contract is deliberately decision-gated until the smaller shell
+exists. Written 2026-08-27 from the current `origin/main`, the August CodeScene
+report, source-history analysis, the component/public-export contract, and
+focused test runs described below.
 
 `agent.core` should remain the safe shipped default while becoming a small
-example an application author can understand and reuse. The implementation
+example an application author can understand and adapt. The implementation
 should be changed in characterized slices, not rewritten wholesale. The chosen
-shape is a functional state machine behind a thin effectful loop, plus one
-explicit policy entry for application-owned prompt, feedback, and continuation
-decisions. Protocol parsing, bounds, effect provenance, evaluation admission,
-and authenticated failure taxonomy remain fixed.
+core shape is a functional state machine behind a thin effectful loop. After
+that extraction, use the real shell and concrete customization examples to
+choose between documenting custom shells, adding a narrow policy entry, or
+shipping no new customization API yet. Protocol parsing, bounds, effect
+provenance, evaluation admission, and authenticated failure taxonomy remain
+fixed in the shipped default.
 
 ## Why this work is needed
 
@@ -53,16 +57,14 @@ safety-sensitive code is therefore also the code users are pushed to fork.
 
 - Make the default `agent.core` entry read as a short sequence of effects and
   state-machine decisions rather than a nested catalogue of every outcome.
-- Give application components a supported way to customize prompt rendering,
-  correction feedback, and bounded continuation policy without copying the
-  provider/evaluation loop.
+- Reduce the amount of orchestration an application must understand or copy,
+  then choose the smallest supported customization contract justified by the
+  extracted shell and real application examples.
 - Preserve the current public outcome taxonomy, transcript correlation,
   phase semantics, effect-sensitive retry rules, hard bounds, annotations,
   and result-contract behavior unless a separately characterized bug is found.
-- Keep Kernel-authenticated facts and safety decisions authoritative for every
-  normally returned policy decision. A policy may choose less work, but cannot
-  extend a turn/evaluation/request bound, repeat an unsafe effect, reinterpret
-  provider evidence, or bypass validation through its returned value.
+- Keep Kernel-authenticated facts and safety decisions authoritative in the
+  shipped shell and in any eventual supported customization contract.
 - Make important state transitions testable as data while retaining
   integration coverage through the compiled shipped PTC-Lisp bundle and real
   Kernel owner.
@@ -73,11 +75,12 @@ safety-sensitive code is therefore also the code users are pushed to fork.
 
 - Do not generalize this into an arbitrary workflow framework.
 - Do not make model-generated programs or manifest data supply executable
-  callbacks. Policies are immutable functions authored by a selected workflow
-  component and compiled into its bundle.
+  callbacks. If a callback seam is eventually selected, callbacks are immutable
+  functions authored by a selected workflow component and compiled into its
+  bundle.
 - Do not make `agent.native` protocol validation, Kernel tools, provider
   failure authentication, capability/effect provenance, or hard limits
-  replaceable through the policy seam.
+  replaceable through any eventual customization seam.
 - Do not preserve private helper names or implementation structure. This is a
   0.x library and the refactor should delete superseded code.
 - Do not add implementation-mirroring unit tests for the current nested
@@ -112,18 +115,13 @@ remaining high-risk boundaries:
    global agent turn, next mission, and transcript order.
 2. Every admitted provider/protocol/whole-request timeout reason and its kebab
    and underscore spellings. Assert the returned `run-outcome` envelope,
-   resolved model alias, retryability, and fail-fast projection. Replace the
-   currently duplicated lists in `ProviderError`, `SafeMetadata`, and
-   `agent.core` with one host-owned closed catalog and a generated pure PTC
-   projection, and make the matrix enumerate that catalog, so a new reason
-   requires a test decision. Also assert exact raw `tool/llm-request`,
-   `llm/request`, inspection, and `run-outcome` error maps: catalog sharing must
-   not add a field to any public or retained envelope.
+   resolved model alias, retryability, and fail-fast projection. Also assert
+   exact raw `tool/llm-request`, `llm/request`, inspection, and `run-outcome`
+   error maps so a later catalog consolidation cannot add a field to any public
+   or retained envelope.
 3. State preservation across one correction followed by a phase transition:
    retained definitions, prompt transition event, `closing?`, narration/tool
    correlation, and turn budgets must survive together.
-4. Invalid policy values must fail before any provider request or subordinate
-   evaluation, without reflecting closures or caller data into diagnostics.
 
 Place new end-to-end cases in a focused
 `test/ptc_runner/kernel/agent_core_characterization_test.exs` instead of
@@ -152,19 +150,29 @@ the prompt inventory; it does not make it private. A file-oriented split into
 configuration, transcript, provider, and phase helpers would turn incidental
 implementation details into callable application API.
 
-### 4. Functional state machine plus a thin effect shell
+### 4. Let applications shadow shipped policy component IDs
+
+Rejected. Local components cannot bind the ID of a shipped component, and a
+per-invocation override replaces source without changing the attested dependency
+graph. Relaxing either rule would silently alter every consumer of that ID and
+undermine pinned-profile auditability. An explicit call from application source
+is preferable because the selected replacement is visible where it is used.
+
+### 5. Functional state machine plus a thin effect shell
 
 Chosen. One discoverable support component owns a deliberately small state
 transition contract; `agent.core` performs the bounded effects it commands.
-Application policy is passed as first-class functions through one explicit
-public entry. This creates a real reuse seam without exporting every helper.
+This removes the nested decision tree without exporting every incidental helper
+and gives the post-extraction decision gate a concrete shell to evaluate.
 
-PTC-Lisp already supports functions as values and callbacks in collection
-values; shipped `cap/fold-pages` exercises the same caller-owned callback
-shape. The first implementation slice must nevertheless prove private local
-callbacks passed across a component boundary, transitive tool-requirement
-accounting, and bounded diagnostics before committing to the final public
-contract.
+### 6. Commit now to either custom shells or a policy map
+
+Deferred. A custom shell over `agent.machine` is broader but makes its complete
+event/command protocol an application-facing contract. A narrow policy map is
+smaller but may omit the adaptations users actually need. The current file is
+the wrong evidence for choosing: extract the machine first, inspect the final
+shell, and exercise concrete customization examples before approving either
+surface.
 
 ## Proposed design
 
@@ -181,11 +189,8 @@ A new discoverable `agent.machine` component owns immutable configuration and
 loop state, closed event classification, and command selection. It performs no
 LLM, Kernel evaluation, annotation, diagnostic, or capability effect. Its
 public surface is intentionally limited to constructor/advance operations (the
-spike should prefer two exports, and must justify any additional export). A
-separate generated discoverable `agent.failure` support component projects the
-host-owned LLM failure catalog as one pure classification function. It exists
-only to keep the catalog authoritative without modifying public LLM envelopes
-or adding a runtime effect.
+implementation should prefer two exports and must justify any additional
+export.
 
 Keep immutable run context separate from changing loop state:
 
@@ -205,102 +210,69 @@ Keep immutable run context separate from changing loop state:
 This replaces positional state threaded through 8- and 11-argument helpers.
 The reducer returns a closed command such as request, evaluate, validate,
 continue, return, subject-failure, provider-failure, or host-failure. Each
-command includes only the data the shell needs for that effect. Policy-hook
-invocation is also an explicit shell command: `agent.core` invokes the callback,
-validates and bounds its answer, then returns a policy-result event to the
-machine. The shell retains the validated policy map; it is not machine state.
-Events fed back to the machine use a closed vocabulary. Unknown commands/events
-fail closed.
+command includes only the data the shell needs for that effect. Events fed back
+to the machine use a closed vocabulary. Unknown commands and events fail
+closed.
 
-This distinction is necessary because a callback is ordinary trusted workflow
-code, not a pure function enforced by the language. The shipped prompt renderer
-already calls `kernel/mission-model-context`, and a custom callback can call any
-capability its component is authorized to use. The machine guarantees only how
-a callback result may influence loop control; it cannot make callback execution
-effect-free. Documentation must recommend pure or read-only policy hooks and
-warn that an effectful hook is responsible for its own idempotency.
+The exact keywords are implementation details until characterization and the
+extraction establish them. Once shipped, even the minimum `agent.machine`
+exports are callable public component contracts. Document their invariants in
+source and the generated prelude reference, but do not advertise the complete
+event/command protocol as the end-user customization API before the decision
+gate evaluates that cost.
 
-The exact keywords are implementation details until the spike and
-characterization suite establish them. Once shipped, the two
-`agent.machine` exports are public component contracts and must be documented
-in their source and the generated prelude reference.
+### Independent failure-catalog track
 
-### Explicit policy seam
+The repeated LLM failure spellings in `ProviderError`, `SafeMetadata`, and
+`agent.core` should still converge on one host-owned catalog, but that cleanup
+does not block state extraction. Its pure PTC projection belongs in a small,
+tracked, generated discoverable `agent.failure` component so it neither adds a
+runtime effect nor modifies the public LLM envelope. This work is Slice 0b and
+may land before, alongside, or after Slices 1–2.
 
-Add a discoverable zero-arity `agent.core/default-policy` function and a
-discoverable `agent.core/run-outcome-with-policy` entry. Existing `run-outcome`,
-`run-value`, `run-result-value`, `run-phased-result-value`, and `run` delegate
-through the default policy and preserve their current contracts.
+### Customization decision after extraction
 
-The initial policy contains only hooks backed by today’s replaceable policy
-components:
+Do not commit to a policy API in advance. After Slice 2, exercise these three
+candidates against the actual reduced shell:
 
-- initialize, render, and transition prompt state;
-- render bounded feedback for a closed loop event; and
-- decide whether a retryable event should continue, subject to the machine's
-  hard phase/turn and safety rules.
+1. Document `agent.core` as the small example shell and let applications write
+   a custom shell over `agent.machine`. This permits transcript and annotation
+   changes, but makes the machine protocol an intentional application contract
+   and leaves shell authors responsible for effect ordering, result validation,
+   and authenticated failure propagation.
+2. Add a narrow callback map for prompt initialization/render/transition,
+   bounded feedback, and advisory continuation. This preserves the shipped
+   shell but freezes hook names and shapes that may not match real demand.
+3. Ship no new customization API yet. Retain component overrides and the
+   smaller copied-shell path until an application demonstrates a stable seam.
 
-A custom component can derive the default map and replace only selected hooks:
+The decision must compare final shell size, safety-sensitive responsibilities,
+two or more real customization examples, and the public-contract cost of the
+machine protocol versus narrow hooks. No candidate is the default merely
+because it was sketched first.
 
-```clojure
-(defn run [task cfg]
-  (agent.core/run-outcome-with-policy
-    task
-    cfg
-    (assoc (agent.core/default-policy)
-           :render-prompt (fn [state] (my.prompt/render state))
-           :feedback (fn [event] (my.feedback/render event)))))
-```
+If the callback map is selected, a plausible API is a zero-arity
+`agent.core/default-policy` plus `agent.core/run-outcome-with-policy`. Validate
+the closed key set and `fn?` values before model dispatch, but do not add public
+arity introspection for this feature. A wrong-arity late hook may fail after one
+provider request through existing bounded evaluator diagnostics; test that it
+does not trigger a second request. Normally returned hook decisions remain
+advisory inside fixed bounds: they cannot extend budgets, repeat an unsafe
+effect, bypass validation, or reinterpret failure evidence.
 
-Policy validation happens once, before model dispatch. Require exactly the
-closed keys, required arities, and callable values; reject missing, unknown, or
-non-callable entries with bounded diagnostics that identify only the key and
-expected shape. PTC-Lisp currently has `fn?` but no public safe arity query for
-an arbitrary private closure, so Slice 0 must expose a bounded, non-invoking
-`accepts-arity?` predicate before this pre-dispatch guarantee can ship. It must
-reuse the evaluator's existing `PtcRunner.Lisp.Eval.Apply.accepts_arity?/2`
-oracle rather than create a second arity table. The public predicate accepts a
-callable and one non-negative integer and returns only a boolean; it never
-returns a descriptor or exposes closure environment, body, metadata, or
-captured values. Refactor the shared oracle so opaque runtime callables fail
-closed when used for policy validation instead of inheriting `pcalls`' current
-optimistic admission. Do not preflight by invoking hooks. Register the new
-PTC-Lisp extension in `priv/functions.exs`, document it in the language
-specification, generate the function reference, and test that both the policy
-validator and `pcalls` derive their answers from the same structural logic.
-Do not include a generic “handle event” hook, raw effect executor, arbitrary
-result projector, or access to host-private diagnostic records.
-
-The machine owns the final decision when policy and safety disagree:
-
-- hard turn, transcript, program, observation, and capability limits win;
-- an unsafe evaluation is never repeated, regardless of policy;
-- at most one existing bounded closing turn is offered;
-- a normally returned policy value cannot bypass result validation or
-  terminal-only source checks;
-- provider/host/subject provenance and fail-fast projection remain fixed; and
-- policy may decline a retry but may not manufacture additional budget.
-
-Calling a hook can itself perform an authorized workflow effect; the above
-rules constrain the loop's reaction to a normally returned value, not
-arbitrary trusted code the policy author placed inside the hook. PTC-Lisp has
-no recovery construct, and callback `return`/`fail` signals deliberately cross
-higher-order and prelude calls. Do not pretend that `agent.core` can contain
-them: document those signals as a policy-contract violation that propagates
-out of the calling workflow, and test that they are never reclassified as a
-successful agent outcome. This is not a new authority escape—a component that
-owns the workflow entry can already return or fail directly. Adding a generic
-control-signal-catching primitive would broaden the language and is outside
-this refactor. Runtime errors from normally invoked hooks retain the existing
-bounded evaluator diagnostics.
+Callbacks remain ordinary trusted workflow code. They may perform authorized
+effects, and PTC-Lisp `return`/`fail` signals propagate out of higher-order and
+prelude calls. If hooks are selected, document those facts, recommend pure or
+read-only callbacks, test effectful/error/control-signal cases, and add no
+generic recovery or arity-reflection language feature.
 
 ### Keep user-facing and support surfaces distinct
 
 `agent.core` remains `:prompt` because its ordinary entries are useful workflow
-functions. Mark the policy seam and `agent.machine` support exports
-`:discoverable` at export level so they are inspectable without adding them to
-the model-facing inventory. They remain callable by design; documentation must
-say that visibility is not an authority boundary.
+functions. Mark `agent.machine`, `agent.failure`, and any later approved policy
+exports `:discoverable` so they are inspectable without entering the
+model-facing inventory. They remain callable by design; documentation must say
+that visibility is not an authority boundary.
 
 Do not split more components merely to improve file-size metrics. Extract
 another public component only when it has a cohesive, reusable contract that
@@ -308,28 +280,24 @@ can be stated without mentioning `agent.core` private variables.
 
 ## Implementation slices
 
-Each slice lands independently with green focused tests. Do not combine the
-state representation, component extraction, and customization API into one
-review.
+Each core slice lands independently with green focused tests. Slice 0b is a
+separate cleanup track, not a prerequisite for Slices 1–2. Slice 3 approves a
+customization direction before any corresponding public API is implemented.
 
-### Slice 0 — characterize and prove the seam
+### Slice 0a — characterize current behavior
 
-1. Add the four integration matrices listed above, with a deterministic
+1. Add the three integration matrices listed above, with a deterministic
    scripted LLM and the real shipped bundle/Kernel.
-2. Add a small compile-and-run spike proving a local component can pass private
-   closures in a policy map to a shipped dependency, that the callbacks retain
-   their intended dependencies, and that tool requirements remain enforced.
-3. Refactor the structural logic behind
-   `PtcRunner.Lisp.Eval.Apply.accepts_arity?/2` into the single arity oracle
-   used by `pcalls`, and expose the bounded non-invoking `accepts-arity?`
-   predicate needed by policy validation. Cover fixed, variadic, multi-arity,
-   partial/composed, public-prelude, Java, opaque runtime-callable, and malformed
-   values; opaque values must fail closed for policy admission. Prove the query
-   never exposes or evaluates a closure body or captured environment. Register
-   it in `priv/functions.exs`, specify it in
-   `docs/ptc-lisp-specification.md`, and regenerate
-   `docs/function-reference.md` with `mix ptc.gen_docs`.
-4. Introduce one host-owned LLM failure catalog that canonicalizes the admitted
+2. Record the current CodeScene findings and focused command timings in the PR
+   description; do not add a source coverage percentage.
+
+Exit criterion: the new tests fail under deliberate mutations of phase-boundary
+retry, provider classification, unsafe closing, and prompt transition, then
+pass on unchanged behavior.
+
+### Slice 0b — consolidate the failure catalog independently
+
+1. Introduce one host-owned LLM failure catalog that canonicalizes the admitted
    provider, model-alias protocol, and whole-request timeout reasons. Make
    `ProviderError` and `SafeMetadata` consume it, and have the documentation
    generator project the same catalog into a small, tracked, generated
@@ -343,12 +311,11 @@ review.
    ledger entry, capability event, event-sink failure point, or new failure
    precedence. The existing `kernel-llm-provider-failure` operation remains
    the terminal evidence-consumption boundary for fail-fast propagation.
-5. Record the current CodeScene findings and focused command timings in the PR
-   description; do not add a source coverage percentage.
 
-Exit criterion: the new tests fail under deliberate mutations of phase-boundary
-retry, provider classification, unsafe closing, and prompt transition, then
-pass on unchanged behavior.
+Exit criterion: every host and PTC consumer enumerates the same catalog, while
+the Slice 0a assertions prove byte-for-byte envelopes, inspection data, events,
+usage, and failure precedence remain unchanged. This slice may land before,
+alongside, or after Slices 1–2.
 
 ### Slice 1 — make state explicit inside `agent.core`
 
@@ -367,53 +334,57 @@ integration suites; no function has more than five positional parameters;
 ### Slice 2 — extract `agent.machine`
 
 1. Move the now-pure reducer and immutable state construction into one new
-   shipped component with the minimum public surface proven by Slice 0.
+   shipped component with the minimum constructor/advance surface required by
+   the characterized shell.
 2. Keep all actual effects in `agent.core`. Add exhaustive direct reducer tests
    for the closed event/command table and invariants, not for string formatting
    or trivial field access.
-3. Add `agent.machine` to `PtcRunner.Kernel.Library`, make its dependencies on
-   the already-generated `agent.failure` projection explicit, and update the
-   appropriate dependency closures, manifest/library tests, generated prelude
-   docs, and semantic revision inputs. Do not regenerate
+3. Add `agent.machine` to `PtcRunner.Kernel.Library` and update the appropriate
+   dependency closures, manifest/library tests, generated prelude docs, and
+   semantic revision inputs. If Slice 0b has landed, make its `agent.failure`
+   dependency explicit; otherwise retain the characterized classifier until
+   0b lands. Do not regenerate
    `priv/semantic_build_projection.json` on the feature branch.
+4. Delete the superseded state-machine helpers and branches; add no
+   compatibility layer. The decision gate must inspect the real reduced shell,
+   not a transitional file that still contains dead orchestration.
 
 Exit criterion: `agent.core` contains no phase/evaluation decision tree, and
 the reducer can be tested without an LLM callback or Kernel owner.
 
-### Slice 3 — ship the policy API
+### Slice 3 — provisional customization decision gate
 
-1. Build the shipped default policy from `agent.prompt`, `agent.feedback`, and
-   `agent.retry` callbacks inside the zero-arity `default-policy` function;
-   dependency references in top-level `def` initializers remain forbidden.
-   Make all existing entries delegate through it.
-2. Add strict pre-dispatch policy validation and negative tests for every
-   rejected shape. Add callback tests for an authorized read, an unsafe effect,
-   a raised runtime error, and escaped `return`/`fail` signals. For normally
-   returning and runtime-error hooks, assert the shell invokes each hook at
-   most once per command and bounds every diagnostic. For `return`/`fail`,
-   assert the existing workflow-level propagation explicitly and that the
-   signal is never reclassified as an agent outcome.
-3. Add an integration example with a local application component that replaces
-   prompt and feedback behavior while reusing the shipped loop. Prove hard
-   limits, unsafe closing, result validation, and provider taxonomy are
-   unchanged under the custom policy.
-4. Update `docs/guides/building-agents.md`,
-   `docs/guides/components-and-preludes.md`, and
-   `docs/reference/component-contracts.md` with the permanent customization
-   path and its trust/authority boundary. Update the exact API in
-   `docs/agent-library-reference.md`, the owning PTC-Lisp docstrings, and the
-   customization prose in `Mix.Tasks.Ptc.GenDocs` that currently requires a
-   copied custom loop. Update generator assertions and run `mix ptc.gen_docs`;
-   do not hand-edit generated references.
+1. Measure the extracted `agent.core`: logical and physical size, remaining
+   branches, public entries, and every safety-sensitive responsibility that a
+   custom shell would have to reproduce.
+2. Build at least two throwaway application components against the extracted
+   code: one replacing prompt/feedback behavior and one changing transcript or
+   annotation behavior. Exercise the real Kernel and prove hard limits, unsafe
+   closing, result validation, provider taxonomy, events, and usage.
+3. Compare the three candidates above. Account explicitly for the cost of
+   supporting the full `agent.machine` protocol, the expressiveness and
+   permanence of narrow hooks, and the option to wait for stronger demand.
+4. Record the decision in the owning component docs or an approved follow-up
+   issue. Do not merge `default-policy`, `run-outcome-with-policy`, or another
+   customization export merely to complete this plan.
 
-Exit criterion: an application can permanently customize the documented hooks
-under a new component ID without copying `agent.core` or using a component
-override.
+If a callback API is selected, its follow-up implementation must prove private
+closure passing, transitive tool requirements, bounded diagnostics, effectful
+hooks, runtime errors, non-local `return`/`fail`, and wrong-arity failure without
+a second provider call. Update `docs/guides/building-agents.md`,
+`docs/guides/components-and-preludes.md`,
+`docs/reference/component-contracts.md`, `docs/agent-library-reference.md`,
+owning PTC-Lisp docstrings, generator prose/assertions, and generated docs only
+for the contract actually approved.
+
+Exit criterion: a reviewed decision names the smallest evidence-backed
+customization contract, or explicitly chooses to ship none. Slices 0a–2 remain
+valuable and complete if the decision is to wait.
 
 ### Slice 4 — simplify and measure
 
-1. Delete superseded private helpers, branches, and documentation; add no
-   compatibility layer.
+1. Delete any remaining superseded documentation or incidental helpers exposed
+   by the customization exercises; add no compatibility layer.
 2. Run CodeScene on the changed tree. If either component retains a critical
    finding, simplify the state/event contract rather than moving code between
    files to chase the score.
@@ -456,24 +427,22 @@ run it only when a slice changes provider-facing request semantics.
 - **A reducer becomes a second opaque blob.** Keep a closed event/command table,
   one transition owner, explicit invariants, and CodeScene acceptance on both
   files. Do not recreate the old nesting behind a new filename.
-- **Public support API leaks implementation.** Export only constructor/advance
-  operations; keep formatting, classification, and state access private inside
-  `agent.machine`. Treat `:discoverable` as presentation, not privacy.
-- **Policy callbacks weaken safety.** Validate them before effects and make
-  normally returned decisions advisory inside fixed bounds. Invoke them as
-  explicit shell effects, document that ordinary workflow authority and
-  non-local `return`/`fail` semantics still apply, and test
-  effectful/error/control-signal cases. Never delegate protocol, evaluation
-  admission, effect provenance, result validation, or failure authentication.
-- **Closure passing obscures capability requirements.** The Slice 0 spike must
-  prove compile-time dependency and attach-time authority checks. If that proof
-  fails, stop and design an explicit data-only policy protocol instead of
-  weakening requirement validation.
-- **Callable validation accidentally executes user code, leaks closure
-  internals, or drifts from `pcalls`.** Expose only the existing structural
-  arity decision as a bounded boolean, share one oracle, fail closed for opaque
-  policy values, and prove it does not invoke, format, or traverse captured
-  state.
+- **The machine protocol becomes an accidental customization API.** Export only
+  constructor/advance operations; keep formatting, classification, and state
+  access private. Treat `:discoverable` as presentation, not privacy, and make
+  Slice 3 decide explicitly whether direct application use is supported.
+- **A policy API is frozen before demand is understood.** Keep Slice 3 as a
+  decision gate. Compare real prompt, feedback, transcript, and annotation
+  adaptations against the extracted shell before adding hooks.
+- **A selected callback seam weakens safety or obscures authority.** If chosen,
+  validate closed keys and `fn?` values before effects, make normal decisions
+  advisory inside fixed bounds, and prove compile-time dependencies,
+  attach-time authority, effectful/error/control-signal behavior, and bounded
+  diagnostics. Never delegate protocol, evaluation admission, effect
+  provenance, result validation, or failure authentication.
+- **Wrong hook arity is discovered after a provider call.** Accept that narrow
+  configuration cost instead of adding a language feature; fail through the
+  existing bounded evaluator path and prove no second provider request occurs.
 - **Host failure classification changes observable execution.** Attach the
   host catalog only to a generated pure component, never to the runtime result
   envelope; do not introduce a private tool or evaluator call. Characterization
