@@ -21,6 +21,45 @@ defmodule Mix.Tasks.PtcTest do
   end
 
   @tag :tmp_dir
+  test "version reports the embedded source identity in human and machine forms", %{tmp_dir: dir} do
+    identity = PtcRunner.BuildIdentity.current()
+    %{version: version, source_revision: revision, source_dirty: dirty} = identity
+    envelope_path = Path.join(dir, "version.json")
+
+    assert run_output(["--version"]) ==
+             "#{version} (#{String.slice(revision, 0, 8)}, " <>
+               "#{if(dirty, do: "dirty", else: "clean")})\n"
+
+    assert run_output(["version", "--envelope", envelope_path]) ==
+             "#{version} (#{String.slice(revision, 0, 8)}, " <>
+               "#{if(dirty, do: "dirty", else: "clean")})\n"
+
+    assert %{
+             "command" => "version",
+             "result" => %{
+               "version" => ^version,
+               "source_revision" => ^revision,
+               "source_dirty" => ^dirty
+             }
+           } = envelope_path |> File.read!() |> Jason.decode!()
+  end
+
+  test "version identity is not replaced by runtime application configuration" do
+    identity = PtcRunner.BuildIdentity.current()
+    previous = Application.get_env(:ptc_runner, :source_revision, :missing)
+
+    on_exit(fn ->
+      if previous == :missing,
+        do: Application.delete_env(:ptc_runner, :source_revision),
+        else: Application.put_env(:ptc_runner, :source_revision, previous)
+    end)
+
+    Application.put_env(:ptc_runner, :source_revision, String.duplicate("0", 40))
+
+    assert PtcRunner.BuildIdentity.current() == identity
+  end
+
+  @tag :tmp_dir
   test "root command validates dependencies until the application has been built", %{
     tmp_dir: directory
   } do

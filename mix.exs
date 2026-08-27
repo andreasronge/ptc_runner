@@ -72,13 +72,91 @@ defmodule PtcRunner.MixProject do
 
   # Run "mix help compile.app" to learn about applications.
   def application do
-    [
+    application = [
       mod: {PtcRunner.Application, []},
       extra_applications: [:crypto, :logger, :public_key, :ssl],
       env: [
         llm_adapter: PtcRunner.LLM.ReqLLMAdapter
       ]
     ]
+
+    case source_identity() do
+      nil -> application
+      identity -> [{:id, ~c"ptc_runner:#{identity.revision}:#{identity.dirty}"} | application]
+    end
+  end
+
+  defp source_identity do
+    revision = System.get_env("PTC_SOURCE_REVISION") || packaged_or_git_revision()
+
+    if revision do
+      dirty = source_dirty_state()
+
+      unless Regex.match?(~r/\A[0-9a-f]{40}\z/, revision) do
+        Mix.raise("PTC source revision must be a lowercase, full 40-character Git SHA")
+      end
+
+      %{revision: revision, dirty: dirty}
+    end
+  end
+
+  # Dependency updaters load only the fetched Mix files in a scratch directory.
+  # That is project inspection, not a build, so let configuration load without
+  # application identity metadata. Supported no-Git builds carry the packaged
+  # revision or provide the explicit hermetic-build inputs documented below.
+  defp packaged_or_git_revision do
+    packaged = Path.join(__DIR__, "priv/source_revision")
+
+    cond do
+      File.exists?(Path.join(__DIR__, ".git")) -> git!(~w(rev-parse HEAD))
+      File.regular?(packaged) -> packaged |> File.read!() |> String.trim()
+      true -> nil
+    end
+  end
+
+  defp source_dirty_state do
+    case explicit_dirty_state() do
+      nil -> packaged_or_git_dirty_state!()
+      explicit -> explicit
+    end
+  end
+
+  defp explicit_dirty_state do
+    case System.get_env("PTC_SOURCE_DIRTY") do
+      nil -> nil
+      "true" -> true
+      "false" -> false
+      _invalid -> Mix.raise("PTC_SOURCE_DIRTY must be true or false")
+    end
+  end
+
+  defp packaged_or_git_dirty_state! do
+    packaged = Path.join(__DIR__, "priv/source_dirty")
+
+    cond do
+      File.exists?(Path.join(__DIR__, ".git")) ->
+        git!(~w(status --porcelain --untracked-files=normal)) != ""
+
+      File.regular?(packaged) ->
+        case packaged |> File.read!() |> String.trim() do
+          "true" -> true
+          "false" -> false
+          _invalid -> Mix.raise("packaged PTC source dirty state must be true or false")
+        end
+
+      true ->
+        Mix.raise("source dirty state unavailable; set PTC_SOURCE_DIRTY")
+    end
+  end
+
+  defp git!(arguments) do
+    case System.cmd("git", arguments, cd: __DIR__, stderr_to_stdout: true) do
+      {output, 0} ->
+        String.trim(output)
+
+      {output, _status} ->
+        Mix.raise("cannot determine PTC source identity: #{String.trim(output)}")
+    end
   end
 
   def cli do
@@ -529,10 +607,26 @@ defmodule PtcRunner.MixProject do
     ]
   end
 
+  # Hex consumers compile without this checkout's Git metadata. Materialize the
+  # publication revision immediately before Hex collects the declared files;
+  # ordinary source builds continue to read Git directly.
+  defp ensure_package_source_identity! do
+    case source_identity() do
+      %{revision: revision, dirty: dirty} ->
+        File.write!(Path.join(__DIR__, "priv/source_revision"), revision <> "\n")
+        File.write!(Path.join(__DIR__, "priv/source_dirty"), "#{dirty}\n")
+
+      nil ->
+        :ok
+    end
+  end
+
   defp package do
+    ensure_package_source_identity!()
+
     [
       files:
-        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run examples/support-triage site/schemas/mcp-2026-07-28.schema.json .formatter.exs mix.exs README.md usage-rules.md LICENSE LICENSES THIRD_PARTY_NOTICES.md CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run examples/support-triage site/schemas/mcp-2026-07-28.schema.json .formatter.exs mix.exs README.md usage-rules.md LICENSE LICENSES THIRD_PARTY_NOTICES.md CHANGELOG.md priv/source_revision priv/source_dirty priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
       # Hex expands the directories above from the working tree, not from
       # git, so anything ignored but present -- a `.ptc` run directory left by
       # a tutorial walk, a `.env` beside an example -- is published. Ship no

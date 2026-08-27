@@ -174,7 +174,12 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSnapshotTest do
     Process.exit(owner, :kill)
 
     assert {:error, :snapshot_unavailable} = Task.await(starter)
-    assert_receive {:DOWN, ^capture_ref, :process, ^capture_pid, :killed}, 5_000
+    assert_receive {:DOWN, ^capture_ref, :process, ^capture_pid, reason}, 5_000
+
+    # The capture is killed by owner cancellation. If it exits between the
+    # pause notification and monitor registration, the monitor reports the
+    # equivalent already-dead observation as :noproc.
+    assert reason in [:killed, :noproc]
   end
 
   @tag :tmp_dir

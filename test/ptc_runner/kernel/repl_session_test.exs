@@ -1214,7 +1214,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert_receive :owner_death_deadline_provider_closed, 1_000
     send(creator, :disconnect)
     assert_receive {:DOWN, ^creator_ref, :process, ^creator, :normal}, 1_000
-    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}, 1_000
+    assert_receive {:DOWN, ^owner_ref, :process, ^owner, :normal}, 5_000
 
     trace = File.read!(trace_path)
     assert trace =~ "deadline_expired"

@@ -45,8 +45,17 @@ defmodule PtcRunner.Kernel.CommandRenderer do
       %{"status" => "ok", "command" => "help", "result" => result} ->
         {:stdout, help_text(result)}
 
-      %{"status" => "ok", "command" => "version", "result" => %{"version" => version}} ->
-        {:stdout, version <> "\n"}
+      %{
+        "status" => "ok",
+        "command" => "version",
+        "result" => %{
+          "version" => version,
+          "source_revision" => revision,
+          "source_dirty" => dirty
+        }
+      } ->
+        state = if dirty, do: "dirty", else: "clean"
+        {:stdout, "#{version} (#{String.slice(revision, 0, 8)}, #{state})\n"}
 
       %{"status" => "ok", "command" => "docs", "result" => %{"content" => content}} ->
         {:stdout, content}

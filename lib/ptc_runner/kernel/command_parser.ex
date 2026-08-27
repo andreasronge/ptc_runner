@@ -39,11 +39,6 @@ defmodule PtcRunner.Kernel.CommandParser do
     end
   end
 
-  defp dispatch_argv(["version"], _frontend), do: arguments(:version)
-
-  defp dispatch_argv(["version" | rest], frontend),
-    do: reject_closed_command(:version, rest, frontend)
-
   defp dispatch_argv(["--help"], frontend), do: help(:root, frontend)
   defp dispatch_argv(["--help" | _rest], _frontend), do: reject(:help, :invalid_arguments)
   defp dispatch_argv([], frontend), do: help(:root, frontend)
@@ -162,6 +157,16 @@ defmodule PtcRunner.Kernel.CommandParser do
          arguments(:init,
            directory: directory,
            options: %{},
+           ordered_options: ordered,
+           frontend_options: frontend_options,
+           frontend: frontend
+         )
+
+  defp validate_command(:version, [], options, ordered, frontend_options, frontend)
+       when map_size(options) == 0,
+       do:
+         arguments(:version,
+           options: options,
            ordered_options: ordered,
            frontend_options: frontend_options,
            frontend: frontend

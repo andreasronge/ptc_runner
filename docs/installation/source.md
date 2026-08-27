@@ -28,6 +28,19 @@ MIX_ENV=prod mix release ptc_runner --overwrite
 _build/prod/rel/ptc_runner/bin/ptc --version
 ```
 
+Version output includes the application version, the producing checkout's
+short commit SHA, and whether tracked or untracked source changes were present,
+for example `0.14.0 (0a4d062b, clean)`. For a machine-readable record, publish
+the version command envelope:
+
+```console
+mix ptc version --envelope version.json
+ptc version --envelope version.json
+```
+
+Hermetic builds without `.git` must set the full lowercase commit SHA in
+`PTC_SOURCE_REVISION` and set `PTC_SOURCE_DIRTY` to `true` or `false`.
+
 That assembled tree is tied to the build host's linked libraries. On macOS,
 build the relocatable archive instead:
 

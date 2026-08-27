@@ -140,12 +140,14 @@ cmp "$project_root/LICENSES/MIT.txt" "$release_root/LICENSES/MIT.txt"
 '
 
 "$command_bin" --version > "$release_tmp_dir/version.stdout"
-grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' "$release_tmp_dir/version.stdout"
+grep -Eq \
+  '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)? \([0-9a-f]{8}, (clean|dirty)\)$' \
+  "$release_tmp_dir/version.stdout"
 
 "$command_bin" help > "$release_tmp_dir/help.stdout"
 grep -q '^Usage:$' "$release_tmp_dir/help.stdout"
 grep -Fqx '  --help    — show root help' "$release_tmp_dir/help.stdout"
-for command in init docs validate run doctor models repl viewer; do
+for command in init docs validate run doctor models repl version viewer; do
   grep -q "ptc $command" "$release_tmp_dir/help.stdout"
   "$command_bin" help "$command" > "$release_tmp_dir/help-$command.stdout"
 done

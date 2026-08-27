@@ -64,6 +64,8 @@ test -x "$package_tmp_dir/source/rel/overlays/bin/ptc"
 test -f "$package_tmp_dir/source/priv/schemas/ptc-host-config.schema.json"
 test -f "$package_tmp_dir/source/priv/schemas/ptc-application-manifest.schema.json"
 test -f "$package_tmp_dir/source/priv/schemas/ptc-project-config.schema.json"
+grep -Eq '^[0-9a-f]{40}$' "$package_tmp_dir/source/priv/source_revision"
+grep -Eq '^(true|false)$' "$package_tmp_dir/source/priv/source_dirty"
 cmp "$project_root/site/schemas/mcp-2026-07-28.schema.json" \
   "$package_tmp_dir/source/site/schemas/mcp-2026-07-28.schema.json"
 cmp "$project_root/THIRD_PARTY_NOTICES.md" "$package_tmp_dir/source/THIRD_PARTY_NOTICES.md"

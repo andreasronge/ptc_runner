@@ -133,7 +133,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
     }
   end
 
-  defp accepted_switches(command, _frontend) when command in [:help, :version], do: []
+  defp accepted_switches(:help, _frontend), do: []
 
   defp accepted_switches(command, frontend),
     do: CommandDeclaration.accepted_switches(command, frontend)

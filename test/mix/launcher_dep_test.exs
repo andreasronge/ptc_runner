@@ -40,7 +40,14 @@ defmodule PtcRunner.Mix.LauncherDepTest do
   defp load_project(directory) do
     System.cmd("mix", ["run", "--no-deps-check", "--no-compile", "--no-start", "-e", @probe],
       cd: directory,
-      env: [{"MIX_ENV", "dev"}, {"MIX_QUIET", "1"}],
+      # GitHub Actions exports GITHUB_SHA to every step. It is workflow
+      # context, not an explicit hermetic-build input, and must not turn this
+      # config-only scratch directory into a partial source-identity build.
+      env: [
+        {"GITHUB_SHA", String.duplicate("a", 40)},
+        {"MIX_ENV", "dev"},
+        {"MIX_QUIET", "1"}
+      ],
       stderr_to_stdout: true
     )
   end
