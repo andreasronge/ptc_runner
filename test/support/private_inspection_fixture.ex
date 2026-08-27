@@ -314,26 +314,19 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     {sink, handle} = start_sink!(directory, run_id)
     emit_model_exchange!(sink, run_id)
 
-    emit!(sink, "capability-input", %{capability_id: "tool-#{run_id}"}, %{
-      environment: :mission,
-      mission_name: "default",
-      name: "workspace.read",
-      arguments: %{"path" => "private-#{run_id}.txt"}
-    })
+    emit!(
+      sink,
+      "capability-input",
+      %{capability_id: "tool-#{run_id}"},
+      tool_input_payload(run_id)
+    )
 
-    emit!(sink, "mcp-request", %{capability_id: "tool-#{run_id}", request_id: 7}, %{
-      mission_name: "default",
-      transport: :stdio,
-      body: %{
-        "jsonrpc" => "2.0",
-        "id" => 7,
-        "method" => "tools/call",
-        "params" => %{
-          "name" => "read",
-          "arguments" => %{"path" => "private-#{run_id}.txt"}
-        }
-      }
-    })
+    emit!(
+      sink,
+      "mcp-request",
+      %{capability_id: "tool-#{run_id}", request_id: 7},
+      tool_request_payload(7, "private-#{run_id}.txt")
+    )
 
     emit!(sink, "mcp-response", %{capability_id: "tool-#{run_id}", request_id: 7}, %{
       mission_name: "default",
@@ -436,15 +429,59 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     })
   end
 
-  defp emit_evaluation_source!(sink, run_id) do
-    emit!(sink, "evaluation-source", %{evaluation_id: "eval-#{run_id}"}, %{
+  defp emit_evaluation_source!(sink, run_id),
+    do:
+      emit!(
+        sink,
+        "evaluation-source",
+        %{evaluation_id: "eval-#{run_id}"},
+        evaluation_source_payload()
+      )
+
+  @doc "Payload for the canonical mission tool capability-input record."
+  def tool_input_payload(run_id) do
+    %{
+      environment: :mission,
+      mission_name: "default",
+      name: "workspace.read",
+      arguments: %{"path" => "private-#{run_id}.txt"}
+    }
+  end
+
+  @doc "Payload for one canonical stdio `tools/call` request record."
+  def tool_request_payload(request_id, path) do
+    %{
+      mission_name: "default",
+      transport: :stdio,
+      body: %{
+        "jsonrpc" => "2.0",
+        "id" => request_id,
+        "method" => "tools/call",
+        "params" => %{"name" => "read", "arguments" => %{"path" => path}}
+      }
+    }
+  end
+
+  @doc "Payload for the canonical mission evaluation-source record."
+  def evaluation_source_payload do
+    %{
       environment: :mission,
       mission_name: "default",
       program_kind: :"ptc-lisp",
       source: @source,
       source_hash: @source_hash,
       source_bytes: byte_size(@source)
-    })
+    }
+  end
+
+  @doc "Payload for the canonical workflow prelude-source record."
+  def prelude_source_payload do
+    %{
+      environment: :workflow,
+      source: @source,
+      source_hash: @source_hash,
+      source_bytes: byte_size(@source)
+    }
   end
 
   defp persist_inspection!(sink, handle) do

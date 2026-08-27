@@ -74,7 +74,8 @@ defmodule PtcRunner.Kernel.Capability do
   @doc """
   Constructs a capability from required `:name`, `:callback`, and
   `:input_schema` options plus optional `:output_schema`, `:effect`,
-  `:validate`, `:description`, and `:model_visible` options.
+  `:validate`, `:description`, `:model_visible`, and `:inspection_capture`
+  options.
 
   Names are bounded lower-case identifiers and may contain `.`, `_`, `/`, and
   `-`. Descriptions are limited to 4,096 bytes. Schemas use the bounded JSON
@@ -82,6 +83,10 @@ defmodule PtcRunner.Kernel.Capability do
   property and constrained-literal keys must already use their underscore form
   so recursive Lisp argument normalization cannot change their meaning.
   Effects are `:read`, `:write`, or `:unknown` and default to `:unknown`.
+  `:inspection_capture` is `:full` (the default) or `:digest_results`;
+  `:digest_results` requires `effect: :read` and directs private inspection to
+  retain a deterministic value identity in place of a successful result. It is
+  private capture policy and never appears in `metadata/1`.
   """
   def new(opts) when is_list(opts) do
     with true <- Keyword.keys(opts) -- @options == [],
