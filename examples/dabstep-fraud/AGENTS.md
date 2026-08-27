@@ -60,5 +60,8 @@ contract. Use `ptc transcript RUN_REF` for one run's private transcript, and
 send its `--private-output` outside `.ptc/` — `ptc` owns that whole directory
 and writing into it makes later runs fail `envelope/publication_failed`.
 
-Runs recorded before 2026-08-27 that reported a model cost currently fail to
-load here; see the reverification note in `evidence/current-main-smoke.json`.
+Runs recorded before the fixed-point cost migration (`0de15a10`) that reported a
+model cost no longer load, by design — 0.x keeps no read compatibility for a
+superseded representation. Delete stale artifacts rather than working around
+them; a damaged file currently also blocks healthy runs in the same directory
+(#1668). See the reverification note in `evidence/current-main-smoke.json`.
