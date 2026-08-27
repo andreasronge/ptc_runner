@@ -134,6 +134,17 @@ defmodule PtcRunner.Kernel.ProjectConfig do
 
   def load(_path), do: {:error, :project_invalid}
 
+  @doc false
+  @spec document_digest(binary()) :: {:ok, binary()} | {:error, failure()}
+  def document_digest(path) when is_binary(path) do
+    case resolve_document_path(path) do
+      {:ok, canonical} -> digest_canonical(canonical)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def document_digest(_path), do: {:error, :project_invalid}
+
   defp load_decoded(canonical, decoded) do
     with :ok <- validate_schema(decoded),
          directory = Path.dirname(canonical),
@@ -214,15 +225,42 @@ defmodule PtcRunner.Kernel.ProjectConfig do
   end
 
   defp read_document(path) do
+    case resolve_document_path(path) do
+      {:ok, canonical} -> read_canonical_document(canonical)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp resolve_document_path(path) do
     case ConfinedFile.resolve_absolute(Path.expand(path)) do
       {:ok, canonical} ->
-        read_canonical_document(canonical)
+        {:ok, canonical}
 
       {:error, reason}
       when reason in [:not_found, :not_regular, :invalid_path, :symlink_escape] ->
         {:error, :project_unavailable}
 
       _invalid ->
+        {:error, :project_invalid}
+    end
+  end
+
+  defp digest_canonical(canonical) do
+    directory = Path.dirname(canonical)
+    name = Path.basename(canonical)
+
+    case ConfinedFile.read_prefix_status(directory, name, @max_bytes) do
+      {:ok, bytes, :complete} ->
+        {:ok, :crypto.hash(:sha256, bytes)}
+
+      {:ok, _prefix, :truncated} ->
+        {:error, :project_invalid}
+
+      {:error, reason}
+      when reason in [:not_found, :not_regular, :invalid_path, :symlink_escape] ->
+        {:error, :project_unavailable}
+
+      {:error, _reason} ->
         {:error, :project_invalid}
     end
   end

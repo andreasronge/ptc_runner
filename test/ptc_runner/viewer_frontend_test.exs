@@ -8,8 +8,10 @@ defmodule PtcRunner.ViewerFrontendTest do
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Kernel.ViewerBinding
+  alias PtcRunner.TestSupport.PrivateInspectionFixture
   alias PtcRunner.ViewerFrontend
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
 
@@ -93,6 +95,104 @@ defmodule PtcRunner.ViewerFrontendTest do
 
     assert response.status == 404
     assert response.body == "inspection_not_configured"
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
+  test "revoking viewer.private takes effect on the next analysis request", %{
+    tmp_dir: directory
+  } do
+    project_path =
+      viewer_project(directory, %{"private" => true}, %{"trace" => true, "inspection" => true})
+
+    {:ok, project} = ProjectConfig.load(project_path)
+    fixture = PrivateInspectionFixture.create!(project.artifact_root, "granted-run")
+    File.rm_rf!(Path.join(project.artifact_root, "analysis-traces"))
+
+    assert {:ok, viewer, address, port} = ViewerFrontend.start(project_path)
+    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+
+    url =
+      "http://#{:inet.ntoa(address)}:#{port}/api/analysis/runs/#{fixture.run_id}/conversation"
+
+    first = Req.get!(url, retry: false)
+    assert first.status == 200
+    refute first.body == "inspection_not_private"
+
+    document = Jason.decode!(File.read!(project_path))
+    File.write!(project_path, Jason.encode!(put_in(document, ["viewer", "private"], false)))
+
+    second = Req.get!(url, retry: false)
+    assert second.status == 404
+    assert second.body == "inspection_not_private"
+    refute first.body == second.body
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
+  test "widening viewer.private serves inspection only after an explicit refresh", %{
+    tmp_dir: directory
+  } do
+    project_path =
+      viewer_project(directory, %{"private" => false}, %{"trace" => true, "inspection" => true})
+
+    {:ok, project} = ProjectConfig.load(project_path)
+    fixture = PrivateInspectionFixture.create!(project.artifact_root, "granted-run")
+    File.rm_rf!(Path.join(project.artifact_root, "analysis-traces"))
+
+    assert {:ok, viewer, address, port} = ViewerFrontend.start(project_path)
+    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+
+    origin = "http://#{:inet.ntoa(address)}:#{port}"
+    url = origin <> "/api/analysis/runs/#{fixture.run_id}/conversation"
+
+    withheld = Req.get!(url, retry: false)
+    assert withheld.status == 404
+    assert withheld.body == "inspection_not_private"
+
+    document = Jason.decode!(File.read!(project_path))
+    File.write!(project_path, Jason.encode!(put_in(document, ["viewer", "private"], true)))
+
+    still_withheld = Req.get!(url, retry: false)
+    assert still_withheld.status == 404
+    assert still_withheld.body == "inspection_not_private"
+
+    refresh = Req.post!(origin <> "/api/kernel/refresh", retry: false)
+    assert refresh.status == 200
+
+    granted = Req.get!(url, retry: false)
+    assert granted.status == 200
+    refute granted.body == "inspection_not_private"
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
+  test "a run finished after Viewer start appears after an explicit refresh", %{
+    tmp_dir: directory
+  } do
+    project_path = viewer_project(directory)
+
+    assert {:ok, viewer, address, port} = ViewerFrontend.start(project_path)
+    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+
+    origin = "http://#{:inet.ntoa(address)}:#{port}"
+    first = Req.get!(origin <> "/api/kernel/runs", retry: false)
+    assert first.status == 200
+    assert length(first.body["items"]) == 1
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project_path])
+
+    stale = Req.get!(origin <> "/api/kernel/runs", retry: false)
+    assert stale.status == 200
+    assert length(stale.body["items"]) == 1
+
+    refresh = Req.post!(origin <> "/api/kernel/refresh", retry: false)
+    assert refresh.status == 200
+    assert refresh.body == %{"status" => "ok"}
+
+    fresh = Req.get!(origin <> "/api/kernel/runs", retry: false)
+    assert fresh.status == 200
+    assert length(fresh.body["items"]) == 2
     assert :ok = PtcViewer.stop(viewer)
   end
 

@@ -173,7 +173,11 @@ ptc run ptc.json \
 `ptc viewer ptc-project.json` uses the project's trace root, port,
 browser-opening preference, REPL setting, and private-data authorization. Trace
 and correlated inspection directories are captured before the listener starts;
-HTTP requests select only a run ID and never a filesystem path. Browser opening
+HTTP requests select only a run ID and never a filesystem path. Revoking
+`viewer.private` takes effect on the next request and drops held private
+evidence. Turning the grant on, and discovering runs that finished after
+startup, require Refresh on the Runs list. Other project fields stay boot-read.
+Browser opening
 is a bounded convenience, and additionally requires an attached terminal:
 missing or failing platform openers do not stop Viewer.
 
@@ -193,7 +197,8 @@ Because `artifacts.inspection` and `viewer.private` must both hold, the private
 routes distinguish which one is missing: `inspection_not_configured` for a
 project that records no inspection artifact, `inspection_not_private` for one
 that records it and withheld the grant. The second needs no re-run — the
-artifact on disk is already usable once the Viewer restarts with the grant.
+artifact on disk is already usable once the Viewer refreshes after the grant.
+Revoking the grant takes effect on the next request without Refresh.
 
 A run can also fall outside evidence the Viewer does hold, which the routes
 name separately from the project settings: `inspection_run_not_recorded` for a

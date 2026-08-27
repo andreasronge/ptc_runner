@@ -208,6 +208,24 @@ defmodule PtcViewer.RouterTest do
     assert ungranted.status == 404
     assert ungranted.resp_body == "inspection_not_private"
 
+    # Host-side grant decisions answer with this same body. The adapter below
+    # only locks the HTTP mapping; it does not exercise ViewerSnapshotStore.
+    adapter = fn _source, _run_id -> {:error, :inspection_not_private} end
+    source = {:pinned, "fixed.ptcins"}
+    {:ok, withheld} = PtcViewer.InspectionStore.start(source)
+    on_exit(fn -> if Process.alive?(withheld), do: PtcViewer.InspectionStore.stop(withheld) end)
+
+    withheld_response =
+      conn(:get, "/api/analysis/runs/r1/conversation")
+      |> call_router(
+        trace_dir: trace_dir,
+        inspection_store: withheld,
+        inspection_adapter: adapter
+      )
+
+    assert withheld_response.status == 404
+    assert withheld_response.resp_body == "inspection_not_private"
+
     source = {:pinned, "fixed.ptcins"}
 
     adapter = fn pinned_source, run_id ->
@@ -326,6 +344,33 @@ defmodule PtcViewer.RouterTest do
     assert failures.status == 200
     assert Jason.decode!(errors.resp_body) == expected
     assert Jason.decode!(failures.resp_body) == expected
+  end
+
+  test "POST /api/kernel/refresh recaptures the host snapshot without a run id", %{
+    trace_dir: trace_dir
+  } do
+    test = self()
+
+    refreshed =
+      conn(:post, "/api/kernel/refresh")
+      |> call_router(
+        trace_dir: trace_dir,
+        live_trace_refresh: fn nil ->
+          send(test, :refreshed)
+          :ok
+        end
+      )
+
+    assert refreshed.status == 200
+    assert Jason.decode!(refreshed.resp_body) == %{"status" => "ok"}
+    assert_received :refreshed
+
+    missing =
+      conn(:post, "/api/kernel/refresh")
+      |> call_router(trace_dir: trace_dir)
+
+    assert missing.status == 503
+    assert missing.resp_body == "Trace refresh unavailable"
   end
 
   defp call_router(conn, opts), do: PtcViewer.Router.call(conn, PtcViewer.Router.init(opts))

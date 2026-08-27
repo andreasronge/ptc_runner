@@ -303,7 +303,7 @@ name, so the reason body is the next action rather than a bare status:
 | answer | cause | next action |
 | --- | --- | --- |
 | `404 inspection_not_configured` | the project records no inspection artifact | set `artifacts.trace` and `artifacts.inspection` and run again |
-| `404 inspection_not_private` | the artifact exists, this Viewer was not granted it | set `viewer.private` and start the Viewer again; nothing needs re-running |
+| `404 inspection_not_private` | the artifact exists, this Viewer was not granted it | set `viewer.private` and Refresh the Runs list; nothing needs re-running |
 | `404 inspection_run_not_recorded` | the Viewer reads private evidence, this run recorded none | run the project again, now that `artifacts.inspection` is set |
 | `404 inspection_run_mismatch` | the Viewer is pinned to a different run's artifact | start the Viewer for this run |
 

@@ -169,7 +169,8 @@ authority. A host supplies `:launch` as a fixed manifest plus a two-arity
 adapter receiving the semantic request and direct frame sink, and may also
 supply a zero-arity `:project_adapter`. The optional one-arity
 `:live_trace_refresh` callback atomically refreshes the host-owned snapshot
-before an ended card opens its canonical Runs detail. A random `:live_token`
+before an ended card opens its canonical Runs detail, and with `nil` recaptures
+the listing so runs that finished after Viewer start become visible. A random `:live_token`
 of at least 32 bytes authenticates non-loopback HTTP reporters through
 `PTC_VIEWER_TOKEN` and remote browser controls through the initial URL:
 
@@ -188,6 +189,7 @@ live ingestion and controls, not the trace browser as a whole.
 | Endpoint | Shared Kernel operation |
 | --- | --- |
 | `GET /api/kernel/runs` | `list_runs` with bounded filters and pagination |
+| `POST /api/kernel/refresh` | Recapture the host snapshot without requiring a run id |
 | `GET /api/kernel/runs/:run_id` | `get_run` |
 | `GET /api/kernel/runs/:run_id/turns` | `list_turns` with bounded filters and pagination |
 | `GET /api/kernel/counters` | `counters` |
