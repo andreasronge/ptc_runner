@@ -1,14 +1,21 @@
 # DABStep fraud analysis
 
-This example asks a model to solve DABStep dev task 49 over 138,236 synthetic
-payment transactions. The published answer is `B. BE`. In the observed
-five-run cohorts, DeepSeek returned the exact answer 3/5 times and GPT-5.6 Luna
-4/5 times—but private transcript inspection showed fully trace-proven
-computation in 3/5 and 1/5 runs respectively.
+DABStep dev task 49 is a multiple-choice question over 138,236 synthetic card
+payments:
 
-That distinction is the demo: a correct string is not proof that a model did
-the calculation. PtcRunner preserves the generated program and its bounded
-tool traffic so both can be checked.
+> What is the top country (ip_country) for fraud? A. NL, B. BE, C. ES, D. FR
+
+The published answer is `B. BE`. NL leads raw fraudulent volume and count and
+is the tempting wrong answer; BE wins only on fraud divided by total volume, by
+0.087 percentage points.
+
+With four options a model can emit `B. BE` without doing that arithmetic, so a
+correct string is not proof it did the calculation. PtcRunner preserves the
+generated program and its bounded tool traffic, so the work can be checked
+instead of the answer. In the observed five-run cohorts, DeepSeek returned the
+exact answer 3/5 times and GPT-5.6 Luna 4/5 times—but private transcript
+inspection showed fully trace-proven computation in 3/5 and 1/5 runs
+respectively.
 
 ## Run it
 
