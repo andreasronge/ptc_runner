@@ -167,7 +167,7 @@ Class `host_facing` is the public JSON/API path under a
 | internal only | prototype | admission | milliseconds | 120 000 | selected file | research admission deadline |
 | internal only | prototype | cleanup | milliseconds | 5 000 | selected or directory | research cleanup deadline |
 | internal only | prototype | producer | bytes | 65 536 | selected file | research I/O buffer |
-| internal only | maintained_guard | admission | schema_version | 8 | selected file | `InspectionArtifact` installed schema |
+| internal only | maintained_guard | admission | schema_version | 9 | selected file | `InspectionArtifact` installed schema |
 | internal only | maintained_guard | query | items | 1 000 max / 100 default | selected or directory | `InspectionQuery` page limit |
 
 The production constants in `InspectionArtifact.Limits` and the generated host

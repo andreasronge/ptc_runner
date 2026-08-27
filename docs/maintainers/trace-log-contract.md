@@ -753,7 +753,7 @@ deterministically encoded JSON object with this exact envelope:
 
 ```json
 {
-  "schema_version": 8,
+  "schema_version": 9,
   "run_id": "run-id",
   "trace_id": "trace-id",
   "sequence": 1,
@@ -779,16 +779,41 @@ The current record types and payloads are:
 | --- | --- | --- |
 | `capability-input` | `capability_id` | `environment`, `name`, `arguments` |
 | `capability-exception` | `capability_id` | `environment`, `name`, `exception_class`, `message`, `message_truncated`, `stacktrace`, `stacktrace_truncated` |
-| `capability-output` | `capability_id` | `environment`, `name`, `result` |
+| `capability-output` | `capability_id` | `environment`, `name`, `result` or `result_identity` |
 | `evaluation-source` | `evaluation_id` | `environment`, `program_kind`, `source`, `source_hash`, `source_bytes` |
 | `evaluation-analysis` | `evaluation_id` | `environment`, `mission_name`, `prelude_calls` |
 | `prelude-source` | `component_id` | `environment`, `source`, `source_hash`, `source_bytes` |
 | `mcp-request` | `capability_id`, `request_id` | `transport`, `body` |
-| `mcp-response` | `capability_id`, `request_id` | `transport`, `body` |
+| `mcp-response` | `capability_id`, `request_id` | `transport`, `body` or `body_identity` |
 | `mcp-stderr` | `capability_id`, `request_id` | `transport`, `text`, `truncated` |
 | `execution-prints` | `evaluation_id` | `environment`, `prints`, `truncated` |
 | `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
 | `explicit-failure-value` | `evaluation_id` | `environment`, `value` |
+
+A read tool the host declared with `inspection_capture: "digest_results"`
+retains value identities in place of two of those payload values:
+`capability-output` carries `result_identity` instead of `result`, and
+`mcp-response` carries `body_identity` instead of `body`. An identity is the
+exact object `{"encoding": "ptc-deterministic-json-v1", "sha256": "sha256:...",
+"encoded_bytes": N}`, where the digest covers
+`"ptc.inspection-value.v1\0" || u64(encoded_bytes) || encoded_value` over the
+value normalized as a retained record would have normalized it. `encoded_bytes`
+is the size of that deterministic JSON encoding, not the MCP wire size.
+
+The alternatives are per record, not per artifact: record types, ordering,
+correlation, joins, and counts are identical to a fully captured run. The
+digest decision uses only what the transport has already computed: MCP error
+and `isError` bodies, bodies rejected as oversized or malformed, capability
+error envelopes, `capability-exception`, and `mcp-stderr` stay full. A value
+the transport accepted and a later stage rejected -- tool-result
+normalization, retained-size admission, bounded output validation -- keeps its
+full error envelope while the wire body remains an identity; the mapping is a
+read, so a full-capture rerun recovers the value and its identity proves it is
+the same one. The sink computes the identity and the decision adds no work, so
+digest capture cannot change an emitting process's heap behaviour. An identity
+attests that a specific normalized value crossed the boundary at that record's
+position in the observed order. It does not retain the value, prove derivation
+of later values, or attest the original MCP wire bytes.
 
 #### Sealed inspection artifact V1
 

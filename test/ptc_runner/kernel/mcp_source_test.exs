@@ -496,7 +496,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert Enum.map(requests, & &1["correlation"]) |> MapSet.new() ==
              Enum.map(responses, & &1["correlation"]) |> MapSet.new()
 
-    assert Enum.all?(records, &(&1["schema_version"] == 8))
+    assert Enum.all?(records, &(&1["schema_version"] == 9))
     assert Enum.all?(requests ++ responses, &(&1["payload"]["mission_name"] == "default"))
 
     encoded_inspection = File.read!(inspection_path)
@@ -506,6 +506,252 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     refute encoded_trace =~ ~s("arguments")
     refute encoded_trace =~ ~s("structuredContent")
     refute encoded_trace =~ "Bearer fixture-secret"
+  end
+
+  @tag :tmp_dir
+  test "a runtime-rejected result keeps its full error envelope while the wire body stays a digest",
+       %{tmp_dir: dir} do
+    # The provider boundary accepts this response -- well-formed, within
+    # `max_result_bytes`, and its structured content satisfies the output
+    # schema -- and only the dispatcher's retained-size admission rejects it
+    # afterwards: 28,000 small strings retain far more BEAM memory than their
+    # encoded bytes. The digest decision is made at the boundary, so the wire
+    # body remains an identity; the rejection itself is retained in full in
+    # `capability-output`, and because the mapping is a read, rerunning with
+    # full capture recovers the value the identity attests.
+    marker = Path.join(dir, "stdio-padded")
+
+    tools = %{
+      "structured" => %{
+        as: "remote.structured",
+        effect: :read,
+        inspection_capture: :digest_results
+      }
+    }
+
+    inspection_path = Path.join(dir, "admission.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: value}} =
+             dir
+             |> manifest(["remote.structured"],
+               program: single_call_program("remote.structured", "x"),
+               max_result_bytes: 1_000_000,
+               timeout_ms: 5_000,
+               evaluation_timeout_ms: 5_000
+             )
+             |> directory_request(
+               stdio_registry(dir, marker, "structured-padded",
+                 tools: tools,
+                 max_result_bytes: 1_000_000
+               ),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert %{"status" => "error", "reason" => "provider_result_limit"} =
+             get_in(value, ["value", "value"])
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert %{"body_identity" => %{"sha256" => "sha256:" <> _}} = response["payload"]
+    refute Map.has_key?(response["payload"], "body")
+
+    assert [output] = Enum.filter(records, &(&1["record_type"] == "capability-output"))
+
+    assert %{"result" => %{"status" => "error", "reason" => "provider_result_limit"}} =
+             output["payload"]
+
+    refute Map.has_key?(output["payload"], "result_identity")
+  end
+
+  @tag :tmp_dir
+  test "a normalization-rejected result keeps its full error envelope while the body digests", %{
+    tmp_dir: dir
+  } do
+    # The transport accepts this body -- well-formed, within the byte bound --
+    # and only tool-result normalization rejects it, after the exchange is
+    # already captured. Like every post-capture rejection, the error envelope
+    # is retained in full while the wire body remains an identity; the read
+    # reproduces under a full-capture rerun.
+    fixture = fixture(self(), structured_value: "wrong")
+    on_exit(fixture.close)
+
+    tools = %{
+      "structured" => %{
+        as: "remote.structured",
+        effect: :read,
+        inspection_capture: :digest_results
+      }
+    }
+
+    inspection_path = Path.join(dir, "invalid.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: value}} =
+             dir
+             |> manifest(["remote.structured"],
+               program: single_call_program("remote.structured", "x")
+             )
+             |> directory_request(registry(fixture.endpoint, tools: tools),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert %{"reason" => "invalid_result", "details" => "mcp_invalid_result"} =
+             get_in(value, ["value", "value"])
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert %{"body_identity" => %{"sha256" => "sha256:" <> _}} = response["payload"]
+    refute Map.has_key?(response["payload"], "body")
+
+    assert [output] = Enum.filter(records, &(&1["record_type"] == "capability-output"))
+    assert %{"result" => %{"status" => "error", "reason" => "invalid_result"}} = output["payload"]
+  end
+
+  @tag :tmp_dir
+  test "digest result capture keeps a body this run rejected as oversized", %{tmp_dir: dir} do
+    # The response looks successful on the wire and is only rejected once the
+    # result is bounded, so capture has to wait for the outcome. Digesting it
+    # would leave no evidence of what the server actually sent.
+    fixture = fixture(self(), large_text?: true)
+    on_exit(fixture.close)
+
+    tools = %{"text" => %{as: "remote.text", effect: :read, inspection_capture: :digest_results}}
+    inspection_path = Path.join(dir, "oversized.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: value}} =
+             dir
+             |> manifest(["remote.text"], program: single_call_program("remote.text", "x"))
+             |> directory_request(registry(fixture.endpoint, tools: tools),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert %{"reason" => "invalid_result", "details" => "mcp_response_exceeded"} =
+             get_in(value, ["value", "value"])
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert %{"body" => %{"result" => _result}} = response["payload"]
+    refute Map.has_key?(response["payload"], "body_identity")
+  end
+
+  @tag :tmp_dir
+  test "digest result capture keeps the record lifecycle a full run produces", %{tmp_dir: dir} do
+    fixture = fixture(self())
+    on_exit(fixture.close)
+
+    # Issue #1670 requires digest capture to add no segmented records: the two
+    # modes must agree on record order, correlation, joins, and counts, and
+    # differ only in which value key each digested record carries.
+    shape = fn tools, name ->
+      path = Path.join(dir, "#{name}.ptcins")
+
+      assert {:ok, %PtcRunner.Kernel.Result{}} =
+               dir
+               |> manifest(Map.keys(public_mappings()))
+               |> directory_request(registry(fixture.endpoint, tools: tools), inspect: path)
+               |> RunLifecycle.build()
+               |> RunLifecycle.execute()
+
+      assert {:ok, records} = StreamingInspection.read_path(path)
+
+      # Capability ids carry run entropy, so compare the join structure rather
+      # than the literal ids: records sharing an id must keep sharing one.
+      ids = records |> Enum.map(& &1["correlation"]["capability_id"]) |> Enum.uniq()
+      slot = Map.new(Enum.with_index(ids), fn {id, index} -> {id, index} end)
+
+      Enum.map(records, fn record ->
+        {record["sequence"], record["record_type"], slot[record["correlation"]["capability_id"]],
+         record["correlation"]["request_id"]}
+      end)
+    end
+
+    digest_tools =
+      Map.new(mappings(), fn {name, m} ->
+        {name, Map.put(m, :inspection_capture, :digest_results)}
+      end)
+
+    assert shape.(digest_tools, "digest-parity") == shape.(mappings(), "full-parity")
+  end
+
+  @tag :tmp_dir
+  test "digest result capture retains identities for successes and bodies for failures", %{
+    tmp_dir: dir
+  } do
+    fixture = fixture(self())
+    on_exit(fixture.close)
+
+    tools =
+      Map.new(mappings(), fn {name, m} ->
+        {name, Map.put(m, :inspection_capture, :digest_results)}
+      end)
+
+    inspection_path = Path.join(dir, "digest.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{}} =
+             dir
+             |> manifest(Map.keys(public_mappings()))
+             |> directory_request(registry(fixture.endpoint, tools: tools),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    by_type = Enum.group_by(records, & &1["record_type"])
+    assert length(by_type["mcp-request"]) == 3
+
+    # `remote.fail` answers with `isError`, so its body survives while the two
+    # successful reads are reduced to identities.
+    {digested, full} =
+      Enum.split_with(by_type["mcp-response"], &Map.has_key?(&1["payload"], "body_identity"))
+
+    assert length(digested) == 2
+    assert [%{"payload" => %{"body" => %{"result" => %{"isError" => true}}}}] = full
+
+    # Arguments are never digested: the traversal the program performed stays
+    # readable even when what came back does not.
+    assert Enum.all?(by_type["capability-input"], &is_map(&1["payload"]["arguments"]))
+    assert Enum.all?(by_type["mcp-request"], &Map.has_key?(&1["payload"], "body"))
+
+    outputs = by_type["capability-output"]
+
+    for record <-
+          digested ++ Enum.filter(outputs, &Map.has_key?(&1["payload"], "result_identity")) do
+      identity = record["payload"]["body_identity"] || record["payload"]["result_identity"]
+
+      assert %{
+               "encoding" => "ptc-deterministic-json-v1",
+               "sha256" => "sha256:" <> hex,
+               "encoded_bytes" => bytes
+             } = identity
+
+      assert byte_size(hex) == 64
+      assert bytes > 0
+    end
+
+    # The workflow result and the failed capability's error envelope are the
+    # records an operator reads after a bad run, so neither is digested.
+    assert Enum.any?(outputs, fn record ->
+             match?(
+               %{"result" => %{"status" => "error", "reason" => "domain_error"}},
+               record["payload"]
+             )
+           end)
+
+    refute Enum.empty?(Enum.filter(outputs, &Map.has_key?(&1["payload"], "result_identity")))
+
+    encoded = File.read!(inspection_path)
+    refute encoded =~ "structuredContent"
+    refute encoded =~ "Bearer fixture-secret"
   end
 
   @tag :tmp_dir

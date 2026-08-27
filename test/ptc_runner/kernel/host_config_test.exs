@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
                  effect: :read,
                  description: nil,
                  error_feedback: :closed,
+                 inspection_capture: :full,
                  model_visible: false
                }
              },
@@ -548,6 +549,31 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert host.install["workspace"].snapshot_identity == %{tool: "read_text", field: "digest"}
   end
 
+  @tag :tmp_dir
+  test "accepts digest result capture for read tools and rejects it for write tools", %{
+    tmp_dir: dir
+  } do
+    digest_config =
+      valid_config()
+      |> put_in(
+        ["install", "workspace", "tools", "read_text", "inspection_capture"],
+        "digest_results"
+      )
+
+    assert {:ok, host} = dir |> write_config(digest_config) |> HostConfig.load()
+    assert host.install["workspace"].tools["read_text"].inspection_capture == :digest_results
+
+    write_digest =
+      put_in(digest_config, ["install", "workspace", "tools", "write_text"], %{
+        "as" => "workspace.write",
+        "effect" => "write",
+        "inspection_capture" => "digest_results"
+      })
+
+    assert {:error, :invalid_host_config} =
+             dir |> write_config(write_digest, unique_name()) |> HostConfig.load()
+  end
+
   test "every enumerated value decodes to an atom this module owns" do
     # The assertions above check the decoded values but not where the atoms came
     # from. They previously came from `String.to_existing_atom/1`, which only
@@ -566,7 +592,17 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     owned = MapSet.new(atoms, fn {_index, atom} -> atom end)
 
-    for atom <- [:bearer, :basic, :closed, :bounded, :write, :normal, :private_inspection] do
+    for atom <- [
+          :bearer,
+          :basic,
+          :closed,
+          :bounded,
+          :write,
+          :normal,
+          :private_inspection,
+          :full,
+          :digest_results
+        ] do
       assert MapSet.member?(owned, atom),
              "#{inspect(atom)} must be a literal in HostConfig, not borrowed from another module"
     end

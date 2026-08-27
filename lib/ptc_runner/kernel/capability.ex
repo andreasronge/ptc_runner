@@ -32,7 +32,7 @@ defmodule PtcRunner.Kernel.Capability do
   alias PtcRunner.Lisp.RetainedSize
 
   @effects [:read, :write, :unknown]
-  @options ~w(name callback validate description model_visible input_schema output_schema effect)a
+  @options ~w(name callback validate description model_visible input_schema output_schema effect inspection_capture)a
   @enforce_keys [:name, :callback, :input_schema]
   defstruct [
     :name,
@@ -44,7 +44,8 @@ defmodule PtcRunner.Kernel.Capability do
     :input_validator,
     :output_validator,
     model_visible: true,
-    effect: :unknown
+    effect: :unknown,
+    inspection_capture: :full
   ]
 
   @type callback_result :: {:ok, term()} | {:error, PtcRunner.Kernel.ProviderError.t()}
@@ -65,14 +66,16 @@ defmodule PtcRunner.Kernel.Capability do
           output_schema: map() | nil,
           input_validator: JSONSchema.compiled(),
           output_validator: JSONSchema.compiled() | nil,
-          effect: :read | :write | :unknown
+          effect: :read | :write | :unknown,
+          inspection_capture: :full | :digest_results
         }
 
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_capability}
   @doc """
   Constructs a capability from required `:name`, `:callback`, and
   `:input_schema` options plus optional `:output_schema`, `:effect`,
-  `:validate`, `:description`, and `:model_visible` options.
+  `:validate`, `:description`, `:model_visible`, and `:inspection_capture`
+  options.
 
   Names are bounded lower-case identifiers and may contain `.`, `_`, `/`, and
   `-`. Descriptions are limited to 4,096 bytes. Schemas use the bounded JSON
@@ -80,6 +83,10 @@ defmodule PtcRunner.Kernel.Capability do
   property and constrained-literal keys must already use their underscore form
   so recursive Lisp argument normalization cannot change their meaning.
   Effects are `:read`, `:write`, or `:unknown` and default to `:unknown`.
+  `:inspection_capture` is `:full` (the default) or `:digest_results`;
+  `:digest_results` requires `effect: :read` and directs private inspection to
+  retain a deterministic value identity in place of a successful result. It is
+  private capture policy and never appears in `metadata/1`.
   """
   def new(opts) when is_list(opts) do
     with true <- Keyword.keys(opts) -- @options == [],
@@ -90,6 +97,9 @@ defmodule PtcRunner.Kernel.Capability do
          {:ok, description} <- valid_description(Keyword.get(opts, :description)),
          visible when is_boolean(visible) <- Keyword.get(opts, :model_visible, true),
          effect when effect in @effects <- Keyword.get(opts, :effect, :unknown),
+         inspection_capture when inspection_capture in [:full, :digest_results] <-
+           Keyword.get(opts, :inspection_capture, :full),
+         true <- inspection_capture == :full or effect == :read,
          {:ok, input_schema, input_validator} <-
            JSONSchema.compile(Keyword.get(opts, :input_schema)),
          true <- callable_input_schema?(input_schema),
@@ -106,7 +116,8 @@ defmodule PtcRunner.Kernel.Capability do
          output_schema: output_schema,
          input_validator: input_validator,
          output_validator: output_validator,
-         effect: effect
+         effect: effect,
+         inspection_capture: inspection_capture
        }}
     else
       _ -> {:error, :invalid_capability}

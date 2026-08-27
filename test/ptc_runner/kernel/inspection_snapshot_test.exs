@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   alias PtcRunner.Kernel.InspectionQuery
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.InspectionValueIdentity
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.RunAnalysisCapability
@@ -422,7 +423,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:ok,
             %{
-              "items" => [%{"run_id" => "mcp-run", "schema_version" => 8}],
+              "items" => [%{"run_id" => "mcp-run", "schema_version" => 9}],
               "next_cursor" => nil,
               "snapshot_hash" => ^snapshot_hash
             }} =
@@ -615,6 +616,187 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
                "limit" => 1
              })
   end
+
+  @tag :tmp_dir
+  test "digested captures join, project, and count like fully captured runs", %{tmp_dir: root} do
+    {trace, inspection} = source_directories(root)
+    write_digest_run(trace, inspection, "digest-ok", :ok)
+    write_digest_run(trace, inspection, "digest-err", :error)
+
+    {:ok, trace_snapshot} = TraceSnapshot.start({:directory, trace}, owner: self())
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, inspection}, trace_snapshot, owner: self())
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace_snapshot)
+    end)
+
+    assert {:ok, %{"items" => runs}} = InspectionSnapshot.query(snapshot, :list_runs, %{})
+
+    assert %{"counts" => %{"capability_calls" => 1, "provider_exchanges" => 2}} =
+             Enum.find(runs, &(&1["run_id"] == "digest-ok"))
+
+    # A digested success projects its identity, never its value, and the
+    # identity is recomputable from the value the emitter sent.
+    assert {:ok, %{"items" => [call]}} =
+             InspectionSnapshot.query(snapshot, :capability_calls, %{"run_id" => "digest-ok"})
+
+    {:ok, result_identity} =
+      InspectionValueIdentity.identity(%{
+        "status" => "ok",
+        "value" => %{"text" => "secret-digest-ok"}
+      })
+
+    assert %{
+             "capability_id" => "tool-digest-ok",
+             "complete?" => true,
+             "capture_mode" => "digest_results",
+             "result_available?" => false,
+             "result_identity" => ^result_identity,
+             "arguments" => %{"path" => "private-digest-ok.txt"}
+           } = call
+
+    refute Map.has_key?(call, "result")
+
+    assert {:ok, %{"items" => exchanges}} =
+             InspectionSnapshot.query(snapshot, :provider_exchanges, %{"run_id" => "digest-ok"})
+
+    {:ok, body_identity} = InspectionValueIdentity.identity(digest_response_body(7, "digest-ok"))
+
+    assert [
+             %{
+               "request_id" => 7,
+               "capture_mode" => "digest_results",
+               "response_available?" => false,
+               "response_identity" => ^body_identity,
+               "request" => %{"method" => "tools/call"}
+             },
+             %{"request_id" => 8, "capture_mode" => "digest_results"}
+           ] = exchanges
+
+    refute Enum.any?(exchanges, &Map.has_key?(&1, "response"))
+
+    # A digested wire beside a fully captured error envelope is the shape a
+    # failed digest-mode call produces; both must join and project.
+    assert {:ok, %{"items" => [error_call]}} =
+             InspectionSnapshot.query(snapshot, :capability_calls, %{"run_id" => "digest-err"})
+
+    assert %{
+             "capture_mode" => "full",
+             "result_available?" => true,
+             "result" => %{"status" => "error", "reason" => "domain_error"}
+           } = error_call
+
+    assert {:ok, %{"items" => [digested, failed]}} =
+             InspectionSnapshot.query(snapshot, :provider_exchanges, %{"run_id" => "digest-err"})
+
+    assert %{"request_id" => 7, "capture_mode" => "digest_results"} = digested
+
+    assert %{
+             "request_id" => 8,
+             "capture_mode" => "full",
+             "response_available?" => true,
+             "response" => %{"result" => %{"isError" => true}}
+           } = failed
+  end
+
+  defp write_digest_run(trace_directory, inspection_directory, run_id, outcome) do
+    events = canonical_events(run_id)
+    File.write!(Path.join(trace_directory, "#{run_id}.jsonl"), encode_jsonl(events))
+    {sink, handle} = start_inspection!(inspection_directory, run_id)
+
+    emit!(
+      sink,
+      "capability-input",
+      %{capability_id: "tool-#{run_id}"},
+      PrivateInspectionFixture.tool_input_payload(run_id)
+    )
+
+    for request_id <- [7, 8] do
+      emit!(
+        sink,
+        "mcp-request",
+        %{capability_id: "tool-#{run_id}", request_id: request_id},
+        PrivateInspectionFixture.tool_request_payload(request_id, "private-#{run_id}.txt")
+      )
+    end
+
+    digest!(sink, "mcp-response", %{capability_id: "tool-#{run_id}", request_id: 7}, %{
+      mission_name: "default",
+      transport: :stdio,
+      body: digest_response_body(7, run_id)
+    })
+
+    case outcome do
+      :ok ->
+        digest!(sink, "mcp-response", %{capability_id: "tool-#{run_id}", request_id: 8}, %{
+          mission_name: "default",
+          transport: :stdio,
+          body: digest_response_body(8, run_id)
+        })
+
+        digest!(sink, "capability-output", %{capability_id: "tool-#{run_id}"}, %{
+          environment: :mission,
+          mission_name: "default",
+          name: "workspace.read",
+          result: %{status: :ok, value: %{"text" => "secret-#{run_id}"}}
+        })
+
+      :error ->
+        emit!(sink, "mcp-response", %{capability_id: "tool-#{run_id}", request_id: 8}, %{
+          mission_name: "default",
+          transport: :stdio,
+          body: %{
+            "jsonrpc" => "2.0",
+            "id" => 8,
+            "result" => %{"isError" => true, "content" => []}
+          }
+        })
+
+        emit!(sink, "capability-output", %{capability_id: "tool-#{run_id}"}, %{
+          environment: :mission,
+          mission_name: "default",
+          name: "workspace.read",
+          result: %{
+            status: :error,
+            kind: :provider_error,
+            reason: :domain_error,
+            retryable?: false
+          }
+        })
+    end
+
+    emit!(
+      sink,
+      "evaluation-source",
+      %{evaluation_id: "eval-#{run_id}"},
+      PrivateInspectionFixture.evaluation_source_payload()
+    )
+
+    emit!(
+      sink,
+      "prelude-source",
+      %{component_id: "component-#{run_id}"},
+      PrivateInspectionFixture.prelude_source_payload()
+    )
+
+    persist_inspection!(sink, handle)
+  end
+
+  defp digest_response_body(request_id, run_id) do
+    %{
+      "jsonrpc" => "2.0",
+      "id" => request_id,
+      "result" => %{
+        "content" => [%{"type" => "text", "text" => "secret-#{run_id}-#{request_id}"}]
+      }
+    }
+  end
+
+  defp digest!(sink, type, correlation, payload),
+    do: :ok = InspectionSink.emit(sink, type, correlation, payload, capture: :digest_results)
 
   @tag :tmp_dir
   test "interrupted capability attempts preserve the complete private prefix", %{tmp_dir: root} do

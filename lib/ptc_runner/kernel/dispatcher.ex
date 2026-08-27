@@ -552,7 +552,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
                     event_sink,
                     inspection_sink,
                     capability_id,
-                    invocation.event_attributes[:mission_name]
+                    invocation.event_attributes[:mission_name],
+                    capability.inspection_capture
                   )
                 )
 
@@ -595,7 +596,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
                    environment,
                    public_name,
                    result,
-                   invocation.event_attributes[:mission_name]
+                   invocation.event_attributes[:mission_name],
+                   capability.inspection_capture
                  ) do
               :ok ->
                 result
@@ -675,17 +677,34 @@ defmodule PtcRunner.Kernel.Dispatcher do
     )
   end
 
-  defp inspection_output(nil, _capability_id, _environment, _name, _result, _mission_name),
-    do: :ok
+  defp inspection_output(
+         nil,
+         _capability_id,
+         _environment,
+         _name,
+         _result,
+         _mission_name,
+         _capture
+       ),
+       do: :ok
 
-  defp inspection_output(sink, capability_id, environment, name, result, mission_name) do
+  defp inspection_output(sink, capability_id, environment, name, result, mission_name, capture) do
     InspectionSink.emit(
       sink,
       "capability-output",
       %{capability_id: capability_id},
-      capability_inspection_payload(environment, name, :result, result, mission_name)
+      capability_inspection_payload(environment, name, :result, result, mission_name),
+      output_capture(result, capture)
     )
   end
+
+  # Digest capture removes bulk read output. Error envelopes are small and are
+  # the record an operator reads when a run fails, so they stay full; so does
+  # any result shape full capture would not have admitted as a record. The
+  # identity itself is computed by the sink, so this process sends the same
+  # message in both modes.
+  defp output_capture(%{status: :ok}, :digest_results), do: [capture: :digest_results]
+  defp output_capture(_result, _capture), do: []
 
   defp maybe_capture_exception(
          result,
@@ -780,7 +799,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     }
   end
 
-  defp invocation_context(event_sink, inspection_sink, capability_id, mission_name) do
+  defp invocation_context(event_sink, inspection_sink, capability_id, mission_name, capture) do
     traceparent =
       case event_sink && EventSink.identity(event_sink) do
         {:ok, %{trace_id: trace_id}} -> Events.traceparent(trace_id, capability_id)
@@ -790,7 +809,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
     %{
       capability_id: capability_id,
       inspection_sink: inspection_sink,
-      traceparent: traceparent
+      traceparent: traceparent,
+      inspection_capture: capture
     }
     |> then(fn context ->
       if is_binary(mission_name), do: Map.put(context, :mission_name, mission_name), else: context

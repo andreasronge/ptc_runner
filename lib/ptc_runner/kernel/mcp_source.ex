@@ -428,13 +428,17 @@ defmodule PtcRunner.Kernel.MCPSource do
         description = Map.get(mapping, :description)
         model_visible = Map.get(mapping, :model_visible, true)
         error_feedback = Map.get(mapping, :error_feedback, :closed)
+        inspection_capture = Map.get(mapping, :inspection_capture, :full)
 
-        if Map.keys(mapping) --
-             [:as, :effect, :description, :model_visible, :error_feedback] == [] and
-             MCPProtocol.valid_tool_name?(upstream) and public =~ @name and
-             not MapSet.member?(public_names, public) and
-             (is_nil(description) or valid_string?(description, 4_096)) and
-             is_boolean(model_visible) and error_feedback in [:closed, :bounded] do
+        validation = %{
+          description: description,
+          model_visible: model_visible,
+          error_feedback: error_feedback,
+          inspection_capture: inspection_capture,
+          effect: effect
+        }
+
+        if valid_installed_mapping?(upstream, public, mapping, public_names, validation) do
           {:cont,
            {:ok,
             Map.put(normalized, upstream, %{
@@ -442,7 +446,8 @@ defmodule PtcRunner.Kernel.MCPSource do
               effect: effect,
               description: description,
               model_visible: model_visible,
-              error_feedback: error_feedback
+              error_feedback: error_feedback,
+              inspection_capture: inspection_capture
             }), MapSet.put(public_names, public)}}
         else
           {:halt, {:error, :invalid_tools}}
@@ -458,6 +463,17 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp installed_tools(_tools), do: {:error, :invalid_tools}
+
+  defp valid_installed_mapping?(upstream, public, mapping, public_names, validation) do
+    Map.keys(mapping) --
+      [:as, :effect, :description, :model_visible, :error_feedback, :inspection_capture] == [] and
+      MCPProtocol.valid_tool_name?(upstream) and public =~ @name and
+      not MapSet.member?(public_names, public) and
+      (is_nil(validation.description) or valid_string?(validation.description, 4_096)) and
+      is_boolean(validation.model_visible) and validation.error_feedback in [:closed, :bounded] and
+      validation.inspection_capture in [:full, :digest_results] and
+      (validation.inspection_capture == :full or validation.effect == :read)
+  end
 
   defp installed_snapshot_identity(nil, _tools), do: {:ok, nil}
 
@@ -966,6 +982,7 @@ defmodule PtcRunner.Kernel.MCPSource do
              input_schema: contract.input_schema,
              output_schema: contract.output_schema,
              effect: mapping.effect,
+             inspection_capture: mapping.inspection_capture,
              callback: fn _arguments, _context -> {:error, :uninstalled_mcp_callback} end
            ),
          capability = %{
@@ -1297,8 +1314,9 @@ defmodule PtcRunner.Kernel.MCPSource do
     with {:ok, response} <-
            http(request, headers, payload, @max_transport_response_bytes),
          {:ok, body} <- response_body(response, request.id),
-         :ok <- capture_exchange(context, :streamable_http, payload, body) do
-      bounded_rpc_outcome(body, method, max_bytes)
+         outcome = bounded_rpc_outcome(body, method, max_bytes),
+         :ok <- capture_exchange(context, :streamable_http, payload, body, outcome) do
+      outcome
     end
   end
 
@@ -1337,8 +1355,9 @@ defmodule PtcRunner.Kernel.MCPSource do
            {:ok, response} <-
              http(request, headers, payload, @max_transport_response_bytes),
            {:ok, body} <- response_body(response, request.id),
-           :ok <- capture_exchange(context, :streamable_http, payload, body) do
-        bounded_outcome(body, method, max_bytes)
+           outcome = bounded_outcome(body, method, max_bytes),
+           :ok <- capture_exchange(context, :streamable_http, payload, body, outcome) do
+        outcome
       end
     end)
     |> strip_http_provenance()
@@ -1375,8 +1394,18 @@ defmodule PtcRunner.Kernel.MCPSource do
 
     case request do
       {:ok, %{request: payload, response: body} = exchange} ->
-        with :ok <- capture_exchange(context, :stdio, payload, body, stderr_capture(exchange)),
-             do: bounded_rpc_outcome(body, method, max_bytes)
+        outcome = bounded_rpc_outcome(body, method, max_bytes)
+
+        with :ok <-
+               capture_exchange(
+                 context,
+                 :stdio,
+                 payload,
+                 body,
+                 stderr_capture(exchange),
+                 outcome
+               ),
+             do: outcome
 
       {:ok, body} ->
         bounded_rpc_outcome(body, method, max_bytes)
@@ -1389,17 +1418,18 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp capture_exchange(context, transport, request, response),
-    do: capture_exchange(context, transport, request, response, nil)
+  defp capture_exchange(context, transport, request, response, outcome),
+    do: capture_exchange(context, transport, request, response, nil, outcome)
 
-  defp capture_exchange(nil, _transport, _request, _response, _stderr), do: :ok
+  defp capture_exchange(nil, _transport, _request, _response, _stderr, _outcome), do: :ok
 
   defp capture_exchange(
          %{inspection_sink: nil},
          _transport,
          _request,
          _response,
-         _stderr
+         _stderr,
+         _outcome
        ),
        do: :ok
 
@@ -1408,7 +1438,8 @@ defmodule PtcRunner.Kernel.MCPSource do
          transport,
          %{"id" => request_id} = request,
          %{"id" => request_id} = response,
-         stderr
+         stderr,
+         outcome
        ) do
     correlation = %{capability_id: capability_id, request_id: request_id}
 
@@ -1427,7 +1458,8 @@ defmodule PtcRunner.Kernel.MCPSource do
       correlation,
       payload.(request),
       payload.(response),
-      stderr_payload(context, stderr)
+      stderr_payload(context, stderr),
+      response_capture(context, response, outcome)
     )
   end
 
@@ -1436,9 +1468,34 @@ defmodule PtcRunner.Kernel.MCPSource do
          _transport,
          _request,
          _response,
-         _stderr
+         _stderr,
+         _outcome
        ),
        do: InspectionSink.emit(sink, "mcp-request", %{}, %{})
+
+  # Digest capture removes bulk read output. The decision uses only what the
+  # transport has already computed -- the bounded RPC outcome and the provider's
+  # own error marking -- so digest capture adds no work to this heap-limited
+  # process (the sink computes the identity). A body the provider marked failed
+  # or the transport rejected stays full, because a failed call is what an
+  # operator reads afterwards and may not reproduce on a rerun. A rejection made
+  # after this point -- tool-result normalization, retained-size admission,
+  # bounded output validation -- retains its full error envelope in
+  # `capability-output` while the wire body remains an identity; the mapping is
+  # a read, so a full-capture rerun recovers the value and the identity attests
+  # it is the same one.
+  defp response_capture(context, response, outcome) do
+    if Map.get(context, :inspection_capture, :full) == :digest_results and
+         match?({:ok, _result}, outcome) and not error_response?(response) do
+      [response_capture: :digest_results]
+    else
+      []
+    end
+  end
+
+  defp error_response?(%{"error" => _error}), do: true
+  defp error_response?(%{"result" => %{"isError" => true}}), do: true
+  defp error_response?(_response), do: false
 
   defp stderr_capture(%{stderr: stderr, stderr_truncated?: truncated?})
        when is_binary(stderr) and stderr != "" do
