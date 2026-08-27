@@ -13,7 +13,10 @@ tool traffic so both can be checked.
 ## Run it
 
 Requirements: `ptc` 0.14.0, Node/npm for the pinned filesystem MCP server,
-`curl`, `jq`, and an OpenRouter key for live runs.
+`curl`, `jq`, and an OpenRouter key for live runs. The host documents declare
+`structured_output_mode` and `usage_guarantees` on every live model, which
+current `ptc` requires; an older build predating that requirement rejects them
+as unknown properties.
 
 ```console
 ./fetch-data.sh
