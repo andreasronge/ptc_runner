@@ -1315,8 +1315,9 @@ defmodule PtcRunner.Kernel.MCPSource do
     with {:ok, response} <-
            http(request, headers, payload, @max_transport_response_bytes),
          {:ok, body} <- response_body(response, request.id),
-         :ok <- capture_exchange(context, :streamable_http, payload, body) do
-      bounded_rpc_outcome(body, method, max_bytes)
+         outcome = bounded_rpc_outcome(body, method, max_bytes),
+         :ok <- capture_exchange(context, :streamable_http, payload, body, outcome) do
+      outcome
     end
   end
 
@@ -1355,8 +1356,9 @@ defmodule PtcRunner.Kernel.MCPSource do
            {:ok, response} <-
              http(request, headers, payload, @max_transport_response_bytes),
            {:ok, body} <- response_body(response, request.id),
-           :ok <- capture_exchange(context, :streamable_http, payload, body) do
-        bounded_outcome(body, method, max_bytes)
+           outcome = bounded_outcome(body, method, max_bytes),
+           :ok <- capture_exchange(context, :streamable_http, payload, body, outcome) do
+        outcome
       end
     end)
     |> strip_http_provenance()
@@ -1393,8 +1395,18 @@ defmodule PtcRunner.Kernel.MCPSource do
 
     case request do
       {:ok, %{request: payload, response: body} = exchange} ->
-        with :ok <- capture_exchange(context, :stdio, payload, body, stderr_capture(exchange)),
-             do: bounded_rpc_outcome(body, method, max_bytes)
+        outcome = bounded_rpc_outcome(body, method, max_bytes)
+
+        with :ok <-
+               capture_exchange(
+                 context,
+                 :stdio,
+                 payload,
+                 body,
+                 stderr_capture(exchange),
+                 outcome
+               ),
+             do: outcome
 
       {:ok, body} ->
         bounded_rpc_outcome(body, method, max_bytes)
@@ -1407,17 +1419,18 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp capture_exchange(context, transport, request, response),
-    do: capture_exchange(context, transport, request, response, nil)
+  defp capture_exchange(context, transport, request, response, outcome),
+    do: capture_exchange(context, transport, request, response, nil, outcome)
 
-  defp capture_exchange(nil, _transport, _request, _response, _stderr), do: :ok
+  defp capture_exchange(nil, _transport, _request, _response, _stderr, _outcome), do: :ok
 
   defp capture_exchange(
          %{inspection_sink: nil},
          _transport,
          _request,
          _response,
-         _stderr
+         _stderr,
+         _outcome
        ),
        do: :ok
 
@@ -1426,7 +1439,8 @@ defmodule PtcRunner.Kernel.MCPSource do
          transport,
          %{"id" => request_id} = request,
          %{"id" => request_id} = response,
-         stderr
+         stderr,
+         outcome
        ) do
     correlation = %{capability_id: capability_id, request_id: request_id}
 
@@ -1441,7 +1455,7 @@ defmodule PtcRunner.Kernel.MCPSource do
       end)
     end
 
-    case response_capture(context, response, request_id) do
+    case response_capture(context, response, request_id, outcome) do
       {:ok, key, body} ->
         InspectionSink.emit_mcp_exchange(
           sink,
@@ -1461,15 +1475,18 @@ defmodule PtcRunner.Kernel.MCPSource do
          _transport,
          _request,
          _response,
-         _stderr
+         _stderr,
+         _outcome
        ),
        do: InspectionSink.emit(sink, "mcp-request", %{}, %{})
 
-  defp response_capture(context, response, request_id) do
+  defp response_capture(context, response, request_id, outcome) do
     # Digest capture removes bulk read output. A failed call is what an operator
-    # reads afterwards and may not reproduce on a rerun, so its body stays full.
+    # reads afterwards and may not reproduce on a rerun, so its body stays full
+    # -- including a body this run went on to reject as oversized or malformed,
+    # which is why the outcome is decided before the exchange is captured.
     if Map.get(context, :inspection_capture, :full) == :digest_results and
-         not error_response?(response) do
+         match?({:ok, _result}, outcome) and not error_response?(response) do
       digested_response(response, request_id)
     else
       {:ok, :body, response}

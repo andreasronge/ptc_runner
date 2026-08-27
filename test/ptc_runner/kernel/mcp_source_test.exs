@@ -509,6 +509,36 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "digest result capture keeps a body this run rejected as oversized", %{tmp_dir: dir} do
+    # The response looks successful on the wire and is only rejected once the
+    # result is bounded, so capture has to wait for the outcome. Digesting it
+    # would leave no evidence of what the server actually sent.
+    fixture = fixture(self(), large_text?: true)
+    on_exit(fixture.close)
+
+    tools = %{"text" => %{as: "remote.text", effect: :read, inspection_capture: :digest_results}}
+    inspection_path = Path.join(dir, "oversized.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: value}} =
+             dir
+             |> manifest(["remote.text"], program: single_call_program("remote.text", "x"))
+             |> directory_request(registry(fixture.endpoint, tools: tools),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert %{"reason" => "invalid_result", "details" => "mcp_response_exceeded"} =
+             get_in(value, ["value", "value"])
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert %{"body" => %{"result" => _result}} = response["payload"]
+    refute Map.has_key?(response["payload"], "body_identity")
+  end
+
+  @tag :tmp_dir
   test "digest result capture keeps the record lifecycle a full run produces", %{tmp_dir: dir} do
     fixture = fixture(self())
     on_exit(fixture.close)
