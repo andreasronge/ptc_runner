@@ -179,7 +179,8 @@ An MCP installation belongs in `ptc-host.json`:
       "effect": "read",
       "description": "Read one UTF-8 file beneath the granted root.",
       "model_visible": true,
-      "error_feedback": "closed"
+      "error_feedback": "closed",
+      "inspection_capture": "full"
     }
   }
 }
@@ -196,6 +197,15 @@ name in `config.model_visible`. Visibility never grants or denies call
 authority. `error_feedback: "bounded"` may expose up to 1,024 bytes of
 validated server error text as untrusted model feedback, so enable it only when
 the server cannot return secrets, paths, or stack traces.
+
+`inspection_capture` is the closed host-only enum `"full"` (the default) or
+`"digest_results"`. The latter is accepted only for read mappings. Private
+inspection then keeps arguments and requests but stores deterministic JSON
+identity metadata for responses and results. It cannot recover the content;
+rerun with full capture when content is needed. Digests of guessable values are
+not confidential, and MCP stderr remains full within `stderr_bytes`. Select
+provider page sizes and configured call, event, and clock limits suitable for
+the source volume.
 
 ## Select less authority in the manifest
 

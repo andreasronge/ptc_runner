@@ -3,12 +3,13 @@ defmodule PtcRunner.Kernel.InspectionRecord do
 
   alias PtcRunner.Kernel.InspectionArtifact.Codec
   alias PtcRunner.Kernel.InspectionRecordTypes
+  alias PtcRunner.Kernel.InspectionValueIdentity
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Lisp.RetainedSize
 
-  @schema_version 8
+  @schema_version 9
   @envelope_keys ~w(schema_version run_id trace_id sequence timestamp record_type correlation payload)
 
   @spec build(binary(), binary(), pos_integer(), binary(), map(), map(), pos_integer()) ::
@@ -78,14 +79,22 @@ defmodule PtcRunner.Kernel.InspectionRecord do
          "payload" => payload
        })
        when record_type in ["capability-input", "capability-output"] do
-    value_key = if record_type == "capability-input", do: "arguments", else: "result"
+    value_keys =
+      case record_type do
+        "capability-input" -> ["arguments"]
+        "capability-output" -> ["result", "result_identity"]
+      end
 
-    valid_id?(id) and valid_capability_payload?(payload, value_key) and
-      ((payload["environment"] == "workflow" and
-          exact_keys?(payload, ["environment", "name", value_key])) or
-         (payload["environment"] == "mission" and
-            exact_keys?(payload, ["environment", "mission_name", "name", value_key]) and
-            valid_id?(payload["mission_name"])))
+    Enum.any?(value_keys, fn value_key ->
+      valid_id?(id) and valid_capability_payload?(payload, value_key) and
+        (value_key != "result_identity" or
+           InspectionValueIdentity.valid?(payload[value_key])) and
+        ((payload["environment"] == "workflow" and
+            exact_keys?(payload, ["environment", "name", value_key])) or
+           (payload["environment"] == "mission" and
+              exact_keys?(payload, ["environment", "mission_name", "name", value_key]) and
+              valid_id?(payload["mission_name"])))
+    end)
   end
 
   defp valid_shape?(%{
@@ -106,10 +115,17 @@ defmodule PtcRunner.Kernel.InspectionRecord do
     exact_keys?(correlation, ~w(capability_id request_id)) and
       valid_id?(correlation["capability_id"]) and valid_request_id?(request_id) and
       (exact_keys?(payload, ~w(transport body)) or
-         (exact_keys?(payload, ~w(transport body mission_name)) and
+         exact_keys?(payload, ~w(transport body_identity)) or
+         ((exact_keys?(payload, ~w(transport body mission_name)) or
+             exact_keys?(payload, ~w(transport body_identity mission_name))) and
             valid_id?(payload["mission_name"]))) and
       payload["transport"] in ["stdio", "streamable_http"] and
-      MCPProtocol.valid_inspection_exchange?(record_type, payload["body"], request_id)
+      if(Map.has_key?(payload, "body"),
+        do: MCPProtocol.valid_inspection_exchange?(record_type, payload["body"], request_id),
+        else:
+          record_type == "mcp-response" and
+            InspectionValueIdentity.valid?(payload["body_identity"])
+      )
   end
 
   defp valid_shape?(%{

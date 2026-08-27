@@ -1183,7 +1183,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   # protocol rule rather than to PtcRunner's naming rule. Only `as` crosses the
   # capability boundary, and that one stays lowercase-dotted.
   defp tool(upstream, value) do
-    allowed = ~w(as effect description error_feedback model_visible)
+    allowed = ~w(as effect description error_feedback inspection_capture model_visible)
 
     with true <- MCPProtocol.valid_tool_name?(upstream),
          true <- is_map(value),
@@ -1191,6 +1191,9 @@ defmodule PtcRunner.Kernel.HostConfig do
          as when is_binary(as) <- value["as"],
          true <- valid_name?(as),
          effect when effect in ["read", "write"] <- value["effect"],
+         capture when capture in ["full", "digest_results"] <-
+           Map.get(value, "inspection_capture", "full"),
+         true <- capture == "full" or effect == "read",
          {:ok, description} <- optional_description(Map.get(value, "description")),
          feedback when feedback in ["closed", "bounded"] <-
            Map.get(value, "error_feedback", "closed"),
@@ -1202,7 +1205,8 @@ defmodule PtcRunner.Kernel.HostConfig do
          effect: tool_effect(effect),
          description: description,
          error_feedback: error_feedback(feedback),
-         model_visible: model_visible
+         model_visible: model_visible,
+         inspection_capture: String.to_existing_atom(capture)
        }}
     else
       _reason -> {:error, :invalid_tool}
@@ -1955,6 +1959,10 @@ defmodule PtcRunner.Kernel.HostConfig do
             "error_feedback" => %{
               "enum" => ["closed", "bounded"],
               "default" => "closed"
+            },
+            "inspection_capture" => %{
+              "enum" => ["full", "digest_results"],
+              "default" => "full"
             },
             "model_visible" => %{"type" => "boolean", "default" => false}
           },

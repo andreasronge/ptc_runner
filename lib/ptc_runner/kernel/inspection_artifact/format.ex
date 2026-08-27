@@ -18,7 +18,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Format do
   @header_magic "PTCINS01"
   @footer_magic "PTCIFTR1"
   @format_version 1
-  @schema_version 8
+  @schema_version 9
   @header_size 16
   @footer_size 192
 

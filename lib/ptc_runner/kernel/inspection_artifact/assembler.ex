@@ -22,7 +22,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
       limits: limits,
       run_id: identity && identity.run_id,
       trace_id: identity && identity.trace_id,
-      schema_version: 8,
+      schema_version: 9,
       first_timestamp: nil,
       last_timestamp: nil,
       first_sequence: 0,
@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
       conversation: Conversation.new(),
       inputs: %{},
       outputs: %{},
+      capture_modes: %{},
       exceptions: %{},
       mcp_requests: %{},
       mcp_responses: %{},
@@ -161,10 +162,17 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
   defp put_join(state, %{"record_type" => "capability-output"} = record) do
     id = record["correlation"]["capability_id"]
     input = Map.get(state.inputs, id)
+    mode = capture_mode(record["payload"], "result")
 
     if compatible_capability?(input, record) and not Map.has_key?(state.outputs, id) and
-         valid_exception_output?(state, id, record["payload"]["result"]) do
-      {:ok, %{state | outputs: Map.put(state.outputs, id, record["sequence"])}}
+         compatible_capture?(state, id, mode) and
+         valid_exception_output?(state, id, record["payload"], mode) do
+      {:ok,
+       %{
+         state
+         | outputs: Map.put(state.outputs, id, record["sequence"]),
+           capture_modes: Map.put(state.capture_modes, id, mode)
+       }}
     else
       {:error, :invalid_record}
     end
@@ -206,18 +214,22 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
 
   defp put_join(state, %{"record_type" => "mcp-response"} = record) do
     key = mcp_key(record)
+    id = elem(key, 0)
     request = Map.get(state.mcp_requests, key)
     payload = record["payload"]
+    mode = capture_mode(payload, "body")
 
     if Map.has_key?(state.mcp_responses, key) or is_nil(request) or
          request.transport != payload["transport"] or
-         request.mission_name != payload["mission_name"] do
+         request.mission_name != payload["mission_name"] or
+         not compatible_capture?(state, id, mode) do
       {:error, :invalid_record}
     else
       {:ok,
        %{
          state
-         | mcp_responses: Map.put(state.mcp_responses, key, record["sequence"])
+         | mcp_responses: Map.put(state.mcp_responses, key, record["sequence"]),
+           capture_modes: Map.put(state.capture_modes, id, mode)
        }}
     end
   end
@@ -413,7 +425,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
   defp mission_join?(%{environment: "workflow", mission_name: nil}, nil), do: true
   defp mission_join?(_input, _mission_name), do: false
 
-  defp valid_exception_output?(state, id, result) do
+  defp valid_exception_output?(state, id, payload, :full) do
     not Map.has_key?(state.exceptions, id) or
       match?(
         %{
@@ -422,9 +434,17 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
           "reason" => "exception",
           "retryable?" => false
         },
-        result
+        payload["result"]
       )
   end
+
+  defp valid_exception_output?(_state, _id, _payload, :digest_results), do: true
+
+  defp capture_mode(payload, value_key),
+    do: if(Map.has_key?(payload, value_key), do: :full, else: :digest_results)
+
+  defp compatible_capture?(state, id, mode),
+    do: Map.get(state.capture_modes, id, mode) == mode
 
   defp mcp_key(record) do
     correlation = record["correlation"]

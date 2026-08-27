@@ -45,6 +45,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.InspectionValueIdentity
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPHTTPAdapter
@@ -428,13 +429,19 @@ defmodule PtcRunner.Kernel.MCPSource do
         description = Map.get(mapping, :description)
         model_visible = Map.get(mapping, :model_visible, true)
         error_feedback = Map.get(mapping, :error_feedback, :closed)
+        inspection_capture = Map.get(mapping, :inspection_capture, :full)
 
-        if Map.keys(mapping) --
-             [:as, :effect, :description, :model_visible, :error_feedback] == [] and
-             MCPProtocol.valid_tool_name?(upstream) and public =~ @name and
-             not MapSet.member?(public_names, public) and
-             (is_nil(description) or valid_string?(description, 4_096)) and
-             is_boolean(model_visible) and error_feedback in [:closed, :bounded] do
+        if valid_installed_mapping?(
+             upstream,
+             public,
+             mapping,
+             public_names,
+             description,
+             model_visible,
+             error_feedback,
+             inspection_capture,
+             effect
+           ) do
           {:cont,
            {:ok,
             Map.put(normalized, upstream, %{
@@ -442,7 +449,8 @@ defmodule PtcRunner.Kernel.MCPSource do
               effect: effect,
               description: description,
               model_visible: model_visible,
-              error_feedback: error_feedback
+              error_feedback: error_feedback,
+              inspection_capture: inspection_capture
             }), MapSet.put(public_names, public)}}
         else
           {:halt, {:error, :invalid_tools}}
@@ -458,6 +466,27 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp installed_tools(_tools), do: {:error, :invalid_tools}
+
+  defp valid_installed_mapping?(
+         upstream,
+         public,
+         mapping,
+         public_names,
+         description,
+         model_visible,
+         error_feedback,
+         inspection_capture,
+         effect
+       ) do
+    Map.keys(mapping) --
+      [:as, :effect, :description, :model_visible, :error_feedback, :inspection_capture] == [] and
+      MCPProtocol.valid_tool_name?(upstream) and public =~ @name and
+      not MapSet.member?(public_names, public) and
+      (is_nil(description) or valid_string?(description, 4_096)) and
+      is_boolean(model_visible) and error_feedback in [:closed, :bounded] and
+      inspection_capture in [:full, :digest_results] and
+      (inspection_capture == :full or effect == :read)
+  end
 
   defp installed_snapshot_identity(nil, _tools), do: {:ok, nil}
 
@@ -966,6 +995,7 @@ defmodule PtcRunner.Kernel.MCPSource do
              input_schema: contract.input_schema,
              output_schema: contract.output_schema,
              effect: mapping.effect,
+             inspection_capture: mapping.inspection_capture,
              callback: fn _arguments, _context -> {:error, :uninstalled_mcp_callback} end
            ),
          capability = %{
@@ -1412,8 +1442,9 @@ defmodule PtcRunner.Kernel.MCPSource do
        ) do
     correlation = %{capability_id: capability_id, request_id: request_id}
 
-    payload = fn body ->
-      %{transport: transport, body: body}
+    payload = fn key, body ->
+      %{transport: transport}
+      |> Map.put(key, body)
       |> then(fn payload ->
         case Map.get(context, :mission_name) do
           name when is_binary(name) -> Map.put(payload, :mission_name, name)
@@ -1425,8 +1456,11 @@ defmodule PtcRunner.Kernel.MCPSource do
     InspectionSink.emit_mcp_exchange(
       sink,
       correlation,
-      payload.(request),
-      payload.(response),
+      payload.(:body, request),
+      case Map.get(context, :inspection_capture, :full) do
+        :full -> payload.(:body, response)
+        :digest_results -> payload.(:body_identity, inspection_identity!(response))
+      end,
       stderr_payload(context, stderr)
     )
   end
@@ -1455,6 +1489,11 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp stderr_payload(_context, _stderr), do: nil
+
+  defp inspection_identity!(value) do
+    {:ok, identity} = InspectionValueIdentity.identity(value)
+    identity
+  end
 
   defp bounded_outcome(body, method, max_result_bytes) do
     with {:ok, result} <- MCPProtocol.outcome(body, method),
