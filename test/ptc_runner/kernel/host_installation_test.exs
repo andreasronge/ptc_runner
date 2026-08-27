@@ -988,6 +988,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              max_calls: 128,
              structured_output_mode: :unsupported,
              usage_guarantees: %{tokens: false, cost_currency: nil},
+             reservation_tariff: nil,
              request_timeout_ms: 120_000
            }
 
