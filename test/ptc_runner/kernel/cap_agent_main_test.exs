@@ -284,7 +284,7 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
   end
 
   defp agent_main_closure do
-    ~w(agent.main agent.core agent.feedback agent.native agent.prompt agent.retry
+    ~w(agent.main agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry
        kernel llm result workflow.event)
   end
 

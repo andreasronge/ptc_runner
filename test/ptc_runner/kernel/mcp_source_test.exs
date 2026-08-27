@@ -1230,8 +1230,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         )
 
       {:ok, components} =
-        Library.components(~w(agent.core agent.feedback agent.native agent.prompt agent.retry
-             kernel llm result workflow.event))
+        Library.components(
+          ~w(agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry
+             kernel llm result workflow.event)
+        )
 
       {:ok, bundle} = Kernel.compile_bundle(components)
       {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])

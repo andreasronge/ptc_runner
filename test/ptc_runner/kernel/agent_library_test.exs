@@ -2139,7 +2139,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     names =
-      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      ~w(agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
 
     {:ok, components} = Library.components(names)
     {:ok, bundle} = Kernel.compile_bundle(components)
@@ -4983,7 +4983,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, llm} = LLMCapability.new(requester: requester)
 
     names =
-      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      ~w(agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
 
     {:ok, components} = Library.components(names)
     {:ok, bundle} = Kernel.compile_bundle(components)
@@ -5088,10 +5088,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   defp agent_bundle(opts) do
     names =
       if Keyword.get(opts, :agent_main, false) do
-        ~w(agent.main agent.core agent.feedback agent.native agent.prompt agent.retry
+        ~w(agent.main agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry
            kernel llm result workflow.event)
       else
-        ~w(agent.core agent.feedback agent.native agent.prompt agent.retry
+        ~w(agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry
            kernel llm result workflow.event)
       end
 

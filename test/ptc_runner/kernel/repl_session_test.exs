@@ -67,7 +67,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     # Runner: shipped preludes require runtime tools (workflow-annotate,
     # runtime-usage), and fail-closed attach rejects a session missing them.
     names =
-      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      ~w(agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
 
     {:ok, components} = Library.components(names)
     {:ok, bundle} = Kernel.compile_bundle(components)

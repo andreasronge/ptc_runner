@@ -119,7 +119,7 @@ defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
     {:ok, %{capabilities: [capability], close: close}} = build_live_llm(limits)
 
     names =
-      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry
+      ~w(agent.core agent.failure agent.feedback agent.native agent.prompt agent.retry
          kernel llm result workflow.event)
 
     {:ok, components} = Library.components(names)

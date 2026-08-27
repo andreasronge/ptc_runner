@@ -23,8 +23,10 @@ manifest must select the shipped library:
 {"library": "agent.core"}
 ```
 
-The resolved closure includes `agent.feedback`, `agent.native`, `agent.prompt`,
-`agent.retry`, `kernel`, `llm`, `result`, and `workflow.event`.
+The resolved closure includes `agent.failure`, `agent.feedback`, `agent.native`,
+`agent.prompt`, `agent.retry`, `kernel`, `llm`, `result`, and `workflow.event`.
+`agent.failure` is a generated `:discoverable` classifier over the existing
+bounded LLM envelope; it does not change public outcomes or fail-fast evidence.
 
 Select `{"library": "agent.main"}` when the manifest entry is
 `agent.main/run`; its dependency closure includes `agent.core`.

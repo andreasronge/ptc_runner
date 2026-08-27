@@ -733,6 +733,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
              |> RunLifecycle.build(registry)
 
     assert built.config.workflow_environment.bundle.component_ids == [
+             "agent.failure",
              "agent.feedback",
              "agent.native",
              "agent.retry",

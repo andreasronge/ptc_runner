@@ -39,8 +39,10 @@ defmodule PtcRunner.Kernel.FrozenBundleTest do
              FrozenBundle.trace_metadata(nil)
 
     {:ok, components} =
-      Library.components(~w(agent.feedback agent.native agent.prompt agent.retry kernel llm result
-        workflow.event agent.core))
+      Library.components(
+        ~w(agent.failure agent.feedback agent.native agent.prompt agent.retry kernel llm result
+        workflow.event agent.core)
+      )
 
     {:ok, bundle} = Kernel.compile_bundle(components)
     assert {:ok, metadata} = FrozenBundle.trace_metadata(bundle)
@@ -54,7 +56,7 @@ defmodule PtcRunner.Kernel.FrozenBundleTest do
     agent_core_indices = Enum.at(metadata.dependency_indices, agent_core_position)
 
     expected =
-      ~w(agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      ~w(agent.failure agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
       |> Enum.map(&Map.fetch!(positions, &1))
       |> Enum.sort()
 

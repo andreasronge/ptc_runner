@@ -23,23 +23,10 @@ defmodule PtcRunner.Kernel.ProviderError do
   provenance is treated conservatively after callback entry.
   """
 
+  alias PtcRunner.Kernel.LLMFailureCatalog
   alias PtcRunner.Kernel.LLMReplayDiagnostic
 
-  @kinds [
-    :denied,
-    :not_found,
-    :unavailable,
-    :invalid_request,
-    :internal,
-    :domain_error,
-    :invalid_result,
-    :authentication_failed,
-    :payment_required,
-    :rate_limited,
-    :tool_calling_unsupported,
-    :timeout,
-    :transport_error
-  ]
+  @kinds LLMFailureCatalog.provider_kinds()
   @options [:retryable?, :mutation_state, :dispatch_provenance, :replay_request_hash]
   @enforce_keys [:kind]
   defstruct [
@@ -51,20 +38,7 @@ defmodule PtcRunner.Kernel.ProviderError do
     retryable?: false
   ]
 
-  @type kind ::
-          :denied
-          | :not_found
-          | :unavailable
-          | :invalid_request
-          | :internal
-          | :domain_error
-          | :invalid_result
-          | :authentication_failed
-          | :payment_required
-          | :rate_limited
-          | :tool_calling_unsupported
-          | :timeout
-          | :transport_error
+  @type kind :: LLMFailureCatalog.provider_kind()
   @type mutation_state :: :indeterminate
   @type dispatch_provenance :: :not_dispatched | :dispatched | :possibly_dispatched
   @type t :: %__MODULE__{
