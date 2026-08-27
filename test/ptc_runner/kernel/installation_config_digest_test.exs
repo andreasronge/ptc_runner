@@ -145,6 +145,14 @@ defmodule PtcRunner.Kernel.InstallationConfigDigestTest do
       put_in(llm, ["install", "deepseek", "structured_output_mode"], "json_schema")
 
     refute digest(llm, "deepseek") == digest(json_schema, "deepseek")
+
+    guaranteed =
+      put_in(llm, ["install", "deepseek", "usage_guarantees"], %{
+        "tokens" => true,
+        "cost_currency" => "USD"
+      })
+
+    refute digest(llm, "deepseek") == digest(guaranteed, "deepseek")
   end
 
   test "credential values are excluded while binding names and env keys remain" do
@@ -414,6 +422,7 @@ defmodule PtcRunner.Kernel.InstallationConfigDigestTest do
         "deepseek" => %{
           "source" => "llm",
           "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "installation_revision" => "model-policy-v2",
           "model" => model,
           "credential" => "openrouter_key"

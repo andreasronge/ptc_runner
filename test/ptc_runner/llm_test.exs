@@ -317,26 +317,37 @@ defmodule PtcRunner.LLMTest do
 
   describe "Requirements" do
     test "live authorization is the minimum of the effective limit and installed max_tokens" do
+      guarantees = %{tokens: true, cost_currency: "USD"}
+
       assert {:ok, authorized} =
-               Requirements.live(%{max_tokens: 2_048, temperature: 0.15}, 4_096)
+               Requirements.live(
+                 %{max_tokens: 2_048, temperature: 0.15},
+                 4_096,
+                 :unsupported,
+                 guarantees
+               )
 
       assert authorized.exact_options == %{max_tokens: 2_048, temperature: 0.15}
       assert authorized.structured_output_mode == :unsupported
+      assert authorized.usage_guarantees == %{tokens: true, cost_currency: "USD"}
 
-      assert {:ok, limited} = Requirements.live(%{max_tokens: 8_192}, 4_096)
+      assert {:ok, limited} =
+               Requirements.live(%{max_tokens: 8_192}, 4_096, :unsupported, guarantees)
+
       assert limited.exact_options == %{max_tokens: 4_096}
 
-      assert {:ok, omitted} = Requirements.live(%{}, 1_024)
+      assert {:ok, omitted} = Requirements.live(%{}, 1_024, :unsupported, guarantees)
       assert omitted.exact_options == %{max_tokens: 1_024}
 
       assert {:ok, structured} =
-               Requirements.live(%{max_tokens: 256}, 4_096, :json_schema)
+               Requirements.live(%{max_tokens: 256}, 4_096, :json_schema, guarantees)
 
       assert structured.structured_output_mode == :json_schema
       assert structured.exact_options == %{max_tokens: 256}
 
-      assert {:ok, probe} = Requirements.probe(%{max_tokens: 99})
+      assert {:ok, probe} = Requirements.probe(%{max_tokens: 99}, guarantees)
       assert probe.structured_output_mode == :unsupported
+      assert probe.usage_guarantees == guarantees
     end
 
     test "probe authorization forces max_tokens 1 and keeps other installation controls" do
@@ -349,7 +360,9 @@ defmodule PtcRunner.LLMTest do
         reasoning_effort: :medium
       }
 
-      assert {:ok, probe} = Requirements.probe(params)
+      assert {:ok, probe} =
+               Requirements.probe(params, %{tokens: false, cost_currency: nil})
+
       assert probe.exact_options == Map.put(params, :max_tokens, 1)
     end
 

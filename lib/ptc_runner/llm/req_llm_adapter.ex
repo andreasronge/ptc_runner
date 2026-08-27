@@ -51,6 +51,23 @@ if Code.ensure_loaded?(ReqLLM) do
     @request_token_headroom 256
     @ollama_base_url "http://localhost:11434"
     @default_bedrock_region "eu-north-1"
+    @usage_observation_key :ptc_runner_usage_observation
+    @raw_input_usage_keys [
+      :input,
+      "input",
+      :prompt_tokens,
+      "prompt_tokens",
+      :input_tokens,
+      "input_tokens"
+    ]
+    @raw_output_usage_keys [
+      :output,
+      "output",
+      :completion_tokens,
+      "completion_tokens",
+      :output_tokens,
+      "output_tokens"
+    ]
     @req_llm_generation_options [
       :api_key,
       :frequency_penalty,
@@ -486,10 +503,10 @@ if Code.ensure_loaded?(ReqLLM) do
           usage = body["usage"] || %{}
 
           tokens =
-            %{
-              input: usage["prompt_tokens"] || 0,
-              output: usage["completion_tokens"] || 0
-            }
+            %{}
+            |> maybe_put_usage_field(:input, usage, "prompt_tokens")
+            |> maybe_put_usage_field(:output, usage, "completion_tokens")
+            |> maybe_put_usage_field(:total_cost, usage, "total_cost")
             |> add_cache_fields()
 
           {:ok, %{content: text, tokens: tokens}}
@@ -503,7 +520,7 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp call_req_llm(%ReqLLMPreparedModel{selector: model, model: req_llm_model}, messages, opts) do
-      http_opts = Keyword.get(opts, :req_http_options, [])
+      http_opts = observed_usage_http_options(opts, req_llm_model)
       cache_enabled = Keyword.get(opts, :cache, false)
 
       generation_opts = req_llm_generation_opts(opts, req_llm_model, messages)
@@ -537,7 +554,7 @@ if Code.ensure_loaded?(ReqLLM) do
            opts
          ) do
       if native_json_schema_model?(req_llm_model) do
-        http_opts = Keyword.get(opts, :req_http_options, [])
+        http_opts = observed_usage_http_options(opts, req_llm_model)
         cache_enabled = Keyword.get(opts, :cache, false)
 
         generation_opts =
@@ -575,7 +592,7 @@ if Code.ensure_loaded?(ReqLLM) do
            tools,
            opts
          ) do
-      http_opts = Keyword.get(opts, :req_http_options, [])
+      http_opts = observed_usage_http_options(opts, req_llm_model)
       cache_enabled = Keyword.get(opts, :cache, false)
 
       request_payload = {messages, tools}
@@ -1097,10 +1114,16 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp extract_ollama_tokens(body) do
-      %{
-        input: body["prompt_eval_count"] || 0,
-        output: body["eval_count"] || 0
-      }
+      %{}
+      |> maybe_put_usage_field(:input, body, "prompt_eval_count")
+      |> maybe_put_usage_field(:output, body, "eval_count")
+    end
+
+    defp maybe_put_usage_field(tokens, target_key, source, source_key) do
+      case Map.fetch(source, source_key) do
+        {:ok, value} -> Map.put(tokens, target_key, value)
+        :error -> tokens
+      end
     end
 
     defp maybe_put_ollama_max_tokens(options, opts) do
@@ -1461,6 +1484,74 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
+    # ReqLLM's OpenAI decoder turns absent or partial usage into zero counts.
+    # Capture provider-specific raw usage before that decoder runs, then attach
+    # only the closed observation marker to the final response. A request step
+    # registers the projection step after the provider has assembled its own
+    # response pipeline, while the capture step remains before that pipeline.
+    defp observed_usage_http_options(opts, model) do
+      plugin = usage_observation_plugin(model)
+
+      opts
+      |> Keyword.get(:req_http_options, [])
+      |> Keyword.update(:plugins, [plugin], fn plugins -> [plugin | List.wrap(plugins)] end)
+    end
+
+    defp usage_observation_plugin(model) do
+      fn request ->
+        request
+        |> Req.Request.append_response_steps(
+          ptc_runner_capture_usage: fn request_response ->
+            capture_raw_usage(request_response, model)
+          end
+        )
+        |> Req.Request.append_request_steps(
+          ptc_runner_register_usage_projection: &register_usage_projection/1
+        )
+      end
+    end
+
+    defp capture_raw_usage({request, response}, model) do
+      observation = raw_usage_observation(response.body, model)
+      private = Map.put(response.private, @usage_observation_key, observation)
+      {request, %{response | private: private}}
+    end
+
+    defp register_usage_projection(request) do
+      Req.Request.append_response_steps(
+        request,
+        ptc_runner_project_usage: &project_usage_observation/1
+      )
+    end
+
+    defp project_usage_observation({request, %{body: %ReqLLM.Response{} = body} = response}) do
+      observation = Map.get(response.private, @usage_observation_key, :missing)
+      provider_meta = Map.put(body.provider_meta, @usage_observation_key, observation)
+      {request, %{response | body: %{body | provider_meta: provider_meta}}}
+    end
+
+    defp project_usage_observation(request_response), do: request_response
+
+    defp raw_usage_observation(body, model) do
+      with {:ok, provider} <- ReqLLM.provider(model.provider),
+           true <- function_exported?(provider, :extract_usage, 2),
+           {:ok, usage} when is_map(usage) <- provider.extract_usage(body, model),
+           true <- raw_token_pair?(usage) do
+        :reported
+      else
+        _missing_or_invalid -> :missing
+      end
+    rescue
+      _exception -> :missing
+    catch
+      _kind, _reason -> :missing
+    end
+
+    defp raw_token_pair?(usage) do
+      Enum.any?(@raw_input_usage_keys, &Map.has_key?(usage, &1)) and
+        Enum.any?(@raw_output_usage_keys, &Map.has_key?(usage, &1))
+    end
+
     defp merge_exact_options(%ReqLLMPreparedModel{} = target, opts) do
       (target.request_options || target.exact_options)
       |> Enum.reject(fn {_key, value} -> is_nil(value) end)
@@ -1470,10 +1561,11 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp attest_structured_requirements(model, %{
            structured_output_mode: mode,
-           usage_guarantees: %{tokens: false, cost_currency: nil},
+           usage_guarantees: %{tokens: tokens, cost_currency: currency},
            reservation: %{total_tokens?: false, cost_tariff: nil}
          })
-         when mode in [:json_schema, :json_object, :unsupported] do
+         when mode in [:json_schema, :json_object, :unsupported] and is_boolean(tokens) and
+                currency in ["USD", nil] do
       attest_structured_mode(model, mode)
     end
 
@@ -2047,23 +2139,53 @@ if Code.ensure_loaded?(ReqLLM) do
           cache_write_from_meta
 
       %{
-        input: usage[:input_tokens] || usage["input_tokens"] || 0,
-        output: usage[:output_tokens] || usage["output_tokens"] || 0,
         cache_creation: cache_creation,
         cache_read: cache_read
       }
+      |> maybe_put_observed_token_usage(usage, provider_meta)
       |> maybe_put_total_cost(usage)
     end
 
     @doc false
     def build_stream_done_chunk(usage) do
-      %{done: true, tokens: build_tokens_from_req_llm_response(usage, %{})}
+      provider_meta = %{@usage_observation_key => :reported}
+      %{done: true, tokens: build_tokens_from_req_llm_response(usage, provider_meta)}
+    end
+
+    defp maybe_put_observed_token_usage(tokens, usage, provider_meta) do
+      if observed_token_usage?(provider_meta) do
+        tokens
+        |> maybe_put_req_llm_usage(:input, usage, :input_tokens, "input_tokens")
+        |> maybe_put_req_llm_usage(:output, usage, :output_tokens, "output_tokens")
+      else
+        tokens
+      end
+    end
+
+    defp observed_token_usage?(provider_meta) do
+      Map.get(provider_meta, @usage_observation_key) == :reported or
+        Map.get(provider_meta, :response_cache_hit) == true or
+        Map.get(provider_meta, "response_cache_hit") == true
     end
 
     defp maybe_put_total_cost(tokens, usage) do
-      case usage[:total_cost] || usage["total_cost"] do
-        total_cost when is_number(total_cost) -> Map.put(tokens, :total_cost, total_cost)
-        _unknown -> tokens
+      case fetch_usage(usage, :total_cost, "total_cost") do
+        {:ok, total_cost} -> Map.put(tokens, :total_cost, total_cost)
+        :error -> tokens
+      end
+    end
+
+    defp maybe_put_req_llm_usage(tokens, target_key, usage, atom_key, string_key) do
+      case fetch_usage(usage, atom_key, string_key) do
+        {:ok, value} -> Map.put(tokens, target_key, value)
+        :error -> tokens
+      end
+    end
+
+    defp fetch_usage(usage, atom_key, string_key) do
+      case Map.fetch(usage, atom_key) do
+        {:ok, value} -> {:ok, value}
+        :error -> Map.fetch(usage, string_key)
       end
     end
 

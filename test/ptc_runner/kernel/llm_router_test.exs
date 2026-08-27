@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
@@ -130,7 +131,12 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                "successful_calls" => 1,
                "usage_calls" => 1,
                "missing_usage_calls" => 0,
-               "usage" => %{"input" => 1_304, "output" => 4_096, "total_cost" => 0.002335}
+               "usage_overflow" => false,
+               "usage" => %{
+                 "input" => 1_304,
+                 "output" => 4_096,
+                 "total_cost" => %{"currency" => "USD", "microunits" => 2_335}
+               }
              }
            ]
 
@@ -1452,7 +1458,12 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                "successful_calls" => 1,
                "usage_calls" => 1,
                "missing_usage_calls" => 0,
-               "usage" => %{"input" => 11, "output" => 5, "total_cost" => 0.0042}
+               "usage_overflow" => false,
+               "usage" => %{
+                 "input" => 11,
+                 "output" => 5,
+                 "total_cost" => %{"currency" => "USD", "microunits" => 4_200}
+               }
              }
            ]
 
@@ -1463,7 +1474,12 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
                "successful_calls" => 1,
                "usage_calls" => 1,
                "missing_usage_calls" => 0,
-               "usage" => %{"input" => 11, "output" => 5, "total_cost" => 0.0042}
+               "usage_overflow" => false,
+               "usage" => %{
+                 "input" => 11,
+                 "output" => 5,
+                 "total_cost" => %{"currency" => "USD", "microunits" => 4_200}
+               }
              }
            ]
 
@@ -1473,7 +1489,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
       "state" => "available",
       "input" => 11,
       "output" => 5,
-      "total_cost" => 0.0042
+      "total_cost" => %{"currency" => "USD", "microunits" => 4_200}
     })
   end
 
@@ -1589,7 +1605,73 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              )
 
     assert {:error, error} = capability.callback.(%{"messages" => []})
+    assert error.kind == :invalid_result
+  end
+
+  test "the response boundary measures the final fixed-point usage object" do
+    raw = %{
+      "content" => "answer",
+      "tokens" => %{"input" => 1, "output" => 2, "total_cost" => 0}
+    }
+
+    normalized =
+      put_in(raw, ["tokens", "total_cost"], %{
+        "currency" => "USD",
+        "microunits" => 0
+      })
+
+    raw_bytes = RetainedSize.bytes_with_cap(raw, 10_000)
+    normalized_bytes = RetainedSize.bytes_with_cap(normalized, 10_000)
+    assert normalized_bytes > raw_bytes
+
+    assert {:ok, capability} =
+             LLMCapability.new(
+               requester: fn _request -> {:ok, raw} end,
+               max_response_bytes: raw_bytes
+             )
+
+    assert {:error, error} = capability.callback.(%{"messages" => []})
     assert error.kind == :invalid_request
+    assert error.details == "LLM response exceeded its boundary"
+  end
+
+  test "an oversized response sub-binary is rejected before retention" do
+    parent = String.duplicate("x", 4_096)
+    content = binary_part(parent, 0, 2_048)
+    assert :binary.referenced_byte_size(content) == byte_size(parent)
+
+    assert {:ok, capability} =
+             LLMCapability.new(
+               requester: fn _request -> {:ok, %{content: content}} end,
+               max_response_bytes: 512
+             )
+
+    assert {:error, error} = capability.callback.(%{"messages" => []})
+    assert error.kind == :invalid_request
+    assert error.details == "LLM response exceeded its boundary"
+  end
+
+  test "missing promised usage is a non-retryable invalid provider result" do
+    assert {:ok, capability} =
+             LLMCapability.new(
+               requester: fn _request -> {:ok, %{content: "answer"}} end,
+               usage_guarantees: %{tokens: true, cost_currency: "USD"}
+             )
+
+    assert {:error, error} = capability.callback.(%{"messages" => []})
+    assert error.kind == :invalid_result
+    assert error.retryable? == false
+
+    assert {:ok, unpriced} =
+             LLMCapability.new(
+               requester: fn _request ->
+                 {:ok, %{content: "answer", tokens: %{input: 1, output: 2}}}
+               end,
+               usage_guarantees: %{tokens: true, cost_currency: nil}
+             )
+
+    assert {:ok, %{"tokens" => %{"input" => 1, "output" => 2}}} =
+             unpriced.callback.(%{"messages" => []})
   end
 
   defp capability(parent, tag, response) do

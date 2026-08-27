@@ -273,8 +273,8 @@ sufficient to select a run without loading its activity:
 - workflow and mission capability-call counts;
 - LLM-call summary derived from named `llm-request` events when applicable;
 - the exact closed `llm_spend` projection retained by `run-stopped`, so the
-  Viewer distinguishes empty, incomplete, unpriced, and available spend without
-  reconstructing or guessing pricing state;
+  Viewer distinguishes empty, incomplete, unpriced, available, and overflow
+  spend without reconstructing or guessing pricing state;
 - error count and duration summary;
 - one-way fingerprints of caller-supplied name/model/provider labels, plus
   finite canonical tag keys and enumerated values;
@@ -485,14 +485,18 @@ the matching `generated_sources` item, so a walker that starts from a turn can
 follow evidence without an extra exact read to obtain the links.
 
 Provider response usage omits `total_cost` when pricing is unavailable. A
-present zero is therefore a measured zero-cost response, not an unknown cost.
+present zero-microunit USD object is therefore a measured zero-cost response,
+not an unknown cost. Decimal provider values are parsed exactly and rounded
+upward to one microunit; floats never remain accounting authority.
 
 The canonical LLM usage summary is shared by trace counters and the V3 run
 envelope's `execution.usage`. For routed `llm-request` calls, `llm_usage` groups
 stopped events by model alias and installation revision. Each row reports total
 and successful calls, calls with valid usage, successful calls missing usage,
 and sums of the closed `input`, `output`, `cache_creation`, `cache_read`, and
-`total_cost` fields. A row includes aggregate `total_cost` only when every
+`total_cost` fields. Every row has `usage_overflow`; sums saturate at
+`9_007_199_254_740_991`, and a true flag means at least one displayed value is
+only a lower bound. A row includes aggregate `total_cost` only when every
 successful call has valid usage that reports cost; otherwise cost is unknown
 and omitted. A revision change creates a separate row rather than silently
 combining unlike deployments.
@@ -521,9 +525,11 @@ alias/revision routing identity; they do not duplicate model identity. The
 additional rows remain subject to the existing aggregate result-byte limit.
 Every finished V3 run envelope also publishes the sealed run-state
 `llm_spend` value that canonical `run-stopped.data.usage` retains. Its closed
-states are `empty`, `incomplete`, `unpriced`, and `available`. The first two
-contain only `state`; the latter two require complete non-negative input and
-output totals, and only `available` requires `total_cost`. Consequently an
+states are `empty`, `incomplete`, `unpriced`, `available`, and `overflow`.
+`empty`, `incomplete`, and `overflow` contain only `state`; the latter two
+ordinary states require complete non-negative input and output totals, and only
+`available` requires the canonical USD/microunit `total_cost`. Any aggregate
+token or cost sum beyond the canonical maximum produces `overflow`. Consequently an
 unknown cost never deserializes as measured zero. Command projection validates
 this value through `LLMUsageSummary`; absence or malformed shape invalidates the
 command outcome rather than triggering reconstruction from trace rows. The
@@ -560,31 +566,52 @@ as `result_limit_exceeded` rather than returning a truncated map.
 A filter-defined cohort is one counters call. An explicit list of selected run
 IDs is one call per `run_id`, with the caller reducing the returned
 `llm_usage_by_model` rows in PTC-Lisp. Those rows carry `calls`,
-`successful_calls`, `usage_calls`, `missing_usage_calls`, and a nested `usage`
-map with `input`, `output`, and optional `total_cost`. Group by
+`successful_calls`, `usage_calls`, `missing_usage_calls`, `usage_overflow`, and
+a nested `usage` map with `input`, `output`, and optional fixed-point
+`total_cost`. Group by
 `resolved_model` and sum the call counters plus nested token keys. The run-ID
 list is cohort selection data; each result already carries attested attribution
 or an honest unattributed count. Absent `total_cost` is unknown spend, not
-zero: omit it from the merged `usage` map whenever any contributing row
-withholds it.
+zero. Costs add through their `microunits` fields, never by adding the objects
+themselves. Preserve `usage_overflow`, check sums against
+`9_007_199_254_740_991`, and omit cost whenever any contributing row withholds
+it.
 
 ```clojure
 (defn withheld-cost? [rows]
   (some #(not (contains? (get % "usage") "total_cost")) rows))
 
+(defn cost-microunits [row]
+  (get-in row ["usage" "total_cost" "microunits"]))
+
+(def max-usage 9007199254740991)
+(def token-keys ["input" "output" "cache_creation" "cache_read"])
+
 (defn reduce-model-rows [rows]
   (->> rows
        (group-by #(get % "resolved_model"))
        (map (fn [[model group]]
-              (let [usage (apply merge-with + (map #(get % "usage") group))
-                    usage (if (withheld-cost? group)
-                            (dissoc usage "total_cost")
-                            usage)]
+              (let [withheld? (withheld-cost? group)
+                    keys (filter (fn [key] (some #(contains? (get % "usage") key) group))
+                                 token-keys)
+                    sums (into {} (map (fn [key]
+                                         [key (reduce + (map #(get (get % "usage") key 0) group))])
+                                       keys))
+                    cost (if withheld? 0 (reduce + (map cost-microunits group)))
+                    overflow? (or (some #(get % "usage_overflow") group)
+                                  (some #(> % max-usage) (vals sums))
+                                  (and (not withheld?) (> cost max-usage)))
+                    usage (into {} (map (fn [[key value]] [key (min value max-usage)]) sums))
+                    usage (if withheld?
+                            usage
+                            (assoc usage "total_cost"
+                              {"currency" "USD" "microunits" (min cost max-usage)}))]
                 {"resolved_model" model
                  "calls" (reduce + (map #(get % "calls") group))
                  "successful_calls" (reduce + (map #(get % "successful_calls") group))
                  "usage_calls" (reduce + (map #(get % "usage_calls") group))
                  "missing_usage_calls" (reduce + (map #(get % "missing_usage_calls") group))
+                 "usage_overflow" (boolean overflow?)
                  "usage" usage})))))
 
 (def selected ["run-a" "run-b" "run-c"])

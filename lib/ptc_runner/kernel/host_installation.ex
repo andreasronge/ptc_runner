@@ -54,6 +54,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.ManagerCleanup
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
@@ -361,6 +362,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
       authority_fingerprint: if(authority, do: authority.fingerprint, else: nil),
       local_preflight: local_preflight_mode(installation),
       structured_output_mode: descriptor_structured_output_mode(installation),
+      usage_guarantees: descriptor_usage_guarantees(installation),
       request_timeout_ms: descriptor_request_timeout_ms(installation)
     )
   end
@@ -389,6 +391,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
        do: mode
 
   defp descriptor_structured_output_mode(_installation), do: nil
+
+  defp descriptor_usage_guarantees(%{source: :llm, usage_guarantees: guarantees}),
+    do: guarantees
+
+  defp descriptor_usage_guarantees(_installation), do: nil
 
   defp descriptor_request_timeout_ms(%{source: :llm, ceilings: %{request_timeout_ms: timeout_ms}})
        when is_integer(timeout_ms) and timeout_ms > 0,
@@ -727,6 +734,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
       default: selected.default,
       max_calls: selected.max_calls,
       structured_output_mode: installation.structured_output_mode,
+      usage_guarantees: installation.usage_guarantees,
       request_timeout_ms: installation.ceilings.request_timeout_ms
     }
   end
@@ -930,7 +938,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
     case Requirements.live(
            installation.params,
            limits.llm_request_output_tokens,
-           installation.structured_output_mode
+           installation.structured_output_mode,
+           installation.usage_guarantees
          ) do
       {:ok, requirements} -> {:ok, requirements}
       :error -> {:error, :invalid_llm_model}
@@ -940,7 +949,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp live_llm_requirements(_installation, _context), do: {:error, :invalid_llm_model}
 
   defp probe_llm_requirements(installation) do
-    case Requirements.probe(installation.params) do
+    case Requirements.probe(installation.params, installation.usage_guarantees) do
       {:ok, requirements} -> {:ok, requirements}
       :error -> {:error, :llm_connectivity_unavailable}
     end
@@ -1069,6 +1078,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          prepared_model: prepared_model,
          credential: credential,
          cache: installation.cache,
+         usage_guarantees: installation.usage_guarantees,
          timeout_ms: timeout_ms,
          max_heap_words: max_heap_words
        }}
@@ -1107,12 +1117,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
   # The probe bills a real request, so what it spent travels back with the
   # success rather than being pattern-matched away: `max_tokens: 1` is sealed
   # into a separate prepared target and bounds the magnitude, not the
-  # attribution. The tokens are the adapter's own map and are closed by
-  # `ConnectivityProbe` before they become reportable evidence; a response
-  # without them still answers `:ok`, because unreachable and unattributed are
-  # different facts. The doctor connectivity deadline remains the outer
-  # `BoundedWorker` bound; the probe does not participate in the ordinary
-  # whole-call LLM clock.
+  # attribution. The same installation reporting guarantees apply to the
+  # probe; absent promised usage fails connectivity rather than being invented.
+  # The doctor connectivity deadline remains the outer `BoundedWorker` bound;
+  # the probe does not participate in the ordinary whole-call LLM clock.
   defp run_llm_connectivity_probe(probe) do
     binding = %{credential: probe.credential, cache: probe.cache}
 
@@ -1132,9 +1140,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
           )
 
         case result do
-          {:ok, {:ok, %{tokens: tokens}}} when is_map(tokens) -> {:ok, tokens}
-          {:ok, {:ok, response}} when is_map(response) -> :ok
-          _failure -> {:error, :llm_connectivity_unavailable}
+          {:ok, {:ok, response}} when is_map(response) ->
+            normalize_probe_usage(response, probe.usage_guarantees)
+
+          _failure ->
+            {:error, :llm_connectivity_unavailable}
         end
 
       {:error, _reason} ->
@@ -1145,6 +1155,33 @@ defmodule PtcRunner.Kernel.HostInstallation do
   catch
     _kind, _reason -> {:error, :llm_connectivity_unavailable}
   end
+
+  defp normalize_probe_usage(response, guarantees) do
+    case Map.fetch(response, :tokens) do
+      {:ok, tokens} -> normalize_probe_tokens(tokens, guarantees)
+      :error -> normalize_probe_usage_strings(response, guarantees)
+    end
+  end
+
+  defp normalize_probe_usage_strings(response, guarantees) do
+    case Map.fetch(response, "tokens") do
+      {:ok, tokens} ->
+        normalize_probe_tokens(tokens, guarantees)
+
+      :error ->
+        if(usage_required?(guarantees), do: {:error, :llm_connectivity_unavailable}, else: :ok)
+    end
+  end
+
+  defp normalize_probe_tokens(tokens, guarantees) do
+    case LLMUsage.normalize(tokens, guarantees) do
+      {:ok, usage} -> {:ok, usage}
+      {:error, :invalid_llm_usage} -> {:error, :llm_connectivity_unavailable}
+    end
+  end
+
+  defp usage_required?(%{tokens: tokens, cost_currency: currency}),
+    do: tokens or currency == "USD"
 
   defp preflight_transport(_host, %{type: :streamable_http} = transport),
     do: {:ok, transport}
@@ -1371,6 +1408,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
                  |> requester.(llm_requester_context(context))
                end
              end,
+             usage_guarantees: installation.usage_guarantees,
              max_request_bytes: selected.max_request_bytes,
              max_response_bytes: selected.max_response_bytes
            ),

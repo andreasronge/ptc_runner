@@ -232,12 +232,16 @@ and availability. Public sessions expose <code class="inline">activity</code>; p
 (analysis/counters {&quot;run_id&quot; run-id})</code></pre><p><code class="inline">analysis/counters</code> is one bounded aggregate, not a page. Filter a cohort in
 one call, or call once per selected <code class="inline">run_id</code> and reduce the returned
 <code class="inline">llm_usage_by_model</code> rows in PTC-Lisp. Those rows carry <code class="inline">calls</code>,
-<code class="inline">successful_calls</code>, <code class="inline">usage_calls</code>, <code class="inline">missing_usage_calls</code>, and a nested
-<code class="inline">usage</code> map with <code class="inline">input</code>, <code class="inline">output</code>, and optional <code class="inline">total_cost</code>. Group by
+<code class="inline">successful_calls</code>, <code class="inline">usage_calls</code>, <code class="inline">missing_usage_calls</code>, <code class="inline">usage_overflow</code>, and
+a nested <code class="inline">usage</code> map with <code class="inline">input</code>, <code class="inline">output</code>, and optional fixed-point
+<code class="inline">total_cost</code>. Group by
 <code class="inline">resolved_model</code> and sum the call counters plus nested token keys. Sum
 <code class="inline">unattributed_model_calls</code> across the same pages so unprovable identities are
-not dropped from the cohort. Absent <code class="inline">total_cost</code> is unknown spend, not zero:
-omit it from the merged <code class="inline">usage</code> map whenever any contributing row withholds it.</p><pre><code class="clojure language-clojure">(analysis/counters
+not dropped from the cohort. Absent <code class="inline">total_cost</code> is unknown spend, not zero.
+Costs add through their <code class="inline">microunits</code> fields, never by adding the objects
+themselves. Preserve <code class="inline">usage_overflow</code>, check sums against
+<code class="inline">9_007_199_254_740_991</code>, and omit cost whenever any contributing row withholds
+it.</p><pre><code class="clojure language-clojure">(analysis/counters
   {&quot;tags&quot; {&quot;cohort&quot; &quot;candidate&quot;}
    &quot;from&quot; &quot;2026-08-01T00:00:00Z&quot;
    &quot;to&quot; &quot;2026-09-01T00:00:00Z&quot;})
@@ -245,19 +249,37 @@ omit it from the merged <code class="inline">usage</code> map whenever any contr
 (defn withheld-cost? [rows]
   (some #(not (contains? (get % &quot;usage&quot;) &quot;total_cost&quot;)) rows))
 
+(defn cost-microunits [row]
+  (get-in row [&quot;usage&quot; &quot;total_cost&quot; &quot;microunits&quot;]))
+
+(def max-usage 9007199254740991)
+(def token-keys [&quot;input&quot; &quot;output&quot; &quot;cache_creation&quot; &quot;cache_read&quot;])
+
 (defn reduce-model-rows [rows]
   (-&gt;&gt; rows
        (group-by #(get % &quot;resolved_model&quot;))
        (map (fn [[model group]]
-              (let [usage (apply merge-with + (map #(get % &quot;usage&quot;) group))
-                    usage (if (withheld-cost? group)
-                            (dissoc usage &quot;total_cost&quot;)
-                            usage)]
+              (let [withheld? (withheld-cost? group)
+                    keys (filter (fn [key] (some #(contains? (get % &quot;usage&quot;) key) group))
+                                 token-keys)
+                    sums (into {} (map (fn [key]
+                                         [key (reduce + (map #(get (get % &quot;usage&quot;) key 0) group))])
+                                       keys))
+                    cost (if withheld? 0 (reduce + (map cost-microunits group)))
+                    overflow? (or (some #(get % &quot;usage_overflow&quot;) group)
+                                  (some #(&gt; % max-usage) (vals sums))
+                                  (and (not withheld?) (&gt; cost max-usage)))
+                    usage (into {} (map (fn [[key value]] [key (min value max-usage)]) sums))
+                    usage (if withheld?
+                            usage
+                            (assoc usage &quot;total_cost&quot;
+                              {&quot;currency&quot; &quot;USD&quot; &quot;microunits&quot; (min cost max-usage)}))]
                 {&quot;resolved_model&quot; model
                  &quot;calls&quot; (reduce + (map #(get % &quot;calls&quot;) group))
                  &quot;successful_calls&quot; (reduce + (map #(get % &quot;successful_calls&quot;) group))
                  &quot;usage_calls&quot; (reduce + (map #(get % &quot;usage_calls&quot;) group))
                  &quot;missing_usage_calls&quot; (reduce + (map #(get % &quot;missing_usage_calls&quot;) group))
+                 &quot;usage_overflow&quot; (boolean overflow?)
                  &quot;usage&quot; usage})))))
 
 (def selected [&quot;run-a&quot; &quot;run-b&quot;])

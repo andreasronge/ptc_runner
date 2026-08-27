@@ -118,7 +118,9 @@ attributed to it, so a CI step can account for what the check spent:</p><pre><co
            &quot;llm_usage&quot;: [{&quot;alias&quot;: &quot;llm&quot;, &quot;installation_revision&quot;: &quot;v1&quot;,
                           &quot;calls&quot;: 1, &quot;successful_calls&quot;: 1, &quot;usage_calls&quot;: 1,
                           &quot;missing_usage_calls&quot;: 0,
-                          &quot;usage&quot;: {&quot;input&quot;: 8, &quot;output&quot;: 1, &quot;total_cost&quot;: 3.0e-6}}]}}</code></pre><p>The probe asks for one output token, so this is about attribution rather than
+                          &quot;usage_overflow&quot;: false,
+                          &quot;usage&quot;: {&quot;input&quot;: 8, &quot;output&quot;: 1,
+                                    &quot;total_cost&quot;: {&quot;currency&quot;: &quot;USD&quot;, &quot;microunits&quot;: 3}}}]}}</code></pre><p>The probe asks for one output token, so this is about attribution rather than
 magnitude. A command that activated no provider reports an empty list, because
 it spent nothing. A failure that did activate one reports
 <code class="inline">&quot;llm_usage_state&quot;: &quot;unavailable&quot;</code> and a null list rather than claiming zero:
@@ -183,10 +185,14 @@ alias and installation revision,
 <code class="inline">llm_usage_by_model</code> grouped by an attested public resolved model, and
 <code class="inline">unattributed_model_calls</code>. <code class="inline">llm_spend</code> is byte-equivalent to the value in the
 canonical <code class="inline">run-stopped</code> usage: <code class="inline">empty</code> and <code class="inline">incomplete</code> contain only <code class="inline">state</code>,
-<code class="inline">unpriced</code> also contains non-negative <code class="inline">input</code> and <code class="inline">output</code>, and <code class="inline">available</code>
-adds a non-negative <code class="inline">total_cost</code>. Only <code class="inline">available</code> can report a measured zero
+<code class="inline">unpriced</code> also contains non-negative <code class="inline">input</code> and <code class="inline">output</code>, <code class="inline">available</code>
+adds a fixed-point USD <code class="inline">total_cost</code>, and <code class="inline">overflow</code> contains only <code class="inline">state</code>.
+Only <code class="inline">available</code> can report a measured zero
 cost; the other states never substitute zero for absent pricing. Rows report call counts, usage-presence counts, and
-summed token and <code class="inline">total_cost</code> values. Terminal accounting pairs each
+summed token and <code class="inline">total_cost</code> values plus required <code class="inline">usage_overflow</code>. Values
+saturate at <code class="inline">9_007_199_254_740_991</code>; a true row flag means at least one value
+is only a lower bound, while any aggregate overflow makes <code class="inline">llm_spend</code> exactly
+<code class="inline">{&quot;state&quot;:&quot;overflow&quot;}</code>. Terminal accounting pairs each
 <code class="inline">llm-request</code> <code class="inline">capability-started</code> with its <code class="inline">capability-stopped</code> by
 <code class="inline">capability_id</code>. An unmatched start is one observed call with unknown usage:
 <code class="inline">calls</code> increments, <code class="inline">successful_calls</code> does not, and <code class="inline">missing_usage_calls</code>
@@ -201,7 +207,7 @@ including dropped <code class="inline">capability-started</code> or <code class=
 preserving other known usage. Non-empty <code class="inline">events_dropped</code> for other event types
 means an available detailed summary covers retained evidence and may not be
 complete. <code class="inline">llm_usage_state</code> describes reconstruction of those detailed rows;
-it does not replace the independently sealed four-state <code class="inline">llm_spend</code> value.</p><p>Artifact publication currently requires a Unix host with POSIX-compatible
+it does not replace the independently sealed five-state <code class="inline">llm_spend</code> value.</p><p>Artifact publication currently requires a Unix host with POSIX-compatible
 <code class="inline">mkdir</code> and <code class="inline">id</code>; trace append also needs <code class="inline">sh</code> and either <code class="inline">lockf</code> or <code class="inline">flock</code>.
 Private artifacts and newly created traces require trusted ancestry, safe
 ownership, and restrictive modes. Preflight refuses unsafe or unwritable

@@ -73,6 +73,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
         "deepseek" => %{
           "source" => "llm",
           "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "cache" => false,
@@ -112,6 +113,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
                reasoning_effort: :medium
              },
              structured_output_mode: :unsupported,
+             usage_guarantees: %{tokens: true, cost_currency: "USD"},
              installation_revision: "model-policy-v2",
              ceilings: %{
                max_request_bytes: 200_000,
@@ -136,6 +138,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
         "deepseek" => %{
           "source" => "llm",
           "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "installation_revision" => "model-policy-v2",
@@ -156,6 +159,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
         "deepseek" => %{
           "source" => "llm",
           "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "installation_revision" => "model-policy-v2",
@@ -175,6 +179,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
         "deepseek" => %{
           "source" => "llm",
           "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "installation_revision" => "model-policy-v2",
@@ -195,6 +200,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
         "deepseek" => %{
           "source" => "llm",
           "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "installation_revision" => "model-policy-v2",
@@ -215,6 +221,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
         "deepseek" => %{
           "source" => "llm",
           "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "installation_revision" => "model-policy-v2"
@@ -654,6 +661,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
         "deepseek" => %{
           "source" => "llm",
           "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
           "installation_revision" => "deepseek-v1",
           "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "key"
@@ -666,6 +674,25 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert host.install["deepseek"].source == :llm
     assert host.install["deepseek"].params == %{}
     assert host.install["deepseek"].structured_output_mode == :unsupported
+    assert host.install["deepseek"].usage_guarantees == %{tokens: true, cost_currency: "USD"}
+
+    missing_guarantees =
+      update_in(llm, ["install", "deepseek"], &Map.delete(&1, "usage_guarantees"))
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(missing_guarantees, "/tmp")
+    assert {:error, _details} = JSV.validate(missing_guarantees, root, cast: false)
+
+    for invalid_guarantees <- [
+          %{"tokens" => true},
+          %{"cost_currency" => "USD"},
+          %{"tokens" => 1, "cost_currency" => "USD"},
+          %{"tokens" => true, "cost_currency" => "EUR"},
+          %{"tokens" => true, "cost_currency" => nil, "extra" => true}
+        ] do
+      invalid = put_in(llm, ["install", "deepseek", "usage_guarantees"], invalid_guarantees)
+      assert {:error, :invalid_host_config} = HostConfig.decode(invalid, "/tmp")
+      assert {:error, _details} = JSV.validate(invalid, root, cast: false)
+    end
 
     for invalid_params <- [
           %{"temperature" => 2.1},

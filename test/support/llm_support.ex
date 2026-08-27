@@ -19,7 +19,8 @@ defmodule PtcRunner.TestSupport.LLMSupport do
   @req_opts [retry: :transient, max_retries: 3]
 
   @doc """
-  Returns the slice-2 interim requirements map for a prepared live call.
+  Returns direct-embedding requirements with no reporting guarantees or
+  reservation authority.
   """
   @spec interim_requirements(pos_integer() | map()) :: PtcRunner.LLM.Requirements.t()
   def interim_requirements(max_tokens \\ 4_096)

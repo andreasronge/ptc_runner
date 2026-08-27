@@ -39,7 +39,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     {:ok, invocation} =
       Invocation.new(%{messages: [%{role: :user, content: "hi"}]}, false, "test", nil)
 
-    assert {:ok, %{content: "ok"}} =
+    assert {:ok, %{content: "ok", tokens: %{input: 1, output: 1}}} =
              ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
 
     assert attestation.exact_options == exact_options
@@ -90,6 +90,63 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     assert body["presence_penalty"] == -0.5
     assert body["frequency_penalty"] == 0.75
     assert body["reasoning_effort"] == "high"
+  end
+
+  test "does not invent token usage when a ReqLLM provider omits usage", %{test: test} do
+    Req.Test.expect(
+      test,
+      request_handler(self(), "deepseek/deepseek-v4-flash-0731", usage: nil)
+    )
+
+    requirements = %{
+      Requirements.interim(%{max_tokens: 64})
+      | usage_guarantees: %{tokens: true, cost_currency: nil}
+    }
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:deepseek/deepseek-v4-flash-0731",
+               requirements
+             )
+
+    {:ok, invocation} =
+      Invocation.new(%{messages: [%{role: :user, content: "hi"}]}, false, "test", nil)
+
+    assert {:ok, %{content: "ok", tokens: tokens}} =
+             ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
+
+    refute Map.has_key?(tokens, :input)
+    refute Map.has_key?(tokens, :output)
+  end
+
+  test "preserves numeric and decimal-string cost on the direct OpenAI-compatible path", %{
+    test: test
+  } do
+    assert {:ok, target, :unavailable, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openai-compat:https://example.com/v1|deployment",
+               Requirements.interim(%{max_tokens: 64})
+             )
+
+    {:ok, invocation} =
+      Invocation.new(%{messages: [%{role: :user, content: "hi"}]}, false, "test", nil)
+
+    for cost <- [0.25, "0.2500001"] do
+      Req.Test.expect(
+        test,
+        request_handler(self(), "deployment",
+          usage: %{
+            "prompt_tokens" => 1,
+            "completion_tokens" => 1,
+            "total_tokens" => 2,
+            "total_cost" => cost
+          }
+        )
+      )
+
+      assert {:ok, %{tokens: %{total_cost: ^cost}}} =
+               ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
+    end
   end
 
   test "preserves an attested token-limit alias through ReqLLM dispatch", %{test: test} do
@@ -808,7 +865,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       send(test_pid, {:request_body, Jason.decode!(body)})
 
-      Req.Test.json(conn, %{
+      response = %{
         "id" => "gen-test",
         "model" => response_model,
         "choices" => [
@@ -820,9 +877,18 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
               "content" => Keyword.get(opts, :content, "ok")
             }
           }
-        ],
-        "usage" => %{"prompt_tokens" => 1, "completion_tokens" => 1, "total_tokens" => 2}
-      })
+        ]
+      }
+
+      usage =
+        Keyword.get(
+          opts,
+          :usage,
+          %{"prompt_tokens" => 1, "completion_tokens" => 1, "total_tokens" => 2}
+        )
+
+      response = if is_nil(usage), do: response, else: Map.put(response, "usage", usage)
+      Req.Test.json(conn, response)
     end
   end
 

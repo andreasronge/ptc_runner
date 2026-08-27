@@ -253,7 +253,7 @@ defmodule PtcRunner.LiveStatusTest do
              "state" => "available",
              "input" => 3,
              "output" => 2,
-             "total_cost" => 0.25
+             "total_cost" => %{"currency" => "USD", "microunits" => 250_000}
            }
 
     send(late.pid, gate)
@@ -337,7 +337,7 @@ defmodule PtcRunner.LiveStatusTest do
              "state" => "available",
              "input" => 3,
              "output" => 2,
-             "total_cost" => 0.25
+             "total_cost" => %{"currency" => "USD", "microunits" => 250_000}
            }
   end
 

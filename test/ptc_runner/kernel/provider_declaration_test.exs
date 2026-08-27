@@ -1020,6 +1020,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
         "live" => %{
           "source" => "llm",
           "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "installation_revision" => "live-v1",
           "model" => "provider:private-selector",
           "credential" => "llm-key"

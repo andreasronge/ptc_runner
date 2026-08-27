@@ -163,7 +163,10 @@ assert.deepEqual(formatLiveSpend({ state: 'unpriced', input: 3, output: 2 }), {
   fields: ['3 in', '2 out', 'cost unavailable']
 });
 assert.deepEqual(
-  formatLiveSpend({ state: 'available', input: 12345, output: 678, total_cost: 0.0042 }),
+  formatLiveSpend({
+    state: 'available', input: 12345, output: 678,
+    total_cost: { currency: 'USD', microunits: 4200 }
+  }),
   {
     state: 'available',
     value: '12,345 in · 678 out · cost 0.0042',
@@ -171,16 +174,11 @@ assert.deepEqual(
   }
 );
 assert.deepEqual(
-  formatLiveSpend({
-    state: 'available',
-    input: 18_014_398_509_481_981,
-    output: 18_014_398_509_481_982,
-    total_cost: 2e12
-  }),
+  formatLiveSpend({ state: 'overflow' }),
   {
     state: 'overflow',
-    value: 'usage exceeds display range',
-    fields: ['usage exceeds display range']
+    value: 'usage overflow',
+    fields: ['usage overflow']
   }
 );
 

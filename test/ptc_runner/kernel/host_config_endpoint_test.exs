@@ -315,6 +315,7 @@ defmodule PtcRunner.Kernel.HostConfigEndpointTest do
           "brain" => %{
             "source" => "llm",
             "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
             "installation_revision" => "brain-v1",
             "model" => "openrouter:some/model",
             "credential" => "api_key",

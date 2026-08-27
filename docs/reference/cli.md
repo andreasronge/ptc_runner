@@ -58,7 +58,9 @@ attributed to it, so a CI step can account for what the check spent:
            "llm_usage": [{"alias": "llm", "installation_revision": "v1",
                           "calls": 1, "successful_calls": 1, "usage_calls": 1,
                           "missing_usage_calls": 0,
-                          "usage": {"input": 8, "output": 1, "total_cost": 3.0e-6}}]}}
+                          "usage_overflow": false,
+                          "usage": {"input": 8, "output": 1,
+                                    "total_cost": {"currency": "USD", "microunits": 3}}}]}}
 ```
 
 The probe asks for one output token, so this is about attribution rather than
@@ -182,10 +184,14 @@ alias and installation revision,
 `llm_usage_by_model` grouped by an attested public resolved model, and
 `unattributed_model_calls`. `llm_spend` is byte-equivalent to the value in the
 canonical `run-stopped` usage: `empty` and `incomplete` contain only `state`,
-`unpriced` also contains non-negative `input` and `output`, and `available`
-adds a non-negative `total_cost`. Only `available` can report a measured zero
+`unpriced` also contains non-negative `input` and `output`, `available`
+adds a fixed-point USD `total_cost`, and `overflow` contains only `state`.
+Only `available` can report a measured zero
 cost; the other states never substitute zero for absent pricing. Rows report call counts, usage-presence counts, and
-summed token and `total_cost` values. Terminal accounting pairs each
+summed token and `total_cost` values plus required `usage_overflow`. Values
+saturate at `9_007_199_254_740_991`; a true row flag means at least one value
+is only a lower bound, while any aggregate overflow makes `llm_spend` exactly
+`{"state":"overflow"}`. Terminal accounting pairs each
 `llm-request` `capability-started` with its `capability-stopped` by
 `capability_id`. An unmatched start is one observed call with unknown usage:
 `calls` increments, `successful_calls` does not, and `missing_usage_calls`
@@ -200,7 +206,7 @@ including dropped `capability-started` or `capability-stopped` events, while
 preserving other known usage. Non-empty `events_dropped` for other event types
 means an available detailed summary covers retained evidence and may not be
 complete. `llm_usage_state` describes reconstruction of those detailed rows;
-it does not replace the independently sealed four-state `llm_spend` value.
+it does not replace the independently sealed five-state `llm_spend` value.
 
 Artifact publication currently requires a Unix host with POSIX-compatible
 `mkdir` and `id`; trace append also needs `sh` and either `lockf` or `flock`.

@@ -170,6 +170,7 @@ defmodule PtcRunner.ViewerFrontendTest do
           "unused" => %{
             "source" => "llm",
             "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
             "installation_revision" => "viewer-test-v1",
             "model" => "openrouter:deepseek/deepseek-v4-flash",
             "credential" => "unused",

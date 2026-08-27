@@ -18,14 +18,17 @@ defmodule PtcRunner.LLM do
 
   @typedoc """
   Provider-reported token usage. `:total_cost` is absent when pricing is
-  unavailable; a present zero is a measured zero-cost response.
+  unavailable; a present zero-microunit object is a measured zero-cost response.
+  Adapter responses may use a non-negative USD number or bounded decimal string;
+  the Kernel immediately replaces it with this fixed-point object.
   """
+  @type usd_cost :: %{currency: String.t(), microunits: non_neg_integer()}
   @type tokens :: %{
           optional(:input) => non_neg_integer(),
           optional(:output) => non_neg_integer(),
           optional(:cache_creation) => non_neg_integer(),
           optional(:cache_read) => non_neg_integer(),
-          optional(:total_cost) => float()
+          optional(:total_cost) => usd_cost() | non_neg_integer() | float() | String.t()
         }
 
   @type response :: %{

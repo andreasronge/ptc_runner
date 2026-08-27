@@ -342,9 +342,10 @@ A schema request succeeds only as <code class="inline">structured_output</code> 
 and <code class="inline">model</code>; there is no encoded <code class="inline">content</code> duplicate. Normalized tool calls
 use <code class="inline">id</code>, <code class="inline">name</code>, and <code class="inline">args</code>. Invalid provider
 arguments may include a bounded <code class="inline">args_error</code> classification. Token usage may
-include <code class="inline">input</code>, <code class="inline">output</code>, <code class="inline">cache_creation</code>, <code class="inline">cache_read</code>, and <code class="inline">total_cost</code>.
-When provider pricing is unavailable, <code class="inline">total_cost</code> is absent; a present zero is
-a measured zero-cost response.</p><p>For non-streaming ReqLLM tool calls, <code class="inline">finish_reason</code> uses ReqLLM's normalized
+include <code class="inline">input</code>, <code class="inline">output</code>, <code class="inline">cache_creation</code>, <code class="inline">cache_read</code>, and fixed-point
+<code class="inline">total_cost</code> as a USD currency and integer microunits object. When provider
+pricing is unavailable, <code class="inline">total_cost</code> is absent; a present zero-microunit object
+is a measured zero-cost response.</p><p>For non-streaming ReqLLM tool calls, <code class="inline">finish_reason</code> uses ReqLLM's normalized
 vocabulary rather than raw provider stop metadata. A <code class="inline">length</code> response carries
 the effective request <code class="inline">output_limit</code> when the adapter can authenticate it after
 provider normalization; it never claims the provider's actual internal

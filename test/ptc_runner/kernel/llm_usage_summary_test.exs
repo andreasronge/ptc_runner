@@ -191,16 +191,22 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
              "state" => "available",
              "input" => 8,
              "output" => 6,
-             "total_cost" => 0.75
+             "total_cost" => %{"currency" => "USD", "microunits" => 750_000}
            }
   end
 
-  test "the spend projection validator accepts only the four exact public shapes" do
+  test "the spend projection validator accepts only the five exact public shapes" do
     valid = [
       %{"state" => "empty"},
       %{"state" => "incomplete"},
+      %{"state" => "overflow"},
       %{"state" => "unpriced", "input" => 0, "output" => 2},
-      %{"state" => "available", "input" => 3, "output" => 4, "total_cost" => 0}
+      %{
+        "state" => "available",
+        "input" => 3,
+        "output" => 4,
+        "total_cost" => %{"currency" => "USD", "microunits" => 0}
+      }
     ]
 
     for spend <- valid do
@@ -223,7 +229,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
     end
   end
 
-  test "an explicit null cost is unpriced and remains safe to aggregate" do
+  test "an explicit null cost is invalid rather than silently unpriced" do
     counters =
       %{}
       |> LLMUsageSummary.accumulate("writer", "stable-v1", :ok, %{
@@ -237,14 +243,10 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
         "total_cost" => 0.25
       })
 
-    assert LLMUsageSummary.spend(counters) == %{
-             "state" => "unpriced",
-             "input" => 8,
-             "output" => 6
-           }
+    assert LLMUsageSummary.spend(counters) == %{"state" => "incomplete"}
   end
 
-  test "aggregate spend may exceed the valid ceiling for one provider response" do
+  test "a provider response above the fixed-point ceiling is incomplete" do
     per_response_max = 9_007_199_254_740_991
 
     counters =
@@ -260,16 +262,54 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
         "total_cost" => 1.0e12
       })
 
-    spend = LLMUsageSummary.spend(counters)
+    assert LLMUsageSummary.spend(counters) == %{"state" => "incomplete"}
+  end
 
-    assert spend == %{
-             "state" => "available",
-             "input" => per_response_max * 2,
-             "output" => per_response_max * 2,
-             "total_cost" => 2.0e12
+  test "usage rows saturate and the spend projection reports aggregate overflow" do
+    maximum = 9_007_199_254_740_991
+    cost = %{"currency" => "USD", "microunits" => maximum}
+
+    counters =
+      %{}
+      |> LLMUsageSummary.accumulate("writer", "stable-v1", :ok, %{
+        "input" => maximum,
+        "output" => maximum,
+        "total_cost" => cost
+      })
+      |> LLMUsageSummary.accumulate("writer", "stable-v1", :ok, %{
+        "input" => 1,
+        "output" => 1,
+        "total_cost" => %{"currency" => "USD", "microunits" => 1}
+      })
+
+    assert LLMUsageSummary.spend(counters) == %{"state" => "overflow"}
+
+    assert [row] =
+             LLMUsageSummary.alias_rows([
+               {"writer", "stable-v1",
+                %{
+                  "input" => maximum,
+                  "output" => maximum,
+                  "total_cost" => cost
+                }},
+               {"writer", "stable-v1",
+                %{
+                  "input" => 1,
+                  "output" => 1,
+                  "total_cost" => %{"currency" => "USD", "microunits" => 1}
+                }}
+             ])
+
+    assert row["usage_overflow"] == true
+
+    assert row["usage"] == %{
+             "input" => maximum,
+             "output" => maximum,
+             "total_cost" => cost
            }
 
-    assert {:ok, ^spend} = LLMUsageSummary.validate_spend(spend)
+    assert {:ok, %{"state" => "overflow"}} =
+             LLMUsageSummary.validate_spend(%{"state" => "overflow"})
   end
 
   test "a missing successful usage withholds priced totals even when another call is priced" do
@@ -337,7 +377,12 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
                  "successful_calls" => 1,
                  "usage_calls" => 1,
                  "missing_usage_calls" => 0,
-                 "usage" => %{"input" => 4, "output" => 2, "total_cost" => 0.1}
+                 "usage_overflow" => false,
+                 "usage" => %{
+                   "input" => 4,
+                   "output" => 2,
+                   "total_cost" => %{"currency" => "USD", "microunits" => 100_000}
+                 }
                }
              ] = rows
     end

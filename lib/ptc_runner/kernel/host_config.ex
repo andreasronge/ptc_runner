@@ -4,13 +4,13 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   The host document is operator-owned and separate from an application
   manifest. It fixes provider sources, credentials, data classes, and outer
-  ceilings.   MCP installations additionally fix transports, tool mappings, and
-  effects; live LLM installations fix the model, structured-output mode, cache
-  policy, and optional inference controls. A manifest may later select an
-  installed alias and narrow its authority; it cannot introduce or replace any
-  field decoded here. Changing `structured_output_mode`, an inference control,
-  or an installation `ceilings.request_timeout_ms` requires a new
-  `installation_revision`.
+  ceilings. MCP installations additionally fix transports, tool mappings, and
+  effects; live LLM installations fix the model, structured-output mode, usage
+  guarantees, cache policy, and optional inference controls. A manifest may
+  later select an installed alias and narrow its authority; it cannot introduce
+  or replace any field decoded here. Changing `structured_output_mode`, a usage
+  guarantee, an inference control, or an installation
+  `ceilings.request_timeout_ms` requires a new `installation_revision`.
 
   An optional `limits` block replaces cataloged installed ceilings, so an
   operator can permit work measured in hours rather than in one bounded run.
@@ -181,6 +181,7 @@ defmodule PtcRunner.Kernel.HostConfig do
                 optional(:reasoning_effort) => :none | :minimal | :low | :medium | :high
               },
               structured_output_mode: :json_schema | :json_object | :unsupported,
+              usage_guarantees: %{tokens: boolean(), cost_currency: String.t() | nil},
               installation_revision: binary(),
               installation_config_digest: binary(),
               ceilings: %{
@@ -730,13 +731,13 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp llm_installation(value, credentials, limits) do
     allowed =
-      ~w(source model credential cache params structured_output_mode installation_revision ceilings data_class accepts_data)
+      ~w(source model credential cache params structured_output_mode usage_guarantees installation_revision ceilings data_class accepts_data)
 
     with :ok <-
            exact_keys(
              value,
              allowed,
-             ~w(source model credential structured_output_mode installation_revision)
+             ~w(source model credential structured_output_mode usage_guarantees installation_revision)
            ),
          model when is_binary(model) <- value["model"],
          true <- valid_string?(model, 256),
@@ -746,6 +747,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          {:ok, params} <- llm_params(Map.get(value, "params", %{})),
          {:ok, structured_output_mode} <-
            structured_output_mode(value["structured_output_mode"]),
+         {:ok, usage_guarantees} <- usage_guarantees(value["usage_guarantees"]),
          {:ok, installation_revision} <-
            revision(value["installation_revision"]),
          {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{}), limits),
@@ -760,6 +762,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          cache: cache,
          params: params,
          structured_output_mode: structured_output_mode,
+         usage_guarantees: usage_guarantees,
          installation_revision: installation_revision,
          ceilings: ceilings,
          data_class: data_class,
@@ -833,6 +836,12 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp structured_output_mode("json_object"), do: {:ok, :json_object}
   defp structured_output_mode("unsupported"), do: {:ok, :unsupported}
   defp structured_output_mode(_value), do: {:error, :invalid_structured_output_mode}
+
+  defp usage_guarantees(%{"tokens" => tokens, "cost_currency" => currency} = guarantees)
+       when map_size(guarantees) == 2 and is_boolean(tokens) and currency in ["USD", nil],
+       do: {:ok, %{tokens: tokens, cost_currency: currency}}
+
+  defp usage_guarantees(_value), do: {:error, :invalid_usage_guarantees}
 
   defp maybe_put_param(params, atom_key, value, string_key, normalized) do
     if Map.has_key?(value, string_key), do: Map.put(params, atom_key, normalized), else: params
@@ -1542,12 +1551,27 @@ defmodule PtcRunner.Kernel.HostConfig do
           "type" => "string",
           "enum" => ["json_schema", "json_object", "unsupported"]
         },
+        "usage_guarantees" =>
+          required_object(
+            %{
+              "tokens" => %{"type" => "boolean"},
+              "cost_currency" => %{"type" => ["string", "null"], "enum" => ["USD", nil]}
+            },
+            ["tokens", "cost_currency"]
+          ),
         "installation_revision" => installation_revision_schema(),
         "ceilings" => llm_ceilings_schema(),
         "data_class" => data_class_schema(),
         "accepts_data" => accepts_data_schema()
       },
-      ["source", "model", "credential", "structured_output_mode", "installation_revision"]
+      [
+        "source",
+        "model",
+        "credential",
+        "structured_output_mode",
+        "usage_guarantees",
+        "installation_revision"
+      ]
     )
   end
 

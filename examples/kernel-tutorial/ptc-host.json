@@ -6,7 +6,8 @@
     "deepseek": {
       "source": "llm",
       "structured_output_mode": "unsupported",
-      "installation_revision": "tutorial-llm-v4",
+      "usage_guarantees": {"tokens": true, "cost_currency": "USD"},
+      "installation_revision": "tutorial-llm-v5",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",
       "cache": false,

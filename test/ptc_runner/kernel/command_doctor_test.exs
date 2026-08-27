@@ -172,6 +172,7 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
       "successful_calls" => 2,
       "usage_calls" => 1,
       "missing_usage_calls" => 1,
+      "usage_overflow" => false,
       "usage" => %{"input" => 12}
     }
 
@@ -182,6 +183,7 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
       "successful_calls" => 0,
       "usage_calls" => 0,
       "missing_usage_calls" => 1,
+      "usage_overflow" => false,
       "usage" => %{}
     }
 

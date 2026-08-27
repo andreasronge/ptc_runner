@@ -1,11 +1,7 @@
 # Install models and tools
 
-Use `ptc-host.json` to install credentials, model routes, MCP tools, and outer
-limits separately from an application.
-
-`ptc.json` may select an installed alias
-and ask for less, but it cannot create one or change its credentials, endpoint,
-command, effects, or ceilings.
+The `ptc-host.json` installs credentials, model routes, MCP tools, and limits.
+An application selects and narrows aliases without changing host configuration.
 
 ## How do I install a model?
 
@@ -20,6 +16,7 @@ Install one model alias with a credential read from the process environment:
     "model": {
       "source": "llm",
       "structured_output_mode": "unsupported",
+      "usage_guarantees": {"tokens": true, "cost_currency": "USD"},
       "installation_revision": "model-v1",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "model_key",
@@ -39,6 +36,9 @@ ptc models ptc-project.json
 
 Plain `doctor` validates configuration without loading credentials or dialing
 providers. `--connect` is a connectivity probe and may consume resources.
+
+See [usage guarantees](../reference/host-installation.md#usage-guarantees) for
+the required accounting policy.
 
 ## How do I install an MCP server?
 

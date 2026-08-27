@@ -45,6 +45,7 @@ diagnostic. For example, an excessive installation timeout is located at
     "deepseek": {
       "source": "llm",
       "structured_output_mode": "unsupported",
+      "usage_guarantees": {"tokens": true, "cost_currency": "USD"},
       "installation_revision": "deepseek-policy-v1",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",
@@ -201,6 +202,7 @@ installations do not carry this deadline.
 "deepseek": {
   "source": "llm",
   "structured_output_mode": "unsupported",
+  "usage_guarantees": {"tokens": true, "cost_currency": "USD"},
   "installation_revision": "deepseek-policy-v1",
   "model": "openrouter:deepseek/deepseek-v4-flash",
   "credential": "openrouter_key",
@@ -277,6 +279,23 @@ both structured modes. `unsupported` refuses a request `schema` before dispatch.
 Changing the mode requires a new `installation_revision`. A schema
 together with a non-empty `tools` list is invalid. Success is a
 `structured_output` object; encoded `content` is not duplicated.
+
+### Usage guarantees
+
+Every live model installation also declares the exact closed
+`usage_guarantees` object. `tokens: true` promises that every dispatched
+successful call reports non-negative `input` and `output` counts;
+`cost_currency: "USD"` additionally promises a total USD cost. `false` and
+`null` declare those observations optional, not zero. Preparation seals and
+attests the declaration, and a successful response or doctor connectivity
+probe that omits promised usage fails as a non-retryable invalid provider
+result. Changing either guarantee requires a new `installation_revision`.
+
+Provider cost numbers and decimal strings are converted immediately to
+`{"currency":"USD","microunits":N}` by exact decimal parsing, with fractions
+rounded upward to one millionth of a dollar. The bounded integer `N` is in
+`0..9_007_199_254_740_991`; binary floating-point values are not retained as
+accounting authority.
 
 Model selectors are provider-qualified strings. These are the provider paths
 PtcRunner configures and exercises directly:

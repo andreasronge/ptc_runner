@@ -211,7 +211,14 @@ defmodule PtcRunner.Kernel.ConnectivityResultTest do
 
     assert {:ok, _result} =
              ConnectivityResult.new(prepared, catalog, entries, true, [
-               %{account | usage: %{"input" => 8, "output" => 1, "total_cost" => 3.0e-6}}
+               %{
+                 account
+                 | usage: %{
+                     "input" => 8,
+                     "output" => 1,
+                     "total_cost" => %{"currency" => "USD", "microunits" => 3}
+                   }
+               }
              ])
 
     # `LLMUsage` owns what a token record may say. A second, looser copy here

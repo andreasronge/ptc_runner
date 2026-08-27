@@ -6,7 +6,8 @@
     "agent_model": {
       "source": "llm",
       "structured_output_mode": "unsupported",
-      "installation_revision": "named-missions-example-v3",
+      "usage_guarantees": {"tokens": true, "cost_currency": "USD"},
+      "installation_revision": "named-missions-example-v4",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",
       "cache": false
