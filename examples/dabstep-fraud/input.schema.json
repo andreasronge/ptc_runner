@@ -7,6 +7,6 @@
     "task": {"type": "string", "minLength": 1, "maxLength": 1000},
     "guidelines": {"type": "string", "minLength": 1, "maxLength": 2000},
     "model": {"type": "string", "enum": ["deepseek", "luna"]},
-    "max_turns": {"type": "integer", "minimum": 1, "maximum": 128}
+    "max_turns": {"type": "integer", "minimum": 1, "maximum": 6}
   }
 }

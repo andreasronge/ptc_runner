@@ -29,7 +29,7 @@
         "start_timeout_ms": 60000
       },
       "tools": {
-        "read_text_file": {"as": "workspace.read", "effect": "read"}
+        "read_text_file": {"as": "workspace.read", "effect": "read", "model_visible": false}
       },
       "ceilings": {
         "timeout_ms": 30000,

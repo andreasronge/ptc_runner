@@ -4,3 +4,4 @@ reference/
 .ptc-replay/
 out*.json
 .env
+.ptc-transcripts/

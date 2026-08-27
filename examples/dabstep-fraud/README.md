@@ -83,10 +83,15 @@ count and raw fraudulent EUR volume. Only the ratio puts BE first, by about
 
 ## The actual generated PTC-Lisp
 
-Luna run `cmd-0xfcwmstj3d6xraxrm810bfm9p` generated the program preserved
-byte-for-byte in [`evidence/luna-01.clj`](evidence/luna-01.clj). Its inspection
-source hash is
-`c61fd9af9544a6f7a12fd1391826ecbf57a4bee7f1288f1329d025fcd9340a7f`.
+Luna run `cmd-0xfcwmstj3d6xraxrm810bfm9p` generated the program preserved in
+[`evidence/luna-01.clj`](evidence/luna-01.clj). The committed file is the exact
+generated source plus a trailing newline, so two different hashes are recorded:
+the inspection source hash is
+`c61fd9af9544a6f7a12fd1391826ecbf57a4bee7f1288f1329d025fcd9340a7f` and the file
+itself hashes to
+`7d26a2642dd7f2f3552189d961921c72dced16a3e23cf57fc1779c0545a79047`. Both appear
+in [`evidence/cohort.json`](evidence/cohort.json) as `source_hash` and
+`source_file_sha256`.
 
 Formatted for display, it:
 
@@ -195,11 +200,45 @@ For the representative three-column run this reduced exact private inspection
 to 8.3 MB. The initial row-file design exceeded PtcRunner's fail-closed 16 MB
 inspection capture after 294 reads; the projected design completes in 133.
 
-`payments.clj` aligns independently paged columns with signed cursors and
-bounded buffers. The application grants only two prompt-visible functions:
-the official fraud definition and the paged reader. The raw MCP function is
-not prompt-visible. Evaluation is bounded to 40 MB, 600 seconds, 256 mission
-capability calls, and six agent turns.
+`payments.clj` aligns independently paged columns with bounded buffers. The
+application grants only two prompt-visible functions: the official fraud
+definition and the paged reader. The raw MCP function stays out of the prompt
+because `model_visible` defaults to `false`; both host documents now state it
+explicitly so the guarantee is checkable without consulting the schema.
+Evaluation is bounded to 40 MB, 600 seconds, 256 mission capability calls, and
+six agent turns; the turn ceiling is enforced by `input.schema.json` rather than
+only set by the shipped inputs.
+
+### What the reader's cursor does and does not prove
+
+The upstream MCP cursor is opaque and server-validated, so a forged one fails
+the read. The outer `read-page` cursor is not. It is an ordinary map the model
+receives and hands back, and it carries the per-column leftovers that keep
+independently paged columns aligned. PtcRunner exposes no keyed digest to
+mission components, and the pinned filesystem server accepts no positional read,
+so this example cannot seal that cursor. Two checks bound it instead:
+
+- `read-page` validates every column state — exact key set, types, a `carry`
+  containing no line break, at most 65,536 buffered values — and fails closed
+  with `:malformed-column-state` otherwise.
+- A page that would emit rows while performing zero upstream reads is refused
+  with `:unbacked-page`. Every page also reports `read_calls`, `content_hashes`,
+  and `unbacked_columns`, so a column served from the cursor buffer is visible
+  in the trace instead of being indistinguishable from one read from disk.
+
+Both checks are deliberately absent from the `read-page` docstring. They are
+runtime guarantees an auditor reads out of the trace, not instructions to the
+model, and leaving the prompt byte-identical is what keeps the preserved cohort
+comparable and the checked-in replay runnable. Announcing a check to the model
+would change the experiment without making the check stronger.
+
+That closes the zero-cost fabrication path: a cursor asserting `done` with
+invented values now fails instead of returning rows. It does not make the cursor
+unforgeable. A model that performs one genuine read per page can still return
+other columns' values from a buffer it authored. Sealing it properly needs
+either a keyed digest available to mission components or aligned paging inside
+the provider, and is left to follow-up work. The cohort below was classified
+before these checks existed and is not re-scored by them.
 
 ## Benchmark fidelity and attribution
 
@@ -239,16 +278,26 @@ The project writes canonical traces, private inspection, results, and command
 envelopes below owner-only `.ptc/`. Treat inspection as sensitive: it contains
 exact model exchanges and capability payloads and is intentionally gitignored.
 
+`ptc` owns the whole `.ptc/` layout: it creates `envelopes/`, `inspection/`,
+`results/`, and `traces/` as one owner-only unit and never repairs that root in
+place. Writing anything else below it — including a transcript — makes every
+later `ptc run` fail with `envelope/publication_failed: … is incomplete`, and
+makes `ptc viewer` fail with `viewer/internal_error`. Send transcripts to a
+directory you own instead, and lock it down yourself.
+
 ```console
 run_ref=$(jq -r '.run_ref' out.json)
-mkdir -p .ptc/transcripts
+mkdir -p .ptc-transcripts && chmod 700 .ptc-transcripts
 ptc transcript "$run_ref" \
   --traces .ptc/traces \
   --inspection .ptc/inspection \
   --private-unattended \
-  --private-output ".ptc/transcripts/${run_ref}.private.json"
+  --private-output ".ptc-transcripts/${run_ref}.private.json"
 ptc viewer ptc-project.json
 ```
+
+A transcript carries the same private material as the inspection record it is
+derived from, so `.ptc-transcripts/` is gitignored and must stay owner-only.
 
 Current PtcRunner writes sealed private inspection evidence as
 `.ptc/inspection/<run-ref>.ptcins`; it is intentionally queried through the

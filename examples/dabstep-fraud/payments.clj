@@ -58,8 +58,25 @@
     (get response :value)
     (fail response)))
 
-(defn- read-column [column previous]
-  (if (and (not (nil? previous))
+(defn- validate-state! [column state]
+  (if (and (map? state)
+           (= (sort (keys state)) ["carry" "done" "upstream_cursor" "values"])
+           (or (nil? (get state "upstream_cursor"))
+               (string? (get state "upstream_cursor")))
+           (string? (get state "carry"))
+           (not (includes? (get state "carry") "\n"))
+           (vector? (get state "values"))
+           (<= (count (get state "values")) 65536)
+           (boolean? (get state "done")))
+    state
+    (fail {:status :error
+           :kind :invalid-cursor
+           :reason :malformed-column-state
+           :column column})))
+
+(defn- read-column [column supplied]
+  (let [previous (if (nil? supplied) nil (validate-state! column supplied))]
+   (if (and (not (nil? previous))
            (or (get previous "done")
                (not (empty? (get previous "values")))))
     (assoc previous "content_hash" nil "read_calls" 0)
@@ -98,7 +115,7 @@
        "values" new-values
        "done" (nil? next-upstream-cursor)
        "content_hash" (get page "content_hash")
-       "read_calls" 1})))
+       "read_calls" 1}))))
 
 (defn- compact-state [state emitted]
   {"upstream_cursor" (get state "upstream_cursor")
@@ -142,11 +159,19 @@
                           columns)
         hashes (vec (filter #(not (nil? %))
                             (map #(get (get states %) "content_hash") columns)))
-        read-calls (reduce + 0 (map #(get (get states %) "read_calls") columns))]
+        read-calls (reduce + 0 (map #(get (get states %) "read_calls") columns))
+        unbacked (vec (filter #(= 0 (get (get states %) "read_calls")) columns))
+        _ (if (and (> emitted 0) (= 0 read-calls))
+            (fail {:status :error
+                   :kind :invalid-cursor
+                   :reason :unbacked-page
+                   :columns unbacked})
+            nil)]
     {"columns" columns
      "rows" rows
      "next_cursor" (if finished?
                      nil
                      {"columns" columns "states" next-states})
      "content_hashes" hashes
+     "unbacked_columns" unbacked
      "read_calls" read-calls}))
