@@ -202,6 +202,9 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapter do
   defp installed_ceiling(%{scope: :manifest_narrowable, field: field}, installed),
     do: Map.fetch!(installed, field)
 
+  defp installed_ceiling(%{scope: :optional_manifest_narrowable, field: field}, installed),
+    do: Map.fetch!(installed, field)
+
   defp installed_ceiling(_row, _installed), do: nil
 
   # --- host configuration -------------------------------------------------

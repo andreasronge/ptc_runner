@@ -510,7 +510,8 @@ defmodule PtcRunner.Kernel.HostConfig do
       schema_limits =
         Map.new(limits, fn {name, _value} ->
           {:ok, field} = Limits.name(name)
-          {name, Map.fetch!(installed, field)}
+          {:ok, row} = LimitCatalog.fetch(field)
+          {name, Map.fetch!(installed, field) || row.minimum}
         end)
 
       Map.put(value, "limits", schema_limits)
@@ -1416,6 +1417,9 @@ defmodule PtcRunner.Kernel.HostConfig do
           case row.scope do
             :manifest_narrowable ->
               "Installed ceiling for #{row.name}; a manifest may only request less."
+
+            :optional_manifest_narrowable ->
+              "Optional aggregate budget for #{row.name}; omission disables it."
 
             :installed_only ->
               "Installed-only operational limit for #{row.name}; applications cannot declare it."

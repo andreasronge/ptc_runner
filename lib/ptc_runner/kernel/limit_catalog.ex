@@ -10,13 +10,16 @@ defmodule PtcRunner.Kernel.LimitCatalog do
 
   `:manifest_narrowable` limits may be requested by an application at or below
   the installed ceiling. `:installed_only` limits are host-owned and are copied
-  unchanged into effective limits.
+  unchanged into effective limits. `:optional_manifest_narrowable` limits are
+  disabled when omitted by the host; an enabled host value becomes both the
+  inherited manifest default and its ceiling.
   """
 
   @generic_maximum 2_592_000_000
   @maximums %{
     llm_request_output_tokens: 1_000_000,
-    llm_request_timeout_ms: 1_800_000
+    llm_request_timeout_ms: 1_800_000,
+    llm_total_tokens: 9_007_199_254_740_991
   }
   @minimums %{llm_request_timeout_ms: 100}
 
@@ -112,6 +115,8 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     {:doctor_connectivity_timeout_ms, 10_000, false}
   ]
 
+  @optional_manifest_narrowable [{:llm_total_tokens, 1, 9_007_199_254_740_991}]
+
   @descriptions %{
     run_duration_ms:
       "Complete ordinary run after optional provider application admission, including active preflight and Kernel execution.",
@@ -129,6 +134,8 @@ defmodule PtcRunner.Kernel.LimitCatalog do
       "Authorized output tokens for one live language-model call, supplied as that call's max_tokens.",
     llm_request_timeout_ms:
       "Whole-call deadline for one live language-model request, including adapter work, retries, and structured output validation.",
+    llm_total_tokens:
+      "Aggregate provider-counted input and output tokens authorized across live language-model calls in one run.",
     workflow_capability_calls: "Total workflow capability calls in one run.",
     workflow_capability_calls_per_name:
       "Workflow capability calls to any one public name in one run.",
@@ -167,6 +174,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     live_provider_tasks: :count,
     llm_request_output_tokens: :count,
     llm_request_timeout_ms: :milliseconds,
+    llm_total_tokens: :count,
     workflow_capability_calls: :count,
     workflow_capability_calls_per_name: :count,
     mission_capability_calls: :count,
@@ -217,19 +225,33 @@ defmodule PtcRunner.Kernel.LimitCatalog do
                unit: Map.fetch!(@units, field),
                description: Map.fetch!(@descriptions, field)
              }
+           end) ++
+           Enum.map(@optional_manifest_narrowable, fn {field, minimum, maximum} ->
+             %{
+               field: field,
+               name: Atom.to_string(field),
+               scope: :optional_manifest_narrowable,
+               compiled_default: nil,
+               installed_default: nil,
+               minimum: minimum,
+               maximum: maximum,
+               identity: true,
+               unit: Map.fetch!(@units, field),
+               description: Map.fetch!(@descriptions, field)
+             }
            end))
         |> Enum.sort_by(& &1.name)
 
   @by_name Map.new(@rows, &{&1.name, &1})
   @by_field Map.new(@rows, &{&1.field, &1})
 
-  @type scope :: :manifest_narrowable | :installed_only
+  @type scope :: :manifest_narrowable | :optional_manifest_narrowable | :installed_only
   @type row :: %{
           field: atom(),
           name: binary(),
           scope: scope(),
-          compiled_default: pos_integer(),
-          installed_default: pos_integer(),
+          compiled_default: pos_integer() | nil,
+          installed_default: pos_integer() | nil,
           minimum: pos_integer(),
           maximum: pos_integer(),
           identity: boolean(),
@@ -243,16 +265,18 @@ defmodule PtcRunner.Kernel.LimitCatalog do
 
   @spec rows(scope()) :: [row()]
   @doc "Returns catalog rows in one scope, preserving lexical order."
-  def rows(scope) when scope in [:manifest_narrowable, :installed_only],
-    do: Enum.filter(@rows, &(&1.scope == scope))
+  def rows(scope)
+      when scope in [:manifest_narrowable, :optional_manifest_narrowable, :installed_only],
+      do: Enum.filter(@rows, &(&1.scope == scope))
 
   @spec names(:all | scope()) :: [binary()]
   @doc "Returns public names for the host or one catalog scope."
   def names(scope \\ :all)
   def names(:all), do: Enum.map(@rows, & &1.name)
 
-  def names(scope) when scope in [:manifest_narrowable, :installed_only],
-    do: scope |> rows() |> Enum.map(& &1.name)
+  def names(scope)
+      when scope in [:manifest_narrowable, :optional_manifest_narrowable, :installed_only],
+      do: scope |> rows() |> Enum.map(& &1.name)
 
   @spec fetch(binary() | atom()) :: {:ok, row()} | :error
   @doc "Looks up a row without converting caller-authored strings to atoms."
@@ -260,13 +284,15 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   def fetch(field) when is_atom(field), do: Map.fetch(@by_field, field)
   def fetch(_name), do: :error
 
-  @spec defaults(:compiled | :installed) :: %{required(atom()) => pos_integer()}
+  @spec defaults(:compiled | :installed) :: %{required(atom()) => pos_integer() | nil}
   @doc "Projects the complete atom-keyed default table from the catalog."
   def defaults(:compiled), do: Map.new(@rows, &{&1.field, &1.compiled_default})
   def defaults(:installed), do: Map.new(@rows, &{&1.field, &1.installed_default})
 
   @spec valid_value?(row(), term()) :: boolean()
   @doc "Checks one value against its row's inclusive range."
+  def valid_value?(%{scope: :optional_manifest_narrowable}, nil), do: true
+
   def valid_value?(%{minimum: minimum, maximum: maximum}, value) when is_integer(value),
     do: value >= minimum and value <= maximum
 
@@ -306,9 +332,14 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   def schema_properties(:host), do: Map.new(@rows, &schema_property/1)
 
   def schema_properties(:manifest),
-    do: @rows |> Enum.filter(&(&1.scope == :manifest_narrowable)) |> Map.new(&schema_property/1)
+    do:
+      @rows
+      |> Enum.filter(&(&1.scope in [:manifest_narrowable, :optional_manifest_narrowable]))
+      |> Map.new(&schema_property/1)
 
-  @spec effective_projection(struct() | map()) :: %{required(binary()) => pos_integer()}
+  @spec effective_projection(struct() | map()) :: %{
+          required(binary()) => pos_integer() | nil
+        }
   @doc "Projects exactly the limit rows that participate in effective identity."
   def effective_projection(limits) when is_map(limits) do
     values = if is_struct(limits), do: Map.from_struct(limits), else: limits
