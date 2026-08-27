@@ -108,6 +108,9 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
 
     on_exit(fn -> ViewerSnapshotStore.stop(store) end)
 
+    held_trace = :sys.get_state(store.pid).trace
+    assert Process.alive?(held_trace.pid)
+
     assert {:ok, %{"items" => items}} = ViewerSnapshotStore.query(store, :list_runs, %{})
     assert MapSet.new(Enum.map(items, & &1["run_id"])) == MapSet.new(["normal", "secret"])
 
@@ -118,7 +121,132 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
 
     assert Enum.map(sanitized, & &1["run_id"]) == ["normal"]
     assert page["excluded_private_trace_files"] == 1
-    assert Process.alive?(:sys.get_state(store.pid).trace.pid)
+    refute Process.alive?(held_trace.pid)
+    recaptured = :sys.get_state(store.pid).trace
+    assert recaptured.pid != held_trace.pid
+    assert Process.alive?(recaptured.pid)
+  end
+
+  @tag :tmp_dir
+  test "a revocation written before the first serving call takes effect immediately", %{
+    tmp_dir: directory
+  } do
+    fixture = PrivateInspectionFixture.create!(Path.join(directory, ".ptc"), "granted-run")
+    path = write_project(directory, true)
+    {:ok, project} = ProjectConfig.load(path)
+    write_project(directory, false)
+
+    {:ok, store} = start_granted_store(project, path, fixture)
+    on_exit(fn -> ViewerSnapshotStore.stop(store) end)
+
+    inspection = :sys.get_state(store.pid).inspection
+    assert InspectionSnapshot.alive?(inspection)
+
+    assert {:error, :inspection_not_private} =
+             ViewerSnapshotStore.conversation(store, fixture.run_id)
+
+    refute InspectionSnapshot.alive?(inspection)
+  end
+
+  @tag :tmp_dir
+  test "a failed post-revoke recapture does not restore the discarded admission", %{
+    tmp_dir: directory
+  } do
+    artifact_root = Path.join(directory, ".ptc")
+    traces = Path.join(artifact_root, "traces")
+    File.mkdir_p!(traces)
+    write_events(Path.join(traces, "normal.jsonl"), [event("normal", 1, "run-started")])
+    write_events(Path.join(traces, "secret.private.jsonl"), [event("secret", 1, "run-started")])
+
+    path = write_project(directory, true)
+    {:ok, project} = ProjectConfig.load(path)
+    {:ok, agent} = Agent.start_link(fn -> :ok end)
+    on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+
+    capture = fn _project, _trace, _deadline ->
+      case Agent.get(agent, & &1) do
+        :ok -> {:ok, nil}
+        :fail -> {:error, :snapshot_unavailable}
+      end
+    end
+
+    assert {:ok, store} =
+             ViewerSnapshotStore.start(
+               {:private_authorized_directory, traces},
+               capture,
+               project: project,
+               project_path: path
+             )
+
+    on_exit(fn -> ViewerSnapshotStore.stop(store) end)
+
+    held_trace = :sys.get_state(store.pid).trace
+    assert {:ok, %{"items" => items}} = ViewerSnapshotStore.query(store, :list_runs, %{})
+    assert MapSet.new(Enum.map(items, & &1["run_id"])) == MapSet.new(["normal", "secret"])
+
+    :ok = Agent.update(agent, fn _ -> :fail end)
+    write_project(directory, false)
+
+    assert {:error, :snapshot_unavailable} =
+             ViewerSnapshotStore.query(store, :list_runs, %{})
+
+    refute Process.alive?(held_trace.pid)
+    assert is_nil(:sys.get_state(store.pid).trace)
+
+    :ok = Agent.update(agent, fn _ -> :ok end)
+
+    assert {:ok, %{"items" => sanitized} = page} =
+             ViewerSnapshotStore.query(store, :list_runs, %{})
+
+    assert Enum.map(sanitized, & &1["run_id"]) == ["normal"]
+    assert page["excluded_private_trace_files"] == 1
+  end
+
+  @tag :tmp_dir
+  test "revocation recaptures from the boot trace directory, not a reloaded artifact root", %{
+    tmp_dir: directory
+  } do
+    artifact_root = Path.join(directory, ".ptc")
+    traces = Path.join(artifact_root, "traces")
+    File.mkdir_p!(traces)
+    write_events(Path.join(traces, "normal.jsonl"), [event("normal", 1, "run-started")])
+    write_events(Path.join(traces, "secret.private.jsonl"), [event("secret", 1, "run-started")])
+
+    path = write_project(directory, true)
+    {:ok, project} = ProjectConfig.load(path)
+
+    assert {:ok, store} =
+             ViewerSnapshotStore.start(
+               {:private_authorized_directory, traces},
+               fn _project, _trace, _deadline -> {:ok, nil} end,
+               project: project,
+               project_path: path
+             )
+
+    on_exit(fn -> ViewerSnapshotStore.stop(store) end)
+
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "kind" => "ptc-project",
+        "version" => 1,
+        "application" => %{"path" => "ptc.json"},
+        "artifacts" => %{
+          "root" => "elsewhere",
+          "trace" => true,
+          "inspection" => true
+        },
+        "viewer" => %{
+          "port" => 0,
+          "open" => false,
+          "repl" => false,
+          "private" => false
+        }
+      })
+    )
+
+    assert {:ok, %{"items" => sanitized}} = ViewerSnapshotStore.query(store, :list_runs, %{})
+    assert Enum.map(sanitized, & &1["run_id"]) == ["normal"]
   end
 
   @tag :tmp_dir

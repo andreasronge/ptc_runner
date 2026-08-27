@@ -44,8 +44,8 @@ ptc viewer hello-ptc/ptc-project.json
 The Runs list uses a matching project `labels.name` as its readable headline,
 keeps the command run ID underneath, and shows finite label tags. When every
 successful model call reported a metric, the row also shows full-run input and
-output tokens and provider-reported cost. Refresh includes runs that finished
-after this captured snapshot.
+output tokens and provider-reported cost; missing prices or usage stay absent.
+Refresh includes runs that finished after this captured snapshot.
 
 When the Live tab launches provider-backed work, pass an exact dotenv file
 with `--env-file FILE` or declare `host.env_file` in the project. The Viewer

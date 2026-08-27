@@ -130,6 +130,43 @@ defmodule PtcRunner.ViewerFrontendTest do
   end
 
   @tag :tmp_dir
+  test "widening viewer.private serves inspection only after an explicit refresh", %{
+    tmp_dir: directory
+  } do
+    project_path =
+      viewer_project(directory, %{"private" => false}, %{"trace" => true, "inspection" => true})
+
+    {:ok, project} = ProjectConfig.load(project_path)
+    fixture = PrivateInspectionFixture.create!(project.artifact_root, "granted-run")
+    File.rm_rf!(Path.join(project.artifact_root, "analysis-traces"))
+
+    assert {:ok, viewer, address, port} = ViewerFrontend.start(project_path)
+    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
+
+    origin = "http://#{:inet.ntoa(address)}:#{port}"
+    url = origin <> "/api/analysis/runs/#{fixture.run_id}/conversation"
+
+    withheld = Req.get!(url, retry: false)
+    assert withheld.status == 404
+    assert withheld.body == "inspection_not_private"
+
+    document = Jason.decode!(File.read!(project_path))
+    File.write!(project_path, Jason.encode!(put_in(document, ["viewer", "private"], true)))
+
+    still_withheld = Req.get!(url, retry: false)
+    assert still_withheld.status == 404
+    assert still_withheld.body == "inspection_not_private"
+
+    refresh = Req.post!(origin <> "/api/kernel/refresh", retry: false)
+    assert refresh.status == 200
+
+    granted = Req.get!(url, retry: false)
+    assert granted.status == 200
+    refute granted.body == "inspection_not_private"
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
   test "a run finished after Viewer start appears after an explicit refresh", %{
     tmp_dir: directory
   } do

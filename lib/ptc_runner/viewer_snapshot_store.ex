@@ -143,7 +143,7 @@ defmodule PtcRunner.ViewerSnapshotStore do
         {:ok,
          %{
            capture_inspection: capture_inspection,
-           document_digest: initial_digest(grant.project_path),
+           document_digest: nil,
            inspection: inspection,
            loaded_project: grant.loaded_project,
            owner_ref: owner_ref,
@@ -152,6 +152,7 @@ defmodule PtcRunner.ViewerSnapshotStore do
            project_path: grant.project_path,
            token: token,
            trace: trace,
+           trace_directory: source_directory(trace_source),
            trace_source: trace_source
          }}
 
@@ -272,7 +273,11 @@ defmodule PtcRunner.ViewerSnapshotStore do
   end
 
   defp apply_loaded_project(state, project, digest) do
-    state = %{state | loaded_project: project, document_digest: digest}
+    state = %{
+      state
+      | document_digest: digest,
+        loaded_project: retain_boot_project(state.loaded_project, project)
+    }
 
     if state.private? and not project.viewer.private do
       drop_private(state)
@@ -280,6 +285,15 @@ defmodule PtcRunner.ViewerSnapshotStore do
       {state, :ok}
     end
   end
+
+  # Other project fields stay boot-read. Only the private grant is overlaid from
+  # the reloaded document, so a combined edit cannot retarget artifact_root or
+  # flip artifacts.inspection on a serving or refresh path.
+  defp retain_boot_project(%ProjectConfig{} = boot, %ProjectConfig{} = loaded) do
+    %{boot | viewer: %{boot.viewer | private: loaded.viewer.private}}
+  end
+
+  defp retain_boot_project(_boot, project), do: project
 
   defp drop_private(state) do
     cleanup(state.trace, state.inspection)
@@ -363,12 +377,16 @@ defmodule PtcRunner.ViewerSnapshotStore do
     }
   end
 
-  defp current_trace_source(%{loaded_project: %{viewer: %{private: true}, artifact_root: root}})
-       when is_binary(root),
-       do: {:private_authorized_directory, Path.join(root, "traces")}
+  defp current_trace_source(%{
+         loaded_project: %{viewer: %{private: true}},
+         trace_directory: directory
+       })
+       when is_binary(directory),
+       do: {:private_authorized_directory, directory}
 
-  defp current_trace_source(%{loaded_project: %{artifact_root: root}}) when is_binary(root),
-    do: {:directory, Path.join(root, "traces")}
+  defp current_trace_source(%{loaded_project: %ProjectConfig{}, trace_directory: directory})
+       when is_binary(directory),
+       do: {:directory, directory}
 
   defp current_trace_source(%{trace_source: source}), do: source
 
@@ -446,14 +464,7 @@ defmodule PtcRunner.ViewerSnapshotStore do
   defp sanitized_source({:private_authorized_directory, directory}), do: {:directory, directory}
   defp sanitized_source(source), do: source
 
-  defp initial_digest(path) when is_binary(path) do
-    case ProjectConfig.document_digest(path) do
-      {:ok, digest} -> digest
-      {:error, _reason} -> nil
-    end
-  end
-
-  defp initial_digest(_path), do: nil
+  defp source_directory({_kind, directory}) when is_binary(directory), do: directory
 
   defp normalize_capture(fun) when is_function(fun, 2),
     do: {:ok, fn _project, trace, deadline -> fun.(trace, deadline) end}
