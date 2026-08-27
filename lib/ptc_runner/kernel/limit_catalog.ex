@@ -115,7 +115,10 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     {:doctor_connectivity_timeout_ms, 10_000, false}
   ]
 
-  @optional_manifest_narrowable [{:llm_total_tokens, 1, 9_007_199_254_740_991}]
+  @optional_manifest_narrowable [
+    {:llm_total_tokens, 1, 9_007_199_254_740_991},
+    {:llm_cost_microusd, 1, 9_007_199_254_740_991}
+  ]
 
   @descriptions %{
     run_duration_ms:
@@ -136,6 +139,8 @@ defmodule PtcRunner.Kernel.LimitCatalog do
       "Whole-call deadline for one live language-model request, including adapter work, retries, and structured output validation.",
     llm_total_tokens:
       "Aggregate provider-counted input and output tokens authorized across live language-model calls in one run.",
+    llm_cost_microusd:
+      "Aggregate USD cost in microunits authorized across live language-model calls in one run.",
     workflow_capability_calls: "Total workflow capability calls in one run.",
     workflow_capability_calls_per_name:
       "Workflow capability calls to any one public name in one run.",
@@ -175,6 +180,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     llm_request_output_tokens: :count,
     llm_request_timeout_ms: :milliseconds,
     llm_total_tokens: :count,
+    llm_cost_microusd: :count,
     workflow_capability_calls: :count,
     workflow_capability_calls_per_name: :count,
     mission_capability_calls: :count,

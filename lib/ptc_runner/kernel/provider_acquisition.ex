@@ -843,6 +843,11 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         _absent -> route
       end
 
+    route =
+      if descriptor.source == :llm,
+        do: Map.put(route, :reservation_tariff, descriptor.reservation_tariff),
+        else: route
+
     case descriptor.request_timeout_ms do
       timeout_ms when is_integer(timeout_ms) ->
         Map.put(route, :request_timeout_ms, timeout_ms)

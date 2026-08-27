@@ -75,6 +75,7 @@ These budgets are disabled by an omitted host value. A positive host value enabl
 
 | Name | Meaning | Unit | Disabled default | Inclusive range |
 | --- | --- | --- | --- | ---: |
+| `llm_cost_microusd` | Aggregate USD cost in microunits authorized across live language-model calls in one run. | count | `null` | 1–9,007,199,254,740,991 |
 | `llm_total_tokens` | Aggregate provider-counted input and output tokens authorized across live language-model calls in one run. | count | `null` | 1–9,007,199,254,740,991 |
 
 ## Installed-only limits

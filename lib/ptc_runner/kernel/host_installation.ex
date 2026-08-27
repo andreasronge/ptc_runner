@@ -363,6 +363,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
       local_preflight: local_preflight_mode(installation),
       structured_output_mode: descriptor_structured_output_mode(installation),
       usage_guarantees: descriptor_usage_guarantees(installation),
+      reservation_tariff: descriptor_reservation_tariff(installation),
       request_timeout_ms: descriptor_request_timeout_ms(installation)
     )
   end
@@ -396,6 +397,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
     do: guarantees
 
   defp descriptor_usage_guarantees(_installation), do: nil
+
+  defp descriptor_reservation_tariff(%{source: :llm, reservation_tariff: tariff}), do: tariff
+  defp descriptor_reservation_tariff(_installation), do: nil
 
   defp descriptor_request_timeout_ms(%{source: :llm, ceilings: %{request_timeout_ms: timeout_ms}})
        when is_integer(timeout_ms) and timeout_ms > 0,
@@ -735,6 +739,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
       max_calls: selected.max_calls,
       structured_output_mode: installation.structured_output_mode,
       usage_guarantees: installation.usage_guarantees,
+      reservation_tariff: installation.reservation_tariff,
       request_timeout_ms: installation.ceilings.request_timeout_ms
     }
   end
@@ -939,7 +944,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
            installation.params,
            limits.llm_request_output_tokens,
            installation.structured_output_mode,
-           installation.usage_guarantees
+           installation.usage_guarantees,
+           reservation_requirement(installation, limits)
          ) do
       {:ok, requirements} -> {:ok, requirements}
       :error -> {:error, :invalid_llm_model}
@@ -947,6 +953,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp live_llm_requirements(_installation, _context), do: {:error, :invalid_llm_model}
+
+  defp reservation_requirement(installation, limits) do
+    %{
+      total_tokens?: not is_nil(limits.llm_total_tokens) or not is_nil(limits.llm_cost_microusd),
+      cost_tariff:
+        if(is_nil(limits.llm_cost_microusd), do: nil, else: installation.reservation_tariff)
+    }
+  end
 
   defp probe_llm_requirements(installation) do
     case Requirements.probe(installation.params, installation.usage_guarantees) do

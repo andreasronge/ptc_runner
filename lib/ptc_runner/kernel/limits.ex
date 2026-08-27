@@ -44,6 +44,7 @@ defmodule PtcRunner.Kernel.Limits do
           llm_request_output_tokens: pos_integer(),
           llm_request_timeout_ms: pos_integer(),
           llm_total_tokens: pos_integer() | nil,
+          llm_cost_microusd: pos_integer() | nil,
           workflow_capability_calls: pos_integer(),
           workflow_capability_calls_per_name: pos_integer(),
           mission_capability_calls: pos_integer(),

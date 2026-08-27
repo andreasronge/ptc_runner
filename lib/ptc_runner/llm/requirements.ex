@@ -75,9 +75,10 @@ defmodule PtcRunner.LLM.Requirements do
           map(),
           pos_integer(),
           :json_schema | :json_object | :unsupported,
-          usage_guarantees()
+          usage_guarantees(),
+          reservation()
         ) :: {:ok, t()} | :error
-  def live(params, output_tokens, structured_output_mode, usage_guarantees)
+  def live(params, output_tokens, structured_output_mode, usage_guarantees, reservation)
       when is_map(params) and is_integer(output_tokens) and output_tokens in 1..@max_tokens and
              structured_output_mode in @structured_modes do
     max_tokens =
@@ -90,11 +91,12 @@ defmodule PtcRunner.LLM.Requirements do
       exact_options: authorized_options(params, max_tokens),
       structured_output_mode: structured_output_mode,
       usage_guarantees: usage_guarantees,
-      reservation: %{total_tokens?: false, cost_tariff: nil}
+      reservation: reservation
     })
   end
 
-  def live(_params, _output_tokens, _structured_output_mode, _usage_guarantees), do: :error
+  def live(_params, _output_tokens, _structured_output_mode, _usage_guarantees, _reservation),
+    do: :error
 
   @spec probe(map(), usage_guarantees()) :: {:ok, t()} | :error
   def probe(params, usage_guarantees) when is_map(params) do

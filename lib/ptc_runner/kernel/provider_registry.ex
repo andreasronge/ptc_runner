@@ -155,6 +155,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
                   tokens: boolean(),
                   cost_currency: String.t() | nil
                 },
+                optional(:reservation_tariff) => %{currency: String.t(), id: binary()} | nil,
                 optional(:request_timeout_ms) => pos_integer() | nil
               },
           preflight: (-> {:ok, acquire()}
@@ -529,6 +530,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           :source,
           :structured_output_mode,
           :usage_guarantees,
+          :reservation_tariff,
           :request_timeout_ms
         ]
 
@@ -541,6 +543,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
       is_boolean(route.default) and valid_optional_max_calls?(Map.get(route, :max_calls)) and
       valid_structured_output_mode?(Map.get(route, :structured_output_mode), route.source) and
       valid_usage_guarantees?(Map.get(route, :usage_guarantees), route.source) and
+      valid_reservation_tariff?(Map.get(route, :reservation_tariff), route.source) and
       LLMRouter.valid_route_timeout_ms?(Map.get(route, :request_timeout_ms), route.source)
   end
 
@@ -562,6 +565,14 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
        do: true
 
   defp valid_usage_guarantees?(_guarantees, _source), do: false
+
+  defp valid_reservation_tariff?(nil, _source), do: true
+
+  defp valid_reservation_tariff?(%{currency: "USD", id: id} = tariff, "llm")
+       when map_size(tariff) == 2 and is_binary(id) and byte_size(id) in 1..128,
+       do: String.valid?(id)
+
+  defp valid_reservation_tariff?(_tariff, _source), do: false
 
   defp valid_optional_max_calls?(nil), do: true
   defp valid_optional_max_calls?(max_calls) when is_integer(max_calls) and max_calls > 0, do: true
