@@ -110,7 +110,7 @@ do
       ;;
     *'"method":"tools/list"'*)
       printf '%s:%s\n' "$id" 'tools/list' >> "$marker"
-      if [ "$mode" = "structured-padded" ]; then
+      if [ "$mode" = "structured-padded" ] || [ "$mode" = "structured-padded-dense" ]; then
         printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured","description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"},"padding":{"type":"array","items":{"type":"string"}}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id"
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured","description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id"
@@ -124,6 +124,8 @@ do
       fi
       if [ "$mode" = "structured-padded" ]; then
         write_padded_structured_result "$id" 28000
+      elif [ "$mode" = "structured-padded-dense" ]; then
+        write_padded_structured_result "$id" 45000
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","structuredContent":{"value":42},"content":[]}}\n' "$id"
       fi

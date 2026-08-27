@@ -1935,6 +1935,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp decode_sse(body, id) do
     case consume_sse_events(body, nil, id, true) do
       {:ok, _rest, response, _at_start?} when is_map(response) -> {:ok, response}
+      {:error, :mcp_response_exceeded} -> {:error, :mcp_response_exceeded}
       _result -> {:error, :mcp_protocol_error}
     end
   end
@@ -1969,6 +1970,9 @@ defmodule PtcRunner.Kernel.MCPSource do
 
       {:ok, {:response, ^id, decoded}} when is_nil(response) ->
         {:ok, decoded}
+
+      {:error, :mcp_response_exceeded} ->
+        {:error, :mcp_response_exceeded}
 
       _invalid ->
         {:error, :mcp_protocol_error}

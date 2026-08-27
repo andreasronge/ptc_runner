@@ -14,7 +14,12 @@ defmodule PtcRunner.Kernel.StrictJSON do
   @max_depth 64
   @max_nodes 100_000
   @timeout_ms 1_000
-  @max_heap_words 2_000_000
+  # Must cover full materialization plus admission of any document that
+  # satisfies `@max_nodes`, or the node limit is unreachable and legal inputs
+  # die in the worker (issue #1676). The worst admissible shape -- a flat
+  # object at the node limit -- peaks near 4.5M words; 8M words (64 MB on a
+  # 64-bit BEAM) keeps the kill a backstop rather than the operative bound.
+  @max_heap_words 8_000_000
 
   @type error ::
           :invalid_json

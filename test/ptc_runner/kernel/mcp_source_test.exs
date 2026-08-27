@@ -567,6 +567,65 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "an element-dense stdio result within byte limits reaches admission, not a protocol error",
+       %{tmp_dir: dir} do
+    # Issue #1676: decode cost scales with element count, not bytes. 45,000
+    # small strings (~400 KB) are within every transport bound, so the
+    # response must reach the dispatcher's retained-size admission -- with
+    # the exchange captured -- instead of killing the decode worker,
+    # failing the call as `mcp_protocol_error`, and poisoning transport
+    # cleanup for the whole run. Digest capture, because the full body's
+    # retained size is above the sealed-evidence record cap -- the ceiling
+    # digest mappings exist for.
+    marker = Path.join(dir, "stdio-dense")
+
+    tools = %{
+      "structured" => %{
+        as: "remote.structured",
+        effect: :read,
+        inspection_capture: :digest_results
+      }
+    }
+
+    inspection_path = Path.join(dir, "dense.ptcins")
+
+    # Enough evaluator heap to hold the dense value while the dispatcher
+    # measures it; the retained-size admission stays the binding limit.
+    {:ok, installed_limits} =
+      Limits.installed_defaults()
+      |> Map.from_struct()
+      |> Map.merge(%{evaluation_heap_words: 4_000_000})
+      |> Limits.new()
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: value}} =
+             dir
+             |> manifest(["remote.structured"],
+               program: single_call_program("remote.structured", "x"),
+               max_result_bytes: 1_000_000,
+               timeout_ms: 5_000,
+               evaluation_timeout_ms: 5_000,
+               limits: %{"evaluation_heap_words" => 4_000_000}
+             )
+             |> directory_request(
+               stdio_registry(dir, marker, "structured-padded-dense",
+                 tools: tools,
+                 max_result_bytes: 1_000_000
+               ),
+               inspect: inspection_path,
+               installed_limits: installed_limits
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert %{"status" => "error", "reason" => "provider_result_limit"} =
+             get_in(value, ["value", "value"])
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+    assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert %{"body_identity" => %{"sha256" => "sha256:" <> _}} = response["payload"]
+  end
+
+  @tag :tmp_dir
   test "a normalization-rejected result keeps its full error envelope while the body digests", %{
     tmp_dir: dir
   } do
