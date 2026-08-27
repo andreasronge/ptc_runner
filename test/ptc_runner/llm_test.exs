@@ -318,13 +318,15 @@ defmodule PtcRunner.LLMTest do
   describe "Requirements" do
     test "live authorization is the minimum of the effective limit and installed max_tokens" do
       guarantees = %{tokens: true, cost_currency: "USD"}
+      reservation = %{total_tokens?: false, cost_tariff: nil}
 
       assert {:ok, authorized} =
                Requirements.live(
                  %{max_tokens: 2_048, temperature: 0.15},
                  4_096,
                  :unsupported,
-                 guarantees
+                 guarantees,
+                 reservation
                )
 
       assert authorized.exact_options == %{max_tokens: 2_048, temperature: 0.15}
@@ -332,15 +334,21 @@ defmodule PtcRunner.LLMTest do
       assert authorized.usage_guarantees == %{tokens: true, cost_currency: "USD"}
 
       assert {:ok, limited} =
-               Requirements.live(%{max_tokens: 8_192}, 4_096, :unsupported, guarantees)
+               Requirements.live(
+                 %{max_tokens: 8_192},
+                 4_096,
+                 :unsupported,
+                 guarantees,
+                 reservation
+               )
 
       assert limited.exact_options == %{max_tokens: 4_096}
 
-      assert {:ok, omitted} = Requirements.live(%{}, 1_024, :unsupported, guarantees)
+      assert {:ok, omitted} = Requirements.live(%{}, 1_024, :unsupported, guarantees, reservation)
       assert omitted.exact_options == %{max_tokens: 1_024}
 
       assert {:ok, structured} =
-               Requirements.live(%{max_tokens: 256}, 4_096, :json_schema, guarantees)
+               Requirements.live(%{max_tokens: 256}, 4_096, :json_schema, guarantees, reservation)
 
       assert structured.structured_output_mode == :json_schema
       assert structured.exact_options == %{max_tokens: 256}

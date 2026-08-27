@@ -13,7 +13,7 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
   `:custom` registration declares `:unverified` instead, and its check becomes
   active work after the phase-8 marker.
   Live LLM installations also seal `structured_output_mode`,
-  `usage_guarantees`, and `request_timeout_ms` here so acquisition can
+  `usage_guarantees`, `reservation_tariff`, and `request_timeout_ms` here so acquisition can
   reconstruct the same workflow route the prepare callback reports. Public
   snapshots and `models` rows omit those fields.
   `PtcRunner.Kernel.InstallationCatalog` completes the rule: an
@@ -59,6 +59,7 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
     :local_preflight,
     :structured_output_mode,
     :usage_guarantees,
+    :reservation_tariff,
     :request_timeout_ms
   ]
   defstruct @enforce_keys ++ [attestation: nil]
@@ -96,6 +97,7 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
           local_preflight: :none | :audited_local | :unverified,
           structured_output_mode: :json_schema | :json_object | :unsupported | nil,
           usage_guarantees: %{tokens: boolean(), cost_currency: String.t() | nil} | nil,
+          reservation_tariff: %{currency: String.t(), id: binary()} | nil,
           request_timeout_ms: pos_integer() | nil,
           attestation: binary() | nil
         }
@@ -110,6 +112,7 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
         opts
         |> Keyword.put_new(:structured_output_mode, default_structured_output_mode(source))
         |> Keyword.put_new(:usage_guarantees, default_usage_guarantees(source))
+        |> Keyword.put_new(:reservation_tariff, default_reservation_tariff(source))
         |> Keyword.put_new(:request_timeout_ms, default_request_timeout_ms(source))
       else
         opts
@@ -227,6 +230,7 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
         descriptor.local_preflight in [:none, :audited_local, :unverified] and
         valid_structured_output_mode?(descriptor.source, descriptor.structured_output_mode) and
         valid_usage_guarantees?(descriptor.source, descriptor.usage_guarantees) and
+        valid_reservation_tariff?(descriptor.source, descriptor.reservation_tariff) and
         valid_request_timeout_ms?(descriptor.source, descriptor.request_timeout_ms)
 
   defp valid_structured_output_mode?(:llm, mode) when mode in @structured_output_modes,
@@ -242,6 +246,14 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
   defp valid_usage_guarantees?(source, nil) when source != :llm, do: true
   defp valid_usage_guarantees?(_source, _guarantees), do: false
 
+  defp valid_reservation_tariff?(:llm, nil), do: true
+
+  defp valid_reservation_tariff?(:llm, %{currency: "USD", id: id} = tariff),
+    do: map_size(tariff) == 2 and is_binary(id) and byte_size(id) in 1..128 and String.valid?(id)
+
+  defp valid_reservation_tariff?(source, nil) when source != :llm, do: true
+  defp valid_reservation_tariff?(_source, _tariff), do: false
+
   defp valid_request_timeout_ms?(:llm, timeout_ms),
     do: LimitCatalog.llm_request_timeout_ms?(timeout_ms)
 
@@ -253,6 +265,8 @@ defmodule PtcRunner.Kernel.ProviderDescriptor do
 
   defp default_usage_guarantees(:llm), do: %{tokens: false, cost_currency: nil}
   defp default_usage_guarantees(_source), do: nil
+
+  defp default_reservation_tariff(_source), do: nil
 
   defp default_request_timeout_ms(:llm) do
     {:ok, row} = LimitCatalog.fetch(:llm_request_timeout_ms)

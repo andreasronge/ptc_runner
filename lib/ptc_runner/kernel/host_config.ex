@@ -182,6 +182,7 @@ defmodule PtcRunner.Kernel.HostConfig do
               },
               structured_output_mode: :json_schema | :json_object | :unsupported,
               usage_guarantees: %{tokens: boolean(), cost_currency: String.t() | nil},
+              reservation_tariff: %{currency: String.t(), id: binary()} | nil,
               installation_revision: binary(),
               installation_config_digest: binary(),
               ceilings: %{
@@ -732,7 +733,7 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp llm_installation(value, credentials, limits) do
     allowed =
-      ~w(source model credential cache params structured_output_mode usage_guarantees installation_revision ceilings data_class accepts_data)
+      ~w(source model credential cache params structured_output_mode usage_guarantees reservation_tariff installation_revision ceilings data_class accepts_data)
 
     with :ok <-
            exact_keys(
@@ -749,6 +750,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          {:ok, structured_output_mode} <-
            structured_output_mode(value["structured_output_mode"]),
          {:ok, usage_guarantees} <- usage_guarantees(value["usage_guarantees"]),
+         {:ok, reservation_tariff} <- reservation_tariff(Map.get(value, "reservation_tariff")),
          {:ok, installation_revision} <-
            revision(value["installation_revision"]),
          {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{}), limits),
@@ -764,6 +766,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          params: params,
          structured_output_mode: structured_output_mode,
          usage_guarantees: usage_guarantees,
+         reservation_tariff: reservation_tariff,
          installation_revision: installation_revision,
          ceilings: ceilings,
          data_class: data_class,
@@ -843,6 +846,17 @@ defmodule PtcRunner.Kernel.HostConfig do
        do: {:ok, %{tokens: tokens, cost_currency: currency}}
 
   defp usage_guarantees(_value), do: {:error, :invalid_usage_guarantees}
+
+  defp reservation_tariff(nil), do: {:ok, nil}
+
+  defp reservation_tariff(%{"currency" => "USD", "id" => id} = tariff)
+       when map_size(tariff) == 2 and is_binary(id) and byte_size(id) in 1..128 do
+    if String.valid?(id),
+      do: {:ok, %{currency: "USD", id: id}},
+      else: {:error, :invalid_reservation_tariff}
+  end
+
+  defp reservation_tariff(_value), do: {:error, :invalid_reservation_tariff}
 
   defp maybe_put_param(params, atom_key, value, string_key, normalized) do
     if Map.has_key?(value, string_key), do: Map.put(params, atom_key, normalized), else: params

@@ -116,6 +116,16 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                       maximum: 9_007_199_254_740_991,
                       identity: true
                     })
+                    |> Map.put("llm_cost_microusd", %{
+                      field: :llm_cost_microusd,
+                      name: "llm_cost_microusd",
+                      scope: :optional_manifest_narrowable,
+                      compiled_default: nil,
+                      installed_default: nil,
+                      minimum: 1,
+                      maximum: 9_007_199_254_740_991,
+                      identity: true
+                    })
 
   # A ceiling equal to the default leaves a manifest no way to raise its own
   # value except by writing a host document. Twenty-one rows were in that

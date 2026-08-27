@@ -114,6 +114,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              },
              structured_output_mode: :unsupported,
              usage_guarantees: %{tokens: true, cost_currency: "USD"},
+             reservation_tariff: nil,
              installation_revision: "model-policy-v2",
              ceilings: %{
                max_request_bytes: 200_000,
