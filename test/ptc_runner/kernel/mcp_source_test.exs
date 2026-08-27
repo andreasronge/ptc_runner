@@ -509,6 +509,47 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "digest result capture keeps a body this run rejected as an invalid result", %{
+    tmp_dir: dir
+  } do
+    # The JSON-RPC layer accepts this body and it is well within the byte
+    # bound; only the installed output schema rejects it. Capture therefore
+    # cannot be decided until tool-result normalization has run.
+    fixture = fixture(self(), structured_value: "wrong")
+    on_exit(fixture.close)
+
+    tools = %{
+      "structured" => %{
+        as: "remote.structured",
+        effect: :read,
+        inspection_capture: :digest_results
+      }
+    }
+
+    inspection_path = Path.join(dir, "invalid.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: value}} =
+             dir
+             |> manifest(["remote.structured"],
+               program: single_call_program("remote.structured", "x")
+             )
+             |> directory_request(registry(fixture.endpoint, tools: tools),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert %{"reason" => "invalid_result", "details" => "mcp_invalid_result"} =
+             get_in(value, ["value", "value"])
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert %{"body" => %{"result" => _result}} = response["payload"]
+    refute Map.has_key?(response["payload"], "body_identity")
+  end
+
+  @tag :tmp_dir
   test "digest result capture keeps a body this run rejected as oversized", %{tmp_dir: dir} do
     # The response looks successful on the wire and is only rejected once the
     # result is bounded, so capture has to wait for the outcome. Digesting it

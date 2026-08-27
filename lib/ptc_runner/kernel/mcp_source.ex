@@ -1041,7 +1041,7 @@ defmodule PtcRunner.Kernel.MCPSource do
              %{"name" => upstream, "arguments" => arguments},
              selected.max_result_bytes,
              header_parameters,
-             context
+             capture_gate(context, output_validator, error_feedback)
            ) do
         {:ok, result} ->
           normalize_result(result, output_validator, error_feedback, effect)
@@ -1051,6 +1051,22 @@ defmodule PtcRunner.Kernel.MCPSource do
       end
     end
   end
+
+  # `bounded_outcome/3` only bounds the RPC result. A `resultType: "complete"`
+  # body can still fail tool-result normalization -- malformed content, or
+  # structured content violating the installed output schema -- so the capture
+  # decision has to carry the same check this caller is about to apply, or a
+  # rejected body survives as an identity.
+  defp capture_gate(context, output_validator, error_feedback) when is_map(context) do
+    Map.put(context, :inspection_result_check, fn result ->
+      match?(
+        {:ok, _value},
+        MCPProtocol.normalize_tool_result(result, output_validator, error_feedback)
+      )
+    end)
+  end
+
+  defp capture_gate(context, _output_validator, _error_feedback), do: context
 
   defp normalize_result(result, output_validator, error_feedback, effect) do
     case MCPProtocol.normalize_tool_result(result, output_validator, error_feedback) do
@@ -1486,12 +1502,23 @@ defmodule PtcRunner.Kernel.MCPSource do
     # -- including a body this run went on to reject as oversized or malformed,
     # which is why the outcome is decided before the exchange is captured.
     if Map.get(context, :inspection_capture, :full) == :digest_results and
-         match?({:ok, _result}, outcome) and not error_response?(response) do
+         not error_response?(response) and accepted_outcome?(context, outcome) do
       digested_response(response, request_id)
     else
       {:ok, :body, response}
     end
   end
+
+  # Fail closed: without a registered check there is no evidence this body
+  # survives validation, so it is captured in full.
+  defp accepted_outcome?(context, {:ok, result}) do
+    case Map.get(context, :inspection_result_check) do
+      check when is_function(check, 1) -> check.(result)
+      _absent -> false
+    end
+  end
+
+  defp accepted_outcome?(_context, _outcome), do: false
 
   defp error_response?(%{"error" => _error}), do: true
   defp error_response?(%{"result" => %{"isError" => true}}), do: true
