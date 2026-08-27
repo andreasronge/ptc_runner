@@ -203,6 +203,61 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
   end
 
   @tag :tmp_dir
+  test "a GET after a failed post-revoke recapture does not widen the grant", %{
+    tmp_dir: directory
+  } do
+    artifact_root = Path.join(directory, ".ptc")
+    traces = Path.join(artifact_root, "traces")
+    File.mkdir_p!(traces)
+    write_events(Path.join(traces, "normal.jsonl"), [event("normal", 1, "run-started")])
+    write_events(Path.join(traces, "secret.private.jsonl"), [event("secret", 1, "run-started")])
+
+    path = write_project(directory, true)
+    {:ok, project} = ProjectConfig.load(path)
+    {:ok, agent} = Agent.start_link(fn -> :ok end)
+    on_exit(fn -> if Process.alive?(agent), do: Agent.stop(agent) end)
+
+    capture = fn _current, _trace, _deadline ->
+      case Agent.get(agent, & &1) do
+        :ok -> {:ok, nil}
+        :fail -> {:error, :snapshot_unavailable}
+      end
+    end
+
+    assert {:ok, store} =
+             ViewerSnapshotStore.start(
+               {:private_authorized_directory, traces},
+               capture,
+               project: project,
+               project_path: path
+             )
+
+    on_exit(fn -> ViewerSnapshotStore.stop(store) end)
+
+    assert {:ok, _} = ViewerSnapshotStore.query(store, :list_runs, %{})
+
+    :ok = Agent.update(agent, fn _ -> :fail end)
+    write_project(directory, false)
+
+    assert {:error, :snapshot_unavailable} =
+             ViewerSnapshotStore.query(store, :list_runs, %{})
+
+    :ok = Agent.update(agent, fn _ -> :ok end)
+    write_project(directory, true)
+
+    assert {:ok, %{"items" => sanitized} = page} =
+             ViewerSnapshotStore.query(store, :list_runs, %{})
+
+    assert Enum.map(sanitized, & &1["run_id"]) == ["normal"]
+    assert page["excluded_private_trace_files"] == 1
+
+    assert :ok = ViewerSnapshotStore.refresh(store)
+
+    assert {:ok, %{"items" => items}} = ViewerSnapshotStore.query(store, :list_runs, %{})
+    assert MapSet.new(Enum.map(items, & &1["run_id"])) == MapSet.new(["normal", "secret"])
+  end
+
+  @tag :tmp_dir
   test "revocation recaptures from the boot trace directory, not a reloaded artifact root", %{
     tmp_dir: directory
   } do

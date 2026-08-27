@@ -317,7 +317,7 @@ defmodule PtcRunner.ViewerSnapshotStore do
   end
 
   defp commit_refresh(state, required) do
-    case capture_next(state) do
+    case capture_next(state, :current) do
       {:ok, source, trace, inspection} ->
         keep_or_discard(state, required, source, trace, inspection)
 
@@ -348,7 +348,7 @@ defmodule PtcRunner.ViewerSnapshotStore do
   end
 
   defp recapture(state) do
-    case capture_next(state) do
+    case capture_next(state, :held) do
       {:ok, source, trace, inspection} ->
         cleanup(state.trace, state.inspection)
         {:ok, replace_capture(state, source, trace, inspection)}
@@ -358,10 +358,11 @@ defmodule PtcRunner.ViewerSnapshotStore do
     end
   end
 
-  defp capture_next(state) do
-    source = current_trace_source(state)
+  defp capture_next(state, grant) do
+    source = trace_source_for(state, grant)
+    project = project_for_capture(state, grant)
 
-    case capture(source, state.capture_inspection, state.loaded_project) do
+    case capture(source, state.capture_inspection, project) do
       {:ok, trace, inspection} -> {:ok, source, trace, inspection}
       {:error, reason} -> {:error, normalize_error(reason)}
     end
@@ -377,18 +378,38 @@ defmodule PtcRunner.ViewerSnapshotStore do
     }
   end
 
-  defp current_trace_source(%{
+  defp trace_source_for(%{private?: true, trace_directory: directory}, :held)
+       when is_binary(directory),
+       do: {:private_authorized_directory, directory}
+
+  defp trace_source_for(%{trace_directory: directory}, :held) when is_binary(directory),
+    do: {:directory, directory}
+
+  defp trace_source_for(%{trace_source: source}, :held), do: source
+
+  defp trace_source_for(state, :current), do: desired_trace_source(state)
+
+  defp desired_trace_source(%{
          loaded_project: %{viewer: %{private: true}},
          trace_directory: directory
        })
        when is_binary(directory),
        do: {:private_authorized_directory, directory}
 
-  defp current_trace_source(%{loaded_project: %ProjectConfig{}, trace_directory: directory})
+  defp desired_trace_source(%{loaded_project: %ProjectConfig{}, trace_directory: directory})
        when is_binary(directory),
        do: {:directory, directory}
 
-  defp current_trace_source(%{trace_source: source}), do: source
+  defp desired_trace_source(%{trace_source: source}), do: source
+
+  defp project_for_capture(
+         %{loaded_project: %ProjectConfig{} = project, private?: private?},
+         :held
+       ) do
+    %{project | viewer: %{project.viewer | private: private?}}
+  end
+
+  defp project_for_capture(state, _grant), do: state.loaded_project
 
   defp capture(trace_source, capture_inspection, project) do
     deadline = System.monotonic_time(:millisecond) + @capture_timeout_ms
