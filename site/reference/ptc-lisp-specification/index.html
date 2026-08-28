@@ -567,7 +567,12 @@ analysis profile:</p><pre><code class="console language-console">ptc repl --prof
   -e '(analysis/read &quot;RUN_REF&quot; {&quot;collection&quot; &quot;explicit_failure_values&quot;})'</code></pre><p>A CI script separates a deliberate failure from an infrastructure one on
 <code class="inline">error.code</code>; distinguishing one deliberate failure from another is what the
 inspection record is for. See the
-<a href="/reference/repl/#private-analysis-without-a-terminal">REPL reference</a>.</p><pre><code class="clojure language-clojure">;; Signal failure when a required condition isn't met.
+<a href="/reference/repl/#private-analysis-without-a-terminal">REPL reference</a>.</p><p>One <code class="inline">fail</code> does not always report <code class="inline">explicit_failure</code>. When the value is a
+capability refusal the Kernel itself issued — a quota or budget ceiling the run
+actually reached, or an authenticated provider failure — the run reports that
+class instead, so re-raising a refusal with <code class="inline">fail</code> does not disguise it as an
+application decision. A value the workflow authored keeps <code class="inline">explicit_failure</code>
+even when it imitates one of those shapes.</p><pre><code class="clojure language-clojure">;; Signal failure when a required condition isn't met.
 ;; This tests whether the granted value is `nil`, which is a different question
 ;; from whether the name was granted at all. Under the Kernel -- a workflow
 ;; entry, a mission run, or either REPL -- an ungranted `data/&lt;name&gt;` is a

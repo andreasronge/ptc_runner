@@ -9,7 +9,7 @@ defmodule PtcRunner.Kernel.ExplicitFailureDiagnostic do
   # literal, so the message adds no caller-supplied text.
 
   @retained "the workflow signalled an explicit failure; its value is retained in the run's private inspection record"
-  @unrequested "the workflow signalled an explicit failure; its value was not retained because the run published no inspection artifact — set artifacts.inspection to true to retain it"
+  @unrequested "the workflow signalled an explicit failure; its value was not retained because the run published no inspection artifact — set artifacts.inspection in the project configuration, or pass --inspect FILE"
   @unwritten "the workflow signalled an explicit failure; its value was not retained because the run's inspection artifact did not reach its destination"
   @oversized "the workflow signalled an explicit failure; its value was not retained because it exceeded the terminal result ceiling"
   @unrepresentable "the workflow signalled an explicit failure; its value was not retained because it cannot be represented as JSON"

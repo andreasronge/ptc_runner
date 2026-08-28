@@ -264,7 +264,8 @@ ceiling, timeout, quota, and manifest grant.
 
 The value handed to `fail` is application data, so it never reaches the envelope
 or the trace. A workflow entry that ends this way reports
-`execution/explicit_failure`, and that diagnostic says where the value went: it
+`execution/explicit_failure` — unless the value re-raises a Kernel refusal, which
+keeps its own class — and that diagnostic says where the value went: it
 is retained in the run's private inspection record when the run publishes one
 and the value fits under `terminal_result_bytes`, and the diagnostic names the
 reason when it is not. See

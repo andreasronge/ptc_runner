@@ -1392,6 +1392,13 @@ A CI script separates a deliberate failure from an infrastructure one on
 inspection record is for. See the
 [REPL reference](reference/repl.md#private-analysis-without-a-terminal).
 
+One `fail` does not always report `explicit_failure`. When the value is a
+capability refusal the Kernel itself issued — a quota or budget ceiling the run
+actually reached, or an authenticated provider failure — the run reports that
+class instead, so re-raising a refusal with `fail` does not disguise it as an
+application decision. A value the workflow authored keeps `explicit_failure`
+even when it imitates one of those shapes.
+
 ```clojure
 ;; Signal failure when a required condition isn't met.
 ;; This tests whether the granted value is `nil`, which is a different question

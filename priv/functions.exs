@@ -4433,7 +4433,7 @@
       ptc_extension?: false,
       examples: [],
       notes:
-        "Terminates the program immediately; a Kernel host aborts and rolls back the run. `ptc run` reports `execution/explicit_failure`, and its message says whether `error` was retained in the private inspection record or dropped. Not allowed inside `pmap` or `pcalls`.",
+        "Terminates the program immediately; a Kernel host aborts and rolls back the run. `ptc run` reports `execution/explicit_failure` — unless `error` re-raises a Kernel refusal, which keeps its own class — and its message says whether `error` was retained in the private inspection record or dropped. Not allowed inside `pmap` or `pcalls`.",
       see_also: ["return"],
       clojure_var: "fail",
       divergences: nil

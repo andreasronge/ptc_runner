@@ -1334,6 +1334,12 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: %{"const" => row.message}
 
   defp diagnostic_message_schema(
+         %{phase: :execution, code: :explicit_failure} = row,
+         _source
+       ),
+       do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
          %{phase: :application, code: :installed_limit_exceeded} = row,
          %{"properties" => %{"kind" => %{"const" => "application"}}}
        ),

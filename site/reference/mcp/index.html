@@ -249,7 +249,8 @@ tool:</p><pre><code class="clojure language-clojure">(ns my.files &quot;Mission 
 <code class="inline">tool/...</code> entries. The underlying capability still enforces its schema, byte
 ceiling, timeout, quota, and manifest grant.</p><p>The value handed to <code class="inline">fail</code> is application data, so it never reaches the envelope
 or the trace. A workflow entry that ends this way reports
-<code class="inline">execution/explicit_failure</code>, and that diagnostic says where the value went: it
+<code class="inline">execution/explicit_failure</code> — unless the value re-raises a Kernel refusal, which
+keeps its own class — and that diagnostic says where the value went: it
 is retained in the run's private inspection record when the run publishes one
 and the value fits under <code class="inline">terminal_result_bytes</code>, and the diagnostic names the
 reason when it is not. See
