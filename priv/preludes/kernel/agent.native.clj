@@ -106,7 +106,9 @@
               (integer? (get details :requested))
               (>= (get details :requested) 0)
               (integer? (get details :remaining))
-              (>= (get details :remaining) 0)))))
+              (>= (get details :remaining) 0)
+              (<= (get details :remaining) (get details :limit_value))
+              (> (get details :requested) (get details :remaining))))))
 
 (defn- normalize-action
   [response max-program-chars]

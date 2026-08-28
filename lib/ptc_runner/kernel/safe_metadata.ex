@@ -400,7 +400,9 @@ defmodule PtcRunner.Kernel.SafeMetadata do
          {:ok, requested} when is_integer(requested) and requested >= 0 <-
            fetch_named(details, "requested"),
          {:ok, remaining} when is_integer(remaining) and remaining >= 0 <-
-           fetch_named(details, "remaining") do
+           fetch_named(details, "remaining"),
+         true <- remaining <= limit_value,
+         true <- requested > remaining do
       {:ok,
        %{
          limit: limit_atom,
@@ -433,7 +435,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
         remaining: remaining
       })
       when limit in @budget_limits and is_integer(limit_value) and limit_value > 0 and
-             is_integer(requested) and requested >= 0 and is_integer(remaining) and remaining >= 0 do
+             is_integer(requested) and is_integer(remaining) and remaining >= 0 and
+             remaining <= limit_value and requested > remaining do
     %{limit: limit, limit_value: limit_value, requested: requested, remaining: remaining}
   end
 

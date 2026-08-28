@@ -234,7 +234,8 @@ defmodule PtcRunner.Kernel.RunState do
         %{limit: limit, limit_value: limit_value, requested: requested, remaining: remaining}
       )
       when limit in @budget_limits and is_integer(limit_value) and limit_value > 0 and
-             is_integer(requested) and requested >= 0 and is_integer(remaining) and remaining >= 0,
+             is_integer(requested) and requested > remaining and is_integer(remaining) and
+             remaining >= 0 and remaining <= limit_value,
       do: safe_call(state, {:budget_refusal?, limit, limit_value, requested, remaining}, false)
 
   def budget_refusal?(_state, _details), do: false
@@ -1656,7 +1657,7 @@ defmodule PtcRunner.Kernel.RunState do
     ledger = Map.fetch!(state.llm_budget, key)
     remaining = ledger_remaining(ledger)
     limit = budget_limit_field(key)
-    requested = llm_bound(route, key)
+    requested = refusal_requested(llm_bound(route, key), remaining)
 
     details =
       %{limit: limit, limit_value: ledger.limit, remaining: remaining}
@@ -1672,6 +1673,19 @@ defmodule PtcRunner.Kernel.RunState do
 
   defp budget_limit_field(:total_tokens), do: :llm_total_tokens
   defp budget_limit_field(:cost), do: :llm_cost_microusd
+
+  # Owner-authored details must be printable by the closed diagnostic: requested
+  # is strictly greater than remaining. An overrun ledger refuses every later
+  # live route, including a zero reservation that would otherwise fit remaining 0.
+  defp refusal_requested(bound, remaining)
+       when is_integer(bound) and bound > remaining,
+       do: bound
+
+  defp refusal_requested(bound, remaining)
+       when is_integer(bound) and remaining < @maximum_integer,
+       do: remaining + 1
+
+  defp refusal_requested(bound, _remaining), do: bound
 
   defp maybe_put_requested(details, requested) when is_integer(requested) and requested >= 0,
     do: Map.put(details, :requested, requested)
@@ -1724,8 +1738,8 @@ defmodule PtcRunner.Kernel.RunState do
          %{limit: limit, limit_value: limit_value, requested: requested, remaining: remaining}
        )
        when limit in @budget_limits and is_integer(limit_value) and limit_value > 0 and
-              is_integer(requested) and requested >= 0 and is_integer(remaining) and
-              remaining >= 0 do
+              is_integer(requested) and requested > remaining and is_integer(remaining) and
+              remaining >= 0 and remaining <= limit_value do
     %{
       state
       | budget_refusals:

@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
 
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.TestSupport.LLMBudgetSupport
 
   @live_route %{
@@ -199,6 +200,50 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
     refused = RunState.usage(state).llm_budget
     assert refused["total_tokens"]["refused"] == 1
     assert refused["cost"]["refused"] == 0
+  end
+
+  test "an overrun cost ledger still authors a closed diagnostic for a zero reservation" do
+    {:ok, limits} = Limits.new(llm_cost_microusd: 250)
+    {:ok, state} = RunState.start(limits)
+
+    assert {:ok, reservation_id} =
+             RunState.reserve_capability(state, :workflow, "llm-request", nil, @live_route)
+
+    provider = idle_provider()
+    assert :ok = RunState.attach_provider(state, reservation_id, provider)
+    assert :ok = RunState.mark_provider_dispatched(state, reservation_id, provider)
+
+    usage = %{
+      "input" => 1,
+      "output" => 1,
+      "total_cost" => %{"currency" => "USD", "microunits" => 300}
+    }
+
+    assert {:ok, {:overrun, [:cost]}} =
+             RunState.finish_provider(state, reservation_id, {:adapter_success, {:valid, usage}})
+
+    zero_cost = Map.put(@live_route, :cost_microusd, 0)
+
+    assert {:error, :llm_cost_limit, details} =
+             RunState.reserve_capability(state, :workflow, "llm-request", nil, zero_cost)
+
+    assert %{
+             limit: :llm_cost_microusd,
+             limit_value: 250,
+             remaining: 0
+           } = details
+
+    assert details.requested > details.remaining
+
+    assert {:ok, _message} =
+             RuntimeLimitDiagnostic.budget_message(
+               details.limit,
+               details.limit_value,
+               details.requested,
+               details.remaining
+             )
+
+    assert RunState.budget_refusal?(state, details)
   end
 
   test "an unrepresentable authenticated token total saturates and locks the ledger" do
