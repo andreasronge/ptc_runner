@@ -61,7 +61,9 @@
              (= token "workflow_capability_calls_per_name"))
         (and (= expected "mission-capability-calls") (= token "mission_capability_calls"))
         (and (= expected "mission-capability-calls-per-name")
-             (= token "mission_capability_calls_per_name")))))
+             (= token "mission_capability_calls_per_name"))
+        (and (= expected "llm-total-tokens") (= token "llm_total_tokens"))
+        (and (= expected "llm-cost-microusd") (= token "llm_cost_microusd")))))
 
 (defn- named-quota-limit? [value]
   (or (hyphenated? value "max-calls")
@@ -85,6 +87,27 @@
                 (string? (get details :alias))
                 (string? (get details :name)))))))
 
+(defn- budget-refusal? [response]
+  (and (map? response)
+       (let [details (get response :details)
+             limit (when (map? details) (get details :limit))
+             reason (get response :reason)]
+         (and (hyphenated? (get response :status) "error")
+              (hyphenated? (get response :kind) "limit-exceeded")
+              (or (hyphenated? reason "llm-total-tokens")
+                  (hyphenated? reason "llm-cost-microusd"))
+              (map? details)
+              (or (and (hyphenated? reason "llm-total-tokens")
+                       (hyphenated? limit "llm-total-tokens"))
+                  (and (hyphenated? reason "llm-cost-microusd")
+                       (hyphenated? limit "llm-cost-microusd")))
+              (integer? (get details :limit_value))
+              (pos? (get details :limit_value))
+              (integer? (get details :requested))
+              (>= (get details :requested) 0)
+              (integer? (get details :remaining))
+              (>= (get details :remaining) 0)))))
+
 (defn- normalize-action
   [response max-program-chars]
   (let [max-program-chars (if (and (integer? max-program-chars)
@@ -94,6 +117,9 @@
                             64000)]
   (cond
     (max-calls-refusal? response)
+    {:kind :max-calls :error response}
+
+    (budget-refusal? response)
     {:kind :max-calls :error response}
 
     (and (map? response) (= :error (get response :status)))

@@ -103,6 +103,7 @@ defmodule PtcRunner.Kernel.LLMReplayDiagnostic do
     |> Map.merge(retain_candidate_metadata(metadata))
     |> Map.merge(SafeMetadata.retain_llm_provider_failure_fields(metadata))
     |> Map.merge(SafeMetadata.retain_named_quota_refusal_fields(metadata))
+    |> Map.merge(SafeMetadata.retain_budget_refusal_fields(metadata))
   end
 
   def retain_parallel_failure_metadata(_metadata), do: %{}

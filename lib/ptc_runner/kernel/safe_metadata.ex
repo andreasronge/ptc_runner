@@ -93,6 +93,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :invalid_runtime_usage_request,
     :invalid_workflow_annotation,
     :live_provider_tasks,
+    :llm_cost_microusd,
+    :llm_total_tokens,
     :model_alias_required,
     :not_found,
     :output_schema_mismatch,
@@ -373,8 +375,75 @@ defmodule PtcRunner.Kernel.SafeMetadata do
 
   def retain_named_quota_refusal_fields(_metadata), do: %{}
 
+  @budget_limits [:llm_total_tokens, :llm_cost_microusd]
+  @budget_limit_names %{
+    "llm-total-tokens" => :llm_total_tokens,
+    "llm-cost-microusd" => :llm_cost_microusd
+  }
+
+  @doc false
+  @spec budget_refusal(term()) :: {:ok, map()} | :error
+  def budget_refusal(value) when is_map(value) and not is_struct(value) do
+    with {:ok, status} <- fetch_named(value, "status"),
+         true <- status in [:error, "error"],
+         {:ok, kind} <- fetch_named(value, "kind"),
+         "limit-exceeded" <- normalize_name(kind),
+         {:ok, reason} <- fetch_named(value, "reason"),
+         {:ok, reason_atom} <- budget_limit_atom(normalize_name(reason)),
+         {:ok, details} when is_map(details) and not is_struct(details) <-
+           fetch_named(value, "details"),
+         {:ok, limit} <- fetch_named(details, "limit"),
+         {:ok, limit_atom} <- budget_limit_atom(normalize_name(limit)),
+         true <- limit_atom == reason_atom,
+         {:ok, limit_value} when is_integer(limit_value) and limit_value > 0 <-
+           fetch_named(details, "limit_value"),
+         {:ok, requested} when is_integer(requested) and requested >= 0 <-
+           fetch_named(details, "requested"),
+         {:ok, remaining} when is_integer(remaining) and remaining >= 0 <-
+           fetch_named(details, "remaining") do
+      {:ok,
+       %{
+         limit: limit_atom,
+         limit_value: limit_value,
+         requested: requested,
+         remaining: remaining
+       }}
+    else
+      _not_a_budget_refusal -> :error
+    end
+  end
+
+  def budget_refusal(_value), do: :error
+
+  @doc false
+  @spec budget_refusal_fields(term()) :: map()
+  def budget_refusal_fields(value) do
+    case budget_refusal(value) do
+      {:ok, details} -> details
+      :error -> %{}
+    end
+  end
+
+  @doc false
+  @spec retain_budget_refusal_fields(term()) :: map()
+  def retain_budget_refusal_fields(%{
+        limit: limit,
+        limit_value: limit_value,
+        requested: requested,
+        remaining: remaining
+      })
+      when limit in @budget_limits and is_integer(limit_value) and limit_value > 0 and
+             is_integer(requested) and requested >= 0 and is_integer(remaining) and remaining >= 0 do
+    %{limit: limit, limit_value: limit_value, requested: requested, remaining: remaining}
+  end
+
+  def retain_budget_refusal_fields(_metadata), do: %{}
+
   defp quota_limit_atom(name) when is_binary(name), do: Map.fetch(@quota_limit_names, name)
   defp quota_limit_atom(_name), do: :error
+
+  defp budget_limit_atom(name) when is_binary(name), do: Map.fetch(@budget_limit_names, name)
+  defp budget_limit_atom(_name), do: :error
 
   defp quota_identity_fields(:max_calls, details) do
     with {:ok, alias_name} when is_binary(alias_name) <- fetch_named(details, "alias"),

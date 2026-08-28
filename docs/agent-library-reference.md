@@ -115,6 +115,7 @@ not resume the previous transcript.
 | Permanent per-alias provider refusal | `provider-error` | `authentication-failed`, `payment-required`, `denied`, `not-found`, `invalid-request`, `tool-calling-unsupported`, and other non-retryable provider reasons | try another alias or abort |
 | Per-alias `max_calls` exhaustion | `limit-exceeded` | `capability-quota` with `details.limit` `max-calls` | another alias may still run |
 | Global LLM capability quota | `limit-exceeded` | `capability-quota` with a workflow or mission capability-call limit | no selected alias can run |
+| Aggregate LLM token or cost budget | `limit-exceeded` | `llm-total-tokens` or `llm-cost-microusd` with the refused reservation | inspect remaining, raise the limit, or abort |
 | Invalid or unknown alias | `protocol-error` | `unknown-model-alias`, `invalid-model-alias`, or `model-alias-required` | correct the request; no provider attempt occurred |
 
 A spent per-alias `max_calls` is a named quota refusal, not a subject failure
@@ -123,6 +124,13 @@ and not a transport error. `run-value`, `run-result-value`, `run-phased-result-v
 When one of those fail-fast paths propagates an installation `max_calls` or a
 workflow or mission capability-call quota to the command boundary, it reports
 `execution/capability_quota_exceeded` while retaining the bounded quota message.
+An authenticated aggregate `llm_total_tokens` or `llm_cost_microusd` reservation
+refusal stays a recoverable capability value until the workflow aborts it;
+fail-fast entries then report `execution/runtime_limit_exceeded` naming the
+refused reservation, not `workflow_failed`. `agent.core/run-outcome` still
+returns that envelope as a provider-failure value. Do not infer the terminal
+cause from `llm_budget.refused > 0`: a later unrelated failure is not the
+earlier budget refusal.
 
 ### `agent.core/run-result-value`
 

@@ -180,8 +180,21 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
     assert budget["cost"]["charged_microusd"] == 300
     assert budget["cost"]["remaining_microusd"] == 0
 
-    assert {:error, :llm_total_tokens_limit, %{"state" => "overrun", "remaining" => 0}} =
+    assert {:error, :llm_total_tokens_limit,
+            %{
+              limit: :llm_total_tokens,
+              limit_value: 50,
+              requested: 40,
+              remaining: 0
+            }} =
              RunState.reserve_capability(state, :workflow, "llm-request", nil, @live_route)
+
+    assert RunState.budget_refusal?(state, %{
+             limit: :llm_total_tokens,
+             limit_value: 50,
+             requested: 40,
+             remaining: 0
+           })
 
     refused = RunState.usage(state).llm_budget
     assert refused["total_tokens"]["refused"] == 1
@@ -212,7 +225,12 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
              "remaining" => 0
            } = RunState.usage(state).llm_budget["total_tokens"]
 
-    assert {:error, :llm_total_tokens_limit, %{"state" => "overrun", "remaining" => 0}} =
+    assert {:error, :llm_total_tokens_limit,
+            %{
+              limit: :llm_total_tokens,
+              remaining: 0,
+              requested: 40
+            }} =
              RunState.reserve_capability(state, :workflow, "llm-request", nil, route)
   end
 
@@ -339,7 +357,12 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
              Enum.count(admissions, fn {_caller, result} ->
                match?(
                  {:error, :llm_total_tokens_limit,
-                  %{"reserved" => 40, "remaining" => 20, "refused" => 1}},
+                  %{
+                    limit: :llm_total_tokens,
+                    limit_value: 60,
+                    requested: 40,
+                    remaining: 20
+                  }},
                  result
                )
              end)

@@ -1302,6 +1302,113 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(outcome.envelope)
   end
 
+  test "aggregate budget diagnostics name the reservation and bind the runtime source" do
+    assert {:error, %CommandOutcome{} = token_outcome} =
+             project_limit_exceeded(:llm_total_tokens, %{
+               limit: :llm_total_tokens,
+               limit_value: 1,
+               requested: 4_096,
+               remaining: 1
+             })
+
+    assert {:ok, token_expected} =
+             RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
+
+    assert token_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert token_outcome.envelope["error"]["message"] == token_expected
+
+    assert token_outcome.envelope["error"]["source"] == %{
+             "kind" => "runtime",
+             "name" => "ptc-runtime"
+           }
+
+    assert token_outcome.exit_status == 6
+    assert_schema_valid(token_outcome.envelope)
+
+    assert {:error, %CommandOutcome{} = cost_outcome} =
+             project_limit_exceeded(:llm_cost_microusd, %{
+               limit: :llm_cost_microusd,
+               limit_value: 2_400,
+               requested: 2_419,
+               remaining: 2_338
+             })
+
+    assert {:ok, cost_expected} =
+             RuntimeLimitDiagnostic.budget_message(:llm_cost_microusd, 2_400, 2_419, 2_338)
+
+    assert cost_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert cost_outcome.envelope["error"]["message"] == cost_expected
+    assert cost_outcome.exit_status == 6
+    assert_schema_valid(cost_outcome.envelope)
+
+    runtime_source = CommandSource.fixed(:runtime)
+
+    assert {:ok, token_expected} =
+             RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: token_expected,
+               provider_activity: true
+             )
+
+    assert {:ok, %CommandDiagnostic{source: ^runtime_source, exit_status: 6}} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: token_expected,
+               source: runtime_source,
+               provider_activity: true
+             )
+
+    maximum = 9_007_199_254_740_991
+
+    assert {:ok, max_message} =
+             RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, maximum, maximum, 0)
+
+    assert RuntimeLimitDiagnostic.budget_message?(max_message)
+
+    assert {:ok, %CommandDiagnostic{}} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: max_message,
+               source: runtime_source,
+               provider_activity: true
+             )
+
+    inconsistent = [
+      "llm_total_tokens limit 1 tokens would be exceeded: the next call requires a 1 tokens reservation with 1 remaining; raise limits.llm_total_tokens in the manifest, and the installed host ceiling if it is lower",
+      "llm_cost_microusd limit 2400 microUSD would be exceeded: the next call requires a 2338 microUSD reservation with 2419 remaining; raise limits.llm_cost_microusd in the manifest, and the installed host ceiling if it is lower",
+      "llm_total_tokens limit 1 tokens would be exceeded: the next call requires a 0 tokens reservation with 0 remaining; raise limits.llm_total_tokens in the manifest, and the installed host ceiling if it is lower"
+    ]
+
+    for message <- inconsistent do
+      refute RuntimeLimitDiagnostic.budget_message?(message)
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+    end
+
+    malformed = [
+      "llm_total_tokens limit 01 tokens would be exceeded: the next call requires a 4096 tokens reservation with 1 remaining; raise limits.llm_total_tokens in the manifest, and the installed host ceiling if it is lower",
+      token_expected <> "; private"
+    ]
+
+    for message <- malformed do
+      refute RuntimeLimitDiagnostic.budget_message?(message)
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+
+      assert_schema_invalid(put_in(token_outcome.envelope, ["error", "message"], message))
+    end
+  end
+
   test "application-authored turn-limit fields cannot claim an agent runtime limit" do
     usage = %{
       remaining_ms: 0,

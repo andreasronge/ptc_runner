@@ -4919,6 +4919,64 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              Kernel.run(~S|(agent.core/run "Spend the alias" {"max_turns" 2})|, quota_config)
   end
 
+  test "agent.core run-outcome returns aggregate budget refusals as provider failures" do
+    continue = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
+      ]
+    }
+
+    {:ok, leaf} = LLMCapability.new(requester: fn _ -> {:ok, continue} end)
+
+    assert {:ok, router} =
+             LLMRouter.new([
+               live_alias_route("primary", true, leaf, nil)
+             ])
+
+    {:ok, outcome_config} = agent_router_config(router, llm_total_tokens: 1)
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "provider-failure",
+                "error" => %{
+                  "status" => "error",
+                  "kind" => "limit_exceeded",
+                  "reason" => "llm_total_tokens",
+                  "details" => %{
+                    "limit" => "llm_total_tokens",
+                    "limit_value" => 1,
+                    "requested" => 4_096,
+                    "remaining" => 1
+                  }
+                }
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Stay within the reservation" {"max_turns" 2}))|,
+               outcome_config
+             )
+
+    {:ok, fail_fast_config} = agent_router_config(router, llm_total_tokens: 1)
+
+    assert {:error,
+            %{
+              kind: :limit_exceeded,
+              reason: :llm_total_tokens,
+              details: %{
+                limit: :llm_total_tokens,
+                limit_value: 1,
+                requested: 4_096,
+                remaining: 1
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-value "Stay within the reservation" {"max_turns" 2}))|,
+               fail_fast_config
+             )
+  end
+
   test "agent.core run-outcome still fails host callback exceptions" do
     {:ok, config} = agent_config_with_requester(fn _request -> raise "boom" end)
 

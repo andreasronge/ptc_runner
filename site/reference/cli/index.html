@@ -307,9 +307,15 @@ envelope when the branch needs to know which failure it was.</p><p>A recoverable
 <code class="inline">workflow_capability_calls_per_name</code> returns
 <code class="inline">{&quot;status&quot;:&quot;error&quot;,&quot;kind&quot;:&quot;limit_exceeded&quot;,&quot;reason&quot;:&quot;capability_quota&quot;,&quot;details&quot;:{&quot;limit&quot;:&quot;workflow_capability_calls_per_name&quot;,&quot;name&quot;:&quot;llm-request&quot;,&quot;limit_value&quot;:2}}</code> as a
 value into PTC-Lisp; a workflow that reads past it can still <code class="inline">return</code> and the
-command exits <code class="inline">0</code>. <code class="inline">execution.usage.capability_refusals</code> counts those errors
+command exits <code class="inline">0</code>. Refusing an aggregate <code class="inline">llm_total_tokens</code> or
+<code class="inline">llm_cost_microusd</code> reservation is the same class of recoverable value, with
+<code class="inline">reason</code> naming the budget. Aborting that exact envelope reports
+<code class="inline">execution/runtime_limit_exceeded</code> (exit 6) and names the refused reservation;
+it is not <code class="inline">workflow_failed</code>. <code class="inline">execution.usage.capability_refusals</code> counts those errors
 from environment capability callbacks and the implicit runtime routes the
-Kernel grants with them (<code class="inline">workflow/limit_exceeded/capability_quota</code>).
+Kernel grants with them (<code class="inline">workflow/limit_exceeded/capability_quota</code>,
+<code class="inline">workflow/limit_exceeded/llm_total_tokens</code>,
+<code class="inline">workflow/limit_exceeded/llm_cost_microusd</code>).
 Runner-added routes such as <code class="inline">kernel-eval</code> are not counted. At most 2 distinct
 classes are named; further classes increment <code class="inline">$overflow</code>. Assert
 <code class="inline">capability_refusals</code> is <code class="inline">{}</code> when a CI job requires that every counted

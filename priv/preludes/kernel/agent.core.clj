@@ -161,7 +161,8 @@
     (fail (get outcome :error))))
 
 (defn- propagate-provider-failure [error]
-  ;; Named quota refusals authenticate through `fail` of the exact envelope.
+  ;; Named quota refusals and authenticated aggregate-budget refusals
+  ;; authenticate through `fail` of the exact envelope.
   ;; Typed provider failures consume the Kernel's provider-failure evidence.
   ;; An unauthenticated envelope returns from the Kernel tool instead of
   ;; aborting, so fail-fast entries still abort that diagnostic.
@@ -251,9 +252,9 @@
   `:ok-envelope` wraps it in the standard success envelope. Prompt, transcript,
   evaluation-admission, provider-callback crashes, and other host/infrastructure
   failures still fail the outer workflow. Typed LLM envelopes, named quota
-  refusals, and alias-resolution protocol errors return as `:provider-failure` so
-  a workflow that called this entry can inspect `kind` and `reason`. Fail-fast
-  entries still abort those envelopes."
+  refusals, aggregate-budget refusals, and alias-resolution protocol errors
+  return as `:provider-failure` so a workflow that called this entry can
+  inspect `kind` and `reason`. Fail-fast entries still abort those envelopes."
   [task cfg projector-kind]
   (let [started (agent.machine/start task (loop-context cfg projector-kind))]
     (if (not= :ok (get started :op))

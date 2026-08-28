@@ -233,6 +233,18 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
                kind: :limit_exceeded,
                reason: :capability_quota
              }) == "workflow/limit_exceeded/capability_quota"
+
+      assert SafeMetadata.capability_refusal_key(:workflow, %{
+               status: :error,
+               kind: :limit_exceeded,
+               reason: :llm_total_tokens
+             }) == "workflow/limit_exceeded/llm_total_tokens"
+
+      assert SafeMetadata.capability_refusal_key(:mission, %{
+               status: :error,
+               kind: :limit_exceeded,
+               reason: :llm_cost_microusd
+             }) == "mission/limit_exceeded/llm_cost_microusd"
     end
 
     test "uses fingerprints and unknown for the remaining class fields" do

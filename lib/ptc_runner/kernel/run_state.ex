@@ -166,6 +166,9 @@ defmodule PtcRunner.Kernel.RunState do
   only after this owner has actually refused that alias. Public total and
   per-name quota refusals are authenticated the same way, keyed by the limit,
   capability name, and configured value that this owner actually refused.
+  Aggregate `llm_total_tokens` and `llm_cost_microusd` reservation refusals
+  are authenticated from the exact `limit`, `limit_value`, `requested`, and
+  `remaining` this owner authored at refuse time.
   """
   @spec reserve_capability(t(), environment(), binary(), reference() | nil, map() | nil) ::
           {:ok, reference()} | {:error, atom()} | {:error, atom(), map()}
@@ -221,6 +224,20 @@ defmodule PtcRunner.Kernel.RunState do
       do: safe_call(state, {:quota_refusal?, limit, name, value}, false)
 
   def named_quota_refusal?(_state, _details), do: false
+
+  @budget_limits [:llm_total_tokens, :llm_cost_microusd]
+
+  @spec budget_refusal?(t(), map()) :: boolean()
+  @doc false
+  def budget_refusal?(
+        state,
+        %{limit: limit, limit_value: limit_value, requested: requested, remaining: remaining}
+      )
+      when limit in @budget_limits and is_integer(limit_value) and limit_value > 0 and
+             is_integer(requested) and requested >= 0 and is_integer(remaining) and remaining >= 0,
+      do: safe_call(state, {:budget_refusal?, limit, limit_value, requested, remaining}, false)
+
+  def budget_refusal?(_state, _details), do: false
 
   @spec capability_quota_details(t(), environment(), binary()) :: map()
   @doc false
@@ -653,6 +670,7 @@ defmodule PtcRunner.Kernel.RunState do
        route_calls: %{workflow: %{}, mission: %{}},
        route_refusals: MapSet.new(),
        quota_refusals: MapSet.new(),
+       budget_refusals: MapSet.new(),
        totals: %{workflow: 0, mission: 0},
        evaluations: 0,
        evaluations_by_mission: %{},
@@ -747,6 +765,16 @@ defmodule PtcRunner.Kernel.RunState do
       )
       when environment in [:workflow, :mission] and is_binary(name) do
     {:reply, quota_details_map(state, environment, name) || %{}, state}
+  end
+
+  def handle_call(
+        {token, {:budget_refusal?, limit, limit_value, requested, remaining}},
+        _from,
+        %{token: token} = state
+      )
+      when limit in @budget_limits and is_integer(limit_value) and limit_value > 0 and
+             is_integer(requested) and requested >= 0 and is_integer(remaining) and remaining >= 0 do
+    {:reply, matching_budget_refusal?(state, limit, limit_value, requested, remaining), state}
   end
 
   def handle_call(
@@ -1509,12 +1537,12 @@ defmodule PtcRunner.Kernel.RunState do
         {:error, :llm_output_limit, state}
 
       llm_ledger_unavailable?(state, route, :total_tokens) ->
-        {ledger, state} = refuse_ledger_with_snapshot(state, :total_tokens)
-        {:error, :llm_total_tokens_limit, ledger, state}
+        {details, state} = refuse_budget(state, route, :total_tokens)
+        {:error, :llm_total_tokens_limit, details, state}
 
       llm_ledger_unavailable?(state, route, :cost) ->
-        {ledger, state} = refuse_ledger_with_snapshot(state, :cost)
-        {:error, :llm_cost_limit, ledger, state}
+        {details, state} = refuse_budget(state, route, :cost)
+        {:error, :llm_cost_limit, details, state}
 
       true ->
         reservation_id = make_ref()
@@ -1624,17 +1652,31 @@ defmodule PtcRunner.Kernel.RunState do
     end)
   end
 
-  defp refuse_ledger_with_snapshot(state, key) do
-    state = refuse_ledger(state, key)
+  defp refuse_budget(state, route, key) do
+    ledger = Map.fetch!(state.llm_budget, key)
+    remaining = ledger_remaining(ledger)
+    limit = budget_limit_field(key)
+    requested = llm_bound(route, key)
 
-    projection =
-      case key do
-        :total_tokens -> total_tokens_projection(state.llm_budget.total_tokens)
-        :cost -> cost_projection(state.llm_budget.cost)
-      end
+    details =
+      %{limit: limit, limit_value: ledger.limit, remaining: remaining}
+      |> maybe_put_requested(requested)
 
-    {projection, state}
+    state =
+      state
+      |> refuse_ledger(key)
+      |> record_budget_refusal(details)
+
+    {details, state}
   end
+
+  defp budget_limit_field(:total_tokens), do: :llm_total_tokens
+  defp budget_limit_field(:cost), do: :llm_cost_microusd
+
+  defp maybe_put_requested(details, requested) when is_integer(requested) and requested >= 0,
+    do: Map.put(details, :requested, requested)
+
+  defp maybe_put_requested(details, _requested), do: details
 
   defp ledger_remaining(%{state: :overrun}), do: 0
 
@@ -1665,6 +1707,10 @@ defmodule PtcRunner.Kernel.RunState do
     MapSet.member?(state.quota_refusals, {limit, name, value})
   end
 
+  defp matching_budget_refusal?(state, limit, limit_value, requested, remaining) do
+    MapSet.member?(state.budget_refusals, {limit, limit_value, requested, remaining})
+  end
+
   defp record_route_refusal(state, %{key: {_name, alias_name}, max_calls: max_calls}) do
     %{state | route_refusals: MapSet.put(state.route_refusals, {alias_name, max_calls})}
   end
@@ -1672,6 +1718,22 @@ defmodule PtcRunner.Kernel.RunState do
   defp record_quota_refusal(state, %{limit: limit, name: name, limit_value: value}) do
     %{state | quota_refusals: MapSet.put(state.quota_refusals, {limit, name, value})}
   end
+
+  defp record_budget_refusal(
+         state,
+         %{limit: limit, limit_value: limit_value, requested: requested, remaining: remaining}
+       )
+       when limit in @budget_limits and is_integer(limit_value) and limit_value > 0 and
+              is_integer(requested) and requested >= 0 and is_integer(remaining) and
+              remaining >= 0 do
+    %{
+      state
+      | budget_refusals:
+          MapSet.put(state.budget_refusals, {limit, limit_value, requested, remaining})
+    }
+  end
+
+  defp record_budget_refusal(state, _details), do: state
 
   defp quota_details_map(state, environment, name) do
     {limit_total, limit_name} = capability_limits(state.limits, environment)

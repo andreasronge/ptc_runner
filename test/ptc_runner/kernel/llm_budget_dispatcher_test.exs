@@ -139,13 +139,79 @@ defmodule PtcRunner.Kernel.LLMBudgetDispatcherTest do
 
     {state, environment} = runtime(router, llm_total_tokens: 30, llm_cost_microusd: 100)
 
-    assert %{status: :error, kind: :limit_exceeded, reason: :llm_total_tokens} =
-             dispatch(state, environment)
+    assert %{
+             status: :error,
+             kind: :limit_exceeded,
+             reason: :llm_total_tokens,
+             details: %{
+               limit: :llm_total_tokens,
+               limit_value: 30,
+               requested: 40,
+               remaining: 30
+             }
+           } = dispatch(state, environment)
 
     refute_receive :provider_called
     budget = RunState.usage(state).llm_budget
     assert budget["total_tokens"]["refused"] == 1
     assert budget["cost"]["refused"] == 0
+
+    assert RunState.budget_refusal?(state, %{
+             limit: :llm_total_tokens,
+             limit_value: 30,
+             requested: 40,
+             remaining: 30
+           })
+  end
+
+  test "a cost reservation that does not fit is refused with owner-authored details" do
+    parent = self()
+
+    router =
+      router(
+        fn _request, tariff ->
+          {:ok,
+           %{
+             total_tokens: 40,
+             cost: %{currency: "USD", microunits: 2419, tariff_id: tariff.id}
+           }}
+        end,
+        fn _request ->
+          send(parent, :provider_called)
+          {:ok, %{content: "unreachable", tokens: %{input: 1, output: 1}}}
+        end
+      )
+
+    {state, environment} = runtime(router, llm_cost_microusd: 2400)
+
+    assert %{
+             status: :error,
+             kind: :limit_exceeded,
+             reason: :llm_cost_microusd,
+             details: %{
+               limit: :llm_cost_microusd,
+               limit_value: 2400,
+               requested: 2419,
+               remaining: 2400
+             }
+           } = dispatch(state, environment)
+
+    refute_receive :provider_called
+    assert RunState.usage(state).llm_budget["cost"]["refused"] == 1
+
+    assert RunState.budget_refusal?(state, %{
+             limit: :llm_cost_microusd,
+             limit_value: 2400,
+             requested: 2419,
+             remaining: 2400
+           })
+
+    refute RunState.budget_refusal?(state, %{
+             limit: :llm_cost_microusd,
+             limit_value: 2400,
+             requested: 2419,
+             remaining: 0
+           })
   end
 
   test "provider failure after acknowledgement full-charges the reservation" do
