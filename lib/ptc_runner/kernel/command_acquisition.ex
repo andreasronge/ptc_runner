@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.ManifestReplPreparation
+  alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProjectContext
   alias PtcRunner.Kernel.ProviderRuntimeServices
@@ -117,6 +118,16 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
 
       {:error, {:installed_limit_invalid, segments}} ->
         {:error, host_path_diagnostic(:installed_limit_invalid, segments)}
+
+      {:error, {:optional_budget_prerequisite, _name, limit, prerequisite}} ->
+        {:ok, message} = OptionalBudgetDiagnostic.prerequisite_message(limit, prerequisite)
+
+        {:error,
+         host_path_diagnostic(
+           :installed_limit_invalid,
+           optional_budget_prerequisite_path(prerequisite),
+           message: message
+         )}
     end
   end
 
@@ -500,9 +511,37 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   defp arguments_outcome(%CommandArguments{} = arguments, run_ref, diagnostic),
     do: CommandOutcome.error(arguments.command, run_ref, diagnostic)
 
-  defp host_path_diagnostic(code, segments) do
+  defp optional_budget_prerequisite_path(:usage_tokens),
+    do: [
+      {:property, "install"},
+      {:property, "*"},
+      {:property, "usage_guarantees"},
+      {:property, "tokens"}
+    ]
+
+  defp optional_budget_prerequisite_path(:usage_cost_currency),
+    do: [
+      {:property, "install"},
+      {:property, "*"},
+      {:property, "usage_guarantees"},
+      {:property, "cost_currency"}
+    ]
+
+  defp optional_budget_prerequisite_path(:reservation_tariff),
+    do: [
+      {:property, "install"},
+      {:property, "*"},
+      {:property, "reservation_tariff"}
+    ]
+
+  defp host_path_diagnostic(code, segments, options \\ []) do
     {:ok, path} = CommandPath.host(segments)
-    CommandDiagnostic.new!(:host, code, source: CommandSource.fixed(:host), path: path)
+
+    CommandDiagnostic.new!(
+      :host,
+      code,
+      [source: CommandSource.fixed(:host), path: path] ++ options
+    )
   end
 
   defp host_schema_diagnostic(%SchemaViolation{rule: rule, path: segments}) do

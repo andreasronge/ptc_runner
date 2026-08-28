@@ -3,9 +3,9 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   Deterministic, privacy-preserving human projection of sealed command outcomes.
 
   Provider failures include the validated provider subject already present in
-  the public command envelope. Project, manifest, component-override, and
-  value-contract failures with a non-root, schema-authorized path include its
-  JSON Pointer. A contract schema rejected before it compiles also names the
+  the public command envelope. Project, host, manifest, component-override,
+  and value-contract failures with a non-root, schema-authorized path include
+  its JSON Pointer. A contract schema rejected before it compiles also names the
   document its pointer indexes, because a manifest may carry two and the
   pointer means nothing without it. Unusual contract-authored pointers and
   logical names use an escaped quoted representation before they enter a

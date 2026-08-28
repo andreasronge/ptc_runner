@@ -116,8 +116,11 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   ]
 
   @optional_manifest_narrowable [
-    {:llm_total_tokens, 1, 9_007_199_254_740_991},
-    {:llm_cost_microusd, 1, 9_007_199_254_740_991}
+    {:llm_total_tokens, 1, 9_007_199_254_740_991, [:usage_tokens],
+     "Requires usage_guarantees.tokens: true on every live LLM installation."},
+    {:llm_cost_microusd, 1, 9_007_199_254_740_991,
+     [:usage_tokens, :usage_cost_currency, :reservation_tariff],
+     "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", and an explicit USD reservation_tariff on every live LLM installation."}
   ]
 
   @descriptions %{
@@ -232,20 +235,25 @@ defmodule PtcRunner.Kernel.LimitCatalog do
                description: Map.fetch!(@descriptions, field)
              }
            end) ++
-           Enum.map(@optional_manifest_narrowable, fn {field, minimum, maximum} ->
-             %{
-               field: field,
-               name: Atom.to_string(field),
-               scope: :optional_manifest_narrowable,
-               compiled_default: nil,
-               installed_default: nil,
-               minimum: minimum,
-               maximum: maximum,
-               identity: true,
-               unit: Map.fetch!(@units, field),
-               description: Map.fetch!(@descriptions, field)
-             }
-           end))
+           Enum.map(
+             @optional_manifest_narrowable,
+             fn {field, minimum, maximum, prerequisites, prerequisite_description} ->
+               %{
+                 field: field,
+                 name: Atom.to_string(field),
+                 scope: :optional_manifest_narrowable,
+                 compiled_default: nil,
+                 installed_default: nil,
+                 minimum: minimum,
+                 maximum: maximum,
+                 identity: true,
+                 unit: Map.fetch!(@units, field),
+                 description: Map.fetch!(@descriptions, field),
+                 prerequisites: prerequisites,
+                 prerequisite_description: prerequisite_description
+               }
+             end
+           ))
         |> Enum.sort_by(& &1.name)
 
   @by_name Map.new(@rows, &{&1.name, &1})
@@ -253,6 +261,10 @@ defmodule PtcRunner.Kernel.LimitCatalog do
 
   @type scope :: :manifest_narrowable | :optional_manifest_narrowable | :installed_only
   @type row :: %{
+          optional(:prerequisites) => [
+            :usage_tokens | :usage_cost_currency | :reservation_tariff
+          ],
+          optional(:prerequisite_description) => binary(),
           field: atom(),
           name: binary(),
           scope: scope(),

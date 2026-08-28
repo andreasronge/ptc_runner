@@ -63,6 +63,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPProtocol
+  alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.SchemaPath
   alias PtcRunner.Kernel.SchemaViolation
   alias PtcRunner.Kernel.StrictJSON
@@ -288,7 +289,8 @@ defmodule PtcRunner.Kernel.HostConfig do
              | {:installation_endpoint_invalid, binary(), atom()}
              | {:schema_validation_unavailable, SchemaViolation.unavailable_reason()}
              | {:host_schema_invalid, SchemaViolation.t()}
-             | {:installed_limit_invalid, [PtcRunner.Kernel.CommandPath.segment()]}}
+             | {:installed_limit_invalid, [PtcRunner.Kernel.CommandPath.segment()]}
+             | {:optional_budget_prerequisite, binary(), atom(), atom()}}
   def load_command(path) when is_binary(path) do
     with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
          directory = Path.dirname(canonical),
@@ -337,6 +339,9 @@ defmodule PtcRunner.Kernel.HostConfig do
         error
 
       {:error, {:installation_endpoint_invalid, _name, _reason}} = error ->
+        error
+
+      {:error, {:optional_budget_prerequisite, _name, _limit, _prerequisite}} = error ->
         error
 
       {:error, _reason} ->
@@ -477,6 +482,15 @@ defmodule PtcRunner.Kernel.HostConfig do
   # do not repeat schema validation outside the worker to distinguish them.
   defp command_semantic_result(:ok), do: :ok
   defp command_semantic_result({:ok, decoded}), do: {:ok, decoded}
+
+  defp command_semantic_result(
+         {:error, {:optional_budget_prerequisite, name, limit, prerequisite}} = error
+       ) do
+    if valid_name?(name) and OptionalBudgetDiagnostic.valid_prerequisite?(limit, prerequisite),
+      do: error,
+      else: {:error, :host_invalid}
+  end
+
   defp command_semantic_result({:error, _reason}), do: {:error, :host_invalid}
 
   defp schema_valid?(value) do
@@ -646,7 +660,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp installations(value, credentials, limits)
        when is_map(value) and map_size(value) in 1..@max_installations do
     with {:ok, installations} <-
-           reduce_named_map(value, fn name, installation ->
+           reduce_sorted_named_map(value, fn name, installation ->
              installation(name, installation, credentials, limits)
            end),
          ids =
@@ -659,7 +673,11 @@ defmodule PtcRunner.Kernel.HostConfig do
          {:ok, installations} <- InstallationConfigDigest.attach_all(installations) do
       {:ok, installations}
     else
-      _invalid -> {:error, :invalid_installations}
+      {:error, {:optional_budget_prerequisite, _name, _limit, _prerequisite}} = error ->
+        error
+
+      _invalid ->
+        {:error, :invalid_installations}
     end
   end
 
@@ -673,7 +691,13 @@ defmodule PtcRunner.Kernel.HostConfig do
           mcp_installation(value, credentials)
 
         "llm" ->
-          llm_installation(value, credentials, limits)
+          case llm_installation(value, credentials, limits) do
+            {:error, {:optional_budget_prerequisite, limit, prerequisite}} ->
+              {:error, {:optional_budget_prerequisite, name, limit, prerequisite}}
+
+            result ->
+              result
+          end
 
         "ptc_trace_snapshot" ->
           trace_snapshot_installation(value, :ptc_trace_snapshot)
@@ -775,6 +799,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          accepts_data: accepts_data
        }}
     else
+      {:error, {:optional_budget_prerequisite, _limit, _prerequisite}} = error -> error
       _reason -> {:error, :invalid_installation}
     end
   end
@@ -849,28 +874,29 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp usage_guarantees(_value), do: {:error, :invalid_usage_guarantees}
 
-  defp usage_guarantee_requirements(
-         %{tokens: true, cost_currency: "USD"},
-         %Limits{llm_cost_microusd: limit}
-       )
-       when is_integer(limit),
-       do: :ok
-
-  defp usage_guarantee_requirements(
-         %{tokens: true},
-         %Limits{llm_total_tokens: limit, llm_cost_microusd: nil}
-       )
-       when is_integer(limit),
-       do: :ok
-
-  defp usage_guarantee_requirements(_guarantees, %Limits{
-         llm_total_tokens: nil,
-         llm_cost_microusd: nil
-       }),
-       do: :ok
-
-  defp usage_guarantee_requirements(_guarantees, %Limits{}),
-    do: {:error, :insufficient_usage_guarantees}
+  defp usage_guarantee_requirements(guarantees, %Limits{} = limits) do
+    with :ok <-
+           optional_budget_requirement(
+             limits.llm_cost_microusd,
+             guarantees.tokens,
+             :llm_cost_microusd,
+             :usage_tokens
+           ),
+         :ok <-
+           optional_budget_requirement(
+             limits.llm_cost_microusd,
+             guarantees.cost_currency == "USD",
+             :llm_cost_microusd,
+             :usage_cost_currency
+           ) do
+      optional_budget_requirement(
+        limits.llm_total_tokens,
+        guarantees.tokens,
+        :llm_total_tokens,
+        :usage_tokens
+      )
+    end
+  end
 
   defp reservation_tariff(nil), do: {:ok, nil}
 
@@ -883,11 +909,20 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp reservation_tariff(_value), do: {:error, :invalid_reservation_tariff}
 
-  defp reservation_tariff_requirement(_tariff, %Limits{llm_cost_microusd: nil}), do: :ok
-  defp reservation_tariff_requirement(%{} = _tariff, %Limits{}), do: :ok
+  defp reservation_tariff_requirement(tariff, %Limits{} = limits),
+    do:
+      optional_budget_requirement(
+        limits.llm_cost_microusd,
+        is_map(tariff),
+        :llm_cost_microusd,
+        :reservation_tariff
+      )
 
-  defp reservation_tariff_requirement(_tariff, %Limits{}),
-    do: {:error, :missing_reservation_tariff}
+  defp optional_budget_requirement(nil, _satisfied?, _limit, _prerequisite), do: :ok
+  defp optional_budget_requirement(_enabled, true, _limit, _prerequisite), do: :ok
+
+  defp optional_budget_requirement(_enabled, false, limit, prerequisite),
+    do: {:error, {:optional_budget_prerequisite, limit, prerequisite}}
 
   defp maybe_put_param(params, atom_key, value, string_key, normalized) do
     if Map.has_key?(value, string_key), do: Map.put(params, atom_key, normalized), else: params
@@ -1404,8 +1439,16 @@ defmodule PtcRunner.Kernel.HostConfig do
       else: {:error, :invalid_description}
   end
 
-  defp reduce_named_map(value, decoder) do
-    Enum.reduce_while(value, {:ok, %{}}, fn {name, item}, {:ok, normalized} ->
+  defp reduce_named_map(value, decoder), do: reduce_named_entries(value, decoder)
+
+  defp reduce_sorted_named_map(value, decoder) do
+    value
+    |> Enum.sort_by(&elem(&1, 0))
+    |> reduce_named_entries(decoder)
+  end
+
+  defp reduce_named_entries(entries, decoder) do
+    Enum.reduce_while(entries, {:ok, %{}}, fn {name, item}, {:ok, normalized} ->
       case decoder.(name, item) do
         {:ok, decoded} -> {:cont, {:ok, Map.put(normalized, name, decoded)}}
         {:error, _reason} = error -> {:halt, error}
@@ -1471,7 +1514,8 @@ defmodule PtcRunner.Kernel.HostConfig do
               "Installed ceiling for #{row.name}; a manifest may only request less."
 
             :optional_manifest_narrowable ->
-              "Optional aggregate budget for #{row.name}; omission disables it."
+              "Optional aggregate budget for #{row.name}; omission disables it. " <>
+                row.prerequisite_description
 
             :installed_only ->
               "Installed-only operational limit for #{row.name}; applications cannot declare it."

@@ -71,12 +71,12 @@ Time values are milliseconds. Heap values are BEAM process heap words, not bytes
 
 ## Optional application-narrowable budgets
 
-These budgets are disabled by an omitted host value. A positive host value enables the budget, becomes its inherited manifest default and installed ceiling, and may be narrowed by the manifest. A manifest cannot enable a host-disabled budget.
+These budgets are disabled by an omitted host value. A positive host value enables the budget, becomes its inherited manifest default and installed ceiling, and may be narrowed by the manifest. A manifest cannot enable a host-disabled budget. The prerequisites in the table apply to every live LLM installation while that host budget is enabled.
 
 | Name | Meaning | Unit | Disabled default | Inclusive range |
 | --- | --- | --- | --- | ---: |
-| `llm_cost_microusd` | Aggregate USD cost in microunits authorized across live language-model calls in one run. | count | `null` | 1–9,007,199,254,740,991 |
-| `llm_total_tokens` | Aggregate provider-counted input and output tokens authorized across live language-model calls in one run. | count | `null` | 1–9,007,199,254,740,991 |
+| `llm_cost_microusd` | Aggregate USD cost in microunits authorized across live language-model calls in one run. Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: "USD", and an explicit USD reservation_tariff on every live LLM installation. | count | `null` | 1–9,007,199,254,740,991 |
+| `llm_total_tokens` | Aggregate provider-counted input and output tokens authorized across live language-model calls in one run. Requires usage_guarantees.tokens: true on every live LLM installation. | count | `null` | 1–9,007,199,254,740,991 |
 
 ## Installed-only limits
 

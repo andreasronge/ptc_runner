@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
+  alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
@@ -76,6 +77,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "application schema validation timed out or exceeded its resource bound; retry the command"},
     {:application, :installed_limit_exceeded, 3, false,
      "an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling"},
+    {:application, :limit_unavailable, 3, false,
+     "an optional application budget is unavailable because the host has not enabled it"},
     {:application, :required_property_missing, 3, false,
      "the application manifest is missing a required property"},
     {:application, :reference_missing, 3, false,
@@ -377,6 +380,12 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :application, code: :installed_limit_exceeded, message: fallback}),
     do: RuntimeLimitDiagnostic.installed_ceiling_message_schema(fallback)
 
+  def message_schema(%{phase: :application, code: :limit_unavailable, message: fallback}),
+    do: OptionalBudgetDiagnostic.unavailable_message_schema(fallback)
+
+  def message_schema(%{phase: :host, code: :installed_limit_invalid, message: fallback}),
+    do: OptionalBudgetDiagnostic.prerequisite_message_schema(fallback)
+
   def message_schema(%{phase: :host, code: :host_schema_invalid, message: fallback}),
     do:
       SchemaViolationDiagnostic.message_schema(
@@ -469,6 +478,12 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:application, :installed_limit_exceeded, message),
     do: RuntimeLimitDiagnostic.installed_ceiling_message?(message)
+
+  defp valid_dynamic_message?(:application, :limit_unavailable, message),
+    do: OptionalBudgetDiagnostic.valid_unavailable_message?(message)
+
+  defp valid_dynamic_message?(:host, :installed_limit_invalid, message),
+    do: OptionalBudgetDiagnostic.valid_prerequisite_message?(message)
 
   defp valid_dynamic_message?(:host, :host_schema_invalid, message),
     do:
@@ -792,6 +807,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
              :schema_validation_unavailable,
              :schema_violation,
              :installed_limit_exceeded,
+             :limit_unavailable,
              :required_property_missing,
              :event_identity_conflict
            ],
@@ -904,6 +920,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
              :duplicate_property,
              :schema_violation,
              :installed_limit_exceeded,
+             :limit_unavailable,
              :required_property_missing,
              :contract_invalid,
              :input_contract_failed,

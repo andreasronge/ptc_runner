@@ -245,7 +245,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     ## Optional application-narrowable budgets
 
-    These budgets are disabled by an omitted host value. A positive host value enables the budget, becomes its inherited manifest default and installed ceiling, and may be narrowed by the manifest. A manifest cannot enable a host-disabled budget.
+    These budgets are disabled by an omitted host value. A positive host value enables the budget, becomes its inherited manifest default and installed ceiling, and may be narrowed by the manifest. A manifest cannot enable a host-disabled budget. The prerequisites in the table apply to every live LLM installation while that host budget is enabled.
 
     | Name | Meaning | Unit | Disabled default | Inclusive range |
     | --- | --- | --- | --- | ---: |
@@ -302,7 +302,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     :optional_manifest_narrowable
     |> LimitCatalog.rows()
     |> Enum.map_join("\n", fn row ->
-      "| `#{row.name}` | #{row.description} | #{limit_unit(row.unit)} | `null` | " <>
+      "| `#{row.name}` | #{row.description} #{row.prerequisite_description} | " <>
+        "#{limit_unit(row.unit)} | `null` | " <>
         "#{format_integer(row.minimum)}–#{format_integer(row.maximum)} |"
     end)
   end
