@@ -435,6 +435,23 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
     |> MapSet.new()
   end
 
+  @doc """
+  A one-component manifest whose entry is `wide/run`, with a terminal result
+  ceiling small enough that a 200-byte terminal value cannot fit under it.
+  """
+  def narrow_terminal_result_manifest(limit_bytes) do
+    %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "wide", "path" => "wide.clj"}],
+        "entry" => "wide/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"terminal_result_bytes" => limit_bytes},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
+  end
+
   def write_application(directory, name, manifest, extra_documents \\ []) do
     root = Path.join(directory, name)
     File.mkdir_p!(root)

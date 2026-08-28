@@ -2108,7 +2108,11 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       ~S|(fail {:kind :llm-provider-error :reason {:status :error :kind :provider-error :reason :payment-required :retryable? false}})|
 
     assert {:error, %{reason: :explicit_failure, details: details}} = Kernel.run(source, config)
-    assert details == %{failure_kind: "llm-provider-error"}
+
+    assert details == %{
+             failure_kind: "llm-provider-error",
+             explicit_failure_retention: :unpublished
+           }
   end
 
   test "parallel workflow code cannot forge an LLM provider failure class" do

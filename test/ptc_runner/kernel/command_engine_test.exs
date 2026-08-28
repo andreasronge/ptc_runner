@@ -490,7 +490,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.envelope["artifact_class"] == "normal"
     assert outcome.envelope["error"]["phase"] == "execution"
-    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+
+    # No inspection artifact was requested, so the diagnostic says the value
+    # was dropped and names the switch that would have retained it.
+    assert outcome.envelope["error"]["message"] =~ "published no inspection artifact"
     assert outcome.envelope["error"]["provider_activity"] == false
     assert outcome.envelope["execution"]["state"] == "incomplete"
     assert is_map(outcome.envelope["execution"]["usage"])
@@ -499,7 +503,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(outcome.envelope)
 
     assert {:stderr, rendered} = CommandRenderer.render(outcome)
-    assert rendered =~ "error: execution/workflow_failed:"
+    assert rendered =~ "error: execution/explicit_failure:"
     refute rendered =~ "evaluation:"
   end
 
@@ -592,6 +596,33 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "an explicit fail value over terminal_result_bytes reports that it was not retained", %{
+    tmp_dir: directory
+  } do
+    manifest = narrow_terminal_result_manifest(100)
+
+    inspection = Path.join(directory, "run.ptcins")
+
+    application =
+      write_application(directory, "explicit-fail-oversized", manifest, [
+        {"wide.clj", ~s|(ns wide) (defn run [input] (fail "#{String.duplicate("x", 200)}"))|}
+      ])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "exceeded the terminal result ceiling"
+    assert_schema_valid(outcome.envelope)
+
+    # The artifact was published, so "not retained" has to mean the value
+    # itself is absent rather than the artifact being missing.
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
+    assert Enum.find(records, &(&1["record_type"] == "explicit-failure-value")) == nil
+    assert Enum.find(records, &(&1["record_type"] == "execution-error"))
+  end
+
+  @tag :tmp_dir
   test "an explicit fail value is retained only as a dedicated inspection record", %{
     tmp_dir: directory
   } do
@@ -606,7 +637,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:error, %CommandOutcome{} = outcome} =
              CommandEngine.dispatch(["run", application, "--inspect", inspection])
 
-    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "private inspection record"
     assert outcome.envelope["execution"]["last_evaluation_error"] == nil
     refute Jason.encode!(outcome.envelope) =~ "must-not-escape"
     assert_schema_valid(outcome.envelope)
@@ -698,7 +730,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:error, %CommandOutcome{} = outcome} =
              CommandEngine.dispatch(["run", application, "--inspect", inspection])
 
-    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "private inspection record"
     assert outcome.envelope["execution"]["last_evaluation_error"] == nil
     assert_schema_valid(outcome.envelope)
 
@@ -723,7 +756,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:error, %CommandOutcome{} = outcome} =
              CommandEngine.dispatch(["run", application, "--inspect", inspection])
 
-    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "private inspection record"
     assert outcome.envelope["execution"]["last_evaluation_error"] == nil
     refute Jason.encode!(outcome.envelope) =~ "__ptc_no_explicit_failure__"
     assert_schema_valid(outcome.envelope)
@@ -1661,16 +1695,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "a result over terminal_result_bytes names the limit, its value, and the manifest key", %{
     tmp_dir: directory
   } do
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "wide", "path" => "wide.clj"}],
-        "entry" => "wide/run"
-      },
-      "input" => %{"value" => %{}},
-      "limits" => %{"terminal_result_bytes" => 100},
-      "providers" => %{"workflow" => [], "mission" => []}
-    }
+    manifest = narrow_terminal_result_manifest(100)
 
     application =
       write_application(directory, "result-limit-exceeded", manifest, [

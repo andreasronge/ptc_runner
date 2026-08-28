@@ -3705,7 +3705,11 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                       :retryable? false}}))|
 
     assert {:error, %{reason: :explicit_failure, details: details}} = Kernel.run(source, config)
-    assert details == %{failure_kind: "llm-provider-error"}
+
+    assert details == %{
+             failure_kind: "llm-provider-error",
+             explicit_failure_retention: :unpublished
+           }
   end
 
   test "agent.core receives a declared bound after rejecting capability arguments" do

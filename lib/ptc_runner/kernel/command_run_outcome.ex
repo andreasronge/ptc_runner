@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.EvaluatorEvidence
   alias PtcRunner.Kernel.ExecutionOutcome
+  alias PtcRunner.Kernel.ExplicitFailureDiagnostic
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMUsageSummary
@@ -660,6 +661,23 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
 
       :error ->
         diagnostic(:execution, :invalid_agent_config, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
+         %Error{
+           kind: :workflow_failed,
+           reason: :explicit_failure,
+           details: %{explicit_failure_retention: retention}
+         },
+         provider_activity
+       ) do
+    case ExplicitFailureDiagnostic.message(retention) do
+      {:ok, message} ->
+        diagnostic(:execution, :explicit_failure, provider_activity, message: message)
+
+      :error ->
+        diagnostic(:execution, :explicit_failure, provider_activity)
     end
   end
 

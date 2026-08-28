@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:bundle, :duplicate_definition},
     {:bundle, :undefined_variable},
     {:bundle, :unknown_namespace},
+    {:execution, :explicit_failure},
     {:execution, :replay_fixture_missing},
     {:execution, :model_output_truncated},
     {:host, :host_schema_invalid},

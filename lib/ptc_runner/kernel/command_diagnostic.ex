@@ -35,6 +35,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.ExplicitFailureDiagnostic
   alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
@@ -472,6 +473,15 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          nil
        ),
        do: ModelOutputDiagnostic.valid_message?(message)
+
+  # An explicit failure names no document: the retention outcome describes the
+  # run's own artifacts, not a manifest the command can point a source at.
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :explicit_failure},
+         nil
+       ),
+       do: ExplicitFailureDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          message,
