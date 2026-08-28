@@ -244,6 +244,49 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   end
 
   @tag :tmp_dir
+  test "a private result refuses a normal destination and an absent one alike", %{tmp_dir: dir} do
+    # A private result publishes to a file or not at all, so naming a normal
+    # destination and naming none are the same mistake. Only the first was
+    # refused: the second authorized the run, spent the provider activity, and
+    # failed internally at publication with nothing to act on.
+    application = application!(dir, "private-result", %{"events" => %{"policy" => "private"}})
+
+    for destination_args <- [["--output", Path.join(dir, "normal.json")], []] do
+      assert {:ok, preparation} =
+               CommandEngine.prepare(["run", application | destination_args])
+
+      assert {:error, outcome} = CommandEngine.preflight(preparation)
+      assert outcome.envelope["error"]["phase"] == "destination"
+      assert outcome.envelope["error"]["code"] == "private_destination_required"
+      assert outcome.envelope["error"]["provider_activity"] == false
+      assert outcome.envelope["execution"] == %{"state" => "not_started"}
+      refute Jason.encode!(outcome.envelope) =~ dir
+    end
+
+    assert {:ok, preparation} =
+             CommandEngine.prepare([
+               "run",
+               application,
+               "--private-output",
+               Path.join(dir, "private.json")
+             ])
+
+    assert {:ok, authority} = CommandEngine.preflight(preparation)
+    assert :ok = PublicationAuthority.abort(authority)
+    assert :ok = CommandPreparation.close(preparation)
+  end
+
+  test "an active doctor authorizes no result destination under a private policy" do
+    # `doctor --connect` publishes no result, so the requirement above must not
+    # reach it; it authorizes with no destinations at all.
+    assert {:ok, authority} =
+             PublicationAuthority.authorize("private-doctor", [], :private, :private_inspection)
+
+    assert PublicationAuthority.authorized?(authority)
+    assert :ok = PublicationAuthority.abort(authority)
+  end
+
+  @tag :tmp_dir
   test "independent authorities cannot reserve the same requested name", %{tmp_dir: dir} do
     target = Path.join(dir, "same-target.jsonl")
 

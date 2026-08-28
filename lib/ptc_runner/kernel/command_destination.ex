@@ -11,7 +11,8 @@ defmodule PtcRunner.Kernel.CommandDestination do
   alias PtcRunner.Kernel.PublicationAuthority
 
   @artifact_names ["trace", "inspection", "result"]
-  @option_keys [:trace_dir, :inspect, :output, :private_output]
+  @result_keys [:output, :private_output]
+  @option_keys [:trace_dir, :inspect] ++ @result_keys
 
   @spec capture(map()) :: {map(), [atom()]}
   def capture(options) when is_map(options) do
@@ -71,7 +72,7 @@ defmodule PtcRunner.Kernel.CommandDestination do
     %{
       "trace" => requested_state(options, [:trace_dir, :trace]),
       "inspection" => requested_state(options, [:inspect]),
-      "result" => requested_state(options, [:output, :private_output])
+      "result" => requested_state(options, @result_keys)
     }
   end
 
@@ -101,7 +102,8 @@ defmodule PtcRunner.Kernel.CommandDestination do
     options = preparation.artifact_destinations
 
     result =
-      with :ok <- ensure_project_artifact_root(preparation) do
+      with :ok <- ensure_project_artifact_root(preparation),
+           :ok <- ensure_private_result_destination(preparation, options) do
         PublicationAuthority.authorize(
           preparation.run_ref,
           Map.to_list(options),
@@ -256,6 +258,26 @@ defmodule PtcRunner.Kernel.CommandDestination do
       end
 
     CommandRejection.destination_collision(:run, first, second, frontend)
+  end
+
+  # Commands that publish a result reach this path; `doctor --connect` does not,
+  # and authorizes no result destination of its own. A run whose result is
+  # private-class therefore has nowhere to publish unless one was requested:
+  # stdout is not a private destination. Refusing here keeps the refusal in
+  # phase 6, before any provider activity, and gives it the same diagnostic a
+  # normal destination already earns inside `PublicationAuthority.authorize/4`.
+  defp ensure_private_result_destination(preparation, options) do
+    prepared = preparation.prepared_run
+
+    private? =
+      PublicationAuthority.private_result?(
+        prepared.effective_event_policy,
+        prepared.effective_data_class
+      )
+
+    if private? and not Enum.any?(@result_keys, &Map.has_key?(options, &1)),
+      do: {:error, :private_destination_required},
+      else: :ok
   end
 
   defp internal_outcome(%CommandPreparation{run_ref: run_ref}) do
