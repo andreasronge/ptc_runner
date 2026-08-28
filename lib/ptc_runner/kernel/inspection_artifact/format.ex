@@ -68,6 +68,46 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Format do
 
   def decode_header(_other), do: {:error, :malformed_source}
 
+  @typedoc "Format and schema versions read without committing to a field layout."
+  @type versions :: %{format_version: pos_integer(), schema_version: pos_integer()}
+
+  @doc """
+  Reads a header's declared versions without requiring the current ones.
+
+  `decode_header/1` matches this version's constants, so it cannot tell an
+  artifact written by another version from a corrupt one. A bounded metadata
+  probe must report those two states differently, and the magic plus the two
+  version fields sit at fixed offsets for every version of the container.
+  """
+  @spec decode_header_versions(binary()) :: {:ok, versions()} | {:error, :malformed_source}
+  def decode_header_versions(
+        <<@header_magic::binary, format_version::unsigned-big-16, schema_version::unsigned-big-16,
+          _header_size::unsigned-big-32>>
+      )
+      when format_version > 0 and schema_version > 0,
+      do: {:ok, %{format_version: format_version, schema_version: schema_version}}
+
+  def decode_header_versions(_other), do: {:error, :malformed_source}
+
+  @doc """
+  Reads a footer's declared versions without requiring the current ones.
+
+  Only the magic and the two version fields are read. Nothing beyond them is
+  interpreted, because a footer written by another version may lay its
+  remaining fields out differently — including its own size, which is why a
+  reader that finds foreign versions here must not treat the trailing
+  `footer_size/0` bytes as a whole footer.
+  """
+  @spec decode_footer_versions(binary()) :: {:ok, versions()} | {:error, :malformed_source}
+  def decode_footer_versions(
+        <<@footer_magic::binary, format_version::unsigned-big-16, schema_version::unsigned-big-16,
+          _rest::binary>>
+      )
+      when format_version > 0 and schema_version > 0,
+      do: {:ok, %{format_version: format_version, schema_version: schema_version}}
+
+  def decode_footer_versions(_other), do: {:error, :malformed_source}
+
   @spec encode_frame(binary()) :: {:ok, binary()} | {:error, :invalid_frame}
   def encode_frame(payload) when is_binary(payload) do
     size = byte_size(payload)

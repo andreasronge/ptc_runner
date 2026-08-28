@@ -93,6 +93,32 @@ defmodule PtcRunner.Kernel.TraceDirectoryAdmission do
   def source_kind(raw_name) when is_binary(raw_name), do: filename_source_kind(raw_name)
   def source_kind(_raw_name), do: nil
 
+  @doc """
+  Returns the canonical run stem a trace filename claims, or `nil`.
+
+  This module owns the canonical stem grammar, so every reader that needs to
+  route a filename to a run — directory admission here, and the bounded
+  catalog probe that never decodes a file's events — asks it rather than
+  restating the suffix and stem rules.
+  """
+  @spec run_claim(binary()) :: binary() | nil
+  def run_claim(raw_name) when is_binary(raw_name) do
+    case filename_source_kind(raw_name) do
+      nil -> nil
+      source_kind -> filename_run_claim(raw_name, source_kind)
+    end
+  end
+
+  def run_claim(_raw_name), do: nil
+
+  @doc "Returns `stem` when it is a canonical run stem, or `nil`."
+  @spec canonical_stem(binary()) :: binary() | nil
+  def canonical_stem(stem) when is_binary(stem) do
+    if canonical_stem?(stem), do: stem
+  end
+
+  def canonical_stem(_stem), do: nil
+
   @spec classify([file_evidence()]) :: {:ok, classification()} | {:error, :invalid_evidence}
   def classify(evidence) when is_list(evidence) do
     if Enum.all?(evidence, &valid_evidence?/1) do

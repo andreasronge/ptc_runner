@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   use GenServer
 
+  alias PtcRunner.Kernel.BoundedCapture
   alias PtcRunner.Kernel.ResourceRegistrar
   alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Kernel.SafeMetadata
@@ -548,59 +549,16 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   end
 
   defp capture_for_owner(capture, owner, owner_ref, capture_heap_words, capture_deadline_ms) do
-    reply_alias = Process.alias()
-    reply_ref = make_ref()
-
-    {worker, worker_ref} =
-      Process.spawn(
-        fn -> send(reply_alias, {reply_ref, capture.()}) end,
-        [
-          {:max_heap_size,
-           %{
-             size: capture_heap_words,
-             kill: true,
-             error_logger: false,
-             include_shared_binaries: true
-           }},
-          :monitor
-        ]
-      )
-
-    timeout = max(capture_deadline_ms - System.monotonic_time(:millisecond), 0)
-
-    receive do
-      {^reply_ref, result} ->
-        Process.unalias(reply_alias)
-        Process.demonitor(worker_ref, [:flush])
-
-        if Process.alive?(owner),
-          do: result,
-          else: {:error, :snapshot_unavailable}
-
-      {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
-        terminate_capture(worker, worker_ref, reply_alias)
-        {:error, :snapshot_unavailable}
-
-      {:DOWN, ^worker_ref, :process, ^worker, :killed} ->
-        Process.unalias(reply_alias)
-        {:error, :source_retained_limit_exceeded}
-
-      {:DOWN, ^worker_ref, :process, ^worker, _reason} ->
-        Process.unalias(reply_alias)
-        {:error, :source_unavailable}
-    after
-      timeout ->
-        terminate_capture(worker, worker_ref, reply_alias)
-        {:error, :source_unavailable}
-    end
-  end
-
-  defp terminate_capture(worker, worker_ref, reply_alias) do
-    Process.unalias(reply_alias)
-    Process.exit(worker, :kill)
-
-    receive do
-      {:DOWN, ^worker_ref, :process, ^worker, _reason} -> :ok
+    case BoundedCapture.for_owner(capture,
+           owner: owner,
+           owner_ref: owner_ref,
+           max_heap_words: capture_heap_words,
+           deadline_ms: capture_deadline_ms
+         ) do
+      {:ok, result} -> result
+      {:error, :owner_down} -> {:error, :snapshot_unavailable}
+      {:error, :heap_exceeded} -> {:error, :source_retained_limit_exceeded}
+      {:error, _failure} -> {:error, :source_unavailable}
     end
   end
 
