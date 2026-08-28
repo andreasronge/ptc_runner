@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.LLMFailureCatalog do
     :payment_required,
     :rate_limited,
     :tool_calling_unsupported,
+    :usage_unavailable,
     :timeout,
     :transport_error
   ]
@@ -57,6 +58,7 @@ defmodule PtcRunner.Kernel.LLMFailureCatalog do
           | :payment_required
           | :rate_limited
           | :tool_calling_unsupported
+          | :usage_unavailable
           | :timeout
           | :transport_error
 

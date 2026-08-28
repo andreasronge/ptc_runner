@@ -683,6 +683,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp llm_failure_code(:invalid_request, false), do: :llm_request_invalid
   defp llm_failure_code(:denied, false), do: :llm_access_denied
   defp llm_failure_code(:timeout, true), do: :llm_timeout
+  defp llm_failure_code(:usage_unavailable, false), do: :llm_usage_unavailable
   defp llm_failure_code(_failure, true), do: :llm_provider_unavailable
   defp llm_failure_code(_failure, false), do: :llm_provider_failed
 

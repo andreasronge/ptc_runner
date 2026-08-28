@@ -122,7 +122,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :transport_error,
     :unavailable,
     :unknown_mission,
-    :unknown_model_alias
+    :unknown_model_alias,
+    :usage_unavailable
   ]
 
   @spec normalize_labels(term()) :: {:ok, map()} | {:error, :invalid_safe_metadata}
@@ -486,6 +487,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
              :internal,
              :domain_error,
              :invalid_result,
+             :usage_unavailable,
              :reservation_bound_exceeded
            ] and is_boolean(retryable?),
       do: %{llm_provider_failure: failure, llm_provider_retryable?: retryable?}

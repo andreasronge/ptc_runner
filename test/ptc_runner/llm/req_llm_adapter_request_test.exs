@@ -3,6 +3,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
   import ExUnit.CaptureIO
 
+  alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.ReqLLMAdapter
@@ -185,6 +186,73 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
       assert {:ok, %{tokens: %{total_cost: ^cost}}} =
                ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
     end
+  end
+
+  test "admits an uncataloged OpenRouter tool call with provider-reported cost", %{test: test} do
+    selector = "openrouter:future-vendor/future-tool-model-1691"
+
+    Req.Test.expect(
+      test,
+      request_handler(self(), "future-vendor/future-tool-model-1691",
+        finish_reason: "tool_calls",
+        message: %{
+          "role" => "assistant",
+          "content" => nil,
+          "reasoning" => "",
+          "reasoning_details" => [],
+          "refusal" => nil,
+          "tool_calls" => [
+            %{
+              "type" => "function",
+              "index" => 0,
+              "id" => "call_ee1f6f98c28c429bb65fe584",
+              "function" => %{"name" => "calc", "arguments" => ~s({"e":"2+2"})}
+            }
+          ]
+        },
+        usage: %{
+          "prompt_tokens" => 25,
+          "completion_tokens" => 9,
+          "total_tokens" => 34,
+          "cost" => "0.000117"
+        }
+      )
+    )
+
+    requirements = %{
+      Requirements.interim(%{max_tokens: 2_000})
+      | usage_guarantees: %{tokens: true, cost_currency: "USD"}
+    }
+
+    assert {:ok, target, :uncataloged, _attestation} =
+             ReqLLMAdapter.prepare_model(selector, requirements)
+
+    target = put_test_http_options(target, test)
+
+    assert {:ok, capability} =
+             LLMCapability.new(
+               requester: fn request ->
+                 {:ok, invocation} = Invocation.new(request, false, "test", nil)
+                 ReqLLMAdapter.call(target, invocation)
+               end,
+               usage_guarantees: requirements.usage_guarantees
+             )
+
+    assert {:ok,
+            %{
+              "tool_calls" => [
+                %{
+                  "id" => "call_ee1f6f98c28c429bb65fe584",
+                  "name" => "calc",
+                  "args" => %{"e" => "2+2"}
+                }
+              ],
+              "tokens" => %{
+                "input" => 25,
+                "output" => 9,
+                "total_cost" => %{"currency" => "USD", "microunits" => 117}
+              }
+            }} = capability.callback.(%{messages: [], tools: [tool_schema()]})
   end
 
   test "preserves an attested token-limit alias through ReqLLM dispatch", %{test: test} do
@@ -788,6 +856,18 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     refute warnings =~ "model_uncataloged"
   end
 
+  test "the refreshed catalog recognizes the reported Ling selector with tools and pricing" do
+    assert {:ok, %ReqLLMPreparedModel{model: model}, :cataloged, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:inclusionai/ling-3.0-flash",
+               Requirements.interim(%{max_tokens: 2_000})
+             )
+
+    assert get_in(model.capabilities, [:tools, :enabled]) == true
+    assert get_in(model.pricing, [:currency]) == "USD"
+    assert is_list(get_in(model.pricing, [:components]))
+  end
+
   test "direct HTTP routes report that catalog status is unavailable" do
     for selector <- ["ollama:local-model", "openai-compat:https://example.com/v1|deployment"] do
       assert {:ok,
@@ -910,10 +990,11 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
           %{
             "index" => 0,
             "finish_reason" => Keyword.get(opts, :finish_reason, "stop"),
-            "message" => %{
-              "role" => "assistant",
-              "content" => Keyword.get(opts, :content, "ok")
-            }
+            "message" =>
+              Keyword.get(opts, :message, %{
+                "role" => "assistant",
+                "content" => Keyword.get(opts, :content, "ok")
+              })
           }
         ]
       }

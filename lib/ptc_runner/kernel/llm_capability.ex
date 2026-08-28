@@ -354,11 +354,19 @@ defmodule PtcRunner.Kernel.LLMCapability do
     end
   end
 
-  defp invalid_usage,
-    do: {:error, ProviderError.new(:invalid_result, "LLM response contained invalid token usage")}
+  defp invalid_usage do
+    {:error,
+     ProviderError.new(:usage_unavailable, "LLM response contained invalid token usage",
+       dispatch_provenance: :dispatched
+     )}
+  end
 
-  defp promised_usage_missing,
-    do: {:error, ProviderError.new(:invalid_result, "LLM provider omitted promised usage")}
+  defp promised_usage_missing do
+    {:error,
+     ProviderError.new(:usage_unavailable, "LLM provider omitted promised usage",
+       dispatch_provenance: :dispatched
+     )}
+  end
 
   defp usage_guarantees(%{tokens: tokens, cost_currency: currency} = guarantees)
        when map_size(guarantees) == 2 and is_boolean(tokens) and currency in ["USD", nil],

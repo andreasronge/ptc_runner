@@ -289,7 +289,7 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
            } = result
   end
 
-  test "malformed tokens on a structured object is an invalid provider result" do
+  test "malformed promised usage on a structured object is usage unavailable" do
     {result, _state, _sink} =
       dispatch_structured(
         self(),
@@ -300,7 +300,7 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
     assert %{
              status: :error,
              kind: :provider_error,
-             reason: :invalid_result,
+             reason: :usage_unavailable,
              retryable?: false
            } = result
   end
