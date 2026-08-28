@@ -102,6 +102,46 @@ names a stable `transcript/` diagnostic and does not echo `RUN_ID` or a
 filesystem path. Whole-directory analysis snapshots remain a separate
 contract: they still inventory every canonical member.
 
+## Choose the smallest evidence authority
+
+The four navigation paths answer different questions. Pick one before opening
+private payloads:
+
+| Need | Use | Authority and lifetime |
+| --- | --- | --- |
+| find candidate runs in a large artifact root | `private-run-catalog-v1` and `analysis/catalog` | one immutable metadata-only generation; no payload admission |
+| publish one complete model conversation | `ptc transcript RUN_ID` | one exact correlated pair and one new owner-only result file |
+| ask several private questions about up to sixteen runs | `private-run-analysis-v1` with repeated `--run` | one immutable selected-set session with `analysis/*` |
+| make a repeatable debugger application or agent | install snapshots and select `debug.nav` | the manifest's fixed mission authority and typed relationship walk |
+
+Catalog discovery and selected analysis are separate commands. For example,
+page the first twenty admissible rows, then carry only chosen `run_id` values
+into a new session:
+
+```console
+ptc repl --profile private-run-catalog-v1 \
+  --resource traces=.ptc/traces \
+  --resource inspection=.ptc/inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/catalog {"state" "admissible" "limit" 20})'
+
+ptc repl --profile private-run-analysis-v1 \
+  --run cmd-00000000000000000000000001 \
+  --run cmd-00000000000000000000000002 \
+  --resource traces=.ptc/traces \
+  --resource inspection=.ptc/inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/open "cmd-00000000000000000000000001")'
+```
+
+If the catalog has more candidates than one selected set can hold, start a
+second `private-run-analysis-v1` command with a later batch. Each command
+re-verifies only its own explicit references and has independent source,
+index, heap, result, handle, call, and session bounds. A catalog digest binds
+only paging inside its discovery generation; it never crosses as an admission
+token. `analysis/open` opens an already-admitted payload and cannot add a run
+to the session.
+
 ## Give the debugger bounded navigation authority
 
 The debugger is an ordinary application. Its host document installs the failed

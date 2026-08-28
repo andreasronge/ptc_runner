@@ -17,7 +17,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   10. `docs/prelude-reference.md` — shipped PTC-Lisp component and export catalog
   11. `priv/preludes/kernel/agent.failure.clj` — generated LLM failure classifier
   12. the exit-status catalog inside `docs/reference/cli.md`
-  13. the static-site guide pages under `site/guides/` (via `mix ptc.gen_site_guides`)
+  13. the profile-frontend diagnostic catalog inside `docs/reference/cli.md`
+  14. the static-site guide pages under `site/guides/` (via `mix ptc.gen_site_guides`)
 
   ## Usage
 
@@ -43,11 +44,14 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Prelude.Export
   alias PtcRunner.Lisp.Registry
+  alias PtcRunner.ProfileDiagnosticCatalog
 
   @function_ref_path "docs/function-reference.md"
   @cli_reference_path "docs/reference/cli.md"
   @exit_status_begin "<!-- BEGIN GENERATED: exit-status catalog (mix ptc.gen_docs) -->"
   @exit_status_end "<!-- END GENERATED: exit-status catalog -->"
+  @profile_diagnostic_begin "<!-- BEGIN GENERATED: profile diagnostic catalog (mix ptc.gen_docs) -->"
+  @profile_diagnostic_end "<!-- END GENERATED: profile diagnostic catalog -->"
   @limit_reference_path "docs/kernel-limits-reference.md"
   @agent_failure_path "priv/preludes/kernel/agent.failure.clj"
   @prelude_reference_path "docs/prelude-reference.md"
@@ -159,6 +163,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     generate_limit_reference(check?)
     generate_agent_failure(check?)
     generate_exit_status_catalog(check?)
+    generate_profile_diagnostic_catalog(check?)
     generate_prelude_reference(check?)
     generate_function_reference(check?)
     Enum.each(all_audits(), &generate_audit(&1, check?))
@@ -360,6 +365,39 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     end
 
     content
+  end
+
+  defp generate_profile_diagnostic_catalog(check?) do
+    content = read_cli_reference!()
+
+    section = """
+    #{@profile_diagnostic_begin}
+
+    | Code | Refusal | Public message |
+    | --- | --- | --- |
+    #{profile_diagnostic_rows()}
+    #{@profile_diagnostic_end}\
+    """
+
+    [head, rest] = String.split(content, @profile_diagnostic_begin, parts: 2)
+    [_stale, tail] = String.split(rest, @profile_diagnostic_end, parts: 2)
+
+    write_or_check!(@cli_reference_path, head <> section <> tail, check?)
+
+    report_generation(
+      @cli_reference_path,
+      length(ProfileDiagnosticCatalog.rows()),
+      "profile diagnostics",
+      check?
+    )
+  end
+
+  defp profile_diagnostic_rows do
+    ProfileDiagnosticCatalog.rows()
+    |> Enum.sort_by(&Atom.to_string(&1.code))
+    |> Enum.map_join("\n", fn row ->
+      "| `#{row.code}` | #{row.description} | #{row.message} |"
+    end)
   end
 
   # `0` and the publication status are not catalog rows: one is the absence of a

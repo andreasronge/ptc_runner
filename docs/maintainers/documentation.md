@@ -200,10 +200,11 @@ edited directly. The same applies to the static-site guide pages under
 `site/guides/`: they are rendered from `docs/guides/` by
 `mix ptc.gen_site_guides` (which `mix ptc.gen_docs` runs), with sections read
 from the guide groups in `mix.exs` — edit the guide Markdown or the groups,
-never the HTML. `docs/reference/cli.md` is
-hand-written apart from the exit-status catalog between its
-`BEGIN GENERATED`/`END GENERATED` markers, which the same task rewrites from
-`PtcRunner.Kernel.DiagnosticCatalog`.
+never the HTML. `docs/reference/cli.md` is hand-written apart from the
+exit-status and profile diagnostic catalogs between their `BEGIN GENERATED`/
+`END GENERATED` markers. The same task rewrites them from
+`PtcRunner.Kernel.DiagnosticCatalog` and
+`PtcRunner.ProfileDiagnosticCatalog`, respectively.
 
 Run focused doctests or documentation tests, then:
 

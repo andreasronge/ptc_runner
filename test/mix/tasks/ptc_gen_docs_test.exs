@@ -4,6 +4,7 @@ defmodule Mix.Tasks.Ptc.GenDocsTest do
   alias Mix.Tasks.Ptc.GenDocs
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.ProfileDiagnosticCatalog
 
   test "generated function reference explains the PtcRunner extension marker" do
     reference = File.read!("docs/function-reference.md")
@@ -18,6 +19,16 @@ defmodule Mix.Tasks.Ptc.GenDocsTest do
     for row <- LimitCatalog.rows() do
       assert reference =~ "`#{row.name}`"
       assert reference =~ row.description
+    end
+  end
+
+  test "generated CLI reference contains every profile frontend diagnostic" do
+    reference = File.read!("docs/reference/cli.md")
+
+    for row <- ProfileDiagnosticCatalog.rows() do
+      assert reference =~ "`#{row.code}`"
+      assert reference =~ row.description
+      assert reference =~ row.message
     end
   end
 

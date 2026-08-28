@@ -304,13 +304,38 @@ profile-local <code class="inline">analysis/catalog</code> function. It never op
 <code class="inline">provider</code>, <code class="inline">correlation</code>, and <code class="inline">state</code>. <code class="inline">tags</code> requires the row to contain the
 supplied subset. Inclusive <code class="inline">from</code> and <code class="inline">to</code> bounds apply to <code class="inline">start_timestamp</code>.
 No other filter, including <code class="inline">bundle</code>, is accepted. The default <code class="inline">limit</code> is 20 and
-the maximum is 100.</p><p>Each page contains exactly <code class="inline">items</code>, <code class="inline">next_cursor</code>, <code class="inline">truncated</code>,
+the maximum is 100.</p><p>Every item has the same closed field set:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Field</th><th style="text-align: left;">Meaning</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">run_id</code></td><td style="text-align: left;">canonical filename run reference</td></tr><tr><td style="text-align: left;"><code class="inline">trace_id</code></td><td style="text-align: left;">trace-head identity, or <code class="inline">null</code> when unavailable</td></tr><tr><td style="text-align: left;"><code class="inline">trace_present</code></td><td style="text-align: left;"><code class="inline">sanitized</code>, <code class="inline">private</code>, <code class="inline">absent</code>, or <code class="inline">unreadable</code></td></tr><tr><td style="text-align: left;"><code class="inline">inspection_present</code></td><td style="text-align: left;">whether a sealed inspection candidate exists</td></tr><tr><td style="text-align: left;"><code class="inline">trace_schema_version</code></td><td style="text-align: left;">probed canonical-event schema version</td></tr><tr><td style="text-align: left;"><code class="inline">inspection_format_version</code></td><td style="text-align: left;">probed sealed-container format version</td></tr><tr><td style="text-align: left;"><code class="inline">inspection_schema_version</code></td><td style="text-align: left;">probed inspection-record schema version</td></tr><tr><td style="text-align: left;"><code class="inline">trace_bytes</code></td><td style="text-align: left;">trace candidate size</td></tr><tr><td style="text-align: left;"><code class="inline">inspection_bytes</code></td><td style="text-align: left;">sealed artifact size</td></tr><tr><td style="text-align: left;"><code class="inline">inspection_record_count</code></td><td style="text-align: left;">footer-declared evidence-record count</td></tr><tr><td style="text-align: left;"><code class="inline">start_timestamp</code></td><td style="text-align: left;">trace-head timestamp</td></tr><tr><td style="text-align: left;"><code class="inline">stop_timestamp</code></td><td style="text-align: left;">terminal trace timestamp, or <code class="inline">null</code></td></tr><tr><td style="text-align: left;"><code class="inline">duration_ms</code></td><td style="text-align: left;">non-negative terminal duration, or <code class="inline">null</code></td></tr><tr><td style="text-align: left;"><code class="inline">status</code></td><td style="text-align: left;">terminal canonical status, or <code class="inline">null</code></td></tr><tr><td style="text-align: left;"><code class="inline">terminal_reason</code></td><td style="text-align: left;">safe terminal reason, or <code class="inline">null</code></td></tr><tr><td style="text-align: left;"><code class="inline">result_hash</code></td><td style="text-align: left;">safe terminal result fingerprint, or <code class="inline">null</code></td></tr><tr><td style="text-align: left;"><code class="inline">complete</code></td><td style="text-align: left;">whether the trace ends in <code class="inline">run-stopped</code></td></tr><tr><td style="text-align: left;"><code class="inline">name</code>, <code class="inline">model</code>, <code class="inline">provider</code></td><td style="text-align: left;">safe <code class="inline">run-started</code> labels, or <code class="inline">null</code></td></tr><tr><td style="text-align: left;"><code class="inline">tags</code>, <code class="inline">labels</code></td><td style="text-align: left;">bounded safe <code class="inline">run-started</code> label maps</td></tr><tr><td style="text-align: left;"><code class="inline">artifact_digest</code></td><td style="text-align: left;">footer-declared inspection fingerprint, or <code class="inline">null</code></td></tr><tr><td style="text-align: left;"><code class="inline">correlation</code></td><td style="text-align: left;"><code class="inline">paired</code>, <code class="inline">trace_only</code>, <code class="inline">inspection_only</code>, <code class="inline">mismatch</code>, or <code class="inline">unavailable</code></td></tr><tr><td style="text-align: left;"><code class="inline">state</code></td><td style="text-align: left;"><code class="inline">admissible</code> or <code class="inline">isolated</code></td></tr><tr><td style="text-align: left;"><code class="inline">isolation_reason</code></td><td style="text-align: left;">the primary closed reason below, or <code class="inline">null</code></td></tr></tbody></table></div><p>The ordered isolation vocabulary is <code class="inline">ambiguous_trace</code>, <code class="inline">unstable_entry</code>,
+<code class="inline">malformed_metadata</code>, <code class="inline">unsupported_schema</code>, <code class="inline">filename_run_mismatch</code>,
+<code class="inline">duplicate_run_identity</code>, and <code class="inline">inspection_correlation_missing</code>. An isolated
+row remains useful for deciding what to repair, but its run must not be copied
+into <code class="inline">--run</code>. Paths, prompts, responses, generated source, capability payloads,
+prints, diagnostics, result values, and full-scan counters never enter a row.</p><p>Each page contains exactly <code class="inline">items</code>, <code class="inline">next_cursor</code>, <code class="inline">truncated</code>,
 <code class="inline">omitted_count</code>, <code class="inline">catalog_digest</code>, and <code class="inline">excluded_files</code>. A cursor is opaque and
 binds the complete filter query and generation digest, but not <code class="inline">limit</code>.
 Changing a filter rejects the query; using a cursor with a changed generation
 reports <code class="inline">source_changed</code>. Growth cannot alter an already-open generation.
 Malformed individual entries remain path-free isolated rows, while capture
-failures refuse the whole profile without disclosing a path.</p><p><code class="inline">analysis.catalog</code> is not a general shipped-library component. It is compiled
+failures refuse the whole profile without disclosing a path.</p><p>Discovery and admission are two separate immutable sessions. Read one or more
+pages, choose only <code class="inline">admissible</code> run references, then start a new selected
+analysis session:</p><pre><code class="console language-console"># Session 1: page/filter metadata; keep the run_id values you select.
+ptc repl --profile private-run-catalog-v1 \
+  --resource traces=tmp/tutorial-traces \
+  --resource inspection=tmp/tutorial-inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/catalog {&quot;state&quot; &quot;admissible&quot; &quot;limit&quot; 20})'
+
+# Session 2: re-verify and admit only the explicit set (at most sixteen).
+ptc repl --profile private-run-analysis-v1 \
+  --run cmd-00000000000000000000000001 \
+  --run cmd-00000000000000000000000002 \
+  --resource traces=tmp/tutorial-traces \
+  --resource inspection=tmp/tutorial-inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/runs {})'</code></pre><p>The catalog digest is cursor identity only; it is neither an admission token
+nor a command option. Stage 2 re-resolves exact candidates and proves their
+embedded identities, bytes, seal, and correlation. Open a later batch in a
+third session with another set of up to sixteen flags. A running analysis
+session cannot acquire a newly named run dynamically.</p><p><code class="inline">analysis.catalog</code> is not a general shipped-library component. It is compiled
 only into this closed profile because ordinary workflows and manifests cannot
 receive its backing capability.</p><h2 id="query-private-inspection-evidence">Query private inspection evidence</h2><p>Interactive private analysis requires an attached terminal and explicit sink
 authorization:</p><pre><code class="console language-console">ptc repl \
@@ -329,7 +354,13 @@ order-independent set. Selected capture resolves only each run's exact normal
 or private trace candidate and inspection artifact, never lists either source
 directory, and pins no unselected artifact. An unselected malformed,
 unsupported, unstable, mismatched, or duplicate claimant therefore cannot
-affect the cohort.</p><p>The trace, inspection, and analysis-trace directories must be physically
+affect the cohort.</p><p>The sixteen-run ceiling bounds pinned handles. Existing source authorities
+remain finite: trace and inspection bytes and retained projections are
+aggregate across the set, the inspection record ceiling remains per artifact,
+logical index entries/bytes and actual retained index memory are aggregate,
+and admission, cleanup, session, capability-call, result, and heap limits still
+apply. A refusal is all-or-nothing and releases every partially admitted
+handle and index.</p><p>The trace, inspection, and analysis-trace directories must be physically
 separate, including through ancestors and symlink aliases. Capture validates
 every admitted private artifact against its matching run. In whole-directory
 mode, trace directory
@@ -445,7 +476,11 @@ never disclose supplied paths, resolved paths, or symlink targets.</p><h2 id="us
   -e '(count (get runs &quot;items&quot;))'</code></pre><p>When their lifecycle stages are reached, records appear in this order:</p><ol><li>one <code class="inline">session-started</code> after construction;</li><li>one <code class="inline">evaluation</code> per accepted source;</li><li>one <code class="inline">session-closed</code> after successful close and trace publication;</li><li>a final <code class="inline">command-error</code> when the command is unsuccessful.</li></ol><p>Validation or setup can therefore emit only <code class="inline">command-error</code>; persistence
 failure follows earlier records without claiming <code class="inline">session-closed</code>. Records use
 schema version 1. Evaluation records contain the bounded mission result and no
-extra raw-source copy.</p><p>A <code class="inline">command-error</code> rejecting a physical-separation conflict adds a
+extra raw-source copy. A profile selection or immutable source-capture refusal
+also carries its stable <code class="inline">code</code>; stderr uses the same identity as <code class="inline">repl/CODE</code>.
+The generated table in the <a href="/reference/cli/#profile-frontend-diagnostics">CLI reference</a>
+is the complete vocabulary. Shared argument-parser refusals remain
+<code class="inline">arguments/CODE</code> and occur before this JSONL lifecycle.</p><p>A <code class="inline">command-error</code> rejecting a physical-separation conflict adds a
 <code class="inline">directory_conflict</code> object beside the existing <code class="inline">category</code> and <code class="inline">message</code>, so
 automation does not parse prose:</p><pre><code class="json language-json">{
   &quot;schema_version&quot;: 1,

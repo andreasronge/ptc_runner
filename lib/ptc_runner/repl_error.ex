@@ -1,4 +1,4 @@
 defmodule PtcRunner.ReplError do
   @moduledoc false
-  defexception [:message]
+  defexception [:code, :message]
 end
