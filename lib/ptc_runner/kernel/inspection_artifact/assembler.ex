@@ -22,7 +22,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Assembler do
       limits: limits,
       run_id: identity && identity.run_id,
       trace_id: identity && identity.trace_id,
-      schema_version: 9,
+      schema_version: Format.schema_version(),
       first_timestamp: nil,
       last_timestamp: nil,
       first_sequence: 0,

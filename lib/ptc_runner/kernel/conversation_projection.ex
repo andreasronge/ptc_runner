@@ -213,19 +213,25 @@ defmodule PtcRunner.Kernel.ConversationProjection do
     {stream_id, turn, added, state} = stream_position(messages, predecessor, state)
     assistant = ConversationMessage.assistant(exchange["result"])
 
-    item = %{
-      "turn" => turn,
-      "capability_id" => exchange["capability_id"],
-      "request_sequence" => exchange["input_sequence"],
-      "response_sequence" => exchange["output_sequence"],
-      "system" => get_in(exchange, ["arguments", "system"]),
-      "messages_added" => added,
-      "feedback" => Enum.filter(added, &(&1["role"] == "tool")),
-      "response" => exchange["result"],
-      "assistant" => assistant,
-      "tokens" => get_in(exchange, ["result", "value", "tokens"]),
-      "outcome" => exchange["result"]["status"]
-    }
+    item =
+      %{
+        "turn" => turn,
+        "capability_id" => exchange["capability_id"],
+        "request_sequence" => exchange["input_sequence"],
+        "response_sequence" => exchange["output_sequence"],
+        "system" => get_in(exchange, ["arguments", "system"]),
+        "messages_added" => added,
+        "feedback" => Enum.filter(added, &(&1["role"] == "tool")),
+        "response" => exchange["result"],
+        "assistant" => assistant,
+        "tokens" => get_in(exchange, ["result", "value", "tokens"]),
+        "outcome" => exchange["result"]["status"]
+      }
+      |> then(fn item ->
+        if Map.has_key?(exchange, "request_hash"),
+          do: Map.put(item, "request_hash", exchange["request_hash"]),
+          else: item
+      end)
 
     node = %{
       complete_messages: messages ++ [assistant],

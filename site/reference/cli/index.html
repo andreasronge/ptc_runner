@@ -410,7 +410,12 @@ ptc transcript RUN_ID \
   --traces tmp/traces \
   --inspection tmp/inspection \
   --private-unattended \
-  --private-output tmp/transcript/conversation.private.json</code></pre><p>The command reserves an owner-only destination before capture. <code class="inline">RUN_ID</code> must be
+  --private-output tmp/transcript/conversation.private.json</code></pre><p>Each selected model turn carries the provider-neutral <code class="inline">request_hash</code> used by
+<code class="inline">llm_replay</code> fixtures. The underlying owner-only inspection artifact carries
+the same value as <code class="inline">payload.request_hash</code> on the <code class="inline">llm-request</code>
+<code class="inline">capability-input</code> record. A private replay miss keeps that hash out of its
+public message while retaining the <code class="inline">replay_fixture_missing</code> code; copy the
+transcript field into the fixture and rerun.</p><p>The command reserves an owner-only destination before capture. <code class="inline">RUN_ID</code> must be
 a canonical PTC command run reference (<code class="inline">cmd-</code> followed by 26 Crockford
 characters). Capture then opens only these exact candidates, without listing
 either directory:</p><pre><code class="text language-text">TRACE_DIRECTORY/RUN_ID.jsonl

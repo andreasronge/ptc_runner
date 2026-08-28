@@ -2,14 +2,16 @@ defmodule PtcRunner.Kernel.InspectionRecord do
   @moduledoc false
 
   alias PtcRunner.Kernel.InspectionArtifact.Codec
+  alias PtcRunner.Kernel.InspectionArtifact.Format
   alias PtcRunner.Kernel.InspectionRecordTypes
   alias PtcRunner.Kernel.InspectionValueIdentity
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.ResultIdentity
   alias PtcRunner.Lisp.RetainedSize
 
-  @schema_version 9
+  @schema_version Format.schema_version()
   @envelope_keys ~w(schema_version run_id trace_id sequence timestamp record_type correlation payload)
 
   @spec build(binary(), binary(), pos_integer(), binary(), map(), map(), pos_integer()) ::
@@ -74,26 +76,25 @@ defmodule PtcRunner.Kernel.InspectionRecord do
   end
 
   defp valid_shape?(%{
-         "record_type" => record_type,
+         "record_type" => "capability-input",
          "correlation" => %{"capability_id" => id},
          "payload" => payload
-       })
-       when record_type in ["capability-input", "capability-output"] do
-    value_keys =
-      case record_type do
-        "capability-input" -> ["arguments"]
-        "capability-output" -> ["result", "result_identity"]
-      end
+       }) do
+    valid_id?(id) and valid_capability_payload?(payload, "arguments") and
+      valid_capability_scope?(payload, capability_input_fields(payload)) and
+      valid_capability_request_hash?(payload)
+  end
 
-    Enum.any?(value_keys, fn value_key ->
+  defp valid_shape?(%{
+         "record_type" => "capability-output",
+         "correlation" => %{"capability_id" => id},
+         "payload" => payload
+       }) do
+    Enum.any?(["result", "result_identity"], fn value_key ->
       valid_id?(id) and valid_capability_payload?(payload, value_key) and
         (value_key != "result_identity" or
            InspectionValueIdentity.valid?(payload[value_key])) and
-        ((payload["environment"] == "workflow" and
-            exact_keys?(payload, ["environment", "name", value_key])) or
-           (payload["environment"] == "mission" and
-              exact_keys?(payload, ["environment", "mission_name", "name", value_key]) and
-              valid_id?(payload["mission_name"])))
+        valid_capability_scope?(payload, [value_key])
     end)
   end
 
@@ -283,6 +284,37 @@ defmodule PtcRunner.Kernel.InspectionRecord do
     payload["environment"] in ["workflow", "mission"] and valid_id?(payload["name"]) and
       is_map(payload[value_key])
   end
+
+  defp valid_capability_scope?(%{"environment" => "workflow"} = payload, fields),
+    do: exact_keys?(payload, ["environment", "name" | fields])
+
+  defp valid_capability_scope?(%{"environment" => "mission"} = payload, fields),
+    do:
+      exact_keys?(payload, ["environment", "mission_name", "name" | fields]) and
+        valid_id?(payload["mission_name"])
+
+  defp valid_capability_scope?(_payload, _fields), do: false
+
+  defp capability_input_fields(%{
+         "environment" => "workflow",
+         "name" => "llm-request"
+       }),
+       do: ["arguments", "request_hash"]
+
+  defp capability_input_fields(_payload), do: ["arguments"]
+
+  defp valid_capability_request_hash?(%{
+         "environment" => "workflow",
+         "name" => "llm-request",
+         "arguments" => arguments,
+         "request_hash" => request_hash
+       }),
+       do: LLMReplay.request_hash(arguments) == {:ok, request_hash}
+
+  defp valid_capability_request_hash?(%{"environment" => _environment, "name" => _name}),
+    do: true
+
+  defp valid_capability_request_hash?(_payload), do: false
 
   defp valid_prelude_calls?(calls) when is_list(calls) do
     Enum.all?(calls, fn call ->

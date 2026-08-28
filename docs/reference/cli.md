@@ -759,6 +759,13 @@ ptc transcript RUN_ID \
   --private-output tmp/transcript/conversation.private.json
 ```
 
+Each selected model turn carries the provider-neutral `request_hash` used by
+`llm_replay` fixtures. The underlying owner-only inspection artifact carries
+the same value as `payload.request_hash` on the `llm-request`
+`capability-input` record. A private replay miss keeps that hash out of its
+public message while retaining the `replay_fixture_missing` code; copy the
+transcript field into the fixture and rerun.
+
 The command reserves an owner-only destination before capture. `RUN_ID` must be
 a canonical PTC command run reference (`cmd-` followed by 26 Crockford
 characters). Capture then opens only these exact candidates, without listing

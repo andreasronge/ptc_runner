@@ -293,7 +293,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
          :private
        )
        when reason in [:explicit_failure, :pmap_error, :pcalls_error, :llm_provider_failed],
-       do: diagnostic(:execution, :workflow_failed, provider_activity)
+       do: diagnostic(:execution, :replay_fixture_missing, provider_activity)
 
   defp failure_diagnostic(%Error{kind: :evaluation_failed} = error, provider_activity, :normal) do
     case EvaluatorEvidence.envelope_value(:normal, error) do

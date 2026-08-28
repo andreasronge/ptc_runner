@@ -84,9 +84,10 @@ workflow expects. A normal-data miss reports:
 no replay fixture matches this request (request_hash: sha256:...)
 ```
 
-Copy that hash into the fixture and rerun. For private-data requests, publish an
-owner-only inspection artifact and read the hash from its capability record;
-the public diagnostic intentionally omits the unsalted value.
+Copy that hash into the fixture and rerun. For private-data requests, follow
+[Inspect a private model conversation](../reference/cli.md#inspect-a-private-model-conversation)
+and copy the selected turn's replay hash; the public diagnostic omits that
+unsalted value.
 
 Matching is exact, so an edited request misses rather than quietly reusing the
 wrong response. A miss is a provider error returned as a value, not a failed

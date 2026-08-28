@@ -5,6 +5,7 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ResultIdentity
 
@@ -15,6 +16,18 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
   @spec command_run_ref(non_neg_integer()) :: binary()
   def command_run_ref(seed \\ 0) when is_integer(seed) and seed >= 0 do
     CommandRunRef.encode(<<seed::unsigned-big-128>>)
+  end
+
+  @doc false
+  def llm_input(arguments) when is_map(arguments) do
+    {:ok, request_hash} = LLMReplay.request_hash(arguments)
+
+    %{
+      environment: :workflow,
+      name: "llm-request",
+      arguments: arguments,
+      request_hash: request_hash
+    }
   end
 
   def create!(root, run_id \\ "private-run") do
@@ -117,11 +130,14 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     {sink, handle} = start_sink!(inspection, run_id)
 
     Enum.each(Enum.zip(ids, requests), fn {capability_id, messages} ->
-      emit!(sink, "capability-input", %{capability_id: capability_id}, %{
-        environment: :workflow,
-        name: "llm-request",
-        arguments: %{"messages" => messages, "system" => "private-system-#{run_id}"}
-      })
+      arguments = %{"messages" => messages, "system" => "private-system-#{run_id}"}
+
+      emit!(
+        sink,
+        "capability-input",
+        %{capability_id: capability_id},
+        llm_input(arguments)
+      )
 
       emit!(sink, "capability-output", %{capability_id: capability_id}, %{
         environment: :workflow,
@@ -198,14 +214,17 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
         request_messages = messages ++ [user]
         assistant = model_message("assistant", turn)
 
-        emit!(sink, "capability-input", %{capability_id: capability_id}, %{
-          environment: :workflow,
-          name: "llm-request",
-          arguments: %{
-            "messages" => request_messages,
-            "system" => "private-system-#{run_id}"
-          }
-        })
+        arguments = %{
+          "messages" => request_messages,
+          "system" => "private-system-#{run_id}"
+        }
+
+        emit!(
+          sink,
+          "capability-input",
+          %{capability_id: capability_id},
+          llm_input(arguments)
+        )
 
         emit!(sink, "capability-output", %{capability_id: capability_id}, %{
           environment: :workflow,
@@ -405,14 +424,17 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
   end
 
   defp emit_model_exchange!(sink, run_id) do
-    emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
-      environment: :workflow,
-      name: "llm-request",
-      arguments: %{
-        "messages" => [%{"content" => "private-prompt-#{run_id}"}],
-        "system" => "private-system-#{run_id}"
-      }
-    })
+    arguments = %{
+      "messages" => [%{"content" => "private-prompt-#{run_id}"}],
+      "system" => "private-system-#{run_id}"
+    }
+
+    emit!(
+      sink,
+      "capability-input",
+      %{capability_id: "llm-#{run_id}"},
+      llm_input(arguments)
+    )
 
     emit!(sink, "capability-output", %{capability_id: "llm-#{run_id}"}, %{
       environment: :workflow,
@@ -493,14 +515,17 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
   defp write_interrupted_inspection!(directory, run_id, _events) do
     {sink, handle} = start_sink!(directory, run_id)
 
-    emit!(sink, "capability-input", %{capability_id: "llm-complete-#{run_id}"}, %{
-      environment: :workflow,
-      name: "llm-request",
-      arguments: %{
-        "messages" => [%{"content" => "private-prompt-#{run_id}", "role" => "user"}],
-        "system" => "private-system-#{run_id}"
-      }
-    })
+    complete_arguments = %{
+      "messages" => [%{"content" => "private-prompt-#{run_id}", "role" => "user"}],
+      "system" => "private-system-#{run_id}"
+    }
+
+    emit!(
+      sink,
+      "capability-input",
+      %{capability_id: "llm-complete-#{run_id}"},
+      llm_input(complete_arguments)
+    )
 
     emit!(sink, "capability-output", %{capability_id: "llm-complete-#{run_id}"}, %{
       environment: :workflow,
@@ -525,18 +550,21 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
       result: %{status: :ok, value: %{"text" => "private-tool-result-#{run_id}"}}
     })
 
-    emit!(sink, "capability-input", %{capability_id: "llm-interrupted-#{run_id}"}, %{
-      environment: :workflow,
-      name: "llm-request",
-      arguments: %{
-        "messages" => [
-          %{"content" => "private-prompt-#{run_id}", "role" => "user"},
-          %{"content" => "private-answer-#{run_id}", "role" => "assistant"},
-          %{"content" => "INTERRUPTED_MODEL_SECRET_#{run_id}", "role" => "user"}
-        ],
-        "system" => "private-system-#{run_id}"
-      }
-    })
+    interrupted_arguments = %{
+      "messages" => [
+        %{"content" => "private-prompt-#{run_id}", "role" => "user"},
+        %{"content" => "private-answer-#{run_id}", "role" => "assistant"},
+        %{"content" => "INTERRUPTED_MODEL_SECRET_#{run_id}", "role" => "user"}
+      ],
+      "system" => "private-system-#{run_id}"
+    }
+
+    emit!(
+      sink,
+      "capability-input",
+      %{capability_id: "llm-interrupted-#{run_id}"},
+      llm_input(interrupted_arguments)
+    )
 
     emit!(sink, "capability-input", %{capability_id: "tool-interrupted-#{run_id}"}, %{
       environment: :mission,

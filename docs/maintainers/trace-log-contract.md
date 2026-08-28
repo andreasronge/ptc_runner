@@ -819,7 +819,7 @@ deterministically encoded JSON object with this exact envelope:
 
 ```json
 {
-  "schema_version": 9,
+  "schema_version": 10,
   "run_id": "run-id",
   "trace_id": "trace-id",
   "sequence": 1,
@@ -843,7 +843,7 @@ The current record types and payloads are:
 
 | Record type | Correlation | Exact payload fields |
 | --- | --- | --- |
-| `capability-input` | `capability_id` | `environment`, `name`, `arguments` |
+| `capability-input` | `capability_id` | `environment`, `name`, `arguments`; `llm-request` also carries `request_hash` |
 | `capability-exception` | `capability_id` | `environment`, `name`, `exception_class`, `message`, `message_truncated`, `stacktrace`, `stacktrace_truncated` |
 | `capability-output` | `capability_id` | `environment`, `name`, `result` or `result_identity` |
 | `evaluation-source` | `evaluation_id` | `environment`, `program_kind`, `source`, `source_hash`, `source_bytes` |
