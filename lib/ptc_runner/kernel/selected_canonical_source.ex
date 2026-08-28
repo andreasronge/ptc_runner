@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.SelectedCanonicalSource do
   @moduledoc """
-  Exact canonical-file selection for one PTC command run reference.
+  Exact canonical-file selection for one or a bounded set of PTC command run
+  references.
 
   Named capture resolves only these candidates, without listing a directory:
 
@@ -16,41 +17,83 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSource do
 
   alias PtcRunner.Kernel.CommandRunRef
 
+  @max_selected_runs 16
+
   @type trace_source ::
           {:file, binary(), binary()} | {:private_authorized_file, binary(), binary()}
 
+  @type selected_trace :: %{
+          required(:path) => binary(),
+          required(:run_ref) => binary(),
+          required(:source_kind) => :sanitized | :private
+        }
+
+  @spec max_selected_runs() :: pos_integer()
+  def max_selected_runs, do: @max_selected_runs
+
   @spec valid_run_ref?(term()) :: boolean()
   def valid_run_ref?(run_ref), do: CommandRunRef.valid?(run_ref)
+
+  @spec validate_run_refs(term()) :: {:ok, [binary()]} | {:error, atom()}
+  def validate_run_refs(run_refs) when is_list(run_refs) do
+    cond do
+      length(run_refs) > @max_selected_runs ->
+        {:error, :selected_set_limit_exceeded}
+
+      run_refs == [] or not Enum.all?(run_refs, &CommandRunRef.valid?/1) ->
+        {:error, :invalid_run_reference}
+
+      length(run_refs) != MapSet.size(MapSet.new(run_refs)) ->
+        {:error, :duplicate_selected_run}
+
+      true ->
+        {:ok, Enum.sort(run_refs)}
+    end
+  end
+
+  def validate_run_refs(_run_refs), do: {:error, :invalid_run_reference}
+
+  @spec resolve_traces(term(), term()) :: {:ok, [selected_trace()]} | {:error, atom()}
+  def resolve_traces(directory, run_refs) do
+    with {:ok, run_refs} <- validate_run_refs(run_refs),
+         {:ok, directory} <- existing_directory(directory) do
+      Enum.reduce_while(run_refs, {:ok, []}, fn run_ref, {:ok, selected} ->
+        case resolve_trace_in(directory, run_ref) do
+          {:ok, source} -> {:cont, {:ok, [selected_trace(source) | selected]}}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, selected} -> {:ok, Enum.reverse(selected)}
+        {:error, _reason} = error -> error
+      end
+    end
+  end
+
+  @spec resolve_inspections(term(), term()) ::
+          {:ok, [%{required(:path) => binary(), required(:run_ref) => binary()}]}
+          | {:error, atom()}
+  def resolve_inspections(directory, run_refs) do
+    with {:ok, run_refs} <- validate_run_refs(run_refs),
+         {:ok, directory} <- existing_directory(directory) do
+      Enum.reduce_while(run_refs, {:ok, []}, fn run_ref, {:ok, selected} ->
+        case resolve_inspection_in(directory, run_ref) do
+          {:ok, path} -> {:cont, {:ok, [%{path: path, run_ref: run_ref} | selected]}}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, selected} -> {:ok, Enum.reverse(selected)}
+        {:error, _reason} = error -> error
+      end
+    end
+  end
 
   @spec resolve_trace(term(), term()) :: {:ok, trace_source()} | {:error, atom()}
   def resolve_trace(directory, run_ref) do
     with :ok <- require_run_ref(run_ref),
          {:ok, directory} <- existing_directory(directory) do
-      normal = join_candidate(directory, run_ref <> ".jsonl")
-      private = join_candidate(directory, run_ref <> ".private.jsonl")
-
-      case {candidate_status(normal), candidate_status(private)} do
-        {:regular, :absent} ->
-          {:ok, {:file, normal, run_ref}}
-
-        {:absent, :regular} ->
-          {:ok, {:private_authorized_file, private, run_ref}}
-
-        {:absent, :absent} ->
-          {:error, :selected_trace_missing}
-
-        {left, right} when left != :absent and right != :absent ->
-          {:error, :ambiguous_selected_trace}
-
-        {:not_regular, :absent} ->
-          {:error, :selected_trace_not_regular}
-
-        {:absent, :not_regular} ->
-          {:error, :selected_trace_not_regular}
-
-        _other ->
-          {:error, :source_unavailable}
-      end
+      resolve_trace_in(directory, run_ref)
     end
   end
 
@@ -58,14 +101,7 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSource do
   def resolve_inspection(directory, run_ref) do
     with :ok <- require_run_ref(run_ref),
          {:ok, directory} <- existing_directory(directory) do
-      path = join_candidate(directory, run_ref <> ".ptcins")
-
-      case candidate_status(path) do
-        :regular -> {:ok, path}
-        :absent -> {:error, :selected_inspection_missing}
-        :not_regular -> {:error, :selected_inspection_not_regular}
-        :unavailable -> {:error, :source_unavailable}
-      end
+      resolve_inspection_in(directory, run_ref)
     end
   end
 
@@ -98,6 +134,17 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSource do
     digest({:selected_canonical_inspection, run_ref, evidence_digest, trace_id})
   end
 
+  @spec trace_set_source_id([map()]) :: binary()
+  def trace_set_source_id(commitments) when is_list(commitments) do
+    digest({:selected_canonical_trace_set, commitments})
+  end
+
+  @spec inspection_set_source_id(binary(), [map()]) :: binary()
+  def inspection_set_source_id(correlated_digest, commitments)
+      when is_binary(correlated_digest) and is_list(commitments) do
+    digest({:selected_canonical_inspection_set, correlated_digest, commitments})
+  end
+
   defp require_run_ref(run_ref) do
     if CommandRunRef.valid?(run_ref), do: :ok, else: {:error, :invalid_run_reference}
   end
@@ -112,6 +159,51 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSource do
   end
 
   defp existing_directory(_directory), do: {:error, :source_unavailable}
+
+  defp resolve_trace_in(directory, run_ref) do
+    normal = join_candidate(directory, run_ref <> ".jsonl")
+    private = join_candidate(directory, run_ref <> ".private.jsonl")
+
+    case {candidate_status(normal), candidate_status(private)} do
+      {:regular, :absent} ->
+        {:ok, {:file, normal, run_ref}}
+
+      {:absent, :regular} ->
+        {:ok, {:private_authorized_file, private, run_ref}}
+
+      {:absent, :absent} ->
+        {:error, :selected_trace_missing}
+
+      {left, right} when left != :absent and right != :absent ->
+        {:error, :ambiguous_selected_trace}
+
+      {:not_regular, :absent} ->
+        {:error, :selected_trace_not_regular}
+
+      {:absent, :not_regular} ->
+        {:error, :selected_trace_not_regular}
+
+      _other ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  defp resolve_inspection_in(directory, run_ref) do
+    path = join_candidate(directory, run_ref <> ".ptcins")
+
+    case candidate_status(path) do
+      :regular -> {:ok, path}
+      :absent -> {:error, :selected_inspection_missing}
+      :not_regular -> {:error, :selected_inspection_not_regular}
+      :unavailable -> {:error, :source_unavailable}
+    end
+  end
+
+  defp selected_trace({:file, path, run_ref}),
+    do: %{path: path, run_ref: run_ref, source_kind: :sanitized}
+
+  defp selected_trace({:private_authorized_file, path, run_ref}),
+    do: %{path: path, run_ref: run_ref, source_kind: :private}
 
   defp join_candidate(directory, name), do: Path.join(directory, name)
 

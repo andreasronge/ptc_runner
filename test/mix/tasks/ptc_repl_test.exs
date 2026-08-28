@@ -1025,6 +1025,114 @@ defmodule PtcRunner.ReplFrontendTest do
     end
   end
 
+  test "selected-run validation and profile restriction precede resource access" do
+    first = PrivateInspectionFixture.command_run_ref(1)
+
+    missing_resources = [
+      "--resource",
+      "traces=/definitely/missing/private-traces",
+      "--resource",
+      "inspection=/definitely/missing/private-inspection"
+    ]
+
+    base = [
+      "--profile",
+      "private-run-analysis-v1",
+      "--private-unattended",
+      "--format",
+      "jsonl",
+      "-e",
+      "42"
+    ]
+
+    for {selection, code} <- [
+          {["--run", "invalid"], "invalid_run_reference"},
+          {["--run", first, "--run", first], "duplicate_selected_run"},
+          {Enum.flat_map(1..17, fn seed ->
+             ["--run", PrivateInspectionFixture.command_run_ref(seed)]
+           end), "selected_set_limit_exceeded"}
+        ] do
+      capture_io(fn ->
+        assert_raise Mix.Error, ~r/#{code}/, fn ->
+          run_repl(base ++ selection ++ missing_resources)
+        end
+      end)
+    end
+
+    for profile <- ["run-analysis-v1", "private-run-catalog-v1"] do
+      capture_io(fn ->
+        assert_raise Mix.Error, ~r/--run.*private-run-analysis-v1/, fn ->
+          run_repl([
+            "--profile",
+            profile,
+            "--run",
+            first,
+            "--resource",
+            "traces=/definitely/missing/traces",
+            "--private-unattended",
+            "--format",
+            "jsonl",
+            "-e",
+            "42"
+          ])
+        end
+      end)
+    end
+  end
+
+  @tag :tmp_dir
+  test "one run flag uses selected-set capture while zero flags retain whole-directory capture",
+       %{
+         tmp_dir: directory
+       } do
+    first_run = PrivateInspectionFixture.command_run_ref(31)
+    second_run = PrivateInspectionFixture.command_run_ref(32)
+    first = PrivateInspectionFixture.create!(Path.join(directory, "first"), first_run)
+    second = PrivateInspectionFixture.create!(Path.join(directory, "second"), second_run)
+
+    File.cp!(
+      Path.join(second.traces, "#{second_run}.jsonl"),
+      Path.join(first.traces, "#{second_run}.jsonl")
+    )
+
+    File.cp!(
+      Path.join(second.inspection, "#{second_run}.ptcins"),
+      Path.join(first.inspection, "#{second_run}.ptcins")
+    )
+
+    args = [
+      "--profile",
+      "private-run-analysis-v1",
+      "--resource",
+      "traces=#{first.traces}",
+      "--resource",
+      "inspection=#{first.inspection}",
+      "--private-unattended",
+      "--format",
+      "jsonl",
+      "-e",
+      "(analysis/runs {})"
+    ]
+
+    selected = capture_io(fn -> run_repl(args ++ ["--run", second_run]) end) |> decode_jsonl()
+    whole = capture_io(fn -> run_repl(args) end) |> decode_jsonl()
+
+    selected_ids =
+      selected
+      |> Enum.at(1)
+      |> get_in(["result", "value", "items"])
+      |> Enum.map(& &1["run_id"])
+
+    whole_ids =
+      whole
+      |> Enum.at(1)
+      |> get_in(["result", "value", "items"])
+      |> Enum.map(& &1["run_id"])
+
+    assert selected_ids == [second_run]
+    assert MapSet.new(whole_ids) == MapSet.new([first_run, second_run])
+  end
+
   test "private_unattended admits eval and jsonl output, reaching source preflight" do
     args = [
       "--profile",

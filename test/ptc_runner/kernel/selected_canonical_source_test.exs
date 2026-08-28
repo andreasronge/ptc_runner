@@ -4,6 +4,25 @@ defmodule PtcRunner.Kernel.SelectedCanonicalSourceTest do
   alias PtcRunner.Kernel.SelectedCanonicalSource
   alias PtcRunner.TestSupport.PrivateInspectionFixture
 
+  test "validates and canonically orders a bounded selected run set" do
+    first = PrivateInspectionFixture.command_run_ref(1)
+    second = PrivateInspectionFixture.command_run_ref(2)
+
+    assert {:ok, [^first, ^second]} =
+             SelectedCanonicalSource.validate_run_refs([second, first])
+
+    assert {:error, :invalid_run_reference} =
+             SelectedCanonicalSource.validate_run_refs([first, "not-a-command-run"])
+
+    assert {:error, :duplicate_selected_run} =
+             SelectedCanonicalSource.validate_run_refs([first, first])
+
+    oversized = Enum.map(1..17, &PrivateInspectionFixture.command_run_ref/1)
+
+    assert {:error, :selected_set_limit_exceeded} =
+             SelectedCanonicalSource.validate_run_refs(oversized)
+  end
+
   @tag :tmp_dir
   test "resolves exactly one normal or private trace candidate without listing", %{tmp_dir: root} do
     run_ref = PrivateInspectionFixture.command_run_ref()

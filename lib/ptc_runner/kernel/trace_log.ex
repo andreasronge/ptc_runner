@@ -614,6 +614,36 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   def capture_file(_path, _opts), do: {:error, :invalid_trace_log}
 
+  @doc false
+  @spec capture_selected([map()], keyword()) :: {:ok, map()} | {:error, atom()}
+  def capture_selected(selected, opts \\ [])
+
+  def capture_selected(selected, opts) when is_list(selected) and is_list(opts) do
+    with true <- Keyword.keys(opts) -- [:max_source_bytes, :capture_hook] == [],
+         max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
+           Keyword.get(opts, :max_source_bytes, @default_source_bytes),
+         capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
+           Keyword.get(opts, :capture_hook),
+         {:ok, directory, before_inventory} <- selected_inventory(selected) do
+      capture_directory_inventory(
+        directory,
+        before_inventory,
+        max_source_bytes,
+        capture_hook,
+        fn -> changed_selected_inventory(selected) end,
+        :selected_private_authorized
+      )
+    else
+      false -> {:error, :invalid_trace_log}
+      {:error, _reason} = error -> error
+      _invalid -> {:error, :invalid_trace_log}
+    end
+  rescue
+    _exception -> {:error, :source_unavailable}
+  end
+
+  def capture_selected(_selected, _opts), do: {:error, :invalid_trace_log}
+
   @doc """
   Appends canonical events to one admin-selected JSONL file under a total byte
   cap. `private: true` requires safe parent ancestry and a mode-`0600` file,
@@ -2234,6 +2264,60 @@ defmodule PtcRunner.Kernel.TraceLog do
       false -> {:error, :invalid_trace_log}
       {:ok, %File.Stat{}} -> {:error, :malformed_source}
       {:error, _reason} -> {:error, :source_unavailable}
+    end
+  end
+
+  defp selected_inventory([%{path: first_path} | _rest] = selected) do
+    directory = first_path |> Path.expand() |> Path.dirname()
+
+    with true <-
+           Enum.all?(selected, fn
+             %{path: path, run_ref: run_ref, source_kind: source_kind}
+             when is_binary(path) and is_binary(run_ref) and
+                    source_kind in [:sanitized, :private] ->
+               expanded = Path.expand(path)
+
+               Path.dirname(expanded) == directory and
+                 capture_file_name?(Path.basename(expanded), source_kind)
+
+             _invalid ->
+               false
+           end),
+         names <- Enum.map(selected, &Path.basename(&1.path)),
+         true <- names == Enum.sort(names) and names == Enum.uniq(names),
+         {:ok, files} <- inventory_selected_files(directory, names) do
+      {:ok, directory, %{files: files}}
+    else
+      false -> {:error, :invalid_trace_log}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp selected_inventory(_selected), do: {:error, :invalid_trace_log}
+
+  defp changed_selected_inventory(selected) do
+    case selected_inventory(selected) do
+      {:ok, _directory, inventory} -> {:ok, inventory, %{}}
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp inventory_selected_files(directory, names) do
+    Enum.reduce_while(names, {:ok, []}, fn name, {:ok, files} ->
+      case File.lstat(Path.join(directory, name), time: :posix) do
+        {:ok, %File.Stat{type: :regular} = stat} ->
+          {:cont, {:ok, [{name, stat_identity(stat)} | files]}}
+
+        {:ok, %File.Stat{}} ->
+          {:halt, {:error, :selected_trace_not_regular}}
+
+        {:error, _reason} ->
+          {:halt, {:error, :source_unavailable}}
+      end
+    end)
+    |> case do
+      {:ok, files} -> {:ok, Enum.reverse(files)}
+      {:error, _reason} = error -> error
     end
   end
 

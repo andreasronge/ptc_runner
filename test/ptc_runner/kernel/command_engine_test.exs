@@ -3498,6 +3498,28 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert arguments.ordered_options == [eval: "-10"]
   end
 
+  test "repl preserves repeated selected-run flags in argument order" do
+    first = CommandRunRef.encode(<<1::128>>)
+    second = CommandRunRef.encode(<<2::128>>)
+
+    assert {:ok, arguments} =
+             CommandParser.parse([
+               "repl",
+               "--profile",
+               "private-run-analysis-v1",
+               "--run",
+               second,
+               "--run",
+               first,
+               "--resource",
+               "traces=traces",
+               "--resource",
+               "inspection=inspection"
+             ])
+
+    assert Keyword.get_values(arguments.ordered_options, :run) == [second, first]
+  end
+
   test "repl structural combinations are rejected by the shared parser" do
     for argv <- [
           ["repl", "--format", "yaml"],

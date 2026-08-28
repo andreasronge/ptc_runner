@@ -321,9 +321,18 @@ authorization:</p><pre><code class="console language-console">ptc repl \
   --load analysis.clj \
   --private-terminal</code></pre><p><code class="inline">--load</code> evaluates one bounded local setup file, then opens the authorized
 interactive terminal with those definitions available. <code class="inline">--eval</code>, scripts, and
-stdin remain unattended input and require <code class="inline">--private-unattended</code> instead.</p><p>The trace, inspection, and analysis-trace directories must be physically
+stdin remain unattended input and require <code class="inline">--private-unattended</code> instead.</p><p>Repeat <code class="inline">--run RUN_ID</code> one through sixteen times to admit one exact, bounded
+cohort. Selection is available only with <code class="inline">private-run-analysis-v1</code>; a single
+flag still uses the selected-set path, while no flags retain whole-directory
+capture. Values are validated as a complete list and then treated as an
+order-independent set. Selected capture resolves only each run's exact normal
+or private trace candidate and inspection artifact, never lists either source
+directory, and pins no unselected artifact. An unselected malformed,
+unsupported, unstable, mismatched, or duplicate claimant therefore cannot
+affect the cohort.</p><p>The trace, inspection, and analysis-trace directories must be physically
 separate, including through ancestors and symlink aliases. Capture validates
-every private artifact against its matching run. When trace directory
+every admitted private artifact against its matching run. In whole-directory
+mode, trace directory
 admission isolates a damaged run, a sealed inspection artifact carrying that
 same run and trace identity is isolated with it; healthy correlated runs remain
 available, and <code class="inline">(analysis/runs {})</code> reports the trace source and isolation

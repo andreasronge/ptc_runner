@@ -301,6 +301,13 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           repeatable: true
         },
         %{
+          key: :run,
+          type: [:string, :keep],
+          syntax: ["--run RUN_ID"],
+          description: "select one private-analysis run; repeatable up to 16",
+          repeatable: true
+        },
+        %{
           key: :session_trace_dir,
           type: :string,
           syntax: ["--session-trace-dir DIRECTORY"],
