@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.DocumentationLibrary
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
 
   @run_ref "cmd-00000000000000000000000001"
 
@@ -77,6 +78,34 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert content =~ "not shipped"
     assert content =~ "built-ins"
     assert content =~ "ptc init support-triage --example support-triage"
+  end
+
+  test "served model docs distinguish cost reservations from measured spend" do
+    assert {:ok, limits} = DocumentationLibrary.fetch("limits")
+    limits = String.replace(limits, ~r/\s+/, " ")
+
+    assert limits =~ "pre-dispatch reservation ceiling"
+    assert limits =~ "not a pre-run price quote"
+    assert limits =~ "2,419 microUSD reservation"
+    assert limits =~ "limits.llm_request_output_tokens"
+    assert limits =~ "params.max_tokens"
+    assert limits =~ "not a sizing multiplier"
+    assert limits =~ "measured successful-call aggregate"
+    assert limits =~ "failed calls can still incur provider charges"
+
+    assert {:ok, diagnostic} =
+             RuntimeLimitDiagnostic.budget_message(:llm_cost_microusd, 2_400, 2_419, 2_338)
+
+    assert limits =~ diagnostic
+
+    assert {:ok, using_models} = DocumentationLibrary.fetch("using-models")
+    using_models = String.replace(using_models, ~r/\s+/, " ")
+
+    assert using_models =~ "ptc models"
+    assert using_models =~ "ptc validate"
+    assert using_models =~ "ptc doctor"
+    assert using_models =~ "pre-run price quote"
+    assert using_models =~ "ptc docs limits"
   end
 
   test "an unknown page is rejected without echoing the requested name" do

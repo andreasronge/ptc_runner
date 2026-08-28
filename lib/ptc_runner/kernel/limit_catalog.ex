@@ -143,7 +143,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     llm_total_tokens:
       "Aggregate provider-counted input and output tokens authorized across live language-model calls in one run.",
     llm_cost_microusd:
-      "Aggregate USD cost in microunits authorized across live language-model calls in one run.",
+      "Pre-dispatch USD reservation ceiling, in microunits, across live language-model calls in one run.",
     workflow_capability_calls: "Total workflow capability calls in one run.",
     workflow_capability_calls_per_name:
       "Workflow capability calls to any one public name in one run.",

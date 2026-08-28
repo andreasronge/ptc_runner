@@ -75,8 +75,47 @@ These budgets are disabled by an omitted host value. A positive host value enabl
 
 | Name | Meaning | Unit | Disabled default | Inclusive range |
 | --- | --- | --- | --- | ---: |
-| `llm_cost_microusd` | Aggregate USD cost in microunits authorized across live language-model calls in one run. Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: "USD", and an explicit USD reservation_tariff on every live LLM installation. | count | `null` | 1–9,007,199,254,740,991 |
+| `llm_cost_microusd` | Pre-dispatch USD reservation ceiling, in microunits, across live language-model calls in one run. Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: "USD", and an explicit USD reservation_tariff on every live LLM installation. | count | `null` | 1–9,007,199,254,740,991 |
 | `llm_total_tokens` | Aggregate provider-counted input and output tokens authorized across live language-model calls in one run. Requires usage_guarantees.tokens: true on every live LLM installation. | count | `null` | 1–9,007,199,254,740,991 |
+
+### Size an LLM cost budget
+
+`llm_cost_microusd` is a pre-dispatch reservation ceiling, not a pre-run
+price quote or a direct measurement of realized spend. Before each live
+call, PtcRunner computes a conservative, request-specific reservation from
+the request and accumulated conversation, the full authorized output-token
+allowance, and the model's pricing. Later calls can therefore require more
+headroom than earlier ones, and a ceiling set near expected final spend can
+refuse before any call is dispatched.
+
+For example, after 62 microUSD has
+settled, a 2,400 microUSD ceiling has
+2,338 remaining. If the next call requires a
+2,419 microUSD reservation, it is refused
+with the exact diagnostic:
+
+```text
+llm_cost_microusd limit 2400 microUSD would be exceeded: the next call requires a 2419 microUSD reservation with 2338 remaining; raise limits.llm_cost_microusd in the manifest, and the installed host ceiling if it is lower
+```
+
+Those numbers describe one request; their ratio to its eventual cost is not
+a sizing multiplier. `ptc models`, `ptc validate`, and `ptc doctor` do not
+provide a pre-run price quote. The optional cost budget is the fail-closed
+admission control, and a refusal reports the next call's exact required
+reservation.
+
+Valid priced usage releases the unused reservation and charges actual cost.
+A dispatched call without trustworthy priced usage conservatively charges
+the full reservation and marks `llm_budget.cost.state` as `incomplete`; that
+charge is an accounting upper bound, not measured spend. When its state is
+`available`, `llm_spend` is the measured successful-call aggregate; failed
+calls can still incur provider charges that it does not measure.
+
+To reduce the output portion of future reservations, an application may
+narrow `limits.llm_request_output_tokens`, or a model installation may set a
+lower `params.max_tokens`. Lower either only when the smaller output allowance
+is valid for the workload; request and conversation size still contribute to
+each reservation.
 
 ## Installed-only limits
 
