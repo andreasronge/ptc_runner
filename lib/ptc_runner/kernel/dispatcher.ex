@@ -61,6 +61,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.RoutedCapability
@@ -890,7 +891,24 @@ defmodule PtcRunner.Kernel.Dispatcher do
     environment
     |> capability_inspection_identity(name, mission_name)
     |> Map.put(key, value)
+    |> maybe_put_llm_request_hash(environment, name, key, value)
   end
+
+  defp maybe_put_llm_request_hash(
+         payload,
+         :workflow,
+         "llm-request",
+         :arguments,
+         arguments
+       ) do
+    case LLMReplay.request_hash(arguments) do
+      {:ok, request_hash} -> Map.put(payload, :request_hash, request_hash)
+      :error -> payload
+    end
+  end
+
+  defp maybe_put_llm_request_hash(payload, _environment, _name, _key, _value),
+    do: payload
 
   defp capability_inspection_identity(environment, name, mission_name) do
     %{environment: environment, name: name}

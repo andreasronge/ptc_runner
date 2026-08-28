@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.StreamingInspection
 
   @request %{"system" => "bounded", "messages" => [%{"role" => "user", "content" => "hi"}]}
 
@@ -1016,7 +1017,11 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
                ])
 
       assert miss.envelope["artifact_class"] == "private", inspect(miss.envelope)
-      assert miss.envelope["error"]["code"] == "workflow_failed"
+      assert miss.envelope["error"]["code"] == "replay_fixture_missing"
+
+      assert miss.envelope["error"]["message"] ==
+               "no replay fixture matches the workflow request"
+
       refute Jason.encode!(miss.envelope) =~ ~r/sha256:[0-9a-f]{64}/
       refute Jason.encode!(miss.envelope) =~ secret
 
@@ -1024,9 +1029,17 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       refute stderr =~ ~r/sha256:[0-9a-f]{64}/
       refute stderr =~ secret
 
-      private_records = File.read!(inspection)
-      assert private_records =~ ~r/request_hash: sha256:[0-9a-f]{64}/
-      assert private_records =~ secret
+      assert {:ok, private_records} = StreamingInspection.read_path(inspection)
+
+      assert %{"payload" => payload} =
+               Enum.find(private_records, fn record ->
+                 record["record_type"] == "capability-input" and
+                   record["payload"]["name"] == "llm-request"
+               end)
+
+      assert {:ok, expected_hash} = LLMReplay.request_hash(payload["arguments"])
+      assert payload["request_hash"] == expected_hash
+      assert Jason.encode!(private_records) =~ secret
     end
 
     @tag :tmp_dir

@@ -48,6 +48,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Items do
     }
 
     item
+    |> maybe_request_hash(payload)
     |> maybe_output(output)
     |> maybe_exception(exception)
   end
@@ -158,6 +159,11 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Items do
   end
 
   defdelegate assemble_turn(turn_meta, input, output, generated), to: Conversation
+
+  defp maybe_request_hash(item, %{"request_hash" => request_hash}),
+    do: Map.put(item, "request_hash", request_hash)
+
+  defp maybe_request_hash(item, _payload), do: item
 
   defp maybe_output(item, nil), do: Map.put(item, "complete?", false)
 

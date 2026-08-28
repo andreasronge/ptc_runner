@@ -3,6 +3,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
 
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.MixCommandAdapter
   alias PtcRunner.TestSupport.PrivateInspectionFixture
   alias PtcRunner.TestSupport.StreamingInspection
@@ -50,6 +51,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
                  %{
                    "turns" => [
                      %{
+                       "request_hash" => request_hash,
                        "system" => system,
                        "messages_added" => [%{"content" => prompt}],
                        "response" => %{"value" => %{"answer" => answer}}
@@ -67,6 +69,13 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     assert system == "private-system-#{run_id}"
     assert prompt == "private-prompt-#{run_id}"
     assert answer == "private-answer-#{run_id}"
+
+    assert {:ok, ^request_hash} =
+             LLMReplay.request_hash(%{
+               "messages" => [%{"content" => prompt}],
+               "system" => system
+             })
+
     assert File.stat!(output).mode |> Bitwise.band(0o777) == 0o600
   end
 

@@ -252,6 +252,81 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
            }
   end
 
+  test "mission capability named llm-request is not classified as a model request" do
+    {:ok, inspection_sink} =
+      StreamingInspection.start(
+        run_id: "mission-name-collision-run",
+        trace_id: "mission-name-collision-trace"
+      )
+
+    assert %{status: :ok, value: %{"ok" => true}} =
+             dispatch_mission(:read, fn -> {:ok, %{"ok" => true}} end,
+               name: "llm-request",
+               inspection_sink: inspection_sink
+             )
+
+    assert {:ok, [input, _output]} = StreamingInspection.records(inspection_sink)
+    assert input["payload"]["name"] == "llm-request"
+    assert input["payload"]["environment"] == "mission"
+    refute Map.has_key?(input["payload"], "request_hash")
+  end
+
+  test "direct workflow capability named llm-request retains its request hash" do
+    {:ok, inspection_sink} =
+      StreamingInspection.start(
+        run_id: "direct-llm-request-run",
+        trace_id: "direct-llm-request-trace"
+      )
+
+    assert %{status: :ok, value: %{"ok" => true}} =
+             dispatch_workflow(fn -> {:ok, %{"ok" => true}} end,
+               name: "llm-request",
+               inspection_sink: inspection_sink
+             )
+
+    assert {:ok, [input, _output]} = StreamingInspection.records(inspection_sink)
+    assert input["payload"]["request_hash"] =~ ~r/\Asha256:[0-9a-f]{64}\z/
+  end
+
+  test "LLM capability with an explicit nil reservation retains its request hash" do
+    parent = self()
+
+    {:ok, llm} =
+      LLMCapability.new(
+        requester: fn request ->
+          send(parent, {:direct_llm_request, request})
+          {:ok, %{content: "ok"}}
+        end,
+        llm_reservation: nil
+      )
+
+    {:ok, inspection_sink} =
+      StreamingInspection.start(
+        run_id: "nil-reservation-run",
+        trace_id: "nil-reservation-trace"
+      )
+
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [llm])
+    {:ok, state} = RunState.start(Limits.defaults())
+    arguments = %{"messages" => []}
+
+    assert %{status: :ok, value: %{"content" => "ok"}} =
+             Dispatcher.dispatch(
+               state,
+               :workflow,
+               environment,
+               "llm-request",
+               arguments,
+               TestHelpers.dispatch_context(state, :workflow, 100),
+               nil,
+               inspection_sink
+             )
+
+    assert_receive {:direct_llm_request, ^arguments}
+    assert {:ok, [input, _output]} = StreamingInspection.records(inspection_sink)
+    assert input["payload"]["request_hash"] =~ ~r/\Asha256:[0-9a-f]{64}\z/
+  end
+
   test "inspection-disabled raises do not format or retain exception details" do
     owner = self()
 
@@ -809,7 +884,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
   defp dispatch_workflow(callback, opts \\ []) do
     {:ok, state} = RunState.start(Limits.defaults())
-    {:ok, capability} = capability(:read, callback)
+    {:ok, capability} = capability(:read, callback, opts)
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
 
     Dispatcher.dispatch(
@@ -855,7 +930,7 @@ defmodule PtcRunner.Kernel.DispatcherEffectTest do
 
   defp capability(effect, callback, opts \\ []) do
     Capability.new(
-      name: "effect-fixture",
+      name: Keyword.get(opts, :name, "effect-fixture"),
       input_schema: @input_schema,
       output_schema: Keyword.get(opts, :output_schema),
       effect: effect,

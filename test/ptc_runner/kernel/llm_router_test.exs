@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderError
@@ -63,6 +64,36 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              Kernel.run(~S|(return (llm/request {"messages" []}))|, default_config)
 
     assert_receive {:fast, %{"messages" => []}}
+  end
+
+  test "custom workflow LLM retains its replay hash under private inspection" do
+    leaf = capability(self(), :custom, %{content: "custom", tokens: %{input: 1, output: 1}})
+    assert {:ok, router} = LLMRouter.new([route("custom", "custom", "custom-v1", true, leaf)])
+
+    assert {:ok, inspection} =
+             StreamingInspection.start(
+               run_id: "routing-custom-inspection",
+               trace_id: "routing-custom-inspection-trace"
+             )
+
+    assert {:ok, config} =
+             config(router, "routing-custom-inspection", inspection_sink: inspection)
+
+    assert {:ok, %{value: %{"content" => "custom"}}} =
+             Kernel.run(~S|(return (llm/request {"messages" []}))|, config)
+
+    assert_receive {:custom, %{"messages" => []}}
+    assert {:ok, request_hash} = LLMReplay.request_hash(%{"messages" => []})
+    assert {:ok, records} = StreamingInspection.records(inspection)
+
+    assert input =
+             Enum.find(records, fn record ->
+               record["record_type"] == "capability-input" and
+                 record["payload"]["name"] == "llm-request"
+             end)
+
+    assert input["payload"]["request_hash"] == request_hash
+    assert :ok = InspectionSink.stop(inspection)
   end
 
   test "agent executes a complete tool call even when the provider reports length" do

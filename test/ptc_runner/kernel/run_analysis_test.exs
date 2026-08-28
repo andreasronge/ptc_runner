@@ -113,6 +113,7 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
                   "generated" => [%{"source" => "(return 42)"}],
                   "feedback" => [],
                   "messages_added" => [%{"content" => prompt}],
+                  "request_hash" => request_hash,
                   "response" => %{"status" => "ok"}
                 } = turn
               ]
@@ -129,7 +130,15 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     # completeness. It carries them.
     assert turn["system"] == "private-system-#{run_id}"
 
-    assert {:ok, %{"items" => [%{"arguments" => %{"system" => "private-system-" <> ^run_id}}]}} =
+    assert {:ok,
+            %{
+              "items" => [
+                %{
+                  "arguments" => %{"system" => "private-system-" <> ^run_id},
+                  "request_hash" => ^request_hash
+                }
+              ]
+            }} =
              RunAnalysis.query(analysis, :read, %{
                "run_id" => run_id,
                "collection" => "model_exchanges"

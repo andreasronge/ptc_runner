@@ -164,11 +164,14 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
     File.write!(Path.join(trace, "#{run_id}.jsonl"), encode_jsonl(events))
     {sink, handle} = start_inspection!(inspection, run_id)
 
-    emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
-      environment: :workflow,
-      name: "llm-request",
-      arguments: %{"messages" => [%{"role" => "user", "content" => "run it"}]}
-    })
+    emit!(
+      sink,
+      "capability-input",
+      %{capability_id: "llm-#{run_id}"},
+      PrivateInspectionFixture.llm_input(%{
+        "messages" => [%{"role" => "user", "content" => "run it"}]
+      })
+    )
 
     calls = List.duplicate(%{"args" => %{"program" => @source}}, 2)
 
@@ -423,7 +426,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
 
     assert {:ok,
             %{
-              "items" => [%{"run_id" => "mcp-run", "schema_version" => 9}],
+              "items" => [%{"run_id" => "mcp-run", "schema_version" => 10}],
               "next_cursor" => nil,
               "snapshot_hash" => ^snapshot_hash
             }} =
@@ -1481,11 +1484,14 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
   defp write_inspection(directory, run_id, variant, _events) do
     {sink, handle} = start_inspection!(directory, run_id)
 
-    emit!(sink, "capability-input", %{capability_id: "llm-#{run_id}"}, %{
-      environment: :workflow,
-      name: "llm-request",
-      arguments: %{"messages" => [%{"content" => "private-#{run_id}"}]}
-    })
+    emit!(
+      sink,
+      "capability-input",
+      %{capability_id: "llm-#{run_id}"},
+      PrivateInspectionFixture.llm_input(%{
+        "messages" => [%{"content" => "private-#{run_id}"}]
+      })
+    )
 
     emit!(sink, "capability-output", %{capability_id: "llm-#{run_id}"}, %{
       environment: :workflow,

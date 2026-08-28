@@ -147,6 +147,16 @@ defmodule PtcRunner.Kernel.ConversationProjectionTest do
       assert Map.has_key?(turn, "system")
       assert turn["system"] == nil
     end
+
+    test "turn reconstruction preserves the replay request hash" do
+      exchange =
+        "llm-1"
+        |> exchange(1, [user("start")], "instructions", "one")
+        |> Map.put("request_hash", "sha256:private-request")
+
+      assert %{"streams" => [%{"turns" => [turn]}]} = present([exchange])
+      assert turn["request_hash"] == "sha256:private-request"
+    end
   end
 
   defp present(exchanges) do
