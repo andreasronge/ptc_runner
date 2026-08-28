@@ -154,8 +154,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
 
     row = root |> rows!() |> row!(fixture.run_id)
 
+    # A version that is not a number is not a version this build cannot read —
+    # it is an event the canonical reader rejects outright, so the row reports
+    # the malformation and projects no version at all.
     assert row["state"] == "isolated"
-    assert row["isolation_reason"] == "unsupported_schema"
+    assert row["isolation_reason"] == "malformed_metadata"
     assert row["trace_schema_version"] == nil
     assert byte_size(Jason.encode!(row)) <= RunCatalog.max_row_bytes()
   end
@@ -419,6 +422,88 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
              RunCatalogSnapshot.start(catalog_source(root), owner: self(), unsupported: true)
   end
 
+  @tag :tmp_dir
+  test "a probed event that is not a canonical trace event isolates the row", %{tmp_dir: root} do
+    fixture = fixture!(root, 37)
+
+    rewrite_trace!(root, fixture.run_id, fn event ->
+      if event["type"] == "run-stopped", do: Map.delete(event, "trace_id"), else: event
+    end)
+
+    row = root |> rows!() |> row!(fixture.run_id)
+
+    assert row["state"] == "isolated"
+    assert row["isolation_reason"] == "malformed_metadata"
+    refute row["complete"]
+  end
+
+  @tag :tmp_dir
+  test "a run-stopped whose result hash contradicts its outcome isolates the row", %{
+    tmp_dir: root
+  } do
+    fixture = fixture!(root, 38)
+
+    rewrite_trace!(root, fixture.run_id, fn event ->
+      if event["type"] == "run-stopped",
+        do: put_in(event, ["data", "result_hash"], "not-a-hash"),
+        else: event
+    end)
+
+    row = root |> rows!() |> row!(fixture.run_id)
+
+    assert row["state"] == "isolated"
+    assert row["isolation_reason"] == "malformed_metadata"
+  end
+
+  @tag :tmp_dir
+  test "a rewritten footer field changes the next generation digest", %{tmp_dir: root} do
+    fixture = fixture!(root, 39)
+    path = inspection_path(root, fixture.run_id)
+
+    assert {:ok, %{catalog_digest: digest}} = RunCatalogSnapshot.info(capture!(root))
+    before_count = row!(rows!(root), fixture.run_id)["inspection_record_count"]
+
+    rewrite_footer_record_count!(path, before_count + 1)
+
+    assert {:ok, %{catalog_digest: changed}} = RunCatalogSnapshot.info(capture!(root))
+    refute changed == digest
+    assert row!(rows!(root), fixture.run_id)["inspection_record_count"] == before_count + 1
+  end
+
+  @tag :tmp_dir
+  test "a current-version header with invalid geometry isolates the row", %{tmp_dir: root} do
+    fixture = fixture!(root, 40)
+    path = inspection_path(root, fixture.run_id)
+    <<prefix::binary-size(12), _declared::unsigned-big-32, rest::binary>> = File.read!(path)
+    File.write!(path, <<prefix::binary, 17::unsigned-big-32, rest::binary>>)
+
+    row = root |> rows!() |> row!(fixture.run_id)
+
+    assert row["state"] == "isolated"
+    assert row["isolation_reason"] == "malformed_metadata"
+  end
+
+  @tag :tmp_dir
+  test "an artifact claiming another run's identity isolates every claimant", %{tmp_dir: root} do
+    first = fixture!(root, 41)
+    second = fixture!(root, 42)
+
+    File.cp!(inspection_path(root, first.run_id), inspection_path(root, second.run_id))
+
+    rows = rows!(root)
+
+    # Both claimants are isolated, never only the impersonator: the run whose
+    # identity was copied is no longer selectable either. The impostor reports
+    # the more specific defect it also has — its bytes are not the run its name
+    # claims — while the impersonated run reports the duplication alone.
+    for run_id <- [first.run_id, second.run_id] do
+      assert row!(rows, run_id)["state"] == "isolated"
+    end
+
+    assert row!(rows, first.run_id)["isolation_reason"] == "duplicate_run_identity"
+    assert row!(rows, second.run_id)["isolation_reason"] == "filename_run_mismatch"
+  end
+
   defp await_stopped(snapshot) do
     if RunCatalogSnapshot.alive?(snapshot) do
       await_stopped(snapshot)
@@ -477,6 +562,19 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
       <<footer_format::unsigned-big-16, schema_version::unsigned-big-16>>,
       footer_rest
     ])
+  end
+
+  # Rewrites one footer field and nothing else. The footer's stored
+  # `artifact_digest` is a claim, not a recomputation, so this leaves that claim
+  # intact — which is exactly the case a commitment must still distinguish.
+  defp rewrite_footer_record_count!(path, record_count) do
+    bytes = File.read!(path)
+    footer_offset = byte_size(bytes) - Format.footer_size()
+    record_count_offset = footer_offset + 40
+
+    <<head::binary-size(^record_count_offset), _count::unsigned-big-64, rest::binary>> = bytes
+
+    File.write!(path, <<head::binary, record_count::unsigned-big-64, rest::binary>>)
   end
 
   defp rewrite_trace!(root, run_id, transform) do

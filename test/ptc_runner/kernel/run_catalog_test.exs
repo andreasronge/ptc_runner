@@ -115,6 +115,24 @@ defmodule PtcRunner.Kernel.RunCatalogTest do
                  0
                )
     end
+
+    test "a probed field the classifier reads is refused rather than raised on" do
+      for {path, value} <- [
+            {[:head, :timestamp], 42},
+            {[:head, :schema_version], "2"},
+            {[:tail, :timestamp], 42},
+            {[:tail, :status], 42},
+            {[:tail, :terminal_reason], %{}},
+            {[:tail, :result_hash], 42},
+            {[:bytes], "512"},
+            {[:commitment], :not_a_digest}
+          ] do
+        probe = probe(trace: put_in(trace_probe([]), Enum.map(path, &Access.key!/1), value))
+
+        assert {:error, :invalid_catalog} = RunCatalog.generation([probe], 0),
+               "expected #{inspect(path)} = #{inspect(value)} to be refused"
+      end
+    end
   end
 
   describe "row bounds" do
@@ -186,13 +204,17 @@ defmodule PtcRunner.Kernel.RunCatalogTest do
   end
 
   defp inspection_probe(overrides) do
+    run_id = Keyword.fetch!(overrides, :run_id)
+
     %{
       present: :probed,
       format_version: Format.format_version(),
       schema_version: Format.schema_version(),
       bytes: 4_096,
+      identity: {4_096, 9, 2, 3, 0},
+      commitment: :crypto.hash(:sha256, "header-footer-#{run_id}"),
       record_count: 12,
-      run_id_sha256: Format.identity_sha256(Keyword.fetch!(overrides, :run_id)),
+      run_id_sha256: Format.identity_sha256(run_id),
       trace_id_sha256: Format.identity_sha256(@trace_id),
       artifact_digest: :crypto.hash(:sha256, "artifact")
     }

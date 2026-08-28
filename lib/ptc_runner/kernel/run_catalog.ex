@@ -109,8 +109,16 @@ defmodule PtcRunner.Kernel.RunCatalog do
   end
 
   # Two entries may not both claim one run or trace identity. Stems are unique
-  # within a root, so this catches the case the filesystem cannot prevent: a
-  # trace whose embedded identity belongs to another entry's run.
+  # within a root, so this catches the cases the filesystem cannot prevent: a
+  # trace whose embedded identity belongs to another entry's run, and a sealed
+  # artifact copied under a second run's canonical name.
+  #
+  # Both halves claim into one space. A trace states its identities in
+  # plaintext and a footer states them only as digests, so the plaintext is
+  # hashed to meet the footer rather than the footer being trusted to name
+  # itself — otherwise the two halves would claim into spaces that never
+  # intersect, and an artifact duplicating another run's identity would leave
+  # the run it impersonates looking admissible.
   defp duplicated_identities(probes) do
     probes
     |> Enum.flat_map(&claimed_identities/1)
@@ -120,10 +128,23 @@ defmodule PtcRunner.Kernel.RunCatalog do
     |> MapSet.new()
   end
 
-  defp claimed_identities(%{run_ref: run_ref, trace: %{present: :probed, head: head}}),
-    do: [{{:run, head.run_id}, run_ref}, {{:trace, head.trace_id}, run_ref}]
+  defp claimed_identities(%{run_ref: run_ref, trace: trace, inspection: inspection}) do
+    Enum.map(trace_claims(trace) ++ inspection_claims(inspection), &{&1, run_ref})
+  end
 
-  defp claimed_identities(_probe), do: []
+  defp trace_claims(%{present: :probed, head: head}) do
+    [
+      {:run, Format.identity_sha256(head.run_id)},
+      {:trace, Format.identity_sha256(head.trace_id)}
+    ]
+  end
+
+  defp trace_claims(_trace), do: []
+
+  defp inspection_claims(%{present: :probed} = inspection),
+    do: [{:run, inspection.run_id_sha256}, {:trace, inspection.trace_id_sha256}]
+
+  defp inspection_claims(_inspection), do: []
 
   defp row(probe, duplicated) do
     correlation = correlation(probe)
@@ -313,26 +334,20 @@ defmodule PtcRunner.Kernel.RunCatalog do
     end
   end
 
-  # A row commitment covers the entry's reference, the trace's filesystem
-  # identity, the digest of the bytes actually probed, and the sealed artifact
-  # digest. Absent halves commit to their absence, so a generation captured
+  # A row commitment covers the entry's reference and, for each half, its
+  # classification, the descriptor identity it was read from, and a digest of
+  # the exact bytes probed. Committing to decoded values instead would miss a
+  # rewrite the decode carries through unchanged — a footer's stored
+  # `artifact_digest` is a claim a metadata-only probe never recomputes, so
+  # editing a footer field beside it changes the row while leaving the claim
+  # alone. Absent halves commit to their absence, so a generation captured
   # before a run was published cannot collide with one captured after.
   defp commitment(%{run_ref: run_ref, trace: trace, inspection: inspection}) do
-    {run_ref, trace_commitment(trace), inspection_commitment(inspection)}
+    {run_ref, half_commitment(trace), half_commitment(inspection)}
   end
 
-  defp trace_commitment(%{present: :probed, identity: identity, commitment: commitment}),
-    do: {:probed, identity, commitment}
-
-  defp trace_commitment(%{present: present}), do: {present}
-
-  defp inspection_commitment(%{present: :probed} = inspection),
-    do: {:probed, inspection.bytes, inspection.artifact_digest}
-
-  defp inspection_commitment(%{present: :versions} = inspection),
-    do: {:versions, inspection.bytes, inspection.format_version, inspection.schema_version}
-
-  defp inspection_commitment(%{present: present}), do: {present}
+  defp half_commitment(%{present: present} = half),
+    do: {present, Map.get(half, :identity), Map.get(half, :commitment)}
 
   defp digest(commitments) do
     [@catalog_version, 0, :erlang.term_to_binary(Enum.sort(commitments), [:deterministic])]
@@ -351,11 +366,15 @@ defmodule PtcRunner.Kernel.RunCatalog do
 
   defp valid_probe?(_probe), do: false
 
+  # Every field the classifier goes on to read is checked here, not a sample of
+  # them. A partial check is worse than none: it reports a contract
+  # (`{:error, :invalid_catalog}`) that it then breaks, raising out of a
+  # projection instead — an untyped `head.timestamp` reaching
+  # `DateTime.from_iso8601/1` is the shape that takes.
   defp valid_trace_probe?(%{present: :probed, head: head, tail: tail} = trace) do
-    Map.has_key?(trace, :bytes) and Map.has_key?(trace, :identity) and
-      Map.has_key?(trace, :commitment) and trace.source_kind in [:sanitized, :private] and
-      is_map(head) and is_map(head.labels) and is_binary(head.run_id) and
-      is_binary(head.trace_id) and (is_nil(tail) or is_map(tail))
+    non_neg_integer?(trace[:bytes]) and is_tuple(trace[:identity]) and
+      is_binary(trace[:commitment]) and trace[:source_kind] in [:sanitized, :private] and
+      valid_head?(head) and valid_tail?(tail)
   end
 
   defp valid_trace_probe?(%{present: present}),
@@ -363,21 +382,45 @@ defmodule PtcRunner.Kernel.RunCatalog do
 
   defp valid_trace_probe?(_trace), do: false
 
+  defp valid_head?(head) when is_map(head) do
+    is_binary(head[:run_id]) and head[:run_id] != "" and is_binary(head[:trace_id]) and
+      head[:trace_id] != "" and is_map(head[:labels]) and optional_binary?(head[:timestamp]) and
+      (is_nil(head[:schema_version]) or is_integer(head[:schema_version]))
+  end
+
+  defp valid_head?(_head), do: false
+
+  defp valid_tail?(nil), do: true
+
+  defp valid_tail?(tail) when is_map(tail) do
+    optional_binary?(tail[:timestamp]) and optional_binary?(tail[:status]) and
+      optional_binary?(tail[:terminal_reason]) and optional_binary?(tail[:result_hash])
+  end
+
+  defp valid_tail?(_tail), do: false
+
   defp valid_inspection_probe?(%{present: :probed} = inspection) do
-    Map.has_key?(inspection, :bytes) and Map.has_key?(inspection, :record_count) and
-      is_binary(inspection.run_id_sha256) and is_binary(inspection.trace_id_sha256) and
-      is_binary(inspection.artifact_digest)
+    non_neg_integer?(inspection[:bytes]) and non_neg_integer?(inspection[:record_count]) and
+      is_tuple(inspection[:identity]) and is_binary(inspection[:commitment]) and
+      is_integer(inspection[:format_version]) and is_integer(inspection[:schema_version]) and
+      is_binary(inspection[:run_id_sha256]) and is_binary(inspection[:trace_id_sha256]) and
+      is_binary(inspection[:artifact_digest])
   end
 
   defp valid_inspection_probe?(%{present: :versions} = inspection) do
-    Map.has_key?(inspection, :bytes) and is_integer(inspection.format_version) and
-      is_integer(inspection.schema_version)
+    non_neg_integer?(inspection[:bytes]) and is_tuple(inspection[:identity]) and
+      is_binary(inspection[:commitment]) and is_integer(inspection[:format_version]) and
+      is_integer(inspection[:schema_version])
   end
 
   defp valid_inspection_probe?(%{present: present}),
     do: present in [:absent, :malformed, :unstable]
 
   defp valid_inspection_probe?(_inspection), do: false
+
+  defp non_neg_integer?(value), do: is_integer(value) and value >= 0
+
+  defp optional_binary?(value), do: is_nil(value) or is_binary(value)
 
   defp unique_refs?(probes) do
     refs = Enum.map(probes, & &1.run_ref)

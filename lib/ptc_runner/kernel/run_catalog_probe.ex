@@ -18,14 +18,22 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
   failure matrix, so this module reports only what it observed and stays a
   pure function of the filesystem.
 
-  Each probed file is `lstat`ed before and after its reads. A file whose
-  identity moved under the probe is reported `:unstable` rather than
-  described from bytes that no longer belong together.
+  A probe reports only bytes it can prove belong to the entry it inventoried.
+  Each file is `lstat`ed before the open, the opened descriptor is `fstat`ed
+  and compared before a byte is read, and the path is `lstat`ed again after —
+  so neither a file replaced under its path nor one rewritten mid-probe is
+  described as the file that was listed. Either reports `:unstable`.
+
+  What survives is validated rather than trusted: the two probed trace events
+  go through the same canonical trace-event validation a directory capture
+  applies, and a sealed container whose versions are this build's is validated
+  against the same header and footer contract its reader enforces.
   """
 
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.InspectionArtifact.Format
   alias PtcRunner.Kernel.TraceDirectoryAdmission
+  alias PtcRunner.Kernel.TraceEventValidation
 
   @head_bytes 65_536
   @tail_bytes 65_536
@@ -41,8 +49,22 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
   @type stat_identity ::
           {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer(), term()}
 
+  @typedoc """
+  A half whose bytes were read but did not decode into a describable state.
+
+  It still carries what it observed — the descriptor identity and a digest of
+  the exact bytes probed — because a generation must distinguish one malformed
+  file from another. Only a half that never reached any bytes carries neither.
+  """
+  @type malformed_probe :: %{
+          :present => :malformed,
+          optional(:identity) => stat_identity(),
+          optional(:commitment) => binary()
+        }
+
   @type trace_probe ::
-          %{present: :absent | :ambiguous | :malformed | :unstable}
+          %{present: :absent | :ambiguous | :unstable}
+          | malformed_probe()
           | %{
               present: :probed,
               source_kind: :sanitized | :private,
@@ -54,10 +76,13 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
             }
 
   @type inspection_probe ::
-          %{present: :absent | :malformed | :unstable}
+          %{present: :absent | :unstable}
+          | malformed_probe()
           | %{
               present: :versions,
               bytes: non_neg_integer(),
+              identity: stat_identity(),
+              commitment: binary(),
               format_version: pos_integer(),
               schema_version: pos_integer()
             }
@@ -66,6 +91,8 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
               format_version: pos_integer(),
               schema_version: pos_integer(),
               bytes: non_neg_integer(),
+              identity: stat_identity(),
+              commitment: binary(),
               record_count: non_neg_integer(),
               run_id_sha256: binary(),
               trace_id_sha256: binary(),
@@ -235,7 +262,7 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
   # commits to what it observed, so a row is never assembled from a head and a
   # tail that may belong to different contents.
   defp probe_stable(path, before, decode) do
-    case read_edges(path, before.size) do
+    case read_edges(path, before.size, stat_identity(before)) do
       {:ok, head, tail} ->
         case File.lstat(path, time: :posix) do
           {:ok, %File.Stat{type: :regular} = later} ->
@@ -247,20 +274,42 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
             %{present: :unstable}
         end
 
+      :moved ->
+        %{present: :unstable}
+
       :error ->
         %{present: :malformed}
     end
   end
 
-  defp read_edges(path, size) do
-    case :file.open(path, [:read, :binary, :raw]) do
+  # The descriptor, not the path, is what the reads come from, so the descriptor
+  # is what must be proven to be the inventoried file: a path can be replaced
+  # between the `lstat` and the `open` and restored before the closing `lstat`,
+  # which would commit replacement bytes under the original identity. Following
+  # `InspectionArtifact.Handle.open/2`, the opened file is `fstat`ed and
+  # compared before a single byte is read. The descriptor is deliberately not
+  # `:raw`: a raw descriptor is process-local and cannot be `fstat`ed.
+  defp read_edges(path, size, expected) do
+    case :file.open(path, [:read, :binary]) do
       {:ok, io} ->
-        result = read_windows(io, size)
+        result =
+          case opened_identity(io) do
+            {:ok, identity} when identity == expected -> read_windows(io, size)
+            _replaced -> :moved
+          end
+
         :file.close(io)
         result
 
       {:error, _reason} ->
         :error
+    end
+  end
+
+  defp opened_identity(io) do
+    case :file.read_file_info(io, time: :posix) do
+      {:ok, file_info} -> {:ok, stat_identity(File.Stat.from_record(file_info))}
+      {:error, _reason} -> :error
     end
   end
 
@@ -282,21 +331,56 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
     end
   end
 
+  # Both probed events are validated as canonical trace events before anything
+  # is projected from them. Projecting from a handful of hand-picked fields let
+  # a file the canonical reader rejects — a `run-stopped` missing its
+  # `trace_id`, a result hash contradicting its outcome — be published as a
+  # complete, admissible run. The rule lives in `TraceEventValidation`, which
+  # already owns per-event shape, run/trace identity agreement, sequence
+  # ordering, and run lifecycle; the probe hands it exactly the events the row
+  # is built from, so the check stays bounded to two events.
   defp decode_trace(head, {tail_bytes, tail_offset}, source_kind, stat) do
+    observed = %{
+      identity: stat_identity(stat),
+      commitment: :crypto.hash(:sha256, [head, tail_bytes])
+    }
+
     with {:ok, head_line} <- first_line(head),
-         {:ok, started} <- decode_started(head_line),
-         {:ok, stopped} <- decode_stopped(tail_bytes, tail_offset, started) do
+         {:ok, started} <- decode_event(head_line),
+         %{"type" => "run-started"} <- started,
+         {:ok, stopped} <- decode_stopped(tail_bytes, tail_offset, started),
+         :ok <- canonical_events(started, stopped) do
+      Map.merge(observed, projected_trace(started, stopped, source_kind, stat))
+    else
+      _invalid -> Map.put(observed, :present, :malformed)
+    end
+  end
+
+  # A schema version this build does not support is a state the row reports
+  # together with the version it declares, not a file the catalog calls corrupt.
+  # Every other validation failure is a refusal, and the row is isolated with
+  # nothing projected from it.
+  defp canonical_events(started, stopped) do
+    case TraceEventValidation.validate(Enum.reject([started, stopped], &is_nil/1)) do
+      :ok -> :ok
+      {:error, :unsupported_version} -> :ok
+      {:error, _malformed} -> :error
+    end
+  end
+
+  defp projected_trace(started, stopped, source_kind, stat) do
+    head = project_started(started)
+
+    if head do
       %{
         present: :probed,
         source_kind: source_kind,
         bytes: stat.size,
-        identity: stat_identity(stat),
-        commitment: :crypto.hash(:sha256, [head, tail_bytes]),
-        head: started,
-        tail: stopped
+        head: head,
+        tail: project_stopped(stopped)
       }
     else
-      :error -> %{present: :malformed}
+      %{present: :malformed}
     end
   end
 
@@ -330,21 +414,31 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
   defp wrap_line(nil), do: :error
   defp wrap_line(line), do: {:ok, line}
 
-  defp decode_started(line) do
-    with {:ok, event} <- decode_event(line),
-         %{"type" => "run-started", "run_id" => run_id, "trace_id" => trace_id} <- event,
-         true <- identifier?(run_id) and identifier?(trace_id) do
-      {:ok,
-       %{
-         run_id: run_id,
-         trace_id: trace_id,
-         schema_version: schema_version(event["schema_version"]),
-         timestamp: timestamp(event["timestamp"]),
-         labels: labels(event)
-       }}
-    else
-      _invalid -> :error
+  defp project_started(%{"run_id" => run_id, "trace_id" => trace_id} = event) do
+    if identifier?(run_id) and identifier?(trace_id) do
+      %{
+        run_id: run_id,
+        trace_id: trace_id,
+        schema_version: schema_version(event["schema_version"]),
+        timestamp: timestamp(event["timestamp"]),
+        labels: labels(event)
+      }
     end
+  end
+
+  defp project_started(_event), do: nil
+
+  defp project_stopped(nil), do: nil
+
+  defp project_stopped(event) do
+    data = event_data(event)
+
+    %{
+      timestamp: timestamp(event["timestamp"]),
+      status: stringify(data["outcome"]),
+      terminal_reason: stringify(data["reason"]),
+      result_hash: safe_string(data["result_hash"])
+    }
   end
 
   defp decode_stopped(tail_bytes, tail_offset, started) do
@@ -359,19 +453,7 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
   # for another run in this run's file is neither: the two lines disagree about
   # whose file this is, so the entry is refused.
   defp classify_tail(%{"type" => "run-stopped", "run_id" => run_id} = event, started) do
-    if run_id == started.run_id do
-      data = event_data(event)
-
-      {:ok,
-       %{
-         timestamp: timestamp(event["timestamp"]),
-         status: stringify(data["outcome"]),
-         terminal_reason: stringify(data["reason"]),
-         result_hash: safe_string(data["result_hash"])
-       }}
-    else
-      :error
-    end
+    if run_id == started["run_id"], do: {:ok, event}, else: :error
   end
 
   defp classify_tail(%{"type" => "run-stopped"}, _started), do: :error
@@ -449,6 +531,12 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
     end
   end
 
+  # The commitment is over the exact bytes the row is read from, not over the
+  # values decoded out of them. A footer's `artifact_digest` is a stored claim
+  # that a metadata-only probe never recomputes, so a rewritten `record_count`
+  # leaves that claim — and any commitment built from it — unchanged while the
+  # row it produces differs. Every outcome that got bytes commits to them,
+  # malformed and foreign-version probes included.
   defp decode_inspection(head, {tail_bytes, _tail_offset}, stat) do
     header = binary_part(head, 0, Format.header_size())
 
@@ -459,25 +547,36 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
         Format.footer_size()
       )
 
+    observed = %{
+      identity: stat_identity(stat),
+      commitment: :crypto.hash(:sha256, [header, footer_bytes])
+    }
+
     with {:ok, header_versions} <- Format.decode_header_versions(header),
          {:ok, footer_versions} <- Format.decode_footer_versions(footer_bytes),
          true <- header_versions == footer_versions do
-      inspection_row(header_versions, footer_bytes, stat)
+      Map.merge(observed, inspection_row(header_versions, header, footer_bytes, stat))
     else
-      _malformed -> %{present: :malformed}
+      _malformed -> Map.put(observed, :present, :malformed)
     end
   end
 
-  defp inspection_row(versions, footer_bytes, stat) do
+  defp inspection_row(versions, header, footer_bytes, stat) do
     if current_versions?(versions) do
-      current_inspection_row(versions, footer_bytes, stat)
+      current_inspection_row(versions, header, footer_bytes, stat)
     else
       versions |> Map.put(:present, :versions) |> Map.put(:bytes, stat.size)
     end
   end
 
-  defp current_inspection_row(versions, footer_bytes, stat) do
-    with {:ok, footer} <- Format.decode_footer(footer_bytes),
+  # `decode_header_versions/1` reads the two version fields without committing
+  # to a layout, which is what makes a foreign version reportable — but it says
+  # nothing about the rest of the current header. Once the versions are this
+  # build's, the whole header is validated the way the artifact reader validates
+  # it, so a container the reader would reject is never published as admissible.
+  defp current_inspection_row(versions, header, footer_bytes, stat) do
+    with {:ok, :header} <- Format.decode_header(header),
+         {:ok, footer} <- Format.decode_footer(footer_bytes),
          true <- footer.total_bytes == stat.size,
          true <- footer.evidence_offset == Format.header_size(),
          true <-
