@@ -987,6 +987,7 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
       paths = write_application(dir)
       private_input = Path.join(dir, "private-input.json")
       inspection = Path.join(dir, "private-run.ptcins")
+      private_output = Path.join(dir, "private-result.json")
       secret = "PRIVATE_REPLAY_PROMPT"
 
       File.write!(private_input, Jason.encode!(%{"secret" => secret}))
@@ -1012,7 +1013,9 @@ defmodule PtcRunner.Kernel.LLMReplayTest do
                  "--private-input",
                  Path.basename(private_input),
                  "--inspect",
-                 inspection
+                 inspection,
+                 "--private-output",
+                 private_output
                ])
 
       assert miss.envelope["artifact_class"] == "private", inspect(miss.envelope)
