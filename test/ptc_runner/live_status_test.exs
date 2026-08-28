@@ -314,7 +314,11 @@ defmodule PtcRunner.LiveStatusTest do
           installation_revision: "stable-v1",
           default?: true,
           capability: leaf,
-          max_calls: nil
+          max_calls: nil,
+          output_tokens: 4_096,
+          reservation_bound: fn _request, _tariff ->
+            {:ok, %{total_tokens: 4_096, cost: nil}}
+          end
         }
       ])
 

@@ -24,6 +24,22 @@ defmodule PtcRunner.TestSupport.AgentFixtures do
     ])
   end
 
+  def live_alias_route(alias_name, default?, capability, max_calls, opts \\ []) do
+    %{
+      alias: alias_name,
+      source: "llm",
+      installation_revision: alias_name <> "-v1",
+      default?: default?,
+      capability: capability,
+      max_calls: max_calls,
+      output_tokens: 4_096,
+      reservation_bound: fn _request, _tariff ->
+        {:ok, %{total_tokens: 4_096, cost: nil}}
+      end
+    }
+    |> Map.merge(Map.new(opts))
+  end
+
   def mission_with_source(namespace, body) do
     source = "(ns #{namespace})\n#{body}\n"
 

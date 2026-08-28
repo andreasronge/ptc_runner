@@ -748,8 +748,8 @@ defmodule PtcRunner.Kernel.MCPStdioTransport do
       {:ok, {:response, id, response}} ->
         consume_response(id, response, byte_size(line), state)
 
-      {:error, :mcp_protocol_error} ->
-        {:error, :mcp_protocol_error, state}
+      {:error, reason} when reason in [:mcp_protocol_error, :mcp_response_exceeded] ->
+        {:error, reason, state}
     end
   end
 

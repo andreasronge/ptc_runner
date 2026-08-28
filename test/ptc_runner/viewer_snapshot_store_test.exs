@@ -479,7 +479,15 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
   end
 
   defp event(run_id, sequence, type) do
-    data = if type == "run-started", do: %{"missions" => %{}}, else: %{"outcome" => "ok"}
+    data =
+      if type == "run-started" do
+        %{"missions" => %{}}
+      else
+        %{
+          "outcome" => "ok",
+          "usage" => %{"llm_budget" => %{"total_tokens" => nil, "cost" => nil}}
+        }
+      end
 
     %{
       "schema_version" => 2,

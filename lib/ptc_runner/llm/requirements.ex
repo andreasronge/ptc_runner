@@ -134,6 +134,10 @@ defmodule PtcRunner.LLM.Requirements do
   @spec equal?(t(), t()) :: boolean()
   def equal?(left, right), do: left == right
 
+  @doc false
+  @spec valid_cost_tariff?(term()) :: boolean()
+  def valid_cost_tariff?(tariff), do: match?({:ok, _canonical}, canonical_tariff(tariff))
+
   defp authorized_options(params, max_tokens) do
     params
     |> Map.take(@option_keys -- [:max_tokens])

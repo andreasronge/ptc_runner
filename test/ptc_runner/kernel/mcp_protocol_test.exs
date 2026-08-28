@@ -102,6 +102,32 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
     end
   end
 
+  test "decodes an element-dense response within the declared admission limits" do
+    # Issue #1676: decode cost scales with element count, not bytes. A
+    # response under the node limit must decode regardless of how its bytes
+    # distribute across elements.
+    padding = Enum.map_join(1..49_000, ",", &~s("p#{&1}"))
+
+    body =
+      ~s({"jsonrpc":"2.0","id":7,"result":{"structuredContent":{"padding":[) <>
+        padding <> ~s(]}}})
+
+    assert {:ok, {:response, 7, %{"result" => _result}}} = MCPProtocol.decode_message(body)
+  end
+
+  test "a decode that exceeds host processing bounds is response excess, not a protocol fault" do
+    # One million integers materialize past the decode worker's heap budget
+    # before the node limit can be counted. The server violated no protocol;
+    # the host declined to process the response. If the budget ever grows
+    # past this document's needs, it fails as `json_node_limit_exceeded`
+    # (a protocol error) instead and this document must grow with it.
+    array = "[" <> String.duplicate("1,", 999_999) <> "1]"
+    body = ~s({"jsonrpc":"2.0","id":7,"result":{"content":) <> array <> "}}"
+
+    assert {:error, :mcp_response_exceeded} = MCPProtocol.decode_message(body)
+    assert {:error, :mcp_response_exceeded} = MCPProtocol.decode_response(body, 7)
+  end
+
   test "rejects inbound JSON above the fixed document depth before decoding" do
     nested = String.duplicate("[", 64) <> "0" <> String.duplicate("]", 64)
     body = ~s({"jsonrpc":"2.0","id":7,"result":#{nested}})

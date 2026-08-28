@@ -277,7 +277,8 @@ defmodule PtcRunner.Kernel.ManifestReplOpening do
       ReplTerminalization.finalize_abandoned(
         state.opened_sinks,
         state.trace_path,
-        state.provider_cleanup
+        state.provider_cleanup,
+        state.preparation.prepared_run.request.package.limits
       )
     end
 

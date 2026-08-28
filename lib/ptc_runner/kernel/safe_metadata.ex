@@ -104,7 +104,10 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :provider_result_limit,
     :provider_timeout,
     :llm_request_timeout,
+    :llm_output_authorization_invalid,
     :rate_limited,
+    :reservation_attestation_unavailable,
+    :reservation_bound_exceeded,
     :reservation_held,
     :resolver_unavailable,
     :run_closed,
@@ -410,7 +413,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
              :transport_error,
              :internal,
              :domain_error,
-             :invalid_result
+             :invalid_result,
+             :reservation_bound_exceeded
            ] and is_boolean(retryable?),
       do: %{llm_provider_failure: failure, llm_provider_retryable?: retryable?}
 

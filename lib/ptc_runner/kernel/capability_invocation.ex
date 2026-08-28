@@ -21,7 +21,12 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
                 structured_output_mode: nil,
                 request_timeout_ms: nil,
                 llm_request_deadline_ms: nil,
-                enclosing_deadline_ms: nil
+                enclosing_deadline_ms: nil,
+                llm_source: nil,
+                llm_output_tokens: nil,
+                llm_reservation_tariff: nil,
+                reservation_bound: nil,
+                reservation: nil
               ]
 
   @type t :: %__MODULE__{
@@ -38,13 +43,18 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
           structured_output_mode: :json_schema | :json_object | :unsupported | nil,
           request_timeout_ms: pos_integer() | nil,
           llm_request_deadline_ms: integer() | nil,
-          enclosing_deadline_ms: integer() | nil
+          enclosing_deadline_ms: integer() | nil,
+          llm_source: binary() | nil,
+          llm_output_tokens: pos_integer() | nil,
+          llm_reservation_tariff: map() | nil,
+          reservation_bound: function() | nil,
+          reservation: map() | nil
         }
 
   @doc false
   @spec leaf(Capability.t(), map()) :: t()
   def leaf(%Capability{} = capability, arguments) when is_map(arguments) do
-    %__MODULE__{
+    invocation = %__MODULE__{
       capability: capability,
       arguments: arguments,
       route_key: nil,
@@ -53,7 +63,27 @@ defmodule PtcRunner.Kernel.CapabilityInvocation do
       result_attributes: %{},
       usage_projection: nil
     }
+
+    put_llm_reservation(invocation, capability.llm_reservation)
   end
+
+  defp put_llm_reservation(
+         invocation,
+         %{source: "llm", output_tokens: output_tokens, tariff: tariff, bound: bound}
+       ) do
+    %{
+      invocation
+      | llm_source: "llm",
+        llm_output_tokens: output_tokens,
+        llm_reservation_tariff: tariff,
+        reservation_bound: bound
+    }
+  end
+
+  defp put_llm_reservation(invocation, %{source: "llm_replay"}),
+    do: %{invocation | llm_source: "llm_replay"}
+
+  defp put_llm_reservation(invocation, _reservation), do: invocation
 
   @doc false
   @spec put_request_schema(t(), map(), JSONSchema.compiled()) :: t()

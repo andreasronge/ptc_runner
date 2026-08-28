@@ -88,6 +88,12 @@ defmodule PtcRunner.LLM do
   @callback prepare_model(model :: String.t(), requirements :: Requirements.t()) ::
               {:ok, target :: term(), catalog_status(), Requirements.t()} | {:error, term()}
 
+  @callback reservation_bound(
+              prepared_target :: term(),
+              normalized_request :: map(),
+              reservation_tariff :: Requirements.cost_tariff() | nil
+            ) :: map()
+
   @doc """
   Preload adapter-owned model metadata into a shared, process-independent store
   (e.g. a `:persistent_term`/ETS catalog) so the first per-request provider
@@ -129,8 +135,30 @@ defmodule PtcRunner.LLM do
   @optional_callbacks [
     ensure_ready: 0,
     provider_application: 1,
-    public_model: 1
+    public_model: 1,
+    reservation_bound: 3
   ]
+
+  @doc false
+  @spec reservation_bound(PreparedModel.t(), map(), Requirements.cost_tariff() | nil) ::
+          {:ok, map()} | {:error, :reservation_attestation_unavailable}
+  def reservation_bound(%PreparedModel{} = prepared, request, tariff)
+      when is_map(request) and not is_struct(request) do
+    with :ok <- validate_prepared(prepared),
+         true <- function_exported?(prepared.adapter, :reservation_bound, 3),
+         true <- prepared.requirements.reservation.cost_tariff == tariff do
+      {:ok, prepared.adapter.reservation_bound(prepared.target, request, tariff)}
+    else
+      _unavailable -> {:error, :reservation_attestation_unavailable}
+    end
+  rescue
+    _exception -> {:error, :reservation_attestation_unavailable}
+  catch
+    _kind, _reason -> {:error, :reservation_attestation_unavailable}
+  end
+
+  def reservation_bound(_prepared, _request, _tariff),
+    do: {:error, :reservation_attestation_unavailable}
 
   @doc false
   @spec attested_public_model(module(), String.t()) :: String.t() | nil

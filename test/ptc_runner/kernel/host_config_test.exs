@@ -46,6 +46,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
                  effect: :read,
                  description: nil,
                  error_feedback: :closed,
+                 inspection_capture: :full,
                  model_visible: false
                }
              },
@@ -129,6 +130,69 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert InstallationConfigDigest.valid_digest?(
              host.install["deepseek"].installation_config_digest
            )
+  end
+
+  @tag :tmp_dir
+  test "a host cost budget requires a tariff on every live LLM installation", %{tmp_dir: dir} do
+    installation = %{
+      "source" => "llm",
+      "structured_output_mode" => "unsupported",
+      "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
+      "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+      "credential" => "openrouter_key",
+      "installation_revision" => "model-policy-v2"
+    }
+
+    config = %{
+      "limits" => %{"llm_cost_microusd" => 1_000_000},
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{"deepseek" => installation}
+    }
+
+    assert {:error, :invalid_host_config} = dir |> write_config(config) |> HostConfig.load()
+
+    tariff = %{"currency" => "USD", "id" => "openrouter-2026-08"}
+    configured = put_in(config, ["install", "deepseek", "reservation_tariff"], tariff)
+
+    assert {:ok, host} = dir |> write_config(configured) |> HostConfig.load()
+    assert host.install["deepseek"].reservation_tariff == %{currency: "USD", id: tariff["id"]}
+  end
+
+  @tag :tmp_dir
+  test "aggregate LLM budgets require matching usage guarantees", %{tmp_dir: dir} do
+    installation = %{
+      "source" => "llm",
+      "structured_output_mode" => "unsupported",
+      "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+      "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+      "credential" => "openrouter_key",
+      "installation_revision" => "model-policy-v2"
+    }
+
+    base = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{"deepseek" => installation}
+    }
+
+    token_budget = Map.put(base, "limits", %{"llm_total_tokens" => 10_000})
+
+    assert {:error, :invalid_host_config} =
+             dir |> write_config(token_budget) |> HostConfig.load()
+
+    cost_budget =
+      base
+      |> Map.put("limits", %{"llm_cost_microusd" => 1_000_000})
+      |> put_in(
+        ["install", "deepseek", "usage_guarantees"],
+        %{"tokens" => true, "cost_currency" => nil}
+      )
+      |> put_in(
+        ["install", "deepseek", "reservation_tariff"],
+        %{"currency" => "USD", "id" => "openrouter-2026-08"}
+      )
+
+    assert {:error, :invalid_host_config} =
+             dir |> write_config(cost_budget) |> HostConfig.load()
   end
 
   @tag :tmp_dir
@@ -548,6 +612,31 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert host.install["workspace"].snapshot_identity == %{tool: "read_text", field: "digest"}
   end
 
+  @tag :tmp_dir
+  test "accepts digest result capture for read tools and rejects it for write tools", %{
+    tmp_dir: dir
+  } do
+    digest_config =
+      valid_config()
+      |> put_in(
+        ["install", "workspace", "tools", "read_text", "inspection_capture"],
+        "digest_results"
+      )
+
+    assert {:ok, host} = dir |> write_config(digest_config) |> HostConfig.load()
+    assert host.install["workspace"].tools["read_text"].inspection_capture == :digest_results
+
+    write_digest =
+      put_in(digest_config, ["install", "workspace", "tools", "write_text"], %{
+        "as" => "workspace.write",
+        "effect" => "write",
+        "inspection_capture" => "digest_results"
+      })
+
+    assert {:error, :invalid_host_config} =
+             dir |> write_config(write_digest, unique_name()) |> HostConfig.load()
+  end
+
   test "every enumerated value decodes to an atom this module owns" do
     # The assertions above check the decoded values but not where the atoms came
     # from. They previously came from `String.to_existing_atom/1`, which only
@@ -566,7 +655,17 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     owned = MapSet.new(atoms, fn {_index, atom} -> atom end)
 
-    for atom <- [:bearer, :basic, :closed, :bounded, :write, :normal, :private_inspection] do
+    for atom <- [
+          :bearer,
+          :basic,
+          :closed,
+          :bounded,
+          :write,
+          :normal,
+          :private_inspection,
+          :full,
+          :digest_results
+        ] do
       assert MapSet.member?(owned, atom),
              "#{inspect(atom)} must be a literal in HostConfig, not borrowed from another module"
     end

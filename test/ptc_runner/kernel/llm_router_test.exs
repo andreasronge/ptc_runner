@@ -1014,7 +1014,13 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
       |> Enum.map(&Task.await/1)
       |> Enum.sort()
 
-    assert results == [:ok, {:error, :route_call_limit}]
+    assert Enum.count(
+             results,
+             &match?({:ok, reservation_id} when is_reference(reservation_id), &1)
+           ) ==
+             1
+
+    assert Enum.count(results, &(&1 == {:error, :route_call_limit})) == 1
     :ok = RunState.stop(state)
   end
 
@@ -1033,7 +1039,11 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
       |> Enum.map(&Task.await/1)
       |> Enum.sort()
 
-    assert results == [:ok, :ok]
+    assert Enum.all?(
+             results,
+             &match?({:ok, reservation_id} when is_reference(reservation_id), &1)
+           )
+
     :ok = RunState.stop(state)
   end
 
@@ -1373,6 +1383,22 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              ])
   end
 
+  test "live routes reject malformed reservation tariffs" do
+    leaf = capability(self(), :unused, %{content: "unused"})
+    valid = route("primary", "llm", "v1", true, leaf)
+
+    for tariff <- [
+          %{},
+          %{currency: "EUR", id: "v1"},
+          %{currency: "USD", id: ""},
+          %{currency: "USD", id: String.duplicate("x", 129)},
+          %{currency: "USD", id: "v1", extra: true}
+        ] do
+      assert {:error, :invalid_llm_router} =
+               LLMRouter.new([Map.put(valid, :reservation_tariff, tariff)])
+    end
+  end
+
   test "routed events carry immutable alias, revision, and closed usage" do
     leaf = capability(self(), :metered, %{content: "answer", tokens: %{input: 4, output: 2}})
     assert {:ok, router} = LLMRouter.new([route("metered", "llm", "metered-v3", false, leaf)])
@@ -1687,7 +1713,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   end
 
   defp route(alias_name, source, revision, default?, capability, max_calls \\ nil) do
-    %{
+    route = %{
       alias: alias_name,
       source: source,
       installation_revision: revision,
@@ -1695,6 +1721,17 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
       capability: capability,
       max_calls: max_calls
     }
+
+    if source == "llm" do
+      Map.merge(route, %{
+        output_tokens: 4_096,
+        reservation_bound: fn _request, _tariff ->
+          {:ok, %{total_tokens: 4_096, cost: nil}}
+        end
+      })
+    else
+      route
+    end
   end
 
   defp truncated_response(response) do

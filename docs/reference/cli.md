@@ -179,7 +179,8 @@ guides print work from wherever the copy was created rather than from one
 checkout directory.
 
 For runs that produce a validated terminal event batch, `execution.usage`
-includes the required aggregate `llm_spend` projection, `llm_usage` grouped by
+includes the required authoritative `llm_budget`, aggregate observational
+`llm_spend`, and `llm_usage` grouped by
 alias and installation revision,
 `llm_usage_by_model` grouped by an attested public resolved model, and
 `unattributed_model_calls`. `llm_spend` is byte-equivalent to the value in the
@@ -207,6 +208,17 @@ preserving other known usage. Non-empty `events_dropped` for other event types
 means an available detailed summary covers retained evidence and may not be
 complete. `llm_usage_state` describes reconstruction of those detailed rows;
 it does not replace the independently sealed five-state `llm_spend` value.
+
+`llm_budget` always has the exact outer keys `total_tokens` and `cost`; either
+is `null` when its optional host limit is disabled. An enabled token ledger
+reports `state`, `limit`, `reserved`, `charged`, `remaining`, and `refused`.
+The cost ledger uses the corresponding `_microusd` field names plus fixed
+`currency: "USD"`. Terminal `reserved` values are zero after automatic
+cleanup. `incomplete` means an acknowledged call was conservatively
+full-charged without exact usage; `overrun` clamps remaining to zero and
+refuses future calls. Unlike the event-derived detail rows, this projection is
+sealed directly from RunState and remains authoritative when events are
+dropped.
 
 Artifact publication currently requires a Unix host with POSIX-compatible
 `mkdir` and `id`; trace append also needs `sh` and either `lockf` or `flock`.

@@ -2142,8 +2142,14 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   defp trace_event(run_id, sequence, type) do
     data =
       case type do
-        "run-started" -> %{"missions" => %{}}
-        "run-stopped" -> %{"outcome" => "ok"}
+        "run-started" ->
+          %{"missions" => %{}}
+
+        "run-stopped" ->
+          %{
+            "outcome" => "ok",
+            "usage" => %{"llm_budget" => %{"total_tokens" => nil, "cost" => nil}}
+          }
       end
 
     %{

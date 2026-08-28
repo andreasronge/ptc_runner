@@ -52,6 +52,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
   receive `nil` and stay on the enclosing provider-worker clocks.
   """
 
+  alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CapabilityExceptionDiagnostic
   alias PtcRunner.Kernel.CapabilityInvocation
@@ -194,10 +195,17 @@ defmodule PtcRunner.Kernel.Dispatcher do
              timeout_ms,
              validation_heap_words,
              validation_deadline_ms
+           ),
+         invocation <- put_mission_name(invocation, environment, mission_name),
+         invocation <-
+           bind_llm_deadline(invocation, state, timeout_ms, validation_deadline_ms),
+         {:ok, invocation} <-
+           attest_llm_reservation(
+             invocation,
+             state,
+             validation_heap_words,
+             validation_deadline_ms
            ) do
-      invocation = put_mission_name(invocation, environment, mission_name)
-      invocation = bind_llm_deadline(invocation, state, timeout_ms, validation_deadline_ms)
-
       validation =
         output_validation(validation_heap_words, validation_deadline_ms, evaluation_lease)
 
@@ -208,15 +216,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
              evaluation_lease,
              route_reservation(invocation)
            ) do
-        :ok ->
+        {:ok, reservation_id} ->
           invoke_with_events(
             state,
+            reservation_id,
             name,
             invocation,
             timeout_ms,
             environment,
-            event_sink,
-            inspection_sink,
+            {event_sink, inspection_sink},
             validation
           )
 
@@ -253,6 +261,29 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
         {:error, :reservation_held} ->
           limit_error(state, event_sink, :reservation_held, environment, mission_name)
+
+        {:error, :llm_output_limit} ->
+          _ = mark_terminal_host_failure(state, environment, evaluation_lease)
+
+          %{
+            status: :error,
+            kind: :capability_unavailable,
+            reason: :llm_output_authorization_invalid,
+            retryable?: false
+          }
+
+        {:error, :llm_total_tokens_limit, ledger} ->
+          llm_budget_limit_error(
+            state,
+            event_sink,
+            invocation,
+            :total_tokens,
+            environment,
+            ledger
+          )
+
+        {:error, :llm_cost_limit, ledger} ->
+          llm_budget_limit_error(state, event_sink, invocation, :cost, environment, ledger)
 
         {:error, :stale_evaluation} ->
           stale_evaluation_error()
@@ -359,6 +390,16 @@ defmodule PtcRunner.Kernel.Dispatcher do
           %{status: :error},
           invocation.error_attributes
         )
+
+      {:error, :reservation_attestation_unavailable} ->
+        _ = mark_terminal_host_failure(state, environment, evaluation_lease)
+
+        %{
+          status: :error,
+          kind: :capability_unavailable,
+          reason: :reservation_attestation_unavailable,
+          retryable?: false
+        }
     end
   end
 
@@ -474,11 +515,52 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end
   end
 
-  defp route_reservation(%CapabilityInvocation{route_key: route_key, max_calls: max_calls})
-       when is_binary(route_key) and is_integer(max_calls) and max_calls > 0,
-       do: %{route_key: route_key, max_calls: max_calls}
+  defp route_reservation(%CapabilityInvocation{} = invocation) do
+    %{}
+    |> maybe_put_route_quota(invocation)
+    |> maybe_put_llm_reservation(invocation)
+    |> case do
+      empty when map_size(empty) == 0 -> nil
+      reservation -> reservation
+    end
+  end
 
-  defp route_reservation(_invocation), do: nil
+  defp maybe_put_route_quota(route, %CapabilityInvocation{
+         route_key: route_key,
+         max_calls: max_calls
+       })
+       when is_binary(route_key) and is_integer(max_calls) and max_calls > 0,
+       do: Map.merge(route, %{route_key: route_key, max_calls: max_calls})
+
+  defp maybe_put_route_quota(route, _invocation), do: route
+
+  defp maybe_put_llm_reservation(route, %CapabilityInvocation{llm_source: source} = invocation)
+       when source in ["llm", "llm_replay"] do
+    route
+    |> Map.put(:source, source)
+    |> maybe_put_positive(:output_tokens, invocation.llm_output_tokens)
+    |> maybe_put_attested_bounds(invocation.reservation)
+  end
+
+  defp maybe_put_llm_reservation(route, _invocation), do: route
+
+  defp maybe_put_attested_bounds(route, %{total_tokens: total_tokens, cost_microusd: cost}) do
+    route
+    |> maybe_put_non_negative(:total_tokens, total_tokens)
+    |> maybe_put_non_negative(:cost_microusd, cost)
+  end
+
+  defp maybe_put_attested_bounds(route, _reservation), do: route
+
+  defp maybe_put_positive(map, key, value) when is_integer(value) and value > 0,
+    do: Map.put(map, key, value)
+
+  defp maybe_put_positive(map, _key, _value), do: map
+
+  defp maybe_put_non_negative(map, key, value) when is_integer(value) and value >= 0,
+    do: Map.put(map, key, value)
+
+  defp maybe_put_non_negative(map, _key, _value), do: map
 
   defp max_calls_details(%CapabilityInvocation{route_key: alias_name, max_calls: max_calls})
        when is_binary(alias_name) and is_integer(max_calls) and max_calls > 0,
@@ -502,12 +584,12 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp invoke_with_events(
          state,
+         reservation_id,
          public_name,
          %CapabilityInvocation{} = invocation,
          timeout_ms,
          environment,
-         event_sink,
-         inspection_sink,
+         {event_sink, inspection_sink},
          validation
        ) do
     capability = invocation.capability
@@ -552,16 +634,26 @@ defmodule PtcRunner.Kernel.Dispatcher do
                     event_sink,
                     inspection_sink,
                     capability_id,
-                    invocation.event_attributes[:mission_name]
+                    invocation.event_attributes[:mission_name],
+                    capability.inspection_capture
                   )
                 )
 
-              {invoke(state, invocation, timeout_ms, context, environment, validation), true}
+              {invoke(
+                 state,
+                 reservation_id,
+                 invocation,
+                 timeout_ms,
+                 context,
+                 environment,
+                 validation
+               ), true}
 
             {:error, :inspection_sink_error} ->
-              {inspection_failure(state), false}
+              {{:settlement, {:adapter_error, :cancelled}, inspection_failure(state)}, false}
           end
 
+        {settlement, invocation_result} = split_settlement(invocation_result)
         {result, exception_diagnostic} = split_exception_diagnostic(invocation_result)
 
         inspection_attempt = %{
@@ -587,6 +679,25 @@ defmodule PtcRunner.Kernel.Dispatcher do
           |> admit_success_output(state, environment, invocation, validation)
           |> merge_result_attributes(invocation.result_attributes)
 
+        inspection_failed_before_settlement? = inspection_failure?(result)
+
+        settled_result =
+          settle_provider_result(
+            state,
+            reservation_id,
+            settlement,
+            result,
+            environment,
+            capability
+          )
+
+        result =
+          if inspection_failed_before_settlement?,
+            do: result,
+            else: settled_result
+
+        result = maybe_merge_error_attributes(result, result, invocation.error_attributes)
+
         result =
           if output_allowed? do
             case inspection_output(
@@ -595,7 +706,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
                    environment,
                    public_name,
                    result,
-                   invocation.event_attributes[:mission_name]
+                   invocation.event_attributes[:mission_name],
+                   capability.inspection_capture
                  ) do
               :ok ->
                 result
@@ -608,6 +720,9 @@ defmodule PtcRunner.Kernel.Dispatcher do
           else
             result
           end
+
+        if inspection_failure?(result),
+          do: RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
 
         _ =
           maybe_emit_limit(
@@ -651,7 +766,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         maybe_merge_error_attributes(result, result, invocation.error_attributes)
 
       {:error, :event_sink_error} ->
-        RunState.release_provider_slot(state)
+        _ = RunState.finish_provider(state, reservation_id, {:adapter_error, :cancelled})
 
         limit_error(
           state,
@@ -675,17 +790,34 @@ defmodule PtcRunner.Kernel.Dispatcher do
     )
   end
 
-  defp inspection_output(nil, _capability_id, _environment, _name, _result, _mission_name),
-    do: :ok
+  defp inspection_output(
+         nil,
+         _capability_id,
+         _environment,
+         _name,
+         _result,
+         _mission_name,
+         _capture
+       ),
+       do: :ok
 
-  defp inspection_output(sink, capability_id, environment, name, result, mission_name) do
+  defp inspection_output(sink, capability_id, environment, name, result, mission_name, capture) do
     InspectionSink.emit(
       sink,
       "capability-output",
       %{capability_id: capability_id},
-      capability_inspection_payload(environment, name, :result, result, mission_name)
+      capability_inspection_payload(environment, name, :result, result, mission_name),
+      output_capture(result, capture)
     )
   end
+
+  # Digest capture removes bulk read output. Error envelopes are small and are
+  # the record an operator reads when a run fails, so they stay full; so does
+  # any result shape full capture would not have admitted as a record. The
+  # identity itself is computed by the sink, so this process sends the same
+  # message in both modes.
+  defp output_capture(%{status: :ok}, :digest_results), do: [capture: :digest_results]
+  defp output_capture(_result, _capture), do: []
 
   defp maybe_capture_exception(
          result,
@@ -769,9 +901,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
     end)
   end
 
-  defp inspection_failure(state) do
-    :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
-
+  defp inspection_failure(_state) do
     %{
       status: :error,
       kind: :inspection_sink_error,
@@ -780,7 +910,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
     }
   end
 
-  defp invocation_context(event_sink, inspection_sink, capability_id, mission_name) do
+  defp inspection_failure?(%{kind: :inspection_sink_error}), do: true
+  defp inspection_failure?(_result), do: false
+
+  defp invocation_context(event_sink, inspection_sink, capability_id, mission_name, capture) do
     traceparent =
       case event_sink && EventSink.identity(event_sink) do
         {:ok, %{trace_id: trace_id}} -> Events.traceparent(trace_id, capability_id)
@@ -790,14 +923,23 @@ defmodule PtcRunner.Kernel.Dispatcher do
     %{
       capability_id: capability_id,
       inspection_sink: inspection_sink,
-      traceparent: traceparent
+      traceparent: traceparent,
+      inspection_capture: capture
     }
     |> then(fn context ->
       if is_binary(mission_name), do: Map.put(context, :mission_name, mission_name), else: context
     end)
   end
 
-  defp invoke(state, invocation, requested_timeout_ms, context, environment, validation) do
+  defp invoke(
+         state,
+         reservation_id,
+         invocation,
+         requested_timeout_ms,
+         context,
+         environment,
+         validation
+       ) do
     capability = invocation.capability
     arguments = invocation.arguments
     remaining = RunState.usage(state).remaining_ms
@@ -809,13 +951,15 @@ defmodule PtcRunner.Kernel.Dispatcher do
     limits = state_limits(state)
 
     if timeout_ms <= 0 do
-      if llm_deadline_wins?(invocation) do
-        finish_llm_timeout(state)
-        llm_request_timeout()
-      else
-        RunState.release_provider_slot(state)
-        limit_error(state, nil, :run_deadline)
-      end
+      result =
+        if llm_deadline_wins?(invocation) do
+          record_llm_timeout_evidence(state)
+          llm_request_timeout()
+        else
+          limit_error(state, nil, :run_deadline)
+        end
+
+      {:settlement, {:adapter_error, :timeout}, result}
     else
       parent = self()
       go = make_ref()
@@ -853,80 +997,97 @@ defmodule PtcRunner.Kernel.Dispatcher do
           end
         end)
 
-      case RunState.attach_provider(state, pid) do
+      case RunState.attach_provider(state, reservation_id, pid) do
         :ok ->
-          send(pid, go)
-          await_provider(state, invocation, pid, ref, timeout_ms, environment, validation)
+          case RunState.mark_provider_dispatched(state, reservation_id, pid) do
+            :ok ->
+              send(pid, go)
+
+              await_provider(
+                state,
+                reservation_id,
+                invocation,
+                pid,
+                ref,
+                timeout_ms,
+                environment,
+                validation
+              )
+
+            {:error, _reason} ->
+              Process.exit(pid, :kill)
+              await_down(pid, ref)
+
+              {:settlement, {:adapter_error, :cancelled}, limit_error(state, nil, :run_closed)}
+          end
 
         {:error, :provider_down} ->
           reason = await_down(pid, ref)
-          RunState.release_provider_slot(state)
 
           # The provider died before the gate opened, so the callback never
           # ran and no effect can have reached the outside world.
-          post_invocation_failure(
-            provider_exit(reason),
-            environment,
-            capability,
-            :not_dispatched
-          )
+          {:settlement, {:adapter_error, :worker_exit},
+           post_invocation_failure(
+             provider_exit(reason),
+             environment,
+             capability,
+             :not_dispatched
+           )}
 
-        {:error, :closed} ->
+        {:error, reason} when reason in [:closed, :unknown_reservation] ->
           await_down(pid, ref)
-          RunState.release_provider_slot(state)
-          limit_error(state, nil, :run_closed)
+          {:settlement, {:adapter_error, :cancelled}, limit_error(state, nil, :run_closed)}
       end
     end
   end
 
-  defp await_provider(state, invocation, pid, ref, timeout_ms, environment, validation) do
+  defp await_provider(
+         state,
+         _reservation_id,
+         invocation,
+         pid,
+         ref,
+         timeout_ms,
+         environment,
+         validation
+       ) do
     capability = invocation.capability
 
     receive do
-      {:provider_result, ^pid, completed_at_ms, result} ->
+      {:provider_result, ^pid, completed_at_ms, raw_result} ->
         await_down(pid, ref)
-        result = enforce_completion_deadline(invocation, completed_at_ms, result)
+        settlement = settlement_evidence(raw_result)
+        result = enforce_completion_deadline(invocation, completed_at_ms, raw_result)
+        record_provider_diagnostics(state, capability, result)
 
-        case RunState.finish_provider(
-               state,
-               replay_request_hash(result),
-               llm_provider_error(capability, result)
-             ) do
-          :ok ->
-            normalize_result(
-              state,
-              environment,
-              invocation,
-              validation,
-              {:provider_completed, completed_at_ms, result}
-            )
+        normalized =
+          normalize_result(
+            state,
+            environment,
+            invocation,
+            validation,
+            {:provider_completed, completed_at_ms, result}
+          )
 
-          {:error, :run_closed} ->
-            cancel_exception_diagnostic(result)
-
-            state
-            |> limit_error(nil, :run_closed)
-            |> post_invocation_failure(environment, capability)
-        end
+        {:settlement, settlement, normalized}
 
       {:DOWN, ^ref, :process, ^pid, reason} ->
-        RunState.release_provider_slot(state)
-        post_invocation_failure(provider_exit(reason), environment, capability)
+        {:settlement, {:adapter_error, :worker_exit},
+         post_invocation_failure(provider_exit(reason), environment, capability)}
     after
       timeout_ms ->
         Process.exit(pid, :kill)
         await_down(pid, ref)
         timeout_result = await_timeout_result(invocation)
 
-        if timeout_result.reason == :llm_request_timeout,
-          do: finish_llm_timeout(state),
-          else: finish_provider_timeout(state)
+        if capability.name == "llm-request", do: record_llm_timeout_evidence(state)
 
-        post_invocation_failure(
-          timeout_result,
-          environment,
-          capability
-        )
+        {:settlement, {:adapter_error, :timeout},
+         post_invocation_failure(
+           timeout_result,
+           environment,
+           capability
+         )}
     end
   end
 
@@ -985,12 +1146,74 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp split_exception_diagnostic(result), do: {result, nil}
 
-  defp cancel_exception_diagnostic(
-         {:raised, :exception, {:diagnostic_worker, pid, _exception_class}}
-       ),
-       do: CapabilityExceptionDiagnostic.cancel(pid)
+  defp split_settlement({:settlement, evidence, result}), do: {evidence, result}
 
-  defp cancel_exception_diagnostic(_result), do: :ok
+  defp settlement_evidence({:ok, value}) when is_map(value) and not is_struct(value) do
+    case Map.fetch(value, "tokens") do
+      :error ->
+        {:adapter_success, :missing}
+
+      {:ok, usage} ->
+        case LLMUsage.normalize(usage) do
+          {:ok, canonical} -> {:adapter_success, {:valid, canonical}}
+          {:error, :invalid_llm_usage} -> {:adapter_success, :invalid}
+        end
+    end
+  end
+
+  defp settlement_evidence({:ok, _value}), do: {:adapter_success, :invalid}
+  defp settlement_evidence(_error), do: {:adapter_error, :provider_error}
+
+  defp settle_provider_result(
+         state,
+         reservation_id,
+         evidence,
+         result,
+         environment,
+         capability
+       ) do
+    case RunState.finish_provider(state, reservation_id, evidence) do
+      {:ok, :settled} ->
+        result
+
+      {:ok, {:overrun, _ledgers}} ->
+        _ =
+          RunState.record_llm_provider_failure(state, :reservation_bound_exceeded, false)
+
+        post_invocation_failure(
+          %{
+            status: :error,
+            kind: :provider_error,
+            reason: :reservation_bound_exceeded,
+            retryable?: false
+          },
+          environment,
+          capability
+        )
+
+      {:error, :unknown_reservation} ->
+        state
+        |> limit_error(nil, :run_closed)
+        |> post_invocation_failure(environment, capability)
+    end
+  end
+
+  defp record_provider_diagnostics(state, capability, result) do
+    case replay_request_hash(result) do
+      request_hash when is_binary(request_hash) ->
+        RunState.record_replay_miss(state, request_hash)
+
+      nil ->
+        :ok
+    end
+
+    case llm_provider_error(capability, result) do
+      %ProviderError{} = error -> RunState.record_llm_provider_failure(state, error)
+      nil -> :ok
+    end
+
+    :ok
+  end
 
   defp normalize_result(
          _state,
@@ -1172,28 +1395,6 @@ defmodule PtcRunner.Kernel.Dispatcher do
     %{heap_words: heap_words, deadline_ms: deadline_ms, evaluation_lease: evaluation_lease}
   end
 
-  defp finish_llm_timeout(state) do
-    _ =
-      RunState.finish_provider(
-        state,
-        nil,
-        ProviderError.new(:timeout, "LLM request deadline elapsed", retryable?: true)
-      )
-
-    :ok
-  end
-
-  defp finish_provider_timeout(state) do
-    _ =
-      RunState.finish_provider(
-        state,
-        nil,
-        ProviderError.new(:timeout, "provider timeout", retryable?: true)
-      )
-
-    :ok
-  end
-
   defp record_llm_timeout_evidence(state) do
     _ =
       RunState.record_llm_provider_failure(
@@ -1248,6 +1449,132 @@ defmodule PtcRunner.Kernel.Dispatcher do
          _deadline_ms
        ),
        do: {:ok, invocation}
+
+  defp attest_llm_reservation(
+         %CapabilityInvocation{llm_source: "llm"} = invocation,
+         state,
+         validation_heap_words,
+         validation_deadline_ms
+       ) do
+    limits = state_limits(state)
+
+    if is_nil(limits.llm_total_tokens) and is_nil(limits.llm_cost_microusd) do
+      {:ok, invocation}
+    else
+      attest_live_llm_reservation(
+        invocation,
+        state,
+        limits,
+        validation_heap_words,
+        validation_deadline_ms
+      )
+    end
+  end
+
+  defp attest_llm_reservation(
+         %CapabilityInvocation{
+           capability: %Capability{name: "llm-request"},
+           llm_source: source
+         } = invocation,
+         state,
+         _heap_words,
+         _deadline_ms
+       )
+       when source != "llm_replay" do
+    limits = state_limits(state)
+
+    if is_nil(limits.llm_total_tokens) and is_nil(limits.llm_cost_microusd),
+      do: {:ok, invocation},
+      else: {:error, :reservation_attestation_unavailable}
+  end
+
+  defp attest_llm_reservation(invocation, _state, _heap_words, _deadline_ms),
+    do: {:ok, invocation}
+
+  defp attest_live_llm_reservation(
+         %CapabilityInvocation{reservation_bound: bound} = invocation,
+         state,
+         limits,
+         validation_heap_words,
+         validation_deadline_ms
+       )
+       when is_function(bound, 2) do
+    timeout_ms =
+      invocation
+      |> CapabilityInvocation.clamp_provider_timeout(RunState.remaining_ms(state))
+      |> validation_worker_timeout_ms(validation_deadline_ms)
+
+    if timeout_ms <= 0 do
+      {:error, :reservation_attestation_unavailable}
+    else
+      result =
+        BoundedWorker.run(
+          fn -> bound.(invocation.arguments, invocation.llm_reservation_tariff) end,
+          timeout_ms: timeout_ms,
+          max_heap_words: validation_heap_words,
+          cancel_with_caller: true
+        )
+
+      case result do
+        {:ok, {:ok, attestation}} ->
+          put_reservation_attestation(invocation, attestation, limits)
+
+        _unavailable ->
+          {:error, :reservation_attestation_unavailable}
+      end
+    end
+  end
+
+  defp attest_live_llm_reservation(
+         _invocation,
+         _state,
+         _limits,
+         _validation_heap_words,
+         _validation_deadline_ms
+       ),
+       do: {:error, :reservation_attestation_unavailable}
+
+  defp put_reservation_attestation(
+         invocation,
+         %{total_tokens: total_tokens, cost: cost} = attestation,
+         limits
+       )
+       when map_size(attestation) == 2 do
+    with true <- valid_attested_integer?(total_tokens),
+         true <-
+           is_integer(invocation.llm_output_tokens) and
+             total_tokens >= invocation.llm_output_tokens,
+         {:ok, cost_microusd} <-
+           validate_attested_cost(cost, invocation.llm_reservation_tariff, limits) do
+      {:ok,
+       %{
+         invocation
+         | reservation: %{total_tokens: total_tokens, cost_microusd: cost_microusd}
+       }}
+    else
+      _invalid -> {:error, :reservation_attestation_unavailable}
+    end
+  end
+
+  defp put_reservation_attestation(_invocation, _attestation, _limits),
+    do: {:error, :reservation_attestation_unavailable}
+
+  defp validate_attested_cost(nil, nil, %{llm_cost_microusd: nil}), do: {:ok, nil}
+
+  defp validate_attested_cost(
+         %{currency: "USD", microunits: microunits, tariff_id: tariff_id} = cost,
+         %{currency: "USD", id: tariff_id} = tariff,
+         %{llm_cost_microusd: limit}
+       )
+       when map_size(cost) == 3 and map_size(tariff) == 2 and is_integer(limit) and
+              is_binary(tariff_id) do
+    if valid_attested_integer?(microunits), do: {:ok, microunits}, else: :error
+  end
+
+  defp validate_attested_cost(_cost, _tariff, _limits), do: :error
+
+  defp valid_attested_integer?(value),
+    do: is_integer(value) and value >= 0 and value <= LLMUsage.maximum_integer()
 
   defp compile_live_request_schema(
          invocation,
@@ -1862,6 +2189,45 @@ defmodule PtcRunner.Kernel.Dispatcher do
     envelope = %{status: :error, kind: :limit_exceeded, reason: reason, retryable?: false}
 
     if extra == %{}, do: envelope, else: Map.put(envelope, :details, extra)
+  end
+
+  defp llm_budget_limit_error(
+         state,
+         event_sink,
+         invocation,
+         :total_tokens,
+         environment,
+         ledger
+       ) do
+    limit_error(
+      state,
+      event_sink,
+      :llm_total_tokens,
+      environment,
+      invocation.event_attributes[:mission_name],
+      %{
+        limit: :llm_total_tokens,
+        limit_value: ledger["limit"],
+        requested: invocation.reservation.total_tokens,
+        remaining: ledger["remaining"]
+      }
+    )
+  end
+
+  defp llm_budget_limit_error(state, event_sink, invocation, :cost, environment, ledger) do
+    limit_error(
+      state,
+      event_sink,
+      :llm_cost_microusd,
+      environment,
+      invocation.event_attributes[:mission_name],
+      %{
+        limit: :llm_cost_microusd,
+        limit_value: ledger["limit_microusd"],
+        requested: invocation.reservation.cost_microusd,
+        remaining: ledger["remaining_microusd"]
+      }
+    )
   end
 
   defp maybe_emit_limit(

@@ -29,6 +29,11 @@ defmodule PtcRunner.Kernel.LLMFailureCatalogTest do
     assert LLMFailureCatalog.consume_kind("llm-request-timeout") == :timeout
     assert LLMFailureCatalog.consume_kind("timeout") == :timeout
 
+    assert LLMFailureCatalog.consume_kind("reservation-bound-exceeded") ==
+             :reservation_bound_exceeded
+
+    refute ProviderError.valid?(%ProviderError{kind: :reservation_bound_exceeded})
+
     assert SafeMetadata.llm_provider_failure(%{
              kind: :llm_provider_error,
              reason: %{reason: :provider_timeout, retryable?: true}

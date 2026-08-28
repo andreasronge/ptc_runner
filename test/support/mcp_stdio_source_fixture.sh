@@ -29,6 +29,18 @@ write_text_result() {
   printf '"}]}}\n'
 }
 
+# Many small strings retain far more BEAM memory than their encoded bytes, so
+# this result passes the installed `max_result_bytes` while exceeding the
+# run's retained-size admission.
+write_padded_structured_result() {
+  response_id=$1
+  count=$2
+
+  printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","structuredContent":{"value":42,"padding":[' "$response_id"
+  awk -v count="$count" 'BEGIN { for (i = 1; i <= count; i++) { if (i > 1) printf ","; printf "\"p%d\"", i } }'
+  printf ']},"content":[]}}\n'
+}
+
 while IFS= read -r line
 do
   id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([1-9][0-9]*\).*/\1/p')
@@ -98,7 +110,11 @@ do
       ;;
     *'"method":"tools/list"'*)
       printf '%s:%s\n' "$id" 'tools/list' >> "$marker"
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured","description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id"
+      if [ "$mode" = "structured-padded" ] || [ "$mode" = "structured-padded-dense" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured","description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"},"padding":{"type":"array","items":{"type":"string"}}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","tools":[{"name":"structured","description":"Return one structured value.","inputSchema":{"type":"object","properties":{"query":{"type":"string","x-mcp-header":"Query"}},"required":["query"]},"outputSchema":{"type":"object","properties":{"value":{"type":"integer"}},"required":["value"]}}],"nextCursor":"page-2","ttlMs":0,"cacheScope":"private"}}\n' "$id"
+      fi
       ;;
     *'"method":"tools/call"'*'"name":"structured"'*)
       case "$line" in *'"query":"x"'*) ;; *) exit 65 ;; esac
@@ -106,7 +122,13 @@ do
       if [ "$mode" = "exit-before-response" ]; then
         exit 0
       fi
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","structuredContent":{"value":42},"content":[]}}\n' "$id"
+      if [ "$mode" = "structured-padded" ]; then
+        write_padded_structured_result "$id" 28000
+      elif [ "$mode" = "structured-padded-dense" ]; then
+        write_padded_structured_result "$id" 45000
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"resultType":"complete","structuredContent":{"value":42},"content":[]}}\n' "$id"
+      fi
       if [ "$mode" = "exit-after-response" ]; then
         exit 0
       fi

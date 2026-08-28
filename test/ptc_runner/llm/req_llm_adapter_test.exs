@@ -10,6 +10,7 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.LLM.ReqLLMPreparedModel
   alias PtcRunner.LLM.Requirements
   alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.StreamingInspection
@@ -261,6 +262,128 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                )
 
       assert attestation.usage_guarantees == %{tokens: true, cost_currency: "USD"}
+    end
+
+    test "attests conservative request token and fixed-point USD reservation bounds" do
+      model =
+        LLMDB.Model.new!(%{
+          id: "reservation-fixture",
+          provider: :openrouter,
+          cost: %{input: 2.0, output: 4.0, request: 0.25}
+        })
+
+      target = %ReqLLMPreparedModel{
+        selector: "openrouter:reservation-fixture",
+        model: model,
+        exact_options: %{max_tokens: 100}
+      }
+
+      request = %{"messages" => [%{"role" => "user", "content" => "hello"}]}
+      tariff = %{currency: "USD", id: "fixture-v1"}
+      total_tokens = :erlang.external_size(request) + 256 + 100
+
+      assert %{
+               total_tokens: ^total_tokens,
+               cost: %{
+                 currency: "USD",
+                 tariff_id: "fixture-v1",
+                 microunits: microunits
+               }
+             } = ReqLLMAdapter.reservation_bound(target, request, tariff)
+
+      assert microunits == total_tokens * 4 + 250_000
+
+      assert %{total_tokens: ^total_tokens, cost: nil} =
+               ReqLLMAdapter.reservation_bound(target, request, nil)
+    end
+
+    test "uses the complete token component set for a conservative cost bound" do
+      model =
+        LLMDB.Model.new!(%{
+          id: "component-reservation-fixture",
+          provider: :xai,
+          cost: %{input: 1.0, output: 2.0},
+          pricing: %{
+            currency: "USD",
+            components: [
+              %{id: "token.input", kind: "token", unit: "token", per: 1_000_000, rate: 1.0},
+              %{id: "token.output", kind: "token", unit: "token", per: 1_000_000, rate: 2.0},
+              %{
+                id: "token.output.long_context",
+                kind: "token",
+                unit: "token",
+                per: 1_000_000,
+                rate: 4.0
+              }
+            ]
+          }
+        })
+
+      target = %ReqLLMPreparedModel{
+        selector: "xai:component-reservation-fixture",
+        model: model,
+        exact_options: %{max_tokens: 100}
+      }
+
+      request = %{"messages" => []}
+      total_tokens = :erlang.external_size(request) + 256 + 100
+
+      assert %{cost: %{microunits: microunits}} =
+               ReqLLMAdapter.reservation_bound(target, request, %{currency: "USD", id: "v1"})
+
+      assert microunits == total_tokens * 7
+    end
+
+    test "refuses USD reservation attestation for unbounded image-priced output" do
+      requirements = cost_budget_requirements()
+
+      assert {:error, :unsupported_model_option} =
+               ReqLLMAdapter.prepare_model("google:gemini-2.5-flash-image", requirements)
+    end
+
+    test "does not reserve for provider-hosted tools unavailable on this adapter surface" do
+      requirements = cost_budget_requirements()
+
+      assert {:ok, target, _status, ^requirements} =
+               ReqLLMAdapter.prepare_model("openai:gpt-5", requirements)
+
+      request = %{"messages" => [], "tools" => []}
+      total_tokens = :erlang.external_size(request) + 256 + 64
+
+      assert %{cost: %{microunits: microunits}} =
+               ReqLLMAdapter.reservation_bound(
+                 target,
+                 request,
+                 requirements.reservation.cost_tariff
+               )
+
+      assert microunits ==
+               ceil(total_tokens * 1.25) + ceil(total_tokens * 10.0) +
+                 ceil(total_tokens * 0.125)
+    end
+
+    test "prepares a cataloged model for token and cost reservation attestation" do
+      tariff = %{currency: "USD", id: "host-tariff-v1"}
+
+      requirements = %{
+        Requirements.interim(%{max_tokens: 64})
+        | usage_guarantees: %{tokens: true, cost_currency: "USD"},
+          reservation: %{total_tokens?: true, cost_tariff: tariff}
+      }
+
+      assert {:ok, target, _status, ^requirements} =
+               ReqLLMAdapter.prepare_model(
+                 @openrouter_model,
+                 requirements
+               )
+
+      assert %{
+               total_tokens: total_tokens,
+               cost: %{currency: "USD", tariff_id: "host-tariff-v1", microunits: microunits}
+             } = ReqLLMAdapter.reservation_bound(target, %{"messages" => []}, tariff)
+
+      assert total_tokens > 64
+      assert microunits > 0
     end
 
     test "attests the complete inference-control set on OpenRouter" do
@@ -782,6 +905,17 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
     end
 
     classified_http(@openrouter_model, request(plug))
+  end
+
+  defp cost_budget_requirements do
+    %{
+      Requirements.interim(%{max_tokens: 64})
+      | usage_guarantees: %{tokens: true, cost_currency: "USD"},
+        reservation: %{
+          total_tokens?: true,
+          cost_tariff: %{currency: "USD", id: "fixture-v1"}
+        }
+    }
   end
 
   defp classified_http(selector, request) do

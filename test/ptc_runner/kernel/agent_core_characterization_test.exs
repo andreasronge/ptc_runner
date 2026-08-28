@@ -27,7 +27,12 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
   alias PtcRunner.TestSupport.StreamingInspection
 
   import PtcRunner.TestSupport.AgentFixtures,
-    only: [mission_with_source: 2, replay_alias_route: 3, replay_alias_router: 2]
+    only: [
+      live_alias_route: 5,
+      mission_with_source: 2,
+      replay_alias_route: 3,
+      replay_alias_router: 2
+    ]
 
   @provider_kinds [
     :denied,
@@ -53,6 +58,7 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
     "internal",
     "domain-error",
     "invalid-result",
+    "reservation-bound-exceeded",
     "authentication-failed",
     "payment-required",
     "rate-limited",
@@ -391,15 +397,7 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
 
       {:ok, router} =
         LLMRouter.new([
-          %{
-            alias: "chosen",
-            source: "llm",
-            installation_revision: "chosen-v1",
-            default?: true,
-            capability: hung,
-            max_calls: nil,
-            request_timeout_ms: 100
-          }
+          live_alias_route("chosen", true, hung, nil, request_timeout_ms: 100)
         ])
 
       {outcome, fail_fast, records, events, usage} =
@@ -414,7 +412,7 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
       }
 
       assert_provider_failure_outcome(outcome, "chosen", error)
-      assert_llm_request_inspection(records, Map.delete(error, "model"))
+      assert_llm_request_inspection(records, error)
       assert_authenticated_fail_fast(fail_fast, :timeout, true)
       assert usage.capability_calls.workflow["llm-request"] == 1
 
@@ -577,7 +575,7 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
     }
 
     assert_provider_failure_outcome(outcome, "chosen", expected)
-    assert_llm_request_inspection(records, Map.delete(expected, "model"))
+    assert_llm_request_inspection(records, expected)
     assert_authenticated_fail_fast(fail_fast, kind, true)
     assert usage.capability_calls.workflow["llm-request"] == 1
 

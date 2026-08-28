@@ -33,6 +33,17 @@ defmodule PtcRunner.Kernel.LLMUsageTest do
              LLMUsage.normalize(%{total_cost: %{currency: "USD", microunits: @maximum}})
   end
 
+  test "scales decimal tariff rates upward without floating-point arithmetic" do
+    assert {:ok, 3} = LLMUsage.ceil_scaled_decimal("0.0000021", 1_000_000, 1)
+    assert {:ok, 10} = LLMUsage.ceil_scaled_decimal("2.5", 4, 1)
+    assert {:ok, 1} = LLMUsage.ceil_scaled_decimal("1", 1, 3)
+    assert {:ok, 0} = LLMUsage.ceil_scaled_decimal("999", 0, 1)
+    assert :error = LLMUsage.ceil_scaled_decimal("1e100", 1, 1)
+    assert :error = LLMUsage.ceil_scaled_decimal("1e999999999999999999", 1, 1)
+    assert {:ok, 1} = LLMUsage.ceil_scaled_decimal("1e-999999999999999999", 1, 1)
+    assert :error = LLMUsage.ceil_scaled_decimal("2", @maximum, 1)
+  end
+
   test "rejects invalid, negative, overlong, overflowing, and non-canonical costs" do
     invalid = [
       nil,

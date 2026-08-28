@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.SessionTrace do
   alias PtcRunner.Kernel.AnalysisResources
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.TraceLog
 
@@ -238,6 +239,7 @@ defmodule PtcRunner.Kernel.SessionTrace do
         {:DOWN, ref, :process, _pid, _reason},
         %{lifecycle_owner_ref: ref, construction_complete?: true} = state
       ) do
+    llm_budget = close_and_read_llm_budget(state)
     stop_attached_session(state)
 
     next =
@@ -248,7 +250,7 @@ defmodule PtcRunner.Kernel.SessionTrace do
         session_ref: nil,
         session_pid: nil
       })
-      |> finalize_aborted_owner()
+      |> finalize_aborted_owner(llm_budget)
       |> cleanup_resources()
       |> persist_aborted_owner()
 
@@ -269,9 +271,13 @@ defmodule PtcRunner.Kernel.SessionTrace do
   def handle_info({:DOWN, ref, :process, _pid, reason}, %{session_ref: ref} = state) do
     owner_reason = if reason == :normal, do: :session_owner_stopped, else: :session_owner_failed
     outcome_reason = state.pending_terminal_reason || owner_reason
+    llm_budget = close_and_read_llm_budget(state)
 
     state =
-      case finalize_state(state, :error, outcome_reason, %{aborted: true}) do
+      case finalize_state(state, :error, outcome_reason, %{
+             aborted: true,
+             llm_budget: llm_budget
+           }) do
         {:ok, next} -> next
         {:error, _reason, next} -> next
       end
@@ -306,6 +312,13 @@ defmodule PtcRunner.Kernel.SessionTrace do
   end
 
   defp finalize_state(%{persistence: :open} = state, outcome, reason, usage) do
+    usage =
+      if Map.has_key?(usage, :llm_budget) or Map.has_key?(usage, "llm_budget") do
+        usage
+      else
+        Map.put(usage, :llm_budget, read_llm_budget(state))
+      end
+
     stopped = %{outcome: outcome, reason: reason, usage: usage}
 
     case EventSink.finalize_and_events(state.sink, stopped) do
@@ -459,10 +472,10 @@ defmodule PtcRunner.Kernel.SessionTrace do
     %{state | sink_ref: nil}
   end
 
-  defp finalize_aborted_owner(state) do
+  defp finalize_aborted_owner(state, llm_budget) do
     reason = state.pending_terminal_reason || :session_owner_failed
 
-    case finalize_state(state, :error, reason, %{aborted: true}) do
+    case finalize_state(state, :error, reason, %{aborted: true, llm_budget: llm_budget}) do
       {:ok, next} -> next
       {:error, _reason, next} -> next
     end
@@ -474,6 +487,24 @@ defmodule PtcRunner.Kernel.SessionTrace do
       {:error, _reason, next} -> next
     end
   end
+
+  defp close_and_read_llm_budget(%{run_state: %RunState{} = run_state} = state) do
+    :ok = RunState.close_and_drain(run_state)
+    RunState.usage(run_state).llm_budget
+  catch
+    :exit, _reason -> LLMBudget.unavailable_terminal_projection(state.limits)
+  end
+
+  defp close_and_read_llm_budget(state),
+    do: LLMBudget.unavailable_terminal_projection(state.limits)
+
+  defp read_llm_budget(%{run_state: %RunState{} = run_state} = state) do
+    RunState.usage(run_state).llm_budget
+  catch
+    :exit, _reason -> LLMBudget.unavailable_terminal_projection(state.limits)
+  end
+
+  defp read_llm_budget(state), do: LLMBudget.unavailable_terminal_projection(state.limits)
 
   defp cleanup_resources(state) do
     state

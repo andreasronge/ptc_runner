@@ -5,11 +5,18 @@ defmodule PtcRunner.Kernel.LLMRouter do
   alias PtcRunner.Kernel.CapabilityInvocation
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.RoutedCapability
+  alias PtcRunner.LLM.Requirements
 
   @alias ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @sources ~w(llm llm_replay custom)
   @route_keys [:alias, :source, :installation_revision, :default?, :capability, :max_calls]
-  @optional_route_keys [:structured_output_mode, :request_timeout_ms]
+  @optional_route_keys [
+    :structured_output_mode,
+    :request_timeout_ms,
+    :output_tokens,
+    :reservation_tariff,
+    :reservation_bound
+  ]
   @structured_output_modes [:json_schema, :json_object, :unsupported]
 
   @type route :: %{
@@ -69,11 +76,27 @@ defmodule PtcRunner.Kernel.LLMRouter do
       is_binary(route.installation_revision) and route.installation_revision =~ @alias and
       is_boolean(route.default?) and match?(%Capability{name: "llm-request"}, route.capability) and
       valid_max_calls?(route.max_calls) and
+      valid_reservation_route?(route) and
       valid_structured_output_mode?(Map.get(route, :structured_output_mode)) and
       valid_route_timeout_ms?(Map.get(route, :request_timeout_ms), route.source)
   end
 
   defp valid_route?(_route), do: false
+
+  defp valid_reservation_route?(%{source: "llm"} = route) do
+    is_integer(Map.get(route, :output_tokens)) and Map.get(route, :output_tokens) > 0 and
+      is_function(Map.get(route, :reservation_bound), 2) and
+      Requirements.valid_cost_tariff?(Map.get(route, :reservation_tariff))
+  end
+
+  defp valid_reservation_route?(%{source: source} = route)
+       when source in ["llm_replay", "custom"],
+       do:
+         not Map.has_key?(route, :output_tokens) and
+           not Map.has_key?(route, :reservation_bound) and
+           not Map.has_key?(route, :reservation_tariff)
+
+  defp valid_reservation_route?(_route), do: false
 
   defp valid_structured_output_mode?(nil), do: true
 
@@ -178,7 +201,11 @@ defmodule PtcRunner.Kernel.LLMRouter do
        result_attributes: %{"model" => route.alias},
        usage_projection: :llm_tokens,
        structured_output_mode: Map.get(route, :structured_output_mode),
-       request_timeout_ms: live_request_timeout_ms(route)
+       request_timeout_ms: live_request_timeout_ms(route),
+       llm_source: route.source,
+       llm_output_tokens: Map.get(route, :output_tokens),
+       llm_reservation_tariff: Map.get(route, :reservation_tariff),
+       reservation_bound: Map.get(route, :reservation_bound)
      }}
   end
 

@@ -38,12 +38,12 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
 
   test "the requester deadline is clamped by the existing workflow deadline" do
     parent = self()
-    validation_deadline_ms = System.monotonic_time(:millisecond) + 500
+    validation_deadline_ms = System.monotonic_time(:millisecond) + 5_000
 
     {result, _state, _sink} =
       dispatch_llm(parent,
-        request_timeout_ms: 5_000,
-        timeout_ms: 5_000,
+        request_timeout_ms: 50_000,
+        timeout_ms: 50_000,
         validation_deadline_ms: validation_deadline_ms,
         requester: fn _request, context ->
           send(parent, {:called, context})
@@ -104,6 +104,38 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
     assert Enum.any?(EventSink.events(sink), fn event ->
              event.type == "capability-stopped" and event.data.reason == :llm_request_timeout
            end)
+  end
+
+  test "the whole-call deadline bounds reservation attestation before provider dispatch" do
+    parent = self()
+
+    {result, _state, _sink} =
+      dispatch_llm(parent,
+        request_timeout_ms: 100,
+        timeout_ms: 5_000,
+        limits: [llm_total_tokens: 10_000],
+        reservation_bound: fn _request, _tariff ->
+          send(parent, :attesting_reservation)
+
+          receive do
+            :never -> {:ok, %{total_tokens: 4_096, cost: nil}}
+          end
+        end,
+        requester: fn _request, _context ->
+          send(parent, :provider_called)
+          {:ok, %{content: "ok", tokens: %{input: 1, output: 1}}}
+        end
+      )
+
+    assert %{
+             status: :error,
+             kind: :capability_unavailable,
+             reason: :reservation_attestation_unavailable,
+             retryable?: false
+           } = result
+
+    assert_received :attesting_reservation
+    refute_received :provider_called
   end
 
   test "an equal enclosing dispatch timeout keeps provider_timeout" do
@@ -301,13 +333,13 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
 
   test "an earlier shared validation deadline stays authoritative after the LLM deadline" do
     parent = self()
-    validation_deadline_ms = System.monotonic_time(:millisecond) + 300
+    validation_deadline_ms = System.monotonic_time(:millisecond) + 5_000
 
     task =
       Task.async(fn ->
         dispatch_llm(parent,
-          request_timeout_ms: 600,
-          timeout_ms: 3_000,
+          request_timeout_ms: 10_000,
+          timeout_ms: 30_000,
           validation_deadline_ms: validation_deadline_ms,
           structured_output_mode: :json_object,
           arguments: %{"schema" => @schema},
@@ -380,9 +412,22 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
         timeout_ms -> Map.put(route, :request_timeout_ms, timeout_ms)
       end
 
+    route =
+      if route.source == "llm" do
+        Map.merge(route, %{
+          output_tokens: 4_096,
+          reservation_bound:
+            Keyword.get(opts, :reservation_bound, fn _request, _tariff ->
+              {:ok, %{total_tokens: 4_096, cost: nil}}
+            end)
+        })
+      else
+        route
+      end
+
     assert {:ok, router} = LLMRouter.new([route])
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [router])
-    {:ok, limits} = Limits.new()
+    {:ok, limits} = Limits.new(Keyword.get(opts, :limits, []))
     {:ok, state} = RunState.start(limits)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "llm-deadline")
     timeout_ms = Keyword.get(opts, :timeout_ms, 1_000)

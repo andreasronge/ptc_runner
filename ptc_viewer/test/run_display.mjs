@@ -4,9 +4,11 @@ import {
   damagedTraceNote,
   emptyRunsMessage,
   excludedTraceNote,
+  formatRunBudget,
   formatRunSpend,
   searchableRunFields,
   traceSourceNotes,
+  validBudget,
   validSpend
 } from '../priv/static/js/run-display.js';
 
@@ -54,6 +56,35 @@ assert.deepEqual(formatRunSpend({
   total_cost: { currency: 'USD', microunits: 0 }
 }), []);
 assert.deepEqual(formatRunSpend(null), []);
+
+const budget = {
+  total_tokens: {
+    state: 'available', limit: 100000, reserved: 0, charged: 12000,
+    remaining: 88000, refused: 1
+  },
+  cost: {
+    state: 'incomplete', currency: 'USD', limit_microusd: 5000000,
+    reserved_microusd: 0, charged_microusd: 2300000,
+    remaining_microusd: 2700000, refused: 0
+  }
+};
+assert.equal(validBudget(budget), true);
+assert.deepEqual(formatRunBudget(budget), [
+  '12,000 / 100,000 token budget',
+  '2.3 / 5 USD budget incomplete'
+]);
+assert.deepEqual(formatRunBudget({ total_tokens: null, cost: null }), []);
+assert.equal(validBudget({ ...budget, extra: null }), false);
+assert.equal(validBudget({
+  ...budget,
+  total_tokens: { ...budget.total_tokens, reserved: 1, remaining: 87999 }
+}), false);
+assert.equal(validBudget({
+  ...budget,
+  total_tokens: {
+    ...budget.total_tokens, state: 'overrun', charged: 60000, remaining: 0
+  }
+}), true);
 
 assert(searchableRunFields(run, matchingProject).includes('chief-of-staff-02-granting-data'));
 assert(searchableRunFields(run, matchingProject).includes('agent'));

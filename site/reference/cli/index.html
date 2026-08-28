@@ -180,7 +180,8 @@ commit. Run <code class="inline">ptc init</code> with an unknown example name to
 names listed. The trees are byte-identical to the repository's, so the commands the
 guides print work from wherever the copy was created rather than from one
 checkout directory.</p><p>For runs that produce a validated terminal event batch, <code class="inline">execution.usage</code>
-includes the required aggregate <code class="inline">llm_spend</code> projection, <code class="inline">llm_usage</code> grouped by
+includes the required authoritative <code class="inline">llm_budget</code>, aggregate observational
+<code class="inline">llm_spend</code>, and <code class="inline">llm_usage</code> grouped by
 alias and installation revision,
 <code class="inline">llm_usage_by_model</code> grouped by an attested public resolved model, and
 <code class="inline">unattributed_model_calls</code>. <code class="inline">llm_spend</code> is byte-equivalent to the value in the
@@ -207,7 +208,16 @@ including dropped <code class="inline">capability-started</code> or <code class=
 preserving other known usage. Non-empty <code class="inline">events_dropped</code> for other event types
 means an available detailed summary covers retained evidence and may not be
 complete. <code class="inline">llm_usage_state</code> describes reconstruction of those detailed rows;
-it does not replace the independently sealed five-state <code class="inline">llm_spend</code> value.</p><p>Artifact publication currently requires a Unix host with POSIX-compatible
+it does not replace the independently sealed five-state <code class="inline">llm_spend</code> value.</p><p><code class="inline">llm_budget</code> always has the exact outer keys <code class="inline">total_tokens</code> and <code class="inline">cost</code>; either
+is <code class="inline">null</code> when its optional host limit is disabled. An enabled token ledger
+reports <code class="inline">state</code>, <code class="inline">limit</code>, <code class="inline">reserved</code>, <code class="inline">charged</code>, <code class="inline">remaining</code>, and <code class="inline">refused</code>.
+The cost ledger uses the corresponding <code class="inline">_microusd</code> field names plus fixed
+<code class="inline">currency: &quot;USD&quot;</code>. Terminal <code class="inline">reserved</code> values are zero after automatic
+cleanup. <code class="inline">incomplete</code> means an acknowledged call was conservatively
+full-charged without exact usage; <code class="inline">overrun</code> clamps remaining to zero and
+refuses future calls. Unlike the event-derived detail rows, this projection is
+sealed directly from RunState and remains authoritative when events are
+dropped.</p><p>Artifact publication currently requires a Unix host with POSIX-compatible
 <code class="inline">mkdir</code> and <code class="inline">id</code>; trace append also needs <code class="inline">sh</code> and either <code class="inline">lockf</code> or <code class="inline">flock</code>.
 Private artifacts and newly created traces require trusted ancestry, safe
 ownership, and restrictive modes. Preflight refuses unsafe or unwritable

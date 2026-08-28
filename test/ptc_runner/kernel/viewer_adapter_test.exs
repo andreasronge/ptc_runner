@@ -258,6 +258,15 @@ defmodule PtcRunner.Kernel.ViewerAdapterTest do
   end
 
   defp event(sequence, type, data) do
+    data =
+      if type == "run-stopped" do
+        Map.put_new(data, "usage", %{
+          "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+        })
+      else
+        data
+      end
+
     %{
       "schema_version" => 2,
       "run_id" => "viewer-run",

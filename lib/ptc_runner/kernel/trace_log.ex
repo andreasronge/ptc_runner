@@ -50,6 +50,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationHandle
@@ -2803,6 +2804,7 @@ defmodule PtcRunner.Kernel.TraceLog do
       "workflow_capability_calls" => workflow_calls,
       "mission_capability_calls" => mission_calls,
       "llm_calls" => capability_name_count(events, "llm-request"),
+      "llm_budget" => terminal_llm_budget(stopped),
       "llm_spend" => terminal_llm_spend(stopped),
       "error_count" => Enum.count(events, &error_event?/1),
       "duration_ms" => duration_ms(started, stopped),
@@ -2818,6 +2820,13 @@ defmodule PtcRunner.Kernel.TraceLog do
       "schema_version" => 2,
       "source" => Atom.to_string(source_kind)
     }
+  end
+
+  defp terminal_llm_budget(stopped) do
+    case LLMBudget.validate_terminal_projection(event_data(stopped, "usage", %{})["llm_budget"]) do
+      {:ok, budget} -> budget
+      {:error, :invalid_llm_budget} -> nil
+    end
   end
 
   defp terminal_llm_spend(stopped) do

@@ -60,6 +60,17 @@ defmodule PtcRunner.Kernel.TypedCanonicalJSONTest do
              StrictJSON.admit([1, 2], max_nodes: 2)
   end
 
+  test "a document at the node limit decodes under the default heap budget" do
+    # Issue #1676: the decode worker's heap budget must cover the worst
+    # admissible document, or the declared node limit is unreachable and
+    # legal inputs die as `:invalid_json`. A flat object at the node limit
+    # is the most heap-expensive admissible shape.
+    source = "{" <> Enum.map_join(1..49_900, ",", &~s("k#{&1}":1)) <> "}"
+
+    assert {:ok, decoded} = StrictJSON.decode(source)
+    assert map_size(decoded) == 49_900
+  end
+
   test "root string inspection requires one unique root property" do
     assert {:ok, "ptc-project"} =
              StrictJSON.unique_root_string(

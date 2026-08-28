@@ -25,7 +25,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.TestSupport.ValuePreviewFixture
 
   import PtcRunner.TestSupport.AgentFixtures,
-    only: [mission_with_source: 2, replay_alias_router: 2]
+    only: [
+      live_alias_route: 4,
+      live_alias_route: 5,
+      mission_with_source: 2,
+      replay_alias_router: 2
+    ]
 
   test "llm/request is an ordinary bounded workflow capability" do
     parent = self()
@@ -4656,15 +4661,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert {:ok, router} =
              LLMRouter.new([
-               %{
-                 alias: "chosen",
-                 source: "llm",
-                 installation_revision: "chosen-v1",
-                 default?: true,
-                 capability: hung,
-                 max_calls: nil,
-                 request_timeout_ms: 100
-               }
+               live_alias_route("chosen", true, hung, nil, request_timeout_ms: 100)
              ])
 
     {:ok, config} = agent_router_config(router)
@@ -4706,6 +4703,68 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              )
   end
 
+  test "agent.core authenticates a settlement-generated reservation overrun" do
+    {:ok, capability} =
+      LLMCapability.new(
+        requester: fn _request ->
+          {:ok, %{content: "over budget", tokens: %{input: 30, output: 30}}}
+        end,
+        usage_guarantees: %{tokens: true, cost_currency: nil}
+      )
+
+    assert {:ok, router} =
+             LLMRouter.new([
+               %{
+                 alias: "chosen",
+                 source: "llm",
+                 installation_revision: "chosen-v1",
+                 default?: true,
+                 capability: capability,
+                 max_calls: nil,
+                 output_tokens: 20,
+                 reservation_bound: fn _request, _tariff ->
+                   {:ok, %{total_tokens: 40, cost: nil}}
+                 end
+               }
+             ])
+
+    {:ok, outcome_config} = agent_router_config(router, llm_total_tokens: 100)
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "provider-failure",
+                "model" => "chosen",
+                "error" => %{
+                  "kind" => "provider_error",
+                  "reason" => "reservation_bound_exceeded",
+                  "retryable?" => false
+                }
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Stay within the reservation" {"max_turns" 1}))|,
+               outcome_config
+             )
+
+    {:ok, fail_fast_config} = agent_router_config(router, llm_total_tokens: 100)
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :llm_provider_failed,
+              details: %{
+                failure_kind: "llm-provider-error",
+                llm_provider_failure: :reservation_bound_exceeded,
+                llm_provider_retryable?: false
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-value "Stay within the reservation" {"max_turns" 1}))|,
+               fail_fast_config
+             )
+  end
+
   test "agent.core run-outcome returns named quota and unknown-alias envelopes as provider failures" do
     continue = %{
       content: nil,
@@ -4718,22 +4777,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert {:ok, router} =
              LLMRouter.new([
-               %{
-                 alias: "expensive",
-                 source: "llm",
-                 installation_revision: "expensive-v1",
-                 default?: true,
-                 capability: leaf,
-                 max_calls: 1
-               },
-               %{
-                 alias: "cheap",
-                 source: "llm",
-                 installation_revision: "cheap-v1",
-                 default?: false,
-                 capability: leaf,
-                 max_calls: nil
-               }
+               live_alias_route("expensive", true, leaf, 1),
+               live_alias_route("cheap", false, leaf, nil)
              ])
 
     {:ok, quota_config} = agent_router_config(router)
@@ -4865,14 +4910,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert {:ok, router} =
              LLMRouter.new([
-               %{
-                 alias: "expensive",
-                 source: "llm",
-                 installation_revision: "expensive-v1",
-                 default?: true,
-                 capability: leaf,
-                 max_calls: 1
-               }
+               live_alias_route("expensive", true, leaf, 1)
              ])
 
     {:ok, quota_config} = agent_router_config(router)
@@ -5001,11 +5039,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     )
   end
 
-  defp agent_router_config(router) do
+  defp agent_router_config(router, limit_overrides \\ []) do
     {:ok, bundle} = agent_bundle([])
     {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [router])
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(evaluation_timeout_ms: 5_000)
+    limit_overrides = Keyword.put_new(limit_overrides, :evaluation_timeout_ms, 5_000)
+    {:ok, limits} = Limits.new(limit_overrides)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "agent-router")
 
     RunConfig.new(

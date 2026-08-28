@@ -129,28 +129,41 @@ defmodule PtcRunner.Kernel.MCPProtocol do
   def valid_tool_name?(name),
     do: is_binary(name) and String.valid?(name) and name =~ @upstream_name
 
-  @spec decode_response(binary(), pos_integer()) :: {:ok, map()} | {:error, :mcp_protocol_error}
+  @spec decode_response(binary(), pos_integer()) ::
+          {:ok, map()} | {:error, :mcp_protocol_error | :mcp_response_exceeded}
   def decode_response(body, id) when is_binary(body) and is_integer(id) and id > 0 do
     case decode_message(body) do
       {:ok, {:response, ^id, decoded}} -> {:ok, decoded}
+      {:error, :mcp_response_exceeded} -> {:error, :mcp_response_exceeded}
       _invalid -> {:error, :mcp_protocol_error}
     end
   end
 
   @spec decode_message(binary()) ::
-          {:ok, inbound_message()} | {:error, :mcp_protocol_error}
+          {:ok, inbound_message()} | {:error, :mcp_protocol_error | :mcp_response_exceeded}
   def decode_message(body) when is_binary(body) do
     with true <- within_document_depth?(body),
-         {:ok, decoded} <- StrictJSON.decode(body),
+         {:ok, decoded} <- admit_document(body),
          true <- JSONValue.map?(decoded),
          "2.0" <- decoded["jsonrpc"] do
       classify_message(decoded)
     else
+      {:error, :mcp_response_exceeded} -> {:error, :mcp_response_exceeded}
       _reason -> {:error, :mcp_protocol_error}
     end
   end
 
   def decode_message(_body), do: {:error, :mcp_protocol_error}
+
+  # A decode the host cannot finish within its own worker bounds is the
+  # host declining the message, not the server violating the protocol.
+  defp admit_document(body) do
+    case StrictJSON.decode_classified(body) do
+      {:ok, decoded} -> {:ok, decoded}
+      {:invalid, _reason} -> {:error, :mcp_protocol_error}
+      {:unavailable, _cause} -> {:error, :mcp_response_exceeded}
+    end
+  end
 
   @doc false
   @spec within_document_depth?(term()) :: boolean()

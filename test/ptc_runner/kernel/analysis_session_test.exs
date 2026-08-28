@@ -1826,7 +1826,14 @@ defmodule PtcRunner.Kernel.AnalysisSessionTest do
     {:ok, limits} = Limits.new()
     {:ok, sink} = EventSink.start(:normal, limits, run_id: run_id)
     :ok = EventSink.emit(sink, "run-started", %{missions: %{}})
-    :ok = EventSink.emit(sink, "run-stopped", %{outcome: :ok, reason: nil})
+
+    :ok =
+      EventSink.emit(sink, "run-stopped", %{
+        outcome: :ok,
+        reason: nil,
+        usage: %{llm_budget: %{"total_tokens" => nil, "cost" => nil}}
+      })
+
     :ok = TraceLog.append_jsonl(path, EventSink.events(sink))
     EventSink.stop(sink)
   end

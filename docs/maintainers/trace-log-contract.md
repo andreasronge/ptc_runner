@@ -524,8 +524,19 @@ mission filter narrows counted calls. Capability events continue to carry only
 alias/revision routing identity; they do not duplicate model identity. The
 additional rows remain subject to the existing aggregate result-byte limit.
 Every finished V3 run envelope also publishes the sealed run-state
-`llm_spend` value that canonical `run-stopped.data.usage` retains. Its closed
-states are `empty`, `incomplete`, `unpriced`, `available`, and `overflow`.
+`llm_budget` and `llm_spend` values that canonical `run-stopped.data.usage`
+retains. Every current `run-stopped` event must carry `data.usage` with a valid
+terminal `llm_budget`; omission makes the trace malformed. `llm_budget` is
+authored only by RunState rather than reconstructed
+from capability events. Its exact `total_tokens` and `cost` ledgers are null
+when disabled; enabled ledgers expose their limit, zero terminal reservation,
+charged and remaining capacity, refusal count, and
+`available | incomplete | overrun` state. Overrun clamps remaining to zero.
+The Viewer run catalog consumes this same field and validates the terminal
+shape before displaying it.
+
+`llm_spend` has the closed states `empty`, `incomplete`, `unpriced`,
+`available`, and `overflow`.
 `empty`, `incomplete`, and `overflow` contain only `state`; the latter two
 ordinary states require complete non-negative input and output totals, and only
 `available` requires the canonical USD/microunit `total_cost`. Any aggregate
@@ -753,7 +764,7 @@ deterministically encoded JSON object with this exact envelope:
 
 ```json
 {
-  "schema_version": 8,
+  "schema_version": 9,
   "run_id": "run-id",
   "trace_id": "trace-id",
   "sequence": 1,
@@ -779,16 +790,41 @@ The current record types and payloads are:
 | --- | --- | --- |
 | `capability-input` | `capability_id` | `environment`, `name`, `arguments` |
 | `capability-exception` | `capability_id` | `environment`, `name`, `exception_class`, `message`, `message_truncated`, `stacktrace`, `stacktrace_truncated` |
-| `capability-output` | `capability_id` | `environment`, `name`, `result` |
+| `capability-output` | `capability_id` | `environment`, `name`, `result` or `result_identity` |
 | `evaluation-source` | `evaluation_id` | `environment`, `program_kind`, `source`, `source_hash`, `source_bytes` |
 | `evaluation-analysis` | `evaluation_id` | `environment`, `mission_name`, `prelude_calls` |
 | `prelude-source` | `component_id` | `environment`, `source`, `source_hash`, `source_bytes` |
 | `mcp-request` | `capability_id`, `request_id` | `transport`, `body` |
-| `mcp-response` | `capability_id`, `request_id` | `transport`, `body` |
+| `mcp-response` | `capability_id`, `request_id` | `transport`, `body` or `body_identity` |
 | `mcp-stderr` | `capability_id`, `request_id` | `transport`, `text`, `truncated` |
 | `execution-prints` | `evaluation_id` | `environment`, `prints`, `truncated` |
 | `execution-error` | `evaluation_id` | `environment`, `kind`, `reason`, `details` |
 | `explicit-failure-value` | `evaluation_id` | `environment`, `value` |
+
+A read tool the host declared with `inspection_capture: "digest_results"`
+retains value identities in place of two of those payload values:
+`capability-output` carries `result_identity` instead of `result`, and
+`mcp-response` carries `body_identity` instead of `body`. An identity is the
+exact object `{"encoding": "ptc-deterministic-json-v1", "sha256": "sha256:...",
+"encoded_bytes": N}`, where the digest covers
+`"ptc.inspection-value.v1\0" || u64(encoded_bytes) || encoded_value` over the
+value normalized as a retained record would have normalized it. `encoded_bytes`
+is the size of that deterministic JSON encoding, not the MCP wire size.
+
+The alternatives are per record, not per artifact: record types, ordering,
+correlation, joins, and counts are identical to a fully captured run. The
+digest decision uses only what the transport has already computed: MCP error
+and `isError` bodies, bodies rejected as oversized or malformed, capability
+error envelopes, `capability-exception`, and `mcp-stderr` stay full. A value
+the transport accepted and a later stage rejected -- tool-result
+normalization, retained-size admission, bounded output validation -- keeps its
+full error envelope while the wire body remains an identity; the mapping is a
+read, so a full-capture rerun recovers the value and its identity proves it is
+the same one. The sink computes the identity and the decision adds no work, so
+digest capture cannot change an emitting process's heap behaviour. An identity
+attests that a specific normalized value crossed the boundary at that record's
+position in the observed order. It does not retain the value, prove derivation
+of later values, or attest the original MCP wire bytes.
 
 #### Sealed inspection artifact V1
 

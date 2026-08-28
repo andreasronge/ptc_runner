@@ -9,9 +9,10 @@ defmodule PtcRunner.Kernel.LLMFailureCatalog do
   envelope and does not add a field to `tool/llm-request`, `llm/request`,
   inspection, or `run-outcome` maps.
 
-  Authenticated fail-fast consumption stays the provider kinds plus whole-request
-  timeout aliases. Model-alias protocol reasons are recoverable to `run-outcome`
-  but remain unauthenticated at `kernel-llm-provider-failure`.
+  Authenticated fail-fast consumption stays the provider kinds, Kernel-generated
+  provider failures, and whole-request timeout aliases. Model-alias protocol
+  reasons are recoverable to `run-outcome` but remain unauthenticated at
+  `kernel-llm-provider-failure`.
   """
 
   @provider_kinds [
@@ -29,6 +30,9 @@ defmodule PtcRunner.Kernel.LLMFailureCatalog do
     :timeout,
     :transport_error
   ]
+
+  @kernel_provider_reasons [:reservation_bound_exceeded]
+  @provider_reasons @provider_kinds ++ @kernel_provider_reasons
 
   @protocol_reasons [
     :unknown_model_alias,
@@ -56,28 +60,31 @@ defmodule PtcRunner.Kernel.LLMFailureCatalog do
           | :timeout
           | :transport_error
 
+  @type provider_failure_kind :: provider_kind() | :reservation_bound_exceeded
+
   @spec provider_kinds() :: [provider_kind()]
   def provider_kinds, do: @provider_kinds
 
   @doc """
   Kebab names SafeMetadata may authenticate as `llm_provider_failure`.
 
-  Includes provider kinds and whole-request timeout aliases. Omits model-alias
-  protocol reasons, which stay unauthenticated at fail-fast.
+  Includes provider kinds, Kernel-generated provider failures, and whole-request
+  timeout aliases. Omits model-alias protocol reasons, which stay unauthenticated
+  at fail-fast.
   """
   @spec authenticated_kebabs() :: [String.t()]
   def authenticated_kebabs do
-    Enum.uniq(Enum.map(@provider_kinds, &kebab/1) ++ Enum.map(@timeout_reasons, &kebab/1))
+    Enum.uniq(Enum.map(@provider_reasons, &kebab/1) ++ Enum.map(@timeout_reasons, &kebab/1))
   end
 
   @doc """
   Maps a normalized kebab failure name to the closed consume atom, or `nil`.
   """
-  @spec consume_kind(String.t()) :: provider_kind() | nil
+  @spec consume_kind(String.t()) :: provider_failure_kind() | nil
   def consume_kind(name) when is_binary(name) do
     cond do
       kebab_in?(name, @timeout_reasons) -> :timeout
-      kebab_in?(name, @provider_kinds) -> existing_atom(name)
+      kebab_in?(name, @provider_reasons) -> existing_atom(name)
       true -> nil
     end
   end
@@ -126,7 +133,7 @@ defmodule PtcRunner.Kernel.LLMFailureCatalog do
 
   defp kebab(atom), do: atom |> Atom.to_string() |> String.replace("_", "-")
 
-  defp provider_reason_tokens, do: Enum.flat_map(@provider_kinds, &spellings/1)
+  defp provider_reason_tokens, do: Enum.flat_map(@provider_reasons, &spellings/1)
   defp protocol_reason_tokens, do: Enum.flat_map(@protocol_reasons, &spellings/1)
   defp timeout_reason_tokens, do: Enum.flat_map(@timeout_reasons, &spellings/1)
 

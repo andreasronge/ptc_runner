@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
@@ -574,6 +575,10 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
                        [^event_sink, %{outcome: :error, reason: :session_owner_failed} = stopped]}}
 
       assert is_map(stopped.usage)
+
+      assert {:ok, _projection} =
+               LLMBudget.validate_terminal_projection(stopped.usage.llm_budget)
+
       assert_receive {:DOWN, ^worker_ref, :process, _worker, :killed}, 5_000
       assert_receive {:DOWN, ^inspection_sink_ref, :process, _pid, :normal}, 5_000
       assert_receive {:DOWN, ^event_sink_ref, :process, _pid, :normal}, 5_000

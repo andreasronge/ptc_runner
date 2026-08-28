@@ -43,7 +43,8 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Items do
       "name" => payload["name"],
       "input_sequence" => input["sequence"],
       "input_timestamp" => input["timestamp"],
-      "arguments" => payload["arguments"]
+      "arguments" => payload["arguments"],
+      "capture_mode" => "full"
     }
 
     item
@@ -55,7 +56,7 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Items do
   def provider_item(request, response, stderr) do
     correlation = request["correlation"]
 
-    %{
+    item = %{
       "run_id" => request["run_id"],
       "trace_id" => request["trace_id"],
       "capability_id" => correlation["capability_id"],
@@ -66,10 +67,25 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Items do
       "response_sequence" => response["sequence"],
       "request_timestamp" => request["timestamp"],
       "response_timestamp" => response["timestamp"],
-      "request" => request["payload"]["body"],
-      "response" => response["payload"]["body"]
+      "request" => request["payload"]["body"]
     }
-    |> maybe_stderr(stderr)
+
+    item =
+      if Map.has_key?(response["payload"], "body") do
+        Map.merge(item, %{
+          "capture_mode" => "full",
+          "response_available?" => true,
+          "response" => response["payload"]["body"]
+        })
+      else
+        Map.merge(item, %{
+          "capture_mode" => "digest_results",
+          "response_available?" => false,
+          "response_identity" => response["payload"]["body_identity"]
+        })
+      end
+
+    maybe_stderr(item, stderr)
   end
 
   @spec source_item(map(), [map()] | nil, binary() | nil, term()) :: map()
@@ -146,12 +162,33 @@ defmodule PtcRunner.Kernel.InspectionArtifact.Items do
   defp maybe_output(item, nil), do: Map.put(item, "complete?", false)
 
   defp maybe_output(item, output) do
-    Map.merge(item, %{
+    payload = output["payload"]
+
+    common = %{
       "complete?" => true,
       "output_sequence" => output["sequence"],
-      "output_timestamp" => output["timestamp"],
-      "result" => output["payload"]["result"]
-    })
+      "output_timestamp" => output["timestamp"]
+    }
+
+    if Map.has_key?(payload, "result") do
+      Map.merge(
+        item,
+        Map.merge(common, %{
+          "capture_mode" => "full",
+          "result_available?" => true,
+          "result" => payload["result"]
+        })
+      )
+    else
+      Map.merge(
+        item,
+        Map.merge(common, %{
+          "capture_mode" => "digest_results",
+          "result_available?" => false,
+          "result_identity" => payload["result_identity"]
+        })
+      )
+    end
   end
 
   defp maybe_exception(item, nil), do: item
