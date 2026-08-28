@@ -33,6 +33,7 @@ if Code.ensure_loaded?(ReqLLM) do
 
     @behaviour PtcRunner.LLM
 
+    alias PtcRunner.Kernel.LLMUsage
     alias PtcRunner.Kernel.ProviderError
     alias PtcRunner.LLM.Invocation
     alias PtcRunner.LLM.OutputLimit
@@ -174,7 +175,8 @@ if Code.ensure_loaded?(ReqLLM) do
             end
 
           _direct_http ->
-            with :ok <- attest_inference_controls(model, canonical.exact_options) do
+            with :ok <- attest_inference_controls(model, canonical.exact_options),
+                 :ok <- attest_direct_reservation(canonical.reservation) do
               {:ok, direct_target(model, canonical), :unavailable, canonical}
             end
         end
@@ -185,6 +187,24 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     def prepare_model(_model, _requirements), do: {:error, :invalid_model}
+
+    @impl true
+    def reservation_bound(
+          %ReqLLMPreparedModel{} = target,
+          request,
+          tariff
+        )
+        when is_map(request) and not is_struct(request) do
+      total_tokens =
+        conservative_input_token_bound(request) + Map.fetch!(target.exact_options, :max_tokens)
+
+      %{
+        total_tokens: total_tokens,
+        cost: reservation_cost_bound(target, total_tokens, tariff)
+      }
+    end
+
+    def reservation_bound(_target, _request, _tariff), do: %{}
 
     # Catalog-free local preflight: refuse contracts this adapter already knows
     # it cannot honor, without loading llm_db inside the audited-local worker.
@@ -1292,6 +1312,191 @@ if Code.ensure_loaded?(ReqLLM) do
       :erlang.external_size(request_payload) + @request_token_headroom
     end
 
+    defp reservation_cost_bound(_target, _total_tokens, nil), do: nil
+
+    defp reservation_cost_bound(
+           %ReqLLMPreparedModel{} = target,
+           total_tokens,
+           %{currency: "USD", id: tariff_id}
+         ) do
+      with {:ok, token_rates, request_rate} <- reservation_cost_rates(target),
+           {:ok, token_cost} <- reservation_token_cost(token_rates, total_tokens),
+           {:ok, request_cost} <-
+             LLMUsage.ceil_scaled_decimal(request_rate, 1_000_000, 1),
+           cost = token_cost + request_cost,
+           true <- cost <= LLMUsage.maximum_integer() do
+        %{currency: "USD", microunits: cost, tariff_id: tariff_id}
+      else
+        _unavailable -> nil
+      end
+    end
+
+    defp reservation_cost_bound(_target, _total_tokens, _tariff), do: nil
+
+    defp reservation_cost_rates(%ReqLLMPreparedModel{model: %LLMDB.Model{} = model}) do
+      case pricing_components(model) do
+        [] -> legacy_reservation_cost_rates(model.cost)
+        components -> component_reservation_cost_rates(model, components)
+      end
+    end
+
+    defp reservation_cost_rates(_target), do: :error
+
+    defp component_reservation_cost_rates(model, components) do
+      currency = pricing_value(model.pricing, :currency)
+
+      with true <- currency in [nil, "USD"],
+           {:ok, billable_rates} <- reservation_component_rates(components),
+           true <- billable_rates != [],
+           {:ok, request_rate} <- request_rate(model.cost) do
+        {:ok, billable_rates, request_rate}
+      else
+        _unsupported -> :error
+      end
+    end
+
+    defp reservation_component_rates(components) do
+      Enum.reduce_while(components, {:ok, []}, fn component, {:ok, rates} ->
+        kind = pricing_value(component, :kind)
+        rate = pricing_value(component, :rate)
+
+        cond do
+          not valid_rate?(rate) ->
+            {:halt, :error}
+
+          rate == 0 or rate == 0.0 ->
+            {:cont, {:ok, rates}}
+
+          kind in [:token, "token"] and not supported_token_component?(component) ->
+            {:halt, :error}
+
+          kind in [:tool, "tool"] and not supported_tool_component?(component) ->
+            {:halt, :error}
+
+          kind in [:storage, "storage"] and not supported_storage_component?(component) ->
+            {:halt, :error}
+
+          kind in [:token, "token"] ->
+            {:cont, {:ok, [{rate, pricing_value(component, :per)} | rates]}}
+
+          # This adapter only translates caller-supplied function definitions
+          # into ReqLLM.Tool values. It exposes none of the separately billed
+          # provider-hosted tools named by catalog pricing components, so their
+          # exact request-specific maximum count is zero.
+          kind in [:tool, "tool"] ->
+            {:cont, {:ok, rates}}
+
+          # File-search storage is likewise reachable only through provider-
+          # hosted tools that this adapter does not expose.
+          kind in [:storage, "storage"] ->
+            {:cont, {:ok, rates}}
+
+          # ReqLLM bills image components from generated-image usage. The text
+          # request surface sealed here has no option that bounds how many
+          # images a provider may return, so a USD reservation cannot safely be
+          # attested for a model carrying a positive image component.
+          kind in [:image, "image"] ->
+            {:halt, :error}
+
+          true ->
+            {:halt, :error}
+        end
+      end)
+    end
+
+    defp supported_token_component?(component) do
+      id = pricing_value(component, :id)
+      per = pricing_value(component, :per)
+      meter = pricing_value(component, :meter)
+
+      is_binary(id) and
+        Enum.any?(
+          ~w(token.input token.output token.reasoning token.cache_read token.cache_write token.cache),
+          &String.starts_with?(id, &1)
+        ) and is_integer(per) and per > 0 and is_nil(meter)
+    end
+
+    defp supported_tool_component?(component) do
+      per = pricing_value(component, :per)
+      meter = pricing_value(component, :meter)
+      tool = pricing_value(component, :tool)
+      unit = pricing_value(component, :unit)
+
+      is_integer(per) and per > 0 and is_nil(meter) and is_binary(tool) and
+        unit in [:call, "call", :source, "source", :session, "session"]
+    end
+
+    defp supported_storage_component?(component) do
+      id = pricing_value(component, :id)
+      per = pricing_value(component, :per)
+      rate = pricing_value(component, :rate)
+      meter = pricing_value(component, :meter)
+
+      is_binary(id) and String.starts_with?(id, "storage.") and is_integer(per) and per > 0 and
+        valid_rate?(rate) and is_binary(meter)
+    end
+
+    defp legacy_reservation_cost_rates(cost) when is_map(cost) do
+      token_rates =
+        [:input, :output, :cache_read, :cache_write, :reasoning]
+        |> Enum.map(&Map.get(cost, &1))
+        |> Enum.reject(&is_nil/1)
+
+      unsupported_rates =
+        [:training, :image, :audio, :input_audio, :output_audio, :input_video, :output_video]
+        |> Enum.map(&Map.get(cost, &1))
+        |> Enum.reject(&is_nil/1)
+
+      request_rate = Map.get(cost, :request) || 0
+
+      if token_rates != [] and Enum.all?(token_rates, &valid_rate?/1) and
+           Enum.all?(unsupported_rates, &(&1 == 0 or &1 == 0.0)) and
+           valid_rate?(request_rate) do
+        {:ok, [{Enum.max(token_rates), 1_000_000}], request_rate}
+      else
+        :error
+      end
+    end
+
+    defp legacy_reservation_cost_rates(_cost), do: :error
+
+    defp request_rate(cost) when is_map(cost) do
+      rate = Map.get(cost, :request) || Map.get(cost, "request") || 0
+      if valid_rate?(rate), do: {:ok, rate}, else: :error
+    end
+
+    defp request_rate(_cost), do: {:ok, 0}
+
+    defp reservation_token_cost(token_rates, total_tokens) do
+      Enum.reduce_while(token_rates, {:ok, 0}, fn {rate, per}, {:ok, total} ->
+        case LLMUsage.ceil_scaled_decimal(rate, total_tokens * 1_000_000, per) do
+          {:ok, amount} ->
+            next = total + amount
+
+            if next <= LLMUsage.maximum_integer(),
+              do: {:cont, {:ok, next}},
+              else: {:halt, :error}
+
+          _unbounded ->
+            {:halt, :error}
+        end
+      end)
+    end
+
+    defp pricing_components(%LLMDB.Model{pricing: pricing}) do
+      case pricing_value(pricing, :components) do
+        components when is_list(components) -> components
+        _missing -> []
+      end
+    end
+
+    defp pricing_value(map, key) when is_map(map),
+      do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
+
+    defp pricing_value(_map, _key), do: nil
+
+    defp valid_rate?(rate), do: is_number(rate) and rate >= 0
+
     defp dispatch_invocation(target, invocation) do
       request = invocation.request
       messages = build_messages(request)
@@ -1421,6 +1626,7 @@ if Code.ensure_loaded?(ReqLLM) do
       opts =
         target
         |> merge_exact_options(on_unsupported: :error, cache: invocation.cache)
+        |> maybe_disable_budget_retries(target)
 
       opts =
         if is_binary(invocation.credential),
@@ -1429,6 +1635,18 @@ if Code.ensure_loaded?(ReqLLM) do
 
       put_deadline_timeouts(opts, invocation)
     end
+
+    defp maybe_disable_budget_retries(opts, %ReqLLMPreparedModel{budgeted?: true}) do
+      opts
+      |> Keyword.put(:max_retries, 0)
+      |> Keyword.update(:req_http_options, [retry: false], &disable_req_retry/1)
+    end
+
+    defp maybe_disable_budget_retries(opts, _target), do: opts
+
+    defp disable_req_retry(options) when is_list(options), do: Keyword.put(options, :retry, false)
+    defp disable_req_retry(options) when is_map(options), do: Map.put(options, :retry, false)
+    defp disable_req_retry(_options), do: [retry: false]
 
     defp remaining_request_ms(%Invocation{llm_request_deadline_ms: nil}), do: :unbounded
 
@@ -1562,14 +1780,32 @@ if Code.ensure_loaded?(ReqLLM) do
     defp attest_structured_requirements(model, %{
            structured_output_mode: mode,
            usage_guarantees: %{tokens: tokens, cost_currency: currency},
-           reservation: %{total_tokens?: false, cost_tariff: nil}
+           reservation: %{total_tokens?: total_tokens?, cost_tariff: tariff}
          })
          when mode in [:json_schema, :json_object, :unsupported] and is_boolean(tokens) and
-                currency in ["USD", nil] do
-      attest_structured_mode(model, mode)
+                is_boolean(total_tokens?) and currency in ["USD", nil] do
+      case attest_structured_mode(model, mode) do
+        :ok -> attest_reservation_requirements(total_tokens?, tariff, tokens, currency)
+        {:error, _reason} = error -> error
+      end
     end
 
     defp attest_structured_requirements(_model, _requirements),
+      do: {:error, :unsupported_model_option}
+
+    defp attest_reservation_requirements(false, nil, _tokens, _currency), do: :ok
+    defp attest_reservation_requirements(true, nil, true, _currency), do: :ok
+
+    defp attest_reservation_requirements(
+           true,
+           %{currency: "USD", id: id} = tariff,
+           true,
+           "USD"
+         )
+         when map_size(tariff) == 2 and is_binary(id),
+         do: :ok
+
+    defp attest_reservation_requirements(_total_tokens?, _tariff, _tokens, _currency),
       do: {:error, :unsupported_model_option}
 
     defp attest_structured_mode(_model, :unsupported), do: :ok
@@ -1622,6 +1858,7 @@ if Code.ensure_loaded?(ReqLLM) do
       %ReqLLMPreparedModel{
         selector: selector,
         exact_options: canonical.exact_options,
+        budgeted?: reservation_enabled?(canonical.reservation),
         structured_output_mode: canonical.structured_output_mode,
         model: nil
       }
@@ -1637,15 +1874,36 @@ if Code.ensure_loaded?(ReqLLM) do
                canonical.structured_output_mode
              ),
            :ok <- attest_prepared_json_schema(prepared, canonical.structured_output_mode) do
-        {:ok,
-         %{
-           prepared
-           | exact_options: canonical.exact_options,
-             request_options: request_options,
-             structured_output_mode: canonical.structured_output_mode
-         }, status, canonical}
+        with :ok <- attest_prepared_reservation(prepared, canonical.reservation) do
+          {:ok,
+           %{
+             prepared
+             | exact_options: canonical.exact_options,
+               request_options: request_options,
+               budgeted?: reservation_enabled?(canonical.reservation),
+               structured_output_mode: canonical.structured_output_mode
+           }, status, canonical}
+        end
       end
     end
+
+    defp attest_prepared_reservation(_prepared, %{cost_tariff: nil}), do: :ok
+
+    defp attest_prepared_reservation(
+           %ReqLLMPreparedModel{} = prepared,
+           %{cost_tariff: %{currency: "USD", id: _id}}
+         ) do
+      case reservation_cost_rates(prepared) do
+        {:ok, _token_rates, _request_rate} -> :ok
+        :error -> {:error, :unsupported_model_option}
+      end
+    end
+
+    defp reservation_enabled?(%{total_tokens?: total_tokens?, cost_tariff: tariff}),
+      do: total_tokens? or not is_nil(tariff)
+
+    defp attest_direct_reservation(%{cost_tariff: nil}), do: :ok
+    defp attest_direct_reservation(_reservation), do: {:error, :unsupported_model_option}
 
     defp attest_prepared_json_schema(%ReqLLMPreparedModel{model: model}, :json_schema) do
       if native_json_schema_model?(model),

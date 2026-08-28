@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.Result
@@ -88,33 +89,40 @@ defmodule PtcRunner.Kernel.Runner do
           {:error, reason} ->
             close_run_state(state)
 
+            usage = preflight_usage(config)
+
             result =
               reason
-              |> configuration_error(%{})
+              |> configuration_error(usage)
               |> apply_provider_cleanup_failure(
                 RunConfig.close_provider_session(config),
-                %{}
+                usage
               )
 
-            finalize_result(result, %{}, config.event_sink)
+            finalize_result(result, usage, config.event_sink)
         end
       after
         stop_run_state(state)
       end
     else
       {:error, reason} ->
+        usage = preflight_usage(config)
+
         result =
           reason
-          |> configuration_error(%{})
-          |> apply_provider_cleanup_failure(RunConfig.close_provider_session(config), %{})
+          |> configuration_error(usage)
+          |> apply_provider_cleanup_failure(RunConfig.close_provider_session(config), usage)
 
-        finalize_result(result, %{}, config.event_sink)
+        finalize_result(result, usage, config.event_sink)
     end
   end
 
   defp transfer_provider_cleanup(config, state) do
     RunConfig.bind_provider_session(config, self(), state.pid, state.provider_tracker)
   end
+
+  defp preflight_usage(config),
+    do: %{llm_budget: LLMBudget.initial_terminal_projection(config.limits)}
 
   defp run_claimed(entry_source, config, state) do
     reporter = PtcRunner.LiveStatus.maybe_start(config, state)
@@ -131,7 +139,7 @@ defmodule PtcRunner.Kernel.Runner do
           close_run_state(state)
         end
 
-      usage = run_state_usage(state)
+      usage = run_state_usage(state, config.limits)
       cleanup = RunConfig.close_provider_session(config)
 
       case execution do
@@ -922,10 +930,10 @@ defmodule PtcRunner.Kernel.Runner do
     :exit, _reason -> :ok
   end
 
-  defp run_state_usage(state) do
+  defp run_state_usage(state, limits) do
     RunState.usage(state)
   catch
-    :exit, _reason -> %{}
+    :exit, _reason -> %{llm_budget: LLMBudget.unavailable_terminal_projection(limits)}
   end
 
   defp apply_terminal_failure(result, state) do

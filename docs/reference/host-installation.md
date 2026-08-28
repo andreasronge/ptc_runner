@@ -297,6 +297,22 @@ rounded upward to one millionth of a dollar. The bounded integer `N` is in
 `0..9_007_199_254_740_991`; binary floating-point values are not retained as
 accounting authority.
 
+If the host enables `llm_total_tokens` or `llm_cost_microusd`, each live call
+must obtain a bounded, request-specific reservation attestation from the
+prepared adapter before admission, and every live installation must declare
+`usage_guarantees.tokens: true`. A cost budget additionally requires
+`usage_guarantees.cost_currency: "USD"` and an explicit
+`reservation_tariff: {"currency":"USD","id":"..."}`. Cost reservations bind
+to that prepared tariff identity; tariff details remain private. A token
+reservation must be at least the request's authorized output-token ceiling.
+Attestation performs no credential lookup or remote work. An absent, crashing,
+timed-out, undersized, or otherwise malformed attestation refuses the call
+before provider dispatch. Provider errors and
+successful calls without valid promised usage conservatively charge the full
+reservation and mark the affected ledger incomplete; authenticated usage above
+the bound charges the actual value, marks overrun, and prevents later calls.
+Replay installations are excluded from these operational ledgers.
+
 Model selectors are provider-qualified strings. These are the provider paths
 PtcRunner configures and exercises directly:
 

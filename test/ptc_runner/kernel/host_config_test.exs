@@ -133,6 +133,69 @@ defmodule PtcRunner.Kernel.HostConfigTest do
   end
 
   @tag :tmp_dir
+  test "a host cost budget requires a tariff on every live LLM installation", %{tmp_dir: dir} do
+    installation = %{
+      "source" => "llm",
+      "structured_output_mode" => "unsupported",
+      "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
+      "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+      "credential" => "openrouter_key",
+      "installation_revision" => "model-policy-v2"
+    }
+
+    config = %{
+      "limits" => %{"llm_cost_microusd" => 1_000_000},
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{"deepseek" => installation}
+    }
+
+    assert {:error, :invalid_host_config} = dir |> write_config(config) |> HostConfig.load()
+
+    tariff = %{"currency" => "USD", "id" => "openrouter-2026-08"}
+    configured = put_in(config, ["install", "deepseek", "reservation_tariff"], tariff)
+
+    assert {:ok, host} = dir |> write_config(configured) |> HostConfig.load()
+    assert host.install["deepseek"].reservation_tariff == %{currency: "USD", id: tariff["id"]}
+  end
+
+  @tag :tmp_dir
+  test "aggregate LLM budgets require matching usage guarantees", %{tmp_dir: dir} do
+    installation = %{
+      "source" => "llm",
+      "structured_output_mode" => "unsupported",
+      "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+      "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+      "credential" => "openrouter_key",
+      "installation_revision" => "model-policy-v2"
+    }
+
+    base = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{"deepseek" => installation}
+    }
+
+    token_budget = Map.put(base, "limits", %{"llm_total_tokens" => 10_000})
+
+    assert {:error, :invalid_host_config} =
+             dir |> write_config(token_budget) |> HostConfig.load()
+
+    cost_budget =
+      base
+      |> Map.put("limits", %{"llm_cost_microusd" => 1_000_000})
+      |> put_in(
+        ["install", "deepseek", "usage_guarantees"],
+        %{"tokens" => true, "cost_currency" => nil}
+      )
+      |> put_in(
+        ["install", "deepseek", "reservation_tariff"],
+        %{"currency" => "USD", "id" => "openrouter-2026-08"}
+      )
+
+    assert {:error, :invalid_host_config} =
+             dir |> write_config(cost_budget) |> HostConfig.load()
+  end
+
+  @tag :tmp_dir
   test "loads an explicit live LLM max_calls ceiling", %{tmp_dir: dir} do
     config = %{
       "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},

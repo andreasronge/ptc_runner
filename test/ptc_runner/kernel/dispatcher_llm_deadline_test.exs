@@ -106,6 +106,38 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
            end)
   end
 
+  test "the whole-call deadline bounds reservation attestation before provider dispatch" do
+    parent = self()
+
+    {result, _state, _sink} =
+      dispatch_llm(parent,
+        request_timeout_ms: 100,
+        timeout_ms: 5_000,
+        limits: [llm_total_tokens: 10_000],
+        reservation_bound: fn _request, _tariff ->
+          send(parent, :attesting_reservation)
+
+          receive do
+            :never -> {:ok, %{total_tokens: 4_096, cost: nil}}
+          end
+        end,
+        requester: fn _request, _context ->
+          send(parent, :provider_called)
+          {:ok, %{content: "ok", tokens: %{input: 1, output: 1}}}
+        end
+      )
+
+    assert %{
+             status: :error,
+             kind: :capability_unavailable,
+             reason: :reservation_attestation_unavailable,
+             retryable?: false
+           } = result
+
+    assert_received :attesting_reservation
+    refute_received :provider_called
+  end
+
   test "an equal enclosing dispatch timeout keeps provider_timeout" do
     parent = self()
 
@@ -380,9 +412,22 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
         timeout_ms -> Map.put(route, :request_timeout_ms, timeout_ms)
       end
 
+    route =
+      if route.source == "llm" do
+        Map.merge(route, %{
+          output_tokens: 4_096,
+          reservation_bound:
+            Keyword.get(opts, :reservation_bound, fn _request, _tariff ->
+              {:ok, %{total_tokens: 4_096, cost: nil}}
+            end)
+        })
+      else
+        route
+      end
+
     assert {:ok, router} = LLMRouter.new([route])
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [router])
-    {:ok, limits} = Limits.new()
+    {:ok, limits} = Limits.new(Keyword.get(opts, :limits, []))
     {:ok, state} = RunState.start(limits)
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "llm-deadline")
     timeout_ms = Keyword.get(opts, :timeout_ms, 1_000)

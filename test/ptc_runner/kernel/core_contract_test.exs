@@ -76,7 +76,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     {:ok, state} = RunState.start(limits)
 
-    assert :ok = RunState.reserve_capability(state, :workflow, "read")
+    assert {:ok, _reservation_id} = RunState.reserve_capability(state, :workflow, "read")
     assert {:error, :limit_exceeded} = RunState.reserve_capability(state, :workflow, "read")
     assert {:error, :limit_exceeded} = RunState.reserve_capability(state, :workflow, "other")
   end
@@ -115,37 +115,43 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert :ok = RunState.stop(state)
   end
 
-  test "provider completion atomically records replay-miss provenance" do
+  test "provider completion and replay-miss provenance use their closed owner APIs" do
     {:ok, state} = RunState.start(Limits.defaults())
     request_hash = "sha256:" <> String.duplicate("a", 64)
 
-    assert :ok = RunState.reserve_capability(state, :workflow, "llm-request")
-    assert :ok = RunState.finish_provider(state, request_hash)
+    assert {:ok, reservation_id} =
+             RunState.reserve_capability(state, :workflow, "llm-request")
+
+    assert :ok = RunState.record_replay_miss(state, request_hash)
+
+    assert {:ok, :settled} =
+             RunState.finish_provider(state, reservation_id, {:adapter_success, :missing})
+
     assert RunState.replay_miss?(state, request_hash)
   end
 
-  test "provider completion authenticates LLM failure evidence only for llm-request" do
+  test "LLM failure evidence remains an explicit authenticated owner record" do
     error = ProviderError.new(:payment_required, "private", retryable?: false)
 
     {:ok, llm_state} = RunState.start(Limits.defaults())
-    assert :ok = RunState.reserve_capability(llm_state, :workflow, "llm-request")
-    assert :ok = RunState.finish_provider(llm_state, nil, error)
+    assert :ok = RunState.record_llm_provider_failure(llm_state, error)
     assert :ok = RunState.consume_llm_provider_failure(llm_state, :payment_required, false)
     assert :error = RunState.consume_llm_provider_failure(llm_state, :payment_required, false)
 
     {:ok, other_state} = RunState.start(Limits.defaults())
-    assert :ok = RunState.reserve_capability(other_state, :workflow, "other")
-    assert :ok = RunState.finish_provider(other_state, nil, error)
     assert :error = RunState.consume_llm_provider_failure(other_state, :payment_required, false)
   end
 
   test "a caller cannot hold two capability reservations at once" do
     {:ok, state} = RunState.start(Limits.defaults())
 
-    assert :ok = RunState.reserve_capability(state, :workflow, "read")
+    assert {:ok, reservation_id} = RunState.reserve_capability(state, :workflow, "read")
     assert {:error, :reservation_held} = RunState.reserve_capability(state, :workflow, "other")
-    assert :ok = RunState.release_provider_slot(state)
-    assert :ok = RunState.reserve_capability(state, :workflow, "other")
+
+    assert {:ok, :settled} =
+             RunState.finish_provider(state, reservation_id, {:adapter_error, :cancelled})
+
+    assert {:ok, _next_id} = RunState.reserve_capability(state, :workflow, "other")
   end
 
   test "only one evaluation lease is granted and failed candidates preserve memory" do
@@ -513,8 +519,11 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                end)
     end
 
-    assert :ok = RunState.reserve_capability(state, :workflow, "tiny-heap")
-    assert :ok = RunState.release_provider_slot(state)
+    assert {:ok, reservation_id} =
+             RunState.reserve_capability(state, :workflow, "tiny-heap")
+
+    assert {:ok, :settled} =
+             RunState.finish_provider(state, reservation_id, {:adapter_error, :cancelled})
   end
 
   test "write mission provider death before tracker attachment omits mutation state" do
@@ -564,7 +573,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "provider attachment after run closure is rejected and releases its reservation" do
     {:ok, state} = RunState.start(Limits.defaults())
-    assert :ok = RunState.reserve_capability(state, :workflow, "late-provider")
+
+    assert {:ok, reservation_id} =
+             RunState.reserve_capability(state, :workflow, "late-provider")
+
     assert :ok = RunState.close(state)
 
     provider =
@@ -576,7 +588,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     provider_ref = Process.monitor(provider)
 
-    assert {:error, :closed} = RunState.attach_provider(state, provider)
+    assert {:error, :closed} = RunState.attach_provider(state, reservation_id, provider)
     assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}, 1_000
 
     internal = :sys.get_state(state.pid)
@@ -681,7 +693,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "closing with drain synchronously terminates attached providers" do
     {:ok, state} = RunState.start(Limits.defaults())
-    assert :ok = RunState.reserve_capability(state, :workflow, "slow")
+    assert {:ok, reservation_id} = RunState.reserve_capability(state, :workflow, "slow")
 
     provider =
       spawn(fn ->
@@ -691,7 +703,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
       end)
 
     provider_ref = Process.monitor(provider)
-    assert :ok = RunState.attach_provider(state, provider)
+    assert :ok = RunState.attach_provider(state, reservation_id, provider)
     assert :ok = RunState.close_and_drain(state)
     assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}
     assert %{closed?: true} = RunState.usage(state)
@@ -700,15 +712,18 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   # The tracker refuses an attachment exactly when it has stopped, which is what
   # it does once the owner goes down — so the release that follows the refusal
   # routinely races the owner's exit and must not kill the dispatcher.
-  test "releasing a provider slot after the owner is gone reports closure" do
+  test "settling a provider reservation after the owner is gone reports an unknown id" do
     {:ok, state} = RunState.start(Limits.defaults())
-    assert :ok = RunState.reserve_capability(state, :workflow, "orphaned")
+
+    assert {:ok, reservation_id} =
+             RunState.reserve_capability(state, :workflow, "orphaned")
 
     owner_ref = Process.monitor(state.pid)
     assert :ok = RunState.stop(state)
     assert_receive {:DOWN, ^owner_ref, :process, _pid, _reason}
 
-    assert {:error, :closed} = RunState.release_provider_slot(state)
+    assert {:error, :unknown_reservation} =
+             RunState.finish_provider(state, reservation_id, {:adapter_error, :cancelled})
   end
 
   # The tracker hears about owner death only through its monitor, so it can still
@@ -726,8 +741,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert_receive {:DOWN, ^owner_ref, :process, _pid, _reason}
 
     assert {:error, :run_closed} = RunState.reserve_capability(state, :workflow, "gone")
-    assert {:error, :run_closed} = RunState.finish_provider(state)
-    assert {:error, :closed} = RunState.release_provider_slot(state)
+
+    assert {:error, :unknown_reservation} =
+             RunState.finish_provider(state, make_ref(), {:adapter_error, :cancelled})
+
     assert :ok = RunState.protocol_error(state)
     assert :ok = RunState.fail(state, :event_sink_error, :event_sink_error)
     assert :ok = RunState.mark_evaluation_terminal_provider_failure(state)
@@ -738,7 +755,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "provider attachment reports closure when the owner died before the tracker noticed" do
     {:ok, state} = RunState.start(Limits.defaults())
-    assert :ok = RunState.reserve_capability(state, :workflow, "orphaned")
+
+    assert {:ok, reservation_id} =
+             RunState.reserve_capability(state, :workflow, "orphaned")
 
     {dead_owner, dead_ref} = spawn_monitor(fn -> :ok end)
     assert_receive {:DOWN, ^dead_ref, :process, ^dead_owner, :normal}
@@ -752,7 +771,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     provider_ref = Process.monitor(provider)
 
-    assert {:error, :closed} = RunState.attach_provider(%{state | pid: dead_owner}, provider)
+    assert {:error, :closed} =
+             RunState.attach_provider(%{state | pid: dead_owner}, reservation_id, provider)
+
     assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}
 
     assert :ok = RunState.close_and_drain(state)
@@ -760,7 +781,10 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "provider attachment distinguishes a closed run from an already-dead provider" do
     {:ok, closed_state} = RunState.start(Limits.defaults())
-    assert :ok = RunState.reserve_capability(closed_state, :workflow, "closed")
+
+    assert {:ok, closed_reservation_id} =
+             RunState.reserve_capability(closed_state, :workflow, "closed")
+
     assert :ok = RunState.close_and_drain(closed_state)
 
     live_provider =
@@ -772,16 +796,28 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     live_ref = Process.monitor(live_provider)
 
-    assert {:error, :closed} = RunState.attach_provider(closed_state, live_provider)
+    assert {:error, :closed} =
+             RunState.attach_provider(closed_state, closed_reservation_id, live_provider)
+
     assert_receive {:DOWN, ^live_ref, :process, ^live_provider, :killed}
 
     {:ok, live_state} = RunState.start(Limits.defaults())
-    assert :ok = RunState.reserve_capability(live_state, :workflow, "dead")
+
+    assert {:ok, live_reservation_id} =
+             RunState.reserve_capability(live_state, :workflow, "dead")
+
     {dead_provider, dead_ref} = spawn_monitor(fn -> :ok end)
     assert_receive {:DOWN, ^dead_ref, :process, ^dead_provider, :normal}
 
-    assert {:error, :provider_down} = RunState.attach_provider(live_state, dead_provider)
-    assert :ok = RunState.release_provider_slot(live_state)
+    assert {:error, :provider_down} =
+             RunState.attach_provider(live_state, live_reservation_id, dead_provider)
+
+    assert {:ok, :settled} =
+             RunState.finish_provider(
+               live_state,
+               live_reservation_id,
+               {:adapter_error, :worker_exit}
+             )
   end
 
   test "a dispatching process killed mid-call releases its slot and stops its provider" do
@@ -824,7 +860,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     Process.exit(caller, :kill)
 
     assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}, 1_000
-    assert :ok = RunState.reserve_capability(state, :workflow, "slow")
+    assert {:ok, _reservation_id} = RunState.reserve_capability(state, :workflow, "slow")
   end
 
   test "run state shutdown kills providers attached to live reservations" do
@@ -4007,9 +4043,11 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   test "provider completion atomically releases its slot and rejects a closed run" do
     {:ok, limits} = Limits.new(live_provider_tasks: 1)
     {:ok, state} = RunState.start(limits)
-    assert :ok = RunState.reserve_capability(state, :workflow, "read")
+    assert {:ok, reservation_id} = RunState.reserve_capability(state, :workflow, "read")
     assert :ok = RunState.close(state)
-    assert {:error, :run_closed} = RunState.finish_provider(state)
+
+    assert {:error, :unknown_reservation} =
+             RunState.finish_provider(state, reservation_id, {:adapter_success, :missing})
   end
 
   defp dispatch_after_provider_down(state, dispatch) do

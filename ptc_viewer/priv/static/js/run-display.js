@@ -28,6 +28,21 @@ export function formatRunSpend(spend) {
   return fields;
 }
 
+export function formatRunBudget(budget) {
+  if (!validBudget(budget)) return [];
+
+  const fields = [];
+  if (budget.total_tokens) fields.push(formatTokenBudget(budget.total_tokens));
+  if (budget.cost) fields.push(formatCostBudget(budget.cost));
+  return fields;
+}
+
+export function validBudget(budget) {
+  if (!budget || typeof budget !== 'object' || Array.isArray(budget)) return false;
+  if (Object.keys(budget).sort().join(',') !== 'cost,total_tokens') return false;
+  return validTokenLedger(budget.total_tokens) && validCostLedger(budget.cost);
+}
+
 export function validSpend(spend) {
   if (!spend || typeof spend !== 'object' || Array.isArray(spend)) return false;
   const keys = Object.keys(spend).sort();
@@ -53,6 +68,57 @@ function validUsdCost(cost) {
   const keys = Object.keys(cost).sort().join(',');
   return keys === 'currency,microunits' && cost.currency === 'USD' &&
     Number.isSafeInteger(cost.microunits) && cost.microunits >= 0;
+}
+
+function validTokenLedger(ledger) {
+  if (ledger === null) return true;
+  if (!exactKeys(ledger, ['charged', 'limit', 'refused', 'remaining', 'reserved', 'state'])) return false;
+  return validLedger(ledger.state, ledger.limit, ledger.reserved, ledger.charged,
+    ledger.remaining, ledger.refused);
+}
+
+function validCostLedger(ledger) {
+  if (ledger === null) return true;
+  if (!exactKeys(ledger, [
+    'charged_microusd', 'currency', 'limit_microusd', 'refused',
+    'remaining_microusd', 'reserved_microusd', 'state'
+  ]) || ledger.currency !== 'USD') return false;
+
+  return validLedger(ledger.state, ledger.limit_microusd, ledger.reserved_microusd,
+    ledger.charged_microusd, ledger.remaining_microusd, ledger.refused);
+}
+
+function validLedger(state, limit, reserved, charged, remaining, refused) {
+  if (!['available', 'incomplete', 'overrun'].includes(state)) return false;
+  if (!positiveInteger(limit) || !nonNegativeInteger(reserved) ||
+      !nonNegativeInteger(charged) || !nonNegativeInteger(remaining) ||
+      !nonNegativeInteger(refused) || reserved !== 0 || reserved > limit) return false;
+  if (state !== 'overrun' && charged > limit) return false;
+  const expectedRemaining = state === 'overrun' ? 0 : Math.max(limit - charged, 0);
+  return remaining === expectedRemaining;
+}
+
+function exactKeys(value, keys) {
+  return value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).sort().join(',') === keys.slice().sort().join(',');
+}
+
+function positiveInteger(value) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+function nonNegativeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function formatTokenBudget(ledger) {
+  const state = ledger.state === 'available' ? '' : ` ${ledger.state}`;
+  return `${ledger.charged.toLocaleString('en-US')} / ${ledger.limit.toLocaleString('en-US')} token budget${state}`;
+}
+
+function formatCostBudget(ledger) {
+  const state = ledger.state === 'available' ? '' : ` ${ledger.state}`;
+  return `${formatMicrousd(ledger.charged_microusd)} / ${formatMicrousd(ledger.limit_microusd)} USD budget${state}`;
 }
 
 function formatMicrousd(microunits) {

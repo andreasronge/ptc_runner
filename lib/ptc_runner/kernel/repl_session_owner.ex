@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
 
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.ManifestReplOpening
   alias PtcRunner.Kernel.ReplTerminalization
   alias PtcRunner.Kernel.RunConfig
@@ -289,7 +290,7 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
     do: {:noreply, state}
 
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{opening_ref: ref} = state) do
-    safely(fn -> RunState.close(state.run_state) end)
+    safely(fn -> RunState.close_and_drain(state.run_state) end)
     state = state |> Map.put(:opening, nil) |> Map.put(:opening_ref, nil)
     state = finalize_abandoned_session(state)
     _ = persist_terminal_batch(state)
@@ -312,7 +313,7 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   defp close_owned_resources(%{config: nil} = state), do: state
 
   defp close_owned_resources(%{config: %RunConfig{} = config} = state) do
-    safely(fn -> RunState.close(state.run_state) end)
+    safely(fn -> RunState.close_and_drain(state.run_state) end)
     {_cleanup, state} = close_provider_session(state)
     state = finalize_abandoned_session(state)
     _ = persist_terminal_batch(state)
@@ -344,7 +345,8 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
       try do
         RunState.usage(state.run_state)
       catch
-        :exit, _reason -> %{}
+        :exit, _reason ->
+          %{llm_budget: LLMBudget.unavailable_terminal_projection(config.limits)}
       end
 
     terminal_batch =

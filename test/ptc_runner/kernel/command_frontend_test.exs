@@ -1269,6 +1269,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       "evaluation_continuation_bytes" => 0,
       "events_dropped" => %{},
       "capability_refusals" => %{},
+      "llm_budget" => %{"total_tokens" => nil, "cost" => nil},
       "llm_spend" => %{"state" => "empty"},
       "llm_usage_state" => "available",
       "llm_usage" => [],

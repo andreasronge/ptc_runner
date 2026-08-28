@@ -26,42 +26,55 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
 
     pid =
       spawn(fn ->
-        worker_loop(state, parent)
+        worker_loop(state, parent, nil)
       end)
 
     pid
   end
 
-  defp worker_loop(state, parent) do
+  defp worker_loop(state, parent, reservation_id) do
     receive do
       {:reserve, mode} ->
         send(parent, {:reserved, self(), RunState.reserve_evaluation(state, "default", mode)})
-        worker_loop(state, parent)
+        worker_loop(state, parent, reservation_id)
 
       {:release, lease} ->
         send(parent, {:released, self(), RunState.release_evaluation(state, lease)})
-        worker_loop(state, parent)
+        worker_loop(state, parent, reservation_id)
 
       {:release_status, lease} ->
         send(parent, {:release_status, self(), RunState.release_evaluation_status(state, lease)})
-        worker_loop(state, parent)
+        worker_loop(state, parent, reservation_id)
 
       {:reserve_capability, environment, name, lease} ->
-        send(
-          parent,
-          {:capability_reserved, self(),
-           RunState.reserve_capability(state, environment, name, lease)}
-        )
+        case RunState.reserve_capability(state, environment, name, lease) do
+          {:ok, next_reservation_id} ->
+            send(parent, {:capability_reserved, self(), :ok})
+            worker_loop(state, parent, next_reservation_id)
 
-        worker_loop(state, parent)
+          {:error, _reason} = error ->
+            send(parent, {:capability_reserved, self(), error})
+            worker_loop(state, parent, reservation_id)
+        end
 
       {:attach_provider, provider} ->
-        send(parent, {:provider_attached, self(), RunState.attach_provider(state, provider)})
-        worker_loop(state, parent)
+        result = RunState.attach_provider(state, reservation_id, provider)
+        send(parent, {:provider_attached, self(), result})
+        worker_loop(state, parent, reservation_id)
 
       :finish_provider ->
-        send(parent, {:provider_finished, self(), RunState.finish_provider(state)})
-        worker_loop(state, parent)
+        result =
+          case RunState.finish_provider(
+                 state,
+                 reservation_id,
+                 {:adapter_success, :missing}
+               ) do
+            {:ok, :settled} -> :ok
+            other -> other
+          end
+
+        send(parent, {:provider_finished, self(), result})
+        worker_loop(state, parent, nil)
 
       :stop ->
         :ok
@@ -787,13 +800,14 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     Process.exit(provider, :kill)
 
     await_owner_state(state, fn owner ->
-      match?(
-        %{
-          evaluation_release_waiter: {_from, _lease},
-          reservations: %{^dispatcher => %{provider: nil, provider_ref: nil}}
-        },
-        owner
-      )
+      match?(%{evaluation_release_waiter: {_from, _lease}}, owner) and
+        Enum.any?(owner.reservations, fn
+          {_reservation_id, %{caller: ^dispatcher, provider: nil, provider_ref: nil}} ->
+            true
+
+          _reservation ->
+            false
+        end)
     end)
 
     refute_receive {:release_status, ^holder, _result}, 50

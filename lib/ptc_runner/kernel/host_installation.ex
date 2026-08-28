@@ -1422,6 +1422,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
                  |> requester.(llm_requester_context(context))
                end
              end,
+             llm_reservation: %{
+               source: "llm",
+               output_tokens: prepared_model.requirements.exact_options.max_tokens,
+               tariff: prepared_model.requirements.reservation.cost_tariff,
+               bound: fn request, tariff ->
+                 PtcRunner.LLM.reservation_bound(prepared_model, request, tariff)
+               end
+             },
              usage_guarantees: installation.usage_guarantees,
              max_request_bytes: selected.max_request_bytes,
              max_response_bytes: selected.max_response_bytes
@@ -1500,6 +1508,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, capability} <-
            LLMCapability.new(
              requester: LLMReplay.requester(replay),
+             llm_reservation: %{source: "llm_replay"},
              max_response_bytes: selected.max_result_bytes
            ),
          {:ok, snapshot} <- llm_replay_snapshot(replay, installation, context.provider) do

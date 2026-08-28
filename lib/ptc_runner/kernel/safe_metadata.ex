@@ -45,7 +45,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   @llm_provider_failures ~w(
     authentication-failed payment-required rate-limited tool-calling-unsupported denied not-found timeout
     provider-timeout llm-request-timeout invalid-request unavailable transport-error internal domain-error
-    invalid-result
+    invalid-result reservation-bound-exceeded
   )
   @capability_rejection_kinds [
     :capability_denied,
@@ -106,7 +106,10 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :provider_result_limit,
     :provider_timeout,
     :llm_request_timeout,
+    :llm_output_authorization_invalid,
     :rate_limited,
+    :reservation_attestation_unavailable,
+    :reservation_bound_exceeded,
     :reservation_held,
     :resolver_unavailable,
     :run_closed,
@@ -412,7 +415,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
              :transport_error,
              :internal,
              :domain_error,
-             :invalid_result
+             :invalid_result,
+             :reservation_bound_exceeded
            ] and is_boolean(retryable?),
       do: %{llm_provider_failure: failure, llm_provider_retryable?: retryable?}
 
@@ -515,6 +519,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   defp provider_failure_atom("internal"), do: :internal
   defp provider_failure_atom("domain-error"), do: :domain_error
   defp provider_failure_atom("invalid-result"), do: :invalid_result
+  defp provider_failure_atom("reservation-bound-exceeded"), do: :reservation_bound_exceeded
 
   defp metadata_name(%PtcRunner.Lisp.Keyword{name: name}), do: name
   defp metadata_name(value) when is_atom(value), do: Atom.to_string(value)

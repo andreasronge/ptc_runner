@@ -730,9 +730,17 @@ defmodule PtcRunner.Kernel.TraceSnapshotTest do
   defp event(run_id, sequence, type) do
     data =
       case type do
-        "run-started" -> %{"missions" => %{}}
-        "run-stopped" -> %{"outcome" => "ok"}
-        _other -> %{}
+        "run-started" ->
+          %{"missions" => %{}}
+
+        "run-stopped" ->
+          %{
+            "outcome" => "ok",
+            "usage" => %{"llm_budget" => %{"total_tokens" => nil, "cost" => nil}}
+          }
+
+        _other ->
+          %{}
       end
 
     %{

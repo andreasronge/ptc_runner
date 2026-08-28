@@ -524,8 +524,19 @@ mission filter narrows counted calls. Capability events continue to carry only
 alias/revision routing identity; they do not duplicate model identity. The
 additional rows remain subject to the existing aggregate result-byte limit.
 Every finished V3 run envelope also publishes the sealed run-state
-`llm_spend` value that canonical `run-stopped.data.usage` retains. Its closed
-states are `empty`, `incomplete`, `unpriced`, `available`, and `overflow`.
+`llm_budget` and `llm_spend` values that canonical `run-stopped.data.usage`
+retains. Every current `run-stopped` event must carry `data.usage` with a valid
+terminal `llm_budget`; omission makes the trace malformed. `llm_budget` is
+authored only by RunState rather than reconstructed
+from capability events. Its exact `total_tokens` and `cost` ledgers are null
+when disabled; enabled ledgers expose their limit, zero terminal reservation,
+charged and remaining capacity, refusal count, and
+`available | incomplete | overrun` state. Overrun clamps remaining to zero.
+The Viewer run catalog consumes this same field and validates the terminal
+shape before displaying it.
+
+`llm_spend` has the closed states `empty`, `incomplete`, `unpriced`,
+`available`, and `overflow`.
 `empty`, `incomplete`, and `overflow` contain only `state`; the latter two
 ordinary states require complete non-negative input and output totals, and only
 `available` requires the canonical USD/microunit `total_cost`. Any aggregate
