@@ -393,7 +393,7 @@ defmodule PtcRunner.Kernel.Runner do
 
         {:error, :inspection_sink_error} ->
           :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
-          :unpublished
+          :unwritten
       end
 
     {:error, put_explicit_failure_retention(public_error, explicit_value, retention)}
@@ -527,7 +527,7 @@ defmodule PtcRunner.Kernel.Runner do
   defp emit_explicit_failure_value(_config, _evaluation_id, :absent), do: {:ok, nil}
 
   defp emit_explicit_failure_value(%{inspection_sink: nil}, _evaluation_id, {:present, _value}),
-    do: {:ok, :unpublished}
+    do: {:ok, :unrequested}
 
   defp emit_explicit_failure_value(config, evaluation_id, {:present, value}) do
     case admitted_explicit_failure_json(value, config.limits.terminal_result_bytes) do
@@ -542,19 +542,21 @@ defmodule PtcRunner.Kernel.Runner do
           {:ok, :retained}
         end
 
-      :error ->
-        {:ok, :oversized}
+      refusal ->
+        {:ok, refusal}
     end
   end
 
+  # A value the boundary cannot project and one that projects but does not fit
+  # are different facts about the same silent drop, and telling a caller their
+  # small value broke a byte ceiling would send them after the wrong remedy.
   defp admitted_explicit_failure_json(value, max_bytes) do
     with {:ok, projected} <- Lisp.project_boundary_value(value, :kernel_json),
          {:ok, json} <- JSONValue.normalize(projected),
-         {:ok, encoded} <- DeterministicJSON.encode(json),
-         true <- byte_size(encoded) <= max_bytes do
-      {:ok, json}
+         {:ok, encoded} <- DeterministicJSON.encode(json) do
+      if byte_size(encoded) <= max_bytes, do: {:ok, json}, else: :oversized
     else
-      _closed -> :error
+      _closed -> :unrepresentable
     end
   end
 

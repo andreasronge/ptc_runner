@@ -3708,7 +3708,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert details == %{
              failure_kind: "llm-provider-error",
-             explicit_failure_retention: :unpublished
+             explicit_failure_retention: :unrequested
            }
   end
 

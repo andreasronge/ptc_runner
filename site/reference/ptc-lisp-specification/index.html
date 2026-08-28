@@ -554,11 +554,14 @@ error: execution/explicit_failure: the workflow signalled an explicit failure;
 its value is retained in the run's private inspection record</code></pre><p>The value itself never reaches the envelope or the trace. Both are payload-free
 by construction — every caller-supplied label on a trace event is reduced to a
 one-way fingerprint — and a <code class="inline">fail</code> value is arbitrary application data. It is
-written instead to the run's private inspection
-artifact as an <code class="inline">explicit-failure-value</code> record, which requires
-<code class="inline">artifacts.inspection</code> (or <code class="inline">--inspect</code>); the diagnostic says so when the run
-published no inspection artifact, and says so again when the value exceeded
-<code class="inline">terminal_result_bytes</code>. Read a retained value back with the analysis profile:</p><pre><code class="console language-console">ptc repl --profile private-run-analysis-v1 \
+written instead to the run's private inspection artifact as an
+<code class="inline">explicit-failure-value</code> record. Retention is not unconditional, and the
+diagnostic's message distinguishes every outcome: the value is retained, or it
+was dropped because the run published no inspection artifact (enable
+<code class="inline">artifacts.inspection</code>, or pass <code class="inline">--inspect</code>), because that artifact did not
+reach its destination, because the value exceeded <code class="inline">terminal_result_bytes</code>, or
+because it cannot be represented as JSON. Read a retained value back with the
+analysis profile:</p><pre><code class="console language-console">ptc repl --profile private-run-analysis-v1 \
   --resource traces=.ptc/traces --resource inspection=.ptc/inspection \
   --session-trace-dir analysis-traces --private-unattended --format jsonl \
   -e '(analysis/read &quot;RUN_REF&quot; {&quot;collection&quot; &quot;explicit_failure_values&quot;})'</code></pre><p>A CI script separates a deliberate failure from an infrastructure one on

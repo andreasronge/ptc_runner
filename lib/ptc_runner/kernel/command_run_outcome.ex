@@ -261,12 +261,31 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        Map.get(report, :secondary_errors, []) ++
        result_failure(evidence))
     |> Enum.reject(&is_nil/1)
+    |> Enum.map(&settle_explicit_failure_retention(&1, report))
     |> Enum.map(&failure_diagnostic(&1, provider_activity, result_class))
     |> Enum.uniq_by(&{&1.phase, &1.code, &1.subject})
     |> Enum.sort_by(&precedence/1)
     |> Enum.uniq_by(&DiagnosticCatalog.compound_category(&1.phase, &1.code))
     |> Enum.take(7)
   end
+
+  # The sink accepting a record is not the same as the artifact reaching its
+  # destination, and an execution diagnostic outranks the publication failure
+  # that would otherwise be the only sign. A run whose inspection artifact was
+  # not written cannot claim the value is readable from it.
+  defp settle_explicit_failure_retention(
+         %Error{details: %{explicit_failure_retention: :retained}} = error,
+         %{artifact_state: %{"inspection" => "written"}}
+       ),
+       do: error
+
+  defp settle_explicit_failure_retention(
+         %Error{details: %{explicit_failure_retention: :retained}} = error,
+         _report
+       ),
+       do: put_in(error.details[:explicit_failure_retention], :unwritten)
+
+  defp settle_explicit_failure_retention(failure, _report), do: failure
 
   defp publication_primary(%{
          artifact_state: %{"result" => "recovery_written"},

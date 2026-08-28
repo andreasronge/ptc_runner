@@ -596,6 +596,30 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "an explicit fail value the boundary cannot project is not reported as oversized", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "explicit-fail-unprojectable", valid_manifest())
+    inspection = Path.join(directory, "run.ptcins")
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (fail (fn [x] x)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "cannot be represented as JSON"
+    refute outcome.envelope["error"]["message"] =~ "terminal result ceiling"
+    assert_schema_valid(outcome.envelope)
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
+    assert Enum.find(records, &(&1["record_type"] == "explicit-failure-value")) == nil
+  end
+
+  @tag :tmp_dir
   test "an explicit fail value over terminal_result_bytes reports that it was not retained", %{
     tmp_dir: directory
   } do

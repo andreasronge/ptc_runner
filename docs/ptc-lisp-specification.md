@@ -1371,11 +1371,14 @@ its value is retained in the run's private inspection record
 The value itself never reaches the envelope or the trace. Both are payload-free
 by construction — every caller-supplied label on a trace event is reduced to a
 one-way fingerprint — and a `fail` value is arbitrary application data. It is
-written instead to the run's private inspection
-artifact as an `explicit-failure-value` record, which requires
-`artifacts.inspection` (or `--inspect`); the diagnostic says so when the run
-published no inspection artifact, and says so again when the value exceeded
-`terminal_result_bytes`. Read a retained value back with the analysis profile:
+written instead to the run's private inspection artifact as an
+`explicit-failure-value` record. Retention is not unconditional, and the
+diagnostic's message distinguishes every outcome: the value is retained, or it
+was dropped because the run published no inspection artifact (enable
+`artifacts.inspection`, or pass `--inspect`), because that artifact did not
+reach its destination, because the value exceeded `terminal_result_bytes`, or
+because it cannot be represented as JSON. Read a retained value back with the
+analysis profile:
 
 ```console
 ptc repl --profile private-run-analysis-v1 \

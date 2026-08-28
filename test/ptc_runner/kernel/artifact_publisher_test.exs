@@ -18,6 +18,53 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   alias PtcRunner.TestSupport.StreamingInspection
 
   @tag :tmp_dir
+  test "an explicit failure whose inspection artifact never lands does not claim retention", %{
+    tmp_dir: dir
+  } do
+    trace = Path.join(dir, "run.jsonl")
+    inspection = Path.join(dir, "run.ptcins")
+    output = Path.join(dir, "result.json")
+
+    # `fail` throws past the enclosing `return`, so this is the ordinary
+    # explicit-failure outcome with an inspection artifact requested.
+    {built, _registry} =
+      build!(dir, "explicit-fail-publication", :normal, trace, inspection, output, :policy,
+        body: ~S|(fail {"secret" "must-not-escape"})|
+      )
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+    assert {:ok, evidence} = ExecutionOutcome.open(outcome, built.publication_authority)
+
+    fault = fn
+      :before_publish -> {:error, :partial_write}
+      _stage -> :ok
+    end
+
+    assert {:error, report} =
+             settlement =
+             RunBuilder.publish_execution_report(
+               outcome,
+               built.publication_authority,
+               %{inspection: fault}
+             )
+
+    refute report.artifact_state["inspection"] == "written"
+
+    assert {:error, projected} =
+             CommandRunOutcome.project(
+               evidence,
+               settlement,
+               "cmd-00000000000000000000000000",
+               false
+             )
+
+    assert projected.envelope["error"]["code"] == "explicit_failure"
+    assert projected.envelope["error"]["message"] =~ "did not reach its destination"
+    refute projected.envelope["error"]["message"] =~ "is retained"
+    refute Jason.encode!(projected.envelope) =~ "must-not-escape"
+  end
+
+  @tag :tmp_dir
   test "normal publication reports partial ordering and path-free failures", %{tmp_dir: dir} do
     trace = Path.join(dir, "run.jsonl")
     inspection = Path.join(dir, "run.ptcins")

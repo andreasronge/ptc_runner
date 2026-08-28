@@ -4,21 +4,26 @@ defmodule PtcRunner.Kernel.ExplicitFailureDiagnostic do
   # A workflow that ends in `(fail value)` reports the outcome, never the
   # value: the value is arbitrary application data, and canonical events and
   # the command envelope are payload-free by construction. What the caller
-  # does need is where the value went, because the three retention outcomes
-  # are otherwise indistinguishable from the exit status. Each is one closed
+  # does need is where the value went, because the retention outcomes are
+  # otherwise indistinguishable from the exit status. Each is one closed
   # literal, so the message adds no caller-supplied text.
 
   @retained "the workflow signalled an explicit failure; its value is retained in the run's private inspection record"
-  @unpublished "the workflow signalled an explicit failure; its value was not retained because the run published no inspection artifact — set artifacts.inspection to true to retain it"
+  @unrequested "the workflow signalled an explicit failure; its value was not retained because the run published no inspection artifact — set artifacts.inspection to true to retain it"
+  @unwritten "the workflow signalled an explicit failure; its value was not retained because the run's inspection artifact did not reach its destination"
   @oversized "the workflow signalled an explicit failure; its value was not retained because it exceeded the terminal result ceiling"
+  @unrepresentable "the workflow signalled an explicit failure; its value was not retained because it cannot be represented as JSON"
 
   @messages %{
     retained: @retained,
-    unpublished: @unpublished,
-    oversized: @oversized
+    unrequested: @unrequested,
+    unwritten: @unwritten,
+    oversized: @oversized,
+    unrepresentable: @unrepresentable
   }
 
-  @type retention :: :retained | :unpublished | :oversized
+  @type retention ::
+          :retained | :unrequested | :unwritten | :oversized | :unrepresentable
 
   @spec retentions() :: [retention()]
   def retentions, do: Map.keys(@messages)

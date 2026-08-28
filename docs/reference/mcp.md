@@ -262,12 +262,14 @@ When prompt-visible wrappers exist, the model sees them instead of the raw
 `tool/...` entries. The underlying capability still enforces its schema, byte
 ceiling, timeout, quota, and manifest grant.
 
-The value handed to `fail` is application data, so it is retained in the run's
-private inspection record rather than published to the envelope or the trace.
-A workflow entry that ends this way reports `execution/explicit_failure`,
-and that diagnostic names which of the two happened. See
-[§5.20](../ptc-lisp-specification.md#5-20-fail-signal-failure) for how to read
-the value back.
+The value handed to `fail` is application data, so it never reaches the envelope
+or the trace. A workflow entry that ends this way reports
+`execution/explicit_failure`, and that diagnostic says where the value went: it
+is retained in the run's private inspection record when the run publishes one
+and the value fits under `terminal_result_bytes`, and the diagnostic names the
+reason when it is not. See
+[§5.20](../ptc-lisp-specification.md#5-20-fail-signal-failure) for how to read a
+retained value back.
 
 ## Choose a transport
 
