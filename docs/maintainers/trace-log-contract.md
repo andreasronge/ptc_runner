@@ -43,12 +43,15 @@ ptc run PROJECT.json --trace-dir traces/ \
 A project document can capture both instead of the two switches; see
 [project configuration](../reference/project-files.md).
 
-Two code-owned profiles read those artifacts. `run-analysis-v1` takes the
+Three code-owned profiles read those artifacts. `run-analysis-v1` takes the
 canonical trace and grants the four `analysis-*` capabilities (`analysis-runs`,
 `analysis-open`, `analysis-read`, `analysis-counters`).
 `private-run-analysis-v1` additionally takes the inspection artifact, and
 requires an authorized private sink because the records it returns carry exact
-prompts, generated source, and capability payloads.
+prompts, generated source, and capability payloads. `private-run-catalog-v1`
+uses bounded metadata-only probes of both directories and grants only the
+profile-local `analysis/catalog`; it does not admit a run or open an inspection
+payload.
 
 ```bash
 # Public: canonical evidence only.
@@ -58,11 +61,15 @@ ptc repl --profile run-analysis-v1 --resource traces=traces/
 # holding the artifact, not the .ptcins path --inspect was given.
 ptc repl --profile private-run-analysis-v1 --private-terminal \
   --resource traces=traces/ --resource inspection=traces-private/
+
+# Private catalog: safe cohort metadata without payload admission.
+ptc repl --profile private-run-catalog-v1 --private-terminal \
+  --resource traces=traces/ --resource inspection=traces-private/
 ```
 
 Use `--private-unattended` in place of `--private-terminal` when no terminal is
 attached, and `--load QUERY.clj` to run forms non-interactively. `ptc repl
---describe-profile NAME` prints either profile's static contract.
+--describe-profile NAME` prints a profile's static contract.
 
 ## Purpose and boundary
 

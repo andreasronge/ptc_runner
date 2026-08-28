@@ -22,7 +22,12 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   @profile_id "private-run-analysis-v1"
 
   test "the profile registry is closed and describes fixed private authority" do
-    assert AnalysisProfileRegistry.ids() == ["private-run-analysis-v1", "run-analysis-v1"]
+    assert AnalysisProfileRegistry.ids() == [
+             "private-run-analysis-v1",
+             "private-run-catalog-v1",
+             "run-analysis-v1"
+           ]
+
     assert {:error, :unsupported_analysis_profile} = AnalysisProfileRegistry.fetch("custom")
     assert {:error, :unsupported_analysis_profile} = AnalysisProfileRegistry.fetch(nil)
 

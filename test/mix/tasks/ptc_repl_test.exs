@@ -948,10 +948,54 @@ defmodule PtcRunner.ReplFrontendTest do
 
   test "unknown profiles report the accepted profile ids" do
     assert_raise Mix.Error,
-                 ~r/unsupported session profile; accepted: private-run-analysis-v1, run-analysis-v1/,
+                 ~r/unsupported session profile; accepted: private-run-analysis-v1, private-run-catalog-v1, run-analysis-v1/,
                  fn ->
                    run_repl(["--describe-profile", "missing-profile"])
                  end
+  end
+
+  @tag :tmp_dir
+  test "the private catalog profile pages safe rows through the JSONL entry point", %{
+    tmp_dir: directory
+  } do
+    fixture = PrivateInspectionFixture.create!(directory)
+
+    output =
+      capture_io(fn ->
+        run_repl([
+          "--profile",
+          "private-run-catalog-v1",
+          "--resource",
+          "traces=#{fixture.traces}",
+          "--resource",
+          "inspection=#{fixture.inspection}",
+          "--session-trace-dir",
+          fixture.output,
+          "--private-unattended",
+          "--format",
+          "jsonl",
+          "-e",
+          "(analysis/catalog {})"
+        ])
+      end)
+
+    records = decode_jsonl(output)
+    assert Enum.map(records, & &1["type"]) == ["session-started", "evaluation", "session-closed"]
+    assert hd(records)["profile_id"] == "private-run-catalog-v1"
+    assert hd(records)["capture"]["catalog"]["row_count"] == 1
+
+    assert %{
+             "items" => [%{"run_id" => run_id, "state" => "admissible"}],
+             "catalog_digest" => digest,
+             "excluded_files" => excluded_files,
+             "truncated" => false,
+             "omitted_count" => 0,
+             "next_cursor" => nil
+           } = Enum.at(records, 1)["result"]["value"]
+
+    assert run_id == fixture.run_id
+    assert is_binary(digest)
+    assert is_integer(excluded_files)
   end
 
   test "private profile frontend policy fails before opening declared sources" do

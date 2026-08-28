@@ -22,6 +22,10 @@ defmodule PtcRunner.ReplFrontend do
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
         --private-unattended --format jsonl -e '(analysis/runs {})'
+      ptc repl --profile private-run-catalog-v1 \
+        --resource traces=tmp/traces \
+        --resource inspection=tmp/inspection \
+        --private-unattended --format jsonl -e '(analysis/catalog {})'
       ptc repl --describe-profile run-analysis-v1
 
   Options:
@@ -42,7 +46,7 @@ defmodule PtcRunner.ReplFrontend do
     * `--output` / `--private-output` — atomically publish the value of exactly
       one non-interactive public/private profile evaluation;
     * `--private-terminal` — explicitly authorize an attached terminal as the
-      private output sink required by `private-run-analysis-v1`;
+      private output sink required by a private analysis profile;
     * `--private-unattended` — explicitly authorize this command's own streams
       as that sink instead, admitting `-e`/`--load`/script/stdin and
       `--format jsonl`. Mutually exclusive with `--private-terminal`;
@@ -419,10 +423,10 @@ defmodule PtcRunner.ReplFrontend do
     do: "selected profile does not allow --continue-on-error"
 
   defp profile_frontend_error(:private_terminal_required),
-    do: "private-run-analysis-v1 requires --private-terminal"
+    do: "selected private analysis profile requires --private-terminal"
 
   defp profile_frontend_error(:interactive_terminal_required),
-    do: "private-run-analysis-v1 requires attached stdin and stdout terminals"
+    do: "selected private analysis profile requires attached stdin and stdout terminals"
 
   defp profile_frontend_error(:private_terminal_unsupported),
     do: "--private-terminal is supported only by a private analysis profile"
@@ -1007,19 +1011,25 @@ defmodule PtcRunner.ReplFrontend do
         "capture" => Map.new(capture_summary(info.snapshot))
       })
     else
-      Enum.each(capture_summary(info.snapshot), fn {resource, counts} ->
-        info(
-          "Captured #{resource}: #{pluralize(counts["file_count"], "file")}, " <>
-            pluralize(counts["run_count"], "run")
-        )
-      end)
+      Enum.each(capture_summary(info.snapshot), &present_capture_summary/1)
     end
   end
 
-  # The log profile reports its one trace capture directly; the private profile
-  # reports one entry per captured resource.
+  # Run-evidence profiles report trace/inspection captures. Catalog discovery
+  # reports its one frozen safe-metadata generation instead.
   defp capture_summary(%{traces: traces, inspection: inspection}),
     do: capture_summary(traces, "traces") ++ capture_summary(inspection, "inspection")
+
+  defp capture_summary(%{
+         source: :ptc_run_catalog,
+         row_count: row_count,
+         excluded_files: excluded_files
+       })
+       when is_integer(row_count) and is_integer(excluded_files) do
+    [
+      {"catalog", %{"row_count" => row_count, "excluded_files" => excluded_files}}
+    ]
+  end
 
   defp capture_summary(snapshot), do: capture_summary(snapshot, "traces")
 
@@ -1028,6 +1038,20 @@ defmodule PtcRunner.ReplFrontend do
        do: [{resource, %{"file_count" => file_count, "run_count" => run_count}}]
 
   defp capture_summary(_info, _resource), do: []
+
+  defp present_capture_summary({"catalog", counts}) do
+    info(
+      "Captured catalog: #{pluralize(counts["row_count"], "row")}, " <>
+        pluralize(counts["excluded_files"], "excluded file")
+    )
+  end
+
+  defp present_capture_summary({resource, counts}) do
+    info(
+      "Captured #{resource}: #{pluralize(counts["file_count"], "file")}, " <>
+        pluralize(counts["run_count"], "run")
+    )
+  end
 
   defp pluralize(1, noun), do: "1 #{noun}"
   defp pluralize(count, noun), do: "#{count} #{noun}s"

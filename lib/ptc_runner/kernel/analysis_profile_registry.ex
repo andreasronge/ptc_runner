@@ -10,9 +10,11 @@ defmodule PtcRunner.Kernel.AnalysisProfileRegistry do
 
   alias PtcRunner.Kernel.PrivateRunAnalysisProfile
   alias PtcRunner.Kernel.PublicRunAnalysisProfile
+  alias PtcRunner.Kernel.RunCatalogProfile
 
   @profiles %{
     "private-run-analysis-v1" => PrivateRunAnalysisProfile,
+    "private-run-catalog-v1" => RunCatalogProfile,
     "run-analysis-v1" => PublicRunAnalysisProfile
   }
 

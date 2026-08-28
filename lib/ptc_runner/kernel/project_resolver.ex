@@ -368,7 +368,8 @@ defmodule PtcRunner.Kernel.ProjectResolver do
       maybe_add_profile_resource(
         argv,
         rest,
-        profile in ["run-analysis-v1", "private-run-analysis-v1"] and artifacts.trace,
+        profile in ["run-analysis-v1", "private-run-analysis-v1", "private-run-catalog-v1"] and
+          artifacts.trace,
         "traces",
         Path.join(root, "traces"),
         derived
@@ -377,7 +378,7 @@ defmodule PtcRunner.Kernel.ProjectResolver do
     maybe_add_profile_resource(
       argv,
       rest,
-      profile == "private-run-analysis-v1" and artifacts.inspection,
+      profile in ["private-run-analysis-v1", "private-run-catalog-v1"] and artifacts.inspection,
       "inspection",
       Path.join(root, "inspection"),
       derived

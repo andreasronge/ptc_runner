@@ -22,9 +22,11 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
   alias PtcRunner.Kernel.BoundedCapture
   alias PtcRunner.Kernel.RunCatalog
   alias PtcRunner.Kernel.RunCatalogProbe
+  alias PtcRunner.Kernel.RunCatalogQuery
   alias PtcRunner.Lisp.RetainedSize
 
   @default_retained_bytes 4_194_304
+  @default_result_bytes 1_000_000
   @capture_heap_words 10_000_000
   @capture_timeout_ms 15_000
   @default_directory_entries RunCatalogProbe.default_directory_entries()
@@ -62,6 +64,7 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
       :max_directory_entries,
       :max_files,
       :max_retained_bytes,
+      :max_result_bytes,
       :capture_heap_words,
       :capture_deadline_ms,
       :listing_hook,
@@ -76,6 +79,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
            Keyword.get(opts, :max_files, @default_files),
          max_retained_bytes when max_retained_bytes in 1..@default_retained_bytes <-
            Keyword.get(opts, :max_retained_bytes, @default_retained_bytes),
+         max_result_bytes when max_result_bytes in 1..@default_result_bytes <-
+           Keyword.get(opts, :max_result_bytes, @default_result_bytes),
          capture_heap_words when capture_heap_words in 233..@capture_heap_words <-
            Keyword.get(opts, :capture_heap_words, @capture_heap_words),
          capture_deadline_ms when is_integer(capture_deadline_ms) <-
@@ -98,6 +103,7 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
         max_directory_entries: max_directory_entries,
         max_files: max_files,
         max_retained_bytes: max_retained_bytes,
+        max_result_bytes: max_result_bytes,
         capture_heap_words: capture_heap_words,
         capture_deadline_ms: capture_deadline_ms,
         listing_hook: listing_hook,
@@ -116,6 +122,13 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
 
   def start(_source, _opts), do: {:error, :invalid_catalog}
 
+  @doc "Returns one bounded page from this generation's safe metadata rows."
+  @spec query(t(), map()) :: {:ok, map()} | {:error, atom()}
+  def query(%__MODULE__{} = snapshot, arguments) when is_map(arguments),
+    do: call(snapshot, {:query, arguments})
+
+  def query(_snapshot, _arguments), do: {:error, :invalid_query}
+
   @doc """
   Returns the generation's frozen rows, in run-reference order.
 
@@ -132,6 +145,18 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
   def info(%__MODULE__{} = snapshot), do: call(snapshot, :info)
   def info(_snapshot), do: {:error, :invalid_catalog}
 
+  @doc false
+  @spec result_limit(t()) :: {:ok, pos_integer()} | {:error, atom()}
+  def result_limit(%__MODULE__{} = snapshot), do: call(snapshot, :result_limit)
+  def result_limit(_snapshot), do: {:error, :invalid_catalog}
+
+  @doc false
+  @spec transfer_owner(t(), pid()) :: :ok | {:error, atom()}
+  def transfer_owner(%__MODULE__{} = snapshot, owner) when is_pid(owner),
+    do: call(snapshot, {:transfer_owner, owner})
+
+  def transfer_owner(_snapshot, _owner), do: {:error, :invalid_catalog}
+
   @spec stop(term()) :: :ok
   def stop(%__MODULE__{} = snapshot) do
     _result = call(snapshot, :stop)
@@ -139,6 +164,12 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
   end
 
   def stop(_snapshot), do: :ok
+
+  @doc false
+  @spec valid?(term()) :: boolean()
+  # ex_dna:disable-for-next-line — opaque owner handles validate locally so one snapshot cannot authorize another kind.
+  def valid?(%__MODULE__{pid: pid, token: token}), do: is_pid(pid) and is_reference(token)
+  def valid?(_snapshot), do: false
 
   @doc false
   @spec alive?(t()) :: boolean()
@@ -155,6 +186,7 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
            token: config.token,
            owner_ref: owner_ref,
            rows: generation.rows,
+           max_result_bytes: config.max_result_bytes,
            info: %{
              source: :ptc_run_catalog,
              catalog_digest: generation.catalog_digest,
@@ -176,8 +208,26 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
   def handle_call({token, :rows}, _from, %{token: token} = state),
     do: {:reply, {:ok, state.rows}, state}
 
+  def handle_call({token, :result_limit}, _from, %{token: token} = state),
+    do: {:reply, {:ok, state.max_result_bytes}, state}
+
+  def handle_call({token, {:query, arguments}}, _from, %{token: token} = state),
+    do:
+      {:reply, RunCatalogQuery.run(state.rows, state.info, arguments, state.max_result_bytes),
+       state}
+
   def handle_call({token, :stop}, _from, %{token: token} = state),
     do: {:stop, :normal, :ok, state}
+
+  def handle_call({token, {:transfer_owner, owner}}, _from, %{token: token} = state)
+      when is_pid(owner) do
+    if Process.alive?(owner) do
+      Process.demonitor(state.owner_ref, [:flush])
+      {:reply, :ok, %{state | owner_ref: Process.monitor(owner)}}
+    else
+      {:reply, {:error, :catalog_unavailable}, state}
+    end
+  end
 
   def handle_call({_token, _request}, _from, state),
     do: {:reply, {:error, :invalid_catalog}, state}
