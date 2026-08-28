@@ -603,8 +603,9 @@ command outcome rather than triggering reconstruction from trace rows. The
 Viewer run catalog consumes this same terminal field and does not maintain a
 second totals vocabulary. A completed LLM error that may have dispatched and
 has no usage makes spend `incomplete`; a provider error carrying trusted
-`not_dispatched` provenance is excluded because no provider request could have
-been billed.
+usage contributes the same observed tokens and cost as a success while leaving
+`successful_calls` unchanged. Trusted `not_dispatched` provenance is excluded
+because no provider request could have been billed.
 
 The command envelope additionally publishes `llm_usage_state`. Terminal
 accounting pairs `llm-request` start and stop events by `capability_id`; an

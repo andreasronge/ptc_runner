@@ -651,7 +651,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
                ), true}
 
             {:error, :inspection_sink_error} ->
-              {{:settlement, {:adapter_error, :cancelled}, inspection_failure(state)}, false}
+              {{:settlement, {:adapter_error, :not_dispatched}, inspection_failure(state)}, false}
           end
 
         {settlement, invocation_result} = split_settlement(invocation_result)
@@ -769,7 +769,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         maybe_merge_error_attributes(result, result, invocation.error_attributes)
 
       {:error, :event_sink_error} ->
-        _ = RunState.finish_provider(state, reservation_id, {:adapter_error, :cancelled})
+        _ = RunState.finish_provider(state, reservation_id, {:adapter_error, :not_dispatched})
 
         limit_error(
           state,
@@ -979,7 +979,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
           limit_error(state, nil, :run_deadline)
         end
 
-      {:settlement, {:adapter_error, :timeout}, result}
+      {:settlement, {:adapter_error, :not_dispatched}, result}
     else
       parent = self()
       go = make_ref()
@@ -1038,7 +1038,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
               Process.exit(pid, :kill)
               await_down(pid, ref)
 
-              {:settlement, {:adapter_error, :cancelled}, limit_error(state, nil, :run_closed)}
+              {:settlement, {:adapter_error, :not_dispatched},
+               limit_error(state, nil, :run_closed)}
           end
 
         {:error, :provider_down} ->
@@ -1046,7 +1047,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
           # The provider died before the gate opened, so the callback never
           # ran and no effect can have reached the outside world.
-          {:settlement, {:adapter_error, :worker_exit},
+          {:settlement, {:adapter_error, :not_dispatched},
            post_invocation_failure(
              provider_exit(reason),
              environment,
@@ -1056,7 +1057,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
         {:error, reason} when reason in [:closed, :unknown_reservation] ->
           await_down(pid, ref)
-          {:settlement, {:adapter_error, :cancelled}, limit_error(state, nil, :run_closed)}
+          {:settlement, {:adapter_error, :not_dispatched}, limit_error(state, nil, :run_closed)}
       end
     end
   end

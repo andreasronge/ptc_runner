@@ -151,11 +151,14 @@ Useful run switches are:
   `.ptc/envelopes/<run_ref>.json` ledger entry is still written for that run.
   `run`, `validate`, `doctor`, `models`, and `init` all accept the flag; the
   document it publishes carries status, run reference, result or classified
-  error, artifact state, and a closed `warnings` array. An uncataloged installed
-  model appears there as `model_uncataloged` with its provider alias and an
-  adapter-attested public selector; the same warning is retained in canonical
-  `run-started` metadata. Parse the envelope rather than scraping stdout, which is a
-  human presentation channel that may also carry application output.
+  error, artifact state, and a closed `warnings` array. For `run`, an uncataloged
+  installed model appears there as `model_uncataloged` with its provider alias
+  and an adapter-attested public selector; the same warning is retained in
+  `run-started` metadata. Non-run commands require an empty warnings
+  array. In particular, `doctor --connect` retains uncataloged-model notices on
+  stderr rather than claiming run metadata it does not produce. Parse the
+  envelope rather than scraping stdout, which is a human
+  presentation channel that may also carry application output.
 
 The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.
@@ -201,8 +204,11 @@ is only a lower bound, while any aggregate overflow makes `llm_spend` exactly
 `calls` increments, `successful_calls` does not, and `missing_usage_calls`
 increments. A matched error that may have dispatched likewise increments
 `missing_usage_calls` when no usage was observed and makes `llm_spend`
-`incomplete`; trusted `not_dispatched` errors are excluded because no provider
-request could have been billed. A row includes `total_cost` only when every call that could carry
+`incomplete`. When that error retains valid provider-reported usage, the call
+instead increments `usage_calls`, contributes its tokens and cost, and can make
+`llm_spend` `available` even though `successful_calls` remains zero. Trusted
+`not_dispatched` errors are excluded because no provider request could have
+been billed. A row includes `total_cost` only when every call that could carry
 usage has valid priced usage; an unmatched or unpriced call leaves the
 aggregate cost unknown and omitted, not reported as zero, while measured
 input/output totals are retained. `llm_usage_state: "available"` means the

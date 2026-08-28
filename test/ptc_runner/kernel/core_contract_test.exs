@@ -526,6 +526,42 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              RunState.finish_provider(state, reservation_id, {:adapter_error, :cancelled})
   end
 
+  test "LLM death before the dispatch gate releases its budget and expects no usage" do
+    parent = self()
+
+    {:ok, router} =
+      TestHelpers.llm_router(fn _request, _context ->
+        send(parent, :provider_called)
+        {:ok, %{content: "unreachable", tokens: %{input: 1, output: 1}}}
+      end)
+
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [router])
+    {:ok, limits} = Limits.new(provider_heap_words: 100, llm_total_tokens: 10_000)
+    {:ok, state} = RunState.start(limits)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "pre-gate-llm-death")
+
+    assert %{status: :error, reason: :provider_exit} =
+             dispatch_after_provider_down(state, fn ->
+               Dispatcher.dispatch(
+                 state,
+                 :workflow,
+                 environment,
+                 "llm-request",
+                 %{},
+                 TestHelpers.dispatch_context(state, :workflow, 1_000),
+                 sink,
+                 nil
+               )
+             end)
+
+    refute_received :provider_called
+
+    assert %{data: %{usage_observation: :not_expected}} =
+             Enum.find(EventSink.events(sink), &(&1.type == "capability-stopped"))
+
+    assert RunState.usage(state).llm_budget["total_tokens"]["charged"] == 0
+  end
+
   test "write mission provider death before tracker attachment omits mutation state" do
     {:ok, capability} =
       Capability.new(

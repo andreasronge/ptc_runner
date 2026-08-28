@@ -146,7 +146,23 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
         "total_cost" => 0.25
       })
 
-    assert LLMUsageSummary.spend(failed) == %{"state" => "incomplete"}
+    assert LLMUsageSummary.spend(failed) == %{
+             "state" => "incomplete"
+           }
+
+    measured_failure =
+      LLMUsageSummary.accumulate(empty, "writer", "stable-v1", :error, %{
+        "input" => 3,
+        "output" => 2,
+        "total_cost" => 0.25
+      })
+
+    assert LLMUsageSummary.spend(measured_failure) == %{
+             "state" => "available",
+             "input" => 3,
+             "output" => 2,
+             "total_cost" => %{"currency" => "USD", "microunits" => 250_000}
+           }
 
     not_dispatched =
       LLMUsageSummary.accumulate(empty, "writer", "stable-v1", :not_dispatched, nil)
@@ -384,6 +400,38 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
                  "missing_usage_calls" => 1,
                  "usage_overflow" => false,
                  "usage" => %{"input" => 4, "output" => 2}
+               }
+             ] = rows
+    end
+  end
+
+  test "a failed LLM call retains complete provider-reported usage" do
+    snapshot = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:writer/model")
+
+    events = [
+      event(1, "run-started", %{"missions" => %{}, "connector_snapshots" => [snapshot]}),
+      llm_started_event(2, "capability-error"),
+      llm_failed_event(3, "capability-error", %{
+        "usage_observation" => "reported",
+        "usage" => %{"input" => 4, "output" => 2, "total_cost" => 0.1}
+      }),
+      event(4, "run-stopped", %{"outcome" => "error"})
+    ]
+
+    assert {:ok, summary} = LLMUsageSummary.terminal(events)
+
+    for rows <- [summary["llm_usage"], summary["llm_usage_by_model"]] do
+      assert [
+               %{
+                 "calls" => 1,
+                 "successful_calls" => 0,
+                 "usage_calls" => 1,
+                 "missing_usage_calls" => 0,
+                 "usage" => %{
+                   "input" => 4,
+                   "output" => 2,
+                   "total_cost" => %{"currency" => "USD", "microunits" => 100_000}
+                 }
                }
              ] = rows
     end

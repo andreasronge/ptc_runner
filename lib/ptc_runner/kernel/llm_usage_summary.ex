@@ -104,21 +104,21 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
   Exactly five states, and none of `unpriced`, `incomplete`, `overflow`, or
   `empty` may render as zero cost:
 
-  * `available` — successful usage complete and priced
-  * `unpriced` — successful usage exists, tokens valid, cost absent
+  * `available` — reported usage is complete and priced
+  * `unpriced` — reported usage exists, tokens are valid, and cost is absent
   * `incomplete` — a possibly dispatched call has missing or invalid usage
   * `overflow` — at least one aggregate token or cost sum exceeded the ceiling
-  * `empty` — no successful LLM call yet
+  * `empty` — no call reported billable usage
   """
   @spec spend(map()) :: map()
   def spend(counters) when is_map(counters) do
-    {successful, missing, tokens_complete?, cost_complete?, usage, usage_overflow?} =
+    {observed, missing, tokens_complete?, cost_complete?, usage, usage_overflow?} =
       Enum.reduce(counters, {0, 0, true, true, %{}, false}, fn
         {_key, {row, row_tokens_complete?, row_cost_complete?}},
-        {successful, missing, tokens_complete?, cost_complete?, usage, usage_overflow?} ->
+        {observed, missing, tokens_complete?, cost_complete?, usage, usage_overflow?} ->
           {usage, aggregate_overflow?} = sum_usage(usage, Map.fetch!(row, "usage"))
 
-          {successful + Map.fetch!(row, "successful_calls"),
+          {observed + Map.fetch!(row, "usage_calls"),
            missing + Map.fetch!(row, "missing_usage_calls"),
            tokens_complete? and row_tokens_complete?, cost_complete? and row_cost_complete?,
            usage, usage_overflow? or Map.fetch!(row, "usage_overflow") or aggregate_overflow?}
@@ -131,7 +131,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
       missing > 0 or not tokens_complete? ->
         %{"state" => "incomplete"}
 
-      successful == 0 ->
+      observed == 0 ->
         %{"state" => "empty"}
 
       cost_complete? ->
@@ -472,8 +472,8 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
     Map.put(counters, key, update_usage(row, tokens_complete?, cost_complete?, call))
   end
 
-  defp update_usage(row, tokens_complete?, cost_complete?, %{outcome: :ok, usage: usage})
-       when is_map(usage) do
+  defp update_usage(row, tokens_complete?, cost_complete?, %{outcome: outcome, usage: usage})
+       when outcome in [:ok, :error] and is_map(usage) do
     case LLMUsage.normalize(usage) do
       {:ok, normalized} ->
         {usage, overflow?} = sum_usage(Map.fetch!(row, "usage"), normalized)

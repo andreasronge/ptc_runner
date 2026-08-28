@@ -1958,6 +1958,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert stopped.kind == :internal
     assert stopped.retryable? == false
+    assert stopped.dispatch_provenance == :not_dispatched
     assert stopped.details =~ "req_llm"
 
     # A route declaring no backing application keeps the retryable transport
@@ -1999,6 +2000,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert raised.kind == :internal
     assert raised.retryable? == false
+    assert raised.dispatch_provenance == :not_dispatched
     refute_receive {:host_llm_request, _model, _request}
   end
 

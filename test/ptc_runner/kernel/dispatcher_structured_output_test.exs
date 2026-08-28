@@ -205,7 +205,10 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
     parent = self()
 
     {result, state, sink} =
-      dispatch_structured(parent, :json_object, %{json: "not-json", tokens: %{}})
+      dispatch_structured(parent, :json_object, %{
+        json: "not-json",
+        tokens: %{input: 4, output: 2, total_cost: 0.1}
+      })
 
     assert_received {:called, _}
 
@@ -218,9 +221,24 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
 
     assert RunState.usage(state).capability_calls.workflow["llm-request"] == 1
 
-    assert Enum.any?(EventSink.events(sink), fn event ->
-             event.type == "capability-stopped" and event.data.reason == :output_schema_mismatch
-           end)
+    assert %{data: stopped} =
+             Enum.find(EventSink.events(sink), &(&1.type == "capability-stopped"))
+
+    assert stopped.reason == :output_schema_mismatch
+    assert stopped.usage_observation == :reported
+
+    assert stopped.usage == %{
+             "input" => 4,
+             "output" => 2,
+             "total_cost" => %{"currency" => "USD", "microunits" => 100_000}
+           }
+
+    assert RunState.usage(state).llm_spend == %{
+             "state" => "available",
+             "input" => 4,
+             "output" => 2,
+             "total_cost" => %{"currency" => "USD", "microunits" => 100_000}
+           }
   end
 
   test "non-object json_object output is output_schema_mismatch" do
@@ -439,36 +457,15 @@ defmodule PtcRunner.Kernel.DispatcherStructuredOutputTest do
          arguments \\ %{"schema" => @schema},
          opts \\ []
        ) do
-    capability_opts =
-      [
-        requester: fn request ->
-          send(parent, {:called, request})
-          {:ok, response}
-        end
-      ]
-      |> Keyword.merge(Keyword.take(opts, [:max_response_bytes]))
+    assert {:ok, router} =
+             TestHelpers.llm_router(
+               fn request ->
+                 send(parent, {:called, request})
+                 {:ok, response}
+               end,
+               Keyword.put(opts, :structured_output_mode, mode)
+             )
 
-    {:ok, capability} = LLMCapability.new(capability_opts)
-
-    route = %{
-      alias: "model",
-      source: "llm",
-      installation_revision: "model-v1",
-      default?: true,
-      capability: capability,
-      max_calls: nil,
-      output_tokens: 4_096,
-      reservation_bound: fn _request, _tariff ->
-        {:ok, %{total_tokens: 4_096, cost: nil}}
-      end
-    }
-
-    route =
-      if mode,
-        do: Map.put(route, :structured_output_mode, mode),
-        else: route
-
-    assert {:ok, router} = LLMRouter.new([route])
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [router])
     {:ok, limits} = Limits.new()
     {:ok, state} = RunState.start(limits)

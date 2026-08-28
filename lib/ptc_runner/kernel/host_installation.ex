@@ -1499,7 +1499,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
              "the #{application} provider application is not started; " <>
                "start it before building this provider, or run through the " <>
                "prepared-run path that admits it",
-             retryable?: false
+             retryable?: false,
+             dispatch_provenance: :not_dispatched
            )}
         end
     end

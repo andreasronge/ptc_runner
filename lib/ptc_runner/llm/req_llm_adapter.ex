@@ -2457,12 +2457,12 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp maybe_put_total_cost(tokens, usage, provider_meta) do
-      case fetch_usage(usage, :total_cost, "total_cost") do
+      case Map.fetch(provider_meta, @reported_total_cost_key) do
         {:ok, total_cost} ->
           Map.put(tokens, :total_cost, total_cost)
 
         :error ->
-          case Map.fetch(provider_meta, @reported_total_cost_key) do
+          case fetch_usage(usage, :total_cost, "total_cost") do
             {:ok, total_cost} -> Map.put(tokens, :total_cost, total_cost)
             :error -> tokens
           end

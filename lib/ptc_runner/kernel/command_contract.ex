@@ -1132,9 +1132,12 @@ defmodule PtcRunner.Kernel.CommandContract do
       "command" => %{"enum" => commands},
       "status" => %{"const" => status},
       "run_ref" => %{"type" => "string", "pattern" => @run_ref},
-      "warnings" => warning_schema()
+      "warnings" => warnings_schema(commands)
     }
   end
+
+  defp warnings_schema(["run"]), do: warning_schema()
+  defp warnings_schema(_commands), do: %{"const" => []}
 
   defp warning_schema do
     %{

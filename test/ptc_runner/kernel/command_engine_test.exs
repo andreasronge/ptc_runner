@@ -4177,6 +4177,19 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert %CommandOutcome{command_mode: {:doctor, :connect}} =
              CommandOutcome.success({:doctor, :connect}, run_ref, active_doctor_result)
 
+    assert_schema_invalid(
+      valid_doctor.envelope
+      |> Map.put("warnings", [
+        %{
+          "code" => "model_uncataloged",
+          "message" =>
+            "the configured model is not an exact catalog entry; pricing, limits, token estimation, and capability detection may be incomplete",
+          "provider" => "alpha",
+          "model" => "openrouter:future/model"
+        }
+      ])
+    )
+
     provider_free_connect_result = %{
       "checks" => [
         %{"name" => "runtime", "status" => "pass", "code" => "supported"},

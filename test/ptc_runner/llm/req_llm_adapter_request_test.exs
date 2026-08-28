@@ -255,6 +255,32 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
             }} = capability.callback.(%{messages: [], tools: [tool_schema()]})
   end
 
+  test "prefers OpenRouter's reported charge over catalog pricing", %{test: test} do
+    Req.Test.expect(
+      test,
+      request_handler(self(), "inclusionai/ling-3.0-flash",
+        usage: %{
+          "prompt_tokens" => 25,
+          "completion_tokens" => 9,
+          "total_tokens" => 34,
+          "cost" => "0.123456"
+        }
+      )
+    )
+
+    assert {:ok, target, :cataloged, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:inclusionai/ling-3.0-flash",
+               Requirements.interim(%{max_tokens: 2_000})
+             )
+
+    {:ok, invocation} =
+      Invocation.new(%{messages: [%{role: :user, content: "hi"}]}, false, "test", nil)
+
+    assert {:ok, %{tokens: %{input: 25, output: 9, total_cost: "0.123456"}}} =
+             ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
+  end
+
   test "preserves an attested token-limit alias through ReqLLM dispatch", %{test: test} do
     Req.Test.expect(test, responses_request_handler(self(), "gpt-5"))
 

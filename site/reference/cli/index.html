@@ -162,11 +162,14 @@ command envelope. When a project enables <code class="inline">artifacts.envelope
 <code class="inline">.ptc/envelopes/&lt;run_ref&gt;.json</code> ledger entry is still written for that run.
 <code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, and <code class="inline">init</code> all accept the flag; the
 document it publishes carries status, run reference, result or classified
-error, artifact state, and a closed <code class="inline">warnings</code> array. An uncataloged installed
-model appears there as <code class="inline">model_uncataloged</code> with its provider alias and an
-adapter-attested public selector; the same warning is retained in canonical
-<code class="inline">run-started</code> metadata. Parse the envelope rather than scraping stdout, which is a
-human presentation channel that may also carry application output.</li></ul><p>The command envelope reports the run reference and artifact class, not artifact
+error, artifact state, and a closed <code class="inline">warnings</code> array. For <code class="inline">run</code>, an uncataloged
+installed model appears there as <code class="inline">model_uncataloged</code> with its provider alias
+and an adapter-attested public selector; the same warning is retained in
+<code class="inline">run-started</code> metadata. Non-run commands require an empty warnings
+array. In particular, <code class="inline">doctor --connect</code> retains uncataloged-model notices on
+stderr rather than claiming run metadata it does not produce. Parse the
+envelope rather than scraping stdout, which is a human
+presentation channel that may also carry application output.</li></ul><p>The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.
 All publications are no-replace and recheck their destination at commit time.</p><p>Atomic publication may reserve owner-only sibling paths named
 <code class="inline">.ptc-private-*</code> or <code class="inline">.ptc-private-result-*</code>. They normally disappear at commit
@@ -202,8 +205,11 @@ is only a lower bound, while any aggregate overflow makes <code class="inline">l
 <code class="inline">calls</code> increments, <code class="inline">successful_calls</code> does not, and <code class="inline">missing_usage_calls</code>
 increments. A matched error that may have dispatched likewise increments
 <code class="inline">missing_usage_calls</code> when no usage was observed and makes <code class="inline">llm_spend</code>
-<code class="inline">incomplete</code>; trusted <code class="inline">not_dispatched</code> errors are excluded because no provider
-request could have been billed. A row includes <code class="inline">total_cost</code> only when every call that could carry
+<code class="inline">incomplete</code>. When that error retains valid provider-reported usage, the call
+instead increments <code class="inline">usage_calls</code>, contributes its tokens and cost, and can make
+<code class="inline">llm_spend</code> <code class="inline">available</code> even though <code class="inline">successful_calls</code> remains zero. Trusted
+<code class="inline">not_dispatched</code> errors are excluded because no provider request could have
+been billed. A row includes <code class="inline">total_cost</code> only when every call that could carry
 usage has valid priced usage; an unmatched or unpriced call leaves the
 aggregate cost unknown and omitted, not reported as zero, while measured
 input/output totals are retained. <code class="inline">llm_usage_state: &quot;available&quot;</code> means the
