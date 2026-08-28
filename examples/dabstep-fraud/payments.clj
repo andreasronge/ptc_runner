@@ -1,5 +1,5 @@
 (ns dabstep.payments
-  "Read-only, streaming access to a verified column projection of the pinned DABStep payments table."
+  "Read-only, streaming access to the pinned DABStep payments table."
   {:visibility :prompt})
 
 (defn- headers []
@@ -11,6 +11,10 @@
    "acquirer_country"])
 
 (defn- known-columns [] (set (headers)))
+(defn- column-index [] (zipmap (headers) (range (count (headers)))))
+(defn- header-line [] (join "," (headers)))
+(defn- max-carry [] 65536)
+
 (defn- integer-columns []
   #{"year" "hour_of_day" "minute_of_hour" "day_of_year"})
 (defn- float-columns [] #{"eur_amount"})
@@ -37,6 +41,7 @@
 
 (defn- typed-cell [column value]
   (cond
+    (nil? value) nil
     (= value "") nil
     (contains? (integer-columns) column) (parse-number parse-long column value)
     (contains? (float-columns) column) (parse-number parse-double column value)
@@ -53,75 +58,36 @@
            :kind :invalid-columns
            :reason :expected-distinct-non-empty-known-column-vector})))
 
+(defn- validate-cursor! [cursor columns]
+  (if (not (and (map? cursor)
+                (= (sort (keys cursor)) ["carry" "columns" "upstream"])
+                (string? (get cursor "upstream"))
+                (string? (get cursor "carry"))
+                (not (includes? (get cursor "carry") "\n"))
+                (<= (count (get cursor "carry")) (max-carry))))
+    (fail {:status :error
+           :kind :invalid-cursor
+           :reason :malformed-cursor})
+    (if (= columns (get cursor "columns"))
+      cursor
+      (fail {:status :error
+             :kind :invalid-cursor
+             :reason :columns-changed}))))
+
 (defn- unwrap-page [response]
   (if (= :ok (get response :status))
     (get response :value)
     (fail response)))
 
-(defn- validate-state! [column state]
-  (if (and (map? state)
-           (= (sort (keys state)) ["carry" "done" "upstream_cursor" "values"])
-           (or (nil? (get state "upstream_cursor"))
-               (string? (get state "upstream_cursor")))
-           (string? (get state "carry"))
-           (not (includes? (get state "carry") "\n"))
-           (vector? (get state "values"))
-           (<= (count (get state "values")) 65536)
-           (boolean? (get state "done")))
-    state
-    (fail {:status :error
-           :kind :invalid-cursor
-           :reason :malformed-column-state
-           :column column})))
-
-(defn- read-column [column supplied]
-  (let [previous (if (nil? supplied) nil (validate-state! column supplied))]
-   (if (and (not (nil? previous))
-           (or (get previous "done")
-               (not (empty? (get previous "values")))))
-    (assoc previous "content_hash" nil "read_calls" 0)
-    (let [first-page? (nil? previous)
-          upstream-cursor (if first-page?
-                            nil
-                            (get previous "upstream_cursor"))
-          arguments (if first-page?
-                      {"path" (str "columns/" column ".txt") "limit" 8}
-                      {"path" (str "columns/" column ".txt")
-                       "cursor" upstream-cursor
-                       "limit" 8})
-          page (unwrap-page (tool/workspace.read arguments))
-          next-upstream-cursor (get page "next_cursor")
-          carry (if first-page? "" (get previous "carry" ""))
-          text (join "" (map #(get % "text") (get page "items")))
-          combined (str carry text)
-          complete-at-boundary? (or (nil? next-upstream-cursor)
-                                    (ends-with? combined "\n"))
-          lines (split-lines combined)
-          complete-lines (if complete-at-boundary? lines (butlast lines))
-          next-carry (if complete-at-boundary? "" (last lines))
-          data-lines (if first-page?
-                       (if (= column (first complete-lines))
-                         (rest complete-lines)
-                         (fail {:status :error
-                                :kind :invalid-payments-data
-                                :reason :header-mismatch
-                                :column column}))
-                       complete-lines)
-          old-values (if first-page? [] (get previous "values"))
-          new-values (vec (concat old-values
-                                  (map #(typed-cell column %) data-lines)))]
-      {"upstream_cursor" next-upstream-cursor
-       "carry" next-carry
-       "values" new-values
-       "done" (nil? next-upstream-cursor)
-       "content_hash" (get page "content_hash")
-       "read_calls" 1}))))
-
-(defn- compact-state [state emitted]
-  {"upstream_cursor" (get state "upstream_cursor")
-   "carry" (get state "carry")
-   "values" (vec (drop emitted (get state "values")))
-   "done" (get state "done")})
+(defn- project [columns lines]
+  (let [position (column-index)
+        selectors (vec (map (fn [c] [(get position c) c]) columns))]
+    (vec (map (fn [line]
+                (let [fields (split line ",")]
+                  (vec (map (fn [selector]
+                              (typed-cell (nth selector 1) (get fields (nth selector 0))))
+                            selectors))))
+              lines))))
 
 (defn fraud-definition
   "Return the metric definition supplied by the official DABStep benchmark manual. Use it when interpreting fraud comparisons."
@@ -134,44 +100,33 @@
   {:signature "(cursor :map?, columns [:string]) -> {columns [:string], rows [[:any]], next_cursor :map?, content_hashes [:string], read_calls :int}"}
   [cursor requested-columns]
   (let [columns (validate-columns! requested-columns)
-        _ (if (and (not (nil? cursor))
-                   (not (= columns (get cursor "columns"))))
-            (fail {:status :error
-                   :kind :invalid-cursor
-                   :reason :columns-changed})
-            nil)
-        previous-states (if (nil? cursor) {} (get cursor "states"))
-        states (zipmap columns
-                       (map #(read-column % (get previous-states %)) columns))
-        emitted (apply min
-                       (map #(count (get (get states %) "values")) columns))
-        rows (vec
-               (map (fn [index]
-                      (vec (map #(nth (get (get states %) "values") index)
-                                columns)))
-                    (range emitted)))
-        next-states (zipmap columns
-                            (map #(compact-state (get states %) emitted) columns))
-        finished? (every? (fn [column]
-                            (let [state (get next-states column)]
-                              (and (get state "done")
-                                   (empty? (get state "values")))))
-                          columns)
-        hashes (vec (filter #(not (nil? %))
-                            (map #(get (get states %) "content_hash") columns)))
-        read-calls (reduce + 0 (map #(get (get states %) "read_calls") columns))
-        unbacked (vec (filter #(= 0 (get (get states %) "read_calls")) columns))
-        _ (if (and (> emitted 0) (= 0 read-calls))
-            (fail {:status :error
-                   :kind :invalid-cursor
-                   :reason :unbacked-page
-                   :columns unbacked})
-            nil)]
+        first-page? (nil? cursor)
+        state (if first-page? nil (validate-cursor! cursor columns))
+        arguments (if first-page?
+                    {"path" "payments.csv"}
+                    {"path" "payments.csv" "cursor" (get state "upstream")})
+        page (unwrap-page (tool/workspace.read arguments))
+        next-upstream (get page "next_cursor")
+        text (join "" (map #(get % "text") (get page "items")))
+        combined (str (if first-page? "" (get state "carry")) text)
+        complete-at-boundary? (or (nil? next-upstream) (ends-with? combined "\n"))
+        lines (split-lines combined)
+        complete-lines (if complete-at-boundary? lines (butlast lines))
+        next-carry (if complete-at-boundary? "" (last lines))
+        data-lines (if first-page?
+                     (if (= (first complete-lines) (header-line))
+                       (rest complete-lines)
+                       (fail {:status :error
+                              :kind :invalid-payments-data
+                              :reason :header-mismatch}))
+                     complete-lines)
+        hash (get page "content_hash")]
     {"columns" columns
-     "rows" rows
-     "next_cursor" (if finished?
+     "rows" (project columns data-lines)
+     "next_cursor" (if (nil? next-upstream)
                      nil
-                     {"columns" columns "states" next-states})
-     "content_hashes" hashes
-     "unbacked_columns" unbacked
-     "read_calls" read-calls}))
+                     {"columns" columns
+                      "upstream" next-upstream
+                      "carry" next-carry})
+     "content_hashes" (if (nil? hash) [] [hash])
+     "read_calls" 1}))

@@ -17,11 +17,9 @@ payments_tmp="data/payments.csv.tmp.$$"
 dev_tmp="reference/dev.jsonl.tmp.$$"
 manual_tmp="reference/context/manual.md.tmp.$$"
 payments_readme_tmp="reference/context/payments-readme.md.tmp.$$"
-columns_tmp="data/columns.tmp.$$"
 
 cleanup() {
   rm -f "$payments_tmp" "$dev_tmp" "$manual_tmp" "$payments_readme_tmp"
-  rm -rf "$columns_tmp"
 }
 
 trap cleanup EXIT HUP INT TERM
@@ -65,37 +63,6 @@ if [ "$line_count" != 138237 ]; then
   exit 1
 fi
 
-mkdir -p "$columns_tmp"
-
-if ! awk -F, -v output="$columns_tmp" '
-  NR == 1 {
-    if (NF != 21) exit 2
-    for (column = 1; column <= NF; column++) {
-      names[column] = $column
-      print $column > (output "/" names[column] ".txt")
-    }
-    next
-  }
-  NF != 21 { exit 3 }
-  {
-    for (column = 1; column <= NF; column++) {
-      print $column >> (output "/" names[column] ".txt")
-    }
-  }
-' "$payments_tmp"; then
-  printf '%s\n' 'failed to derive the verified column projection' >&2
-  exit 1
-fi
-
-for column_file in "$columns_tmp"/*.txt; do
-  column_line_count=$(wc -l < "$column_file" | tr -d ' ')
-  if [ "$column_line_count" != 138237 ]; then
-    printf 'column line count mismatch for %s: expected 138237, got %s\n' \
-      "$column_file" "$column_line_count" >&2
-    exit 1
-  fi
-done
-
 if ! jq -e -s 'any(.[];
   .task_id == "49" and
   .question == "What is the top country (ip_country) for fraud? A. NL, B. BE, C. ES, D. FR" and
@@ -116,8 +83,3 @@ mv "$payments_tmp" data/payments.csv
 mv "$dev_tmp" reference/dev.jsonl
 mv "$manual_tmp" reference/context/manual.md
 mv "$payments_readme_tmp" reference/context/payments-readme.md
-rm -rf data/columns
-mv "$columns_tmp" data/columns
-trap - EXIT HUP INT TERM
-
-printf '%s\n' "Fetched and verified DABStep revision ${dabstep_revision}."

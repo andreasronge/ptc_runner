@@ -17,13 +17,13 @@
     },
     "payments_data": {
       "source": "mcp",
-      "installation_revision": "ptc-fs-mcp-0.2.0-payments-only",
+      "installation_revision": "ptc-fs-mcp-0.2.0-payments-csv",
       "accepts_data": ["normal", "private_inspection"],
       "transport": {
         "type": "stdio",
         "command": "npx",
         "cwd": ".",
-        "args": ["-y", "ptc-fs-mcp@0.2.0", "--root", "data", "--include", "columns/*.txt"],
+        "args": ["-y", "ptc-fs-mcp@0.2.0", "--root", "data", "--include", "payments.csv", "--max-read-bytes", "500000", "--max-result-bytes", "1000000"],
         "inherit_environment": true,
         "env": {},
         "start_timeout_ms": 60000
@@ -34,7 +34,7 @@
       "ceilings": {
         "timeout_ms": 30000,
         "max_catalog_tools": 8,
-        "max_result_bytes": 262144
+        "max_result_bytes": 1048576
       }
     }
   }

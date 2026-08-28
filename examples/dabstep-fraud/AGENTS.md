@@ -27,7 +27,8 @@ and need no network. Inside this repository the same commands are `mix ptc …`.
   against `replay.jsonl`, so it runs with no model credential.
 - `input.schema.json`, `result.schema.json`, `inputs/*.json` — the contracts
   and the two shipped inputs.
-- `fetch-data.sh` — rebuilds the checksum-pinned `data/` projection.
+- `fetch-data.sh` — downloads and checksum-verifies `data/payments.csv` and
+  the reference files. It does not reshape the data.
 - `evidence/` — committed run records. Read `README.md` before citing them.
 
 ## Working loop
@@ -63,5 +64,6 @@ and writing into it makes later runs fail `envelope/publication_failed`.
 Runs recorded before the fixed-point cost migration (`0de15a10`) that reported a
 model cost no longer load, by design — 0.x keeps no read compatibility for a
 superseded representation. Delete stale artifacts rather than working around
-them; a damaged file currently also blocks healthy runs in the same directory
-(#1668). See the reverification note in `evidence/current-main-smoke.json`.
+them. A damaged file used to block healthy runs in the same directory; #1668 is
+fixed on `main`, so a damaged artifact is now isolated. See the reverification
+note in `evidence/current-main-smoke.json`.

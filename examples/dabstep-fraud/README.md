@@ -49,12 +49,17 @@ result contract:
 
 ### Replay without a live model
 
-The checked-in replay preserves the representative Luna run's final analysis
-program. Its exploratory first program omits the unused `next_cursor` from its
-printed preview: upstream MCP cursors are intentionally opaque and may change
-when `fetch-data.sh` recreates checksum-identical files. The replay still uses
-exact request matching, executes the generated PTC-Lisp, and performs all 133
-local MCP reads against the checksum-pinned data projection.
+The checked-in replay preserves all five turns of a live GPT-5.6 Luna run
+against the raw CSV: an exploratory read, a malformed `defn` the model then
+corrected, the corrected scan, its execution, and `(return "B. BE")`. Replay
+executes every one of those programs and performs all 50 local MCP reads
+against the checksum-pinned `data/payments.csv`.
+
+One byte of the recorded conversation is edited. The model's exploratory
+program printed `next_cursor`; `ptc-fs-mcp` signs each cursor with a
+per-process key, so that signature differs on every server start and no fixture
+could ever match the following request. The preview drops the unused
+`next_cursor` and keeps `:rows` and `:read_calls`. Nothing else is altered.
 
 ```console
 ./fetch-data.sh
@@ -65,10 +70,10 @@ ptc run ptc-project.replay.json \
 
 No model credential is needed. Replay is exact-request matched: changing the
 task, tools, prompt, or continuation causes a fixture miss instead of silently
-using unrelated output.
-
-The portable fixture was verified again after deleting and rebuilding the
-column projection with `fetch-data.sh`.
+using unrelated output. Three consecutive runs returned `B. BE` with 50 mission
+capability calls and no errors, and it was verified again after deleting `data/`
+and re-running `fetch-data.sh`, producing a byte-identical 74,371,086-byte
+inspection artifact.
 
 ## What the program computed
 
@@ -140,11 +145,21 @@ The model chose the three required columns, followed every cursor to `nil`,
 kept only per-country aggregates, divided fraudulent EUR by total EUR, ranked
 the four options, and returned the required format in one program.
 
+That run used the column-projection reader. The program is reproduced as
+generated; it still compiles and runs against the current raw-CSV reader
+unchanged, because `read-page` keeps the same signature and cursor discipline.
+
 ## Observed comparison
 
 These are five independent live samples per model observed on 2026-08-24 with
 the same task, six-turn budget, data, contracts, and PtcRunner limits. Caching
 was disabled. They are observations of one task, not benchmark scores.
+
+They predate the raw-CSV reader. The cohort ran against the column-projection
+design, so its read counts and inspection sizes describe that design. The
+prompt-visible API is unchanged — the same `read-page` calls work against either
+reader — but the cohort is not re-scored against the current one and no run
+below was repeated.
 
 | Model | Exact answer | Evidence-backed | Model calls | Observed cost |
 |---|---:|---:|---:|---:|
@@ -188,8 +203,9 @@ five-run cohorts.
 | DeepSeek V4 Flash live | result contract rejected a rate vector at `/value` | 6 | 134 | $0.001326 |
 | Luna replay | `B. BE` | 2 | 133 | — |
 
-Both live failures were model-authored rather than provider or artifact
-failures. Luna received result-contract feedback after invalid terminal
+Those samples also used the column-projection reader, so their mission-read
+counts reflect 16,384-byte pages. Both live failures were model-authored rather
+than provider or artifact failures. Luna received result-contract feedback after invalid terminal
 candidates and continued within its remaining turns. DeepSeek completed a
 streaming EUR-volume calculation on its final turn but returned a sorted rate
 vector instead of one permitted answer string. The sealed inspection records,
@@ -197,58 +213,68 @@ resolved-model counters, selected-run transcript check, costs, and run
 references are recorded in
 [`evidence/current-main-smoke.json`](evidence/current-main-smoke.json).
 
-## Why the data is columnar
+## Why the model reads the raw CSV
 
-The pinned source CSV is 23.6 MB. `fetch-data.sh` verifies it first, then
-deterministically transposes all 21 columns into newline-delimited files. The
-model still chooses any distinct projection; host code contains no answer,
-country, or fraud-rate logic.
+The pinned source is one 23,581,339-byte `data/payments.csv`. `fetch-data.sh`
+downloads it, verifies its checksum, header, and line count, and stops there. It
+does not reshape the data, so nothing between the benchmark file and the model
+is authored by a helper script.
 
-The MCP installation can read only `data/columns/*.txt`. It cannot read the raw
-CSV, the answer-bearing `reference/dev.jsonl`, or the benchmark context files.
-For the representative three-column run this reduced exact private inspection
-to 8.3 MB. The initial row-file design exceeded PtcRunner's fail-closed 16 MB
-inspection capture after 294 reads; the projected design completes in 133.
+The MCP installation can read only `data/payments.csv`. It cannot read the
+answer-bearing `reference/dev.jsonl` or the benchmark context files.
 
-`payments.clj` aligns independently paged columns with bounded buffers. The
-application grants only two prompt-visible functions: the official fraud
-definition and the paged reader. The raw MCP function stays out of the prompt
-because `model_visible` defaults to `false`; both host documents now state it
+`payments.clj` pages that file and projects the columns the model asked for, so
+the projection is still model-selected — it happens in the component rather than
+on disk. The application grants only two prompt-visible functions: the official
+fraud definition and the paged reader. The raw MCP function stays out of the
+prompt because `model_visible` defaults to `false`; both host documents state it
 explicitly so the guarantee is checkable without consulting the schema.
+
+The server runs with `--max-read-bytes 500000 --max-result-bytes 1000000`, which
+is what makes reading the whole file affordable: one page carries 485,376 source
+bytes, so a complete scan is 49 reads instead of the 1,440 the 16,384-byte
+default of `ptc-fs-mcp` would need. The consumer ceiling is `max_result_bytes`
+1,048,576, one notch above the server's, because PtcRunner's accounting is
+slightly wider than the server's and equal values are rejected as
+`mcp_response_exceeded`.
+
+Reading all 21 columns rather than three costs evidence volume. Exact private
+inspection is 74,371,086 bytes, about three times the source, because an MCP
+result carries its payload in both `content` and `structuredContent`. The
+previous column-projection design recorded 8.3 MB. The fail-closed ceiling is
+536,870,912 bytes, so this fits with room to spare;
+[ptc_runner#1670](https://github.com/andreasronge/ptc_runner/issues/1670) tracks
+recording a value identity instead of the bytes.
+
 Evaluation is bounded to 40 MB, 600 seconds, 256 mission capability calls, and
 six agent turns; the turn ceiling is enforced by `input.schema.json` rather than
 only set by the shipped inputs.
 
 ### What the reader's cursor does and does not prove
 
-The upstream MCP cursor is opaque and server-validated, so a forged one fails
-the read. The outer `read-page` cursor is not. It is an ordinary map the model
-receives and hands back, and it carries the per-column leftovers that keep
-independently paged columns aligned. PtcRunner exposes no keyed digest to
-mission components, and the pinned filesystem server accepts no positional read,
-so this example cannot seal that cursor. Two checks bound it instead:
+`read-page` performs exactly one upstream read per call and hands the upstream
+MCP cursor straight back to the server. That cursor is opaque and
+server-validated — `ptc-fs-mcp` signs it with a per-process key — so a forged
+position fails the read instead of returning invented rows. Every page reports
+`read_calls` and `content_hashes`, so a page is always attributable to the read
+that produced it.
 
-- `read-page` validates every column state — exact key set, types, a `carry`
-  containing no line break, at most 65,536 buffered values — and fails closed
-  with `:malformed-column-state` otherwise.
-- A page that would emit rows while performing zero upstream reads is refused
-  with `:unbacked-page`. Every page also reports `read_calls`, `content_hashes`,
-  and `unbacked_columns`, so a column served from the cursor buffer is visible
-  in the trace instead of being indistinguishable from one read from disk.
+What the model can still author is `carry`: the partial final line of the
+previous page, which `read-page` prepends before splitting. `read-page`
+validates it — exact cursor key set, types, no line break, at most 65,536
+bytes — and fails closed with `:malformed-cursor` otherwise. A model performing
+one genuine read per page could still fabricate at most that one line.
 
-Both checks are deliberately absent from the `read-page` docstring. They are
+That is a tighter bound than the column-projection reader this example used
+before, whose cursor carried up to 65,536 buffered values per column and needed
+an `:unbacked-page` check because a page could be served entirely from that
+buffer. Reading one file leaves no buffer to serve from and no unbacked page to
+refuse.
+
+These checks are deliberately absent from the `read-page` docstring. They are
 runtime guarantees an auditor reads out of the trace, not instructions to the
-model, and leaving the prompt byte-identical is what keeps the preserved cohort
-comparable and the checked-in replay runnable. Announcing a check to the model
-would change the experiment without making the check stronger.
-
-That closes the zero-cost fabrication path: a cursor asserting `done` with
-invented values now fails instead of returning rows. It does not make the cursor
-unforgeable. A model that performs one genuine read per page can still return
-other columns' values from a buffer it authored. Sealing it properly needs
-either a keyed digest available to mission components or aligned paging inside
-the provider, and is left to follow-up work. The cohort below was classified
-before these checks existed and is not re-scored by them.
+model. Announcing a check to the model would change the experiment without
+making the check stronger.
 
 ## Benchmark fidelity and attribution
 
@@ -258,10 +284,10 @@ realistic analytical work. This example is not a DABStep leaderboard
 submission and makes no benchmark-score claim.
 
 The official harness supplies a larger context corpus. This example supplies
-the payments data plus the exact fraud definition from the pinned official
-manual through a prompt-visible domain function. It omits unrelated fee,
-merchant, MCC, and acquirer files, and exposes a lossless model-selected column
-projection instead of raw rows. Those are deliberate harness deviations.
+the pinned payments CSV unmodified, plus the exact fraud definition from the
+pinned official manual through a prompt-visible domain function. It omits
+unrelated fee, merchant, MCC, and acquirer files. That omission is a deliberate
+harness deviation; the payments data itself is served as published.
 
 The prompt-facing namespace and function documentation also name DABStep and
 point directly to the relevant manual fact. They do not expose the published
