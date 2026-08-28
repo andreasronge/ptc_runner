@@ -89,7 +89,7 @@ defmodule PtcRunner.DotenvTest do
       assert System.get_env("PTC_DOTENV_TEST_EQ") == "a=b=c"
     end
 
-    test "does not overwrite an env var that is already set", %{tmp_dir: dir} do
+    test "overwrites an env var that is already set", %{tmp_dir: dir} do
       track_env(["PTC_DOTENV_TEST_EXISTING"])
       System.put_env("PTC_DOTENV_TEST_EXISTING", "original")
       path = Path.join(dir, ".env")
@@ -97,7 +97,7 @@ defmodule PtcRunner.DotenvTest do
 
       Dotenv.load_file(path)
 
-      assert System.get_env("PTC_DOTENV_TEST_EXISTING") == "original"
+      assert System.get_env("PTC_DOTENV_TEST_EXISTING") == "from_file"
     end
   end
 
@@ -129,14 +129,14 @@ defmodule PtcRunner.DotenvTest do
       assert System.get_env(key) == nil
     end
 
-    test "preserves a value inherited before the launch", %{tmp_dir: dir} do
+    test "temporarily overrides a value inherited before the launch", %{tmp_dir: dir} do
       key = "PTC_DOTENV_SCOPED_EXISTING"
       track_env([key])
       System.put_env(key, "inherited")
       path = Path.join(dir, ".env")
       File.write!(path, "#{key}=from-file\n")
 
-      assert "inherited" =
+      assert "from-file" =
                Dotenv.with_file_scope(path, fn ->
                  assert :ok = Dotenv.load_file(path)
                  System.get_env(key)

@@ -121,7 +121,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   } do
     environment_name = "PTC_TEST_DOCTOR_CONNECT_TOKEN"
     previous_environment = System.get_env(environment_name)
-    System.delete_env(environment_name)
+    System.put_env(environment_name, "ambient-secret")
 
     provider_applications = LLMSupport.snapshot_provider_applications()
 
@@ -197,9 +197,10 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     assert presentation.exit_status == 0
     assert outcome.exit_status == 0
     assert outcome.envelope["result"]["provider_activity"] == true
-    assert System.get_env(environment_name) == "test-secret"
+    assert System.get_env(environment_name) == "ambient-secret"
     assert_received {:host_llm_ensure_ready, _pid}
-    assert_received {:host_llm_request, "openrouter:test/model", _request}
+
+    assert_received {:host_llm_request, "openrouter:test/model", %{credential: "test-secret"}}
 
     # The readiness check bills a real request, so it accounts for one, on the
     # rows a run reports. `max_tokens: 1` bounds the magnitude, not the
@@ -369,7 +370,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     # An MCP-only project reached `credential_unavailable` with the named file
     # never read: environment setup was gated on the selected provider being an
     # LLM, while an MCP transport binds environment credentials the same way.
-    assert System.get_env(environment_name) == "test-secret"
+    assert System.get_env(environment_name) == nil
 
     refute presentation.outcome.envelope["error"]["code"] == "credential_unavailable"
   end

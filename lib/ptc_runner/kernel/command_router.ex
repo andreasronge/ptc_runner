@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.CommandRouter do
   @moduledoc false
 
+  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandFrontend
@@ -37,6 +38,20 @@ defmodule PtcRunner.Kernel.CommandRouter do
   end
 
   defp run_one_shot(entry, bootstrap, runner) do
+    env_file = Keyword.get(entry.arguments.frontend_options, :env_file)
+
+    Dotenv.with_file_scope(env_file, fn ->
+      run_one_shot_scoped(entry, bootstrap, runner)
+    end)
+  rescue
+    _exception ->
+      internal_error(entry)
+  catch
+    _kind, _reason ->
+      internal_error(entry)
+  end
+
+  defp run_one_shot_scoped(entry, bootstrap, runner) do
     case bootstrap.(entry.arguments) do
       {:ok, %CommandRuntime{} = runtime} ->
         case runner.(entry.arguments, runtime) do
@@ -73,33 +88,21 @@ defmodule PtcRunner.Kernel.CommandRouter do
           70
         )
     end
-  rescue
-    _exception ->
-      presentation(
-        nil,
-        "",
-        one_shot_error(
-          entry.arguments.command,
-          :internal_error,
-          "the #{entry.arguments.command} command failed internally",
-          entry.run_ref
-        ),
-        70
-      )
-  catch
-    _kind, _reason ->
-      presentation(
-        nil,
-        "",
-        one_shot_error(
-          entry.arguments.command,
-          :internal_error,
-          "the #{entry.arguments.command} command failed internally",
-          entry.run_ref
-        ),
-        70
-      )
   end
+
+  defp internal_error(entry),
+    do:
+      presentation(
+        nil,
+        "",
+        one_shot_error(
+          entry.arguments.command,
+          :internal_error,
+          "the #{entry.arguments.command} command failed internally",
+          entry.run_ref
+        ),
+        70
+      )
 
   defp one_shot_error(command, code, message, run_ref) do
     safe =

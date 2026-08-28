@@ -133,24 +133,11 @@ defmodule PtcRunner.Kernel.CommandEngine do
          presentation?
        ) do
     if CommandRuntime.valid?(runtime) do
-      case Dotenv.attach_environment(runtime, arguments.frontend_options) do
-        {:ok, runtime} ->
-          case prepare_arguments_safely(
-                 arguments,
-                 entry.run_ref,
-                 entry.destinations,
-                 runtime
-               ) do
-            {:ok, %CommandPreparation{} = preparation} ->
-              dispatch_preparation(preparation, runtime, entry, presentation?)
+      env_file = Keyword.get(arguments.frontend_options, :env_file)
 
-            terminal ->
-              with_rejection(terminal)
-          end
-
-        {:error, _reason} ->
-          with_rejection(startup_failure(entry))
-      end
+      Dotenv.with_file_scope(env_file, fn ->
+        dispatch_scoped(arguments, entry, runtime, presentation?)
+      end)
     else
       with_rejection(startup_failure(entry))
     end
@@ -158,6 +145,27 @@ defmodule PtcRunner.Kernel.CommandEngine do
 
   defp dispatch_entry_context(%CommandEntry{} = entry, _runtime, _presentation?),
     do: with_rejection(startup_failure(entry))
+
+  defp dispatch_scoped(arguments, entry, runtime, presentation?) do
+    case Dotenv.attach_environment(runtime, arguments.frontend_options) do
+      {:ok, runtime} ->
+        case prepare_arguments_safely(
+               arguments,
+               entry.run_ref,
+               entry.destinations,
+               runtime
+             ) do
+          {:ok, %CommandPreparation{} = preparation} ->
+            dispatch_preparation(preparation, runtime, entry, presentation?)
+
+          terminal ->
+            with_rejection(terminal)
+        end
+
+      {:error, _reason} ->
+        with_rejection(startup_failure(entry))
+    end
+  end
 
   defp dispatch_preparation(preparation, runtime, entry, true) do
     CommandRunDispatch.dispatch_frontend(preparation, runtime, entry.frontend)
