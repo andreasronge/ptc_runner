@@ -817,9 +817,21 @@ defmodule PtcRunner.ReplFrontendTest do
   test "a host-backed manifest acquires once and reuses one provider session", %{
     tmp_dir: directory
   } do
+    environment_name = "PTC_REPL_SCOPED_CREDENTIAL"
+    previous_environment = System.get_env(environment_name)
+    System.delete_env(environment_name)
+
+    on_exit(fn ->
+      if previous_environment,
+        do: System.put_env(environment_name, previous_environment),
+        else: System.delete_env(environment_name)
+    end)
+
     marker = Path.join(directory, "provider-lifecycle")
     manifest_path = Path.join(directory, "provider-repl.json")
     host_path = Path.join(directory, "ptc-host.json")
+    env_file = Path.join(directory, "repl.env")
+    File.write!(env_file, "#{environment_name}=from-file\n")
 
     File.write!(Path.join(directory, "main.clj"), "(ns app) (defn run [x] (return x))")
 
@@ -845,6 +857,7 @@ defmodule PtcRunner.ReplFrontendTest do
     File.write!(
       host_path,
       Jason.encode!(%{
+        "credentials" => %{"token" => %{"env" => environment_name}},
         "install" => %{
           "workspace" => %{
             "source" => "mcp",
@@ -854,6 +867,7 @@ defmodule PtcRunner.ReplFrontendTest do
               "command" => System.find_executable("sh"),
               "cwd" => @stdio_root,
               "args" => [@stdio_fixture, marker, "mark-close"],
+              "env" => %{"TOKEN" => %{"binding" => "token"}},
               "start_timeout_ms" => 5_000
             },
             "tools" => %{
@@ -876,6 +890,8 @@ defmodule PtcRunner.ReplFrontendTest do
           manifest_path,
           "--host-config",
           host_path,
+          "--env-file",
+          env_file,
           "-e",
           "(def x 41)",
           "-e",
@@ -889,6 +905,7 @@ defmodule PtcRunner.ReplFrontendTest do
     assert Enum.count(lifecycle, &String.ends_with?(&1, ":server/discover")) == 1
     assert Enum.count(lifecycle, &String.ends_with?(&1, ":tools/list")) == 2
     assert Enum.count(lifecycle, &(&1 == "session-closed")) == 1
+    assert System.get_env(environment_name) == nil
   end
 
   @tag :tmp_dir

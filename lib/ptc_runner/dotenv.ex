@@ -2,7 +2,7 @@ defmodule PtcRunner.Dotenv do
   @moduledoc """
   Loads environment variables from an explicitly named dotenv file.
 
-  Existing process environment variables take precedence over file values.
+  File values take precedence over existing process environment variables.
   Command frontends use `--env-file FILE` to choose the exact file; this module
   does not search the invocation directory or its parents implicitly.
 
@@ -28,8 +28,8 @@ defmodule PtcRunner.Dotenv do
   Parse `path` as a `.env` file and set the variables it declares.
 
   Lines are `KEY=VALUE`; blank lines and `#` comments are ignored. Surrounding
-  single or double quotes are stripped from the value. Existing environment
-  variables are never overwritten.
+  single or double quotes are stripped from the value. Declared values
+  overwrite existing environment variables.
   """
   @spec load_file(String.t()) :: :ok | {:error, file_error()}
   def load_file(path) when is_binary(path) do
@@ -92,12 +92,11 @@ defmodule PtcRunner.Dotenv do
   def attach_environment(_runtime, _frontend_options), do: {:error, :invalid_command_runtime}
 
   @doc false
-  @spec with_file_scope(binary(), (-> result)) :: result when result: term()
+  @spec with_file_scope(binary() | nil, (-> result)) :: result when result: term()
   def with_file_scope(path, fun) when is_binary(path) and is_function(fun, 0) do
-    # The ordinary CLI is one-shot, but Viewer launches share a long-lived VM.
-    # Remember only names declared by this file so values loaded for one launch
-    # cannot become the inherited baseline of the next launch. The fixed lock
-    # also prevents two scoped launches from restoring over each other.
+    # Remember only names declared by this file so values loaded for one command
+    # cannot become the inherited baseline of the next command. The fixed lock
+    # also prevents two scoped commands from restoring over each other.
     case declared_keys(path) do
       {:ok, keys} ->
         :global.trans({__MODULE__, :file_scope}, fn ->
@@ -179,7 +178,7 @@ defmodule PtcRunner.Dotenv do
       [key, value] ->
         key = String.trim(key)
         value = value |> String.trim() |> String.trim("\"") |> String.trim("'")
-        if System.get_env(key) == nil, do: System.put_env(key, value)
+        System.put_env(key, value)
 
       _ ->
         :ok
