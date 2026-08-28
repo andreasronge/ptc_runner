@@ -75,8 +75,9 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
   Records one LLM call into a bounded `{alias, revision}` accumulator.
 
   Unlike `alias_rows/1`, this preserves failed calls so live spend can use the
-  same classification terminal accounting does: count every call, withhold
-  pricing only when a successful call lacks priced usage.
+  same classification terminal accounting does: a possibly dispatched error
+  without usage is incomplete, while trusted `:not_dispatched` failures do not
+  imply provider spend.
   """
   @spec accumulate(map(), binary(), binary(), atom() | binary(), map() | nil) :: map()
   def accumulate(counters, alias_name, revision, status, usage)
@@ -91,7 +92,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
       %{
         alias: alias_name,
         revision: revision,
-        outcome: if(stringify(status) == "ok", do: :ok, else: :error),
+        outcome: normalize_outcome(status),
         usage: usage
       }
     )
@@ -105,7 +106,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
 
   * `available` — successful usage complete and priced
   * `unpriced` — successful usage exists, tokens valid, cost absent
-  * `incomplete` — at least one successful call has missing or invalid usage
+  * `incomplete` — a possibly dispatched call has missing or invalid usage
   * `overflow` — at least one aggregate token or cost sum exceeded the ceiling
   * `empty` — no successful LLM call yet
   """
@@ -127,11 +128,11 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
       usage_overflow? ->
         %{"state" => "overflow"}
 
-      successful == 0 ->
-        %{"state" => "empty"}
-
       missing > 0 or not tokens_complete? ->
         %{"state" => "incomplete"}
+
+      successful == 0 ->
+        %{"state" => "empty"}
 
       cost_complete? ->
         Map.put(Map.take(usage, @total_keys), "state", "available")
@@ -339,8 +340,11 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
     id = field(event, "data", "capability_id")
     alias_name = field(event, "data", "alias")
     revision = field(event, "data", "installation_revision")
+    status = stringify(field(event, "data", "status"))
+    usage_observation = optional_stringify(field(event, "data", "usage_observation"))
 
-    if valid_id?(id) and valid_llm_name?(alias_name) and valid_llm_name?(revision) do
+    if valid_id?(id) and valid_llm_name?(alias_name) and valid_llm_name?(revision) and
+         valid_usage_observation?(status, usage_observation) do
       record = %{
         llm?: true,
         run_id: field(event, "run_id"),
@@ -360,8 +364,27 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
 
   defp valid_llm_name?(value), do: is_binary(value) and value =~ @name
 
+  defp valid_usage_observation?(_status, nil), do: true
+  defp valid_usage_observation?("error", "not_expected"), do: true
+
+  defp valid_usage_observation?(status, observation),
+    do: status in ["ok", "error"] and observation in ["reported", "missing"]
+
   defp stop_outcome(event) do
-    if stringify(field(event, "data", "status")) == "ok", do: :ok, else: :error
+    case {stringify(field(event, "data", "status")),
+          optional_stringify(field(event, "data", "usage_observation"))} do
+      {"ok", _observation} -> :ok
+      {"error", "not_expected"} -> :not_dispatched
+      {_status, _observation} -> :error
+    end
+  end
+
+  defp normalize_outcome(status) do
+    case stringify(status) do
+      "ok" -> :ok
+      "not_dispatched" -> :not_dispatched
+      _other -> :error
+    end
   end
 
   defp call_from_stop(event) do
@@ -473,7 +496,10 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
        when outcome in [:ok, :unknown],
        do: {Map.update!(row, "missing_usage_calls", &(&1 + 1)), false, false}
 
-  defp update_usage(row, tokens_complete?, cost_complete?, %{outcome: :error}),
+  defp update_usage(row, _tokens_complete?, _cost_complete?, %{outcome: :error}),
+    do: {Map.update!(row, "missing_usage_calls", &(&1 + 1)), false, false}
+
+  defp update_usage(row, tokens_complete?, cost_complete?, %{outcome: :not_dispatched}),
     do: {row, tokens_complete?, cost_complete?}
 
   defp validate_spend_usage(spend, usage) do
@@ -650,4 +676,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummary do
 
   defp stringify(value) when is_atom(value), do: Atom.to_string(value)
   defp stringify(value), do: value
+
+  defp optional_stringify(nil), do: nil
+  defp optional_stringify(value), do: stringify(value)
 end

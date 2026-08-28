@@ -306,7 +306,8 @@ defmodule PtcRunner.Kernel.RunState do
   @type usage_evidence :: {:valid, map()} | :missing | :invalid
   @type settlement_evidence ::
           {:adapter_success, usage_evidence()}
-          | {:adapter_error, :provider_error | :worker_exit | :timeout | :cancelled}
+          | {:adapter_error,
+             :provider_error | :worker_exit | :timeout | :cancelled | :not_dispatched}
 
   @spec finish_provider(t(), reference(), settlement_evidence()) ::
           {:ok, :settled}
@@ -1817,6 +1818,14 @@ defmodule PtcRunner.Kernel.RunState do
   defp settle_llm_budget(
          budget,
          %{dispatched?: true, llm: reservation},
+         {:adapter_error, :not_dispatched}
+       ) do
+    {release_llm_reservations(budget, reservation), []}
+  end
+
+  defp settle_llm_budget(
+         budget,
+         %{dispatched?: true, llm: reservation},
          {:adapter_error, _reason}
        ) do
     {full_charge_llm_reservations(budget, reservation), []}
@@ -2355,7 +2364,7 @@ defmodule PtcRunner.Kernel.RunState do
        do: true
 
   defp valid_settlement_evidence?({:adapter_error, reason})
-       when reason in [:provider_error, :worker_exit, :timeout, :cancelled],
+       when reason in [:provider_error, :worker_exit, :timeout, :cancelled, :not_dispatched],
        do: true
 
   defp valid_settlement_evidence?(_evidence), do: false

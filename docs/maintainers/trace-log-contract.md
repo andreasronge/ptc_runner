@@ -547,12 +547,13 @@ upward to one microunit; floats never remain accounting authority.
 The canonical LLM usage summary is shared by trace counters and the V3 run
 envelope's `execution.usage`. For routed `llm-request` calls, `llm_usage` groups
 stopped events by model alias and installation revision. Each row reports total
-and successful calls, calls with valid usage, successful calls missing usage,
+and successful calls, calls with valid usage, calls that may have dispatched
+but lack usage,
 and sums of the closed `input`, `output`, `cache_creation`, `cache_read`, and
 `total_cost` fields. Every row has `usage_overflow`; sums saturate at
 `9_007_199_254_740_991`, and a true flag means at least one displayed value is
-only a lower bound. A row includes aggregate `total_cost` only when every
-successful call has valid usage that reports cost; otherwise cost is unknown
+only a lower bound. A row includes aggregate `total_cost` only when every call
+that could have reached a provider has valid usage that reports cost; otherwise cost is unknown
 and omitted. A revision change creates a separate row rather than silently
 combining unlike deployments.
 
@@ -600,7 +601,10 @@ unknown cost never deserializes as measured zero. Command projection validates
 this value through `LLMUsageSummary`; absence or malformed shape invalidates the
 command outcome rather than triggering reconstruction from trace rows. The
 Viewer run catalog consumes this same terminal field and does not maintain a
-second totals vocabulary.
+second totals vocabulary. A completed LLM error that may have dispatched and
+has no usage makes spend `incomplete`; a provider error carrying trusted
+`not_dispatched` provenance is excluded because no provider request could have
+been billed.
 
 The command envelope additionally publishes `llm_usage_state`. Terminal
 accounting pairs `llm-request` start and stop events by `capability_id`; an

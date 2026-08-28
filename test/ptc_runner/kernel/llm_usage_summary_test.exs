@@ -146,7 +146,12 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
         "total_cost" => 0.25
       })
 
-    assert LLMUsageSummary.spend(failed) == %{"state" => "empty"}
+    assert LLMUsageSummary.spend(failed) == %{"state" => "incomplete"}
+
+    not_dispatched =
+      LLMUsageSummary.accumulate(empty, "writer", "stable-v1", :not_dispatched, nil)
+
+    assert LLMUsageSummary.spend(not_dispatched) == %{"state" => "empty"}
 
     unpriced =
       LLMUsageSummary.accumulate(empty, "writer", "stable-v1", :ok, %{
@@ -180,7 +185,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
         "output" => 2,
         "total_cost" => 0.25
       })
-      |> LLMUsageSummary.accumulate("writer", "stable-v1", :error, nil)
+      |> LLMUsageSummary.accumulate("writer", "stable-v1", :not_dispatched, nil)
       |> LLMUsageSummary.accumulate("other", "stable-v1", :ok, %{
         "input" => 5,
         "output" => 4,
@@ -356,7 +361,7 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
     assert hd(summary["llm_usage_by_model"])["resolved_model"] == "openrouter:writer/model"
   end
 
-  test "matched successful and failed LLM calls keep their current counters" do
+  test "matched failed LLM calls make possibly billed usage incomplete" do
     snapshot = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:writer/model")
 
     events = [
@@ -376,13 +381,34 @@ defmodule PtcRunner.Kernel.LLMUsageSummaryTest do
                  "calls" => 2,
                  "successful_calls" => 1,
                  "usage_calls" => 1,
-                 "missing_usage_calls" => 0,
+                 "missing_usage_calls" => 1,
                  "usage_overflow" => false,
-                 "usage" => %{
-                   "input" => 4,
-                   "output" => 2,
-                   "total_cost" => %{"currency" => "USD", "microunits" => 100_000}
-                 }
+                 "usage" => %{"input" => 4, "output" => 2}
+               }
+             ] = rows
+    end
+  end
+
+  test "a matched not-dispatched LLM failure does not claim missing provider usage" do
+    snapshot = TestHelpers.llm_snapshot("writer", "stable-v1", "openrouter:writer/model")
+
+    events = [
+      event(1, "run-started", %{"missions" => %{}, "connector_snapshots" => [snapshot]}),
+      llm_started_event(2, "capability-local"),
+      llm_failed_event(3, "capability-local", %{"usage_observation" => "not_expected"}),
+      event(4, "run-stopped", %{"outcome" => "error"})
+    ]
+
+    assert {:ok, summary} = LLMUsageSummary.terminal(events)
+
+    for rows <- [summary["llm_usage"], summary["llm_usage_by_model"]] do
+      assert [
+               %{
+                 "calls" => 1,
+                 "successful_calls" => 0,
+                 "usage_calls" => 0,
+                 "missing_usage_calls" => 0,
+                 "usage" => %{}
                }
              ] = rows
     end

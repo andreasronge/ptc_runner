@@ -98,6 +98,59 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     Application.put_env(
       :ptc_runner,
       :host_llm_test_result,
+      {:error,
+       ProviderError.new(:usage_unavailable, "PRIVATE USAGE RESPONSE",
+         dispatch_provenance: :dispatched
+       )}
+    )
+
+    usage_unavailable =
+      write_application(directory, "usage-unavailable", manifest, %{
+        "main.clj" => ~S|(ns app) (defn run [_input] (agent.core/run "answer" {"max_turns" 1}))|
+      })
+
+    assert {:error, %CommandOutcome{} = usage_outcome} =
+             CommandEngine.dispatch(["run", usage_unavailable, "--host-config", host_path])
+
+    assert usage_outcome.envelope["error"]["code"] == "llm_usage_unavailable"
+
+    assert usage_outcome.envelope["execution"]["usage"]["llm_spend"] == %{
+             "state" => "incomplete"
+           }
+
+    assert [usage_row] = usage_outcome.envelope["execution"]["usage"]["llm_usage"]
+    assert usage_row["missing_usage_calls"] == 1
+    refute Jason.encode!(usage_outcome.envelope) =~ "PRIVATE USAGE RESPONSE"
+    assert_schema_valid(usage_outcome.envelope)
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:error,
+       ProviderError.new(:invalid_request, "PRIVATE LOCAL VALIDATION",
+         dispatch_provenance: :not_dispatched
+       )}
+    )
+
+    not_dispatched =
+      write_application(directory, "not-dispatched", manifest, %{
+        "main.clj" => ~S|(ns app) (defn run [_input] (agent.core/run "answer" {"max_turns" 1}))|
+      })
+
+    assert {:error, %CommandOutcome{} = not_dispatched_outcome} =
+             CommandEngine.dispatch(["run", not_dispatched, "--host-config", host_path])
+
+    not_dispatched_usage = not_dispatched_outcome.envelope["execution"]["usage"]
+    assert not_dispatched_outcome.envelope["error"]["code"] == "llm_request_invalid"
+    assert not_dispatched_usage["llm_spend"] == %{"state" => "empty"}
+    assert [not_dispatched_row] = not_dispatched_usage["llm_usage"]
+    assert not_dispatched_row["missing_usage_calls"] == 0
+    refute Jason.encode!(not_dispatched_outcome.envelope) =~ "PRIVATE LOCAL VALIDATION"
+    assert_schema_valid(not_dispatched_outcome.envelope)
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
       {:error, ProviderError.new(:tool_calling_unsupported, "PRIVATE TOOL CAPABILITY RESPONSE")}
     )
 
