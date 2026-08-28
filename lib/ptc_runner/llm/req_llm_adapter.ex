@@ -741,7 +741,10 @@ if Code.ensure_loaded?(ReqLLM) do
       do: ProviderError.new(:invalid_request, "LLM provider does not support structured output")
 
     defp normalize_provider_error(:tool_calling_not_supported),
-      do: ProviderError.new(:invalid_request, "LLM adapter route does not support tool calling")
+      do:
+        ProviderError.new(:invalid_request, "LLM adapter route does not support tool calling",
+          dispatch_provenance: :not_dispatched
+        )
 
     defp normalize_provider_error(_reason),
       do: ProviderError.new(:unavailable, "LLM provider unavailable", retryable?: true)
@@ -1764,9 +1767,9 @@ if Code.ensure_loaded?(ReqLLM) do
     defp raw_usage_observation(body, model) do
       with {:ok, provider} <- ReqLLM.provider(model.provider),
            true <- function_exported?(provider, :extract_usage, 2),
-           {:ok, usage} when is_map(usage) <- provider.extract_usage(body, model),
-           true <- raw_token_pair?(usage) do
-        {:reported, provider_reported_total_cost(model.provider, usage)}
+           {:ok, usage} when is_map(usage) <- provider.extract_usage(body, model) do
+        observation = if raw_token_pair?(usage), do: :reported, else: :missing
+        {observation, provider_reported_total_cost(model.provider, usage)}
       else
         _missing_or_invalid -> {:missing, nil}
       end

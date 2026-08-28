@@ -288,19 +288,25 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
-  @spec mark_provider_dispatched(t(), reference(), pid()) ::
-          :ok | {:error, :unknown_reservation | :run_closed | :provider_mismatch}
-  @doc "Acknowledges the one-way provider dispatch transition."
-  def mark_provider_dispatched(state, reservation_id, provider)
-      when is_reference(reservation_id) and is_pid(provider),
+  @spec open_provider_gate(t(), reference(), pid(), reference()) ::
+          :ok
+          | {:error,
+             :already_dispatched
+             | :dispatch_unknown
+             | :unknown_reservation
+             | :run_closed
+             | :provider_mismatch}
+  @doc "Atomically records provider dispatch and sends its one-shot gate reference."
+  def open_provider_gate(state, reservation_id, provider, gate)
+      when is_reference(reservation_id) and is_pid(provider) and is_reference(gate),
       do:
         safe_call(
           state,
-          {:mark_provider_dispatched, reservation_id, provider},
-          {:error, :run_closed}
+          {:open_provider_gate, reservation_id, provider, gate},
+          {:error, :dispatch_unknown}
         )
 
-  def mark_provider_dispatched(_state, _reservation_id, _provider),
+  def open_provider_gate(_state, _reservation_id, _provider, _gate),
     do: {:error, :unknown_reservation}
 
   @type usage_evidence :: {:valid, map()} | :missing | :invalid
@@ -806,10 +812,11 @@ defmodule PtcRunner.Kernel.RunState do
   end
 
   def handle_call(
-        {token, {:mark_provider_dispatched, reservation_id, provider}},
+        {token, {:open_provider_gate, reservation_id, provider, gate}},
         _from,
         %{token: token} = state
-      ) do
+      )
+      when is_reference(gate) do
     cond do
       unavailable?(state) ->
         {:reply, {:error, :run_closed}, state}
@@ -820,7 +827,11 @@ defmodule PtcRunner.Kernel.RunState do
       get_in(state.reservations, [reservation_id, :provider]) != provider ->
         {:reply, {:error, :provider_mismatch}, state}
 
+      get_in(state.reservations, [reservation_id, :dispatched?]) ->
+        {:reply, {:error, :already_dispatched}, state}
+
       true ->
+        send(provider, gate)
         {:reply, :ok, put_in(state.reservations[reservation_id].dispatched?, true)}
     end
   end

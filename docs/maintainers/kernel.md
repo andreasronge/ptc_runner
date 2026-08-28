@@ -276,7 +276,9 @@ admission outcomes are documented by `RunState` and `Evaluation`.
 budgets, bounds the trusted callback worker, normalizes output, and rejects late
 completion. It may retain small schema-authored correction facts, but never
 submitted values, undeclared property names, enum values, or opaque validator
-reasons.
+reasons. `RunState` opens the callback worker's one-shot gate in the same owner
+operation that records the dispatched reservation; an uncertain gate
+acknowledgement remains possibly dispatched and is charged fail-closed.
 
 `LimitCatalog` is the authority for limit names, scope, defaults, ranges, and
 identity participation. Installed limits are ceilings; manifests may narrow

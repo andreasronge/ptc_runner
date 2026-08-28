@@ -291,7 +291,9 @@ successful call reports non-negative `input` and `output` counts;
 attests the declaration, and a successful response or doctor connectivity
 probe that omits promised usage fails as non-retryable
 `llm_usage_unavailable`. Changing either guarantee requires a new
-`installation_revision`.
+`installation_revision`. Token and cost guarantees are independent: a
+cost-only installation retains an authoritative provider charge even when the
+provider omits one or both token counts.
 
 Provider cost numbers and decimal strings, including OpenRouter's reported
 `usage.cost`, are converted immediately to

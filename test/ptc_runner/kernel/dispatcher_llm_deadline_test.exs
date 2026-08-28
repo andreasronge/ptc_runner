@@ -10,8 +10,12 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.LLM.Invocation
+  alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.LLM.Requirements
   alias PtcRunner.TestSupport.TestHelpers
 
   @schema %{
@@ -167,6 +171,47 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
     assert %{status: :error, kind: :limit_exceeded, reason: reason} = result
     assert reason in [:run_deadline, :run_closed]
     refute_received :provider_called
+
+    assert %{data: %{usage_observation: :not_expected}} =
+             Enum.find(EventSink.events(sink), &(&1.type == "capability-stopped"))
+
+    assert RunState.usage(state).llm_budget["total_tokens"]["charged"] == 0
+  end
+
+  test "a direct-route tool refusal releases its reservation without expecting usage" do
+    assert {:ok, target, :unavailable, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "ollama:local-model",
+               Requirements.interim(%{max_tokens: 64})
+             )
+
+    {result, state, sink} =
+      dispatch_llm(self(),
+        limits: [llm_total_tokens: 10_000],
+        arguments: %{
+          "messages" => [],
+          "tools" => [
+            %{
+              "type" => "function",
+              "function" => %{
+                "name" => "lookup",
+                "description" => "fixture",
+                "parameters" => %{"type" => "object", "properties" => %{}}
+              }
+            }
+          ]
+        },
+        requester: fn request, %{llm_request_deadline_ms: deadline} ->
+          {:ok, invocation} =
+            request
+            |> ProviderRegistry.adapter_request()
+            |> Invocation.new(false, "test", deadline)
+
+          ReqLLMAdapter.call(target, invocation)
+        end
+      )
+
+    assert %{status: :error, kind: :provider_error, reason: :invalid_request} = result
 
     assert %{data: %{usage_observation: :not_expected}} =
              Enum.find(EventSink.events(sink), &(&1.type == "capability-stopped"))

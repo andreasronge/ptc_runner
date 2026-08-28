@@ -281,6 +281,47 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
              ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
   end
 
+  test "preserves OpenRouter's reported charge when token usage is incomplete", %{test: test} do
+    Req.Test.expect(
+      test,
+      request_handler(self(), "inclusionai/ling-3.0-flash",
+        usage: %{
+          "prompt_tokens" => 25,
+          "cost" => "0.123456"
+        }
+      )
+    )
+
+    requirements = %{
+      Requirements.interim(%{max_tokens: 2_000})
+      | usage_guarantees: %{tokens: false, cost_currency: "USD"}
+    }
+
+    assert {:ok, target, :cataloged, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:inclusionai/ling-3.0-flash",
+               requirements
+             )
+
+    target = put_test_http_options(target, test)
+
+    assert {:ok, capability} =
+             LLMCapability.new(
+               requester: fn request ->
+                 {:ok, invocation} = Invocation.new(request, false, "test", nil)
+                 ReqLLMAdapter.call(target, invocation)
+               end,
+               usage_guarantees: requirements.usage_guarantees
+             )
+
+    assert {:ok, %{"tokens" => tokens}} =
+             capability.callback.(%{messages: [%{role: :user, content: "hi"}]})
+
+    assert tokens["total_cost"] == %{"currency" => "USD", "microunits" => 123_456}
+    refute Map.has_key?(tokens, "input")
+    refute Map.has_key?(tokens, "output")
+  end
+
   test "preserves an attested token-limit alias through ReqLLM dispatch", %{test: test} do
     Req.Test.expect(test, responses_request_handler(self(), "gpt-5"))
 

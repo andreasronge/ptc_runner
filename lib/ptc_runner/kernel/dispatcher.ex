@@ -1019,10 +1019,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
       case RunState.attach_provider(state, reservation_id, pid) do
         :ok ->
-          case RunState.mark_provider_dispatched(state, reservation_id, pid) do
+          case RunState.open_provider_gate(state, reservation_id, pid, go) do
             :ok ->
-              send(pid, go)
-
               await_provider(
                 state,
                 reservation_id,
@@ -1034,11 +1032,23 @@ defmodule PtcRunner.Kernel.Dispatcher do
                 validation
               )
 
-            {:error, _reason} ->
+            {:error, reason}
+            when reason in [
+                   :provider_mismatch,
+                   :run_closed,
+                   :unknown_reservation
+                 ] ->
               Process.exit(pid, :kill)
               await_down(pid, ref)
 
               {:settlement, {:adapter_error, :not_dispatched},
+               limit_error(state, nil, :run_closed)}
+
+            {:error, reason} when reason in [:already_dispatched, :dispatch_unknown] ->
+              Process.exit(pid, :kill)
+              await_down(pid, ref)
+
+              {:settlement, {:adapter_error, :provider_error},
                limit_error(state, nil, :run_closed)}
           end
 

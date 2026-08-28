@@ -278,7 +278,9 @@ successful call reports non-negative <code class="inline">input</code> and <code
 attests the declaration, and a successful response or doctor connectivity
 probe that omits promised usage fails as non-retryable
 <code class="inline">llm_usage_unavailable</code>. Changing either guarantee requires a new
-<code class="inline">installation_revision</code>.</p><p>Provider cost numbers and decimal strings, including OpenRouter's reported
+<code class="inline">installation_revision</code>. Token and cost guarantees are independent: a
+cost-only installation retains an authoritative provider charge even when the
+provider omits one or both token counts.</p><p>Provider cost numbers and decimal strings, including OpenRouter's reported
 <code class="inline">usage.cost</code>, are converted immediately to
 <code class="inline">{&quot;currency&quot;:&quot;USD&quot;,&quot;microunits&quot;:N}</code> by exact decimal parsing, with fractions
 rounded upward to one millionth of a dollar. The bounded integer <code class="inline">N</code> is in
