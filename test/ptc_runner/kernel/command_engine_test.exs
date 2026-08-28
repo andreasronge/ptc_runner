@@ -3104,6 +3104,27 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "normal trace counts below the structural reserve fail schema admission", %{
+    tmp_dir: directory
+  } do
+    for count <- [1, 2] do
+      application =
+        write_application(
+          directory,
+          "invalid-normal-event-count-#{count}",
+          valid_manifest(%{"limits" => %{"normal_event_count" => count}})
+        )
+
+      for command <- ["validate", "doctor", "run"] do
+        outcome = assert_error([command, application], "application", "schema_violation")
+        assert outcome.envelope["error"]["path"] == "/limits/normal_event_count"
+        assert outcome.envelope["error"]["message"] =~ "minimum"
+        assert outcome.envelope["error"]["provider_activity"] == false
+      end
+    end
+  end
+
+  @tag :tmp_dir
   test "a stale mission capability requirement remains actionable after acquisition", %{
     tmp_dir: directory
   } do
