@@ -36,6 +36,7 @@ defmodule PtcRunner.Kernel.Evaluation do
 
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
@@ -397,7 +398,8 @@ defmodule PtcRunner.Kernel.Evaluation do
       link: true,
       strict_data: true,
       data_grants: DataKeys.source_referenceable_forms(environment.data),
-      missing_data_params_message: @missing_data_params_message
+      missing_data_params_message: @missing_data_params_message,
+      shipped_library_ids: Library.component_ids()
     ]
 
     mission_calls_before = mission_capability_calls(state)

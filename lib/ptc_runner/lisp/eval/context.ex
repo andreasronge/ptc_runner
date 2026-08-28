@@ -114,6 +114,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # Kernel-supplied diagnostic used when `data/params` is missing under
     # strict data. `nil` treats `params` as an ordinary missing key.
     missing_data_params_message: nil,
+    # Kernel-supplied catalog of shipped library component IDs. `nil` means
+    # Introspection should not distinguish unattached shipped refs from
+    # unknown ones.
+    shipped_library_ids: nil,
     # When true, session-authored code may only name prelude namespaces that
     # were directly attached. Prelude-internal calls remain allowed because the
     # compiler already validated their declared namespace deps.
@@ -216,6 +220,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           strict_data: boolean(),
           data_grants: [String.t()] | nil,
           missing_data_params_message: String.t() | nil,
+          shipped_library_ids: MapSet.t(String.t()) | nil,
           strict_transitive_calls: boolean(),
           private_tool_authority?: boolean(),
           direct_namespaces: MapSet.t(String.t()),
@@ -298,6 +303,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       data_grants: normalize_data_grants(Keyword.get(opts, :data_grants)),
       missing_data_params_message:
         normalize_missing_params_message(Keyword.get(opts, :missing_data_params_message)),
+      shipped_library_ids: normalize_shipped_library_ids(Keyword.get(opts, :shipped_library_ids)),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       private_tool_authority?: Keyword.get(opts, :private_tool_authority?, false),
       direct_namespaces: namespace_set(Keyword.get(opts, :direct_namespaces, [])),
@@ -361,6 +367,15 @@ defmodule PtcRunner.Lisp.Eval.Context do
     do: message
 
   defp normalize_missing_params_message(_message), do: nil
+
+  defp normalize_shipped_library_ids(ids) when is_list(ids) do
+    ids
+    |> Enum.filter(&is_binary/1)
+    |> MapSet.new()
+  end
+
+  defp normalize_shipped_library_ids(%MapSet{} = ids), do: ids
+  defp normalize_shipped_library_ids(_ids), do: nil
 
   defp normalize_namespace_requirers(requirers) when is_map(requirers) do
     Map.new(requirers, fn
@@ -617,7 +632,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
         prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack,
         strict_data: source.strict_data,
         data_grants: source.data_grants,
-        missing_data_params_message: source.missing_data_params_message
+        missing_data_params_message: source.missing_data_params_message,
+        shipped_library_ids: source.shipped_library_ids
     }
   end
 

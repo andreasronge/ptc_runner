@@ -75,6 +75,16 @@ defmodule PtcRunner.ReplFrontendTest do
     refute output =~ "PtcRunner.Lisp"
   end
 
+  test "direct eval names an unattached shipped library instead of denying it" do
+    output = capture_io(fn -> run_repl(["-e", ~S|(doc "agent.core/run")|]) end)
+
+    assert output =~
+             "agent.core/run is a shipped library export that this session has not attached."
+
+    assert output =~ ~s(select {"library": "agent.core"} in workflow.components.)
+    refute output =~ "No documentation found"
+  end
+
   test "direct eval retains canonical unknown-namespace guidance" do
     expected =
       "Error (invalid_form): " <> NamespaceDiagnostic.message("kernel")

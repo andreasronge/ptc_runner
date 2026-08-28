@@ -288,6 +288,11 @@ defmodule PtcRunner.Lisp do
     - `:missing_data_params_message` - Optional diagnostic used when `data/params`
       is missing under `:strict_data`. The Kernel sets this so a no-params
       evaluation is not reported as a missing grant.
+    - `:shipped_library_ids` - Optional catalog of shipped library component IDs.
+      The Kernel passes `PtcRunner.Kernel.Library.component_ids/0` so `doc` and
+      `apropos` can name an unattached shipped library instead of denying it.
+      `nil` (the default) keeps today's miss message, so embedded `run/2`
+      callers are unchanged.
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
       SOURCE string, or a list of source-bearing selection maps accepted by
       `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code.
@@ -807,6 +812,7 @@ defmodule PtcRunner.Lisp do
       strict_data: Keyword.get(opts, :strict_data, false),
       data_grants: Keyword.get(opts, :data_grants),
       missing_data_params_message: Keyword.get(opts, :missing_data_params_message),
+      shipped_library_ids: Keyword.get(opts, :shipped_library_ids),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
@@ -1210,6 +1216,7 @@ defmodule PtcRunner.Lisp do
       strict_data: strict_data,
       data_grants: data_grants,
       missing_data_params_message: missing_data_params_message,
+      shipped_library_ids: shipped_library_ids,
       strict_transitive_calls: strict_transitive_calls,
       private_tool_authority?: private_tool_authority?,
       direct_namespaces: direct_namespaces,
@@ -1252,6 +1259,7 @@ defmodule PtcRunner.Lisp do
         strict_data: strict_data,
         data_grants: data_grants,
         missing_data_params_message: missing_data_params_message,
+        shipped_library_ids: shipped_library_ids,
         strict_transitive_calls: strict_transitive_calls,
         private_tool_authority?: private_tool_authority?,
         direct_namespaces: direct_namespaces,

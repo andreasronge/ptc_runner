@@ -795,4 +795,103 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       end
     end
   end
+
+  describe "unattached shipped libraries" do
+    @catalog ["agent.core", "agent.failure", "cap", "kernel"]
+    @catalog_opts [shipped_library_ids: @catalog]
+
+    test "Lisp.run without a catalog keeps the generic miss" do
+      result = eval!(~S|(doc "agent.core/run")|, nil)
+
+      assert result.return == nil
+      assert result.prints == [~s(No documentation found for "agent.core/run".)]
+      refute "agent.core" in eval!(~S|(apropos "agent")|, nil).return
+    end
+
+    test "an unattached shipped export names the missing attachment", %{prelude: prelude} do
+      result = eval!(~S|(doc "agent.core/run")|, prelude, @catalog_opts)
+
+      assert result.return == nil
+
+      assert result.prints == [
+               """
+               agent.core/run is a shipped library export that this session has not attached.
+               Pass --project PROJECT.json, or select {"library": "agent.core"} in workflow.components.\
+               """
+             ]
+    end
+
+    test "an unattached shipped namespace names the missing attachment" do
+      result = eval!(~S|(doc "agent.core")|, nil, @catalog_opts)
+
+      assert result.prints == [
+               """
+               agent.core is a shipped library that this session has not attached.
+               Pass --project PROJECT.json, or select {"library": "agent.core"} in workflow.components.\
+               """
+             ]
+    end
+
+    test "an unknown ref stays a generic miss when a catalog is present", %{prelude: prelude} do
+      result = eval!(~S|(doc "missing/ns")|, prelude, @catalog_opts)
+
+      assert result.prints == [~s(No documentation found for "missing/ns".)]
+    end
+
+    test "an attached shipped namespace does not redirect a missing export" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns agent.core "Fake." {:visibility :prompt})
+        (defn run [task cfg] cfg)
+        """)
+
+      result = eval!(~S|(doc "agent.core/nope")|, prelude, @catalog_opts)
+
+      assert result.prints == [~s(No documentation found for "agent.core/nope".)]
+
+      assert eval!(~S|(doc "agent.core/run")|, prelude, @catalog_opts).prints |> hd() =~
+               "agent.core/run"
+    end
+
+    test "a hidden attached shipped export stays a generic miss" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns agent.core "Fake." {:visibility :prompt})
+        (defn run [task cfg] cfg)
+        (defn other [x] x)
+        """)
+
+      mask = [prelude_export_mask: %{"agent.core" => MapSet.new(["agent.core/other"])}]
+      result = eval!(~S|(doc "agent.core/run")|, prelude, mask ++ @catalog_opts)
+
+      assert result.prints == [~s(No documentation found for "agent.core/run".)]
+    end
+
+    test "apropos names unattached shipped libraries that match the query" do
+      names = eval!(~S|(apropos "agent")|, nil, @catalog_opts).return
+
+      assert "agent.core" in names
+      assert "agent.failure" in names
+      refute "cap" in names
+      refute "kernel" in names
+    end
+
+    test "apropos does not list an attached shipped library by its bare id" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns agent.core "Fake." {:visibility :prompt})
+        (defn run [task cfg] cfg)
+        """)
+
+      names = eval!(~S|(apropos "agent")|, prelude, @catalog_opts).return
+
+      assert "agent.core/run" in names
+      refute "agent.core" in names
+      assert "agent.failure" in names
+    end
+
+    test "a blank apropos still matches nothing when a catalog is present" do
+      assert eval!(~S|(apropos "")|, nil, @catalog_opts).return == []
+    end
+  end
 end

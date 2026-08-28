@@ -193,6 +193,28 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert history_bytes > 0
   end
 
+  test "direct eval names an unattached shipped library instead of denying it" do
+    {:ok, session} = ReplSession.new()
+
+    assert {:ok, doc, session} = ReplSession.eval(session, ~S|(doc "agent.core/run")|)
+    assert doc.return == nil
+
+    assert Enum.join(doc.prints, "\n") ==
+             """
+             agent.core/run is a shipped library export that this session has not attached.
+             Pass --project PROJECT.json, or select {"library": "agent.core"} in workflow.components.\
+             """
+
+    assert {:ok, apropos, session} = ReplSession.eval(session, ~S|(apropos "agent")|)
+    assert "agent.core" in apropos.return
+    assert "agent.failure" in apropos.return
+
+    assert {:ok, unknown, session} = ReplSession.eval(session, ~S|(doc "missing/ns")|)
+    assert unknown.prints == [~s(No documentation found for "missing/ns".)]
+
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
   test "REPL sessions reject JSON-result configurations" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
