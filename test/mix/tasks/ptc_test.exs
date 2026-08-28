@@ -167,6 +167,52 @@ defmodule Mix.Tasks.PtcTest do
   end
 
   @tag :tmp_dir
+  test "root validate renders optional-budget host and manifest remedies", %{tmp_dir: dir} do
+    manifest_path = write_manifest(dir, %{"value" => 1})
+    host_path = Path.join(dir, "ptc-host.json")
+
+    File.write!(
+      host_path,
+      Jason.encode!(%{
+        "limits" => %{"llm_cost_microusd" => 1_000},
+        "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
+        "install" => %{
+          "private-model-alias" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
+            "installation_revision" => "model-v1",
+            "model" => "provider:private-model",
+            "credential" => "key"
+          }
+        }
+      })
+    )
+
+    host_message = failed_message(["validate", manifest_path, "--host-config", host_path])
+
+    assert host_message =~
+             "host/installed_limit_invalid: llm_cost_microusd requires reservation_tariff on every live LLM installation"
+
+    refute host_message =~ "private-model-alias"
+    refute host_message =~ "provider:private-model"
+
+    manifest = manifest_path |> File.read!() |> Jason.decode!()
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(Map.put(manifest, "limits", %{"llm_total_tokens" => 50}))
+    )
+
+    manifest_message = failed_message(["validate", manifest_path])
+
+    assert manifest_message =~
+             "application/limit_unavailable: llm_total_tokens 50 is unavailable because the host has not enabled it; enable llm_total_tokens in the host document before declaring it in the manifest"
+
+    assert manifest_message =~ " at /limits/llm_total_tokens"
+  end
+
+  @tag :tmp_dir
   test "root command names input and result contract failure paths", %{tmp_dir: dir} do
     manifest_path = write_manifest(dir, %{})
     File.write!(Path.join(dir, "main.clj"), ~S|(ns main) (defn run [input] (return input))|)

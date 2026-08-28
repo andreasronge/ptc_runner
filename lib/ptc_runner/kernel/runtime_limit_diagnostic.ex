@@ -248,7 +248,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   @doc false
   @spec heap_words_message?(term()) :: boolean()
   def heap_words_message?(message) when is_binary(message) do
-    valid_exact_message?(
+    DiagnosticPattern.valid_exact_integer_message?(
       message,
       @heap_prefix,
       @heap_suffix,
@@ -935,18 +935,13 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
     )
   end
 
-  defp valid_exact_message?(message, prefix, suffix, maximum_digits, builder) do
-    with true <- String.starts_with?(message, prefix),
-         true <- String.ends_with?(message, suffix),
-         digits_bytes <- byte_size(message) - byte_size(prefix) - byte_size(suffix),
-         true <- digits_bytes in 1..maximum_digits,
-         digits <- binary_part(message, byte_size(prefix), digits_bytes),
-         {limit, ""} <- Integer.parse(digits),
-         true <- Integer.to_string(limit) == digits,
-         {:ok, expected} <- builder.(limit) do
-      message == expected
-    else
-      _invalid -> false
-    end
-  end
+  defp valid_exact_message?(message, prefix, suffix, maximum_digits, builder),
+    do:
+      DiagnosticPattern.valid_exact_integer_message?(
+        message,
+        prefix,
+        suffix,
+        maximum_digits,
+        builder
+      )
 end

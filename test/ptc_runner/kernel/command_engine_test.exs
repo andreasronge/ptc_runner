@@ -5909,6 +5909,224 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "optional LLM budget prerequisites produce closed host diagnostics", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "budget-prerequisites", valid_manifest())
+
+    cases = [
+      {"tokens", "llm_total_tokens", %{"tokens" => false, "cost_currency" => nil}, nil,
+       "/install/*/usage_guarantees/tokens",
+       "llm_total_tokens requires usage_guarantees.tokens: true on every live LLM installation; set it in the host document"},
+      {"currency", "llm_cost_microusd", %{"tokens" => true, "cost_currency" => nil},
+       %{"currency" => "USD", "id" => "private-tariff-id"},
+       "/install/*/usage_guarantees/cost_currency",
+       "llm_cost_microusd requires usage_guarantees.cost_currency: \"USD\" on every live LLM installation; set it in the host document"},
+      {"tariff", "llm_cost_microusd", %{"tokens" => true, "cost_currency" => "USD"}, nil,
+       "/install/*/reservation_tariff",
+       "llm_cost_microusd requires reservation_tariff on every live LLM installation; add it under each live LLM installation (see ptc docs host)"}
+    ]
+
+    for {name, limit, guarantees, tariff, expected_path, expected_message} <- cases do
+      host =
+        env_credential_host()
+        |> Map.put("limits", %{limit => 1_000})
+        |> put_in(["install", "model", "usage_guarantees"], guarantees)
+        |> then(fn host ->
+          if tariff,
+            do: put_in(host, ["install", "model", "reservation_tariff"], tariff),
+            else: host
+        end)
+
+      host_path = write_host_config(directory, "budget-prerequisite-#{name}", host)
+
+      outcome =
+        assert_error(
+          ["validate", application, "--host-config", host_path],
+          "host",
+          "installed_limit_invalid"
+        )
+
+      error = outcome.envelope["error"]
+      assert outcome.exit_status == 3
+      assert error["message"] == expected_message
+      assert error["path"] == expected_path
+      assert error["notes"] == []
+      assert error["source"] == %{"kind" => "host", "name" => "ptc-host.json"}
+      assert error["provider_activity"] == false
+
+      encoded = Jason.encode!(outcome.envelope)
+      refute encoded =~ "model"
+      refute encoded =~ "private-tariff-id"
+    end
+  end
+
+  @tag :tmp_dir
+  test "optional LLM budget prerequisite selection is deterministic and private", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "budget-alias-order", valid_manifest())
+
+    invalid_installation =
+      env_credential_host()
+      |> get_in(["install", "model"])
+      |> put_in(["usage_guarantees"], %{"tokens" => false, "cost_currency" => nil})
+
+    host = %{
+      "limits" => %{"llm_total_tokens" => 1_000},
+      "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
+      "install" => %{
+        "zeta-private" => invalid_installation,
+        "alpha-private" => invalid_installation
+      }
+    }
+
+    host_path = write_host_config(directory, "budget-alias-order", host)
+
+    for _iteration <- 1..5 do
+      outcome =
+        assert_error(
+          ["validate", application, "--host-config", host_path],
+          "host",
+          "installed_limit_invalid"
+        )
+
+      error = outcome.envelope["error"]
+      assert error["path"] == "/install/*/usage_guarantees/tokens"
+
+      assert error["message"] ==
+               "llm_total_tokens requires usage_guarantees.tokens: true on every live LLM installation; set it in the host document"
+
+      encoded = Jason.encode!(outcome.envelope)
+      refute encoded =~ "alpha-private"
+      refute encoded =~ "zeta-private"
+    end
+  end
+
+  @tag :tmp_dir
+  test "host budget diagnostics preserve structural and unrelated semantic precedence", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "budget-precedence", valid_manifest())
+
+    malformed_tariff =
+      env_credential_host()
+      |> Map.put("limits", %{"llm_cost_microusd" => 1_000})
+      |> put_in(
+        ["install", "model", "usage_guarantees"],
+        %{"tokens" => true, "cost_currency" => "USD"}
+      )
+      |> put_in(["install", "model", "reservation_tariff"], %{"currency" => "USD"})
+
+    malformed_path = write_host_config(directory, "malformed-tariff", malformed_tariff)
+
+    malformed =
+      assert_error(
+        ["validate", application, "--host-config", malformed_path],
+        "host",
+        "host_schema_invalid"
+      )
+
+    assert malformed.envelope["error"]["path"] == "/install/*/reservation_tariff/id"
+
+    dangling_credential =
+      env_credential_host()
+      |> put_in(["install", "model", "credential"], "private-missing-credential")
+
+    dangling_path = write_host_config(directory, "budget-unrelated-semantic", dangling_credential)
+
+    dangling =
+      assert_error(
+        ["validate", application, "--host-config", dangling_path],
+        "host",
+        "host_invalid"
+      )
+
+    assert dangling.envelope["error"]["path"] == nil
+    refute Jason.encode!(dangling.envelope) =~ "private-missing-credential"
+  end
+
+  @tag :tmp_dir
+  test "host-disabled optional budgets name the unavailable limit and remedy", %{
+    tmp_dir: directory
+  } do
+    for {name, requested} <- [
+          {"llm_cost_microusd", 50},
+          {"llm_total_tokens", 9_007_199_254_740_991}
+        ] do
+      application =
+        write_application(
+          directory,
+          "disabled-#{name}",
+          valid_manifest(%{"limits" => %{name => requested}})
+        )
+
+      outcome = assert_error(["validate", application], "application", "limit_unavailable")
+      error = outcome.envelope["error"]
+
+      assert outcome.exit_status == 3
+      assert error["path"] == "/limits/#{name}"
+
+      assert error["message"] ==
+               "#{name} #{requested} is unavailable because the host has not enabled it; enable #{name} in the host document before declaring it in the manifest"
+
+      assert error["notes"] == []
+      assert error["source"] == %{"kind" => "application", "name" => "ptc.json"}
+      assert error["provider_activity"] == false
+    end
+  end
+
+  @tag :tmp_dir
+  test "enabled optional budgets inherit, narrow, and distinguish an exceeded ceiling", %{
+    tmp_dir: directory
+  } do
+    host =
+      env_credential_host()
+      |> Map.put("limits", %{"llm_total_tokens" => 1_000})
+      |> put_in(
+        ["install", "model", "usage_guarantees"],
+        %{"tokens" => true, "cost_currency" => nil}
+      )
+
+    host_path = write_host_config(directory, "enabled-token-budget", host)
+
+    inherited = write_application(directory, "inherited-token-budget", valid_manifest())
+
+    assert {:ok, %CommandOutcome{} = inherited_outcome} =
+             CommandEngine.prepare(["validate", inherited, "--host-config", host_path])
+
+    assert inherited_outcome.exit_status == 0
+
+    narrowed =
+      write_application(
+        directory,
+        "narrowed-token-budget",
+        valid_manifest(%{"limits" => %{"llm_total_tokens" => 500}})
+      )
+
+    assert {:ok, %CommandOutcome{} = narrowed_outcome} =
+             CommandEngine.prepare(["validate", narrowed, "--host-config", host_path])
+
+    assert narrowed_outcome.exit_status == 0
+
+    exceeded =
+      write_application(
+        directory,
+        "exceeded-token-budget",
+        valid_manifest(%{"limits" => %{"llm_total_tokens" => 1_001}})
+      )
+
+    outcome =
+      assert_error(
+        ["validate", exceeded, "--host-config", host_path],
+        "application",
+        "installed_limit_exceeded"
+      )
+
+    assert outcome.envelope["error"]["path"] == "/limits/llm_total_tokens"
+  end
+
+  @tag :tmp_dir
   test "host duplicate properties retain their schema-authorized parent", %{tmp_dir: directory} do
     application = write_application(directory, "host-duplicate-paths", valid_manifest())
 

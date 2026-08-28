@@ -82,7 +82,12 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
          "source" => %{"kind" => "application"},
          "path" => path
        })
-       when code in ["schema_violation", "required_property_missing"] and is_binary(path) and
+       when code in [
+              "schema_violation",
+              "required_property_missing",
+              "installed_limit_exceeded",
+              "limit_unavailable"
+            ] and is_binary(path) and
               path != "",
        do: " at " <> path
 
@@ -92,24 +97,31 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
          "source" => %{"kind" => "application"},
          "path" => ""
        })
-       when code in ["schema_violation", "required_property_missing"],
+       when code in [
+              "schema_violation",
+              "required_property_missing",
+              "installed_limit_exceeded",
+              "limit_unavailable"
+            ],
        do: " at document root"
 
   defp location_suffix(%{
          "phase" => "host",
-         "code" => "host_schema_invalid",
+         "code" => code,
          "source" => %{"kind" => "host"},
          "path" => path
        })
-       when is_binary(path) and path != "",
+       when code in ["host_schema_invalid", "installed_limit_invalid"] and is_binary(path) and
+              path != "",
        do: " at " <> path
 
   defp location_suffix(%{
          "phase" => "host",
-         "code" => "host_schema_invalid",
+         "code" => code,
          "source" => %{"kind" => "host"},
          "path" => ""
-       }),
+       })
+       when code in ["host_schema_invalid", "installed_limit_invalid"],
        do: " at document root"
 
   defp location_suffix(%{

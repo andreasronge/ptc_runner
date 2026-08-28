@@ -114,7 +114,10 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                       installed_default: nil,
                       minimum: 1,
                       maximum: 9_007_199_254_740_991,
-                      identity: true
+                      identity: true,
+                      prerequisites: [:usage_tokens],
+                      prerequisite_description:
+                        "Requires usage_guarantees.tokens: true on every live LLM installation."
                     })
                     |> Map.put("llm_cost_microusd", %{
                       field: :llm_cost_microusd,
@@ -124,7 +127,14 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                       installed_default: nil,
                       minimum: 1,
                       maximum: 9_007_199_254_740_991,
-                      identity: true
+                      identity: true,
+                      prerequisites: [
+                        :usage_tokens,
+                        :usage_cost_currency,
+                        :reservation_tariff
+                      ],
+                      prerequisite_description:
+                        "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", and an explicit USD reservation_tariff on every live LLM installation."
                     })
 
   # A ceiling equal to the default leaves a manifest no way to raise its own

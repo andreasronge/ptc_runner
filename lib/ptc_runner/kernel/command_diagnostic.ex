@@ -8,8 +8,9 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   inspects a lower-level reason or rejected value. Catalog-authorized dynamic
   message shapes contain only fixed literals plus bounded PTC-Lisp symbol
   names, sealed provider-selection field names, a catalog-validated runtime
-  ceiling, a bounded agent turn ceiling, an opaque replay request hash, or a
-  closed component-override field rule. Compile messages require
+  ceiling or optional-budget request, a closed host budget prerequisite, a
+  bounded agent turn ceiling, an opaque replay request hash, or a closed
+  component-override field rule. Compile messages require
   component-source provenance; a missing capability message is rebuilt from
   the frozen bundle's sorted tool requirements. A missing MCP tool message may
   retain only the validated, declaration-owned upstream name and carries no
@@ -36,6 +37,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
+  alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
@@ -361,6 +363,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
 
   defp valid_message_source?(
          message,
+         %{phase: :host, code: :installed_limit_invalid},
+         %CommandSource{kind: :host}
+       ),
+       do: OptionalBudgetDiagnostic.valid_prerequisite_message?(message)
+
+  defp valid_message_source?(
+         message,
          %{phase: :application, code: code},
          %CommandSource{kind: :application}
        )
@@ -491,6 +500,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: :application}
        ),
        do: RuntimeLimitDiagnostic.installed_ceiling_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :limit_unavailable},
+         %CommandSource{kind: :application}
+       ),
+       do: OptionalBudgetDiagnostic.valid_unavailable_message?(message)
 
   defp valid_message_source?(
          _message,

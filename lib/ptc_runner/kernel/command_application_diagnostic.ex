@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaPath
   alias PtcRunner.Kernel.SchemaViolation
@@ -53,6 +54,13 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
 
   defp message_option({:installed_limit_exceeded, name, requested, ceiling}) do
     case RuntimeLimitDiagnostic.installed_ceiling_message(name, requested, ceiling) do
+      {:ok, message} -> [message: message]
+      :error -> []
+    end
+  end
+
+  defp message_option({:limit_unavailable, name, requested}) do
+    case OptionalBudgetDiagnostic.unavailable_message(name, requested) do
       {:ok, message} -> [message: message]
       :error -> []
     end
@@ -137,6 +145,13 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
        when is_binary(name) and is_integer(requested) and is_integer(ceiling) and
               requested > ceiling,
        do: {:installed_limit_exceeded, nil}
+
+  defp projection(:application, {:limit_unavailable, name, requested}) do
+    case OptionalBudgetDiagnostic.unavailable_message(name, requested) do
+      {:ok, _message} -> {:limit_unavailable, nil}
+      :error -> {:schema_violation, nil}
+    end
+  end
 
   defp projection(_role, reason)
        when reason in [:document_limit_exceeded, :json_depth_exceeded, :json_node_limit_exceeded],

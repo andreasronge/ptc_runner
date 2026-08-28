@@ -6,7 +6,9 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.ModelOutputDiagnostic
+  alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
 
@@ -25,6 +27,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:execution, :replay_fixture_missing},
     {:execution, :model_output_truncated},
     {:host, :host_schema_invalid},
+    {:host, :installed_limit_invalid},
     {:local_preflight, :environment_unavailable},
     {:local_preflight, :fixtures_unreadable},
     {:project, :project_schema_invalid},
@@ -239,6 +242,86 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
                message: inverted,
                source: CommandSource.fixed(:application),
                provider_activity: false
+             )
+  end
+
+  test "optional-budget messages enforce cataloged names, prerequisites, values, and suffixes" do
+    assert {:ok, schema} =
+             JSV.build(CommandContract.catalog_diagnostic_schema(),
+               atoms: false,
+               warnings: :silent
+             )
+
+    for row <- LimitCatalog.rows(:optional_manifest_narrowable),
+        requested <- [row.minimum, row.maximum] do
+      assert {:ok, message} = OptionalBudgetDiagnostic.unavailable_message(row.name, requested)
+      assert OptionalBudgetDiagnostic.valid_unavailable_message?(message)
+
+      assert {:ok, diagnostic} =
+               CommandDiagnostic.new(:application, :limit_unavailable,
+                 source: CommandSource.fixed(:application),
+                 message: message
+               )
+
+      rendered = CommandDiagnostic.to_map(diagnostic)
+      assert {:ok, _validated} = JSV.validate(rendered, schema, cast: false)
+
+      for malformed <- [message <> ".", message <> " private-value"] do
+        refute OptionalBudgetDiagnostic.valid_unavailable_message?(malformed)
+        assert {:error, _invalid} = JSV.validate(Map.put(rendered, "message", malformed), schema)
+      end
+    end
+
+    assert :error = OptionalBudgetDiagnostic.unavailable_message("caller-secret", 1)
+    assert :error = OptionalBudgetDiagnostic.unavailable_message("llm_total_tokens", 0)
+    assert :error = OptionalBudgetDiagnostic.unavailable_message("llm_total_tokens", nil)
+
+    assert :error =
+             OptionalBudgetDiagnostic.unavailable_message(
+               "llm_total_tokens",
+               9_007_199_254_740_992
+             )
+
+    oversized =
+      "llm_total_tokens " <>
+        String.duplicate("9", 100_000) <>
+        " is unavailable because the host has not enabled it; enable llm_total_tokens in the host document before declaring it in the manifest"
+
+    refute OptionalBudgetDiagnostic.valid_unavailable_message?(oversized)
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:application, :limit_unavailable,
+               source: CommandSource.fixed(:application),
+               message: oversized
+             )
+
+    for row <- LimitCatalog.rows(:optional_manifest_narrowable),
+        prerequisite <- row.prerequisites do
+      assert {:ok, message} =
+               OptionalBudgetDiagnostic.prerequisite_message(row.name, prerequisite)
+
+      assert OptionalBudgetDiagnostic.valid_prerequisite_message?(message)
+
+      assert {:ok, diagnostic} =
+               CommandDiagnostic.new(:host, :installed_limit_invalid,
+                 source: CommandSource.fixed(:host),
+                 message: message
+               )
+
+      rendered = CommandDiagnostic.to_map(diagnostic)
+      assert {:ok, _validated} = JSV.validate(rendered, schema, cast: false)
+      refute OptionalBudgetDiagnostic.valid_prerequisite_message?(message <> ".")
+
+      assert {:error, _invalid} =
+               JSV.validate(Map.put(rendered, "message", message <> "."), schema)
+    end
+
+    assert :error = OptionalBudgetDiagnostic.prerequisite_message("caller-secret", :usage_tokens)
+
+    assert :error =
+             OptionalBudgetDiagnostic.prerequisite_message(
+               "llm_total_tokens",
+               :reservation_tariff
              )
   end
 
@@ -478,6 +561,15 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
             2_048
           )
         end
+      },
+      %{
+        phase: :application,
+        code: :limit_unavailable,
+        source: :application,
+        setting: "llm_total_tokens",
+        value: "5000",
+        remedy: "enable llm_total_tokens in the host document",
+        build: fn -> OptionalBudgetDiagnostic.unavailable_message("llm_total_tokens", 5_000) end
       }
     ]
   end
