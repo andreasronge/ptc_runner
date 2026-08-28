@@ -273,7 +273,9 @@ documentation are rendered when available.</p><p>Top-level mission <code class="
 bounded structural types, but never their values. The inventory is the complete
 prompt-visible mission surface. <code class="inline">dir</code> and <code class="inline">export-meta</code> inspect visible
 attached prelude exports. <code class="inline">apropos</code> and <code class="inline">doc</code> cover those exports plus fixed
-built-ins and the bounded Java surface. None enumerate data values or direct
+built-ins and the bounded Java surface. When a shipped library is not attached,
+they print an attachment redirect rather than denying that the documentation
+exists. None enumerate data values or direct
 tool capabilities. When the inventory is empty, the prompt says so explicitly
 instead of leaving a blank heading.
 The generic examples do not name <code class="inline">data/input</code>; an agent sees that reference

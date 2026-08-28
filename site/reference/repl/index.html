@@ -182,7 +182,11 @@ sessions explain that <code class="inline">:context</code> requires a manifest m
 attempting to use a manifest session internally.</p><p>The language functions are the canonical discovery interface in every input
 context, not only at a terminal: <code class="inline">(apropos &quot;term&quot;)</code> / <code class="inline">(apropos 'term)</code> searches
 attached prelude exports, fixed built-ins, and the bounded Java surface, while
-<code class="inline">(doc &quot;name&quot;)</code> / <code class="inline">(doc name)</code> prints documentation. <code class="inline">(dir)</code> and
+<code class="inline">(doc &quot;name&quot;)</code> / <code class="inline">(doc name)</code> prints documentation. Without <code class="inline">--project</code>, a
+<code class="inline">doc</code> or <code class="inline">apropos</code> hit on a shipped library this session has not attached
+prints an attachment redirect (<code class="inline">--project PROJECT.json</code> or
+<code class="inline">{&quot;library&quot;: &quot;&lt;id&gt;&quot;}</code> in <code class="inline">workflow.components</code>) instead of claiming the
+symbol does not exist. <code class="inline">(dir)</code> and
 <code class="inline">(export-meta &quot;ns/name&quot;)</code> / <code class="inline">(export-meta ns/name)</code> inspect the attached
 prelude API specifically, and <code class="inline">(source ns/name)</code> prints an attached prelude
 defining form when available. For <code class="inline">doc</code>/<code class="inline">dir</code>/<code class="inline">export-meta</code>/<code class="inline">source</code>, unquoted

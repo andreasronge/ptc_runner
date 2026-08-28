@@ -172,7 +172,11 @@ attempting to use a manifest session internally.
 The language functions are the canonical discovery interface in every input
 context, not only at a terminal: `(apropos "term")` / `(apropos 'term)` searches
 attached prelude exports, fixed built-ins, and the bounded Java surface, while
-`(doc "name")` / `(doc name)` prints documentation. `(dir)` and
+`(doc "name")` / `(doc name)` prints documentation. Without `--project`, a
+`doc` or `apropos` hit on a shipped library this session has not attached
+prints an attachment redirect (`--project PROJECT.json` or
+`{"library": "<id>"}` in `workflow.components`) instead of claiming the
+symbol does not exist. `(dir)` and
 `(export-meta "ns/name")` / `(export-meta ns/name)` inspect the attached
 prelude API specifically, and `(source ns/name)` prints an attached prelude
 defining form when available. For `doc`/`dir`/`export-meta`/`source`, unquoted

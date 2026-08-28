@@ -206,8 +206,9 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
              """
 
     assert {:ok, apropos, session} = ReplSession.eval(session, ~S|(apropos "agent")|)
-    assert "agent.core" in apropos.return
-    assert "agent.failure" in apropos.return
+    refute "agent.core" in apropos.return
+    assert Enum.join(apropos.prints, "\n") =~ "agent.core"
+    assert Enum.join(apropos.prints, "\n") =~ "agent.failure"
 
     assert {:ok, unknown, session} = ReplSession.eval(session, ~S|(doc "missing/ns")|)
     assert unknown.prints == [~s(No documentation found for "missing/ns".)]

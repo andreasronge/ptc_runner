@@ -849,8 +849,16 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
       assert result.prints == [~s(No documentation found for "agent.core/nope".)]
 
-      assert eval!(~S|(doc "agent.core/run")|, prelude, @catalog_opts).prints |> hd() =~
-               "agent.core/run"
+      printed = hd(eval!(~S|(doc "agent.core/run")|, prelude, @catalog_opts).prints)
+      assert printed =~ "(agent.core/run"
+      refute printed =~ "has not attached"
+    end
+
+    test "a malformed shipped-looking ref stays a generic miss" do
+      for ref <- ["agent.core/", "/run", "agent.core/foo/bar"] do
+        result = eval!(~s|(doc "#{ref}")|, nil, @catalog_opts)
+        assert result.prints == [~s(No documentation found for "#{ref}".)]
+      end
     end
 
     test "a hidden attached shipped export stays a generic miss" do
@@ -867,31 +875,39 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert result.prints == [~s(No documentation found for "agent.core/run".)]
     end
 
-    test "apropos names unattached shipped libraries that match the query" do
-      names = eval!(~S|(apropos "agent")|, nil, @catalog_opts).return
+    test "apropos prints matching unattached libraries and returns only callable names" do
+      result = eval!(~S|(apropos "agent")|, nil, @catalog_opts)
 
-      assert "agent.core" in names
-      assert "agent.failure" in names
-      refute "cap" in names
-      refute "kernel" in names
+      refute "agent.core" in result.return
+      refute "agent.failure" in result.return
+
+      assert result.prints == [
+               """
+               Unattached shipped libraries matching "agent": agent.core, agent.failure.
+               Pass --project PROJECT.json, or select {"library": "<id>"} in workflow.components.\
+               """
+             ]
     end
 
-    test "apropos does not list an attached shipped library by its bare id" do
+    test "apropos does not advise about an attached shipped library" do
       {:ok, prelude} =
         Compiler.compile("""
         (ns agent.core "Fake." {:visibility :prompt})
         (defn run [task cfg] cfg)
         """)
 
-      names = eval!(~S|(apropos "agent")|, prelude, @catalog_opts).return
+      result = eval!(~S|(apropos "agent")|, prelude, @catalog_opts)
 
-      assert "agent.core/run" in names
-      refute "agent.core" in names
-      assert "agent.failure" in names
+      assert "agent.core/run" in result.return
+      refute "agent.core" in result.return
+      assert Enum.join(result.prints, "\n") =~ "agent.failure"
+      refute Enum.join(result.prints, "\n") =~ "agent.core,"
     end
 
     test "a blank apropos still matches nothing when a catalog is present" do
-      assert eval!(~S|(apropos "")|, nil, @catalog_opts).return == []
+      result = eval!(~S|(apropos "")|, nil, @catalog_opts)
+      assert result.return == []
+      assert result.prints == []
     end
   end
 end

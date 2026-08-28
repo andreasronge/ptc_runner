@@ -6,7 +6,9 @@ defmodule PtcRunner.Lisp.Introspection do
   `dir`, `export-meta`, and `source` describe the attached prelude. `apropos`
   and `doc` additionally expose fixed built-ins and the bounded Java surface
   from `PtcRunner.Lisp.Registry`. When the Kernel supplies a shipped-library
-  catalog, they also name unattached shipped libraries instead of denying them.
+  catalog, a miss on an unattached shipped ref prints an attachment redirect
+  instead of denying that the documentation exists; `apropos` prints the same
+  class of advisory while still returning only callable names.
   The same answers are produced in the REPL, in workflow and mission source,
   and inside a prelude export reading another prelude's documentation — there
   is no REPL-only path.
@@ -73,10 +75,10 @@ defmodule PtcRunner.Lisp.Introspection do
   names. When the evaluation context carries a shipped-library catalog, a miss
   whose namespace is in that catalog and not attached is a redirect naming the
   missing attachment rather than a denial that the documentation exists.
-  `apropos` additionally names those unattached shipped libraries whose IDs
-  match the query. An unknown or malformed ref is a miss, not a failure. A
-  `nil` catalog degrades to the registry-only miss, so embedded `Lisp.run`
-  callers stay unchanged.
+  `apropos` prints the same class of advisory for matching unattached shipped
+  libraries and still returns only callable names. An unknown or malformed ref
+  is a miss, not a failure. A `nil` catalog degrades to the registry-only miss,
+  so embedded `Lisp.run` callers stay unchanged.
   """
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
@@ -107,10 +109,14 @@ defmodule PtcRunner.Lisp.Introspection do
   Every call path — direct application and higher-order dispatch — routes
   through here, so argument faults and answers cannot differ between them.
   `doc` answers `{:print, text}` because its text belongs on the print channel
-  rather than in the result.
+  rather than in the result. `apropos` may answer `{:print, text, names}` when
+  it also has an attachment advisory: the names stay on the result channel.
   """
   @spec invoke(operation(), [term()], EvalContext.t()) ::
-          {:ok, term()} | {:print, String.t()} | {:error, term()}
+          {:ok, term()}
+          | {:print, String.t()}
+          | {:print, String.t(), term()}
+          | {:error, term()}
   def invoke(op, args, %EvalContext{} = context) when op in @operations do
     invoke_normalized(op, normalize_args(args), context)
   end
@@ -121,8 +127,14 @@ defmodule PtcRunner.Lisp.Introspection do
   defp invoke_normalized(:dir, [namespace], %EvalContext{} = context) when is_binary(namespace),
     do: {:ok, dir(context.prelude, namespace, filter(context))}
 
-  defp invoke_normalized(:apropos, [query], %EvalContext{} = context) when is_binary(query),
-    do: {:ok, apropos(context.prelude, query, filter(context), context.shipped_library_ids)}
+  defp invoke_normalized(:apropos, [query], %EvalContext{} = context) when is_binary(query) do
+    names = apropos(context.prelude, query, filter(context))
+
+    case unattached_library_advisory(query, context.prelude, context.shipped_library_ids) do
+      nil -> {:ok, names}
+      text -> {:print, text, names}
+    end
+  end
 
   defp invoke_normalized(:export_meta, [ref], %EvalContext{} = context) when is_binary(ref),
     do: {:ok, export_meta(context.prelude, ref, filter(context))}
@@ -201,19 +213,16 @@ defmodule PtcRunner.Lisp.Introspection do
   end
 
   @doc """
-  Sorted visible export refs, canonical registry names, and unattached shipped
-  library IDs matching `query`.
+  Sorted visible export refs and canonical registry names matching `query`.
 
   Matching is a case-insensitive literal substring. Attached exports search
   their ref and docstring; registry entries search their name, signatures,
-  description, notes, divergences, and section. Unattached shipped libraries
-  search their component ID. A blank query matches nothing rather than
-  everything — an empty search is not a request for the whole surface.
+  description, notes, divergences, and section. A blank query matches nothing
+  rather than everything — an empty search is not a request for the whole
+  surface.
   """
   @spec apropos(Prelude.t() | nil, String.t(), visible()) :: [String.t()]
-  @spec apropos(Prelude.t() | nil, String.t(), visible(), MapSet.t(String.t()) | nil) ::
-          [String.t()]
-  def apropos(prelude, query, visible, catalog \\ nil) when is_binary(query) do
+  def apropos(prelude, query, visible) when is_binary(query) do
     needle = String.downcase(String.trim(query))
 
     if needle == "" do
@@ -235,7 +244,6 @@ defmodule PtcRunner.Lisp.Introspection do
 
       prelude_matches
       |> Kernel.++(registry_matches)
-      |> Kernel.++(unattached_library_matches(prelude, needle, catalog))
       |> Enum.uniq()
       |> Enum.sort()
     end
@@ -381,6 +389,25 @@ defmodule PtcRunner.Lisp.Introspection do
 
   defp missing_source(ref), do: ~s(No source available for "#{ref}".)
 
+  defp unattached_library_advisory(query, prelude, catalog) do
+    needle = String.downcase(String.trim(query))
+
+    if needle == "" do
+      nil
+    else
+      case unattached_library_matches(prelude, needle, catalog) do
+        [] -> nil
+        [library_id] -> unattached_library_message(library_id, library_id)
+        ids -> unattached_libraries_message(needle, ids)
+      end
+    end
+  end
+
+  defp unattached_libraries_message(query, ids) do
+    "Unattached shipped libraries matching \"#{query}\": #{Enum.join(ids, ", ")}.\n" <>
+      ~s(Pass --project PROJECT.json, or select {"library": "<id>"} in workflow.components.)
+  end
+
   defp unattached_library_matches(_prelude, _needle, nil), do: []
 
   defp unattached_library_matches(prelude, needle, catalog) do
@@ -411,9 +438,9 @@ defmodule PtcRunner.Lisp.Introspection do
   end
 
   defp library_id_for_ref(ref) do
-    case String.split(ref, "/", parts: 2) do
+    case String.split(ref, "/") do
       [name] when name != "" -> name
-      [namespace, _symbol] when namespace != "" -> namespace
+      [namespace, symbol] when namespace != "" and symbol != "" -> namespace
       _ -> nil
     end
   end
