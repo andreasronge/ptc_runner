@@ -150,6 +150,51 @@ one shared all-or-nothing trace and inspection snapshot; the transcript keeps
 its singular path. Explicit single-file sources remain filename-agnostic and
 may contain multiple complete disjoint runs; they never combine with siblings.
 
+### Private catalog generation and selected-set binding
+
+`private-run-catalog-v1` is the discovery authority, not a lightweight form of
+admission. One owner captures a generation once: each trace candidate
+contributes at most its first 65,536 bytes and last 65,536 bytes, and each
+`.ptcins` candidate contributes only the fixed 16-byte header and 192-byte
+footer. The probe never decodes an inspection frame or an intervening trace
+event. Before any read it compares `lstat` inventory identity with the opened
+descriptor, and after the read it checks the path again. Replacement or drift
+therefore isolates the row instead of describing bytes from another file.
+
+The generation commitment is domain-separated by `ptc-run-catalog-v1` and
+covers `excluded_files` plus every sorted run stem and both halves' observed
+state, descriptor identity, and exact probe-byte digest. Absent halves commit
+to absence. The returned `catalog_digest` identifies that immutable captured
+value; page cursors bind it and the complete filter query. Neither the digest
+nor a cursor is an admission credential, persisted catalog, or input to
+`private-run-analysis-v1`.
+
+Catalog capture has finite ceilings: 4,096 entries per directory, 1,024 joined
+run stems, 2,048 encoded bytes per row, 4,194,304 retained bytes, 1,000,000
+result bytes, a 5-second bounded listing operation, a 15-second capture
+deadline, and bounded listing/capture heaps. Entry defects are isolated in
+rows; unavailable roots and whole-operation bounds refuse startup. The owner
+holds detached metadata only and no file descriptors after capture.
+
+Repeated `--run` starts a different owner and binds admission to the sorted
+set of one through sixteen explicit command run references. For every member,
+it resolves exactly two possible trace names and one inspection name without
+listing, pins regular descriptors, validates complete embedded identities,
+rehashes the selected trace bytes, confirms the inspection seal and range
+digests, and proves trace-to-inspection correlation. The snapshot identity
+commits to the selected set, source class, evidence digests, and correlated
+trace IDs; argument order does not affect it. Unselected paths and a prior
+catalog digest contribute no authority.
+
+Trace/inspection source bytes, trace retention, inspection logical index
+entries and bytes, actual retained indexes, and admission heap are aggregate
+across the selected set. The inspection record bound remains per artifact;
+one pinned inspection handle exists per admitted run. Failure is
+all-or-nothing: partial indexes and handles are deleted before returning the
+path-free refusal. Normal close, construction failure, deadline, owner death,
+and explicit stop all tear down the catalog or selected owners and their
+resources; already sealed input artifacts remain untouched.
+
 One directory holds both sanitized and private trace files, and one source
 grant reads exactly one kind. A run listing and a counters query therefore
 report the trace files that grant refused to read, as
@@ -1200,6 +1245,26 @@ not include a record payload or host path. A completed Kernel result may be
 returned as bounded context with `:inspection_persistence_failed`, matching the
 existing trace-persistence distinction; persistence failure is not rewritten
 as workflow failure.
+
+## Private cohort acceptance ledger
+
+The end-to-end test owns only the cross-stage workflow. Deterministic boundary
+tests remain authoritative for fault states that do not need forty full private
+payloads:
+
+| Acceptance behavior | Authoritative coverage |
+| --- | --- |
+| metadata-only probes and no payload reads | `run_catalog_snapshot_test.exs`: “a paired cohort lists safe metadata without opening either payload” |
+| growth cannot alter an open generation | `run_catalog_snapshot_test.exs`: “an open generation is unchanged by a run published after its capture” |
+| stale and filter-bound cursors | `run_catalog_snapshot_test.exs`: “a cursor from another catalog generation is stale” and “cursors bind every filter but not the page limit” |
+| duplicate identities and missing pairs | `run_catalog_snapshot_test.exs`: “two entries claiming one trace identity isolate both” and “a row reports a missing half instead of refusing the generation” |
+| replacement and changed metadata | `run_catalog_snapshot_test.exs`: descriptor-replacement tests; `selected_canonical_set_snapshot_test.exs`: alternate-creation, replacement, truncation, and mismatch tests |
+| malformed selected versus unselected members | `run_catalog_profile_test.exs`: malformed unselected isolation; `selected_canonical_set_snapshot_test.exs`: selected malformed/version failures |
+| exact candidate and correlation failures | `selected_canonical_source_test.exs`, `selected_canonical_snapshot_test.exs`, and `selected_canonical_set_snapshot_test.exs` |
+| aggregate bytes/index retention and per-artifact records | `selected_canonical_set_snapshot_test.exs`: source-byte, record, and retained-index ceiling tests |
+| owner death and cleanup after partial admission | `run_catalog_snapshot_test.exs`: owner exit; `run_catalog_profile_test.exs`: close/construction cleanup; `selected_canonical_set_snapshot_test.exs`: owner-death and partial-index cleanup tests |
+| paged forty-run discovery and two independent 16-run sessions | `ptc_repl_test.exs`: “catalog discovery pages forty safe rows into two independent selected sessions” |
+| stable closed frontend diagnostic projection | `profile_diagnostic_catalog_test.exs` and the selected-run JSONL assertions in `ptc_repl_test.exs` |
 
 ## Non-goals
 

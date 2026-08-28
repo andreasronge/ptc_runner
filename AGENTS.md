@@ -152,8 +152,9 @@ load-sensitive failures.
   `docs/conformance/`, `priv/preludes/kernel/agent.failure.clj`, and the site
   documentation pages under `site/guides/`, `site/installation/`, and
   `site/reference/` (plus the sidebar between the generated markers in
-  `site/index.html`) are generated, as is the exit-status catalog between the
-  `BEGIN GENERATED`/`END GENERATED` markers in `docs/reference/cli.md`. Edit
+  `site/index.html`) are generated, as are the exit-status and profile
+  diagnostic catalogs between the `BEGIN GENERATED`/`END GENERATED` markers
+  in `docs/reference/cli.md`. Edit
   their owning catalogs, hand-authored shipped prelude sources, guides, or
   generator and run `mix ptc.gen_docs`. The sections shown on ptc-runner.dev
   and HexDocs both come from the documentation groups in `mix.exs`.

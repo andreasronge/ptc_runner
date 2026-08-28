@@ -95,9 +95,11 @@ defmodule PtcRunner.ReplFrontend do
   `session-started`, `evaluation`, and successfully persisted `session-closed`
   records for lifecycle stages that are reached. An unsuccessful command ends
   with `command-error`; validation failures can therefore emit that record
-  alone. Evaluation records contain the existing bounded public mission result
-  projection and never add a raw source field. A failing command raises
-  a closed frontend error; this shared module never halts the VM.
+  alone. Profile selection and source-capture records carry the stable code
+  from `PtcRunner.ProfileDiagnosticCatalog`; the outer one-shot error uses the
+  same `repl/CODE`. Evaluation records contain the existing bounded public
+  mission result projection and never add a raw source field. A failing command
+  raises a closed frontend error; this shared module never halts the VM.
   """
 
   alias PtcRunner.Dotenv
@@ -119,14 +121,17 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Lisp.NamespaceDiagnostic
   alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.Lisp.ValuePreview
+  alias PtcRunner.ProfileDiagnosticCatalog
   alias PtcRunner.ReplError
   alias PtcRunner.ReplLineEditor, as: LineEditor
 
-  @spec run(CommandArguments.t(), CommandRuntime.t()) :: :ok | {:error, binary()}
+  @spec run(CommandArguments.t(), CommandRuntime.t()) ::
+          :ok | {:error, binary()} | {:error, atom(), binary()}
   def run(arguments, runtime), do: run(arguments, runtime, [])
 
   @doc false
-  @spec run(CommandArguments.t(), CommandRuntime.t(), keyword()) :: :ok | {:error, binary()}
+  @spec run(CommandArguments.t(), CommandRuntime.t(), keyword()) ::
+          :ok | {:error, binary()} | {:error, atom(), binary()}
   def run(
         %CommandArguments{command: :repl, application: script, ordered_options: opts},
         %CommandRuntime{} = runtime,
@@ -161,6 +166,9 @@ defmodule PtcRunner.ReplFrontend do
             arguments
           )
 
+        {:error, %{code: code, message: message}} ->
+          command_error(opts, :cli, code, message)
+
         {:error, message} ->
           command_error(opts, :cli, message)
       end
@@ -170,7 +178,7 @@ defmodule PtcRunner.ReplFrontend do
       {:error, "invalid repl frontend options"}
     end
   rescue
-    error in ReplError -> {:error, error.message}
+    error in ReplError -> repl_error(error)
   end
 
   def run(_arguments, _runtime, _frontend_opts), do: {:error, "invalid repl frontend options"}
@@ -180,6 +188,12 @@ defmodule PtcRunner.ReplFrontend do
       length(opts) == MapSet.size(MapSet.new(Keyword.keys(opts))) and
       Keyword.get(opts, :terminal_attached, false) in [true, false]
   end
+
+  defp repl_error(%ReplError{code: code, message: message})
+       when is_atom(code) and not is_nil(code),
+       do: {:error, code, message}
+
+  defp repl_error(%ReplError{message: message}), do: {:error, message}
 
   defp terminal_attached?(opts),
     do: Keyword.get_lazy(opts, :terminal_attached, &AnalysisTerminal.attached?/0)
@@ -336,8 +350,19 @@ defmodule PtcRunner.ReplFrontend do
            }) do
       {:ok, :profile}
     else
-      {:error, :unsupported_analysis_profile} -> {:error, unsupported_profile_message()}
-      {:error, reason} when is_atom(reason) -> {:error, profile_frontend_error(reason)}
+      {:error, :unsupported_analysis_profile} ->
+        {:error, unsupported_profile_message()}
+
+      {:error, reason}
+      when reason in [
+             :invalid_run_reference,
+             :selected_set_limit_exceeded,
+             :duplicate_selected_run
+           ] ->
+        {:error, ProfileDiagnosticCatalog.classify!(reason)}
+
+      {:error, reason} when is_atom(reason) ->
+        {:error, profile_frontend_error(reason)}
     end
   end
 
@@ -440,14 +465,6 @@ defmodule PtcRunner.ReplFrontend do
 
   defp profile_frontend_error(:selected_runs_unsupported),
     do: "--run is supported only with --profile private-run-analysis-v1"
-
-  defp profile_frontend_error(reason)
-       when reason in [
-              :invalid_run_reference,
-              :selected_set_limit_exceeded,
-              :duplicate_selected_run
-            ],
-       do: "selected run setup failed: #{reason}"
 
   defp profile_frontend_error(_reason), do: "invalid profile command"
 
@@ -732,38 +749,8 @@ defmodule PtcRunner.ReplFrontend do
 
       {:error, reason} ->
         cleanup_temporary_directory(output_directory, temporary?)
-        command_error(opts, :setup, profile_setup_error(reason))
+        command_error(opts, :setup, ProfileDiagnosticCatalog.classify!(reason))
     end
-  end
-
-  defp profile_setup_error(
-         {:source_retained_limit_exceeded,
-          %{source: source, measured_bytes: measured_bytes, limit_bytes: limit_bytes}}
-       )
-       when source in [
-              :ptc_trace_snapshot,
-              :ptc_private_trace_snapshot,
-              :ptc_inspection_snapshot
-            ] and
-              is_integer(measured_bytes) and is_integer(limit_bytes) do
-    "ptc repl profile setup failed: #{source} retains #{measured_bytes} bytes " <>
-      "(limit: #{limit_bytes} bytes)"
-  end
-
-  defp profile_setup_error(:empty_traces_resource),
-    do: empty_resource_error("traces", "*.jsonl trace files")
-
-  defp profile_setup_error(:empty_inspection_resource),
-    do: empty_resource_error("inspection", "*.ptcins records")
-
-  defp profile_setup_error(reason) when is_atom(reason),
-    do: "ptc repl profile setup failed: #{reason}"
-
-  defp profile_setup_error(_reason), do: "ptc repl profile setup failed"
-
-  defp empty_resource_error(resource, artifacts) do
-    "ptc repl profile setup failed: the #{resource} resource directory contains no " <>
-      "#{artifacts} at its own level; artifacts in subdirectories are not captured"
   end
 
   defp maybe_private_terminal(builder_options, opts) do
@@ -788,7 +775,13 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp evaluate_profile_mode(session, opts, arguments) do
-    initial = %{next_index: 1, failed_indexes: [], failure: nil, result: :unavailable}
+    initial = %{
+      next_index: 1,
+      failed_indexes: [],
+      failure: nil,
+      evaluation_diagnostic: nil,
+      result: :unavailable
+    }
 
     case maybe_profile_load(session, opts, initial) do
       {:ok, state} -> run_profile_input(session, opts, arguments, state)
@@ -815,7 +808,7 @@ defmodule PtcRunner.ReplFrontend do
             {:ok, next}
 
           {_disposition, next} ->
-            {:halt, put_failure(next, :setup, "profile load evaluation failed")}
+            {:halt, put_failure(next, :setup, evaluation_diagnostic(next))}
         end
 
       {:error, :source_limit_exceeded} ->
@@ -851,10 +844,10 @@ defmodule PtcRunner.ReplFrontend do
         {:error, next} ->
           if opts[:continue_on_error],
             do: {:cont, next},
-            else: {:halt, put_failure(next, :evaluation, "profile evaluation failed")}
+            else: {:halt, put_failure(next, :evaluation, evaluation_diagnostic(next))}
 
         {:terminal, next} ->
-          {:halt, put_failure(next, :lifecycle, "profile session became terminal")}
+          {:halt, put_failure(next, :lifecycle, evaluation_diagnostic(next))}
       end
     end)
     |> ensure_evaluation_failure()
@@ -897,8 +890,8 @@ defmodule PtcRunner.ReplFrontend do
   defp profile_single_source(session, opts, source, input_kind, state) do
     case evaluate_profile_source(session, opts, source, input_kind, state) do
       {:ok, next} -> next
-      {:error, next} -> put_failure(next, :evaluation, "profile evaluation failed")
-      {:terminal, next} -> put_failure(next, :lifecycle, "profile session became terminal")
+      {:error, next} -> put_failure(next, :evaluation, evaluation_diagnostic(next))
+      {:terminal, next} -> put_failure(next, :lifecycle, evaluation_diagnostic(next))
     end
   end
 
@@ -944,9 +937,14 @@ defmodule PtcRunner.ReplFrontend do
 
       source ->
         case evaluate_profile_source(session, opts, source, :interactive, state) do
-          {:ok, next} -> profile_loop(session, opts, next)
-          {:error, next} -> profile_loop(session, opts, next)
-          {:terminal, next} -> put_failure(next, :lifecycle, "profile session became terminal")
+          {:ok, next} ->
+            profile_loop(session, opts, next)
+
+          {:error, next} ->
+            profile_loop(session, opts, next)
+
+          {:terminal, next} ->
+            put_failure(next, :lifecycle, evaluation_diagnostic(next))
         end
     end
   end
@@ -966,7 +964,10 @@ defmodule PtcRunner.ReplFrontend do
         if result.status == :ok do
           {:ok, next}
         else
-          next = %{next | failed_indexes: [index | next.failed_indexes]}
+          next =
+            next
+            |> Map.put(:failed_indexes, [index | next.failed_indexes])
+            |> retain_evaluation_diagnostic(result)
 
           case AnalysisSession.info(session) do
             {:ok, %{lifecycle: :open}} -> {:error, next}
@@ -980,7 +981,7 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp ensure_evaluation_failure(%{failure: nil, failed_indexes: [_ | _]} = state),
-    do: put_failure(state, :evaluation, "one or more profile evaluations failed")
+    do: put_failure(state, :evaluation, evaluation_diagnostic(state))
 
   defp ensure_evaluation_failure(state), do: state
 
@@ -988,6 +989,22 @@ defmodule PtcRunner.ReplFrontend do
     do: %{state | failure: {category, message}}
 
   defp put_failure(state, _category, _message), do: state
+
+  defp retain_evaluation_diagnostic(%{evaluation_diagnostic: nil} = state, result),
+    do: %{state | evaluation_diagnostic: classify_evaluation_result(result)}
+
+  defp retain_evaluation_diagnostic(state, _result), do: state
+
+  defp classify_evaluation_result(%{outcome: :result_exceeded}),
+    do: ProfileDiagnosticCatalog.classify!(:result_limit_exceeded)
+
+  defp classify_evaluation_result(_result),
+    do: ProfileDiagnosticCatalog.classify!(:profile_evaluation_failed)
+
+  defp evaluation_diagnostic(%{evaluation_diagnostic: nil}),
+    do: ProfileDiagnosticCatalog.classify!(:profile_evaluation_failed)
+
+  defp evaluation_diagnostic(%{evaluation_diagnostic: diagnostic}), do: diagnostic
 
   defp retain_profile_result(state, %{status: :ok, value_available?: true, value: value}),
     do: %{state | result: {:ok, value}}
@@ -1002,6 +1019,11 @@ defmodule PtcRunner.ReplFrontend do
         case state.failure do
           nil ->
             publish_profile_result(result_handle, state.result)
+
+          {category, %{code: code, message: message}} ->
+            command_error(opts, category, code, message, %{
+              "evaluation_indexes" => Enum.reverse(state.failed_indexes)
+            })
 
           {category, message} ->
             command_error(opts, category, message, %{
@@ -1158,11 +1180,33 @@ defmodule PtcRunner.ReplFrontend do
   defp handle_profile_command(_command, _profile_id),
     do: info("Unknown command. Available: :help, :quit")
 
+  @spec command_error(keyword(), atom(), map()) :: no_return()
+  defp command_error(opts, category, %{code: code, message: message})
+       when is_atom(code) and is_binary(message),
+       do: command_error(opts, category, code, message)
+
   @spec command_error(keyword(), atom(), binary()) :: no_return()
-  defp command_error(opts, category, message), do: command_error(opts, category, message, %{})
+  defp command_error(opts, category, message) when is_binary(message),
+    do: command_error(opts, category, message, %{})
+
+  @spec command_error(keyword(), atom(), atom(), binary()) :: no_return()
+  defp command_error(opts, category, code, message) when is_atom(code) and is_binary(message),
+    do: command_error(opts, category, code, message, %{})
 
   @spec command_error(keyword(), atom(), binary(), map()) :: no_return()
-  defp command_error(opts, category, message, extra) do
+  defp command_error(opts, category, message, extra) when is_binary(message) and is_map(extra) do
+    emit_command_error(opts, category, message, extra)
+    fail(message)
+  end
+
+  @spec command_error(keyword(), atom(), atom(), binary(), map()) :: no_return()
+  defp command_error(opts, category, code, message, extra)
+       when is_atom(code) and is_binary(message) and is_map(extra) do
+    emit_command_error(opts, category, message, Map.put(extra, "code", Atom.to_string(code)))
+    fail(code, message)
+  end
+
+  defp emit_command_error(opts, category, message, extra) do
     if output_format(opts) == :jsonl do
       emit_jsonl(
         Map.merge(
@@ -1176,8 +1220,6 @@ defmodule PtcRunner.ReplFrontend do
         )
       )
     end
-
-    fail(message)
   end
 
   defp output_format(opts),
@@ -1797,4 +1839,5 @@ defmodule PtcRunner.ReplFrontend do
   defp info(message), do: IO.puts(message)
   defp error(message), do: IO.puts(:stderr, message)
   defp fail(message), do: raise(ReplError, message: message)
+  defp fail(code, message), do: raise(ReplError, code: code, message: message)
 end

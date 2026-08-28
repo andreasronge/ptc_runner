@@ -1052,11 +1052,21 @@ defmodule PtcRunner.ReplFrontendTest do
              ["--run", PrivateInspectionFixture.command_run_ref(seed)]
            end), "selected_set_limit_exceeded"}
         ] do
-      capture_io(fn ->
-        assert_raise Mix.Error, ~r/#{code}/, fn ->
-          run_repl(base ++ selection ++ missing_resources)
-        end
-      end)
+      output =
+        capture_io(fn ->
+          error =
+            assert_raise Mix.Error, ~r|repl/#{code}:|, fn ->
+              run_repl(base ++ selection ++ missing_resources)
+            end
+
+          refute error.message =~ "/definitely/missing"
+        end)
+
+      assert [record] = decode_jsonl(output)
+      assert record["type"] == "command-error"
+      assert record["category"] == "cli"
+      assert record["code"] == code
+      refute output =~ "/definitely/missing"
     end
 
     for profile <- ["run-analysis-v1", "private-run-catalog-v1"] do
@@ -1078,6 +1088,75 @@ defmodule PtcRunner.ReplFrontendTest do
         end
       end)
     end
+  end
+
+  @tag :tmp_dir
+  test "catalog discovery pages forty safe rows into two independent selected sessions", %{
+    tmp_dir: directory
+  } do
+    cohort = build_private_cohort!(directory, 40)
+
+    catalog_output =
+      capture_io(fn ->
+        run_repl([
+          "--profile",
+          "private-run-catalog-v1",
+          "--resource",
+          "traces=#{cohort.traces}",
+          "--resource",
+          "inspection=#{cohort.inspection}",
+          "--session-trace-dir",
+          cohort.catalog_output,
+          "--private-unattended",
+          "--format",
+          "jsonl",
+          "-e",
+          ~S|(def first-page (analysis/catalog {"state" "admissible" "limit" 20}))|,
+          "-e",
+          "first-page",
+          "-e",
+          ~S|(analysis/catalog {"state" "admissible" "limit" 20 "cursor" (get first-page "next_cursor")})|
+        ])
+      end)
+
+    catalog_records = decode_jsonl(catalog_output)
+    evaluations = Enum.filter(catalog_records, &(&1["type"] == "evaluation"))
+    first_page = Enum.at(evaluations, 1)["result"]["value"]
+    second_page = Enum.at(evaluations, 2)["result"]["value"]
+
+    assert length(first_page["items"]) == 20
+    assert length(second_page["items"]) == 20
+    assert first_page["truncated"]
+    refute second_page["truncated"]
+    assert is_binary(first_page["next_cursor"])
+    assert second_page["next_cursor"] == nil
+    assert first_page["catalog_digest"] == second_page["catalog_digest"]
+    assert Enum.all?(first_page["items"] ++ second_page["items"], &(&1["state"] == "admissible"))
+    refute catalog_output =~ "private-prompt-"
+    refute catalog_output =~ "private-answer-"
+    refute catalog_output =~ "private-tool-result-"
+
+    first_batch = first_page["items"] |> Enum.take(16) |> Enum.map(& &1["run_id"])
+    later_batch = second_page["items"] |> Enum.take(16) |> Enum.map(& &1["run_id"])
+
+    first_session = run_selected_cohort!(cohort, first_batch, cohort.first_output)
+    later_session = run_selected_cohort!(cohort, later_batch, cohort.later_output)
+
+    assert Enum.sort(first_session.run_ids) == Enum.sort(first_batch)
+    assert Enum.sort(later_session.run_ids) == Enum.sort(later_batch)
+    assert MapSet.disjoint?(MapSet.new(first_session.run_ids), MapSet.new(later_session.run_ids))
+    assert first_session.session_id != later_session.session_id
+
+    assert first_session.capture == %{
+             "inspection" => %{"file_count" => 16, "run_count" => 16},
+             "traces" => %{"file_count" => 16, "run_count" => 16}
+           }
+
+    assert later_session.capture == first_session.capture
+    refute first_session.output =~ "catalog_digest"
+    refute later_session.output =~ "catalog_digest"
+    refute first_session.output =~ first_page["catalog_digest"]
+    refute later_session.output =~ first_page["catalog_digest"]
   end
 
   @tag :tmp_dir
@@ -1365,8 +1444,7 @@ defmodule PtcRunner.ReplFrontendTest do
     fixture = PrivateInspectionFixture.create!(directory, "old-schema")
     PrivateInspectionFixture.rewrite_schema!(fixture.inspection, 4)
 
-    message =
-      ~r/ptc repl profile setup failed: malformed_source/
+    message = ~r|repl/malformed_source: analysis source is malformed|
 
     capture_io(fn ->
       assert_raise Mix.Error, message, fn ->
@@ -1572,25 +1650,27 @@ defmodule PtcRunner.ReplFrontendTest do
 
     output =
       capture_io(fn ->
-        assert_raise Mix.Error, ~r/one or more profile evaluations failed/, fn ->
-          run_repl([
-            "--profile",
-            "run-analysis-v1",
-            "--resource",
-            "traces=#{source}",
-            "--session-trace-dir",
-            output_directory,
-            "--format",
-            "jsonl",
-            "--continue-on-error",
-            "-e",
-            "(def x 40)",
-            "-e",
-            "missing-value",
-            "-e",
-            "(+ x 2)"
-          ])
-        end
+        assert_raise Mix.Error,
+                     ~r|repl/profile_evaluation_failed: profile evaluation failed|,
+                     fn ->
+                       run_repl([
+                         "--profile",
+                         "run-analysis-v1",
+                         "--resource",
+                         "traces=#{source}",
+                         "--session-trace-dir",
+                         output_directory,
+                         "--format",
+                         "jsonl",
+                         "--continue-on-error",
+                         "-e",
+                         "(def x 40)",
+                         "-e",
+                         "missing-value",
+                         "-e",
+                         "(+ x 2)"
+                       ])
+                     end
       end)
 
     records = decode_jsonl(output)
@@ -1618,6 +1698,63 @@ defmodule PtcRunner.ReplFrontendTest do
     assert List.last(records)["evaluation_indexes"] == [2]
     assert File.regular?(Enum.at(records, -2)["trace_path"])
     assert log_analysis_session_pids() == before_sessions
+  end
+
+  @tag :tmp_dir
+  test "JSONL result limit uses the same stable frontend code at both boundaries", %{
+    tmp_dir: directory
+  } do
+    source = Path.join(directory, "source")
+    output_directory = Path.join(directory, "output")
+    File.mkdir!(source)
+    File.mkdir!(output_directory)
+    seed_trace(source, "seed")
+
+    output =
+      capture_io(fn ->
+        error =
+          assert_raise Mix.Error, ~r|repl/result_limit_exceeded:|, fn ->
+            run_repl(
+              profile_args(source, output_directory) ++
+                [
+                  "--format",
+                  "jsonl",
+                  "-e",
+                  ~S|(loop [s "\\" n 0] (if (= n 19) s (recur (str s s) (inc n))))|
+                ]
+            )
+          end
+
+        assert error.message =~ "profile evaluation result exceeded its byte limit"
+      end)
+
+    assert %{"type" => "command-error", "code" => "result_limit_exceeded"} =
+             output |> decode_jsonl() |> List.last()
+  end
+
+  @tag :tmp_dir
+  test "interactive terminal evaluation uses the stable frontend code", %{tmp_dir: directory} do
+    source = Path.join(directory, "source")
+    output_directory = Path.join(directory, "output")
+    File.mkdir!(source)
+    File.mkdir!(output_directory)
+    seed_trace(source, "seed")
+
+    input = Enum.map_join(1..65, "\n", &Integer.to_string/1) <> "\n"
+
+    output =
+      capture_io(input, fn ->
+        error =
+          assert_raise Mix.Error, ~r|repl/profile_evaluation_failed:|, fn ->
+            run_repl(profile_args(source, output_directory), terminal_attached: true)
+          end
+
+        send(self(), {:interactive_profile_error, error.message})
+      end)
+
+    assert_receive {:interactive_profile_error, message}
+    assert message =~ "profile evaluation failed"
+    assert output =~ "PTC-Lisp REPL [run-analysis-v1]"
   end
 
   @tag :tmp_dir
@@ -1664,11 +1801,20 @@ defmodule PtcRunner.ReplFrontendTest do
     File.mkdir!(output_directory)
     seed_trace(nested, "seed")
 
-    assert_raise Mix.Error,
-                 ~r/the traces resource directory contains no \*\.jsonl trace files at its own level/,
-                 fn ->
-                   run_repl(profile_args(source, output_directory) ++ ["-e", "42"])
-                 end
+    output =
+      capture_io(fn ->
+        assert_raise Mix.Error,
+                     ~r|repl/source_unavailable: analysis source is unavailable or capture timed out|,
+                     fn ->
+                       run_repl(
+                         profile_args(source, output_directory) ++
+                           ["--format", "jsonl", "-e", "42"]
+                       )
+                     end
+      end)
+
+    assert [%{"type" => "command-error", "category" => "setup", "code" => "source_unavailable"}] =
+             decode_jsonl(output)
 
     assert File.ls!(output_directory) == []
   end
@@ -2105,6 +2251,97 @@ defmodule PtcRunner.ReplFrontendTest do
     |> Enum.reject(&String.starts_with?(&1, "==> "))
     |> Enum.map(&Jason.decode!/1)
   end
+
+  defp build_private_cohort!(directory, count) do
+    File.chmod!(directory, 0o700)
+    seed_root = prepare_private_fixture_root!(Path.join(directory, "cohort-seed"))
+
+    cohort =
+      PrivateInspectionFixture.create!(seed_root, command_run_ref(1))
+
+    File.mkdir!(Path.join(directory, "catalog-output"))
+    File.mkdir!(Path.join(directory, "first-output"))
+    File.mkdir!(Path.join(directory, "later-output"))
+
+    Enum.each(2..count, fn seed ->
+      fixture_root = prepare_private_fixture_root!(Path.join(directory, "cohort-#{seed}"))
+
+      fixture =
+        PrivateInspectionFixture.create!(
+          fixture_root,
+          command_run_ref(seed)
+        )
+
+      File.cp!(
+        Path.join(fixture.traces, "#{fixture.run_id}.jsonl"),
+        Path.join(cohort.traces, "#{fixture.run_id}.jsonl")
+      )
+
+      File.cp!(
+        Path.join(fixture.inspection, "#{fixture.run_id}.ptcins"),
+        Path.join(cohort.inspection, "#{fixture.run_id}.ptcins")
+      )
+    end)
+
+    Map.merge(cohort, %{
+      catalog_output: Path.join(directory, "catalog-output"),
+      first_output: Path.join(directory, "first-output"),
+      later_output: Path.join(directory, "later-output")
+    })
+  end
+
+  defp prepare_private_fixture_root!(root) do
+    directories = [
+      root,
+      Path.join(root, "traces"),
+      Path.join(root, "inspection"),
+      Path.join(root, "analysis-traces")
+    ]
+
+    Enum.each(directories, fn directory ->
+      File.mkdir_p!(directory)
+      File.chmod!(directory, 0o700)
+    end)
+
+    root
+  end
+
+  defp run_selected_cohort!(cohort, run_ids, output_directory) do
+    selection = Enum.flat_map(run_ids, &["--run", &1])
+
+    output =
+      capture_io(fn ->
+        run_repl(
+          [
+            "--profile",
+            "private-run-analysis-v1",
+            "--resource",
+            "traces=#{cohort.traces}",
+            "--resource",
+            "inspection=#{cohort.inspection}",
+            "--session-trace-dir",
+            output_directory,
+            "--private-unattended",
+            "--format",
+            "jsonl",
+            "-e",
+            ~S|(analysis/runs {"limit" 100})|
+          ] ++ selection
+        )
+      end)
+
+    [started, evaluated, closed] = decode_jsonl(output)
+
+    %{
+      output: output,
+      session_id: started["session_id"],
+      capture: started["capture"],
+      run_ids: evaluated["result"]["value"]["items"] |> Enum.map(& &1["run_id"]),
+      trace_path: closed["trace_path"]
+    }
+  end
+
+  defp command_run_ref(seed), do: PrivateInspectionFixture.command_run_ref(10_000 + seed)
 
   defp write_file(directory, name, contents) do
     file = Path.join(directory, name)

@@ -366,6 +366,41 @@ supplied subset. Inclusive `from` and `to` bounds apply to `start_timestamp`.
 No other filter, including `bundle`, is accepted. The default `limit` is 20 and
 the maximum is 100.
 
+Every item has the same closed field set:
+
+| Field | Meaning |
+| --- | --- |
+| `run_id` | canonical filename run reference |
+| `trace_id` | trace-head identity, or `null` when unavailable |
+| `trace_present` | `sanitized`, `private`, `absent`, or `unreadable` |
+| `inspection_present` | whether a sealed inspection candidate exists |
+| `trace_schema_version` | probed canonical-event schema version |
+| `inspection_format_version` | probed sealed-container format version |
+| `inspection_schema_version` | probed inspection-record schema version |
+| `trace_bytes` | trace candidate size |
+| `inspection_bytes` | sealed artifact size |
+| `inspection_record_count` | footer-declared evidence-record count |
+| `start_timestamp` | trace-head timestamp |
+| `stop_timestamp` | terminal trace timestamp, or `null` |
+| `duration_ms` | non-negative terminal duration, or `null` |
+| `status` | terminal canonical status, or `null` |
+| `terminal_reason` | safe terminal reason, or `null` |
+| `result_hash` | safe terminal result fingerprint, or `null` |
+| `complete` | whether the trace ends in `run-stopped` |
+| `name`, `model`, `provider` | safe `run-started` labels, or `null` |
+| `tags`, `labels` | bounded safe `run-started` label maps |
+| `artifact_digest` | footer-declared inspection fingerprint, or `null` |
+| `correlation` | `paired`, `trace_only`, `inspection_only`, `mismatch`, or `unavailable` |
+| `state` | `admissible` or `isolated` |
+| `isolation_reason` | the primary closed reason below, or `null` |
+
+The ordered isolation vocabulary is `ambiguous_trace`, `unstable_entry`,
+`malformed_metadata`, `unsupported_schema`, `filename_run_mismatch`,
+`duplicate_run_identity`, and `inspection_correlation_missing`. An isolated
+row remains useful for deciding what to repair, but its run must not be copied
+into `--run`. Paths, prompts, responses, generated source, capability payloads,
+prints, diagnostics, result values, and full-scan counters never enter a row.
+
 Each page contains exactly `items`, `next_cursor`, `truncated`,
 `omitted_count`, `catalog_digest`, and `excluded_files`. A cursor is opaque and
 binds the complete filter query and generation digest, but not `limit`.
@@ -373,6 +408,34 @@ Changing a filter rejects the query; using a cursor with a changed generation
 reports `source_changed`. Growth cannot alter an already-open generation.
 Malformed individual entries remain path-free isolated rows, while capture
 failures refuse the whole profile without disclosing a path.
+
+Discovery and admission are two separate immutable sessions. Read one or more
+pages, choose only `admissible` run references, then start a new selected
+analysis session:
+
+```console
+# Session 1: page/filter metadata; keep the run_id values you select.
+ptc repl --profile private-run-catalog-v1 \
+  --resource traces=tmp/tutorial-traces \
+  --resource inspection=tmp/tutorial-inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/catalog {"state" "admissible" "limit" 20})'
+
+# Session 2: re-verify and admit only the explicit set (at most sixteen).
+ptc repl --profile private-run-analysis-v1 \
+  --run cmd-00000000000000000000000001 \
+  --run cmd-00000000000000000000000002 \
+  --resource traces=tmp/tutorial-traces \
+  --resource inspection=tmp/tutorial-inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/runs {})'
+```
+
+The catalog digest is cursor identity only; it is neither an admission token
+nor a command option. Stage 2 re-resolves exact candidates and proves their
+embedded identities, bytes, seal, and correlation. Open a later batch in a
+third session with another set of up to sixteen flags. A running analysis
+session cannot acquire a newly named run dynamically.
 
 `analysis.catalog` is not a general shipped-library component. It is compiled
 only into this closed profile because ordinary workflows and manifests cannot
@@ -406,6 +469,14 @@ or private trace candidate and inspection artifact, never lists either source
 directory, and pins no unselected artifact. An unselected malformed,
 unsupported, unstable, mismatched, or duplicate claimant therefore cannot
 affect the cohort.
+
+The sixteen-run ceiling bounds pinned handles. Existing source authorities
+remain finite: trace and inspection bytes and retained projections are
+aggregate across the set, the inspection record ceiling remains per artifact,
+logical index entries/bytes and actual retained index memory are aggregate,
+and admission, cleanup, session, capability-call, result, and heap limits still
+apply. A refusal is all-or-nothing and releases every partially admitted
+handle and index.
 
 The trace, inspection, and analysis-trace directories must be physically
 separate, including through ancestors and symlink aliases. Capture validates
@@ -608,7 +679,11 @@ When their lifecycle stages are reached, records appear in this order:
 Validation or setup can therefore emit only `command-error`; persistence
 failure follows earlier records without claiming `session-closed`. Records use
 schema version 1. Evaluation records contain the bounded mission result and no
-extra raw-source copy.
+extra raw-source copy. A profile selection or immutable source-capture refusal
+also carries its stable `code`; stderr uses the same identity as `repl/CODE`.
+The generated table in the [CLI reference](cli.md#profile-frontend-diagnostics)
+is the complete vocabulary. Shared argument-parser refusals remain
+`arguments/CODE` and occur before this JSONL lifecycle.
 
 A `command-error` rejecting a physical-separation conflict adds a
 `directory_conflict` object beside the existing `category` and `message`, so

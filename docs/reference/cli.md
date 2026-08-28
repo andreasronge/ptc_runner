@@ -537,6 +537,47 @@ Every classified diagnostic and the status it exits with:
 | 70 | `internal` | `internal_error` | no | the command failed internally |
 <!-- END GENERATED: exit-status catalog -->
 
+### Profile frontend diagnostics
+
+Profile commands exit `1` for frontend setup, source capture, selection, or
+evaluation refusals. Selection, immutable source-capture, and classified
+evaluation refusals carry a stable `code` from the table below in the terminal
+JSONL `command-error` record; stderr uses the same identity as `repl/CODE`.
+Other frontend setup and persistence failures retain `repl/command_failed`.
+Shared argument-parser refusals still use their existing `arguments/CODE`
+diagnostic and exit `2`. Catalog messages never include a resource path,
+selected run reference, or private payload. Any internal reason classified at
+this boundary but outside the closed vocabulary becomes `profile_setup_failed`.
+
+The table is generated from the catalog the REPL frontend dispatches on:
+
+<!-- BEGIN GENERATED: profile diagnostic catalog (mix ptc.gen_docs) -->
+
+| Code | Refusal | Public message |
+| --- | --- | --- |
+| `ambiguous_selected_trace` | Both sanitized and private trace candidates exist. | selected run has ambiguous trace candidates |
+| `catalog_limit_exceeded` | Catalog entry, file, retained-memory, heap, or listing bounds were exceeded. | private run catalog exceeded its capture limits |
+| `duplicate_inspection_run` | More than one selected artifact claims the same inspection run identity. | selected inspection set contains a duplicate run identity |
+| `duplicate_selected_run` | The same run reference was supplied more than once. | selected run set contains a duplicate reference |
+| `inspection_correlation_missing` | The selected trace and sealed evidence do not prove one correlation. | selected trace and inspection artifacts do not correlate |
+| `invalid_run_reference` | A --run value is not a canonical PTC command run reference. | selected run reference is invalid |
+| `malformed_source` | Selected metadata or sealed evidence failed structural validation. | analysis source is malformed |
+| `profile_evaluation_failed` | A profile form failed for a reason outside the source-capture vocabulary. | profile evaluation failed |
+| `profile_setup_failed` | An unclassified internal setup failure was closed at the frontend boundary. | private analysis profile setup failed |
+| `result_limit_exceeded` | A catalog page or selected-analysis result could not fit its result bound. | profile evaluation result exceeded its byte limit |
+| `selected_inspection_missing` | No sealed inspection artifact exists for a selected run. | selected inspection artifact is missing |
+| `selected_inspection_not_regular` | The exact selected inspection candidate is not a regular file. | selected inspection artifact is not a regular file |
+| `selected_run_mismatch` | Embedded run or trace identity disagrees with the selected candidate. | selected source identity does not match its run reference |
+| `selected_set_limit_exceeded` | More than sixteen run references were selected for one session. | selected run set exceeds the 16-run limit |
+| `selected_trace_missing` | No trace candidate exists for a selected run. | selected trace is missing |
+| `selected_trace_not_regular` | The exact selected trace candidate is not a regular file. | selected trace is not a regular file |
+| `source_changed` | A selected source or cursor identity changed while it was being verified. | analysis source changed during immutable capture |
+| `source_limit_exceeded` | Aggregate bytes, per-artifact records, index entries, or heap were exceeded. | selected analysis source exceeded its admission limits |
+| `source_retained_limit_exceeded` | The immutable trace projection or inspection index retained too much memory. | selected analysis source exceeded its retained-memory limit |
+| `source_unavailable` | A source root became unavailable or its bounded capture deadline elapsed. | analysis source is unavailable or capture timed out |
+| `unsupported_schema` | A selected trace or inspection artifact uses an unsupported version. | analysis source uses an unsupported schema version |
+<!-- END GENERATED: profile diagnostic catalog -->
+
 ### Diagnose a failed run
 
 The command reports a closed phase/code pair. If a workflow deliberately calls
@@ -669,6 +710,31 @@ NAME=DIR` overrides only that derived resource. Use
 `private-run-catalog-v1` with `(analysis/catalog QUERY)` for bounded safe
 metadata discovery before opening private evidence; the complete query contract
 is in the [Kernel REPL guide](repl.md#discover-a-private-run-catalog).
+
+The complete discovery-to-selection command flow is two invocations. Replace
+the example references in the second command with `run_id` values from
+admissible rows in the first command's JSONL evaluation record:
+
+```console
+ptc repl --profile private-run-catalog-v1 \
+  --resource traces=.ptc/traces \
+  --resource inspection=.ptc/inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/catalog {"state" "admissible" "limit" 20})'
+
+ptc repl --profile private-run-analysis-v1 \
+  --run cmd-00000000000000000000000001 \
+  --run cmd-00000000000000000000000002 \
+  --resource traces=.ptc/traces \
+  --resource inspection=.ptc/inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/runs {})'
+```
+
+Each selected session accepts one through sixteen distinct canonical command
+run references. It re-verifies the exact candidates and carries no catalog
+cursor, digest, or dynamic source-acquisition authority. Start another command
+with a later batch rather than trying to add runs to an open session.
 
 The [TraceLog and run-analysis reference](../maintainers/trace-log-contract.md) defines
 event schemas,
