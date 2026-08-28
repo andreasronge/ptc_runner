@@ -504,6 +504,64 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
     assert row!(rows, second.run_id)["isolation_reason"] == "filename_run_mismatch"
   end
 
+  @tag :tmp_dir
+  test "a replacement opened under the inventoried path is detected by descriptor identity", %{
+    tmp_dir: root
+  } do
+    fixture = fixture!(root, 43)
+    path = trace_path(root, fixture.run_id)
+    original = Path.join(root, "inventoried-trace.jsonl")
+    replacement = Path.join(root, "replacement-trace.jsonl")
+    File.cp!(path, replacement)
+    test = self()
+    synchronization = make_ref()
+
+    file_probe_hook = fn
+      :before_open, ^path ->
+        synchronize_file_probe(test, synchronization, :before_open, :continue_open)
+
+      :after_open, ^path ->
+        synchronize_file_probe(test, synchronization, :after_open, :continue_probe)
+
+      _phase, _other_path ->
+        :ok
+    end
+
+    capture =
+      Task.async(fn ->
+        RunCatalogSnapshot.start(
+          catalog_source(root),
+          owner: test,
+          file_probe_hook: file_probe_hook
+        )
+      end)
+
+    assert_receive {^synchronization, :before_open, capture_pid}, 5_000
+    File.rename!(path, original)
+    File.rename!(replacement, path)
+    send(capture_pid, {synchronization, :continue_open})
+
+    assert_receive {^synchronization, :after_open, ^capture_pid}, 5_000
+    File.rename!(path, replacement)
+    File.rename!(original, path)
+    send(capture_pid, {synchronization, :continue_probe})
+
+    assert {:ok, snapshot} = Task.await(capture)
+    on_exit(fn -> RunCatalogSnapshot.stop(snapshot) end)
+    assert {:ok, rows} = RunCatalogSnapshot.rows(snapshot)
+    row = row!(rows, fixture.run_id)
+    assert row["state"] == "isolated"
+    assert row["isolation_reason"] == "unstable_entry"
+  end
+
+  defp synchronize_file_probe(test, synchronization, phase, continuation) do
+    send(test, {synchronization, phase, self()})
+
+    receive do
+      {^synchronization, ^continuation} -> :ok
+    end
+  end
+
   defp await_stopped(snapshot) do
     if RunCatalogSnapshot.alive?(snapshot) do
       await_stopped(snapshot)

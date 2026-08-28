@@ -120,7 +120,8 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
   that carry no canonical stem, which the catalog reports as `excluded_files`
   rather than as rows. Fails whole-operation with `:source_unavailable` for an
   unusable root and `:catalog_limit_exceeded` for a listing or stem count
-  beyond its bound.
+  beyond its bound. `:listing_hook` and `:file_probe_hook` exist only for tests
+  that need deterministic synchronization around filesystem operations.
   """
   @spec probe_all(binary(), binary(), keyword()) ::
           {:ok, %{probes: [probe()], excluded_files: non_neg_integer()}} | {:error, atom()}
@@ -131,10 +132,12 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
     max_directory_entries = Keyword.get(opts, :max_directory_entries, @default_directory_entries)
     max_files = Keyword.get(opts, :max_files, @default_files)
     listing_hook = Keyword.get(opts, :listing_hook)
+    file_probe_hook = Keyword.get(opts, :file_probe_hook)
 
     with true <- max_directory_entries in 1..@default_directory_entries,
          true <- max_files in 1..@default_files,
          true <- is_nil(listing_hook) or is_function(listing_hook, 0),
+         true <- is_nil(file_probe_hook) or is_function(file_probe_hook, 2),
          {:ok, trace_names} <- listing(traces_directory, max_directory_entries, listing_hook),
          {:ok, inspection_names} <-
            listing(inspection_directory, max_directory_entries, listing_hook) do
@@ -143,7 +146,8 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
         inspection_directory,
         trace_names,
         inspection_names,
-        max_files
+        max_files,
+        file_probe_hook
       )
     else
       false -> {:error, :invalid_catalog}
@@ -153,7 +157,14 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
 
   def probe_all(_traces_directory, _inspection_directory, _opts), do: {:error, :invalid_catalog}
 
-  defp collect(traces_directory, inspection_directory, trace_names, inspection_names, max_files) do
+  defp collect(
+         traces_directory,
+         inspection_directory,
+         trace_names,
+         inspection_names,
+         max_files,
+         file_probe_hook
+       ) do
     {trace_entries, excluded_traces} = trace_entries(trace_names)
     {inspection_entries, excluded_inspection} = inspection_entries(inspection_names)
 
@@ -167,8 +178,14 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
         Enum.map(stems, fn stem ->
           %{
             run_ref: stem,
-            trace: probe_trace(traces_directory, Map.get(trace_entries, stem, [])),
-            inspection: probe_inspection(inspection_directory, Map.get(inspection_entries, stem))
+            trace:
+              probe_trace(traces_directory, Map.get(trace_entries, stem, []), file_probe_hook),
+            inspection:
+              probe_inspection(
+                inspection_directory,
+                Map.get(inspection_entries, stem),
+                file_probe_hook
+              )
           }
         end)
 
@@ -238,16 +255,23 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
     end
   end
 
-  defp probe_trace(_directory, []), do: %{present: :absent}
-  defp probe_trace(_directory, [_first, _second | _rest]), do: %{present: :ambiguous}
+  defp probe_trace(_directory, [], _file_probe_hook), do: %{present: :absent}
 
-  defp probe_trace(directory, [{source_kind, name}]),
-    do: probe_trace_file(Path.join(directory, name), source_kind)
+  defp probe_trace(_directory, [_first, _second | _rest], _file_probe_hook),
+    do: %{present: :ambiguous}
 
-  defp probe_trace_file(path, source_kind) do
+  defp probe_trace(directory, [{source_kind, name}], file_probe_hook),
+    do: probe_trace_file(Path.join(directory, name), source_kind, file_probe_hook)
+
+  defp probe_trace_file(path, source_kind, file_probe_hook) do
     case File.lstat(path, time: :posix) do
       {:ok, %File.Stat{type: :regular, size: size} = before} when size > 0 ->
-        probe_stable(path, before, &decode_trace(&1, &2, source_kind, before))
+        probe_stable(
+          path,
+          before,
+          &decode_trace(&1, &2, source_kind, before),
+          file_probe_hook
+        )
 
       {:ok, %File.Stat{}} ->
         %{present: :malformed}
@@ -261,8 +285,8 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
   # is unchanged across the reads. One recheck, then isolation: the catalog
   # commits to what it observed, so a row is never assembled from a head and a
   # tail that may belong to different contents.
-  defp probe_stable(path, before, decode) do
-    case read_edges(path, before.size, stat_identity(before)) do
+  defp probe_stable(path, before, decode, file_probe_hook) do
+    case read_edges(path, before.size, stat_identity(before), file_probe_hook) do
       {:ok, head, tail} ->
         case File.lstat(path, time: :posix) do
           {:ok, %File.Stat{type: :regular} = later} ->
@@ -289,9 +313,13 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
   # `InspectionArtifact.Handle.open/2`, the opened file is `fstat`ed and
   # compared before a single byte is read. The descriptor is deliberately not
   # `:raw`: a raw descriptor is process-local and cannot be `fstat`ed.
-  defp read_edges(path, size, expected) do
+  defp read_edges(path, size, expected, file_probe_hook) do
+    run_file_probe_hook(file_probe_hook, :before_open, path)
+
     case :file.open(path, [:read, :binary]) do
       {:ok, io} ->
+        run_file_probe_hook(file_probe_hook, :after_open, path)
+
         result =
           case opened_identity(io) do
             {:ok, identity} when identity == expected -> read_windows(io, size)
@@ -305,6 +333,9 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
         :error
     end
   end
+
+  defp run_file_probe_hook(nil, _phase, _path), do: :ok
+  defp run_file_probe_hook(hook, phase, path), do: hook.(phase, path)
 
   defp opened_identity(io) do
     case :file.read_file_info(io, time: :posix) do
@@ -514,14 +545,14 @@ defmodule PtcRunner.Kernel.RunCatalogProbe do
 
   defp safe_string(_value), do: nil
 
-  defp probe_inspection(_directory, nil), do: %{present: :absent}
+  defp probe_inspection(_directory, nil, _file_probe_hook), do: %{present: :absent}
 
-  defp probe_inspection(directory, name) do
+  defp probe_inspection(directory, name, file_probe_hook) do
     path = Path.join(directory, name)
 
     case File.lstat(path, time: :posix) do
       {:ok, %File.Stat{type: :regular, size: size} = before} when size >= @sealed_edge_bytes ->
-        probe_stable(path, before, &decode_inspection(&1, &2, before))
+        probe_stable(path, before, &decode_inspection(&1, &2, before), file_probe_hook)
 
       {:ok, %File.Stat{}} ->
         %{present: :malformed}

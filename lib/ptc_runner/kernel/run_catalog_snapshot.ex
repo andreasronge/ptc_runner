@@ -44,7 +44,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
   Options lower, never raise, the capture bounds: `:max_directory_entries`,
   `:max_files`, `:max_retained_bytes`, `:capture_heap_words`, and
   `:capture_deadline_ms`. `:owner` names the process the generation belongs
-  to, and `:listing_hook` exists for tests that need to observe listing.
+  to, and `:listing_hook` and `:file_probe_hook` exist for tests that need
+  deterministic synchronization around filesystem operations.
 
   Whole-operation refusals are path-free: `:source_unavailable` for a root
   that cannot be listed, and `:catalog_limit_exceeded` for a listing, stem
@@ -63,7 +64,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
       :max_retained_bytes,
       :capture_heap_words,
       :capture_deadline_ms,
-      :listing_hook
+      :listing_hook,
+      :file_probe_hook
     ]
 
     with true <- Keyword.keys(opts) -- allowed == [],
@@ -83,7 +85,9 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
              System.monotonic_time(:millisecond) + @capture_timeout_ms
            ),
          listing_hook when is_nil(listing_hook) or is_function(listing_hook, 0) <-
-           Keyword.get(opts, :listing_hook) do
+           Keyword.get(opts, :listing_hook),
+         file_probe_hook when is_nil(file_probe_hook) or is_function(file_probe_hook, 2) <-
+           Keyword.get(opts, :file_probe_hook) do
       token = make_ref()
 
       config = %{
@@ -96,7 +100,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
         max_retained_bytes: max_retained_bytes,
         capture_heap_words: capture_heap_words,
         capture_deadline_ms: capture_deadline_ms,
-        listing_hook: listing_hook
+        listing_hook: listing_hook,
+        file_probe_hook: file_probe_hook
       }
 
       case GenServer.start(__MODULE__, config) do
@@ -240,7 +245,8 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
            RunCatalogProbe.probe_all(config.traces, config.inspection,
              max_directory_entries: config.max_directory_entries,
              max_files: config.max_files,
-             listing_hook: config.listing_hook
+             listing_hook: config.listing_hook,
+             file_probe_hook: config.file_probe_hook
            ),
          {:ok, generation} <- RunCatalog.generation(probes, excluded_files) do
       retain(generation, config.max_retained_bytes)
