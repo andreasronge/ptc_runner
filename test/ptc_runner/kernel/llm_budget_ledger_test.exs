@@ -202,7 +202,7 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
     assert refused["cost"]["refused"] == 0
   end
 
-  test "an overrun cost ledger still authors a closed diagnostic for a zero reservation" do
+  test "an overrun cost ledger does not authenticate a zero reservation as a refused reservation" do
     {:ok, limits} = Limits.new(llm_cost_microusd: 250)
     {:ok, state} = RunState.start(limits)
 
@@ -224,26 +224,22 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
 
     zero_cost = Map.put(@live_route, :cost_microusd, 0)
 
-    assert {:error, :llm_cost_limit, details} =
+    assert {:error, :llm_cost_limit,
+            %{
+              limit: :llm_cost_microusd,
+              limit_value: 250,
+              requested: 0,
+              remaining: 0
+            } = details} =
              RunState.reserve_capability(state, :workflow, "llm-request", nil, zero_cost)
 
-    assert %{
-             limit: :llm_cost_microusd,
-             limit_value: 250,
-             remaining: 0
-           } = details
+    # A zero reservation against remaining 0 is overspend-lock, not a refused
+    # reservation. The owner still authors the exact bound and does not
+    # authenticate a diagnostic it cannot print.
+    refute RunState.budget_refusal?(state, details)
 
-    assert details.requested > details.remaining
-
-    assert {:ok, _message} =
-             RuntimeLimitDiagnostic.budget_message(
-               details.limit,
-               details.limit_value,
-               details.requested,
-               details.remaining
-             )
-
-    assert RunState.budget_refusal?(state, details)
+    assert RuntimeLimitDiagnostic.budget_message(details.limit, details.limit_value, 0, 0) ==
+             :error
   end
 
   test "an unrepresentable authenticated token total saturates and locks the ledger" do
