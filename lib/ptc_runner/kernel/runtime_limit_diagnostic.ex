@@ -381,6 +381,106 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   def protocol_errors_message?(_message), do: false
 
+  @budget_limits [:llm_total_tokens, :llm_cost_microusd]
+  @safe_integer_maximum 9_007_199_254_740_991
+  @safe_integer_maximum_digits 16
+  # 1..=9_007_199_254_740_991 without leading zeros. JSON Schema `pattern` is
+  # ECMA-262, so the closed diagnostic admits the full safe-integer budget
+  # range rather than the generic 10-digit ceiling used by count limits.
+  @safe_positive_integer_pattern "(?:[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[01][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]|900719925474099[01])"
+  @safe_integer_or_zero_pattern "(?:0|" <> @safe_positive_integer_pattern <> ")"
+  @budget_would_be_exceeded " would be exceeded: the next call requires a "
+  @budget_remaining_suffix " remaining; raise limits."
+  @budget_units %{
+    llm_total_tokens: " tokens",
+    llm_cost_microusd: " microUSD"
+  }
+  @budget_reservation_units %{
+    llm_total_tokens: " tokens reservation with ",
+    llm_cost_microusd: " microUSD reservation with "
+  }
+  @budget_maximum_message_bytes (for limit <- @budget_limits do
+                                   name = Atom.to_string(limit)
+                                   unit = Map.fetch!(@budget_units, limit)
+                                   reservation_unit = Map.fetch!(@budget_reservation_units, limit)
+
+                                   byte_size(name <> " limit ") +
+                                     @safe_integer_maximum_digits +
+                                     byte_size(unit <> @budget_would_be_exceeded) +
+                                     @safe_integer_maximum_digits +
+                                     byte_size(reservation_unit) +
+                                     @safe_integer_maximum_digits +
+                                     byte_size(
+                                       @budget_remaining_suffix <> name <> @manifest_remedy
+                                     )
+                                 end)
+                                |> Enum.max()
+
+  @doc false
+  @spec budget_message(term(), term(), term(), term()) :: {:ok, binary()} | :error
+  def budget_message(limit, limit_value, requested, remaining)
+      when limit in @budget_limits and is_integer(limit_value) and is_integer(requested) and
+             is_integer(remaining) do
+    with {:ok, row} <- LimitCatalog.fetch(limit),
+         true <- LimitCatalog.valid_value?(row, limit_value),
+         true <- requested in 0..@safe_integer_maximum,
+         true <- remaining in 0..limit_value,
+         true <- requested > remaining do
+      name = Atom.to_string(limit)
+
+      {:ok,
+       name <>
+         " limit " <>
+         Integer.to_string(limit_value) <>
+         Map.fetch!(@budget_units, limit) <>
+         @budget_would_be_exceeded <>
+         Integer.to_string(requested) <>
+         Map.fetch!(@budget_reservation_units, limit) <>
+         Integer.to_string(remaining) <>
+         @budget_remaining_suffix <>
+         name <>
+         @manifest_remedy}
+    else
+      _invalid -> :error
+    end
+  end
+
+  def budget_message(_limit, _limit_value, _requested, _remaining), do: :error
+
+  @doc false
+  @spec budget_message?(term()) :: boolean()
+  def budget_message?(message) when is_binary(message) do
+    Enum.any?(@budget_limits, fn limit ->
+      prefix = Atom.to_string(limit) <> " limit "
+      unit = Map.fetch!(@budget_units, limit)
+      reservation_unit = Map.fetch!(@budget_reservation_units, limit)
+      suffix = @budget_remaining_suffix <> Atom.to_string(limit) <> @manifest_remedy
+
+      with true <- String.starts_with?(message, prefix),
+           true <- String.ends_with?(message, suffix),
+           rest_bytes <- byte_size(message) - byte_size(prefix) - byte_size(suffix),
+           true <- rest_bytes > 0,
+           rest <- binary_part(message, byte_size(prefix), rest_bytes),
+           [limit_digits, after_limit] <-
+             String.split(rest, unit <> @budget_would_be_exceeded, parts: 2),
+           [requested_digits, remaining_digits] <-
+             String.split(after_limit, reservation_unit, parts: 2),
+           {limit_value, ""} <- Integer.parse(limit_digits),
+           {requested, ""} <- Integer.parse(requested_digits),
+           {remaining, ""} <- Integer.parse(remaining_digits),
+           true <- Integer.to_string(limit_value) == limit_digits,
+           true <- Integer.to_string(requested) == requested_digits,
+           true <- Integer.to_string(remaining) == remaining_digits,
+           {:ok, expected} <- budget_message(limit, limit_value, requested, remaining) do
+        message == expected
+      else
+        _invalid -> false
+      end
+    end)
+  end
+
+  def budget_message?(_message), do: false
+
   defp capability_quota_message_branches do
     for limit <- @quota_limits do
       name = Atom.to_string(limit)
@@ -410,6 +510,32 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       @subordinate_limit_pattern,
       @protocol_errors_suffix
     )
+  end
+
+  defp budget_message_branches do
+    for limit <- @budget_limits do
+      name = Atom.to_string(limit)
+      prefix = name <> " limit "
+      unit = Map.fetch!(@budget_units, limit)
+      reservation_unit = Map.fetch!(@budget_reservation_units, limit)
+      suffix = @budget_remaining_suffix <> name <> @manifest_remedy
+
+      %{
+        "type" => "string",
+        "minLength" => 1,
+        "maxLength" => @budget_maximum_message_bytes,
+        "pattern" =>
+          DiagnosticPattern.exact(
+            DiagnosticPattern.escape(prefix) <>
+              @safe_positive_integer_pattern <>
+              DiagnosticPattern.escape(unit <> @budget_would_be_exceeded) <>
+              @safe_integer_or_zero_pattern <>
+              DiagnosticPattern.escape(reservation_unit) <>
+              @safe_integer_or_zero_pattern <>
+              DiagnosticPattern.escape(suffix)
+          )
+      }
+    end
   end
 
   @doc false
@@ -457,6 +583,15 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
 
   def details_message(%{limit: :protocol_errors, limit_value: value}),
     do: named_limit(:protocol_errors, protocol_errors_message(value))
+
+  def details_message(%{
+        limit: limit,
+        limit_value: value,
+        requested: requested,
+        remaining: remaining
+      })
+      when limit in [:llm_total_tokens, :llm_cost_microusd],
+      do: named_limit(limit, budget_message(limit, value, requested, remaining))
 
   def details_message(_details), do: :error
 
@@ -548,7 +683,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   def runtime_limit_message?(message) when is_binary(message) do
     subordinate_evaluations_message?(message) or transcript_chars_message?(message) or
       timeout_message?(message) or heap_words_message?(message) or
-      protocol_errors_message?(message)
+      protocol_errors_message?(message) or budget_message?(message)
   end
 
   def runtime_limit_message?(_message), do: false
@@ -652,7 +787,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       [subordinate_message_branch()] ++
         [transcript_message_branch()] ++
         timeout_message_branches() ++
-        [heap_message_branch(), protocol_errors_message_branch()]
+        [heap_message_branch(), protocol_errors_message_branch() | budget_message_branches()]
     )
   end
 
@@ -668,7 +803,7 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
       message_schema(
         fallback,
         [subordinate_message_branch() | timeout_message_branches()] ++
-          [heap_message_branch(), protocol_errors_message_branch()]
+          [heap_message_branch(), protocol_errors_message_branch() | budget_message_branches()]
       )
 
   @doc false

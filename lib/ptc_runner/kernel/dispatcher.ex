@@ -273,18 +273,18 @@ defmodule PtcRunner.Kernel.Dispatcher do
             retryable?: false
           }
 
-        {:error, :llm_total_tokens_limit, ledger} ->
-          llm_budget_limit_error(
+        {:error, :llm_total_tokens_limit, details} ->
+          limit_error(
             state,
             event_sink,
-            invocation,
-            :total_tokens,
+            :llm_total_tokens,
             environment,
-            ledger
+            mission_name,
+            details
           )
 
-        {:error, :llm_cost_limit, ledger} ->
-          llm_budget_limit_error(state, event_sink, invocation, :cost, environment, ledger)
+        {:error, :llm_cost_limit, details} ->
+          limit_error(state, event_sink, :llm_cost_microusd, environment, mission_name, details)
 
         {:error, :stale_evaluation} ->
           stale_evaluation_error()
@@ -2207,45 +2207,6 @@ defmodule PtcRunner.Kernel.Dispatcher do
     envelope = %{status: :error, kind: :limit_exceeded, reason: reason, retryable?: false}
 
     if extra == %{}, do: envelope, else: Map.put(envelope, :details, extra)
-  end
-
-  defp llm_budget_limit_error(
-         state,
-         event_sink,
-         invocation,
-         :total_tokens,
-         environment,
-         ledger
-       ) do
-    limit_error(
-      state,
-      event_sink,
-      :llm_total_tokens,
-      environment,
-      invocation.event_attributes[:mission_name],
-      %{
-        limit: :llm_total_tokens,
-        limit_value: ledger["limit"],
-        requested: invocation.reservation.total_tokens,
-        remaining: ledger["remaining"]
-      }
-    )
-  end
-
-  defp llm_budget_limit_error(state, event_sink, invocation, :cost, environment, ledger) do
-    limit_error(
-      state,
-      event_sink,
-      :llm_cost_microusd,
-      environment,
-      invocation.event_attributes[:mission_name],
-      %{
-        limit: :llm_cost_microusd,
-        limit_value: ledger["limit_microusd"],
-        requested: invocation.reservation.cost_microusd,
-        remaining: ledger["remaining_microusd"]
-      }
-    )
   end
 
   defp maybe_emit_limit(

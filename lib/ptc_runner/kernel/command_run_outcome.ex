@@ -497,6 +497,32 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
     end
   end
 
+  defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           reason: reason,
+           details: %{
+             limit: limit,
+             limit_value: limit_value,
+             requested: requested,
+             remaining: remaining
+           }
+         },
+         provider_activity
+       )
+       when reason in [:llm_total_tokens, :llm_cost_microusd] and reason == limit do
+    case RuntimeLimitDiagnostic.budget_message(limit, limit_value, requested, remaining) do
+      {:ok, message} ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity,
+          message: message,
+          source: CommandSource.fixed(:runtime)
+        )
+
+      :error ->
+        diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
+    end
+  end
+
   defp failure_diagnostic(%Error{kind: :limit_exceeded}, provider_activity),
     do: diagnostic(:execution, :runtime_limit_exceeded, provider_activity)
 

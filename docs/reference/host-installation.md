@@ -310,7 +310,11 @@ before provider dispatch. Provider errors and
 successful calls without valid promised usage conservatively charge the full
 reservation and mark the affected ledger incomplete; authenticated usage above
 the bound charges the actual value, marks overrun, and prevents later calls.
-Replay installations are excluded from these operational ledgers.
+Replay installations are excluded from these operational ledgers. A reservation
+that does not fit remains a recoverable `limit_exceeded` envelope until the
+workflow aborts it; aborting the authenticated envelope reports
+`execution/runtime_limit_exceeded` naming the refused reservation, distinct
+from realized overspend.
 
 Model selectors are provider-qualified strings. These are the provider paths
 PtcRunner configures and exercises directly:

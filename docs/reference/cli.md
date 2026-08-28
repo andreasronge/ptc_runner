@@ -357,9 +357,15 @@ A recoverable capability error does not change the exit status. Exhausting
 `workflow_capability_calls_per_name` returns
 `{"status":"error","kind":"limit_exceeded","reason":"capability_quota","details":{"limit":"workflow_capability_calls_per_name","name":"llm-request","limit_value":2}}` as a
 value into PTC-Lisp; a workflow that reads past it can still `return` and the
-command exits `0`. `execution.usage.capability_refusals` counts those errors
+command exits `0`. Refusing an aggregate `llm_total_tokens` or
+`llm_cost_microusd` reservation is the same class of recoverable value, with
+`reason` naming the budget. Aborting that exact envelope reports
+`execution/runtime_limit_exceeded` (exit 6) and names the refused reservation;
+it is not `workflow_failed`. `execution.usage.capability_refusals` counts those errors
 from environment capability callbacks and the implicit runtime routes the
-Kernel grants with them (`workflow/limit_exceeded/capability_quota`).
+Kernel grants with them (`workflow/limit_exceeded/capability_quota`,
+`workflow/limit_exceeded/llm_total_tokens`,
+`workflow/limit_exceeded/llm_cost_microusd`).
 Runner-added routes such as `kernel-eval` are not counted. At most 2 distinct
 classes are named; further classes increment `$overflow`. Assert
 `capability_refusals` is `{}` when a CI job requires that every counted

@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
 
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.TestSupport.LLMBudgetSupport
 
   @live_route %{
@@ -180,12 +181,65 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
     assert budget["cost"]["charged_microusd"] == 300
     assert budget["cost"]["remaining_microusd"] == 0
 
-    assert {:error, :llm_total_tokens_limit, %{"state" => "overrun", "remaining" => 0}} =
+    assert {:error, :llm_total_tokens_limit,
+            %{
+              limit: :llm_total_tokens,
+              limit_value: 50,
+              requested: 40,
+              remaining: 0
+            }} =
              RunState.reserve_capability(state, :workflow, "llm-request", nil, @live_route)
+
+    assert RunState.budget_refusal?(state, %{
+             limit: :llm_total_tokens,
+             limit_value: 50,
+             requested: 40,
+             remaining: 0
+           })
 
     refused = RunState.usage(state).llm_budget
     assert refused["total_tokens"]["refused"] == 1
     assert refused["cost"]["refused"] == 0
+  end
+
+  test "an overrun cost ledger does not authenticate a zero reservation as a refused reservation" do
+    {:ok, limits} = Limits.new(llm_cost_microusd: 250)
+    {:ok, state} = RunState.start(limits)
+
+    assert {:ok, reservation_id} =
+             RunState.reserve_capability(state, :workflow, "llm-request", nil, @live_route)
+
+    provider = idle_provider()
+    assert :ok = RunState.attach_provider(state, reservation_id, provider)
+    assert :ok = RunState.mark_provider_dispatched(state, reservation_id, provider)
+
+    usage = %{
+      "input" => 1,
+      "output" => 1,
+      "total_cost" => %{"currency" => "USD", "microunits" => 300}
+    }
+
+    assert {:ok, {:overrun, [:cost]}} =
+             RunState.finish_provider(state, reservation_id, {:adapter_success, {:valid, usage}})
+
+    zero_cost = Map.put(@live_route, :cost_microusd, 0)
+
+    assert {:error, :llm_cost_limit,
+            %{
+              limit: :llm_cost_microusd,
+              limit_value: 250,
+              requested: 0,
+              remaining: 0
+            } = details} =
+             RunState.reserve_capability(state, :workflow, "llm-request", nil, zero_cost)
+
+    # A zero reservation against remaining 0 is overspend-lock, not a refused
+    # reservation. The owner still authors the exact bound and does not
+    # authenticate a diagnostic it cannot print.
+    refute RunState.budget_refusal?(state, details)
+
+    assert RuntimeLimitDiagnostic.budget_message(details.limit, details.limit_value, 0, 0) ==
+             :error
   end
 
   test "an unrepresentable authenticated token total saturates and locks the ledger" do
@@ -212,7 +266,12 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
              "remaining" => 0
            } = RunState.usage(state).llm_budget["total_tokens"]
 
-    assert {:error, :llm_total_tokens_limit, %{"state" => "overrun", "remaining" => 0}} =
+    assert {:error, :llm_total_tokens_limit,
+            %{
+              limit: :llm_total_tokens,
+              remaining: 0,
+              requested: 40
+            }} =
              RunState.reserve_capability(state, :workflow, "llm-request", nil, route)
   end
 
@@ -339,7 +398,12 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
              Enum.count(admissions, fn {_caller, result} ->
                match?(
                  {:error, :llm_total_tokens_limit,
-                  %{"reserved" => 40, "remaining" => 20, "refused" => 1}},
+                  %{
+                    limit: :llm_total_tokens,
+                    limit_value: 60,
+                    requested: 40,
+                    remaining: 20
+                  }},
                  result
                )
              end)

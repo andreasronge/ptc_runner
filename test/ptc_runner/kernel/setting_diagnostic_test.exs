@@ -127,7 +127,11 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
       {%{limit: :max_calls, alias: "deepseek", limit_value: 4}, "max_calls"},
       {%{limit: :workflow_capability_calls_per_name, name: "llm-request", limit_value: 2},
        "workflow_capability_calls_per_name"},
-      {%{limit: :protocol_errors, limit_value: 64}, "protocol_errors"}
+      {%{limit: :protocol_errors, limit_value: 64}, "protocol_errors"},
+      {%{limit: :llm_total_tokens, limit_value: 1, requested: 4_096, remaining: 1},
+       "llm_total_tokens"},
+      {%{limit: :llm_cost_microusd, limit_value: 2_400, requested: 2_419, remaining: 2_338},
+       "llm_cost_microusd"}
     ]
 
     for {detail, expected_limit} <- details do
@@ -426,6 +430,26 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         value: "64",
         remedy: "raise limits.protocol_errors in the manifest",
         build: fn -> RuntimeLimitDiagnostic.protocol_errors_message(64) end
+      },
+      %{
+        phase: :execution,
+        code: :runtime_limit_exceeded,
+        source: :runtime,
+        setting: "llm_total_tokens",
+        value: "1",
+        remedy: "raise limits.llm_total_tokens in the manifest",
+        build: fn -> RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1) end
+      },
+      %{
+        phase: :execution,
+        code: :runtime_limit_exceeded,
+        source: :runtime,
+        setting: "llm_cost_microusd",
+        value: "2400",
+        remedy: "raise limits.llm_cost_microusd in the manifest",
+        build: fn ->
+          RuntimeLimitDiagnostic.budget_message(:llm_cost_microusd, 2_400, 2_419, 2_338)
+        end
       },
       %{
         phase: :result_cleanup,

@@ -233,6 +233,40 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
                kind: :limit_exceeded,
                reason: :capability_quota
              }) == "workflow/limit_exceeded/capability_quota"
+
+      assert SafeMetadata.capability_refusal_key(:workflow, %{
+               status: :error,
+               kind: :limit_exceeded,
+               reason: :llm_total_tokens
+             }) == "workflow/limit_exceeded/llm_total_tokens"
+
+      assert SafeMetadata.capability_refusal_key(:mission, %{
+               status: :error,
+               kind: :limit_exceeded,
+               reason: :llm_cost_microusd
+             }) == "mission/limit_exceeded/llm_cost_microusd"
+    end
+
+    test "budget_refusal requires a diagnostic-valid reservation tuple" do
+      envelope = %{
+        status: :error,
+        kind: :limit_exceeded,
+        reason: :llm_cost_microusd,
+        details: %{limit: :llm_cost_microusd, limit_value: 250, requested: 1, remaining: 0}
+      }
+
+      assert {:ok, %{limit: :llm_cost_microusd, requested: 1, remaining: 0}} =
+               SafeMetadata.budget_refusal(envelope)
+
+      refute match?(
+               {:ok, _details},
+               SafeMetadata.budget_refusal(put_in(envelope, [:details, :requested], 0))
+             )
+
+      refute match?(
+               {:ok, _details},
+               SafeMetadata.budget_refusal(put_in(envelope, [:details, :remaining], 251))
+             )
     end
 
     test "uses fingerprints and unknown for the remaining class fields" do

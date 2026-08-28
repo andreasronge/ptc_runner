@@ -474,6 +474,53 @@ defmodule PtcRunner.LiveStatusTest do
     assert frame.outcome_reason == expected
   end
 
+  test "a refused aggregate token budget reaches the card as a named limit" do
+    parent = self()
+    {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)
+
+    continue = %{
+      content: nil,
+      tool_calls: [
+        %{id: "call-1", name: "run_ptc_lisp", args: %{"program" => "(def pending 1)"}}
+      ]
+    }
+
+    {:ok, llm} = LLMCapability.new(requester: fn _request -> {:ok, continue} end)
+
+    assert {:ok, router} =
+             LLMRouter.new([
+               %{
+                 alias: "primary",
+                 source: "llm",
+                 installation_revision: "primary-v1",
+                 default?: true,
+                 capability: llm,
+                 max_calls: nil,
+                 output_tokens: 4_096,
+                 reservation_bound: fn _request, _tariff ->
+                   {:ok, %{total_tokens: 4_096, cost: nil}}
+                 end
+               }
+             ])
+
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: agent_bundle(), capabilities: [router])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(llm_total_tokens: 1, evaluation_timeout_ms: 5_000)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "live-token-budget")
+    {:ok, config} = run_config(limits, sink, %{}, workflow, mission)
+
+    assert {:error, %{kind: :limit_exceeded, reason: :llm_total_tokens}} =
+             PtcRunner.LiveStatus.with_target(target, fn ->
+               Kernel.run(~S|(agent.core/run "Work" {"max_turns" 2})|, config)
+             end)
+
+    assert_receive {:live_frame, %{phase: "error", outcome_limit: "llm_total_tokens"} = frame},
+                   5_000
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
+    assert frame.outcome_reason == expected
+  end
+
   test "an evaluator failure reaches the card with typed last_evaluation_error" do
     parent = self()
     {:ok, target} = Target.new(fn _run_id, frame -> send(parent, {:live_frame, frame}) end)

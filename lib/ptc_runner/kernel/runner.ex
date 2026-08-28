@@ -351,7 +351,7 @@ defmodule PtcRunner.Kernel.Runner do
               |> Map.merge(authenticated_replay_metadata(step.fail.details, state)),
             usage: RunState.usage(state)
           }
-          |> maybe_promote_max_calls_error(step.fail.details, state),
+          |> maybe_promote_authenticated_limit_error(step.fail.details, state),
           workflow_inspection_details(step.fail, config.event_sink)
         )
     end
@@ -848,7 +848,22 @@ defmodule PtcRunner.Kernel.Runner do
         end
 
       :error ->
-        explicit_failure_taxonomy(value, state)
+        case SafeMetadata.budget_refusal(value) do
+          {:ok, details} ->
+            if RunState.budget_refusal?(state, details) do
+              %Error{
+                kind: :limit_exceeded,
+                reason: details.limit,
+                details: details,
+                usage: RunState.usage(state)
+              }
+            else
+              explicit_failure_taxonomy(value, state)
+            end
+
+          :error ->
+            explicit_failure_taxonomy(value, state)
+        end
     end
   end
 
@@ -868,7 +883,7 @@ defmodule PtcRunner.Kernel.Runner do
     }
   end
 
-  defp maybe_promote_max_calls_error(
+  defp maybe_promote_authenticated_limit_error(
          %Error{reason: reason, usage: usage} = error,
          details,
          state
@@ -884,6 +899,27 @@ defmodule PtcRunner.Kernel.Runner do
             usage: usage
           }
         else
+          maybe_promote_budget_error(error, details, state)
+        end
+
+      %{} ->
+        maybe_promote_budget_error(error, details, state)
+    end
+  end
+
+  defp maybe_promote_authenticated_limit_error(error, _details, _state), do: error
+
+  defp maybe_promote_budget_error(%Error{usage: usage} = error, details, state) do
+    case SafeMetadata.retain_budget_refusal_fields(details) do
+      %{limit: limit} = budget ->
+        if RunState.budget_refusal?(state, budget) do
+          %Error{
+            kind: :limit_exceeded,
+            reason: limit,
+            details: budget,
+            usage: usage
+          }
+        else
           error
         end
 
@@ -891,8 +927,6 @@ defmodule PtcRunner.Kernel.Runner do
         error
     end
   end
-
-  defp maybe_promote_max_calls_error(error, _details, _state), do: error
 
   defp apply_provider_cleanup_failure(
          result,
@@ -966,7 +1000,7 @@ defmodule PtcRunner.Kernel.Runner do
          _sink,
          {:error, %Error{kind: :limit_exceeded, details: %{limit: limit}}}
        )
-       when limit in [:max_calls, :protocol_errors],
+       when limit in [:max_calls, :protocol_errors, :llm_total_tokens, :llm_cost_microusd],
        do: :ok
 
   defp maybe_emit_workflow_limit(

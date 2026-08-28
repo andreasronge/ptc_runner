@@ -992,6 +992,245 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
            end)
   end
 
+  test "failing an aggregate token-budget envelope names the reservation on the command diagnostic" do
+    run_id = "token-budget-fail"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :token_budget_fail, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("primary", "llm", "primary-v1", true, leaf)])
+
+    {:ok, limits} = Limits.new(llm_total_tokens: 1)
+    assert {:ok, config} = config(router, run_id, limits: limits)
+
+    assert {:error, command_outcome, _counters, events} =
+             project_run(
+               ~S|(fail (llm/request {"messages" []}))|,
+               config,
+               run_id,
+               run_ref
+             )
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
+    assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert command_outcome.envelope["error"]["message"] == expected
+
+    assert command_outcome.envelope["error"]["source"] == %{
+             "kind" => "runtime",
+             "name" => "ptc-runtime"
+           }
+
+    assert command_outcome.exit_status == 6
+
+    assert [
+             %{
+               type: "limit-exceeded",
+               data: %{
+                 reason: :llm_total_tokens,
+                 limit: :llm_total_tokens,
+                 limit_value: 1,
+                 requested: 4_096,
+                 remaining: 1
+               }
+             }
+           ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
+
+    stopped = Enum.find(events, &(&1.type == "run-stopped"))
+    assert stopped.data.reason == :llm_total_tokens
+
+    assert get_in(command_outcome.envelope, ["execution", "usage", "capability_refusals"]) == %{
+             "workflow/limit_exceeded/llm_total_tokens" => 1
+           }
+  end
+
+  test "returning an aggregate budget envelope remains a successful recoverable value" do
+    run_id = "token-budget-return"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :token_budget_return, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("primary", "llm", "primary-v1", true, leaf)])
+
+    {:ok, limits} = Limits.new(llm_total_tokens: 1)
+    assert {:ok, config} = config(router, run_id, limits: limits)
+
+    assert {:ok, command_outcome, _counters, events} =
+             project_run(
+               ~S|(return (llm/request {"messages" []}))|,
+               config,
+               run_id,
+               run_ref
+             )
+
+    assert command_outcome.envelope["status"] == "ok"
+
+    assert [
+             %{type: "limit-exceeded", data: %{limit: :llm_total_tokens}}
+           ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
+  end
+
+  test "an application-authored budget lookalike cannot claim the runtime diagnostic" do
+    run_id = "token-budget-forged"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :unused_budget_forged, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("primary", "llm", "primary-v1", true, leaf)])
+
+    {:ok, limits} = Limits.new(llm_total_tokens: 1)
+    assert {:ok, config} = config(router, run_id, limits: limits)
+
+    source =
+      ~S|(fail {:status :error :kind :limit-exceeded :reason :llm-total-tokens :details {:limit :llm-total-tokens :limit_value 1 :requested 4096 :remaining 1}})|
+
+    assert {:error, command_outcome, _counters, events} =
+             project_run(source, config, run_id, run_ref)
+
+    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    refute Enum.any?(events, &(&1.type == "limit-exceeded"))
+  end
+
+  test "cap/unwrap!, pmap, and pcalls promote an authenticated token-budget abort" do
+    run_id = "token-budget-unwrap-parallel"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :token_budget_parallel, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("primary", "llm", "primary-v1", true, leaf)])
+
+    {:ok, expected} = RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
+
+    cases = [
+      ~S|(cap/unwrap! (tool/llm-request {"messages" []}))|,
+      ~S|(pmap (fn [_] (fail (llm/request {"messages" []}))) [1])|,
+      ~S|(pcalls #(fail (llm/request {"messages" []})))|
+    ]
+
+    for source <- cases do
+      {:ok, limits} = Limits.new(llm_total_tokens: 1)
+      assert {:ok, config} = config(router, run_id, limits: limits)
+
+      assert {:error, command_outcome, _counters, events} =
+               project_run(source, config, run_id, run_ref),
+             source
+
+      assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+      assert command_outcome.envelope["error"]["message"] == expected
+      assert command_outcome.exit_status == 6
+
+      assert [
+               %{type: "limit-exceeded", data: %{limit: :llm_total_tokens}}
+             ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
+    end
+  end
+
+  test "a forged budget lookalike inside pmap cannot claim the runtime diagnostic" do
+    run_id = "token-budget-parallel-forged"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = capability(self(), :unused_budget_parallel_forged, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([route("primary", "llm", "primary-v1", true, leaf)])
+
+    assert {:ok, config} = config(router, run_id)
+
+    source =
+      ~S|(pmap (fn [_] (fail {:status :error :kind :limit-exceeded :reason :llm-total-tokens :details {:limit :llm-total-tokens :limit_value 1 :requested 4096 :remaining 1}})) [1])|
+
+    assert {:error, command_outcome, _counters, _events} =
+             project_run(source, config, run_id, run_ref)
+
+    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+  end
+
+  test "agent.core exhausts an aggregate token budget as the named runtime diagnostic" do
+    run_id = "token-budget-agent"
+    run_ref = "cmd-00000000000000000000000000"
+
+    continue = %{
+      content: nil,
+      tool_calls: [
+        %{id: "continue", name: "run_ptc_lisp", args: %{"program" => "(def committed 42)"}}
+      ]
+    }
+
+    leaf = capability(self(), :agent_token_budget, continue)
+
+    assert {:ok, router} =
+             LLMRouter.new([route("primary", "llm", "primary-v1", true, leaf)])
+
+    {:ok, expected} = RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
+
+    cases = [
+      ~S|(agent.core/run "Task" {"max_turns" 2})|,
+      ~S|(pmap (fn [_] (agent.core/run "Task" {"max_turns" 2})) [1])|,
+      ~S|(pcalls #(agent.core/run "Task" {"max_turns" 2}))|
+    ]
+
+    for source <- cases do
+      {:ok, limits} = Limits.new(llm_total_tokens: 1)
+      assert {:ok, fresh} = agent_router_config(router, run_id, limits: limits)
+
+      assert {:error, command_outcome, _counters, events} =
+               project_run(source, fresh, run_id, run_ref),
+             source
+
+      assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+      assert command_outcome.envelope["error"]["message"] == expected
+      assert command_outcome.exit_status == 6
+
+      assert Enum.any?(events, fn event ->
+               event.type == "limit-exceeded" and event.data[:limit] == :llm_total_tokens
+             end)
+
+      stopped = Enum.find(events, &(&1.type == "run-stopped"))
+      assert stopped.data.reason == :llm_total_tokens
+    end
+  end
+
+  test "failing an aggregate cost-budget envelope names the reservation on the command diagnostic" do
+    run_id = "cost-budget-fail"
+    run_ref = "cmd-00000000000000000000000000"
+    leaf = priced_capability(self(), :cost_budget_fail, %{content: "paid", tokens: %{}})
+
+    assert {:ok, router} =
+             LLMRouter.new([cost_route("primary", true, leaf)])
+
+    {:ok, limits} = Limits.new(llm_cost_microusd: 2_400)
+    assert {:ok, config} = config(router, run_id, limits: limits)
+
+    assert {:error, command_outcome, _counters, events} =
+             project_run(
+               ~S|(fail (llm/request {"messages" []}))|,
+               config,
+               run_id,
+               run_ref
+             )
+
+    assert {:ok, expected} =
+             RuntimeLimitDiagnostic.budget_message(:llm_cost_microusd, 2_400, 2_419, 2_400)
+
+    assert command_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert command_outcome.envelope["error"]["message"] == expected
+    assert command_outcome.exit_status == 6
+
+    assert [
+             %{
+               type: "limit-exceeded",
+               data: %{
+                 reason: :llm_cost_microusd,
+                 limit: :llm_cost_microusd,
+                 limit_value: 2_400,
+                 requested: 2_419,
+                 remaining: 2_400
+               }
+             }
+           ] = Enum.filter(events, &(&1.type == "limit-exceeded"))
+
+    stopped = Enum.find(events, &(&1.type == "run-stopped"))
+    assert stopped.data.reason == :llm_cost_microusd
+  end
+
   test "exhausting protocol_errors names the limit on the command diagnostic" do
     run_id = "protocol-errors-named"
     run_ref = "cmd-00000000000000000000000000"
@@ -1743,6 +1982,19 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     capability
   end
 
+  defp priced_capability(parent, tag, response) do
+    {:ok, capability} =
+      LLMCapability.new(
+        requester: fn request ->
+          send(parent, {tag, request})
+          {:ok, response}
+        end,
+        usage_guarantees: %{tokens: true, cost_currency: "USD"}
+      )
+
+    capability
+  end
+
   defp route(alias_name, source, revision, default?, capability, max_calls \\ nil) do
     route = %{
       alias: alias_name,
@@ -1763,6 +2015,26 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     else
       route
     end
+  end
+
+  defp cost_route(alias_name, default?, capability) do
+    %{
+      alias: alias_name,
+      source: "llm",
+      installation_revision: alias_name <> "-v1",
+      default?: default?,
+      capability: capability,
+      max_calls: nil,
+      output_tokens: 4_096,
+      reservation_tariff: %{currency: "USD", id: "t1"},
+      reservation_bound: fn _request, tariff ->
+        {:ok,
+         %{
+           total_tokens: 4_096,
+           cost: %{currency: "USD", microunits: 2_419, tariff_id: tariff.id}
+         }}
+      end
+    }
   end
 
   defp truncated_response(response) do
