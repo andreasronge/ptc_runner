@@ -582,8 +582,10 @@ defmodule PtcRunner.LiveStatusTest do
   # `agent.core`, so the smallest way to reach the turn-limit shape is to ship it.
   defp agent_bundle do
     {:ok, components} =
-      Library.components(~w(agent.core agent.feedback agent.native agent.prompt agent.retry
-           kernel llm result workflow.event))
+      Library.components(
+        ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry
+           kernel llm result workflow.event)
+      )
 
     {:ok, bundle} = Kernel.compile_bundle(components)
     bundle

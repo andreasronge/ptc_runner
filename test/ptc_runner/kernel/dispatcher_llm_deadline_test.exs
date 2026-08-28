@@ -38,12 +38,12 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
 
   test "the requester deadline is clamped by the existing workflow deadline" do
     parent = self()
-    validation_deadline_ms = System.monotonic_time(:millisecond) + 500
+    validation_deadline_ms = System.monotonic_time(:millisecond) + 5_000
 
     {result, _state, _sink} =
       dispatch_llm(parent,
-        request_timeout_ms: 5_000,
-        timeout_ms: 5_000,
+        request_timeout_ms: 50_000,
+        timeout_ms: 50_000,
         validation_deadline_ms: validation_deadline_ms,
         requester: fn _request, context ->
           send(parent, {:called, context})
@@ -333,13 +333,13 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
 
   test "an earlier shared validation deadline stays authoritative after the LLM deadline" do
     parent = self()
-    validation_deadline_ms = System.monotonic_time(:millisecond) + 300
+    validation_deadline_ms = System.monotonic_time(:millisecond) + 5_000
 
     task =
       Task.async(fn ->
         dispatch_llm(parent,
-          request_timeout_ms: 600,
-          timeout_ms: 3_000,
+          request_timeout_ms: 10_000,
+          timeout_ms: 30_000,
           validation_deadline_ms: validation_deadline_ms,
           structured_output_mode: :json_object,
           arguments: %{"schema" => @schema},

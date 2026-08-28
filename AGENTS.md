@@ -144,16 +144,19 @@ load-sensitive failures.
 - `ptc_runner_launcher/` — optional macOS/Linux MCP stdio launcher companion.
 - `docs/` — specifications, guides, and implementation records.
   `priv/preludes/kernel/` — shipped Lisp libraries; recompile after editing.
+  Generated `priv/preludes/kernel/agent.failure.clj` is projected from
+  `PtcRunner.Kernel.LLMFailureCatalog` by `mix ptc.gen_docs`; do not edit it
+  by hand.
 - `docs/function-reference.md`, `docs/java-interop.md`,
   `docs/kernel-limits-reference.md`, `docs/prelude-reference.md`,
-  `docs/conformance/`, and the site documentation pages under `site/guides/`,
-  `site/installation/`, and `site/reference/` (plus the sidebar between the
-  generated markers in `site/index.html`) are generated, as is the
-  exit-status catalog between the `BEGIN GENERATED`/`END GENERATED` markers
-  in `docs/reference/cli.md`. Edit their owning catalogs, shipped prelude
-  sources, guides, or generator and run `mix ptc.gen_docs`. The sections
-  shown on ptc-runner.dev and HexDocs both come from the documentation
-  groups in `mix.exs`.
+  `docs/conformance/`, `priv/preludes/kernel/agent.failure.clj`, and the site
+  documentation pages under `site/guides/`, `site/installation/`, and
+  `site/reference/` (plus the sidebar between the generated markers in
+  `site/index.html`) are generated, as is the exit-status catalog between the
+  `BEGIN GENERATED`/`END GENERATED` markers in `docs/reference/cli.md`. Edit
+  their owning catalogs, hand-authored shipped prelude sources, guides, or
+  generator and run `mix ptc.gen_docs`. The sections shown on ptc-runner.dev
+  and HexDocs both come from the documentation groups in `mix.exs`.
 - `ptc_viewer/` — separate nested Mix project and canonical trace viewer. Root
   `mix precommit` does not run Viewer tests; the pre-push hook does. Format
   Viewer edits from that directory.

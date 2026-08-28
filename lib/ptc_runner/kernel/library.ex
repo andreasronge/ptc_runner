@@ -3,8 +3,9 @@ defmodule PtcRunner.Kernel.Library do
   Shipped PTC-Lisp libraries as explicit Kernel components.
 
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
-  `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
-  `agent.prompt`, `agent.main`, `result`, `analysis`, and `debug.nav`.
+  `llm`, `agent.native`, `agent.core`, `agent.failure`, `agent.feedback`,
+  `agent.machine`, `agent.retry`, `agent.prompt`, `agent.main`, `result`,
+  `analysis`, and `debug.nav`.
 
   `agent.main` is a generic entry wrapper: a manifest names `agent.main/run`
   and supplies `task` and `agent` through input, instead of every application
@@ -43,6 +44,16 @@ defmodule PtcRunner.Kernel.Library do
   at its explicit page bound, and rejects changed snapshots or cursor cycles
   observed within one invocation without retaining source-sized resume history.
 
+  `agent.failure` is also `:discoverable`. It is generated from
+  `PtcRunner.Kernel.LLMFailureCatalog` and exports one pure `classify`
+  function over the existing bounded LLM envelope. Classification does not add
+  a field, tool call, or fail-fast evidence; `kernel-llm-provider-failure`
+  remains the consume boundary.
+
+  `agent.machine` is `:discoverable` as well: a pure constructor/advance reducer
+  for the shipped agent loop. Visibility is not an authority boundary; the
+  exports remain callable. It is not an application customization API.
+
   Fetching one component with `component/1` does not expand its dependencies,
   and `PtcRunner.Kernel` refuses to compile an incomplete set. Manifests and
   `resolve_components/1` expand installed-library selections transitively;
@@ -64,6 +75,8 @@ defmodule PtcRunner.Kernel.Library do
   @agent_native_path Path.expand("../../../priv/preludes/kernel/agent.native.clj", __DIR__)
   @agent_prompt_path Path.expand("../../../priv/preludes/kernel/agent.prompt.clj", __DIR__)
   @agent_core_path Path.expand("../../../priv/preludes/kernel/agent.core.clj", __DIR__)
+  @agent_failure_path Path.expand("../../../priv/preludes/kernel/agent.failure.clj", __DIR__)
+  @agent_machine_path Path.expand("../../../priv/preludes/kernel/agent.machine.clj", __DIR__)
   @agent_main_path Path.expand("../../../priv/preludes/kernel/agent.main.clj", __DIR__)
   @agent_feedback_path Path.expand("../../../priv/preludes/kernel/agent.feedback.clj", __DIR__)
   @agent_retry_path Path.expand("../../../priv/preludes/kernel/agent.retry.clj", __DIR__)
@@ -78,6 +91,8 @@ defmodule PtcRunner.Kernel.Library do
   @external_resource @agent_native_path
   @external_resource @agent_prompt_path
   @external_resource @agent_core_path
+  @external_resource @agent_failure_path
+  @external_resource @agent_machine_path
   @external_resource @agent_main_path
   @external_resource @agent_feedback_path
   @external_resource @agent_retry_path
@@ -93,6 +108,8 @@ defmodule PtcRunner.Kernel.Library do
     "agent.native" => File.read!(@agent_native_path),
     "agent.prompt" => File.read!(@agent_prompt_path),
     "agent.core" => File.read!(@agent_core_path),
+    "agent.failure" => File.read!(@agent_failure_path),
+    "agent.machine" => File.read!(@agent_machine_path),
     "agent.main" => File.read!(@agent_main_path),
     "agent.feedback" => File.read!(@agent_feedback_path),
     "agent.retry" => File.read!(@agent_retry_path),
@@ -104,11 +121,17 @@ defmodule PtcRunner.Kernel.Library do
     "analysis" => ["cap"],
     "debug.nav" => ["cap"],
     "agent.prompt" => ["kernel"],
-    "agent.core" => [
+    "agent.machine" => [
+      "agent.failure",
       "agent.feedback",
-      "agent.native",
       "agent.prompt",
       "agent.retry",
+      "result"
+    ],
+    "agent.core" => [
+      "agent.machine",
+      "agent.native",
+      "agent.prompt",
       "kernel",
       "llm",
       "result",

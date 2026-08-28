@@ -12,6 +12,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   require private inspection.
   """
 
+  alias PtcRunner.Kernel.LLMFailureCatalog
+
   @label_keys ~w(name model provider tags)
   @tag_values %{
     "environment" => ~w(development test staging production),
@@ -42,11 +44,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     assertion-failed
     unknown-action
   )
-  @llm_provider_failures ~w(
-    authentication-failed payment-required rate-limited tool-calling-unsupported denied not-found timeout
-    provider-timeout llm-request-timeout invalid-request unavailable transport-error internal domain-error
-    invalid-result reservation-bound-exceeded
-  )
+  @llm_provider_failures LLMFailureCatalog.authenticated_kebabs()
   @capability_rejection_kinds [
     :capability_denied,
     :capability_unavailable,
@@ -272,7 +270,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
          normalized when normalized in @llm_provider_failures <- normalize_name(provider_reason),
          {:ok, retryable?} when is_boolean(retryable?) <- fetch_named(reason, "retryable?") do
       %{
-        llm_provider_failure: provider_failure_atom(normalized),
+        llm_provider_failure: LLMFailureCatalog.consume_kind(normalized),
         llm_provider_retryable?: retryable?
       }
     else
@@ -503,23 +501,6 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   end
 
   defp normalize_name(_value), do: nil
-
-  defp provider_failure_atom("authentication-failed"), do: :authentication_failed
-  defp provider_failure_atom("payment-required"), do: :payment_required
-  defp provider_failure_atom("rate-limited"), do: :rate_limited
-  defp provider_failure_atom("tool-calling-unsupported"), do: :tool_calling_unsupported
-  defp provider_failure_atom("denied"), do: :denied
-  defp provider_failure_atom("not-found"), do: :not_found
-  defp provider_failure_atom("timeout"), do: :timeout
-  defp provider_failure_atom("provider-timeout"), do: :timeout
-  defp provider_failure_atom("llm-request-timeout"), do: :timeout
-  defp provider_failure_atom("invalid-request"), do: :invalid_request
-  defp provider_failure_atom("unavailable"), do: :unavailable
-  defp provider_failure_atom("transport-error"), do: :transport_error
-  defp provider_failure_atom("internal"), do: :internal
-  defp provider_failure_atom("domain-error"), do: :domain_error
-  defp provider_failure_atom("invalid-result"), do: :invalid_result
-  defp provider_failure_atom("reservation-bound-exceeded"), do: :reservation_bound_exceeded
 
   defp metadata_name(%PtcRunner.Lisp.Keyword{name: name}), do: name
   defp metadata_name(value) when is_atom(value), do: Atom.to_string(value)

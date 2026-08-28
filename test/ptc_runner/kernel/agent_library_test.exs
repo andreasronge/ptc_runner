@@ -24,6 +24,14 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.ValuePreviewFixture
 
+  import PtcRunner.TestSupport.AgentFixtures,
+    only: [
+      live_alias_route: 4,
+      live_alias_route: 5,
+      mission_with_source: 2,
+      replay_alias_router: 2
+    ]
+
   test "llm/request is an ordinary bounded workflow capability" do
     parent = self()
 
@@ -2136,7 +2144,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       )
 
     names =
-      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry kernel llm result workflow.event)
 
     {:ok, components} = Library.components(names)
     {:ok, bundle} = Kernel.compile_bundle(components)
@@ -4653,19 +4661,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert {:ok, router} =
              LLMRouter.new([
-               %{
-                 alias: "chosen",
-                 source: "llm",
-                 installation_revision: "chosen-v1",
-                 default?: true,
-                 capability: hung,
-                 max_calls: nil,
-                 output_tokens: 4_096,
-                 reservation_bound: fn _request, _tariff ->
-                   {:ok, %{total_tokens: 4_096, cost: nil}}
-                 end,
-                 request_timeout_ms: 100
-               }
+               live_alias_route("chosen", true, hung, nil, request_timeout_ms: 100)
              ])
 
     {:ok, config} = agent_router_config(router)
@@ -4781,8 +4777,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert {:ok, router} =
              LLMRouter.new([
-               agent_live_alias_route("expensive", true, leaf, 1),
-               agent_live_alias_route("cheap", false, leaf, nil)
+               live_alias_route("expensive", true, leaf, 1),
+               live_alias_route("cheap", false, leaf, nil)
              ])
 
     {:ok, quota_config} = agent_router_config(router)
@@ -4914,7 +4910,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert {:ok, router} =
              LLMRouter.new([
-               agent_live_alias_route("expensive", true, leaf, 1)
+               live_alias_route("expensive", true, leaf, 1)
              ])
 
     {:ok, quota_config} = agent_router_config(router)
@@ -5025,7 +5021,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, llm} = LLMCapability.new(requester: requester)
 
     names =
-      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry kernel llm result workflow.event)
 
     {:ok, components} = Library.components(names)
     {:ok, bundle} = Kernel.compile_bundle(components)
@@ -5041,39 +5037,6 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       limits: limits,
       event_sink: sink
     )
-  end
-
-  defp replay_alias_router(chosen_capability, other_capability) do
-    LLMRouter.new([
-      replay_alias_route("chosen", true, chosen_capability),
-      replay_alias_route("other", false, other_capability)
-    ])
-  end
-
-  defp replay_alias_route(alias_name, default?, capability) do
-    %{
-      alias: alias_name,
-      source: "llm_replay",
-      installation_revision: alias_name <> "-v1",
-      default?: default?,
-      capability: capability,
-      max_calls: nil
-    }
-  end
-
-  defp agent_live_alias_route(alias_name, default?, capability, max_calls) do
-    %{
-      alias: alias_name,
-      source: "llm",
-      installation_revision: alias_name <> "-v1",
-      default?: default?,
-      capability: capability,
-      max_calls: max_calls,
-      output_tokens: 4_096,
-      reservation_bound: fn _request, _tariff ->
-        {:ok, %{total_tokens: 4_096, cost: nil}}
-      end
-    }
   end
 
   defp agent_router_config(router, limit_overrides \\ []) do
@@ -5164,10 +5127,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   defp agent_bundle(opts) do
     names =
       if Keyword.get(opts, :agent_main, false) do
-        ~w(agent.main agent.core agent.feedback agent.native agent.prompt agent.retry
+        ~w(agent.main agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry
            kernel llm result workflow.event)
       else
-        ~w(agent.core agent.feedback agent.native agent.prompt agent.retry
+        ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry
            kernel llm result workflow.event)
       end
 
@@ -5230,15 +5193,6 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
       :error ->
         MissionEnvironment.new(capabilities: capabilities, data: data)
-    end
-  end
-
-  defp mission_with_source(namespace, body) do
-    source = "(ns #{namespace})\n#{body}\n"
-
-    with {:ok, component} <- Component.new(id: namespace, source: source, origin: "test"),
-         {:ok, bundle} <- Kernel.compile_bundle([component]) do
-      MissionEnvironment.new(bundle: bundle)
     end
   end
 

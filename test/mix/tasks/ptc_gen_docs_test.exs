@@ -40,7 +40,7 @@ defmodule Mix.Tasks.Ptc.GenDocsTest do
     assert reference =~ "Reserved Kernel operations"
 
     assert reference =~
-             "- **Selecting it also installs:** `agent.core`, `agent.feedback`, `agent.native`, `agent.prompt`, `agent.retry`, `kernel`, `llm`, `result`, `workflow.event`"
+             "- **Selecting it also installs:** `agent.core`, `agent.failure`, `agent.feedback`, `agent.machine`, `agent.native`, `agent.prompt`, `agent.retry`, `kernel`, `llm`, `result`, `workflow.event`"
 
     assert reference =~ ~r/##### `llm\/request`.*?- \*\*Effect:\*\* `unknown`/s
     refute reference =~ "agent.feedback/cap-with-marker"
