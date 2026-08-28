@@ -138,13 +138,16 @@ disjoint valid files remain admitted; no filename-ordered winner, repair, or
 partial run is selected.
 
 Exact selected capture is a distinct source variant used by
-`ptc transcript RUN_ID`: it resolves only
+`ptc transcript RUN_ID` and by one through sixteen repeated `--run` flags on
+`private-run-analysis-v1`: it resolves only
 `<run-ref>.jsonl` or `<run-ref>.private.jsonl` plus
 `<run-ref>.ptcins`, never lists the granted directory, and does not
 count unrelated members toward `max_directory_entries`, `max_files`, or the
 aggregate source-byte ceiling. Selected snapshot identity commits to the
-requested run reference, trace source class, exact evidence digests, and
-correlated trace ID. Explicit single-file sources remain filename-agnostic and
+canonically sorted run-reference set, trace source classes, exact evidence
+digests, and correlated trace IDs. The repeated-flag cohort is admitted into
+one shared all-or-nothing trace and inspection snapshot; the transcript keeps
+its singular path. Explicit single-file sources remain filename-agnostic and
 may contain multiple complete disjoint runs; they never combine with siblings.
 
 One directory holds both sanitized and private trace files, and one source

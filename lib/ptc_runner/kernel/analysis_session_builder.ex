@@ -36,6 +36,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   alias PtcRunner.Kernel.AnalysisTerminal
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.SelectedCanonicalSource
   alias PtcRunner.Kernel.SessionTrace
 
   @type resources :: %{required(binary()) => binary()}
@@ -65,6 +66,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
     :private_unattended,
     :terminal_attached
   ]
+  @private_analysis_profile "private-run-analysis-v1"
 
   @doc """
   Starts one fixed analysis profile over immutable source captures.
@@ -123,11 +125,18 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
         do: @common_options ++ @inspection_options,
         else: @common_options
 
-    if Keyword.keys(opts) -- allowed == [] and valid_builder_hooks?(opts) and
-         valid_capture_hooks?(opts) and valid_private_terminal?(opts) and valid_preview?(opts) do
-      :ok
-    else
-      {:error, recipe.invalid_source_error()}
+    allowed =
+      if recipe.id() == @private_analysis_profile,
+        do: [:selected_run_refs | allowed],
+        else: allowed
+
+    with :ok <- validate_selected_runs(recipe, opts) do
+      if Keyword.keys(opts) -- allowed == [] and valid_builder_hooks?(opts) and
+           valid_capture_hooks?(opts) and valid_private_terminal?(opts) and valid_preview?(opts) do
+        :ok
+      else
+        {:error, recipe.invalid_source_error()}
+      end
     end
   end
 
@@ -155,6 +164,23 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   defp valid_optional_hook?(hook, arity), do: is_function(hook, arity)
 
   defp valid_preview?(opts), do: Keyword.get(opts, :preview_chars, 2_048) in 64..65_536
+
+  defp validate_selected_runs(recipe, opts) do
+    case Keyword.fetch(opts, :selected_run_refs) do
+      :error ->
+        :ok
+
+      {:ok, run_refs} ->
+        if recipe.id() == @private_analysis_profile do
+          case SelectedCanonicalSource.validate_run_refs(run_refs) do
+            {:ok, _validated} -> :ok
+            {:error, _reason} = error -> error
+          end
+        else
+          {:error, recipe.invalid_source_error()}
+        end
+    end
+  end
 
   defp authorize_private_profile(recipe, opts) do
     terminal? = Keyword.get(opts, :private_terminal, false)

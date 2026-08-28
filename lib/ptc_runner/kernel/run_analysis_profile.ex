@@ -116,12 +116,13 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
       "traces" => %{
         "required" => true,
         "kind" => "private-authorized-trace-directory",
-        "summary" => "Immutable capture of canonical normal and private trace files"
+        "summary" =>
+          "Immutable capture of all canonical traces or one to sixteen exact --run candidates"
       },
       "inspection" => %{
         "required" => true,
         "kind" => "private-inspection-directory",
-        "summary" => "Immutable private records validated against the trace capture"
+        "summary" => "Immutable private records for all traces or the exact selected --run cohort"
       }
     })
   end
@@ -145,7 +146,7 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
 
   def capture(:public, recipe, %{"traces" => directory} = resources, opts)
       when map_size(resources) == 1 and is_binary(directory) and is_list(opts) do
-    if Keyword.has_key?(opts, :selected_run_ref) do
+    if Keyword.has_key?(opts, :selected_run_ref) or Keyword.has_key?(opts, :selected_run_refs) do
       {:error, recipe.invalid_source_error()}
     else
       capture_trace(recipe, {:directory, directory}, opts)
@@ -160,10 +161,14 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
       )
       when map_size(resources) == 2 and is_binary(inspection) and is_binary(traces) and
              is_list(opts) do
+    {selected_run_refs, opts} = Keyword.pop(opts, :selected_run_refs)
     {selected_run_ref, capture_opts} = Keyword.pop(opts, :selected_run_ref)
 
     cond do
-      is_nil(selected_run_ref) ->
+      not is_nil(selected_run_ref) and not is_nil(selected_run_refs) ->
+        {:error, :invalid_run_reference}
+
+      is_nil(selected_run_ref) and is_nil(selected_run_refs) ->
         with {:ok, trace} <- start_trace({:private_authorized_directory, traces}, capture_opts) do
           case AnalysisProfile.refuse_empty_capture(
                  TraceSnapshot.info(trace),
@@ -176,6 +181,15 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
 
       SelectedCanonicalSource.valid_run_ref?(selected_run_ref) ->
         capture_selected(recipe, traces, inspection, selected_run_ref, capture_opts)
+
+      is_list(selected_run_refs) ->
+        case SelectedCanonicalSource.validate_run_refs(selected_run_refs) do
+          {:ok, run_refs} ->
+            capture_selected_set(recipe, traces, inspection, run_refs, capture_opts)
+
+          {:error, _reason} = error ->
+            error
+        end
 
       true ->
         {:error, :invalid_run_reference}
@@ -226,6 +240,23 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
          {:ok, trace} <-
            start_trace({:selected_canonical, traces, run_ref}, opts) do
       capture_inspection(recipe, trace, {:selected_canonical, inspection, run_ref}, opts)
+    end
+  end
+
+  defp capture_selected_set(recipe, traces, inspection, run_refs, opts) do
+    with {:ok, _trace_sources} <- SelectedCanonicalSource.resolve_traces(traces, run_refs),
+         {:ok, _inspection_sources} <-
+           SelectedCanonicalSource.resolve_inspections(inspection, run_refs),
+         {:ok, trace} <- start_trace({:selected_canonical_set, traces, run_refs}, opts) do
+      capture_inspection(
+        recipe,
+        trace,
+        {:selected_canonical_set, inspection, run_refs},
+        opts
+      )
+    else
+      {:error, :unsupported_version} -> {:error, :unsupported_schema}
+      {:error, _reason} = error -> error
     end
   end
 

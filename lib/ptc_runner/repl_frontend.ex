@@ -41,6 +41,8 @@ defmodule PtcRunner.ReplFrontend do
     * `-t, --trace` — append this session's canonical events to a JSONL file;
     * `--profile` — select a code-owned mission session profile;
     * `--resource NAME=VALUE` — supply a required profile resource; repeatable;
+    * `--run RUN_ID` — select an exact run for `private-run-analysis-v1`;
+      repeat one through sixteen times to admit one bounded cohort;
     * `--session-trace-dir` — existing output directory for a profile session's
       separate canonical trace;
     * `--output` / `--private-output` — atomically publish the value of exactly
@@ -112,6 +114,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
+  alias PtcRunner.Kernel.SelectedCanonicalSource
   alias PtcRunner.Lisp.EvaluatorError
   alias PtcRunner.Lisp.NamespaceDiagnostic
   alias PtcRunner.Lisp.Result, as: LispResult
@@ -244,7 +247,7 @@ defmodule PtcRunner.ReplFrontend do
       resources != [] or not is_nil(opts[:session_trace_dir]) or
         Keyword.has_key?(opts, :continue_on_error) or
         Keyword.has_key?(opts, :private_terminal) or
-          Keyword.has_key?(opts, :private_unattended) ->
+        Keyword.has_key?(opts, :private_unattended) or Keyword.has_key?(opts, :run) ->
         {:error, "profile options require --profile"}
 
       format == "jsonl" ->
@@ -312,6 +315,7 @@ defmodule PtcRunner.ReplFrontend do
          terminal_attached?
        ) do
     with {:ok, recipe} <- AnalysisProfileRegistry.fetch(opts[:profile]),
+         :ok <- validate_selected_runs(recipe, opts),
          :ok <-
            validate_profile_combinations(
              recipe,
@@ -434,7 +438,34 @@ defmodule PtcRunner.ReplFrontend do
   defp profile_frontend_error(:private_destination_conflict),
     do: "--private-terminal and --private-unattended are mutually exclusive"
 
+  defp profile_frontend_error(:selected_runs_unsupported),
+    do: "--run is supported only with --profile private-run-analysis-v1"
+
+  defp profile_frontend_error(reason)
+       when reason in [
+              :invalid_run_reference,
+              :selected_set_limit_exceeded,
+              :duplicate_selected_run
+            ],
+       do: "selected run setup failed: #{reason}"
+
   defp profile_frontend_error(_reason), do: "invalid profile command"
+
+  defp validate_selected_runs(recipe, opts) do
+    case Keyword.get_values(opts, :run) do
+      [] ->
+        :ok
+
+      run_refs when recipe == PtcRunner.Kernel.PrivateRunAnalysisProfile ->
+        case SelectedCanonicalSource.validate_run_refs(run_refs) do
+          {:ok, _validated} -> :ok
+          {:error, _reason} = error -> error
+        end
+
+      _run_refs ->
+        {:error, :selected_runs_unsupported}
+    end
+  end
 
   defp run_profile_session(opts, arguments) do
     case reserve_profile_result(opts) do
@@ -672,6 +703,7 @@ defmodule PtcRunner.ReplFrontend do
         preview_chars: preview_chars(opts)
       ]
       |> maybe_private_terminal(opts)
+      |> maybe_selected_runs(opts)
 
     case AnalysisSessionBuilder.start(
            opts[:profile],
@@ -746,6 +778,13 @@ defmodule PtcRunner.ReplFrontend do
         |> Keyword.put(:private_terminal, true)
         |> Keyword.put(:terminal_attached, Keyword.fetch!(opts, :terminal_attached)),
       else: builder_options
+  end
+
+  defp maybe_selected_runs(builder_options, opts) do
+    case Keyword.get_values(opts, :run) do
+      [] -> builder_options
+      run_refs -> Keyword.put(builder_options, :selected_run_refs, run_refs)
+    end
   end
 
   defp evaluate_profile_mode(session, opts, arguments) do

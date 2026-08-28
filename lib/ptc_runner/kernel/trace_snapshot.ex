@@ -110,6 +110,25 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     end
   end
 
+  def start({:selected_canonical_set, directory, run_refs}, opts)
+      when is_binary(directory) and is_list(run_refs) and is_list(opts) do
+    case SelectedCanonicalSource.resolve_traces(directory, run_refs) do
+      {:ok, selected} ->
+        run_refs = Enum.map(selected, & &1.run_ref)
+
+        start_capture(
+          {:selected_set, Path.expand(directory), selected},
+          :ptc_private_trace_snapshot,
+          :private,
+          %{directory: Path.expand(directory), run_refs: run_refs, sources: selected},
+          opts
+        )
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
   def start(_source, _opts), do: {:error, :invalid_snapshot}
 
   defp start_capture(capture_source, source, source_kind, selected_run_ref, opts)
@@ -458,6 +477,39 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     end)
   end
 
+  defp capture({:selected_set, directory, selected}, config, capture_hook, _listing_hook) do
+    result =
+      if length(selected) <= config.max_trace_files do
+        TraceLog.capture_selected(selected,
+          max_source_bytes: config.max_source_bytes,
+          capture_hook: capture_hook
+        )
+      else
+        {:error, :source_limit_exceeded}
+      end
+
+    case result do
+      {:ok, capture} ->
+        with {:ok, current} <-
+               SelectedCanonicalSource.resolve_traces(directory, config.selected_run_ref.run_refs),
+             true <- current == selected,
+             {:ok, source_id} <- selected_source_id(config, capture) do
+          capture
+          |> Map.put(:source_id, source_id)
+          |> retain_capture(config)
+        else
+          false -> {:error, :source_changed}
+          {:error, _reason} = error -> error
+        end
+
+      {:error, :invalid_trace_log} ->
+        {:error, :invalid_snapshot}
+
+      {:error, reason} when is_atom(reason) ->
+        {:error, reason}
+    end
+  end
+
   defp capture_file_source(path, config, capture_hook, after_capture) do
     case TraceLog.capture_file(path,
            max_source_bytes: config.max_source_bytes,
@@ -498,6 +550,21 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   defp selected_source_id(%{selected_run_ref: nil}, capture), do: {:ok, capture.source_id}
 
+  defp selected_source_id(%{selected_run_ref: %{run_refs: run_refs, sources: selected}}, capture) do
+    with [] <- Map.get(capture, :isolated_components, []),
+         events_by_run = Enum.group_by(capture.events, & &1["run_id"]),
+         true <- events_by_run |> Map.keys() |> Enum.sort() == run_refs,
+         proofs = Map.new(capture.source_proofs, &{&1.raw_name, &1}),
+         true <- map_size(proofs) == length(selected),
+         {:ok, commitments} <- selected_trace_commitments(selected, events_by_run, proofs) do
+      {:ok, SelectedCanonicalSource.trace_set_source_id(commitments)}
+    else
+      [_ | _] = isolated -> {:error, selected_isolation_error(isolated)}
+      false -> {:error, :selected_run_mismatch}
+      {:error, _reason} = error -> error
+    end
+  end
+
   defp selected_source_id(config, capture) do
     with {:ok, trace_id} <-
            SelectedCanonicalSource.prove_trace_events(capture.events, config.selected_run_ref) do
@@ -509,6 +576,44 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
          capture.source_id,
          trace_id
        )}
+    end
+  end
+
+  defp selected_trace_commitments(selected, events_by_run, proofs) do
+    Enum.reduce_while(selected, {:ok, []}, fn source, {:ok, commitments} ->
+      with {:ok, trace_id} <-
+             SelectedCanonicalSource.prove_trace_events(
+               Map.get(events_by_run, source.run_ref, []),
+               source.run_ref
+             ),
+           {:ok, proof} <- Map.fetch(proofs, Path.basename(source.path)) do
+        commitment = %{
+          run_ref: source.run_ref,
+          source_kind: source.source_kind,
+          evidence_digest: proof.content_digest,
+          trace_id: trace_id
+        }
+
+        {:cont, {:ok, [commitment | commitments]}}
+      else
+        _invalid -> {:halt, {:error, :selected_run_mismatch}}
+      end
+    end)
+    |> case do
+      {:ok, commitments} -> {:ok, Enum.reverse(commitments)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp selected_isolation_error(components) do
+    reasons = components |> Enum.flat_map(& &1.reasons) |> MapSet.new()
+
+    cond do
+      MapSet.member?(reasons, :unsupported_version) -> :unsupported_schema
+      MapSet.member?(reasons, :filename_run_mismatch) -> :selected_run_mismatch
+      MapSet.member?(reasons, :run_identity_conflict) -> :selected_run_mismatch
+      MapSet.member?(reasons, :trace_identity_conflict) -> :selected_run_mismatch
+      true -> :malformed_source
     end
   end
 

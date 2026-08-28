@@ -397,9 +397,20 @@ ptc repl \
 interactive terminal with those definitions available. `--eval`, scripts, and
 stdin remain unattended input and require `--private-unattended` instead.
 
+Repeat `--run RUN_ID` one through sixteen times to admit one exact, bounded
+cohort. Selection is available only with `private-run-analysis-v1`; a single
+flag still uses the selected-set path, while no flags retain whole-directory
+capture. Values are validated as a complete list and then treated as an
+order-independent set. Selected capture resolves only each run's exact normal
+or private trace candidate and inspection artifact, never lists either source
+directory, and pins no unselected artifact. An unselected malformed,
+unsupported, unstable, mismatched, or duplicate claimant therefore cannot
+affect the cohort.
+
 The trace, inspection, and analysis-trace directories must be physically
 separate, including through ancestors and symlink aliases. Capture validates
-every private artifact against its matching run. When trace directory
+every admitted private artifact against its matching run. In whole-directory
+mode, trace directory
 admission isolates a damaged run, a sealed inspection artifact carrying that
 same run and trace identity is isolated with it; healthy correlated runs remain
 available, and `(analysis/runs {})` reports the trace source and isolation

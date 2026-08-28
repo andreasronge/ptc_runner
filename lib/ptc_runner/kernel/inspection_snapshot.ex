@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionArtifact.Admission
+  alias PtcRunner.Kernel.InspectionArtifact.Format
   alias PtcRunner.Kernel.InspectionArtifact.Handle
   alias PtcRunner.Kernel.InspectionArtifact.Indexes
   alias PtcRunner.Kernel.InspectionArtifact.Limits
@@ -59,6 +60,21 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     with true <- TraceSnapshot.valid?(trace_snapshot),
          {:ok, path} <- SelectedCanonicalSource.resolve_inspection(directory, run_ref) do
       start({:file, path, run_ref}, trace_snapshot, opts)
+    else
+      false -> {:error, :invalid_snapshot}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def start({:selected_canonical_set, directory, run_refs}, trace_snapshot, opts)
+      when is_binary(directory) and is_list(run_refs) and is_list(opts) do
+    with true <- TraceSnapshot.valid?(trace_snapshot),
+         {:ok, selected} <- SelectedCanonicalSource.resolve_inspections(directory, run_refs) do
+      start_with_valid_trace(
+        {:selected_set, Path.expand(directory), selected},
+        trace_snapshot,
+        opts
+      )
     else
       false -> {:error, :invalid_snapshot}
       {:error, _reason} = error -> error
@@ -191,39 +207,23 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
          {:ok, trace_info} <- TraceSnapshot.info(trace_snapshot),
          {:ok, inventory} <- inventory(source, config),
          true <- inventory.source_bytes <= config.max_source_bytes,
+         :ok <- validate_selected_versions(inventory.files, source),
          :ok <- capture_hook(config.open_hook),
          {:ok, admitted} <-
-           open_and_admit(inventory.files, source, trace_snapshot, limits, config, owner),
-         :ok <- capture_hook(config.capture_hook),
-         :ok <- verify_all_handles(admission_handles(admitted)),
-         :ok <- close_isolated_handles(admitted),
-         true <- Indexes.within_retained?(admitted.indexes, limits) do
-      digest = snapshot_digest(trace_info.snapshot_hash, admitted.digests)
-      source_id = selected_source_id(source, digest, admitted)
-
-      {:ok,
-       %{
-         token: token,
-         owner_ref: owner_ref,
-         trace_ref: trace_ref,
-         limits: limits,
-         indexes: admitted.indexes,
-         handles: admitted.handles,
-         snapshot_digest: source_id,
-         trace_snapshot_hash: trace_info.snapshot_hash,
-         max_result_bytes: config.max_result_bytes,
-         query_hook: config.query_hook,
-         info: %{
-           capture_id: source_id,
-           captured_at: DateTime.utc_now(),
-           file_count: length(inventory.files),
-           run_count: map_size(admitted.handles),
-           snapshot_hash: SafeMetadata.fingerprint(source_id),
-           source_bytes: inventory.source_bytes,
-           retained_bytes: Indexes.accounting(admitted.indexes).charged_retained_bytes,
-           trace_capture_id: trace_info.capture_id
-         }
-       }}
+           open_and_admit(inventory.files, source, trace_snapshot, limits, config, owner) do
+      finalize_admitted(
+        admitted,
+        source,
+        inventory,
+        %{
+          trace_info: trace_info,
+          token: token,
+          owner_ref: owner_ref,
+          trace_ref: trace_ref,
+          limits: limits,
+          config: config
+        }
+      )
     else
       false -> {:stop, :source_limit_exceeded}
       {:error, reason} -> {:stop, normalize_error(reason)}
@@ -325,6 +325,32 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   defp inventory({:viewer_file, path, run_ref}, config),
     do: inventory({:file, path, run_ref}, config)
 
+  defp inventory({:selected_set, _directory, selected}, config) do
+    if length(selected) <= config.max_files do
+      Enum.reduce_while(selected, {:ok, [], 0}, fn %{path: path}, {:ok, files, bytes} ->
+        case File.lstat(path, time: :posix) do
+          {:ok, %File.Stat{type: :regular, size: size} = stat} ->
+            {:cont, {:ok, [{path, stat} | files], bytes + size}}
+
+          {:ok, %File.Stat{}} ->
+            {:halt, {:error, :selected_inspection_not_regular}}
+
+          {:error, :enoent} ->
+            {:halt, {:error, :selected_inspection_missing}}
+
+          {:error, _reason} = error ->
+            {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, files, bytes} -> {:ok, %{files: Enum.reverse(files), source_bytes: bytes}}
+        {:error, _reason} = error -> error
+      end
+    else
+      {:error, :source_limit_exceeded}
+    end
+  end
+
   defp inventory({:directory, directory}, config) do
     case BoundedWorker.run(
            fn -> inventory_directory(directory, config) end,
@@ -371,10 +397,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
   defp admit_all(opened, source, trace_snapshot, indexes, limits, config) do
     result =
-      Enum.reduce_while(opened, {:ok, empty_admission(indexes)}, fn {_path, handle}, {:ok, acc} ->
+      Enum.reduce_while(opened, {:ok, empty_admission(indexes)}, fn {path, handle}, {:ok, acc} ->
         opts = [
           during_admission_hook: config.admission_hook,
-          expected_identity: inspection_identity(handle, source, trace_snapshot)
+          expected_identity: inspection_identity(handle, source, trace_snapshot, path)
         ]
 
         case opts[:expected_identity] do
@@ -388,7 +414,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
           {:ok, identity} ->
             opts = Keyword.put(opts, :expected_identity, identity)
             facts = fn run_id, trace_id -> paired_facts(trace_snapshot, run_id, trace_id) end
-            admit_one(handle, acc, source, facts, limits, opts)
+            admit_one(handle, acc, source, path, facts, limits, opts)
         end
       end)
 
@@ -402,10 +428,10 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     end
   end
 
-  defp admit_one(handle, acc, source, facts, limits, opts) do
+  defp admit_one(handle, acc, source, path, facts, limits, opts) do
     case Admission.run(handle, acc.indexes, facts, limits, opts) do
       {:ok, admitted} ->
-        case add_admitted(acc, admitted, handle, source) do
+        case add_admitted(acc, admitted, handle, source, path) do
           {:ok, next} -> {:cont, {:ok, next}}
           {:error, reason} -> {:halt, {:error, reason, admission_handles(acc)}}
         end
@@ -442,7 +468,12 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
 
   defp open_and_admit(files, source, trace_snapshot, limits, config, owner) do
     with {:ok, opened} <- open_all(files) do
-      case admit_bounded(opened, source, trace_snapshot, limits, config, owner) do
+      result =
+        with :ok <- validate_selected_claims(opened, source) do
+          admit_bounded(opened, source, trace_snapshot, limits, config, owner)
+        end
+
+      case result do
         {:ok, admitted} ->
           {:ok, admitted}
 
@@ -562,17 +593,15 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     end
   end
 
-  defp add_admitted(acc, admitted, handle, source) do
+  defp add_admitted(acc, admitted, handle, source, path) do
     run_id = admitted.run_id
+    requested = requested_run(source, path)
 
     cond do
       Map.has_key?(acc.digests, run_id) ->
         {:error, :duplicate_inspection_run}
 
-      match?({:file, _path, requested} when requested != run_id, source) ->
-        {:error, :selected_run_mismatch}
-
-      match?({:viewer_file, _path, requested} when requested != run_id, source) ->
+      is_binary(requested) and requested != run_id ->
         {:error, :selected_run_mismatch}
 
       true ->
@@ -597,7 +626,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     end
   end
 
-  defp inspection_identity(%{footer: footer}, {:directory, _directory}, trace_snapshot) do
+  defp inspection_identity(%{footer: footer}, {:directory, _directory}, trace_snapshot, _path) do
     TraceSnapshot.resolve_directory_inspection_identity(
       trace_snapshot,
       footer.run_id_sha256,
@@ -605,7 +634,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
     )
   end
 
-  defp inspection_identity(%{footer: footer}, _source, trace_snapshot) do
+  defp inspection_identity(%{footer: footer}, _source, trace_snapshot, _path) do
     TraceSnapshot.resolve_inspection_identity(
       trace_snapshot,
       footer.run_id_sha256,
@@ -616,14 +645,218 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
   defp selected_source_id({:file, _path, run_ref}, digest, admitted) do
     case Map.fetch(admitted.indexes.trace_facts, run_ref) do
       {:ok, %{"trace_id" => trace_id}} ->
-        SelectedCanonicalSource.inspection_source_id(run_ref, digest, trace_id)
+        {:ok, SelectedCanonicalSource.inspection_source_id(run_ref, digest, trace_id)}
 
       _missing ->
-        digest
+        {:error, :inspection_correlation_missing}
     end
   end
 
-  defp selected_source_id(_source, digest, _admitted), do: digest
+  defp selected_source_id({:selected_set, _directory, selected}, digest, admitted) do
+    Enum.reduce_while(selected, {:ok, []}, fn %{run_ref: run_ref}, {:ok, commitments} ->
+      with {:ok, evidence_digest} <- Map.fetch(admitted.digests, run_ref),
+           {:ok, %{"trace_id" => trace_id}} <-
+             Map.fetch(admitted.indexes.trace_facts, run_ref) do
+        commitment = %{
+          run_ref: run_ref,
+          evidence_digest: evidence_digest,
+          trace_id: trace_id
+        }
+
+        {:cont, {:ok, [commitment | commitments]}}
+      else
+        _missing -> {:halt, {:error, :inspection_correlation_missing}}
+      end
+    end)
+    |> case do
+      {:ok, commitments} ->
+        {:ok, SelectedCanonicalSource.inspection_set_source_id(digest, Enum.reverse(commitments))}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp selected_source_id(_source, digest, _admitted), do: {:ok, digest}
+
+  defp finalize_admitted(admitted, source, inventory, context) do
+    %{trace_info: trace_info, limits: limits, config: config} = context
+
+    result =
+      with :ok <- capture_hook(config.capture_hook),
+           :ok <- verify_all_handles(admission_handles(admitted)),
+           :ok <- verify_selected_source(source, inventory.files),
+           :ok <- close_isolated_handles(admitted),
+           true <- Indexes.within_retained?(admitted.indexes, limits),
+           digest = snapshot_digest(trace_info.snapshot_hash, admitted.digests),
+           {:ok, source_id} <- selected_source_id(source, digest, admitted) do
+        {:ok,
+         %{
+           token: context.token,
+           owner_ref: context.owner_ref,
+           trace_ref: context.trace_ref,
+           limits: limits,
+           indexes: admitted.indexes,
+           handles: admitted.handles,
+           snapshot_digest: source_id,
+           trace_snapshot_hash: trace_info.snapshot_hash,
+           max_result_bytes: config.max_result_bytes,
+           query_hook: config.query_hook,
+           info: %{
+             capture_id: source_id,
+             captured_at: DateTime.utc_now(),
+             file_count: length(inventory.files),
+             run_count: map_size(admitted.handles),
+             snapshot_hash: SafeMetadata.fingerprint(source_id),
+             source_bytes: inventory.source_bytes,
+             retained_bytes: Indexes.accounting(admitted.indexes).charged_retained_bytes,
+             trace_capture_id: trace_info.capture_id
+           }
+         }}
+      else
+        false -> {:error, :max_retained_bytes}
+        {:error, _reason} = error -> error
+      end
+
+    case result do
+      {:ok, state} ->
+        {:ok, state}
+
+      {:error, reason} ->
+        cleanup_failed(admitted.indexes, admission_handles(admitted))
+        {:stop, normalize_error(reason)}
+    end
+  end
+
+  defp validate_selected_claims(opened, {:selected_set, _directory, _selected} = source) do
+    requests = selected_requests(source)
+    claims = Enum.map(opened, fn {_path, handle} -> handle.footer.run_id_sha256 end)
+
+    cond do
+      length(claims) != MapSet.size(MapSet.new(claims)) ->
+        {:error, :duplicate_inspection_run}
+
+      Enum.any?(opened, fn {path, handle} ->
+        case Map.fetch(requests, path) do
+          {:ok, run_ref} -> Format.identity_sha256(run_ref) != handle.footer.run_id_sha256
+          :error -> true
+        end
+      end) ->
+        {:error, :selected_run_mismatch}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_selected_claims(_opened, _source), do: :ok
+
+  defp selected_requests({:file, path, run_ref}), do: %{path => run_ref}
+  defp selected_requests({:viewer_file, path, run_ref}), do: %{path => run_ref}
+
+  defp selected_requests({:selected_set, _directory, selected}),
+    do: Map.new(selected, &{&1.path, &1.run_ref})
+
+  defp selected_requests(_source), do: %{}
+
+  defp requested_run(source, path), do: source |> selected_requests() |> Map.get(path)
+
+  defp verify_selected_source({:selected_set, _directory, _selected} = source, files) do
+    requests = selected_requests(source)
+
+    with :ok <- verify_selected_paths(source, requests),
+         true <- Enum.all?(files, fn {path, expected} -> current_file?(path, expected) end) do
+      :ok
+    else
+      {:error, _reason} = error -> error
+      false -> {:error, :source_changed}
+    end
+  end
+
+  defp verify_selected_source(_source, _files), do: :ok
+
+  defp verify_selected_paths({:selected_set, directory, selected}, requests) do
+    run_refs = Enum.map(selected, & &1.run_ref)
+
+    case SelectedCanonicalSource.resolve_inspections(directory, run_refs) do
+      {:ok, current} ->
+        if Map.new(current, &{&1.path, &1.run_ref}) == requests,
+          do: :ok,
+          else: {:error, :source_changed}
+
+      {:error, _reason} ->
+        {:error, :source_changed}
+    end
+  end
+
+  defp current_file?(path, expected) do
+    case File.lstat(path, time: :posix) do
+      {:ok, current} -> file_identity(current) == file_identity(expected)
+      {:error, _reason} -> false
+    end
+  end
+
+  defp file_identity(%File.Stat{} = stat) do
+    {stat.type, stat.size, stat.major_device, stat.minor_device, stat.inode}
+  end
+
+  defp selected_inspection_version(path) do
+    case :file.open(path, [:read, :binary, :raw]) do
+      {:ok, io} ->
+        result =
+          case :file.pread(io, 0, Format.header_size()) do
+            {:ok, header} -> selected_header_version(io, header)
+            _malformed_or_unreadable -> :ok
+          end
+
+        :file.close(io)
+        result
+
+      {:error, :enoent} ->
+        {:error, :selected_inspection_missing}
+
+      {:error, _reason} ->
+        {:error, :source_unavailable}
+    end
+  end
+
+  defp selected_header_version(io, header) do
+    case Format.decode_header_versions(header) do
+      {:ok, versions} ->
+        if current_versions?(versions),
+          do: validate_current_footer_version(io),
+          else: {:error, :unsupported_schema}
+
+      {:error, :malformed_source} ->
+        :ok
+    end
+  end
+
+  defp validate_current_footer_version(io) do
+    with {:ok, size} <- :file.position(io, :eof),
+         true <- size >= Format.header_size() + Format.footer_size(),
+         {:ok, footer} <- :file.pread(io, size - Format.footer_size(), Format.footer_size()),
+         {:ok, versions} <- Format.decode_footer_versions(footer),
+         true <- current_versions?(versions) do
+      :ok
+    else
+      _malformed_or_foreign_footer -> :ok
+    end
+  end
+
+  defp validate_selected_versions(files, {:selected_set, _directory, _selected}) do
+    Enum.reduce_while(files, :ok, fn {path, _stat}, :ok ->
+      case selected_inspection_version(path) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp validate_selected_versions(_files, _source), do: :ok
+
+  defp current_versions?(%{format_version: format_version, schema_version: schema_version}),
+    do: format_version == Format.format_version() and schema_version == Format.schema_version()
 
   defp snapshot_digest(trace_capture_id, digests) do
     pairs =
@@ -719,6 +952,7 @@ defmodule PtcRunner.Kernel.InspectionSnapshot do
               :selected_run_mismatch,
               :selected_inspection_missing,
               :selected_inspection_not_regular,
+              :unsupported_schema,
               :max_records,
               :max_index_entries,
               :max_logical_index_bytes,
