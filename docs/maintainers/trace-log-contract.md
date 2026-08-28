@@ -544,7 +544,7 @@ present zero-microunit USD object is therefore a measured zero-cost response,
 not an unknown cost. Decimal provider values are parsed exactly and rounded
 upward to one microunit; floats never remain accounting authority.
 
-The canonical LLM usage summary is shared by trace counters and the V3 run
+The canonical LLM usage summary is shared by trace counters and the V4 run
 envelope's `execution.usage`. For routed `llm-request` calls, `llm_usage` groups
 stopped events by model alias and installation revision. Each row reports total
 and successful calls, calls with valid usage, calls that may have dispatched
@@ -579,7 +579,7 @@ Snapshot lookup uses all events from the run-filter-selected runs before a
 mission filter narrows counted calls. Capability events continue to carry only
 alias/revision routing identity; they do not duplicate model identity. The
 additional rows remain subject to the existing aggregate result-byte limit.
-Every finished V3 run envelope also publishes the sealed run-state
+Every finished V4 run envelope also publishes the sealed run-state
 `llm_budget` and `llm_spend` values that canonical `run-stopped.data.usage`
 retains. Every current `run-stopped` event must carry `data.usage` with a valid
 terminal `llm_budget`; omission makes the trace malformed. `llm_budget` is

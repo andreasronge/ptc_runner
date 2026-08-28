@@ -25,14 +25,14 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     key: :envelope,
     type: :string,
     syntax: ["--envelope ENVELOPE.json"],
-    description: "atomically publish the V3 command envelope"
+    description: "atomically publish the V4 command envelope"
   }
   @run_envelope_option %{
     key: :envelope,
     type: :string,
     syntax: ["--envelope ENVELOPE.json"],
     description:
-      "atomically publish a V3 command envelope copy (project ledger still written when artifacts.envelope is enabled)"
+      "atomically publish a V4 command envelope copy (project ledger still written when artifacts.envelope is enabled)"
   }
 
   @declarations %{

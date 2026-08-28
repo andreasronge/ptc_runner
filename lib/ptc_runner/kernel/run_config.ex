@@ -33,8 +33,8 @@ defmodule PtcRunner.Kernel.RunConfig do
   anchoring independent durations.
   Before callbacks can start, execution binds it to the Runner or REPL session
   owner and to the run state whose provider tasks it tracks.
-  `connector_snapshots` are bounded safe metadata copied into `run-started`;
-  neither field is visible to Lisp.
+  `connector_snapshots` and closed `provider_warnings` are bounded safe metadata
+  copied into `run-started`; neither field is visible to Lisp.
 
   `result_contract` is an optional sealed, compiled application contract
   exposed only through the reserved workflow validator used by `agent.main`.
@@ -54,6 +54,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   """
 
   alias PtcRunner.Kernel.ApplicationSource
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.FrozenBundle
@@ -97,6 +98,7 @@ defmodule PtcRunner.Kernel.RunConfig do
     inspection_sink_owner: nil,
     provider_session: nil,
     connector_snapshots: [],
+    provider_warnings: [],
     session_profile: nil,
     labels: %{},
     run_started_metadata: %{}
@@ -118,6 +120,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           inspection_sink_owner: pid() | nil,
           provider_session: ProviderSession.t() | nil,
           connector_snapshots: [map()],
+          provider_warnings: [CommandWarning.t()],
           session_profile: map() | nil,
           labels: map(),
           run_started_metadata: map()
@@ -145,6 +148,7 @@ defmodule PtcRunner.Kernel.RunConfig do
                :inspection_sink,
                :provider_session,
                :connector_snapshots,
+               :provider_warnings,
                :session_profile,
                :labels,
                :component_overrides
@@ -171,6 +175,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          true <- provider_session?(provider_session, limits),
          {:ok, run_deadline} <- provider_run_deadline(provider_session),
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
+         true <- provider_warnings?(Keyword.get(opts, :provider_warnings, [])),
          {:ok, session_profile} <- session_profile(Keyword.get(opts, :session_profile)),
          {:ok, labels} <- SafeMetadata.normalize_labels(Keyword.get(opts, :labels, %{})),
          {:ok, component_overrides} <-
@@ -180,6 +185,7 @@ defmodule PtcRunner.Kernel.RunConfig do
              workflow,
              missions,
              Keyword.get(opts, :connector_snapshots, []),
+             Keyword.get(opts, :provider_warnings, []),
              session_profile,
              labels,
              component_overrides,
@@ -209,6 +215,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          inspection_sink_owner: inspection_sink_owner,
          provider_session: provider_session,
          connector_snapshots: Keyword.get(opts, :connector_snapshots, []),
+         provider_warnings: Keyword.get(opts, :provider_warnings, []),
          session_profile: session_profile,
          labels: labels,
          run_started_metadata: run_started_metadata
@@ -325,6 +332,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          workflow,
          missions,
          snapshots,
+         warnings,
          session_profile,
          labels,
          component_overrides,
@@ -338,6 +346,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           workflow_prelude: workflow_prelude,
           missions: mission_metadata,
           connector_snapshots: snapshots,
+          warnings: Enum.map(warnings, &CommandWarning.to_map/1),
           installation_config_digests: installation_config_digests(snapshots)
         }
         |> maybe_put_session_profile(session_profile)
@@ -353,6 +362,11 @@ defmodule PtcRunner.Kernel.RunConfig do
       {:error, :invalid_bundle} -> {:error, :invalid_run_config}
     end
   end
+
+  defp provider_warnings?(warnings) when is_list(warnings) and length(warnings) <= 128,
+    do: Enum.all?(warnings, &CommandWarning.valid?/1)
+
+  defp provider_warnings?(_warnings), do: false
 
   defp mission_metadata(missions) do
     Enum.reduce_while(missions |> Enum.sort_by(&elem(&1, 0)), {:ok, %{}}, fn

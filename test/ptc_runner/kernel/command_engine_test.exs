@@ -733,7 +733,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "V3 success and error envelopes retain evaluations by mission", %{tmp_dir: directory} do
+  test "V4 success and error envelopes retain evaluations by mission", %{tmp_dir: directory} do
     manifest =
       valid_manifest(%{
         "workflow" => %{
@@ -3460,7 +3460,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                },
                %{
                  "switches" => ["--envelope ENVELOPE.json"],
-                 "description" => "atomically publish the V3 command envelope"
+                 "description" => "atomically publish the V4 command envelope"
                },
                %{
                  "switches" => ["--help"],
@@ -5000,12 +5000,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     }
 
     classified = %{
-      "schema_version" => 3,
+      "schema_version" => 4,
       "command" => "run",
       "status" => "error",
       "run_ref" => run_ref,
       "error" => CommandDiagnostic.to_map(top_level),
       "secondary_errors" => [],
+      "warnings" => [],
       "artifact_state" => %{
         "trace" => "not_requested",
         "inspection" => "not_requested",
@@ -5223,12 +5224,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     result_publication = CommandDiagnostic.new!(:publication, :result_publication_failed)
 
     envelope = %{
-      "schema_version" => 3,
+      "schema_version" => 4,
       "command" => "run",
       "status" => "error",
       "run_ref" => run_ref,
       "error" => CommandDiagnostic.to_map(execution),
       "secondary_errors" => [],
+      "warnings" => [],
       "artifact_state" => %{
         "trace" => "not_requested",
         "inspection" => "not_requested",
@@ -5341,7 +5343,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.exit_status == 2
 
     assert outcome.envelope == %{
-             "schema_version" => 3,
+             "schema_version" => 4,
              "command" => "unknown",
              "status" => "error",
              "run_ref" => outcome.envelope["run_ref"],
@@ -5357,7 +5359,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                "retryable" => false,
                "provider_activity" => false
              },
-             "secondary_errors" => []
+             "secondary_errors" => [],
+             "warnings" => []
            }
 
     assert_schema_valid(outcome.envelope)

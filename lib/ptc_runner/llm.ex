@@ -243,6 +243,19 @@ defmodule PtcRunner.LLM do
   def callback(_prepared, _binding), do: {:error, :invalid_prepared_model}
 
   @doc """
+  Returns the closed public warning fact for an uncataloged prepared model.
+
+  The adapter remains the authority on whether its selector is public. Direct
+  HTTP selectors therefore stay private even when catalog facts are absent.
+  """
+  @spec catalog_warning(PreparedModel.t()) :: {:model_uncataloged, binary() | nil} | nil
+  def catalog_warning(%PreparedModel{catalog_status: :uncataloged} = prepared) do
+    {:model_uncataloged, attested_public_model(prepared.adapter, prepared.selector)}
+  end
+
+  def catalog_warning(%PreparedModel{}), do: nil
+
+  @doc """
   Returns the configured LLM adapter module.
 
   Resolution order:
@@ -329,7 +342,7 @@ defmodule PtcRunner.LLM do
   defp requester_deadline(_context), do: :error
 
   defp warn_catalog_status(%PreparedModel{catalog_status: :uncataloged} = prepared) do
-    public_model = attested_public_model(prepared.adapter, prepared.selector)
+    {:model_uncataloged, public_model} = catalog_warning(prepared)
     identity = if public_model, do: " #{inspect(public_model)}", else: ""
 
     IO.warn(
