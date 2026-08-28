@@ -103,7 +103,8 @@ defmodule PtcRunner.Kernel.RunCatalog do
 
     %{
       rows: rows,
-      catalog_digest: digest(Enum.map(probes, &commitment/1)),
+      catalog_digest:
+        digest([{:excluded_files, excluded_files} | Enum.map(probes, &commitment/1)]),
       excluded_files: excluded_files
     }
   end

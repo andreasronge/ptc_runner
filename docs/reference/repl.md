@@ -13,6 +13,7 @@ environments deliberately separate:
 | Manifest mission | `--project` or `--manifest` plus `--mission NAME` | selected manifest mission | direct mission capabilities plus provider dependency closure |
 | Public analysis profile | `--profile run-analysis-v1` | fixed code-owned mission | immutable traces |
 | Private analysis profile | `--profile private-run-analysis-v1` | fixed code-owned mission | correlated traces and private inspection records |
+| Private catalog profile | `--profile private-run-catalog-v1` | fixed code-owned mission | safe metadata from bounded trace and inspection probes |
 
 Successful definitions and exact `*1`, `*2`, and `*3` history persist for one
 command. A failed form preserves the previously committed state. Profile and
@@ -342,6 +343,40 @@ ptc repl --describe-profile run-analysis-v1 --format jsonl
 The description includes fixed resources, components, namespaces,
 capabilities, limits, and policies, but no paths, source, processes, callbacks,
 or credentials.
+
+## Discover a private run catalog
+
+Use `private-run-catalog-v1` to select a cohort before admitting any run's
+private evidence. The profile probes bounded trace heads and tails plus sealed
+inspection headers and footers, freezes one generation, and grants only the
+profile-local `analysis/catalog` function. It never opens an inspection payload.
+
+```console
+ptc repl \
+  --profile private-run-catalog-v1 \
+  --resource traces=tmp/tutorial-traces \
+  --resource inspection=tmp/tutorial-inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/catalog {"status" "error" "limit" 20})'
+```
+
+The exact-match filters are `run_id`, `trace_id`, `status`, `name`, `model`,
+`provider`, `correlation`, and `state`. `tags` requires the row to contain the
+supplied subset. Inclusive `from` and `to` bounds apply to `start_timestamp`.
+No other filter, including `bundle`, is accepted. The default `limit` is 20 and
+the maximum is 100.
+
+Each page contains exactly `items`, `next_cursor`, `truncated`,
+`omitted_count`, `catalog_digest`, and `excluded_files`. A cursor is opaque and
+binds the complete filter query and generation digest, but not `limit`.
+Changing a filter rejects the query; using a cursor with a changed generation
+reports `source_changed`. Growth cannot alter an already-open generation.
+Malformed individual entries remain path-free isolated rows, while capture
+failures refuse the whole profile without disclosing a path.
+
+`analysis.catalog` is not a general shipped-library component. It is compiled
+only into this closed profile because ordinary workflows and manifests cannot
+receive its backing capability.
 
 ## Query private inspection evidence
 

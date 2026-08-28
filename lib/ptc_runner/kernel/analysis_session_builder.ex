@@ -8,8 +8,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   profile module, component, capability set, mission data, label, limit, or
   sink policy.
 
-  `private-run-analysis-v1` requires one authorized private destination before
-  either source is captured, alongside physical separation of its trace,
+  Private profiles require one authorized private destination before either
+  source is captured, alongside physical separation of their trace,
   inspection, and analysis-trace directories.
 
   Exactly one of two destinations must be supplied. `private_terminal: true`
@@ -467,7 +467,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
     %{
       resources: resources,
       snapshot: AnalysisResources.handle(resources, :traces),
-      inspection_snapshot: AnalysisResources.handle(resources, :inspection)
+      inspection_snapshot: AnalysisResources.handle(resources, :inspection),
+      catalog_snapshot: AnalysisResources.handle(resources, :catalog)
     }
   end
 

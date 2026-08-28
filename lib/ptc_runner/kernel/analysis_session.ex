@@ -126,6 +126,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
                resources: assembly.resources,
                snapshot: AnalysisResources.handle(assembly.resources, :traces),
                inspection_snapshot: AnalysisResources.handle(assembly.resources, :inspection),
+               catalog_snapshot: AnalysisResources.handle(assembly.resources, :catalog),
                session_trace: assembly.session_trace,
                run_state: run_state,
                event_sink: assembly.config.event_sink

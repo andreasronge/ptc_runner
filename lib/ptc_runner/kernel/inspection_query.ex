@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   alias PtcRunner.Kernel.InspectionArtifact.Indexes
   alias PtcRunner.Kernel.InspectionArtifact.Items
   alias PtcRunner.Kernel.InspectionArtifact.ValueHash
+  alias PtcRunner.Kernel.QueryCursor
   alias PtcRunner.Kernel.ResultLimit
 
   @default_limit 100
@@ -496,7 +497,12 @@ defmodule PtcRunner.Kernel.InspectionQuery do
       "items" => selected,
       "next_cursor" =>
         if(more?,
-          do: encode_cursor(next_offset, context.snapshot.snapshot_digest, context.page.query_id),
+          do:
+            QueryCursor.encode(
+              next_offset,
+              context.snapshot.snapshot_digest,
+              context.page.query_id
+            ),
           else: nil
         ),
       "truncated" => more?,
@@ -674,53 +680,14 @@ defmodule PtcRunner.Kernel.InspectionQuery do
   end
 
   defp page_options(arguments, source_id, operation) do
-    limit = Map.get(arguments, "limit", @default_limit)
-    query_id = digest({operation, Map.drop(arguments, ["cursor"])})
-
-    with true <- is_integer(limit) and limit in 1..@max_limit,
-         {:ok, offset} <- cursor_offset(Map.get(arguments, "cursor"), source_id, query_id) do
-      {:ok, %{limit: limit, offset: offset, query_id: query_id}}
-    else
-      {:error, _reason} = error -> error
-      _invalid -> {:error, :invalid_query}
-    end
-  end
-
-  defp cursor_offset(nil, _source_id, _query_id), do: {:ok, 0}
-
-  defp cursor_offset(cursor, source_id, query_id)
-       when is_binary(cursor) and byte_size(cursor) <= @max_cursor_bytes do
-    with {:ok, encoded} <- Base.url_decode64(cursor, padding: false),
-         {:ok,
-          %{"offset" => offset, "source" => cursor_source, "query" => cursor_query} = payload} <-
-           Jason.decode(encoded),
-         true <- map_size(payload) == 3,
-         true <- is_integer(offset) and offset >= 0,
-         true <- is_binary(cursor_source) and is_binary(cursor_query) do
-      cond do
-        cursor_source != source_id -> {:error, :source_changed}
-        cursor_query != query_id -> {:error, :invalid_query}
-        true -> {:ok, offset}
-      end
-    else
-      _invalid -> {:error, :invalid_query}
-    end
-  end
-
-  defp cursor_offset(_cursor, _source_id, _query_id), do: {:error, :invalid_query}
-
-  # ex_dna:disable-for-next-line — cursor encoding is intentionally local to the sealed reader
-  defp encode_cursor(offset, source_id, query_id) do
-    %{"offset" => offset, "source" => source_id, "query" => query_id}
-    |> Jason.encode!()
-    |> Base.url_encode64(padding: false)
-  end
-
-  defp digest(value) do
-    value
-    |> :erlang.term_to_binary([:deterministic])
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.url_encode64(padding: false)
+    QueryCursor.page_options(
+      arguments,
+      source_id,
+      {operation, Map.drop(arguments, ["cursor"])},
+      @default_limit,
+      @max_limit,
+      @max_cursor_bytes
+    )
   end
 
   # ex_dna:disable-for-next-line — closed query validation stays beside its production caller

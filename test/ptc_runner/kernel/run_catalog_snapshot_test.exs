@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   alias PtcRunner.Kernel.InspectionArtifact.Format
   alias PtcRunner.Kernel.RunCatalog
   alias PtcRunner.Kernel.RunCatalogSnapshot
+  alias PtcRunner.Lisp.RetainedSize
   alias PtcRunner.TestSupport.PrivateInspectionFixture
 
   @tag :tmp_dir
@@ -26,7 +27,7 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
     assert row["trace_schema_version"] == 2
     assert row["inspection_format_version"] == Format.format_version()
     assert row["inspection_schema_version"] == Format.schema_version()
-    assert row["status"] == "failed"
+    assert row["status"] == "error"
     assert row["complete"] == true
     assert row["start_timestamp"] == "2026-07-26T12:00:01Z"
     assert row["stop_timestamp"] == "2026-07-26T12:00:08Z"
@@ -301,6 +302,265 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
     assert {:ok, %{catalog_digest: later_digest, row_count: 2}} = RunCatalogSnapshot.info(later)
     refute later_digest == digest
     assert Enum.sort([first.run_id, second.run_id]) == Enum.map(rows!(root), & &1["run_id"])
+  end
+
+  @tag :tmp_dir
+  test "paging stays on one frozen generation while the roots grow", %{tmp_dir: root} do
+    first = fixture!(root, 44)
+    second = fixture!(root, 45)
+    File.write!(Path.join(root, "traces/notes.txt"), "excluded\n")
+
+    snapshot = capture!(root)
+
+    assert {:ok,
+            %{
+              "items" => [%{"run_id" => first_run}],
+              "next_cursor" => cursor,
+              "truncated" => true,
+              "omitted_count" => 1,
+              "catalog_digest" => digest,
+              "excluded_files" => excluded_files
+            } = first_page} = RunCatalogSnapshot.query(snapshot, %{"limit" => 1})
+
+    assert first_run == Enum.min([first.run_id, second.run_id])
+    assert is_binary(cursor)
+    assert excluded_files > 0
+
+    third = fixture!(root, 46)
+
+    assert {:ok,
+            %{
+              "items" => [%{"run_id" => second_run}],
+              "next_cursor" => nil,
+              "truncated" => false,
+              "omitted_count" => 0,
+              "catalog_digest" => ^digest,
+              "excluded_files" => ^excluded_files
+            } = second_page} =
+             RunCatalogSnapshot.query(snapshot, %{"limit" => 100, "cursor" => cursor})
+
+    assert second_run == Enum.max([first.run_id, second.run_id])
+    refute second_run == third.run_id
+
+    assert Map.keys(first_page) |> Enum.sort() ==
+             ~w(catalog_digest excluded_files items next_cursor omitted_count truncated)
+
+    assert Map.keys(second_page) |> Enum.sort() ==
+             ~w(catalog_digest excluded_files items next_cursor omitted_count truncated)
+  end
+
+  @tag :tmp_dir
+  test "a cursor from another catalog generation is stale", %{tmp_dir: root} do
+    fixture!(root, 47)
+    fixture!(root, 48)
+    first_generation = capture!(root)
+
+    assert {:ok, %{"next_cursor" => cursor}} =
+             RunCatalogSnapshot.query(first_generation, %{"limit" => 1})
+
+    fixture!(root, 49)
+    second_generation = capture!(root)
+
+    assert {:error, :source_changed} =
+             RunCatalogSnapshot.query(second_generation, %{"limit" => 1, "cursor" => cursor})
+  end
+
+  @tag :tmp_dir
+  test "excluded-file accounting is part of the cursor generation", %{tmp_dir: root} do
+    fixture!(root, 84)
+    fixture!(root, 85)
+    first_generation = capture!(root)
+
+    assert {:ok, %{"next_cursor" => cursor, "catalog_digest" => digest}} =
+             RunCatalogSnapshot.query(first_generation, %{"limit" => 1})
+
+    File.write!(Path.join(root, "traces/notes.txt"), "excluded\n")
+    second_generation = capture!(root)
+
+    assert {:ok, %{catalog_digest: changed, excluded_files: excluded_files}} =
+             RunCatalogSnapshot.info(second_generation)
+
+    refute changed == digest
+    assert excluded_files > 0
+
+    assert {:error, :source_changed} =
+             RunCatalogSnapshot.query(second_generation, %{"limit" => 1, "cursor" => cursor})
+  end
+
+  @tag :tmp_dir
+  test "cursors bind every filter but not the page limit", %{tmp_dir: root} do
+    fixture!(root, 50)
+    fixture!(root, 51)
+    snapshot = capture!(root)
+
+    assert {:ok, %{"next_cursor" => cursor}} =
+             RunCatalogSnapshot.query(snapshot, %{"status" => "error", "limit" => 1})
+
+    assert {:ok, %{"items" => [_], "next_cursor" => nil}} =
+             RunCatalogSnapshot.query(snapshot, %{
+               "status" => "error",
+               "limit" => 100,
+               "cursor" => cursor
+             })
+
+    assert {:error, :invalid_query} =
+             RunCatalogSnapshot.query(snapshot, %{
+               "status" => "succeeded",
+               "cursor" => cursor
+             })
+
+    assert {:error, :invalid_query} =
+             RunCatalogSnapshot.query(snapshot, %{"bundle" => "not-a-catalog-filter"})
+
+    assert {:error, :invalid_query} =
+             RunCatalogSnapshot.query(snapshot, %{"cursor" => cursor <> "tampered"})
+  end
+
+  @tag :tmp_dir
+  test "catalog filters are exact, tags are a subset, and time bounds are inclusive", %{
+    tmp_dir: root
+  } do
+    first = fixture!(root, 52)
+    second = fixture!(root, 53)
+    inspection_only = fixture!(root, 54)
+    isolated = fixture!(root, 55)
+
+    rewrite_started!(root, first.run_id, "2026-07-26T12:00:01Z", %{
+      "name" => "alpha",
+      "model" => "model-a",
+      "provider" => "provider-a",
+      "tags" => %{"arm" => "a", "shared" => true}
+    })
+
+    rewrite_started!(root, second.run_id, "2026-07-26T13:00:01Z", %{
+      "name" => "beta",
+      "model" => "model-b",
+      "provider" => "provider-b",
+      "tags" => %{"arm" => "b", "shared" => true}
+    })
+
+    File.rm!(trace_path(root, inspection_only.run_id))
+    File.write!(trace_path(root, isolated.run_id), "{not-json\n")
+
+    snapshot = capture!(root)
+
+    for {filters, expected} <- [
+          {%{"run_id" => first.run_id}, [first.run_id]},
+          {%{"trace_id" => "trace-#{second.run_id}"}, [second.run_id]},
+          {%{"name" => "alpha"}, [first.run_id]},
+          {%{"model" => "model-b"}, [second.run_id]},
+          {%{"provider" => "provider-a"}, [first.run_id]},
+          {%{"tags" => %{"arm" => "a"}}, [first.run_id]},
+          {%{"tags" => %{"shared" => true}}, Enum.sort([first.run_id, second.run_id])},
+          {%{"from" => "2026-07-26T13:00:01Z"}, [second.run_id]},
+          {%{"to" => "2026-07-26T12:00:01Z"}, [first.run_id]},
+          {%{"correlation" => "inspection_only"}, [inspection_only.run_id]},
+          {%{"state" => "isolated"}, [isolated.run_id]}
+        ] do
+      assert {:ok, %{"items" => items}} = RunCatalogSnapshot.query(snapshot, filters)
+      assert Enum.map(items, & &1["run_id"]) == expected
+    end
+
+    assert {:ok, %{"items" => status_items}} =
+             RunCatalogSnapshot.query(snapshot, %{"status" => "error"})
+
+    assert Enum.map(status_items, & &1["run_id"]) == Enum.sort([first.run_id, second.run_id])
+  end
+
+  @tag :tmp_dir
+  test "query and result limits fail closed", %{tmp_dir: root} do
+    fixture!(root, 56)
+    snapshot = capture!(root)
+
+    for arguments <- [
+          %{"limit" => 0},
+          %{"limit" => 101},
+          %{"cursor" => String.duplicate("x", 1_025)},
+          %{"cursor" => nil},
+          %{"status" => nil},
+          %{"tags" => nil},
+          %{"tags" => String.duplicate("x", 10)},
+          %{"from" => nil},
+          %{"from" => "not-a-timestamp"}
+        ] do
+      assert {:error, :invalid_query} = RunCatalogSnapshot.query(snapshot, arguments)
+    end
+
+    assert {:error, :invalid_query} = RunCatalogSnapshot.query(snapshot, :not_a_map)
+
+    assert {:ok, tiny} =
+             RunCatalogSnapshot.start(catalog_source(root),
+               owner: self(),
+               max_result_bytes: 1
+             )
+
+    on_exit(fn -> RunCatalogSnapshot.stop(tiny) end)
+    assert {:error, :result_limit_exceeded} = RunCatalogSnapshot.query(tiny, %{})
+  end
+
+  @tag :tmp_dir
+  test "the result byte bound returns the largest fitting page prefix", %{tmp_dir: root} do
+    fixture!(root, 58)
+    fixture!(root, 59)
+    baseline = capture!(root)
+
+    assert {:ok, %{"items" => [_], "truncated" => true} = one_item_page} =
+             RunCatalogSnapshot.query(baseline, %{"limit" => 1})
+
+    retained_bytes = RetainedSize.bytes_with_cap(one_item_page, 1_000_000)
+    encoded_bytes = one_item_page |> Jason.encode!() |> byte_size()
+    exact_limit = max(retained_bytes, encoded_bytes)
+
+    assert {:ok, limited} =
+             RunCatalogSnapshot.start(catalog_source(root),
+               owner: self(),
+               max_result_bytes: exact_limit
+             )
+
+    on_exit(fn -> RunCatalogSnapshot.stop(limited) end)
+
+    assert {:ok,
+            %{
+              "items" => [_],
+              "truncated" => true,
+              "omitted_count" => 1,
+              "next_cursor" => cursor
+            }} = RunCatalogSnapshot.query(limited, %{"limit" => 2})
+
+    assert is_binary(cursor)
+  end
+
+  @tag :tmp_dir
+  test "ownership can move exactly once to a live successor", %{tmp_dir: root} do
+    fixture!(root, 57)
+    test = self()
+
+    first_owner =
+      spawn(fn ->
+        send(test, {:owner_ready, self()})
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    assert_receive {:owner_ready, ^first_owner}
+    assert {:ok, snapshot} = RunCatalogSnapshot.start(catalog_source(root), owner: first_owner)
+    on_exit(fn -> RunCatalogSnapshot.stop(snapshot) end)
+
+    assert :ok = RunCatalogSnapshot.transfer_owner(snapshot, self())
+    first_ref = Process.monitor(first_owner)
+    send(first_owner, :stop)
+    assert_receive {:DOWN, ^first_ref, :process, ^first_owner, _reason}
+    assert RunCatalogSnapshot.alive?(snapshot)
+    assert {:ok, %{row_count: 1}} = RunCatalogSnapshot.info(snapshot)
+
+    dead_owner = spawn(fn -> :ok end)
+    dead_ref = Process.monitor(dead_owner)
+    assert_receive {:DOWN, ^dead_ref, :process, ^dead_owner, _reason}
+
+    assert {:error, :catalog_unavailable} =
+             RunCatalogSnapshot.transfer_owner(snapshot, dead_owner)
   end
 
   @tag :tmp_dir
@@ -589,8 +849,18 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
   defp catalog_source(root),
     do: {:private_authorized_catalog, Path.join(root, "traces"), Path.join(root, "inspection")}
 
-  defp fixture!(root, seed),
-    do: PrivateInspectionFixture.create!(root, PrivateInspectionFixture.command_run_ref(seed))
+  defp fixture!(root, seed) do
+    fixture =
+      PrivateInspectionFixture.create!(root, PrivateInspectionFixture.command_run_ref(seed))
+
+    rewrite_trace!(root, fixture.run_id, fn event ->
+      if event["type"] == "run-stopped",
+        do: put_in(event, ["data", "outcome"], "error"),
+        else: event
+    end)
+
+    fixture
+  end
 
   defp trace_path(root, run_id), do: Path.join(root, "traces/#{run_id}.jsonl")
   defp inspection_path(root, run_id), do: Path.join(root, "inspection/#{run_id}.ptcins")
@@ -646,5 +916,17 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshotTest do
       |> Enum.map(transform)
 
     File.write!(path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+  end
+
+  defp rewrite_started!(root, run_id, timestamp, labels) do
+    rewrite_trace!(root, run_id, fn event ->
+      if event["type"] == "run-started" do
+        event
+        |> Map.put("timestamp", timestamp)
+        |> put_in(["data", "labels"], labels)
+      else
+        event
+      end
+    end)
   end
 end

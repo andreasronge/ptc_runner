@@ -663,9 +663,12 @@ ptc repl --project ptc-project.json \
   -e '(analysis/runs {})'
 ```
 
-The public profile derives `traces`; the private profile derives both `traces`
-and `inspection` when those artifact classes are enabled. An explicit
-`--resource NAME=DIR` overrides only that derived resource.
+The public profile derives `traces`; both private profiles derive `traces` and
+`inspection` when those artifact classes are enabled. An explicit `--resource
+NAME=DIR` overrides only that derived resource. Use
+`private-run-catalog-v1` with `(analysis/catalog QUERY)` for bounded safe
+metadata discovery before opening private evidence; the complete query contract
+is in the [Kernel REPL guide](repl.md#discover-a-private-run-catalog).
 
 The [TraceLog and run-analysis reference](../maintainers/trace-log-contract.md) defines
 event schemas,

@@ -54,6 +54,8 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationHandle
+  alias PtcRunner.Kernel.QueryCursor
+  alias PtcRunner.Kernel.QueryValidation
   alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.TraceDirectoryAdmission
@@ -2981,43 +2983,16 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp page_options(arguments, source_id, operation) do
-    limit = Map.get(arguments, "limit", @default_limit)
-    query_id = digest({operation, Map.drop(arguments, ["cursor", "limit"])})
-
-    with true <- is_integer(limit) and limit in 1..@max_limit,
-         {:ok, offset} <- cursor_offset(Map.get(arguments, "cursor"), source_id, query_id) do
-      {:ok, %{limit: limit, offset: offset, query_id: query_id}}
-    else
-      {:error, _reason} = error -> error
-      _ -> {:error, :invalid_query}
-    end
+    QueryCursor.page_options(
+      arguments,
+      source_id,
+      {operation, Map.drop(arguments, ["cursor", "limit"])},
+      @default_limit,
+      @max_limit,
+      @max_cursor_bytes
+    )
   end
-
-  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
-  defp cursor_offset(nil, _source_id, _query_id), do: {:ok, 0}
-
-  defp cursor_offset(cursor, source_id, query_id)
-       when is_binary(cursor) and byte_size(cursor) <= @max_cursor_bytes do
-    with {:ok, encoded} <- Base.url_decode64(cursor, padding: false),
-         {:ok,
-          %{"offset" => offset, "source" => cursor_source, "query" => cursor_query} = payload} <-
-           Jason.decode(encoded),
-         true <- map_size(payload) == 3,
-         true <- is_integer(offset) and offset >= 0,
-         true <- is_binary(cursor_source) and is_binary(cursor_query) do
-      cond do
-        cursor_source != source_id -> {:error, :source_changed}
-        cursor_query != query_id -> {:error, :invalid_query}
-        true -> {:ok, offset}
-      end
-    else
-      _ -> {:error, :invalid_query}
-    end
-  end
-
-  defp cursor_offset(_cursor, _source_id, _query_id), do: {:error, :invalid_query}
 
   defp paginate(
          items,
@@ -3149,23 +3124,11 @@ defmodule PtcRunner.Kernel.TraceLog do
 
     Map.merge(metadata, %{
       "items" => selected,
-      "next_cursor" => if(more?, do: encode_cursor(next_offset, source_id, query_id), else: nil),
+      "next_cursor" =>
+        if(more?, do: QueryCursor.encode(next_offset, source_id, query_id), else: nil),
       "truncated" => more?,
       "omitted_count" => max(length(all_items) - next_offset, 0)
     })
-  end
-
-  defp encode_cursor(offset, source_id, query_id) do
-    %{"offset" => offset, "source" => source_id, "query" => query_id}
-    |> Jason.encode!()
-    |> Base.url_encode64(padding: false)
-  end
-
-  defp digest(value) do
-    value
-    |> :erlang.term_to_binary([:deterministic])
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.url_encode64(padding: false)
   end
 
   defp validate_run_filters(arguments) do
@@ -3201,36 +3164,19 @@ defmodule PtcRunner.Kernel.TraceLog do
       else: {:error, :invalid_query}
   end
 
-  defp valid_string(value)
-       when is_binary(value) and byte_size(value) in 1..@max_string_bytes,
-       do: if(String.valid?(value), do: :ok, else: {:error, :invalid_query})
-
-  defp valid_string(_value), do: {:error, :invalid_query}
+  defp valid_string(value), do: QueryValidation.string(value, @max_string_bytes)
   defp valid_tags(nil), do: :ok
-
-  defp valid_tags(tags) when is_map(tags) and map_size(tags) <= 16 do
-    if Enum.all?(tags, fn {key, value} -> valid_string(key) == :ok and JSONValue.value?(value) end),
-       do: :ok,
-       else: {:error, :invalid_query}
-  end
-
-  defp valid_tags(_tags), do: {:error, :invalid_query}
+  defp valid_tags(tags), do: QueryValidation.tags(tags, @max_string_bytes)
   defp valid_timestamp(nil), do: :ok
-
-  defp valid_timestamp(timestamp) when is_binary(timestamp) do
-    case DateTime.from_iso8601(timestamp) do
-      {:ok, _datetime, 0} -> :ok
-      _ -> {:error, :invalid_query}
-    end
-  end
-
-  defp valid_timestamp(_timestamp), do: {:error, :invalid_query}
+  defp valid_timestamp(timestamp), do: QueryValidation.timestamp(timestamp)
 
   defp validate_keys(arguments, allowed) do
     if JSONValue.map?(arguments) and Map.keys(arguments) -- allowed == [],
       do: :ok,
       else: {:error, :invalid_query}
   end
+
+  defp digest(value), do: QueryCursor.query_digest(value)
 
   defp event_data(nil, _key), do: nil
   defp event_data(event, key), do: get_in(event, ["data", key])

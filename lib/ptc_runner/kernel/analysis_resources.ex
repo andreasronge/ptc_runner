@@ -2,20 +2,24 @@ defmodule PtcRunner.Kernel.AnalysisResources do
   @moduledoc false
 
   alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.RunCatalogSnapshot
   alias PtcRunner.Kernel.TraceSnapshot
 
   @public_profile "run-analysis-v1"
   @private_profile "private-run-analysis-v1"
+  @catalog_profile "private-run-catalog-v1"
 
   @enforce_keys [:profile_id, :handles]
   defstruct [:profile_id, :handles]
 
   @type t :: %__MODULE__{
           profile_id: binary(),
-          handles: %{
-            required(:traces) => TraceSnapshot.t(),
-            optional(:inspection) => InspectionSnapshot.t()
-          }
+          handles:
+            %{
+              required(:traces) => TraceSnapshot.t(),
+              optional(:inspection) => InspectionSnapshot.t()
+            }
+            | %{required(:catalog) => RunCatalogSnapshot.t()}
         }
 
   @doc false
@@ -39,6 +43,13 @@ defmodule PtcRunner.Kernel.AnalysisResources do
       profile_id: @private_profile,
       handles: %{traces: traces, inspection: inspection}
     }
+
+    if valid?(resources), do: {:ok, resources}, else: {:error, :invalid_analysis_resources}
+  end
+
+  def new(@catalog_profile, %{catalog: catalog} = handles)
+      when map_size(handles) == 1 do
+    resources = %__MODULE__{profile_id: @catalog_profile, handles: %{catalog: catalog}}
 
     if valid?(resources), do: {:ok, resources}, else: {:error, :invalid_analysis_resources}
   end
@@ -68,12 +79,20 @@ defmodule PtcRunner.Kernel.AnalysisResources do
       InspectionSnapshot.valid?(inspection)
   end
 
+  def valid?(%__MODULE__{
+        profile_id: @catalog_profile,
+        handles: %{catalog: catalog} = handles
+      }) do
+    map_size(handles) == 1 and RunCatalogSnapshot.valid?(catalog) and
+      match?({:ok, %{source: :ptc_run_catalog}}, RunCatalogSnapshot.info(catalog))
+  end
+
   def valid?(_resources), do: false
 
   @doc false
-  @spec handle(t(), :traces | :inspection) ::
-          TraceSnapshot.t() | InspectionSnapshot.t() | nil
-  def handle(%__MODULE__{handles: handles}, name) when name in [:traces, :inspection],
+  @spec handle(t(), :traces | :inspection | :catalog) ::
+          TraceSnapshot.t() | InspectionSnapshot.t() | RunCatalogSnapshot.t() | nil
+  def handle(%__MODULE__{handles: handles}, name) when name in [:traces, :inspection, :catalog],
     do: Map.get(handles, name)
 
   @doc false
@@ -92,6 +111,12 @@ defmodule PtcRunner.Kernel.AnalysisResources do
     end
   end
 
+  def info(%__MODULE__{profile_id: @catalog_profile} = resources) do
+    resources
+    |> handle(:catalog)
+    |> RunCatalogSnapshot.info()
+  end
+
   def info(_resources), do: {:error, :invalid_analysis_resources}
 
   @doc false
@@ -103,6 +128,20 @@ defmodule PtcRunner.Kernel.AnalysisResources do
       when is_pid(owner) do
     with true <- valid?(resources),
          :ok <- TraceSnapshot.transfer_owner(traces, owner) do
+      :ok
+    else
+      false -> {:error, :invalid_analysis_resources}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def transfer_owner(
+        %__MODULE__{profile_id: @catalog_profile, handles: %{catalog: catalog}} = resources,
+        owner
+      )
+      when is_pid(owner) do
+    with true <- valid?(resources),
+         :ok <- RunCatalogSnapshot.transfer_owner(catalog, owner) do
       :ok
     else
       false -> {:error, :invalid_analysis_resources}
@@ -146,6 +185,11 @@ defmodule PtcRunner.Kernel.AnalysisResources do
     :ok
   end
 
+  def stop(%__MODULE__{profile_id: @catalog_profile, handles: %{catalog: catalog}}) do
+    RunCatalogSnapshot.stop(catalog)
+    :ok
+  end
+
   def stop(_resources), do: :ok
 
   @doc false
@@ -158,6 +202,9 @@ defmodule PtcRunner.Kernel.AnalysisResources do
         handles: %{traces: traces, inspection: inspection}
       }),
       do: TraceSnapshot.alive?(traces) or InspectionSnapshot.alive?(inspection)
+
+  def alive?(%__MODULE__{profile_id: @catalog_profile, handles: %{catalog: catalog}}),
+    do: RunCatalogSnapshot.alive?(catalog)
 
   def alive?(_resources), do: false
 end

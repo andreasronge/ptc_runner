@@ -327,6 +327,27 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
              "inspection=#{Path.join([target, ".ptc", "inspection"])}"
            ]
 
+    assert {:ok, catalog_entry} =
+             CommandEntry.open_with_ref(
+               [
+                 "repl",
+                 "--project",
+                 project_path,
+                 "--profile",
+                 "private-run-catalog-v1",
+                 "--private-unattended",
+                 "--eval",
+                 "(analysis/catalog {})"
+               ],
+               :mix,
+               "cmd-00000000000000000000000000"
+             )
+
+    assert Keyword.get_values(catalog_entry.arguments.ordered_options, :resource) == [
+             "traces=#{Path.join([target, ".ptc", "traces"])}",
+             "inspection=#{Path.join([target, ".ptc", "inspection"])}"
+           ]
+
     explicit = Path.join(target, "captured-traces")
 
     assert {:ok, overridden} =

@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.CommandParser do
   alias PtcRunner.Kernel.ViewerBinding
 
   @type frontend :: CommandDeclaration.frontend()
+  @private_output_profiles ~w(private-run-analysis-v1 private-run-catalog-v1)
 
   @spec parse([binary()], frontend()) ::
           {:ok, CommandArguments.t()} | {:error, CommandRejection.t()}
@@ -425,7 +426,7 @@ defmodule PtcRunner.Kernel.CommandParser do
         not Map.get(options, :continue_on_error, false) and
         ((output? and options[:profile] == "run-analysis-v1" and
             not Map.get(options, :private_unattended, false)) or
-           (private_output? and options[:profile] == "private-run-analysis-v1" and
+           (private_output? and options[:profile] in @private_output_profiles and
               Map.get(options, :private_unattended, false)))
     else
       true
