@@ -8,7 +8,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   inspects a lower-level reason or rejected value. Catalog-authorized dynamic
   message shapes contain only fixed literals plus bounded PTC-Lisp symbol
   names, sealed provider-selection field names, a catalog-validated runtime
-  ceiling or optional-budget request, a closed host budget prerequisite, a
+  ceiling or optional-limit request, a closed host budget prerequisite, a
   bounded agent turn ceiling, an opaque replay request hash, or a closed
   component-override field rule. Compile messages require
   component-source provenance; a missing capability message is rebuilt from

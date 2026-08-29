@@ -217,6 +217,7 @@ defmodule PtcRunner.Lisp.IntegrationTest do
         {"tool configuration", "nil", [tools: %{"bad" => :not_a_tool}], :invalid_tool},
         {"signature", "nil", [signature: "("], :parse_error},
         {"parallel configuration", "nil", [max_parallel_workers: 0], :invalid_config},
+        {"loop limit configuration", "nil", [loop_limit: 0], :invalid_config},
         {"prelude attachment", "nil", [prelude: prelude], :prelude_attach_failed}
       ]
 

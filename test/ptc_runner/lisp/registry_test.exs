@@ -331,7 +331,7 @@ defmodule PtcRunner.Lisp.RegistryTest do
       # DIV-14: if-let / when-let only support single symbol bindings
       "if-let" => "DIV-14",
       "when-let" => "DIV-14",
-      # DIV-01: iteration cap on loop / recur / defn (self-recursion)
+      # DIV-01: optional per-activation iteration cap on loop / recur / defn (self-recursion)
       "defn" => "DIV-01",
       "loop" => "DIV-01",
       "recur" => "DIV-01",

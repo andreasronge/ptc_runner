@@ -80,7 +80,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:application, :installed_limit_exceeded, 3, false,
      "an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling"},
     {:application, :limit_unavailable, 3, false,
-     "an optional application budget is unavailable because the host has not enabled it"},
+     "an optional application limit is unavailable because the host has not enabled it"},
     {:application, :limit_configuration_invalid, 3, false,
      "normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes"},
     {:application, :required_property_missing, 3, false,

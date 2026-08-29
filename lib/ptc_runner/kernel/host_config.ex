@@ -1525,8 +1525,7 @@ defmodule PtcRunner.Kernel.HostConfig do
               "Installed ceiling for #{row.name}; a manifest may only request less."
 
             :optional_manifest_narrowable ->
-              "Optional aggregate budget for #{row.name}; omission disables it. " <>
-                row.prerequisite_description
+              optional_limit_schema_description(row)
 
             :installed_only ->
               "Installed-only operational limit for #{row.name}; applications cannot declare it."
@@ -1542,6 +1541,15 @@ defmodule PtcRunner.Kernel.HostConfig do
       "description",
       "Optional installed ceilings. Omitted limits keep their cataloged installed defaults."
     )
+  end
+
+  defp optional_limit_schema_description(%{name: name, prerequisite_description: description})
+       when is_binary(description) and description != "" do
+    "Optional limit for #{name}; omission disables it. " <> description
+  end
+
+  defp optional_limit_schema_description(%{name: name}) do
+    "Optional limit for #{name}; omission disables it. A positive value enables it and becomes the inherited manifest default and installed ceiling."
   end
 
   defp runtime_schema do

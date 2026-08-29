@@ -490,6 +490,13 @@ ceilings for an application that selects no providers:
 }
 ```
 
+Optional rows (`llm_total_tokens`, `llm_cost_microusd`,
+`workflow_loop_iterations`, `evaluation_loop_iterations`) are disabled when
+omitted. A positive host value enables the row, becomes the inherited manifest
+default and installed ceiling, and may be narrowed by the application. The LLM
+budget rows also require live-installation prerequisites; the loop-iteration
+rows do not.
+
 The four heap and concurrency rows (`workflow_heap_words`,
 `evaluation_heap_words`, `provider_heap_words`, `live_provider_tasks`) and
 `llm_request_timeout_ms` have no manifest headroom. Raising a heap or concurrency

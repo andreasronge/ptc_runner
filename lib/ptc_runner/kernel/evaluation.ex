@@ -391,6 +391,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       max_heap: limits.evaluation_heap_words,
       max_parallel_workers: limits.live_provider_tasks,
       max_program_bytes: limits.subordinate_source_bytes,
+      loop_limit: limits.evaluation_loop_iterations,
       filter_context: false,
       caller: :kernel,
       preserve_runtime_callables: true,

@@ -807,6 +807,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         max_parallel_workers: limits.live_provider_tasks,
         max_program_bytes: limits.subordinate_source_bytes,
         max_tool_call_result_bytes: limits.capability_result_bytes,
+        loop_limit: limits.evaluation_loop_iterations,
         preserve_runtime_callables: true,
         filter_context: false,
         link: true,

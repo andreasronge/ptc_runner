@@ -1199,7 +1199,7 @@ Syntactic sugar for defining named functions in the user namespace:
 ```
 
 **Safety Mechanism:**
-PTC-Lisp enforces an iteration limit on `loop`/`recur` jumps. If a `loop` or tail-recursive function using `recur` exceeds the allowed number of iterations (default 1000), execution is terminated with a `loop_limit_exceeded` error. Ordinary non-tail function recursion is not counted by this limit; it remains bounded by the sandbox timeout and memory limit.
+PTC-Lisp does not count `loop`/`recur` jumps by default. Direct embedders may pass `:loop_limit`, and Kernel hosts may enable `workflow_loop_iterations` or `evaluation_loop_iterations`. When a positive limit is configured, it applies to one `loop` or tail-recursive function activation: entering the loop or calling the function starts the counter at zero, and each `recur` jump to that head consumes one iteration. Sequential loops, nested loops, and separate higher-order callback invocations are separate activations. If that activation exceeds the configured limit, execution is terminated with a `loop_limit_exceeded` error. Ordinary non-tail function recursion and host collection traversal (`map`, `reduce`, and similar) are not counted. Heap and elapsed-time limits remain the containment boundaries.
 
 ### 5.17 `for` — Eager Comprehension
 
@@ -4048,7 +4048,7 @@ identify the phase as `:setup`; evaluation-phase failures identify `:eval`.
 | `:unbound_var` | Unknown symbol/variable |
 | `:not_callable` | Attempt to call a non-callable value |
 | `:runtime_error` | General runtime evaluation error |
-| `:loop_limit_exceeded` | `loop`/`recur` iteration limit exceeded |
+| `:loop_limit_exceeded` | Configured `loop`/`recur` iteration limit exceeded |
 | `:unknown_tool` | Tool not registered |
 | `:tool_error` | Tool execution failed |
 | `:destructure_error` | Destructuring pattern mismatch |
@@ -4706,7 +4706,7 @@ does not promise a retry.
 | Concern | Mitigation |
 |---------|------------|
 | Memory exhaustion | Max memory size limit |
-| Infinite loops | Timeout + loop iteration limit (default 1000) |
+| Infinite loops | Timeout; optional per-activation loop/tail-recur limit when configured |
 | Unbounded recursion | Timeout + memory limit |
 | Tool abuse | Explicit capability grants; Kernel total/per-name quotas; optional direct `max_tool_calls` |
 | Data exfiltration | Tools are host-controlled, audited |
