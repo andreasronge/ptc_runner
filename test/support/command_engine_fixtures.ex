@@ -160,12 +160,13 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
 
   def run_success_fixture(artifact_class, result) do
     %{
-      "schema_version" => 3,
+      "schema_version" => 4,
       "command" => "run",
       "status" => "ok",
       "run_ref" => CommandRunRef.encode(@zero_entropy),
       "result" => result,
       "secondary_errors" => [],
+      "warnings" => [],
       "artifact_state" => %{
         "trace" => "not_requested",
         "inspection" => "not_requested",

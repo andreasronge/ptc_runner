@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   @moduledoc """
   Sealed command result returned to frontends.
 
-  It carries a validated V3 envelope and status. Frontends must call
+  It carries a validated V4 envelope and status. Frontends must call
   `to_map/1` at the rendering boundary so a mutated or caller-authored struct
   cannot be emitted. Outcomes never write a stream, raise through Mix, halt the
   VM, or exit the operating-system process.
@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.DiagnosticCatalog
 
   @non_run_modes [
@@ -174,10 +175,18 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   end
 
   @doc false
-  @spec run_success(binary(), :normal | :private, term(), map(), map(), map()) :: t()
-  def run_success(run_ref, result_class, value, artifact_state, usage, evaluation_memory)
+  @spec run_success(binary(), :normal | :private, term(), map(), map(), map(), [map()]) :: t()
+  def run_success(
+        run_ref,
+        result_class,
+        value,
+        artifact_state,
+        usage,
+        evaluation_memory,
+        warnings \\ []
+      )
       when result_class in [:normal, :private] and is_map(artifact_state) and is_map(usage) and
-             is_map(evaluation_memory) do
+             is_map(evaluation_memory) and is_list(warnings) do
     result =
       case result_class do
         :normal -> %{"result_class" => "normal", "value" => value}
@@ -185,12 +194,13 @@ defmodule PtcRunner.Kernel.CommandOutcome do
       end
 
     envelope = %{
-      "schema_version" => 3,
+      "schema_version" => 4,
       "command" => "run",
       "status" => "ok",
       "run_ref" => run_ref,
       "result" => result,
       "secondary_errors" => [],
+      "warnings" => warnings,
       "artifact_state" => artifact_state,
       "artifact_class" => Atom.to_string(result_class),
       "execution" => %{
@@ -213,7 +223,8 @@ defmodule PtcRunner.Kernel.CommandOutcome do
           CommandDiagnostic.t(),
           [CommandDiagnostic.t()],
           map(),
-          map()
+          map(),
+          [map()]
         ) :: t()
   def run_classified_error(
         run_ref,
@@ -221,17 +232,21 @@ defmodule PtcRunner.Kernel.CommandOutcome do
         %CommandDiagnostic{} = diagnostic,
         secondary,
         artifact_state,
-        execution
+        execution,
+        warnings \\ []
       )
       when result_class in [:normal, :private] and is_list(secondary) and
-             length(secondary) <= 6 and is_map(artifact_state) and is_map(execution) do
+             length(secondary) <= 6 and is_map(artifact_state) and is_map(execution) and
+             is_list(warnings) do
     if CommandRunRef.valid?(run_ref) and CommandDiagnostic.valid?(diagnostic) and
          Enum.all?(secondary, &CommandDiagnostic.valid?/1) and
+         valid_warnings?(warnings) and
          valid_mode_diagnostics?(:run, [diagnostic | secondary]) and
          valid_compound_diagnostics?(diagnostic, secondary) do
       envelope =
         error_envelope(:run, run_ref, diagnostic, secondary)
         |> Map.merge(%{
+          "warnings" => warnings,
           "artifact_state" => artifact_state,
           "artifact_class" => Atom.to_string(result_class),
           "execution" => execution
@@ -252,11 +267,12 @@ defmodule PtcRunner.Kernel.CommandOutcome do
       seal(
         command_mode,
         %{
-          "schema_version" => 3,
+          "schema_version" => 4,
           "command" => Atom.to_string(public_command),
           "status" => "ok",
           "run_ref" => run_ref,
-          "result" => result
+          "result" => result,
+          "warnings" => []
         },
         0
       )
@@ -269,7 +285,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     do: raise(ArgumentError, "invalid closed command outcome")
 
   @doc """
-  Checks the complete sealed outcome, including its exact fields, V3 envelope,
+  Checks the complete sealed outcome, including its exact fields, V4 envelope,
   command mode, exit status, and in-VM construction attestation.
   """
   @spec valid?(term()) :: boolean()
@@ -291,7 +307,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
 
   def valid?(_outcome), do: false
 
-  @doc "Returns the validated V3 envelope for rendering."
+  @doc "Returns the validated V4 envelope for rendering."
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = outcome) do
     if valid?(outcome),
@@ -303,12 +319,13 @@ defmodule PtcRunner.Kernel.CommandOutcome do
 
   defp error_envelope(command_mode, run_ref, diagnostic, secondary) do
     %{
-      "schema_version" => 3,
+      "schema_version" => 4,
       "command" => command_mode |> public_command() |> Atom.to_string(),
       "status" => "error",
       "run_ref" => run_ref,
       "error" => CommandDiagnostic.to_map(diagnostic),
-      "secondary_errors" => Enum.map(secondary, &CommandDiagnostic.to_map/1)
+      "secondary_errors" => Enum.map(secondary, &CommandDiagnostic.to_map/1),
+      "warnings" => []
     }
   end
 
@@ -328,6 +345,11 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   end
 
   defp payload(outcome), do: {outcome.command_mode, outcome.envelope, outcome.exit_status}
+
+  defp valid_warnings?(warnings) when is_list(warnings) and length(warnings) <= 128,
+    do: Enum.all?(warnings, &CommandWarning.valid_map?/1)
+
+  defp valid_warnings?(_warnings), do: false
 
   defp public_command({:doctor, :connect}), do: :doctor
   defp public_command(command) when is_atom(command), do: command

@@ -651,7 +651,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
                ), true}
 
             {:error, :inspection_sink_error} ->
-              {{:settlement, {:adapter_error, :cancelled}, inspection_failure(state)}, false}
+              {{:settlement, {:adapter_error, :not_dispatched}, inspection_failure(state)}, false}
           end
 
         {settlement, invocation_result} = split_settlement(invocation_result)
@@ -738,6 +738,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
           invocation.event_attributes
           |> maybe_merge_error_attributes(result, invocation.error_attributes)
           |> maybe_put_usage(result, invocation.usage_projection)
+          |> maybe_put_settlement_usage(settlement, invocation.usage_projection)
+          |> maybe_put_usage_observation(settlement, invocation.usage_projection)
           |> maybe_put_llm_result_metadata(result, invocation.usage_projection)
           |> Map.merge(%{
             capability_id: capability_id,
@@ -767,7 +769,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
         maybe_merge_error_attributes(result, result, invocation.error_attributes)
 
       {:error, :event_sink_error} ->
-        _ = RunState.finish_provider(state, reservation_id, {:adapter_error, :cancelled})
+        _ = RunState.finish_provider(state, reservation_id, {:adapter_error, :not_dispatched})
 
         limit_error(
           state,
@@ -977,7 +979,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
           limit_error(state, nil, :run_deadline)
         end
 
-      {:settlement, {:adapter_error, :timeout}, result}
+      {:settlement, {:adapter_error, :not_dispatched}, result}
     else
       parent = self()
       go = make_ref()
@@ -1017,10 +1019,8 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
       case RunState.attach_provider(state, reservation_id, pid) do
         :ok ->
-          case RunState.mark_provider_dispatched(state, reservation_id, pid) do
+          case RunState.open_provider_gate(state, reservation_id, pid, go) do
             :ok ->
-              send(pid, go)
-
               await_provider(
                 state,
                 reservation_id,
@@ -1032,11 +1032,24 @@ defmodule PtcRunner.Kernel.Dispatcher do
                 validation
               )
 
-            {:error, _reason} ->
+            {:error, reason}
+            when reason in [
+                   :provider_mismatch,
+                   :run_closed,
+                   :unknown_reservation
+                 ] ->
               Process.exit(pid, :kill)
               await_down(pid, ref)
 
-              {:settlement, {:adapter_error, :cancelled}, limit_error(state, nil, :run_closed)}
+              {:settlement, {:adapter_error, :not_dispatched},
+               limit_error(state, nil, :run_closed)}
+
+            {:error, reason} when reason in [:already_dispatched, :dispatch_unknown] ->
+              Process.exit(pid, :kill)
+              await_down(pid, ref)
+
+              {:settlement, {:adapter_error, :provider_error},
+               limit_error(state, nil, :run_closed)}
           end
 
         {:error, :provider_down} ->
@@ -1044,7 +1057,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
           # The provider died before the gate opened, so the callback never
           # ran and no effect can have reached the outside world.
-          {:settlement, {:adapter_error, :worker_exit},
+          {:settlement, {:adapter_error, :not_dispatched},
            post_invocation_failure(
              provider_exit(reason),
              environment,
@@ -1054,7 +1067,7 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
         {:error, reason} when reason in [:closed, :unknown_reservation] ->
           await_down(pid, ref)
-          {:settlement, {:adapter_error, :cancelled}, limit_error(state, nil, :run_closed)}
+          {:settlement, {:adapter_error, :not_dispatched}, limit_error(state, nil, :run_closed)}
       end
     end
   end
@@ -1180,6 +1193,13 @@ defmodule PtcRunner.Kernel.Dispatcher do
   end
 
   defp settlement_evidence({:ok, _value}), do: {:adapter_success, :invalid}
+
+  defp settlement_evidence({:error, %ProviderError{dispatch_provenance: :not_dispatched} = error}) do
+    if ProviderError.valid?(error),
+      do: {:adapter_error, :not_dispatched},
+      else: {:adapter_error, :provider_error}
+  end
+
   defp settlement_evidence(_error), do: {:adapter_error, :provider_error}
 
   defp settle_provider_result(
@@ -1932,6 +1952,24 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp maybe_put_usage(data, _result, nil), do: data
 
+  defp maybe_put_settlement_usage(data, {:adapter_success, {:valid, usage}}, :llm_tokens),
+    do: Map.put_new(data, :usage, usage)
+
+  defp maybe_put_settlement_usage(data, _settlement, _usage_projection), do: data
+
+  defp maybe_put_usage_observation(data, settlement, :llm_tokens) do
+    observation =
+      case settlement do
+        {:adapter_success, {:valid, _usage}} -> :reported
+        {:adapter_error, :not_dispatched} -> :not_expected
+        _missing_or_invalid -> :missing
+      end
+
+    Map.put(data, :usage_observation, observation)
+  end
+
+  defp maybe_put_usage_observation(data, _settlement, _usage_projection), do: data
+
   defp merge_result_attributes(%{status: :ok, value: value}, attributes)
        when is_map(value) and is_map(attributes) and map_size(attributes) > 0,
        do: %{status: :ok, value: Map.merge(value, attributes)}
@@ -2125,9 +2163,10 @@ defmodule PtcRunner.Kernel.Dispatcher do
     revision = Map.get(data, :installation_revision) || Map.get(data, "installation_revision")
     status = Map.get(data, :status) || Map.get(data, "status")
     usage = Map.get(data, :usage) || Map.get(data, "usage")
+    observation = Map.get(data, :usage_observation) || Map.get(data, "usage_observation")
 
     if llm_spend_identity?(name, alias_name, revision) do
-      case spend_status(status) do
+      case spend_status(status, observation) do
         nil -> :ok
         normalized -> RunState.record_llm_usage(state, alias_name, revision, normalized, usage)
       end
@@ -2143,9 +2182,14 @@ defmodule PtcRunner.Kernel.Dispatcher do
 
   defp llm_spend_identity?(_name, _alias_name, _revision), do: false
 
-  defp spend_status(status) when status in [:ok, "ok"], do: :ok
-  defp spend_status(status) when status in [:error, "error"], do: :error
-  defp spend_status(_status), do: nil
+  defp spend_status(status, _observation) when status in [:ok, "ok"], do: :ok
+
+  defp spend_status(status, observation)
+       when status in [:error, "error"] and observation in [:not_expected, "not_expected"],
+       do: :not_dispatched
+
+  defp spend_status(status, _observation) when status in [:error, "error"], do: :error
+  defp spend_status(_status, _observation), do: nil
 
   defp validate_size(value, cap) do
     case RetainedSize.bytes_with_cap(value, cap) do

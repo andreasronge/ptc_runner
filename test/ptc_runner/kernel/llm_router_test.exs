@@ -1901,7 +1901,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              )
 
     assert {:error, error} = capability.callback.(%{"messages" => []})
-    assert error.kind == :invalid_result
+    assert error.kind == :usage_unavailable
   end
 
   test "the response boundary measures the final fixed-point usage object" do
@@ -1947,7 +1947,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert error.details == "LLM response exceeded its boundary"
   end
 
-  test "missing promised usage is a non-retryable invalid provider result" do
+  test "missing promised usage is a non-retryable dispatched usage failure" do
     assert {:ok, capability} =
              LLMCapability.new(
                requester: fn _request -> {:ok, %{content: "answer"}} end,
@@ -1955,8 +1955,9 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              )
 
     assert {:error, error} = capability.callback.(%{"messages" => []})
-    assert error.kind == :invalid_result
+    assert error.kind == :usage_unavailable
     assert error.retryable? == false
+    assert error.dispatch_provenance == :dispatched
 
     assert {:ok, unpriced} =
              LLMCapability.new(

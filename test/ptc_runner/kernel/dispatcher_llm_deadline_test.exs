@@ -3,14 +3,19 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
 
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CapabilityInvocation
+  alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.LLM.Invocation
+  alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.LLM.Requirements
   alias PtcRunner.TestSupport.TestHelpers
 
   @schema %{
@@ -136,6 +141,82 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
 
     assert_received :attesting_reservation
     refute_received :provider_called
+  end
+
+  test "an enclosing deadline expiring after reservation records no provider dispatch" do
+    parent = self()
+    deadline = Deadline.new(100)
+
+    {result, state, sink} =
+      dispatch_llm(parent,
+        run_deadline: deadline,
+        limits: [llm_total_tokens: 10_000],
+        before_dispatch: fn sink ->
+          :ok = :sys.suspend(sink.pid)
+
+          resume =
+            Task.async(fn ->
+              wait_until(Deadline.expires_at(deadline) + 10)
+              :ok = :sys.resume(sink.pid)
+            end)
+
+          fn -> Task.await(resume) end
+        end,
+        requester: fn _request, _context ->
+          send(parent, :provider_called)
+          {:ok, %{content: "unreachable", tokens: %{input: 1, output: 1}}}
+        end
+      )
+
+    assert %{status: :error, kind: :limit_exceeded, reason: reason} = result
+    assert reason in [:run_deadline, :run_closed]
+    refute_received :provider_called
+
+    assert %{data: %{usage_observation: :not_expected}} =
+             Enum.find(EventSink.events(sink), &(&1.type == "capability-stopped"))
+
+    assert RunState.usage(state).llm_budget["total_tokens"]["charged"] == 0
+  end
+
+  test "a direct-route tool refusal releases its reservation without expecting usage" do
+    assert {:ok, target, :unavailable, _attestation} =
+             ReqLLMAdapter.prepare_model(
+               "ollama:local-model",
+               Requirements.interim(%{max_tokens: 64})
+             )
+
+    {result, state, sink} =
+      dispatch_llm(self(),
+        limits: [llm_total_tokens: 10_000],
+        arguments: %{
+          "messages" => [],
+          "tools" => [
+            %{
+              "type" => "function",
+              "function" => %{
+                "name" => "lookup",
+                "description" => "fixture",
+                "parameters" => %{"type" => "object", "properties" => %{}}
+              }
+            }
+          ]
+        },
+        requester: fn request, %{llm_request_deadline_ms: deadline} ->
+          {:ok, invocation} =
+            request
+            |> ProviderRegistry.adapter_request()
+            |> Invocation.new(false, "test", deadline)
+
+          ReqLLMAdapter.call(target, invocation)
+        end
+      )
+
+    assert %{status: :error, kind: :provider_error, reason: :invalid_request} = result
+
+    assert %{data: %{usage_observation: :not_expected}} =
+             Enum.find(EventSink.events(sink), &(&1.type == "capability-stopped"))
+
+    assert RunState.usage(state).llm_budget["total_tokens"]["charged"] == 0
   end
 
   test "an equal enclosing dispatch timeout keeps provider_timeout" do
@@ -428,7 +509,7 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
     assert {:ok, router} = LLMRouter.new([route])
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [router])
     {:ok, limits} = Limits.new(Keyword.get(opts, :limits, []))
-    {:ok, state} = RunState.start(limits)
+    {:ok, state} = RunState.start(limits, run_deadline: Keyword.get(opts, :run_deadline))
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "llm-deadline")
     timeout_ms = Keyword.get(opts, :timeout_ms, 1_000)
     arguments = Keyword.get(opts, :arguments, %{})
@@ -439,17 +520,23 @@ defmodule PtcRunner.Kernel.DispatcherLlmDeadlineTest do
         deadline_ms -> [validation_deadline_ms: deadline_ms]
       end
 
+    cleanup = Keyword.get(opts, :before_dispatch, fn _sink -> fn -> :ok end end).(sink)
+
     result =
-      Dispatcher.dispatch(
-        state,
-        :workflow,
-        environment,
-        "llm-request",
-        arguments,
-        TestHelpers.dispatch_context(state, :workflow, timeout_ms, dispatch_opts),
-        sink,
-        nil
-      )
+      try do
+        Dispatcher.dispatch(
+          state,
+          :workflow,
+          environment,
+          "llm-request",
+          arguments,
+          TestHelpers.dispatch_context(state, :workflow, timeout_ms, dispatch_opts),
+          sink,
+          nil
+        )
+      after
+        cleanup.()
+      end
 
     {result, state, sink}
   end

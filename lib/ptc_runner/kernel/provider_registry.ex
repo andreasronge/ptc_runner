@@ -7,7 +7,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   receive a path-free application identity, requested workflow or mission
   destination, building owner, and installed limits. Acquisition returns a
   normalized provider build with one or more capabilities, an optional safe
-  snapshot, and an optional idempotent
+  snapshot, bounded closed command warnings, and an optional idempotent
   close function. A close function must return exactly `:ok`; any other return,
   exception, or exit is a provider-cleanup failure. The Kernel still attempts
   every registered close function and may replace the run outcome with
@@ -71,6 +71,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.JSONValue
@@ -127,7 +128,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           close: close() | nil,
           data_class: :normal | :private_inspection,
           accepts_data: [:normal | :private_inspection],
-          exports: %{optional(atom()) => term()}
+          exports: %{optional(atom()) => term()},
+          warnings: [CommandWarning.t()]
         }
   @type credential_values :: %{binary() => binary()}
   @type acquisition_services :: %{optional(atom()) => term()}
@@ -706,16 +708,18 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
     data_class = Map.get(built, :data_class, :normal)
     accepts_data = Map.get(built, :accepts_data, [:normal])
     exports = Map.get(built, :exports, %{})
+    warnings = Map.get(built, :warnings, [])
 
     if Map.keys(built) --
-         [:capabilities, :snapshot, :close, :data_class, :accepts_data, :exports] == [] and
+         [:capabilities, :snapshot, :close, :data_class, :accepts_data, :exports, :warnings] == [] and
          valid_capabilities?(capabilities, provides) and
          (is_nil(snapshot) or JSONValue.map?(snapshot)) and
          (is_nil(close) or is_function(close, 0)) and
          data_class in [:normal, :private_inspection] and
          accepts_data != [] and accepts_data == Enum.uniq(accepts_data) and
          Enum.all?(accepts_data, &(&1 in [:normal, :private_inspection])) and
-         is_map(exports) and Enum.sort(Map.keys(exports)) == Enum.sort(provides) do
+         is_map(exports) and Enum.sort(Map.keys(exports)) == Enum.sort(provides) and
+         valid_warnings?(warnings) do
       {:ok,
        %{
          capabilities: capabilities,
@@ -723,7 +727,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
          close: close,
          data_class: data_class,
          accepts_data: accepts_data,
-         exports: exports
+         exports: exports,
+         warnings: warnings
        }}
     else
       {:error, :invalid_provider_build}
@@ -732,6 +737,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp normalize_build({:error, _reason} = error, _provides), do: error
   defp normalize_build(_result, _provides), do: {:error, :invalid_provider_build}
+
+  defp valid_warnings?(warnings) when is_list(warnings) and length(warnings) <= 128,
+    do: Enum.all?(warnings, &CommandWarning.valid?/1)
+
+  defp valid_warnings?(_warnings), do: false
 
   defp valid_capabilities?(capabilities, provides) when is_list(capabilities) do
     (capabilities != [] or provides != []) and length(capabilities) <= 128 and

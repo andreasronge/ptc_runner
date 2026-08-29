@@ -242,6 +242,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the LLM provider denied access to the configured model"},
     {:execution, :llm_timeout, 5, true, "the LLM provider request timed out"},
     {:execution, :llm_provider_unavailable, 5, true, "the LLM provider is unavailable"},
+    {:execution, :llm_usage_unavailable, 5, false,
+     "the LLM provider did not return the promised usage or cost metadata"},
     {:execution, :llm_provider_failed, 5, false, "the LLM provider request failed"},
     {:execution, :mission_failed, 5, false, "a subordinate mission failed"},
     {:execution, :capability_quota_exceeded, 6, false, "a capability quota was exceeded"},

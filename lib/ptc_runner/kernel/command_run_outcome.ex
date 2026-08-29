@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.EvaluatorEvidence
@@ -193,7 +194,8 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        when result_class in [:normal, :private] do
     with {:ok, value} <- public_value(result_class, result.value),
          {:ok, usage} <- usage_projection(result.usage, Map.get(evidence, :terminal_batch)),
-         {:ok, evaluation_memory} <- evaluation_memory_projection(result.evaluation_memory) do
+         {:ok, evaluation_memory} <- evaluation_memory_projection(result.evaluation_memory),
+         {:ok, warnings} <- warnings_projection(Map.get(evidence, :terminal_batch)) do
       {:ok,
        CommandOutcome.run_success(
          run_ref,
@@ -201,7 +203,8 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
          value,
          artifact_state,
          usage,
-         evaluation_memory
+         evaluation_memory,
+         warnings
        )}
     else
       _invalid ->
@@ -223,8 +226,9 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        when result_class in [:normal, :private] do
     diagnostics = failure_diagnostics(evidence, report, result_class, provider_activity)
 
-    case {diagnostics, execution_evidence(evidence, result_class)} do
-      {[primary | secondary], {:ok, execution}} ->
+    case {diagnostics, execution_evidence(evidence, result_class),
+          warnings_projection(Map.get(evidence, :terminal_batch))} do
+      {[primary | secondary], {:ok, execution}, {:ok, warnings}} ->
         {:error,
          CommandOutcome.run_classified_error(
            run_ref,
@@ -232,7 +236,8 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
            primary,
            secondary,
            artifact_state,
-           execution
+           execution,
+           warnings
          )}
 
       _invalid ->
@@ -683,6 +688,7 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp llm_failure_code(:invalid_request, false), do: :llm_request_invalid
   defp llm_failure_code(:denied, false), do: :llm_access_denied
   defp llm_failure_code(:timeout, true), do: :llm_timeout
+  defp llm_failure_code(:usage_unavailable, false), do: :llm_usage_unavailable
   defp llm_failure_code(_failure, true), do: :llm_provider_unavailable
   defp llm_failure_code(_failure, false), do: :llm_provider_failed
 
@@ -850,6 +856,25 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
       "unattributed_model_calls" => nil
     }
   end
+
+  defp warnings_projection({:ok, events}) when is_list(events) do
+    warnings =
+      Enum.find_value(events, [], fn event ->
+        type = Map.get(event, :type) || Map.get(event, "type")
+        data = Map.get(event, :data) || Map.get(event, "data")
+
+        if type == "run-started" and is_map(data),
+          do: Map.get(data, :warnings) || Map.get(data, "warnings") || [],
+          else: nil
+      end)
+
+    if is_list(warnings) and length(warnings) <= 128 and
+         Enum.all?(warnings, &CommandWarning.valid_map?/1),
+       do: {:ok, warnings},
+       else: {:error, :invalid_warnings}
+  end
+
+  defp warnings_projection(_terminal_batch), do: {:ok, []}
 
   defp capability_calls(calls) when is_map(calls) do
     Enum.reduce_while(calls, {:ok, %{}}, fn

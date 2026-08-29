@@ -27,7 +27,11 @@ defmodule PtcRunner.Kernel.LLMRouter do
           required(:capability) => Capability.t(),
           required(:max_calls) => pos_integer() | nil,
           optional(:structured_output_mode) => :json_schema | :json_object | :unsupported,
-          optional(:request_timeout_ms) => pos_integer()
+          optional(:request_timeout_ms) => pos_integer(),
+          optional(:output_tokens) => pos_integer(),
+          optional(:reservation_tariff) => Requirements.cost_tariff() | nil,
+          optional(:reservation_bound) => (map(), Requirements.cost_tariff() | nil ->
+                                             {:ok, map()} | {:error, term()})
         }
 
   @spec new([route()]) :: {:ok, RoutedCapability.t()} | {:error, :invalid_llm_router}

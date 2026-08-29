@@ -4,6 +4,8 @@ defmodule PtcRunner.TestSupport.TestHelpers do
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunState
 
@@ -41,6 +43,36 @@ defmodule PtcRunner.TestSupport.TestHelpers do
       validation_deadline_ms: Keyword.get(opts, :validation_deadline_ms),
       mission_name: Keyword.get(opts, :mission_name)
     }
+  end
+
+  @doc "Builds the canonical bounded live LLM route used by Dispatcher tests."
+  def llm_router(requester, opts \\ []) when is_function(requester) and is_list(opts) do
+    capability_opts =
+      [requester: requester]
+      |> Keyword.merge(Keyword.take(opts, [:max_response_bytes]))
+
+    with {:ok, capability} <- LLMCapability.new(capability_opts) do
+      route = %{
+        alias: "model",
+        source: "llm",
+        installation_revision: "model-v1",
+        default?: true,
+        capability: capability,
+        max_calls: nil,
+        output_tokens: 4_096,
+        reservation_bound: fn _request, _tariff ->
+          {:ok, %{total_tokens: 4_096, cost: nil}}
+        end
+      }
+
+      route =
+        case Keyword.get(opts, :structured_output_mode) do
+          nil -> route
+          mode -> Map.put(route, :structured_output_mode, mode)
+        end
+
+      LLMRouter.new([route])
+    end
   end
 
   @doc "Builds a current staged provider whose acquisition returns a normalized build map."

@@ -1,6 +1,6 @@
 defmodule PtcRunner.Kernel.CommandContract do
   @moduledoc """
-  Generated-in-source JSON Schema for the V3 command envelope.
+  Generated-in-source JSON Schema for the V4 command envelope.
 
   The checked-in JSON artifact is produced from this module. Diagnostic
   phase/code/retryability/message rows come only from `DiagnosticCatalog`.
@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
@@ -26,7 +27,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.SelectionRulesDiagnostic
   alias PtcRunner.Lisp.EvaluatorErrorCatalog
 
-  @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v3.schema.json"
+  @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v4.schema.json"
   @envelope_root_key {__MODULE__, :envelope_root}
   @non_run_schema_modes [
     {"help", :help, false, false},
@@ -106,7 +107,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     %{
       "$schema" => "https://json-schema.org/draft/2020-12/schema",
       "$id" => @id,
-      "title" => "PtcRunner command envelope V3",
+      "title" => "PtcRunner command envelope V4",
       "oneOf" =>
         Enum.map(@non_run_schema_modes, fn {command, mode, provider_activity, compound?} ->
           error_envelope(command, diagnostic_rows(mode), provider_activity, compound?)
@@ -857,7 +858,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     diagnostic = diagnostic_schema(rows, provider_activity)
 
     closed(
-      ~w(schema_version command status run_ref error secondary_errors),
+      ~w(schema_version command status run_ref error secondary_errors warnings),
       base_properties([command], "error")
       |> Map.merge(%{
         "error" => diagnostic,
@@ -875,7 +876,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     secondary_diagnostic = diagnostic_schema(diagnostic_rows({:doctor, :connect}))
 
     closed(
-      ~w(schema_version command status run_ref error secondary_errors result),
+      ~w(schema_version command status run_ref error secondary_errors warnings result),
       base_properties(["doctor"], "error")
       |> Map.merge(%{
         "error" => primary_diagnostic,
@@ -1039,7 +1040,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp run_error_envelope(artifact_class, states, execution, diagnostic, secondary_errors) do
     closed(
-      ~w(schema_version command status run_ref error secondary_errors artifact_state artifact_class execution),
+      ~w(schema_version command status run_ref error secondary_errors warnings artifact_state artifact_class execution),
       base_properties(["run"], "error")
       |> Map.merge(%{
         "error" => ref(diagnostic),
@@ -1105,7 +1106,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp success_envelope(command, result) do
     closed(
-      ~w(schema_version command status run_ref result),
+      ~w(schema_version command status run_ref result warnings),
       base_properties([command], "ok")
       |> Map.put("result", result)
     )
@@ -1113,7 +1114,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp run_success_envelope(artifact_class, result) do
     closed(
-      ~w(schema_version command status run_ref result secondary_errors artifact_state artifact_class execution),
+      ~w(schema_version command status run_ref result secondary_errors warnings artifact_state artifact_class execution),
       base_properties(["run"], "ok")
       |> Map.merge(%{
         "result" => result,
@@ -1127,10 +1128,33 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp base_properties(commands, status) do
     %{
-      "schema_version" => %{"const" => 3},
+      "schema_version" => %{"const" => 4},
       "command" => %{"enum" => commands},
       "status" => %{"const" => status},
-      "run_ref" => %{"type" => "string", "pattern" => @run_ref}
+      "run_ref" => %{"type" => "string", "pattern" => @run_ref},
+      "warnings" => warnings_schema(commands)
+    }
+  end
+
+  defp warnings_schema(["run"]), do: warning_schema()
+  defp warnings_schema(_commands), do: %{"const" => []}
+
+  defp warning_schema do
+    %{
+      "type" => "array",
+      "maxItems" => 128,
+      "items" =>
+        closed(~w(code message provider model), %{
+          "code" => %{"const" => "model_uncataloged"},
+          "message" => %{"const" => CommandWarning.message()},
+          "provider" => %{"type" => "string", "pattern" => @alias},
+          "model" => %{
+            "oneOf" => [
+              %{"type" => "null"},
+              %{"type" => "string", "minLength" => 1, "maxLength" => 256}
+            ]
+          }
+        })
     }
   end
 

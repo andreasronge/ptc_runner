@@ -1,6 +1,8 @@
 defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
   use ExUnit.Case, async: true
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -56,7 +58,7 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
 
     provider = idle_provider()
     assert :ok = RunState.attach_provider(state, reservation_id, provider)
-    assert :ok = RunState.mark_provider_dispatched(state, reservation_id, provider)
+    assert :ok = RunState.open_provider_gate(state, reservation_id, provider, make_ref())
 
     usage = %{
       "input" => 11,
@@ -70,7 +72,7 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
     assert RunState.usage(state).llm_budget == LLMBudgetSupport.settled_projection()
   end
 
-  test "dispatch acknowledgement is one-way, provider-bound, and required before full charge" do
+  test "dispatch gate opening is one-way, provider-bound, and required before full charge" do
     {:ok, limits} = Limits.new(llm_total_tokens: 100)
     {:ok, state} = RunState.start(limits)
 
@@ -88,10 +90,12 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
     assert :ok = RunState.attach_provider(state, reservation_id, provider)
 
     assert {:error, :provider_mismatch} =
-             RunState.mark_provider_dispatched(state, reservation_id, other)
+             RunState.open_provider_gate(state, reservation_id, other, make_ref())
 
-    assert :ok = RunState.mark_provider_dispatched(state, reservation_id, provider)
-    assert :ok = RunState.mark_provider_dispatched(state, reservation_id, provider)
+    assert :ok = RunState.open_provider_gate(state, reservation_id, provider, make_ref())
+
+    assert {:error, :already_dispatched} =
+             RunState.open_provider_gate(state, reservation_id, provider, make_ref())
 
     assert {:ok, :settled} =
              RunState.finish_provider(
@@ -123,7 +127,7 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
              RunState.attach_provider(state, make_ref(), provider)
 
     assert {:error, :unknown_reservation} =
-             RunState.mark_provider_dispatched(state, make_ref(), provider)
+             RunState.open_provider_gate(state, make_ref(), provider, make_ref())
 
     refute Process.alive?(provider)
     assert RunState.usage(state).capability_calls.workflow == %{}
@@ -153,6 +157,88 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
            } = RunState.usage(state).llm_budget["total_tokens"]
   end
 
+  test "opening the provider gate is atomic with the dispatched transition" do
+    {:ok, limits} = Limits.new(llm_total_tokens: 100)
+    {:ok, state} = RunState.start(limits)
+    parent = self()
+    gate = make_ref()
+
+    provider =
+      spawn(fn ->
+        receive do
+          ^gate ->
+            send(parent, :provider_gate_opened)
+            receive do: (:stop -> :ok)
+        end
+      end)
+
+    provider_ref = Process.monitor(provider)
+
+    caller =
+      spawn(fn ->
+        {:ok, reservation_id} =
+          RunState.reserve_capability(
+            state,
+            :workflow,
+            "llm-request",
+            nil,
+            Map.put(@live_route, :cost_microusd, nil)
+          )
+
+        :ok = RunState.attach_provider(state, reservation_id, provider)
+        send(parent, {:gate_ready, self()})
+
+        receive do
+          :open_gate ->
+            send(parent, :opening_gate)
+
+            result =
+              RunState.open_provider_gate(state, reservation_id, provider, gate)
+
+            send(parent, {:gate_call_returned, result})
+        end
+      end)
+
+    caller_ref = Process.monitor(caller)
+
+    assert_receive {:gate_ready, ^caller}
+    assert :ok = :sys.suspend(state.pid)
+
+    try do
+      send(caller, :open_gate)
+      assert_receive :opening_gate
+
+      assert_eventually(fn ->
+        case Process.info(state.pid, :message_queue_len) do
+          {:message_queue_len, count} -> count >= 1
+          _missing -> false
+        end
+      end)
+
+      assert true == :erlang.suspend_process(caller)
+      assert :ok = :sys.resume(state.pid)
+
+      assert_receive :provider_gate_opened
+      refute_receive {:gate_call_returned, _result}
+
+      Process.exit(caller, :kill)
+      assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}
+      assert_receive {:DOWN, ^provider_ref, :process, ^provider, :killed}
+
+      assert_eventually(fn ->
+        RunState.usage(state).llm_budget["total_tokens"]["charged"] == 40
+      end)
+    after
+      case Process.info(state.pid, :status) do
+        {:status, :suspended} -> :sys.resume(state.pid)
+        _running_or_stopped -> :ok
+      end
+
+      if Process.alive?(caller), do: Process.exit(caller, :kill)
+      if Process.alive?(provider), do: Process.exit(provider, :kill)
+    end
+  end
+
   test "authenticated overruns charge actual with saturation and refuse in fixed order" do
     {:ok, limits} = Limits.new(llm_total_tokens: 50, llm_cost_microusd: 250)
     {:ok, state} = RunState.start(limits)
@@ -162,7 +248,7 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
 
     provider = idle_provider()
     assert :ok = RunState.attach_provider(state, reservation_id, provider)
-    assert :ok = RunState.mark_provider_dispatched(state, reservation_id, provider)
+    assert :ok = RunState.open_provider_gate(state, reservation_id, provider, make_ref())
 
     usage = %{
       "input" => 30,
@@ -211,7 +297,7 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
 
     provider = idle_provider()
     assert :ok = RunState.attach_provider(state, reservation_id, provider)
-    assert :ok = RunState.mark_provider_dispatched(state, reservation_id, provider)
+    assert :ok = RunState.open_provider_gate(state, reservation_id, provider, make_ref())
 
     usage = %{
       "input" => 1,
@@ -252,7 +338,7 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
 
     provider = idle_provider()
     assert :ok = RunState.attach_provider(state, reservation_id, provider)
-    assert :ok = RunState.mark_provider_dispatched(state, reservation_id, provider)
+    assert :ok = RunState.open_provider_gate(state, reservation_id, provider, make_ref())
 
     usage = %{"input" => @maximum_integer, "output" => 1}
 
@@ -286,7 +372,7 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
 
     provider = idle_provider()
     assert :ok = RunState.attach_provider(state, reservation_id, provider)
-    assert :ok = RunState.mark_provider_dispatched(state, reservation_id, provider)
+    assert :ok = RunState.open_provider_gate(state, reservation_id, provider, make_ref())
 
     usage = %{
       "input" => 50,
@@ -318,7 +404,7 @@ defmodule PtcRunner.Kernel.LLMBudgetLedgerTest do
         {:ok, id} = RunState.reserve_capability(state, :workflow, "llm-request", nil, route)
         provider = spawn(fn -> receive do: (:stop -> :ok) end)
         :ok = RunState.attach_provider(state, id, provider)
-        :ok = RunState.mark_provider_dispatched(state, id, provider)
+        :ok = RunState.open_provider_gate(state, id, provider, make_ref())
         send(parent, {:admitted, self(), id})
         receive do: (:done -> :ok)
       end)
