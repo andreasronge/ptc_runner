@@ -389,7 +389,6 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     {:ok, llm_cost} = LimitCatalog.fetch(:llm_cost_microusd)
     integer_max = 9_007_199_254_740_991
     drop_count = 4_294_967_295
-    fingerprint = "sha256:" <> String.duplicate("f", 64)
     refusal_limit = SafeMetadata.capability_refusal_map_limit()
 
     assert usage.closed? == true
@@ -407,14 +406,15 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     assert usage.evaluation_missions == []
     assert usage.errors == drop_count
 
-    expected_refusals =
-      1..refusal_limit
-      |> Map.new(fn index ->
-        {"workflow/#{fingerprint}/#{fingerprint}-#{index}", drop_count}
-      end)
-      |> Map.put("$overflow", drop_count)
+    fingerprint = "sha256:" <> String.duplicate("f", 64)
 
-    assert usage.capability_refusals == expected_refusals
+    assert usage.capability_refusals == %{
+             "workflow/#{fingerprint}/#{fingerprint}-1" => drop_count,
+             "workflow/#{fingerprint}/#{fingerprint}-2" => drop_count,
+             "$overflow" => drop_count
+           }
+
+    assert refusal_limit == 2
 
     assert usage.llm_budget == %{
              "total_tokens" => %{
