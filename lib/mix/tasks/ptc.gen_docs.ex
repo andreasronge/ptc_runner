@@ -197,6 +197,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     # redundant.
     {:ok, run_duration} = LimitCatalog.fetch(:run_duration_ms)
     {:ok, workflow_timeout} = LimitCatalog.fetch(:workflow_timeout_ms)
+    {:ok, normal_event_count} = LimitCatalog.fetch(:normal_event_count)
 
     content = """
     <!-- Auto-generated — do not edit by hand -->
@@ -230,6 +231,8 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     rows; it does not need a fabricated provider. A live LLM deadline also
     requires the selected installation's `ceilings.request_timeout_ms` to be
     raised to the requested value.
+
+    Normal trace limits also have structural rules. `event_payload_bytes` is large enough for every bounded terminal payload, and `normal_event_count` is at least #{normal_event_count.minimum}: one ordinary `run-started` event plus the two-event terminal reserve. After host/application resolution, `normal_event_bytes` must be at least `EventSink.terminal_reserve(:normal, effective_limits).bytes + EventBudget.maximum_event_bytes("run-started", event_payload_bytes)`, preserving one complete maximum-size `run-started` envelope in addition to the complete `events-dropped` and `run-stopped` envelopes. Invalid combinations are refused before execution as `application/limit_configuration_invalid`. Private trace policy keeps its zero terminal reserve and does not use this normal-trace byte relationship.
 
     A breached ceiling names itself, its configured value, and the manifest key that raises it, so the error at the point of failure carries this rule too. A request above the ceiling is refused by name, with both numbers.
 

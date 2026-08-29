@@ -20,6 +20,15 @@ defmodule PtcRunner.Kernel.Limits do
   only catalog rows scoped `:manifest_narrowable` or
   `:optional_manifest_narrowable`; installed-only values are copied from the
   host unchanged.
+
+  Catalog validation covers each field independently, including the minimum
+  event payload needed by bounded terminal events. Manifest loading also
+  validates the normal trace fields together after host/application resolution:
+  the effective count must retain one ordinary event plus the two terminal
+  events, and the byte budget must retain one complete maximum-size
+  `run-started` event in addition to `PtcRunner.Kernel.EventSink`'s measured
+  terminal reserve. Private trace policy keeps its zero-reserve fail-closed
+  behavior.
   """
 
   alias PtcRunner.Kernel.LimitCatalog

@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Evaluation
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionSink
@@ -948,7 +949,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   end
 
   test "normal event sinks drop while private event sinks fail closed" do
-    {:ok, limits} = Limits.new(normal_event_count: 1, normal_event_bytes: 10_000)
+    {:ok, limits} = Limits.new(normal_event_count: 3, normal_event_bytes: 10_000)
 
     {:ok, normal} =
       EventSink.start(:normal, limits,
@@ -959,11 +960,15 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, private} = EventSink.start(:private, limits, run_id: "private")
 
     assert :ok = EventSink.emit(normal, "run-started", %{"safe" => true})
+    assert :ok = EventSink.emit(normal, "run-progress", %{"safe" => true})
     assert :ok = EventSink.emit(normal, "run-stopped", %{"safe" => true})
-    assert %{"run-stopped" => 1} = EventSink.dropped(normal)
+    assert :ok = EventSink.emit(normal, "after-stop", %{"safe" => true})
+    assert %{"after-stop" => 1} = EventSink.dropped(normal)
 
     assert :ok = EventSink.emit(private, "run-started", %{"safe" => true})
-    assert {:error, :event_sink_error} = EventSink.emit(private, "run-stopped", %{"safe" => true})
+    assert :ok = EventSink.emit(private, "run-progress", %{"safe" => true})
+    assert :ok = EventSink.emit(private, "run-stopped", %{"safe" => true})
+    assert {:error, :event_sink_error} = EventSink.emit(private, "after-stop", %{"safe" => true})
   end
 
   test "stopped event sinks are contained according to their policy" do
@@ -1007,7 +1012,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   test "private event sink exhaustion is a terminal event-sink error" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(normal_event_count: 1, normal_event_bytes: 10_000)
+    {:ok, limits} = Limits.new(normal_event_count: 3, normal_event_bytes: 10_000)
     {:ok, sink} = EventSink.start(:private, limits, run_id: "private-run")
 
     {:ok, config} =
@@ -1018,6 +1023,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         limits: limits,
         event_sink: sink
       )
+
+    assert :ok = EventSink.emit(sink, "occupied-one", %{})
+    assert :ok = EventSink.emit(sink, "occupied-two", %{})
 
     assert {:error, %{kind: :event_sink_error, reason: :event_sink_error}} =
              Kernel.run("(return 42)", config)
@@ -1064,12 +1072,12 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
 
-    {:ok, limits} =
-      Limits.new(
-        normal_event_count: 4,
+    limits = %{
+      Limits.defaults()
+      | normal_event_count: 4,
         normal_event_bytes: 20_000,
         event_payload_bytes: 1_000
-      )
+    }
 
     {:ok, sink} =
       EventSink.start(:normal, limits,
@@ -1300,7 +1308,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     end
 
     minimum =
-      Enum.find(1..50_000, fn payload_bytes ->
+      Enum.find(EventBudget.minimum_normal_payload_bytes()..50_000, fn payload_bytes ->
         case build.(payload_bytes) do
           {{:ok, _config}, sink, _limits} ->
             EventSink.stop(sink)
@@ -1821,7 +1829,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
   test "failed subordinate evaluation start retains no unattempted inspection source" do
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(normal_event_count: 1, normal_event_bytes: 20_000)
+    {:ok, limits} = Limits.new(normal_event_count: 3, normal_event_bytes: 20_000)
     {:ok, state} = RunState.start(limits)
     {:ok, event_sink} = EventSink.start(:private, limits, run_id: "full-before-evaluation")
 
@@ -1831,6 +1839,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
         trace_id: "full-before-evaluation"
       )
 
+    assert :ok = EventSink.emit(event_sink, "occupied", %{})
+    assert :ok = EventSink.emit(event_sink, "occupied", %{})
     assert :ok = EventSink.emit(event_sink, "occupied", %{})
 
     assert %{outcome: :evaluation_error, reason: :event_sink_error} =

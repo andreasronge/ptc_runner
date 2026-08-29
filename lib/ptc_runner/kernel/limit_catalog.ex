@@ -21,7 +21,13 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     llm_request_timeout_ms: 1_800_000,
     llm_total_tokens: 9_007_199_254_740_991
   }
-  @minimums %{llm_request_timeout_ms: 100}
+  @minimums %{
+    # EventBudget owns the retained-size upper bound; the catalog test keeps
+    # this schema authority synchronized with that runtime contract.
+    event_payload_bytes: 4_826,
+    llm_request_timeout_ms: 100,
+    normal_event_count: 3
+  }
 
   # `{field, effective default, installed ceiling}`.
   #

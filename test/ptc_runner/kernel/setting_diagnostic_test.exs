@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -570,6 +571,15 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         value: "5000",
         remedy: "enable llm_total_tokens in the host document",
         build: fn -> OptionalBudgetDiagnostic.unavailable_message("llm_total_tokens", 5_000) end
+      },
+      %{
+        phase: :application,
+        code: :limit_configuration_invalid,
+        source: :application,
+        setting: "normal_event_bytes",
+        value: "24449",
+        remedy: "raise limits.normal_event_bytes",
+        build: fn -> LimitConfigurationDiagnostic.message(24_449, 24_450, 7_000) end
       }
     ]
   end
