@@ -32,9 +32,19 @@ defmodule PtcRunner.Kernel.ModelContract do
   @spec value_contract(ValueContract.t()) ::
           {:ok, term()} | {:error, :unsupported_contract}
   def value_contract(%ValueContract{schema: schema} = contract) do
-    if ValueContract.sealed?(contract),
-      do: json_schema(schema),
-      else: {:error, :unsupported_contract}
+    cond do
+      not ValueContract.sealed?(contract) ->
+        {:error, :unsupported_contract}
+
+      Map.has_key?(schema, "oneOf") ->
+        case ValueContract.prompt_discriminator(contract) do
+          {:ok, discriminator} -> json_schema_union(schema, discriminator)
+          :error -> {:error, :unsupported_contract}
+        end
+
+      true ->
+        json_schema(schema)
+    end
   end
 
   def value_contract(_contract), do: {:error, :unsupported_contract}
@@ -219,19 +229,8 @@ defmodule PtcRunner.Kernel.ModelContract do
     end
   end
 
-  defp json_schema(%{"oneOf" => branches} = schema) when is_list(branches) do
-    with {:ok, variants} <- map_types(branches, &union_variant/1) do
-      {:ok,
-       constrained_node(
-         schema,
-         [
-           {"kind", "tagged_union"},
-           {"nullable", false},
-           {"variants", Enum.sort_by(variants, &union_sort_key/1)}
-         ]
-       )}
-    end
-  end
+  defp json_schema(%{"oneOf" => branches}) when is_list(branches),
+    do: {:error, :unsupported_contract}
 
   defp json_schema(%{"type" => "array"} = schema) do
     with {:ok, items} <- optional_items(schema) do
@@ -251,6 +250,21 @@ defmodule PtcRunner.Kernel.ModelContract do
 
   defp json_schema(_schema), do: {:error, :unsupported_contract}
 
+  defp json_schema_union(%{"oneOf" => branches} = schema, discriminator)
+       when is_list(branches) and is_binary(discriminator) do
+    with {:ok, variants} <- map_types(branches, &union_variant(&1, discriminator)) do
+      {:ok,
+       constrained_node(
+         schema,
+         [
+           {"kind", "tagged_union"},
+           {"nullable", false},
+           {"variants", Enum.sort_by(variants, &union_sort_key/1)}
+         ]
+       )}
+    end
+  end
+
   defp optional_json_schema(nil), do: {:ok, nil}
   defp optional_json_schema(schema), do: json_schema(schema)
 
@@ -268,29 +282,27 @@ defmodule PtcRunner.Kernel.ModelContract do
     end
   end
 
-  defp union_variant(schema) do
+  defp union_variant(schema, discriminator_name) do
     with {:ok, projection} <- json_schema(schema),
          {:object, pairs} <- projection,
-         {:ok, discriminator} <- discriminator_literal(schema) do
+         {:ok, discriminator} <- discriminator_literal(schema, discriminator_name) do
       {:ok, object([{"discriminator", discriminator}, {"type", {:object, pairs}}])}
     else
       _invalid -> {:error, :unsupported_contract}
     end
   end
 
-  defp discriminator_literal(%{"properties" => properties}) when is_map(properties) do
-    properties
-    |> Enum.flat_map(fn
-      {name, %{"const" => literal}} -> [{name, literal}]
-      _field -> []
-    end)
-    |> case do
-      [{name, literal}] -> {:ok, object([{"name", name}, {"literal", literal}])}
-      _invalid -> {:error, :unsupported_contract}
+  defp discriminator_literal(%{"properties" => properties}, name) when is_map(properties) do
+    case get_in(properties, [name, "const"]) do
+      literal when is_binary(literal) ->
+        {:ok, object([{"name", name}, {"literal", literal}])}
+
+      _invalid ->
+        {:error, :unsupported_contract}
     end
   end
 
-  defp discriminator_literal(_schema), do: {:error, :unsupported_contract}
+  defp discriminator_literal(_schema, _name), do: {:error, :unsupported_contract}
 
   defp union_sort_key({:object, pairs}) do
     {"discriminator", {:object, discriminator}} = List.keyfind(pairs, "discriminator", 0)

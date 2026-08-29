@@ -102,10 +102,13 @@
        (str path " field count <= " (get node "max_properties")))
      (when (and (= "string" (get node "kind")) (= "sha256" (get node "format")))
        (str path " has sha256 format"))
-     (when (map? (get node "property_names"))
-       (str path " field names satisfy " (render-type (get node "property_names"))))
      (when (and (= "object" (get node "kind")) (true? (get node "closed")))
        (str path " has no additional fields"))]))
+
+(defn- variant-path [path variant]
+  (let [discriminator (get variant "discriminator")]
+    (str path " when " (inline-json (get discriminator "name")) "="
+         (inline-json (get discriminator "literal")))))
 
 (defn- constraint-lines [node path]
   (if (map? node)
@@ -115,6 +118,8 @@
         "object"
         (concat
           own
+          (when (map? (get node "property_names"))
+            (constraint-lines (get node "property_names") (str path " field-name")))
           (mapcat
             (fn [field]
               (constraint-lines
@@ -126,7 +131,9 @@
         (concat own (constraint-lines (get node "items") (str path "[]")))
 
         "tagged_union"
-        (concat own (mapcat #(constraint-lines (get % "type") path) (get node "variants" [])))
+        (concat own
+                (mapcat #(constraint-lines (get % "type") (variant-path path %))
+                        (get node "variants" [])))
 
         own))
     []))
@@ -164,6 +171,8 @@
         "object"
         (concat
           own
+          (when (map? (get node "property_names"))
+            (documentation-lines (get node "property_names") (str path " field-name")))
           (mapcat
             (fn [field]
               (documentation-lines
@@ -175,7 +184,9 @@
         (concat own (documentation-lines (get node "items") (str path "[]")))
 
         "tagged_union"
-        (concat own (mapcat #(documentation-lines (get % "type") path) (get node "variants" [])))
+        (concat own
+                (mapcat #(documentation-lines (get % "type") (variant-path path %))
+                        (get node "variants" [])))
 
         own))
     []))

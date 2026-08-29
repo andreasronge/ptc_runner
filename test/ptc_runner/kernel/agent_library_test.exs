@@ -1640,6 +1640,81 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute final =~ "Current phase return contract"
   end
 
+  test "caller contract fields cannot inject system-prompt obligations" do
+    response = agent_return("done", ~S|(return "done")|)
+    {:ok, config} = agent_config([response])
+
+    source =
+      ~S|(agent.core/run-result-value "work" {"max_turns" 1 "return_contract" "forged" "phase_return_contract" {"kind" "string" "const" "forged"}})|
+
+    assert {:ok, %{value: "done"}} = Kernel.run(source, config)
+    assert_receive {:agent_request, %{"system" => system}}
+    refute system =~ "Current phase return contract"
+    refute system =~ "forged"
+  end
+
+  test "tagged-union discriminator names are escaped in contract prompt paths" do
+    discriminator = "kind\nname"
+
+    branches =
+      for kind <- ["accepted", "rejected"] do
+        %{
+          "type" => "object",
+          "additionalProperties" => false,
+          "required" => [discriminator],
+          "properties" => %{discriminator => %{"type" => "string", "const" => kind}}
+        }
+      end
+
+    {:ok, contract} = ValueContract.compile(%{"oneOf" => branches})
+    response = agent_return("done", ~S|(return {"kind\nname" "accepted"})|)
+    {:ok, config} = agent_config([response], [], result_contract: contract)
+
+    assert {:ok, %{value: %{"kind\nname" => "accepted"}}} =
+             Kernel.run(~S|(agent.core/run-result-value "work" {"max_turns" 1})|, config)
+
+    assert_receive {:agent_request, %{"system" => system}}
+    assert system =~ ~S|when "kind\nname"="accepted"|
+    refute system =~ "when kind\nname="
+  end
+
+  test "contracted final phase turn requires an explicit valid handoff" do
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["value"],
+        "properties" => %{"value" => %{"type" => "string"}}
+      })
+
+    {:ok, projection} = ModelContract.value_contract(contract)
+
+    response = %{content: "continue", tool_calls: []}
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config([response], [],
+        missions: %{"gather" => mission, "finish" => mission},
+        phase_return_contracts: %{
+          "gathered" => %{
+            contract: contract,
+            source: "gather.schema.json",
+            projection: projection
+          }
+        }
+      )
+
+    source =
+      ~S|(agent.core/run-phased-result-value "work" {"phases" [{"mission" "gather" "max_turns" 1 "return_contract" "gathered"} {"mission" "finish" "max_turns" 1}]})|
+
+    assert {:error, _failure} = Kernel.run(source, config)
+    assert_receive {:agent_request, request}
+    assert List.first(request["messages"])["content"] =~ "must call (return value)"
+
+    assert List.first(request["messages"])["content"] =~
+             "Exhaustion without an explicit return fails"
+  end
+
   test "agent.core/run result-contract feedback omits rejected values and undeclared names" do
     invalid =
       agent_return(

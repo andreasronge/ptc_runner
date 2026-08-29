@@ -53,7 +53,49 @@ defmodule PtcRunner.Kernel.ManifestTest do
     assert {:ok, package, _input} = ApplicationPackage.acquire_memory("ptc.json", documents)
     assert %ValueContract{} = package.contracts.phase_returns["gathered"]
     assert <<_::binary-size(64)>> = package.contract_behavior_hashes.phase_returns["gathered"]
-    assert "sha256:" <> <<_::binary-size(64)>> = package.contract_prompt_hashes.phase_returns["gathered"]
+
+    assert "sha256:" <> <<_::binary-size(64)>> =
+             package.contract_prompt_hashes.phase_returns["gathered"]
+  end
+
+  test "aggregate phase-return prompt projections fail inert acquisition at the boundary" do
+    names = for index <- 1..16, do: "phase#{index}"
+
+    schema = %{
+      "type" => "object",
+      "additionalProperties" => false,
+      "properties" =>
+        Map.new(1..128, fn index ->
+          {"field#{index}",
+           %{
+             "type" => "string",
+             "description" => String.duplicate("d", 390),
+             "minLength" => 1
+           }}
+        end)
+    }
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "contracts" => %{
+        "phase_return_schemas" => Map.new(names, &{&1, %{"path" => "#{&1}.schema.json"}})
+      }
+    }
+
+    documents =
+      %{
+        "ptc.json" => Jason.encode!(manifest),
+        "main.clj" => "(ns main) (defn run [_] (return {}))"
+      }
+      |> Map.merge(Map.new(names, &{"#{&1}.schema.json", Jason.encode!(schema)}))
+
+    assert {:error, :contract_projection_limit_exceeded} =
+             ApplicationPackage.acquire_memory("ptc.json", documents)
   end
 
   @tag :tmp_dir

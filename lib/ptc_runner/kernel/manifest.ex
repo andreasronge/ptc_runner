@@ -497,9 +497,8 @@ defmodule PtcRunner.Kernel.Manifest do
                  {:error, _reason} = error -> {:halt, error}
                end
              end
-           ),
-         :ok <- phase_return_contract_declarations(Map.get(value, "phase_return_schemas", %{})) do
-      :ok
+           ) do
+      phase_return_contract_declarations(Map.get(value, "phase_return_schemas", %{}))
     end
   end
 

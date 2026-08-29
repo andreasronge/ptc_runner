@@ -288,7 +288,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: kind, name: name, contract_authority: nil},
          %{phase: :application, code: :contract_invalid}
        )
-       when kind in [:input_contract, :result_contract],
+       when kind in [:input_contract, :result_contract, :phase_return_contract],
        do: true
 
   defp valid_path_authority?(
@@ -311,7 +311,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: kind, contract_authority: authority},
          %{phase: :application, code: code}
        )
-       when kind in [:input_contract, :result_contract] and
+       when kind in [:input_contract, :result_contract, :phase_return_contract] and
               code in [:invalid_json, :duplicate_property, :contract_invalid],
        do: true
 
@@ -395,7 +395,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %{phase: :application, code: :contract_invalid},
          %CommandSource{kind: kind}
        )
-       when kind in [:input_contract, :result_contract],
+       when kind in [:input_contract, :result_contract, :phase_return_contract],
        do: ContractSchemaDiagnostic.valid_message?(message)
 
   defp valid_message_source?(

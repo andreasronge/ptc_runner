@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
   @moduledoc """
   Exact behavior identity for one fully normalized application declaration.
 
-  The digest is SHA-256 over `"ptc.effective-application.v2\\0"`, the
+  The digest is SHA-256 over `"ptc.effective-application.v3\\0"`, the
   big-endian `u64` byte length, and the TJCS projection documented by the
   stable command contract. Selected input values, paths, labels, event IDs,
   raw provider selectors, credentials, and private OAuth authority never enter

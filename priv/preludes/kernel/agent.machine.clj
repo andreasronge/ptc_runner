@@ -42,13 +42,16 @@
   {:type :action :kind (get action :kind) :action action})
 
 (defn- phase-turn-budget
-  [turns-remaining consolidate-at-turns-remaining has-next-phase?]
+  [turns-remaining consolidate-at-turns-remaining has-next-phase? return-contract?]
   (if (not has-next-phase?)
     (agent.feedback/turn-budget turns-remaining consolidate-at-turns-remaining)
     (str "PHASE BUDGET: " turns-remaining " "
          (if (= turns-remaining 1) "turn remains" "turns remain")
          " in the current mission phase, including the next program."
          (cond
+           (and (= turns-remaining 1) return-contract?)
+           "\nFINAL PHASE TURN: the next program must call (return value) satisfying the current phase contract, or (fail value). Exhaustion without an explicit return fails the phase."
+
            (= turns-remaining 1)
            "\nFINAL PHASE TURN: close the most material evidence gap. The host will then switch mission authority and continue with the retained transcript."
 
@@ -59,12 +62,13 @@
            :else ""))))
 
 (defn- with-phase-budget
-  [content turns-remaining consolidate-at-turns-remaining has-next-phase?]
+  [content turns-remaining consolidate-at-turns-remaining has-next-phase? return-contract?]
   (str content "\n\n"
        (phase-turn-budget
          turns-remaining
          consolidate-at-turns-remaining
-         has-next-phase?)))
+         has-next-phase?
+         return-contract?)))
 
 ;; The model's own narration is its stated plan for the turn. Dropping it left
 ;; the next turn seeing a tool result with no record of why it was requested.
@@ -113,7 +117,8 @@
        (phase-turn-budget
          (get phase "max_turns")
          consolidate-at-turns-remaining
-         has-next-phase?)))
+         has-next-phase?
+         (string? (get phase "return_contract")))))
 
 (defn- returned-outcome [value]
   {:status :returned :value value})
@@ -244,7 +249,8 @@
                content
                (get event :turns-remaining)
                (get context :consolidate-at-turns-remaining)
-               (next-phase? phases phase-index)))
+               (next-phase? phases phase-index)
+               (string? (get phase "return_contract"))))
            :prompt-state next-prompt
            :closing? (get state :closing?)}
           {:prompt-error :invalid-transition}))
@@ -545,7 +551,8 @@
                          task)
                        (get initial-phase "max_turns")
                        (get context :consolidate-at-turns-remaining)
-                       (next-phase? phases 0))}]
+                       (next-phase? phases 0)
+                       (string? (get initial-phase "return_contract")))}]
          :prompt-state initial-prompt-state
          :closing? false}}})))
 

@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   import PtcRunner.TestSupport.CommandEngineFixtures
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandApplicationDiagnostic
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandContractAuthority
   alias PtcRunner.Kernel.CommandDeclaration
@@ -50,6 +51,17 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.TestSupport.TestHelpers
 
   @zero_entropy <<0::128>>
+
+  test "contract projection overflow has a stable source-free application diagnostic" do
+    diagnostic =
+      CommandApplicationDiagnostic.project(:validate, :contract_projection_limit_exceeded)
+
+    assert diagnostic.phase == :application
+    assert diagnostic.code == :contract_projection_limit_exceeded
+    assert diagnostic.exit_status == 3
+    assert diagnostic.source == nil
+    assert diagnostic.path == nil
+  end
 
   test "run references use the fixed Crockford encoding" do
     assert CommandRunRef.encode(@zero_entropy) == "cmd-" <> String.duplicate("0", 26)
@@ -7829,6 +7841,36 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     # A distinct cause must produce a distinct diagnostic; the bare-enum and
     # bare-const rows deliberately share one rule at two locations.
     assert length(Enum.uniq(messages)) == length(cases) - 1
+
+    phase_path =
+      write_application(
+        directory,
+        "invalid-phase-contract",
+        valid_manifest(%{
+          "contracts" => %{
+            "phase_return_schemas" => %{
+              "gathered" => %{"path" => "gather.schema.json"}
+            }
+          }
+        }),
+        %{
+          "gather.schema.json" =>
+            Jason.encode!(%{
+              "type" => "object",
+              "properties" => %{
+                "sum" => %{"type" => "integer", "minimum" => 2, "maximum" => 1}
+              }
+            })
+        }
+      )
+
+    phase_outcome = assert_error(["validate", phase_path], "application", "contract_invalid")
+    assert phase_outcome.envelope["error"]["path"] == "/properties/sum/minimum"
+
+    assert phase_outcome.envelope["error"]["source"] == %{
+             "kind" => "phase_return_contract",
+             "name" => "gather.schema.json"
+           }
 
     # A contract document that is not an object at all reaches the compiler and
     # is named as such. Refusing it before compilation would leave the

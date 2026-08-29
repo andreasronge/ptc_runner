@@ -63,6 +63,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.MissionInventory
+  alias PtcRunner.Kernel.ModelContract
   alias PtcRunner.Kernel.ProviderSession
   alias PtcRunner.Kernel.ProviderTaskTracker
   alias PtcRunner.Kernel.SafeMetadata
@@ -294,7 +295,11 @@ defmodule PtcRunner.Kernel.RunConfig do
     Enum.all?(contracts, fn
       {name, %{contract: %ValueContract{} = contract, source: source, projection: projection}}
       when is_binary(name) and is_binary(source) ->
-        ValueContract.sealed?(contract) and is_tuple(projection)
+        ValueContract.sealed?(contract) and
+          byte_size(name) in 1..128 and
+          Regex.match?(~r/\A[a-z][a-z0-9._-]*\z/, name) and
+          ApplicationSource.valid_name?(source) and
+          match?({:ok, ^projection}, ModelContract.value_contract(contract))
 
       _binding ->
         false

@@ -16,15 +16,16 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   while its closure is acquired.
 
   Content identity is SHA-256 over
-  `"ptc.application-content.v2\\0"`, a big-endian `u32` record count, and
+  `"ptc.application-content.v3\\0"`, a big-endian `u32` record count, and
   records sorted by kind byte then UTF-8 logical name. Each record is
   `kind || u32(name-bytes) || name || u64(payload-bytes) || payload`.
   The closed kinds are projected-manifest `0x01`, effective-local-source
   `0x02`, shipped-library-source `0x03`, input-contract `0x04`,
   result-contract `0x05`, direct-dependencies `0x06`, and verified-override
-  identity `0x07`. Component records use `workflow/<id>` or
+  identity `0x07`, and raw named phase-return contract `0x08`. Component records use `workflow/<id>` or
   `mission/<mission-name>/<id>`;
-  contract names are `input` and `result`. Duplicate kind/name pairs are
+  input and result contract names are `input` and `result`; phase-return
+  contract records use their declared contract name. Duplicate kind/name pairs are
   invalid. Manifest, dependency, and override payloads use
   `PtcRunner.Kernel.TypedCanonicalJSON`; source and contract payloads retain
   their exact captured UTF-8 bytes. The complete framed projection is capped
@@ -37,6 +38,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.ConfinedFile
+  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.Library
@@ -94,8 +96,16 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
           workflow_components: [PtcRunner.Kernel.Component.t()],
           workflow_component_kinds: %{binary() => :local | :library},
           entry: binary(),
-          contracts: %{input: ValueContract.t() | nil, result: ValueContract.t() | nil},
-          contract_sources: %{input: binary() | nil, result: binary() | nil},
+          contracts: %{
+            input: ValueContract.t() | nil,
+            result: ValueContract.t() | nil,
+            phase_returns: %{binary() => ValueContract.t()}
+          },
+          contract_sources: %{
+            input: binary() | nil,
+            result: binary() | nil,
+            phase_returns: %{binary() => binary()}
+          },
           missions: map(),
           providers: %{workflow: [map()], mission: [map()]},
           limits: Limits.t(),
@@ -103,7 +113,11 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
           events: map(),
           labels: map(),
           component_overrides: [map()],
-          contract_behavior_hashes: %{input: binary() | nil, result: binary() | nil},
+          contract_behavior_hashes: %{
+            input: binary() | nil,
+            result: binary() | nil,
+            phase_returns: %{binary() => binary()}
+          },
           contract_prompt_projections: %{result: term() | nil, phase_returns: map()},
           contract_prompt_hashes: %{result: binary() | nil, phase_returns: map()},
           application_content_digest: binary(),
@@ -642,7 +656,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
   defp contract_prompt_binding(%ValueContract{} = contract) do
     with {:ok, projection} <- ModelContract.value_contract(contract),
-         {:ok, json} <- PtcRunner.Kernel.DeterministicJSON.encode(projection),
+         {:ok, json} <- DeterministicJSON.encode(projection),
          {:ok, value} <- Jason.decode(json),
          {:ok, encoded} <- TypedCanonicalJSON.encode(value),
          true <- byte_size(encoded) <= 262_144,

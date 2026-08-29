@@ -50,6 +50,57 @@ defmodule PtcRunner.Kernel.ModelContractTest do
              ModelContract.projection_hash({:object, projection})
   end
 
+  test "tagged union discriminator remains unambiguous with other const fields" do
+    schema = %{
+      "oneOf" =>
+        for kind <- ["accepted", "rejected"] do
+          %{
+            "type" => "object",
+            "additionalProperties" => false,
+            "required" => ["kind", "version"],
+            "properties" => %{
+              "kind" => %{"type" => "string", "const" => kind},
+              "version" => %{"type" => "integer", "const" => 1}
+            }
+          }
+        end
+    }
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+    assert {:ok, {:object, projection}} = ModelContract.value_contract(contract)
+    {"variants", variants} = List.keyfind(projection, "variants", 0)
+
+    assert Enum.map(variants, fn {:object, pairs} ->
+             {"discriminator", {:object, discriminator}} =
+               List.keyfind(pairs, "discriminator", 0)
+
+             List.keyfind(discriminator, "literal", 0)
+           end) == [{"literal", "accepted"}, {"literal", "rejected"}]
+  end
+
+  test "ignores invalid string-const discriminator candidates accepted as ordinary fields" do
+    schema = %{
+      "oneOf" =>
+        for kind <- ["accepted", "rejected"] do
+          %{
+            "type" => "object",
+            "additionalProperties" => false,
+            "required" => ["kind", "marker"],
+            "properties" => %{
+              "kind" => %{"type" => "string", "const" => kind},
+              "marker" => %{
+                "type" => "string",
+                "const" => if(kind == "accepted", do: "", else: "ready")
+              }
+            }
+          }
+        end
+    }
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+    assert {:ok, {:object, _projection}} = ModelContract.value_contract(contract)
+  end
+
   alias PtcRunner.Lisp.Signature
 
   test "keeps positional nullability and map-field presence separate" do

@@ -20,6 +20,7 @@ defmodule PtcRunner.Kernel.CommandSource do
     :component,
     :input_contract,
     :result_contract,
+    :phase_return_contract,
     :external_input,
     :component_override,
     :runtime
@@ -44,6 +45,7 @@ defmodule PtcRunner.Kernel.CommandSource do
           | :component
           | :input_contract
           | :result_contract
+          | :phase_return_contract
           | :external_input
           | :component_override
           | :runtime
@@ -82,7 +84,13 @@ defmodule PtcRunner.Kernel.CommandSource do
         %__MODULE__{kind: kind} = source,
         %CommandContractAuthority{} = authority
       )
-      when kind in [:application, :external_input, :input_contract, :result_contract] do
+      when kind in [
+             :application,
+             :external_input,
+             :input_contract,
+             :result_contract,
+             :phase_return_contract
+           ] do
     if valid?(source) and CommandContractAuthority.valid?(authority) do
       {:ok, source |> Map.put(:contract_authority, authority) |> attest()}
     else
@@ -134,8 +142,9 @@ defmodule PtcRunner.Kernel.CommandSource do
   defp valid_name?(:component_override, name), do: name == "component-override.json"
   defp valid_name?(:runtime, name), do: name == "ptc-runtime"
 
-  defp valid_name?(kind, name) when kind in [:component, :input_contract, :result_contract],
-    do: ApplicationSource.valid_name?(name)
+  defp valid_name?(kind, name)
+       when kind in [:component, :input_contract, :result_contract, :phase_return_contract],
+       do: ApplicationSource.valid_name?(name)
 
   defp valid_name?(_kind, _name), do: false
 
@@ -146,7 +155,13 @@ defmodule PtcRunner.Kernel.CommandSource do
          kind,
          authority
        )
-       when kind in [:application, :external_input, :input_contract, :result_contract],
+       when kind in [
+              :application,
+              :external_input,
+              :input_contract,
+              :result_contract,
+              :phase_return_contract
+            ],
        do: is_nil(authority) or CommandContractAuthority.valid?(authority)
 
   defp valid_contract_authority?(_kind, nil), do: true
