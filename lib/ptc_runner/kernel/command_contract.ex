@@ -1089,7 +1089,7 @@ defmodule PtcRunner.Kernel.CommandContract do
           run_error_envelope(
             artifact_class,
             @capacity_artifact_states,
-            closed(~w(state), %{"state" => %{"const" => "not_started"}}),
+            unfinished_execution_schema(artifact_class),
             diagnostic,
             %{"const" => []}
           )
@@ -1517,7 +1517,10 @@ defmodule PtcRunner.Kernel.CommandContract do
     })
   end
 
-  defp execution_schema(artifact_class) when artifact_class in ~w(normal private) do
+  # A run that failed before it could start reaches only these two states: the
+  # provider-free path never started, and the active path is conservatively
+  # incomplete because provider work already happened.
+  defp unfinished_execution_schema(artifact_class) when artifact_class in ~w(normal private) do
     %{
       "oneOf" => [
         closed(~w(state), %{"state" => %{"const" => "not_started"}}),
@@ -1526,17 +1529,26 @@ defmodule PtcRunner.Kernel.CommandContract do
           "usage" => nullable_ref("usage"),
           "evaluation_memory" => nullable_ref("evaluation_memory"),
           "last_evaluation_error" => last_evaluation_error_schema(artifact_class)
-        }),
-        finished_ok_execution_schema(),
-        closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
-          "state" => %{"const" => "finished"},
-          "outcome" => %{"const" => "error"},
-          "diagnostic" => ref("execution_diagnostic"),
-          "usage" => ref("usage"),
-          "evaluation_memory" => ref("evaluation_memory"),
-          "last_evaluation_error" => last_evaluation_error_schema(artifact_class)
         })
       ]
+    }
+  end
+
+  defp execution_schema(artifact_class) when artifact_class in ~w(normal private) do
+    %{
+      "oneOf" =>
+        Map.fetch!(unfinished_execution_schema(artifact_class), "oneOf") ++
+          [
+            finished_ok_execution_schema(),
+            closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
+              "state" => %{"const" => "finished"},
+              "outcome" => %{"const" => "error"},
+              "diagnostic" => ref("execution_diagnostic"),
+              "usage" => ref("usage"),
+              "evaluation_memory" => ref("evaluation_memory"),
+              "last_evaluation_error" => last_evaluation_error_schema(artifact_class)
+            })
+          ]
     }
   end
 

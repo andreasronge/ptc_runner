@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LimitCapacityDiagnostic
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
@@ -380,6 +381,31 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
              )
 
     assert ProviderActivity.value(prepared.provider_activity) == false
+    assert :ok = PreparedRun.close(prepared)
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
+  # The refusal is computed after provider assembly, so the active path reports
+  # it with provider activity. A code whose catalog policy forbids that value
+  # cannot be constructed there, and the run falls back to exit 70.
+  test "a terminal capacity refusal is classified on both the provider-free and active paths" do
+    {prepared, catalog} = oversized_metadata_prepared_run()
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    reason = {:terminal_payload_capacity_exceeded, payload_bytes, payload_bytes * 2}
+
+    for provider_activity <- [false, true] do
+      assert {:ok, diagnostic} =
+               RunBuilder.environment_failure_diagnostic(reason, prepared, provider_activity)
+
+      assert diagnostic.phase == :application
+      assert diagnostic.code == :limit_capacity_invalid
+      assert diagnostic.exit_status == 3
+      assert diagnostic.provider_activity == provider_activity
+
+      assert diagnostic.message ==
+               elem(LimitCapacityDiagnostic.message(payload_bytes, payload_bytes * 2), 1)
+    end
+
     assert :ok = PreparedRun.close(prepared)
     assert :ok = InstallationCatalog.close(catalog)
   end

@@ -886,6 +886,11 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def source_kinds(_phase, _code), do: []
 
   @spec provider_activity_policy(phase(), atom()) :: false | true | :boolean
+  # Every other application-phase code is decided before any provider work. This
+  # one is computed after provider assembly, so it spans the marker: the
+  # provider-free owner path reports false and the active path reports true.
+  def provider_activity_policy(:application, :limit_capacity_invalid), do: :boolean
+
   def provider_activity_policy(phase, _code)
       when phase in [
              :arguments,

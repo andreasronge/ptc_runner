@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LimitCapacityDiagnostic
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.Limits
@@ -5838,6 +5839,48 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
       assert outcome.envelope["error"]["path"] == "/limits/normal_event_count"
       assert outcome.envelope["error"]["message"] =~ "minimum"
+    end
+  end
+
+  # The refusal is computed after provider assembly, so it can be reported with
+  # or without provider activity, and the dispatcher calls an active failure
+  # incomplete. Every one of those outcomes has to seal, or the run that raised
+  # this reason exits 70 through the very path the diagnostic exists to replace.
+  test "every reachable capacity refusal outcome seals as a V4 envelope" do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, message} = LimitCapacityDiagnostic.message(payload_bytes, payload_bytes * 2)
+    {:ok, run_ref} = CommandRunRef.generate()
+
+    artifact_state = %{
+      "trace" => "not_written",
+      "inspection" => "not_requested",
+      "result" => "not_requested"
+    }
+
+    for provider_activity <- [false, true],
+        execution_state <- [:not_started, :incomplete],
+        result_class <- [:normal, :private] do
+      assert {:ok, diagnostic} =
+               CommandDiagnostic.new(:application, :limit_capacity_invalid,
+                 source: CommandSource.fixed(:application),
+                 message: message,
+                 provider_activity: provider_activity
+               )
+
+      assert {:error, outcome} =
+               CommandRunOutcome.operation_failure(
+                 run_ref,
+                 diagnostic,
+                 result_class,
+                 artifact_state,
+                 provider_activity,
+                 execution_state
+               )
+
+      assert outcome.exit_status == 3
+      assert outcome.envelope["error"]["code"] == "limit_capacity_invalid"
+      assert outcome.envelope["error"]["provider_activity"] == provider_activity
+      assert CommandContract.valid_envelope?(outcome.envelope)
     end
   end
 
