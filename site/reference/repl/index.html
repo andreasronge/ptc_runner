@@ -184,13 +184,14 @@ context, not only at a terminal: <code class="inline">(apropos &quot;term&quot;)
 attached prelude exports, fixed built-ins, and the bounded Java surface, while
 <code class="inline">(doc &quot;name&quot;)</code> / <code class="inline">(doc name)</code> prints documentation. Without <code class="inline">--project</code>, a
 <code class="inline">doc</code> or <code class="inline">apropos</code> hit on a shipped library this session has not attached
-prints an attachment redirect (<code class="inline">--project PROJECT.json</code> or
-<code class="inline">{&quot;library&quot;: &quot;&lt;id&gt;&quot;}</code> in <code class="inline">workflow.components</code>) instead of claiming the
-symbol does not exist. <code class="inline">(dir)</code> and
-<code class="inline">(export-meta &quot;ns/name&quot;)</code> / <code class="inline">(export-meta ns/name)</code> inspect the attached
-prelude API specifically, and <code class="inline">(source ns/name)</code> prints an attached prelude
-defining form when available. For <code class="inline">doc</code>/<code class="inline">dir</code>/<code class="inline">export-meta</code>/<code class="inline">source</code>, unquoted
-and quoted symbols are accepted the same way as strings; <code class="inline">apropos</code> accepts
+prints an attachment redirect. Add <code class="inline">{&quot;library&quot;: &quot;&lt;id&gt;&quot;}</code> to
+<code class="inline">workflow.components</code> for a workflow or to <code class="inline">missions.&lt;name&gt;.components</code> for a
+mission, then restart the run or session. The redirect identifies a matching
+library namespace; it does not assert that the requested export exists.
+<code class="inline">(dir)</code> and <code class="inline">(export-meta &quot;ns/name&quot;)</code> / <code class="inline">(export-meta ns/name)</code> inspect the
+attached prelude API specifically, and <code class="inline">(source ns/name)</code> prints an attached
+prelude defining form when available. For <code class="inline">doc</code>/<code class="inline">dir</code>/<code class="inline">export-meta</code>/<code class="inline">source</code>,
+unquoted and quoted symbols are accepted the same way as strings; <code class="inline">apropos</code> accepts
 quoted symbols or strings (an unquoted query evaluates normally). An attached interactive terminal prints
 this guidance in its startup banner, and <code class="inline">:help</code> repeats it. Detached input,
 scripts, repeated <code class="inline">--eval</code>, stdin mode, and JSONL output do not print the

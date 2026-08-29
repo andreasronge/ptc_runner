@@ -174,13 +174,14 @@ context, not only at a terminal: `(apropos "term")` / `(apropos 'term)` searches
 attached prelude exports, fixed built-ins, and the bounded Java surface, while
 `(doc "name")` / `(doc name)` prints documentation. Without `--project`, a
 `doc` or `apropos` hit on a shipped library this session has not attached
-prints an attachment redirect (`--project PROJECT.json` or
-`{"library": "<id>"}` in `workflow.components`) instead of claiming the
-symbol does not exist. `(dir)` and
-`(export-meta "ns/name")` / `(export-meta ns/name)` inspect the attached
-prelude API specifically, and `(source ns/name)` prints an attached prelude
-defining form when available. For `doc`/`dir`/`export-meta`/`source`, unquoted
-and quoted symbols are accepted the same way as strings; `apropos` accepts
+prints an attachment redirect. Add `{"library": "<id>"}` to
+`workflow.components` for a workflow or to `missions.<name>.components` for a
+mission, then restart the run or session. The redirect identifies a matching
+library namespace; it does not assert that the requested export exists.
+`(dir)` and `(export-meta "ns/name")` / `(export-meta ns/name)` inspect the
+attached prelude API specifically, and `(source ns/name)` prints an attached
+prelude defining form when available. For `doc`/`dir`/`export-meta`/`source`,
+unquoted and quoted symbols are accepted the same way as strings; `apropos` accepts
 quoted symbols or strings (an unquoted query evaluates normally). An attached interactive terminal prints
 this guidance in its startup banner, and `:help` repeats it. Detached input,
 scripts, repeated `--eval`, stdin mode, and JSONL output do not print the

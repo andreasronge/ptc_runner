@@ -75,13 +75,15 @@ defmodule PtcRunner.ReplFrontendTest do
     refute output =~ "PtcRunner.Lisp"
   end
 
-  test "direct eval names an unattached shipped library instead of denying it" do
+  test "direct eval names an unattached shipped library" do
     output = capture_io(fn -> run_repl(["-e", ~S|(doc "agent.core/run")|]) end)
 
     assert output =~
-             "agent.core/run is a shipped library export that this session has not attached."
+             ~s(Shipped library "agent.core" is not attached, so "agent.core/run" cannot be resolved in this session.)
 
-    assert output =~ ~s(select {"library": "agent.core"} in workflow.components.)
+    assert output =~
+             ~s(Attach {"library": "agent.core"} to this environment's component list)
+
     refute output =~ "No documentation found"
   end
 

@@ -3576,8 +3576,9 @@ identically in the REPL, in generated workflow or mission source, and inside a
 prelude export reading another prelude's documentation. `dir`, `export-meta`,
 and `source` describe the attached prelude API; `apropos` and `doc` also cover
 fixed built-ins and the bounded Java surface. When a Kernel session supplies the
-shipped-library catalog, a miss on an unattached shipped ref prints an
-attachment redirect instead of claiming the documentation does not exist.
+shipped-library catalog, a miss in an unattached shipped namespace prints an
+attachment redirect. The catalog contains library IDs rather than export refs,
+so this redirect does not assert that the requested export exists.
 
 | Form | Result |
 |------|--------|
@@ -3645,7 +3646,9 @@ spelling. `apropos` similarly suppresses a colliding registry name when its
 attached export is hidden. This preserves the invariant that attached API
 discovery never advertises something the running program cannot call. A Kernel
 session may still *print* an attachment redirect for an unattached shipped
-library; that advisory is not a callable name in `apropos`'s result.
+library; that advisory is not a callable name in `apropos`'s result. Its
+component-list guidance is environment-neutral because the same function runs
+in workflow, mission, and direct REPL contexts.
 
 None of the forms enumerate `data/...` values or `tool/...` capabilities;
 those appear in the mission inventory. `dir`, `export-meta`, and `source`

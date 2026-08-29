@@ -2894,8 +2894,9 @@
           "as data. A miss prints a not-found line and still returns `nil`. When a Kernel " <>
           "session supplies the shipped-library catalog, a miss whose namespace is a " <>
           "shipped library that this session has not attached prints an attachment redirect " <>
-          "naming `--project` / `workflow.components` instead of denying that the " <>
-          "documentation exists. A malformed or unknown ref keeps the not-found line.",
+          "with environment-neutral component guidance. The catalog contains library IDs, " <>
+          "not export refs, so the redirect does not assert that the requested export exists. " <>
+          "A malformed ref or unknown namespace keeps the not-found line.",
       see_also: ["apropos", "dir", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil

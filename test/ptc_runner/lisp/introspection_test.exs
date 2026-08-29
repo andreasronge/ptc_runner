@@ -808,17 +808,34 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       refute "agent.core" in eval!(~S|(apropos "agent")|, nil).return
     end
 
-    test "an unattached shipped export names the missing attachment", %{prelude: prelude} do
+    test "a ref in an unattached shipped namespace names the missing attachment", %{
+      prelude: prelude
+    } do
       result = eval!(~S|(doc "agent.core/run")|, prelude, @catalog_opts)
 
       assert result.return == nil
 
       assert result.prints == [
                """
-               agent.core/run is a shipped library export that this session has not attached.
-               Pass --project PROJECT.json, or select {"library": "agent.core"} in workflow.components.\
+               Shipped library "agent.core" is not attached, so "agent.core/run" cannot be resolved in this session.
+               Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
                """
              ]
+    end
+
+    test "an unknown symbol under an unattached shipped namespace is not called an export", %{
+      prelude: prelude
+    } do
+      result = eval!(~S|(doc "agent.core/not-real")|, prelude, @catalog_opts)
+      output = Enum.join(result.prints, "\n")
+
+      refute output =~ "is a shipped library export"
+
+      assert output ==
+               """
+               Shipped library "agent.core" is not attached, so "agent.core/not-real" cannot be resolved in this session.
+               Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
+               """
     end
 
     test "an unattached shipped namespace names the missing attachment" do
@@ -826,8 +843,8 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
       assert result.prints == [
                """
-               agent.core is a shipped library that this session has not attached.
-               Pass --project PROJECT.json, or select {"library": "agent.core"} in workflow.components.\
+               Shipped library "agent.core" is not attached, so "agent.core" cannot be resolved in this session.
+               Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
                """
              ]
     end
@@ -884,7 +901,7 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert result.prints == [
                """
                Unattached shipped libraries matching "agent": agent.core, agent.failure.
-               Pass --project PROJECT.json, or select {"library": "<id>"} in workflow.components.\
+               Attach {"library": "<id>"} to this environment's component list before starting the run or session.\
                """
              ]
     end

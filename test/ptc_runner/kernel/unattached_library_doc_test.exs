@@ -11,7 +11,7 @@ defmodule PtcRunner.Kernel.UnattachedLibraryDocTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.StreamingInspection
 
-  test "mission evaluation names an unattached shipped library instead of denying it" do
+  test "mission evaluation gives environment-neutral attachment guidance" do
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new()
     {:ok, state} = RunState.start(limits)
@@ -25,13 +25,18 @@ defmodule PtcRunner.Kernel.UnattachedLibraryDocTest do
                1_000
              )
 
-    assert Enum.join(prints, "\n") =~
-             "agent.core/run is a shipped library export that this session has not attached."
+    assert Enum.join(prints, "\n") ==
+             """
+             Shipped library "agent.core" is not attached, so "agent.core/run" cannot be resolved in this session.
+             Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
+             """
+
+    refute Enum.join(prints, "\n") =~ "workflow.components"
 
     assert :ok = RunState.stop(state)
   end
 
-  test "workflow evaluation names an unattached shipped library instead of denying it" do
+  test "workflow evaluation gives environment-neutral attachment guidance" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new()
@@ -61,7 +66,10 @@ defmodule PtcRunner.Kernel.UnattachedLibraryDocTest do
       |> Enum.filter(&(&1["record_type"] == "execution-prints"))
       |> Enum.flat_map(& &1["payload"]["prints"])
 
-    assert Enum.join(prints, "\n") =~
-             "agent.core/run is a shipped library export that this session has not attached."
+    assert Enum.join(prints, "\n") ==
+             """
+             Shipped library "agent.core" is not attached, so "agent.core/run" cannot be resolved in this session.
+             Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
+             """
   end
 end

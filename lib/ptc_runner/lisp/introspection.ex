@@ -6,9 +6,10 @@ defmodule PtcRunner.Lisp.Introspection do
   `dir`, `export-meta`, and `source` describe the attached prelude. `apropos`
   and `doc` additionally expose fixed built-ins and the bounded Java surface
   from `PtcRunner.Lisp.Registry`. When the Kernel supplies a shipped-library
-  catalog, a miss on an unattached shipped ref prints an attachment redirect
-  instead of denying that the documentation exists; `apropos` prints the same
-  class of advisory while still returning only callable names.
+  catalog, a miss in an unattached shipped namespace prints an attachment
+  redirect; `apropos` prints the same class of advisory while still returning
+  only callable names. The redirect identifies the library whose namespace
+  matched, but does not claim that the requested export exists.
   The same answers are produced in the REPL, in workflow and mission source,
   and inside a prelude export reading another prelude's documentation — there
   is no REPL-only path.
@@ -74,7 +75,8 @@ defmodule PtcRunner.Lisp.Introspection do
   registry, and `apropos` merges visible attached refs with canonical registry
   names. When the evaluation context carries a shipped-library catalog, a miss
   whose namespace is in that catalog and not attached is a redirect naming the
-  missing attachment rather than a denial that the documentation exists.
+  missing attachment. Because the catalog contains library IDs rather than
+  export refs, the redirect does not claim that the requested export exists.
   `apropos` prints the same class of advisory for matching unattached shipped
   libraries and still returns only callable names. An unknown or malformed ref
   is a miss, not a failure. A `nil` catalog degrades to the registry-only miss,
@@ -405,7 +407,7 @@ defmodule PtcRunner.Lisp.Introspection do
 
   defp unattached_libraries_message(query, ids) do
     "Unattached shipped libraries matching \"#{query}\": #{Enum.join(ids, ", ")}.\n" <>
-      ~s(Pass --project PROJECT.json, or select {"library": "<id>"} in workflow.components.)
+      ~s(Attach {"library": "<id>"} to this environment's component list before starting the run or session.)
   end
 
   defp unattached_library_matches(_prelude, _needle, nil), do: []
@@ -452,14 +454,9 @@ defmodule PtcRunner.Lisp.Introspection do
   defp attached_namespaces(_prelude), do: []
 
   defp unattached_library_message(ref, library_id) do
-    kind =
-      case String.split(ref, "/", parts: 2) do
-        [_namespace, symbol] when symbol != "" -> "shipped library export"
-        _ -> "shipped library"
-      end
-
-    "#{ref} is a #{kind} that this session has not attached.\n" <>
-      ~s(Pass --project PROJECT.json, or select {"library": "#{library_id}"} in workflow.components.)
+    ~s(Shipped library "#{library_id}" is not attached, so "#{ref}" cannot be resolved in this session.) <>
+      "\n" <>
+      ~s(Attach {"library": "#{library_id}"} to this environment's component list before starting the run or session.)
   end
 
   defp render_registry_entry(entry) do

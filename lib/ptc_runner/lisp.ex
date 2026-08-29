@@ -290,7 +290,9 @@ defmodule PtcRunner.Lisp do
       evaluation is not reported as a missing grant.
     - `:shipped_library_ids` - Optional catalog of shipped library component IDs.
       The Kernel passes `PtcRunner.Kernel.Library.component_ids/0` so `doc` and
-      `apropos` can name an unattached shipped library instead of denying it.
+      `apropos` can name an unattached shipped library. The catalog contains
+      library IDs, not export refs, so a `doc` redirect does not assert that the
+      requested export exists.
       `nil` (the default) keeps today's miss message, so embedded `run/2`
       callers are unchanged.
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
