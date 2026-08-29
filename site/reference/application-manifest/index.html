@@ -261,7 +261,10 @@ installed side of every provider source.</p><h2 id="narrow-installed-limits">Nar
 }</code></pre><p>The host installs maximums. A manifest may request a lower or equal value;
 omission uses the normal runtime default capped by a lower installed ceiling.
 Limits also bound time, heaps, concurrency, retained definitions/history,
-source, capability values, and trace events.</p><p>Installed-only operational timeouts cannot appear in a manifest. The generated
+source, capability values, and trace events.</p><p>Optional rows such as <code class="inline">llm_total_tokens</code>, <code class="inline">llm_cost_microusd</code>,
+<code class="inline">workflow_loop_iterations</code>, and <code class="inline">evaluation_loop_iterations</code> stay disabled
+until the host enables them. A manifest cannot turn a host-disabled optional
+limit on; it may only inherit or narrow an enabled host value.</p><p>Installed-only operational timeouts cannot appear in a manifest. The generated
 <a href="/reference/kernel-limits-reference/">Kernel limits reference</a> lists every name,
 meaning, unit, default, range, and scope.</p><h2 id="choose-event-privacy-and-labels">Choose event privacy and labels</h2><p>Trace events are sanitized and bounded:</p><pre><code class="json language-json">&quot;events&quot;: {&quot;policy&quot;: &quot;normal&quot;}</code></pre><p><code class="inline">&quot;private&quot;</code> changes trace discovery and sink requirements. It does
 not create a prompt/response transcript. Exact model exchanges, generated

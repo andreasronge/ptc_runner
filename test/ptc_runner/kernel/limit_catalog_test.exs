@@ -111,6 +111,18 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                          })}
                       end)
                     )
+                    |> Map.put("evaluation_loop_iterations", %{
+                      field: :evaluation_loop_iterations,
+                      name: "evaluation_loop_iterations",
+                      scope: :optional_manifest_narrowable,
+                      compiled_default: nil,
+                      installed_default: nil,
+                      minimum: 1,
+                      maximum: 2_592_000_000,
+                      identity: true,
+                      prerequisites: [],
+                      prerequisite_description: nil
+                    })
                     |> Map.put("llm_total_tokens", %{
                       field: :llm_total_tokens,
                       name: "llm_total_tokens",
@@ -140,6 +152,18 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                       ],
                       prerequisite_description:
                         "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", and an explicit USD reservation_tariff on every live LLM installation."
+                    })
+                    |> Map.put("workflow_loop_iterations", %{
+                      field: :workflow_loop_iterations,
+                      name: "workflow_loop_iterations",
+                      scope: :optional_manifest_narrowable,
+                      compiled_default: nil,
+                      installed_default: nil,
+                      minimum: 1,
+                      maximum: 2_592_000_000,
+                      identity: true,
+                      prerequisites: [],
+                      prerequisite_description: nil
                     })
 
   # A ceiling equal to the default leaves a manifest no way to raise its own

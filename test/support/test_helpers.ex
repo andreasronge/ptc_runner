@@ -177,17 +177,15 @@ defmodule PtcRunner.TestSupport.TestHelpers do
   A PTC-Lisp entry body that genuinely occupies its worker while a test
   inspects the run in flight.
 
-  `(loop [] (recur))` reads like an infinite loop and has been used across this
-  suite as one, but it is not: PTC-Lisp hard-caps `loop`/`recur` at exactly
-  1_000 jumps (`PtcRunner.Lisp.Eval.Context`'s `loop_limit`, which is not
-  reachable through manifest limits), and an empty body burns through that cap
-  in well under a second. Any test that kills a caller, traces an owner, or
-  calls `:sys.get_state/1` on a session "while the run blocks" is really racing
-  that natural completion, and loses under full-suite load — surfacing as an
+  `(loop [] (recur))` is an unbounded `loop`/`recur` activation. Without an
+  explicit `loop_limit` it runs until the sandbox timeout or heap cap. Tests
+  that kill a caller, trace an owner, or call `:sys.get_state/1` on a session
+  "while the run blocks" must occupy the worker with real work instead of
+  racing a tiny empty loop against suite load — surfacing as an
   `ArgumentError` or a `:noproc` exit on an already-exited process rather than
   as an obvious timeout.
 
-  This gives each of the 1_000 iterations real work instead. `repeats` scales
+  This gives each of 1_000 iterations real work. `repeats` scales
   that work roughly linearly: 1 lands near 6s on a developer machine, 5 near
   30s. Callers should pick the smallest value that clears their own setup
   overhead by a wide margin — the duration is calibrated, not guaranteed, so

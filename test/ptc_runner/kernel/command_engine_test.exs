@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
@@ -544,25 +545,44 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     tmp_dir: directory
   } do
     cases = [
-      {~S|(ns app) (defn run [_input] (return (count)))|, "arity_error"},
-      {~S|(ns app) (defn run [_input] (return (1 2 3)))|, "not_callable"},
-      {~S|(ns app) (defn run [_input] (loop [i 0] (if (< i 999999) (recur (inc i)) i)))|,
-       "loop_limit_exceeded"},
-      {~S|(ns app) (defn run [_input] (return (Math/round 1)))|, "java_type_error"}
+      {~S|(ns app) (defn run [_input] (return (count)))|, "arity_error", []},
+      {~S|(ns app) (defn run [_input] (return (1 2 3)))|, "not_callable", []},
+      {~S|(ns app) (defn run [_input] (return (Math/round 1)))|, "java_type_error", []}
     ]
 
-    Enum.with_index(cases, fn {source, kind}, index ->
+    Enum.with_index(cases, fn {source, kind, extra}, index ->
       application = write_application(directory, "evaluator-kind-#{index}", valid_manifest())
       File.write!(Path.join(Path.dirname(application), "main.clj"), source)
 
       assert {:error, %CommandOutcome{} = outcome} =
-               CommandEngine.dispatch(["run", application])
+               CommandEngine.dispatch(["run", application] ++ extra)
 
       assert outcome.envelope["error"]["code"] == "evaluation_failed"
       assert outcome.envelope["execution"]["last_evaluation_error"]["kind"] == kind
       refute Jason.encode!(outcome.envelope) =~ "PtcRunner.Lisp"
       assert_schema_valid(outcome.envelope)
     end)
+
+    host_path =
+      write_host_config(directory, "evaluator-loop-limit", %{
+        "install" => %{},
+        "limits" => %{"workflow_loop_iterations" => 50}
+      })
+
+    application = write_application(directory, "evaluator-kind-loop", valid_manifest())
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (loop [i 0] (if (< i 999999) (recur (inc i)) i)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["code"] == "evaluation_failed"
+    assert outcome.envelope["execution"]["last_evaluation_error"]["kind"] == "loop_limit_exceeded"
+    refute Jason.encode!(outcome.envelope) =~ "PtcRunner.Lisp"
+    assert_schema_valid(outcome.envelope)
   end
 
   @tag :tmp_dir
@@ -6207,14 +6227,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "host-disabled optional budgets name the unavailable limit and remedy", %{
     tmp_dir: directory
   } do
-    for {name, requested} <- [
-          {"llm_cost_microusd", 50},
-          {"llm_total_tokens", 9_007_199_254_740_991}
-        ] do
+    for row <- LimitCatalog.rows(:optional_manifest_narrowable),
+        requested <- [row.minimum, row.maximum] do
+      name = row.name
+
       application =
         write_application(
           directory,
-          "disabled-#{name}",
+          "disabled-#{name}-#{requested}",
           valid_manifest(%{"limits" => %{name => requested}})
         )
 
@@ -6281,6 +6301,55 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       )
 
     assert outcome.envelope["error"]["path"] == "/limits/llm_total_tokens"
+  end
+
+  @tag :tmp_dir
+  test "enabled optional non-LLM limits inherit, narrow, and distinguish an exceeded ceiling", %{
+    tmp_dir: directory
+  } do
+    for row <- LimitCatalog.rows(:optional_manifest_narrowable),
+        row.prerequisites == [] do
+      host_path =
+        write_host_config(directory, "enabled-#{row.name}", %{
+          "install" => %{},
+          "limits" => %{row.name => 1_000}
+        })
+
+      inherited = write_application(directory, "inherited-#{row.name}", valid_manifest())
+
+      assert {:ok, %CommandOutcome{} = inherited_outcome} =
+               CommandEngine.prepare(["validate", inherited, "--host-config", host_path])
+
+      assert inherited_outcome.exit_status == 0
+
+      narrowed =
+        write_application(
+          directory,
+          "narrowed-#{row.name}",
+          valid_manifest(%{"limits" => %{row.name => 500}})
+        )
+
+      assert {:ok, %CommandOutcome{} = narrowed_outcome} =
+               CommandEngine.prepare(["validate", narrowed, "--host-config", host_path])
+
+      assert narrowed_outcome.exit_status == 0
+
+      exceeded =
+        write_application(
+          directory,
+          "exceeded-#{row.name}",
+          valid_manifest(%{"limits" => %{row.name => 1_001}})
+        )
+
+      outcome =
+        assert_error(
+          ["validate", exceeded, "--host-config", host_path],
+          "application",
+          "installed_limit_exceeded"
+        )
+
+      assert outcome.envelope["error"]["path"] == "/limits/#{row.name}"
+    end
   end
 
   @tag :tmp_dir

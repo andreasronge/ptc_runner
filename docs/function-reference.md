@@ -34,12 +34,12 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `def` | `(def ...)` |  |
-| `defn` | `(defn ...)` |  — DIV-01: self-recursion is subject to the iteration cap (default 1000, configurable up to 10000). DIV-15: no multi-arity head form ([x] x ([x y] ...)). DIV-16: no :pre/:post conditions. See docs/clojure-conformance-gaps.md. |
+| `defn` | `(defn ...)` |  — DIV-01: self-recursion has no default iteration cap; an optional per-activation loop/tail-recur limit may be configured. DIV-15: no multi-arity head form ([x] x ([x y] ...)). DIV-16: no :pre/:post conditions. See docs/clojure-conformance-gaps.md. |
 | `defonce` | `(defonce ...)` |  |
 | `fn` | `(fn ...)` |  |
 | `let` | `(let ...)` |  |
-| `loop` | `(loop ...)` |  — DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md. |
-| `recur` | `(recur ...)` |  — DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md. |
+| `loop` | `(loop ...)` |  — DIV-01: no default iteration cap; an optional per-activation loop/tail-recur limit may be configured. See docs/clojure-conformance-gaps.md. |
+| `recur` | `(recur ...)` |  — DIV-01: no default iteration cap; an optional per-activation loop/tail-recur limit may be configured. See docs/clojure-conformance-gaps.md. |
 
 
 

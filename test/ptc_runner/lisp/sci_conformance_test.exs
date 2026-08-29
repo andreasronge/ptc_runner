@@ -257,7 +257,7 @@ defmodule PtcRunner.Lisp.SciConformanceTest do
 
   # ---------------------------------------------------------------------------
   # From: recur-test (line 667)
-  # DIV-01: PTC-Lisp enforces a loop iteration limit (default 1000) for sandbox safety.
+  # DIV-01: PTC-Lisp may enforce an optional per-activation loop/tail-recur limit.
   # ---------------------------------------------------------------------------
 
   describe "SCI recur-test" do

@@ -49,7 +49,7 @@ defmodule PtcRunner.Lisp.EvaluatorErrorTest do
             %{
               kind: "loop_limit_exceeded",
               message:
-                "Loop iteration limit exceeded (1000 iterations). Use reduce/map over a finite sequence instead, or split work across smaller loops."
+                "Loop iteration limit exceeded (1000 iterations). Reduce the iterations in this loop, split the work into separately entered loops, use a finite collection operation, or raise the active configured limit."
             }} =
              EvaluatorError.public_evidence(:loop_limit_exceeded, %{limit: 1000})
   end

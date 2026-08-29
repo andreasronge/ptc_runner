@@ -16,17 +16,28 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
       Context.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [],
         prelude: nil,
         strict_transitive_calls: true,
-        private_tool_authority?: true
+        private_tool_authority?: true,
+        loop_limit: 250
       )
 
     child = Context.new_child(parent, %{"scope" => "child"}, %{"x" => 1})
 
     assert child.tool_call_budget === parent.tool_call_budget
     assert child.tool_activity === parent.tool_activity
+    assert child.loop_limit === parent.loop_limit
     assert child.strict_transitive_calls === parent.strict_transitive_calls
     assert child.private_tool_authority? === parent.private_tool_authority?
     assert child.user_ns == %{"scope" => "child"}
     assert child.env == %{"x" => 1}
+  end
+
+  test "loop_limit defaults to nil and consume_loop_iteration is activation-local" do
+    ctx = Context.new(%{}, %{}, %{}, fn _, _, _ -> nil end, [])
+    assert ctx.loop_limit == nil
+    assert Context.consume_loop_iteration(0, nil) == {:ok, 0}
+    assert Context.consume_loop_iteration(0, 2) == {:ok, 1}
+    assert Context.consume_loop_iteration(1, 2) == {:ok, 2}
+    assert Context.consume_loop_iteration(2, 2) == {:error, :loop_limit_exceeded}
   end
 
   describe "append_tool_call/2" do
