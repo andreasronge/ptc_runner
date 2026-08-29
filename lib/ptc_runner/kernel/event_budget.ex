@@ -15,7 +15,7 @@ defmodule PtcRunner.Kernel.EventBudget do
   # run instead. Keep this explicit because sizing a constructed literal can
   # undercount the ref-counted binaries retained by a real sink;
   # `limit_catalog_test` re-derives it by measurement.
-  @minimum_normal_payload_bytes 7_645
+  @minimum_normal_payload_bytes 8_211
   @maximum_dropped_bytes 3_449
 
   @doc false

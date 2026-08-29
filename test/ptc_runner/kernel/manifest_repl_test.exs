@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.LimitConfigurationDiagnostic
@@ -248,7 +249,7 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   } do
     write_component(directory)
     manifest = Path.join(directory, "invalid-trace-budget.json")
-    payload_bytes = 8_000
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
     {:ok, base_limits} = Limits.new(event_payload_bytes: payload_bytes)
     required_bytes = LimitConfiguration.required_normal_event_bytes(base_limits)
 

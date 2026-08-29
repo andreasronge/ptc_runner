@@ -2,14 +2,22 @@ defmodule PtcRunner.Kernel.TerminalUsage do
   @moduledoc false
 
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.RetainedSize
 
-  @maximum_repl_errors 4_294_967_295
+  # Both counters saturate at the same 32-bit width the trace projection
+  # admits. Neither can reach a bignum inside `run_duration_ms`, so this is a
+  # retained-size upper bound as well as a value bound.
+  @maximum_counter 4_294_967_295
   @maximum_llm_amount 9_007_199_254_740_991
 
   @doc """
   Builds the largest `run-stopped` usage projection one configuration can emit.
+
+  It must carry every key `RunState.usage/1` produces, plus the `errors` count a
+  REPL session adds on close; a key omitted here is a payload the sink admits at
+  build time and cannot record at finalization.
 
   The shape has a fixed part every run carries and an application-scaled part
   keyed by declared capability and mission names. `RunConfig` measures the real
@@ -41,15 +49,31 @@ defmodule PtcRunner.Kernel.TerminalUsage do
       evaluations_by_mission: Map.new(mission_names, &{&1, limits.subordinate_evaluations}),
       subordinate_source_checks: limits.subordinate_source_checks,
       protocol_errors: limits.protocol_errors + 1,
+      agent_protocol_errors: @maximum_counter,
       evaluation_memory_bytes: limits.evaluation_memory_bytes,
       evaluation_history_bytes: limits.evaluation_history_bytes,
       evaluation_continuation_bytes:
         limits.evaluation_memory_bytes + limits.evaluation_history_bytes,
       evaluation_busy?: true,
       evaluation_missions: Enum.sort(mission_names),
-      errors: @maximum_repl_errors,
+      errors: @maximum_counter,
       capability_refusals: maximum_capability_refusals(),
-      llm_budget: maximum_llm_budget(limits)
+      llm_budget: maximum_llm_budget(limits),
+      llm_spend: maximum_llm_spend()
+    }
+  end
+
+  # `available` is the widest of the four spend states: the other three drop
+  # `input`/`output`, and only this one carries the nested cost object.
+  defp maximum_llm_spend do
+    %{
+      "state" => "available",
+      "input" => LLMUsage.maximum_integer(),
+      "output" => LLMUsage.maximum_integer(),
+      "total_cost" => %{
+        "currency" => "USD",
+        "microunits" => LLMUsage.maximum_integer()
+      }
     }
   end
 

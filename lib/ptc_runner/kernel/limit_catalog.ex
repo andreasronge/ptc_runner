@@ -24,7 +24,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   @minimums %{
     # EventBudget owns the retained-size upper bound; the catalog test keeps
     # this schema authority synchronized with that runtime contract.
-    event_payload_bytes: 7_645,
+    event_payload_bytes: 8_211,
     llm_request_timeout_ms: 100,
     normal_event_count: 3
   }

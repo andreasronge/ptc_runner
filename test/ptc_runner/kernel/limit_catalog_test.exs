@@ -408,15 +408,21 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     sink = %EventSink{pid: self(), token: make_ref(), policy: :normal}
     minimum = EventBudget.minimum_normal_payload_bytes()
 
-    {:ok, catalog_minima} = Limits.new(Map.new(LimitCatalog.rows(), &{&1.field, &1.minimum}))
-    {:ok, catalog_maxima} = Limits.new(Map.new(LimitCatalog.rows(), &{&1.field, &1.maximum}))
-    {:ok, defaults} = Limits.new()
+    rows = LimitCatalog.rows()
 
-    for limits <- [defaults, catalog_minima, catalog_maxima] do
+    overrides =
+      [%{}, Map.new(rows, &{&1.field, &1.minimum}), Map.new(rows, &{&1.field, &1.maximum})] ++
+        Enum.flat_map(rows, &[%{&1.field => &1.minimum}, %{&1.field => &1.maximum}])
+
+    for override <- overrides do
+      {:ok, limits} = Limits.new(override)
       usage = TerminalUsage.maximum(%{}, %{}, [], limits)
-      assert EventSink.required_terminal_payload_bytes(sink, usage) <= minimum
+
+      assert EventSink.required_terminal_payload_bytes(sink, usage) <= minimum,
+             "#{inspect(override)} needs more than the published floor"
     end
 
+    {:ok, catalog_maxima} = Limits.new(Map.new(rows, &{&1.field, &1.maximum}))
     usage = TerminalUsage.maximum(%{}, %{}, [], catalog_maxima)
     assert EventSink.required_terminal_payload_bytes(sink, usage) == minimum
 
@@ -425,7 +431,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   end
 
   test "effective normal trace bytes retain one ordinary event and terminal reserve" do
-    payload_bytes = 8_000
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
     {:ok, base} = Limits.new(event_payload_bytes: payload_bytes)
     required_bytes = LimitConfiguration.required_normal_event_bytes(base)
 

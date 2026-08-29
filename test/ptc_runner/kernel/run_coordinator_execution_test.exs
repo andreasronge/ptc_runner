@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
@@ -864,7 +865,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
         "entry" => "app/run"
       },
       "input" => %{"value" => %{}},
-      "limits" => %{"event_payload_bytes" => 8_000}
+      "limits" => %{"event_payload_bytes" => EventBudget.minimum_normal_payload_bytes()}
     }
 
     documents =

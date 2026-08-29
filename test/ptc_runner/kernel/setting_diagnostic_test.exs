@@ -6,10 +6,13 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.ExplicitFailureDiagnostic
   alias PtcRunner.Kernel.LimitCapacityDiagnostic
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.LimitConfigurationDiagnostic
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -615,25 +618,42 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         remedy: "enable llm_total_tokens in the host document",
         build: fn -> OptionalBudgetDiagnostic.unavailable_message("llm_total_tokens", 5_000) end
       },
-      %{
-        phase: :application,
-        code: :limit_configuration_invalid,
-        source: :application,
-        setting: "normal_event_bytes",
-        value: "27449",
-        remedy: "raise limits.normal_event_bytes",
-        build: fn -> LimitConfigurationDiagnostic.message(27_449, 27_450, 8_000) end
-      },
-      %{
-        phase: :application,
-        code: :limit_capacity_invalid,
-        source: :application,
-        setting: "event_payload_bytes",
-        value: "8000",
-        remedy: "raise limits.event_payload_bytes",
-        build: fn -> LimitCapacityDiagnostic.message(8_000, 9_000) end
-      }
+      limit_configuration_row(),
+      limit_capacity_row()
     ]
+  end
+
+  # Both rows are keyed to the published `event_payload_bytes` floor rather than
+  # to literals, so raising the floor cannot silently retire their coverage.
+  defp limit_configuration_row do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, limits} = Limits.new(event_payload_bytes: payload_bytes)
+    required = LimitConfiguration.required_normal_event_bytes(limits)
+
+    %{
+      phase: :application,
+      code: :limit_configuration_invalid,
+      source: :application,
+      setting: "normal_event_bytes",
+      value: Integer.to_string(required - 1),
+      remedy: "raise limits.normal_event_bytes",
+      build: fn -> LimitConfigurationDiagnostic.message(required - 1, required, payload_bytes) end
+    }
+  end
+
+  defp limit_capacity_row do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    required = payload_bytes * 2
+
+    %{
+      phase: :application,
+      code: :limit_capacity_invalid,
+      source: :application,
+      setting: "event_payload_bytes",
+      value: Integer.to_string(payload_bytes),
+      remedy: "raise limits.event_payload_bytes",
+      build: fn -> LimitCapacityDiagnostic.message(payload_bytes, required) end
+    }
   end
 
   # The agent loop reports why it stopped, and only three of its five reasons

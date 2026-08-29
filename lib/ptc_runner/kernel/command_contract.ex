@@ -76,8 +76,11 @@ defmodule PtcRunner.Kernel.CommandContract do
   # `limit_capacity_invalid` is the exception: the terminal-usage requirement it
   # reports scales with the resolved capability and mission inventory, which is
   # not known until provider assembly, by which point the run already carries
-  # its result class. It stays exit 3 with execution `not_started` and no trace.
-  @classified_preclassification_pairs [{:application, :limit_capacity_invalid}]
+  # its result class. It gets its own branch rather than joining the general
+  # classified union, so the envelope keeps stating what the code means — the
+  # run never started and wrote nothing.
+  @capacity_pairs [{:application, :limit_capacity_invalid}]
+  @capacity_artifact_states ~w(not_requested not_written)
 
   @codes_by_phase DiagnosticCatalog.rows()
                   |> Enum.group_by(& &1.phase, & &1.code)
@@ -133,6 +136,7 @@ defmodule PtcRunner.Kernel.CommandContract do
               @artifact_states -- @recovery_artifact_states,
               "classified_diagnostic"
             ),
+            run_capacity_error_envelope("capacity_diagnostic"),
             run_recovery_error_envelope(
               "recovery_written",
               "recovery_written_diagnostic"
@@ -167,7 +171,14 @@ defmodule PtcRunner.Kernel.CommandContract do
             false
           ),
         "classified_diagnostic" =>
-          diagnostic_schema(Enum.reject(DiagnosticCatalog.rows(), &preclassification_only?/1)),
+          diagnostic_schema(
+            Enum.reject(
+              DiagnosticCatalog.rows(),
+              &(&1.phase in @preclassification_only_phases)
+            )
+          ),
+        "capacity_diagnostic" =>
+          diagnostic_schema(Enum.filter(DiagnosticCatalog.rows(), &capacity_pair?/1)),
         "recovery_written_diagnostic" =>
           recovery_diagnostic_schema(@recovery_written_publication_codes),
         "finalization_uncertain_diagnostic" =>
@@ -893,10 +904,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     )
   end
 
-  defp preclassification_only?(%{phase: phase, code: code}),
-    do:
-      phase in @preclassification_only_phases and
-        {phase, code} not in @classified_preclassification_pairs
+  defp capacity_pair?(%{phase: phase, code: code}), do: {phase, code} in @capacity_pairs
 
   defp diagnostic_rows(:run), do: DiagnosticCatalog.rows()
 
@@ -1069,6 +1077,21 @@ defmodule PtcRunner.Kernel.CommandContract do
             states,
             execution_schema(artifact_class),
             diagnostic
+          )
+        end)
+    }
+  end
+
+  defp run_capacity_error_envelope(diagnostic) do
+    %{
+      "oneOf" =>
+        Enum.map(~w(normal private), fn artifact_class ->
+          run_error_envelope(
+            artifact_class,
+            @capacity_artifact_states,
+            closed(~w(state), %{"state" => %{"const" => "not_started"}}),
+            diagnostic,
+            %{"const" => []}
           )
         end)
     }

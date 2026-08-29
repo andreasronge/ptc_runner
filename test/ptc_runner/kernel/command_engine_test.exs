@@ -5701,7 +5701,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "impossible normal trace budgets are rejected identically before execution", %{
     tmp_dir: directory
   } do
-    payload_bytes = 8_000
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
     {:ok, base_limits} = Limits.new(event_payload_bytes: payload_bytes)
     required_bytes = LimitConfiguration.required_normal_event_bytes(base_limits)
     configured_bytes = required_bytes - 1

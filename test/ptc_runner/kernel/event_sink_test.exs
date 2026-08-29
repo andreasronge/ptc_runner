@@ -66,12 +66,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   end
 
   test "terminal reserve retains one dropped summary and one run-stopped event" do
-    {:ok, limits} =
-      Limits.new(
-        normal_event_count: 4,
-        normal_event_bytes: 26_000,
-        event_payload_bytes: 8_000
-      )
+    limits = reserved_limits(normal_event_count: 4, ordinary_bytes: 7_699)
 
     {:ok, sink} =
       EventSink.start(:normal, limits,
@@ -102,7 +97,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   end
 
   test "the minimum admitted normal budget retains run-started and both terminal events" do
-    payload_bytes = 8_000
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
     {:ok, base} = Limits.new(event_payload_bytes: payload_bytes)
     reserve = EventSink.terminal_reserve(:normal, base)
     run_started_bytes = EventBudget.maximum_event_bytes("run-started", payload_bytes)
@@ -128,12 +123,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   end
 
   test "terminal reserve remains available after the ordinary byte budget is saturated" do
-    {:ok, limits} =
-      Limits.new(
-        normal_event_count: 10,
-        normal_event_bytes: 26_000,
-        event_payload_bytes: 8_000
-      )
+    limits = reserved_limits(normal_event_count: 10, ordinary_bytes: 7_699)
 
     {:ok, sink} =
       EventSink.start(:normal, limits,
@@ -158,12 +148,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   end
 
   test "finalization atomically hands off a frozen terminal batch" do
-    {:ok, limits} =
-      Limits.new(
-        normal_event_count: 4,
-        normal_event_bytes: 26_000,
-        event_payload_bytes: 8_000
-      )
+    limits = reserved_limits(normal_event_count: 4, ordinary_bytes: 7_699)
 
     {:ok, sink} =
       EventSink.start(:normal, limits,
@@ -376,6 +361,24 @@ defmodule PtcRunner.Kernel.EventSinkTest do
       payload = %{"value" => String.duplicate("x", size)}
       if RetainedSize.bytes(payload) == bytes, do: payload
     end) || flunk("could not construct a #{bytes}-byte payload")
+  end
+
+  # The smallest admitted payload plus an explicit ordinary byte budget on top
+  # of the measured terminal reserve, so these tests keep their intended
+  # headroom when the catalog floor moves.
+  defp reserved_limits(opts) do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, base} = Limits.new(event_payload_bytes: payload_bytes)
+
+    {:ok, limits} =
+      Limits.new(
+        normal_event_count: Keyword.fetch!(opts, :normal_event_count),
+        normal_event_bytes:
+          EventSink.terminal_reserve(:normal, base).bytes + Keyword.fetch!(opts, :ordinary_bytes),
+        event_payload_bytes: payload_bytes
+      )
+
+    limits
   end
 
   defp catalog_maximum_limits do

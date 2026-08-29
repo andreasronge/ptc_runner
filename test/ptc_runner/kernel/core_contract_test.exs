@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SourceCheck
+  alias PtcRunner.Kernel.TerminalUsage
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -1380,13 +1381,34 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              )
   end
 
+  # A key present in a real terminal projection but missing from the maximum is a
+  # payload the sink admits at build time and cannot record at finalization —
+  # the shape of #1605 and #1708 both.
+  test "the maximum terminal usage covers every key a real terminal projection carries" do
+    {:ok, limits} = Limits.new()
+    {:ok, state} = RunState.start(limits)
+    runner_keys = state |> RunState.usage() |> Map.keys() |> MapSet.new()
+    repl_keys = MapSet.put(runner_keys, :errors)
+
+    maximum_keys =
+      %{}
+      |> TerminalUsage.maximum(%{}, [], limits)
+      |> Map.keys()
+      |> MapSet.new()
+
+    assert MapSet.subset?(repl_keys, maximum_keys),
+           "missing: #{inspect(MapSet.difference(repl_keys, maximum_keys))}"
+
+    assert MapSet.difference(maximum_keys, repl_keys) |> MapSet.to_list() == []
+  end
+
   test "terminal preflight counts only metered environment capabilities" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
 
     {:ok, limits} =
       Limits.new(
-        event_payload_bytes: 8_000,
+        event_payload_bytes: EventBudget.minimum_normal_payload_bytes(),
         normal_event_count: 4,
         normal_event_bytes: 100_000
       )
@@ -1424,14 +1446,15 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                )
     end
 
-    {:ok, base_limits} = Limits.new(normal_event_count: 3, event_payload_bytes: 8_000)
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, base_limits} = Limits.new(normal_event_count: 3, event_payload_bytes: payload_bytes)
     reserve = EventSink.terminal_reserve(:normal, base_limits)
 
     {:ok, tight_limits} =
       Limits.new(
         normal_event_count: 3,
         normal_event_bytes: reserve.bytes + 1,
-        event_payload_bytes: 8_000
+        event_payload_bytes: payload_bytes
       )
 
     {:ok, tight} = EventSink.start(:normal, tight_limits, run_id: "tight-run-started")
