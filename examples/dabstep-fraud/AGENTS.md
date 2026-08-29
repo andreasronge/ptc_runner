@@ -67,3 +67,15 @@ superseded representation. Delete stale artifacts rather than working around
 them. A damaged file used to block healthy runs in the same directory; #1668 is
 fixed on `main`, so a damaged artifact is now isolated. See the reverification
 note in `evidence/current-main-smoke.json`.
+
+## Re-recording `replay.jsonl`
+
+Run the example live once, then read both halves of each turn from that run's
+private inspection: `analysis/read RUN {"collection" "model_exchanges"}` projects
+`request_hash` alongside the model's `result`. Write one fixture line per
+exchange, in `input_sequence` order.
+
+One edit is required. `ptc-fs-mcp` signs each cursor with a per-process key, so
+a recorded program that prints `next_cursor` puts a value in the conversation
+that changes on every server start, and no fixture can match the next request.
+Drop `next_cursor` from any printed preview before writing the fixture.

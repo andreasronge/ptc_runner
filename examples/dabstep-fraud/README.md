@@ -238,13 +238,27 @@ default of `ptc-fs-mcp` would need. The consumer ceiling is `max_result_bytes`
 slightly wider than the server's and equal values are rejected as
 `mcp_response_exceeded`.
 
-Reading all 21 columns rather than three costs evidence volume. Exact private
-inspection is 74,371,086 bytes, about three times the source, because an MCP
-result carries its payload in both `content` and `structuredContent`. The
-previous column-projection design recorded 8.3 MB. The fail-closed ceiling is
-536,870,912 bytes, so this fits with room to spare;
-[ptc_runner#1670](https://github.com/andreasronge/ptc_runner/issues/1670) tracks
-recording a value identity instead of the bytes.
+Reading all 21 columns rather than three would cost evidence volume. Captured in
+full, this run records 74,373,399 bytes of private inspection — about three
+times the source, because an MCP result carries its payload in both `content`
+and `structuredContent`.
+
+The read mapping therefore declares `"inspection_capture": "digest_results"`,
+which brings the artifact to **270,127 bytes**. Inspection keeps the capability
+arguments, the complete MCP request bodies, every model exchange, and a
+`result_identity` and `response_identity` for each accepted response:
+
+```json
+{"encoding": "ptc-deterministic-json-v1", "encoded_bytes": 496387,
+ "sha256": "sha256:16b97ab9ea6519107313b22745f215d805335f2abcff0e365d5afa51c9e1500a"}
+```
+
+What is dropped is the accepted response body. An auditor can still see that 49
+reads happened, in order, with those exact arguments, each returning a value of
+exactly that size and identity — and `payments.csv` is checksum-pinned by
+`fetch-data.sh`, so the content is reproducible and the identity confirms it is
+the same one. Rejected responses, error envelopes, and MCP stderr keep their
+bodies. Model exchanges are never digested.
 
 Evaluation is bounded to 40 MB, 600 seconds, 256 mission capability calls, and
 six agent turns; the turn ceiling is enforced by `input.schema.json` rather than
@@ -312,7 +326,10 @@ Upstream dataset: <https://huggingface.co/datasets/adyen/DABstep>
 
 The project writes canonical traces, private inspection, results, and command
 envelopes below owner-only `.ptc/`. Treat inspection as sensitive: it contains
-exact model exchanges and capability payloads and is intentionally gitignored.
+exact model exchanges and is intentionally gitignored. Read payloads are stored
+as identities rather than content, so a digested record reports
+`capture_mode: "digest_results"` and `result_available?: false` — that is a
+weaker evidence class, not a missing or truncated exchange.
 
 `ptc` owns the whole `.ptc/` layout: it creates `envelopes/`, `inspection/`,
 `results/`, and `traces/` as one owner-only unit and never repairs that root in
