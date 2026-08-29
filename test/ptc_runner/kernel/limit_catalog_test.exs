@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SchemaViolation
 
   @manifest_narrowable [
@@ -297,7 +298,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                  "/tmp"
                )
 
-      if row.name == "normal_event_count" do
+      if row.name in ["normal_event_count", "event_payload_bytes"] do
         assert {:error,
                 {:host_schema_invalid,
                  %SchemaViolation{
@@ -350,7 +351,12 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     minimum = EventBudget.minimum_normal_payload_bytes()
     dropped = EventBudget.maximum_dropped()
 
-    assert minimum == 4_826
+    assert minimum ==
+             EventBudget.required_terminal_payload_bytes(
+               :normal,
+               EventBudget.catalog_floor_usage()
+             )
+
     assert map_size(dropped) == 17
     assert dropped["$overflow"] == 4_294_967_295
 
@@ -364,6 +370,12 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     refute EventBudget.normal_terminal_payload_capacity?(minimum - 1)
     assert EventBudget.normal_terminal_payload_capacity?(minimum)
 
+    {:ok, state} = RunState.start(Limits.defaults())
+    real_keys = state |> RunState.usage() |> Map.keys() |> MapSet.new()
+    floor_keys = EventBudget.catalog_floor_usage() |> Map.keys() |> MapSet.new()
+    RunState.stop(state)
+    assert MapSet.subset?(real_keys, floor_keys)
+
     for schema <- [HostConfig.schema(), Manifest.schema()] do
       assert get_in(schema, [
                "properties",
@@ -376,7 +388,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   end
 
   test "effective normal trace bytes retain one ordinary event and terminal reserve" do
-    payload_bytes = 7_000
+    payload_bytes = 10_000
     {:ok, base} = Limits.new(event_payload_bytes: payload_bytes)
     required_bytes = LimitConfiguration.required_normal_event_bytes(base)
 

@@ -30,7 +30,7 @@ rows; it does not need a fabricated provider. A live LLM deadline also
 requires the selected installation's `ceilings.request_timeout_ms` to be
 raised to the requested value.
 
-Normal trace limits also have structural rules. `event_payload_bytes` is large enough for every bounded terminal payload, and `normal_event_count` is at least 3: one ordinary `run-started` event plus the two-event terminal reserve. After host/application resolution, `normal_event_bytes` must be at least `EventSink.terminal_reserve(:normal, effective_limits).bytes + EventBudget.maximum_event_bytes("run-started", event_payload_bytes)`, preserving one complete maximum-size `run-started` envelope in addition to the complete `events-dropped` and `run-stopped` envelopes. Invalid combinations are refused before execution as `application/limit_configuration_invalid`. Private trace policy keeps its zero terminal reserve and does not use this normal-trace byte relationship.
+Normal trace limits also have structural rules. `event_payload_bytes` is large enough for every bounded terminal payload, including the complete maximum `run-stopped` usage shape at catalog maxima with an empty capability and mission inventory, and `normal_event_count` is at least 3: one ordinary `run-started` event plus the two-event terminal reserve. After host/application resolution, `normal_event_bytes` must be at least `EventSink.terminal_reserve(:normal, effective_limits).bytes + EventBudget.maximum_event_bytes("run-started", event_payload_bytes)`, preserving one complete maximum-size `run-started` envelope in addition to the complete `events-dropped` and `run-stopped` envelopes. Invalid combinations are refused before execution as `application/limit_configuration_invalid`. A resolved capability or mission inventory that then grows terminal usage past `event_payload_bytes` is refused at run construction as `application/limit_capacity_invalid`. Private trace policy keeps its zero terminal reserve and does not use this normal-trace byte relationship.
 
 A breached ceiling names itself, its configured value, and the manifest key that raises it, so the error at the point of failure carries this rule too. A request above the ceiling is refused by name, with both numbers.
 
@@ -50,7 +50,7 @@ Time values are milliseconds. Heap values are BEAM process heap words, not bytes
 | `evaluation_history_bytes` | Each value and the aggregate exact three-value continuation history. | bytes | 1,000,000 | 16,000,000 | 1–2,592,000,000 |
 | `evaluation_memory_bytes` | Retained mission definitions across successful turns. | bytes | 2,000,000 | 32,000,000 | 1–2,592,000,000 |
 | `evaluation_timeout_ms` | One subordinate mission evaluation, and one interactive REPL form. | milliseconds | 30,000 | 600,000 | 1–2,592,000,000 |
-| `event_payload_bytes` | One trace event payload. | bytes | 262,144 | 4,000,000 | 4,826–2,592,000,000 |
+| `event_payload_bytes` | One trace event payload. | bytes | 262,144 | 4,000,000 | 8,211–2,592,000,000 |
 | `live_provider_tasks` | Concurrent provider callback processes and Kernel-owned parallel Lisp workers. | count | 8 | 8 | 1–2,592,000,000 |
 | `llm_request_output_tokens` | Authorized output tokens for one live language-model call, supplied as that call's max_tokens. | count | 4,096 | 65,536 | 1–1,000,000 |
 | `llm_request_timeout_ms` | Whole-call deadline for one live language-model request, including adapter work, retries, and structured output validation. | milliseconds | 120,000 | 120,000 | 100–1,800,000 |

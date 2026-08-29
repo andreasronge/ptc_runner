@@ -1415,7 +1415,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   test "configuration assembly rejects a run-started payload above the event ceiling" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(event_payload_bytes: 5_000)
+    {:ok, limits} = Limits.new(event_payload_bytes: 10_000)
     connector_snapshots = [%{"value" => String.duplicate("x", 10_000)}]
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-metadata-ceiling")
 

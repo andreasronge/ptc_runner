@@ -7,8 +7,11 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.ExplicitFailureDiagnostic
+  alias PtcRunner.Kernel.LimitCapacityDiagnostic
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.LimitConfigurationDiagnostic
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -452,6 +455,10 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   # configured value it must quote, and the remedy that says what to change —
   # the three things `max_turns` supplied and the rest of the family did not.
   defp limit_rows do
+    {:ok, payload_limits} = Limits.new(event_payload_bytes: 10_000)
+    required_bytes = LimitConfiguration.required_normal_event_bytes(payload_limits)
+    configured_bytes = required_bytes - 1
+
     [
       %{
         phase: :execution,
@@ -619,9 +626,20 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         code: :limit_configuration_invalid,
         source: :application,
         setting: "normal_event_bytes",
-        value: "24449",
+        value: Integer.to_string(configured_bytes),
         remedy: "raise limits.normal_event_bytes",
-        build: fn -> LimitConfigurationDiagnostic.message(24_449, 24_450, 7_000) end
+        build: fn ->
+          LimitConfigurationDiagnostic.message(configured_bytes, required_bytes, 10_000)
+        end
+      },
+      %{
+        phase: :application,
+        code: :limit_capacity_invalid,
+        source: :application,
+        setting: "event_payload_bytes",
+        value: "10000",
+        remedy: "raise limits.event_payload_bytes",
+        build: fn -> LimitCapacityDiagnostic.message(10_000, 20_000) end
       }
     ]
   end

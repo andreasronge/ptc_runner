@@ -145,26 +145,13 @@ defmodule PtcRunner.Kernel.EventSink do
         usage
       )
       when policy in [:normal, :private] and is_map(usage) do
-    {dropped, drop_map_headroom} =
-      if policy == :normal,
-        do: EventBudget.maximum_dropped_with_headroom(),
-        else: {%{}, 0}
+    case EventBudget.required_terminal_payload_bytes(policy, usage) do
+      required when is_integer(required) and required > 0 ->
+        limits.event_payload_bytes >= required
 
-    usage = Map.put(usage, :events_dropped, dropped)
-    payload_limit = limits.event_payload_bytes - drop_map_headroom
-
-    payloads = [
-      %{outcome: :error, reason: EventBudget.maximum_terminal_reason(), usage: usage},
-      %{
-        outcome: :ok,
-        reason: nil,
-        result_hash: "sha256:" <> String.duplicate("f", 64),
-        usage: usage
-      }
-    ]
-
-    payload_limit > 0 and
-      Enum.all?(payloads, &EventSinkState.payload_within_limit?(&1, payload_limit))
+      _invalid ->
+        false
+    end
   end
 
   def terminal_usage_capacity?(_sink, _limits, _usage), do: false

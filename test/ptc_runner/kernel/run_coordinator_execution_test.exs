@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
@@ -852,7 +853,10 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   end
 
   defp oversized_metadata_prepared_run do
-    component_ids = Enum.map(1..96, &"component#{&1}")
+    component_ids =
+      Enum.map(1..96, fn index ->
+        "component#{index}x" <> String.duplicate("x", 40)
+      end)
 
     manifest = %{
       "version" => 1,
@@ -863,7 +867,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
         "entry" => "app/run"
       },
       "input" => %{"value" => %{}},
-      "limits" => %{"event_payload_bytes" => 5_000}
+      "limits" => %{"event_payload_bytes" => EventBudget.minimum_normal_payload_bytes()}
     }
 
     documents =

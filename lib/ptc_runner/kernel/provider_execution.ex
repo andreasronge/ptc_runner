@@ -331,22 +331,12 @@ defmodule PtcRunner.Kernel.ProviderExecution do
   # is why the invariant is enforced here rather than asserted in a comment.
   defp classify_marked_failure({:error, %CommandDiagnostic{}} = error, _prepared), do: error
 
-  defp classify_marked_failure(
-         {:error, {:missing_capability_requirement, names}},
-         prepared
-       ) do
-    case RunBuilder.environment_failure_diagnostic(
-           {:missing_capability_requirement, names},
-           prepared,
-           true
-         ) do
+  defp classify_marked_failure({:error, reason}, prepared) do
+    case RunBuilder.environment_failure_diagnostic(reason, prepared, true) do
       {:ok, diagnostic} -> {:error, diagnostic}
       :error -> {:error, internal_diagnostic()}
     end
   end
-
-  defp classify_marked_failure({:error, _reason}, _prepared),
-    do: {:error, internal_diagnostic()}
 
   defp classify_marked_failure(result, _prepared), do: result
 

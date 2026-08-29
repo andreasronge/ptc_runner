@@ -56,6 +56,7 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.InspectionSink
@@ -69,8 +70,6 @@ defmodule PtcRunner.Kernel.RunConfig do
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.RetainedSize
-
-  @maximum_repl_errors 4_294_967_295
 
   @enforce_keys [
     :workflow_environment,
@@ -131,7 +130,8 @@ defmodule PtcRunner.Kernel.RunConfig do
           | {:error,
              :invalid_run_config
              | :mission_inventory_exceeded
-             | :run_started_metadata_exceeded}
+             | :run_started_metadata_exceeded
+             | {:limit_capacity_invalid, pos_integer(), pos_integer()}}
   @doc "Constructs a run configuration and rejects missing or unknown fields."
   def new(opts) when is_list(opts) do
     with false <-
@@ -192,12 +192,7 @@ defmodule PtcRunner.Kernel.RunConfig do
              limits
            ),
          true <- EventSink.begin_capacity?(sink, run_started_metadata),
-         true <-
-           EventSink.terminal_usage_capacity?(
-             sink,
-             limits,
-             maximum_terminal_usage(workflow, missions, limits)
-           ) do
+         :ok <- terminal_usage_capacity(sink, limits, workflow, missions) do
       {:ok,
        %__MODULE__{
          workflow_environment: workflow,
@@ -221,9 +216,17 @@ defmodule PtcRunner.Kernel.RunConfig do
          run_started_metadata: run_started_metadata
        }}
     else
-      {:error, :mission_inventory_exceeded} = error -> error
-      {:error, :run_started_metadata_exceeded} = error -> error
-      _ -> {:error, :invalid_run_config}
+      {:error, :mission_inventory_exceeded} = error ->
+        error
+
+      {:error, :run_started_metadata_exceeded} = error ->
+        error
+
+      {:error, {:limit_capacity_invalid, _payload, _required}} = error ->
+        error
+
+      _ ->
+        {:error, :invalid_run_config}
     end
   end
 
@@ -452,108 +455,29 @@ defmodule PtcRunner.Kernel.RunConfig do
     |> Map.new(&{&1["provider"], &1["installation_config_digest"]})
   end
 
-  defp maximum_terminal_usage(workflow, missions, limits) do
+  defp terminal_usage_capacity(sink, limits, workflow, missions) do
     mission_capabilities =
       missions
       |> Enum.flat_map(fn {_name, mission} -> mission.environment.capabilities end)
       |> Map.new()
 
-    %{
-      closed?: true,
-      remaining_ms: limits.run_duration_ms,
-      capability_calls: %{
-        workflow:
-          maximum_call_map(
-            workflow.capabilities,
-            limits.workflow_capability_calls,
-            limits.workflow_capability_calls_per_name
-          ),
-        mission:
-          maximum_call_map(
-            mission_capabilities,
-            limits.mission_capability_calls,
-            limits.mission_capability_calls_per_name
-          )
-      },
-      subordinate_evaluations: limits.subordinate_evaluations,
-      evaluations_by_mission:
-        Map.new(missions, fn {name, _mission} -> {name, limits.subordinate_evaluations} end),
-      subordinate_source_checks: limits.subordinate_source_checks,
-      protocol_errors: limits.protocol_errors + 1,
-      evaluation_memory_bytes: limits.evaluation_memory_bytes,
-      evaluation_history_bytes: limits.evaluation_history_bytes,
-      evaluation_continuation_bytes:
-        limits.evaluation_memory_bytes + limits.evaluation_history_bytes,
-      evaluation_busy?: true,
-      evaluation_missions: Map.keys(missions) |> Enum.sort(),
-      errors: @maximum_repl_errors,
-      capability_refusals: maximum_capability_refusals(),
-      llm_budget: maximum_llm_budget(limits)
-    }
-  end
+    usage =
+      EventBudget.maximum_terminal_usage(
+        workflow.capabilities,
+        mission_capabilities,
+        Map.keys(missions),
+        limits
+      )
 
-  defp maximum_llm_budget(limits) do
-    maximum = 9_007_199_254_740_991
+    case EventBudget.required_terminal_payload_bytes(sink.policy, usage) do
+      required when is_integer(required) and limits.event_payload_bytes >= required ->
+        :ok
 
-    %{
-      "total_tokens" =>
-        if(is_nil(limits.llm_total_tokens),
-          do: nil,
-          else: %{
-            "state" => "incomplete",
-            "limit" => limits.llm_total_tokens,
-            "reserved" => 0,
-            "charged" => maximum,
-            "remaining" => 0,
-            "refused" => maximum
-          }
-        ),
-      "cost" =>
-        if(is_nil(limits.llm_cost_microusd),
-          do: nil,
-          else: %{
-            "state" => "incomplete",
-            "currency" => "USD",
-            "limit_microusd" => limits.llm_cost_microusd,
-            "reserved_microusd" => 0,
-            "charged_microusd" => maximum,
-            "remaining_microusd" => 0,
-            "refused" => maximum
-          }
-        )
-    }
-  end
+      required when is_integer(required) ->
+        {:error, {:limit_capacity_invalid, limits.event_payload_bytes, required}}
 
-  # Closed class keys cannot be grown from caller input, but a trusted resolver
-  # may still mint unrecognized atoms. Distinct keys are capped at the same
-  # limit RunState enforces, plus `$overflow`, and reserved at fingerprint
-  # length so a named class cannot enlarge run-stopped past event_payload_bytes.
-  defp maximum_capability_refusals do
-    fingerprint = "sha256:" <> String.duplicate("f", 64)
-    count = 4_294_967_295
-    limit = SafeMetadata.capability_refusal_map_limit()
-
-    1..limit
-    |> Map.new(fn index ->
-      {"workflow/#{fingerprint}/#{fingerprint}-#{index}", count}
-    end)
-    |> Map.put("$overflow", count)
-  end
-
-  defp maximum_call_map(capabilities, total_limit, per_name_limit) do
-    maximum_count = min(total_limit, per_name_limit)
-
-    capabilities
-    |> Map.keys()
-    |> Enum.sort_by(&{-retained_name_bytes(&1), &1})
-    |> Enum.take(total_limit)
-    |> Map.new(&{&1, maximum_count})
-  end
-
-  defp retained_name_bytes(name) do
-    case RetainedSize.bytes(name) do
-      bytes when is_integer(bytes) -> bytes
-      :oversized -> 9_223_372_036_854_775_807
+      :error ->
+        {:error, :invalid_run_config}
     end
   end
 

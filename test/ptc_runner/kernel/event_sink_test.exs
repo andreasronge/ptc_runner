@@ -67,8 +67,8 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     {:ok, limits} =
       Limits.new(
         normal_event_count: 4,
-        normal_event_bytes: 20_000,
-        event_payload_bytes: 5_000
+        normal_event_bytes: 50_000,
+        event_payload_bytes: 10_000
       )
 
     {:ok, sink} =
@@ -100,7 +100,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   end
 
   test "the minimum admitted normal budget retains run-started and both terminal events" do
-    payload_bytes = 5_000
+    payload_bytes = 10_000
     {:ok, base} = Limits.new(event_payload_bytes: payload_bytes)
     reserve = EventSink.terminal_reserve(:normal, base)
     run_started_bytes = EventBudget.maximum_event_bytes("run-started", payload_bytes)
@@ -126,11 +126,14 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   end
 
   test "terminal reserve remains available after the ordinary byte budget is saturated" do
+    {:ok, base} = Limits.new(event_payload_bytes: 10_000)
+    reserve = EventSink.terminal_reserve(:normal, base)
+
     {:ok, limits} =
       Limits.new(
         normal_event_count: 10,
-        normal_event_bytes: 20_000,
-        event_payload_bytes: 5_000
+        normal_event_bytes: reserve.bytes + 8_000,
+        event_payload_bytes: 10_000
       )
 
     {:ok, sink} =
@@ -159,8 +162,8 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     {:ok, limits} =
       Limits.new(
         normal_event_count: 4,
-        normal_event_bytes: 20_000,
-        event_payload_bytes: 5_000
+        normal_event_bytes: 50_000,
+        event_payload_bytes: 10_000
       )
 
     {:ok, sink} =
@@ -271,18 +274,19 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     assert Enum.map(events, & &1.type) == ["events-dropped", "run-stopped"]
   end
 
-  test "terminal usage admission covers a maximum reachable drop-map layout" do
-    usage = %{closed?: true}
+  test "the payload minimum finalizes the catalog-floor terminal usage" do
+    minimum = EventBudget.minimum_normal_payload_bytes()
+    usage = EventBudget.catalog_floor_usage()
     sink = %EventSink{pid: self(), token: make_ref(), policy: :normal}
 
-    payload_bytes =
-      Enum.find(EventBudget.minimum_normal_payload_bytes()..10_000, fn payload_bytes ->
-        limits = %{Limits.defaults() | event_payload_bytes: payload_bytes}
-        EventSink.terminal_usage_capacity?(sink, limits, usage)
-      end)
+    assert minimum == EventBudget.required_terminal_payload_bytes(:normal, usage)
+    {:ok, limits} = Limits.new(event_payload_bytes: minimum)
+    assert EventSink.terminal_usage_capacity?(sink, limits, usage)
 
-    assert payload_bytes == 4_873
-    {:ok, limits} = Limits.new(event_payload_bytes: payload_bytes)
+    too_tight = %{limits | event_payload_bytes: minimum - 1}
+    refute EventSink.terminal_usage_capacity?(sink, too_tight, usage)
+    assert {:error, :invalid_limits} = Limits.new(event_payload_bytes: minimum - 1)
+
     token = make_ref()
 
     state =
@@ -294,7 +298,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
         "trace",
         EventSink.terminal_reserve(:normal, limits)
       )
-      |> Map.put(:dropped, saturated_drop_map())
+      |> Map.put(:dropped, EventBudget.maximum_dropped())
 
     stopped_data = %{
       outcome: :error,
@@ -302,11 +306,15 @@ defmodule PtcRunner.Kernel.EventSinkTest do
       usage: usage
     }
 
-    assert {{:ok, _batch}, _finalized} =
+    assert {{:ok, %{events: events}}, _finalized} =
              EventSinkState.handle({token, {:finalize_and_events, stopped_data}}, state)
 
-    too_tight_limits = %{limits | event_payload_bytes: payload_bytes - 1}
-    refute EventSink.terminal_usage_capacity?(sink, too_tight_limits, usage)
+    assert Enum.map(events, & &1.type) == ["events-dropped", "run-stopped"]
+    stopped = Enum.find(events, &(&1.type == "run-stopped"))
+    measured = RetainedSize.bytes(stopped.data)
+    assert is_integer(measured) and measured > 0
+    assert measured <= minimum
+    assert EventSinkState.payload_within_limit?(stopped.data, minimum)
   end
 
   test "terminal usage admission exceeds the former cleanup-reason ceiling" do

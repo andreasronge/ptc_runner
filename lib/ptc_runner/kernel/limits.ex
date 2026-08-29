@@ -22,13 +22,13 @@ defmodule PtcRunner.Kernel.Limits do
   host unchanged.
 
   Catalog validation covers each field independently, including the minimum
-  event payload needed by bounded terminal events. Manifest loading also
-  validates the normal trace fields together after host/application resolution:
-  the effective count must retain one ordinary event plus the two terminal
-  events, and the byte budget must retain one complete maximum-size
-  `run-started` event in addition to `PtcRunner.Kernel.EventSink`'s measured
-  terminal reserve. Private trace policy keeps its zero-reserve fail-closed
-  behavior.
+  event payload needed by a complete maximum bounded `run-stopped` payload.
+  Manifest loading also validates the normal trace fields together after
+  host/application resolution: the effective count must retain one ordinary
+  event plus the two terminal events, and the byte budget must retain one
+  complete maximum-size `run-started` event in addition to
+  `PtcRunner.Kernel.EventSink`'s measured terminal reserve. Private trace
+  policy keeps its zero-reserve fail-closed behavior.
   """
 
   alias PtcRunner.Kernel.LimitCatalog

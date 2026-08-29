@@ -256,8 +256,8 @@ defmodule PtcRunner.Kernel.SafeMetadata do
 
   Terminal usage admission reserves this many fingerprint-length keys plus
   `$overflow`. Two named classes is the largest such map that still admits an
-  empty environment at the 7_000-byte `event_payload_bytes` floor used by
-  terminal preflight. Further classes increment `$overflow`.
+  empty environment at the catalog `event_payload_bytes` floor. Further classes
+  increment `$overflow`.
   """
   @spec capability_refusal_map_limit() :: 2
   def capability_refusal_map_limit, do: 2

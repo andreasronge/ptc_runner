@@ -77,7 +77,12 @@ defmodule PtcRunner.Kernel.CommandContract do
   @project_codes Map.fetch!(@codes_by_phase, :project)
   @host_codes Map.fetch!(@codes_by_phase, :host)
   @application_codes Map.fetch!(@codes_by_phase, :application)
-  @static_application_codes @application_codes -- [:override_invalid, :event_identity_conflict]
+  @static_application_codes @application_codes --
+                              [
+                                :override_invalid,
+                                :event_identity_conflict,
+                                :limit_capacity_invalid
+                              ]
   @bundle_codes Map.fetch!(@codes_by_phase, :bundle)
   @provider_declaration_codes Map.fetch!(@codes_by_phase, :provider_declaration)
   @destination_codes Map.fetch!(@codes_by_phase, :destination)
@@ -160,12 +165,7 @@ defmodule PtcRunner.Kernel.CommandContract do
             false
           ),
         "classified_diagnostic" =>
-          diagnostic_schema(
-            Enum.reject(
-              DiagnosticCatalog.rows(),
-              &(&1.phase in @preclassification_only_phases)
-            )
-          ),
+          diagnostic_schema(Enum.reject(DiagnosticCatalog.rows(), &preclassification_only_row?/1)),
         "recovery_written_diagnostic" =>
           recovery_diagnostic_schema(@recovery_written_publication_codes),
         "finalization_uncertain_diagnostic" =>
@@ -189,6 +189,11 @@ defmodule PtcRunner.Kernel.CommandContract do
   @doc false
   @spec unclassified_diagnostic_phase?(atom()) :: boolean()
   def unclassified_diagnostic_phase?(phase), do: phase in @unclassified_run_phases
+
+  defp preclassification_only_row?(row) do
+    row.phase in @preclassification_only_phases and
+      DiagnosticCatalog.provider_activity_policy(row.phase, row.code) != :boolean
+  end
 
   @doc false
   @spec diagnostic_allowed?(term(), atom(), atom()) :: boolean()

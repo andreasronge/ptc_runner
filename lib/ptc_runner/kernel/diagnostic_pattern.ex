@@ -29,6 +29,18 @@ defmodule PtcRunner.Kernel.DiagnosticPattern do
   def exact(body) when is_binary(body), do: "^" <> body <> "$(?![\\s\\S])"
 
   @doc false
+  @spec message_schema(pos_integer(), binary()) :: map()
+  def message_schema(max_length, pattern)
+      when is_integer(max_length) and max_length > 0 and is_binary(pattern) do
+    %{
+      "type" => "string",
+      "minLength" => 1,
+      "maxLength" => max_length,
+      "pattern" => pattern
+    }
+  end
+
+  @doc false
   @spec valid_exact_integer_message?(
           binary(),
           binary(),

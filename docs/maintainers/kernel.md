@@ -353,12 +353,19 @@ three: one ordinary `run-started` event plus the `events-dropped` and
 measured normal terminal reserve plus
 `EventBudget.maximum_event_bytes("run-started", event_payload_bytes)`, preserving
 one complete maximum-size `run-started` envelope in addition to the terminal
-envelopes. `EventBudget` owns the bounded payload and envelope shapes;
-`LimitConfiguration` owns the cross-field check for manifest-backed validate,
-doctor, run, and REPL paths; a refusal is the pre-execution
-`application/limit_configuration_invalid` diagnostic. Private trace policy
-still uses a zero terminal reserve and is not subject to this normal-trace byte
-relationship.
+envelopes. `event_payload_bytes` itself must be large enough for every bounded
+terminal payload: the catalog minimum is the retained size of a complete
+maximum `run-stopped` payload whose usage fields sit at catalog maxima with an
+empty capability and mission inventory. Manifests whose resolved capability or
+mission inventory then grows the usage map past that payload ceiling are
+refused at `RunConfig` construction as `application/limit_capacity_invalid`,
+not during `validate` or `doctor`. `EventBudget` owns the bounded payload and
+envelope shapes and the shared maximum terminal-usage construction;
+`LimitConfiguration` owns the cross-field `normal_event_bytes` check for
+manifest-backed validate, doctor, run, and REPL paths; a refusal of that
+relationship is the pre-execution `application/limit_configuration_invalid`
+diagnostic. Private trace policy still uses a zero terminal reserve and is
+not subject to this normal-trace byte relationship.
 
 The Lisp execution Telemetry prefix is `[:ptc_runner, :lisp, :execute]`. Its
 closed `caller` values are `:direct`, `:kernel`, and `:repl`. Stop metadata

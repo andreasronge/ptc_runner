@@ -516,7 +516,8 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   # Installed-limit values have their own closed diagnostic and exact path
   # below. Substitute valid values only for this structural pass so type/range
-  # failures retain `installed_limit_invalid`; non-objects and unknown names
+  # failures retain `installed_limit_invalid`; non-objects, unknown names, and
+  # the two structural minima (`normal_event_count`, `event_payload_bytes`)
   # still fail the generated schema before any normalization.
   defp command_schema_value(%{"limits" => limits} = value) when is_map(limits) do
     if Map.keys(limits) -- Limits.names() == [] do
@@ -541,8 +542,9 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp command_schema_value(value), do: value
 
-  defp schema_minimum_violation?("normal_event_count", value) when is_integer(value) do
-    {:ok, row} = LimitCatalog.fetch(:normal_event_count)
+  defp schema_minimum_violation?(name, value)
+       when name in ["normal_event_count", "event_payload_bytes"] and is_integer(value) do
+    {:ok, row} = LimitCatalog.fetch(name)
     value < row.minimum
   end
 

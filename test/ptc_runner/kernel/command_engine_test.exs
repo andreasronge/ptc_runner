@@ -25,12 +25,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.Error
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LimitCapacityDiagnostic
   alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
@@ -5680,7 +5682,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "impossible normal trace budgets are rejected identically before execution", %{
     tmp_dir: directory
   } do
-    payload_bytes = 7_000
+    payload_bytes = 10_000
     {:ok, base_limits} = Limits.new(event_payload_bytes: payload_bytes)
     required_bytes = LimitConfiguration.required_normal_event_bytes(base_limits)
     configured_bytes = required_bytes - 1
@@ -5770,6 +5772,111 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert outcome.envelope["error"]["path"] == "/limits/normal_event_count"
       assert outcome.envelope["error"]["message"] =~ "minimum"
     end
+  end
+
+  @tag :tmp_dir
+  test "event payload values below the catalog minimum use schema diagnostics", %{
+    tmp_dir: directory
+  } do
+    below = EventBudget.minimum_normal_payload_bytes() - 1
+
+    application =
+      write_application(
+        directory,
+        "invalid-event-payload-bytes",
+        valid_manifest(%{"limits" => %{"event_payload_bytes" => below}})
+      )
+
+    for command <- ["validate", "run", "doctor"] do
+      outcome = assert_error([command, application], "application", "schema_violation")
+      assert outcome.envelope["error"]["path"] == "/limits/event_payload_bytes"
+      assert outcome.envelope["error"]["message"] =~ "minimum"
+    end
+
+    host =
+      write_host_config(directory, "invalid-event-payload-bytes", %{
+        "install" => %{},
+        "limits" => %{"event_payload_bytes" => below}
+      })
+
+    outcome =
+      assert_error(
+        ["validate", application, "--host-config", host],
+        "host",
+        "host_schema_invalid"
+      )
+
+    assert outcome.envelope["error"]["path"] == "/limits/event_payload_bytes"
+    assert outcome.envelope["error"]["message"] =~ "minimum"
+  end
+
+  @tag :tmp_dir
+  test "the catalog event payload minimum runs a stock application", %{tmp_dir: directory} do
+    minimum = EventBudget.minimum_normal_payload_bytes()
+
+    application =
+      write_application(
+        directory,
+        "minimum-event-payload",
+        valid_manifest(%{"limits" => %{"event_payload_bytes" => minimum}})
+      )
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.prepare(["validate", application])
+    assert {:ok, %CommandOutcome{}} = CommandEngine.prepare(["doctor", application])
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", application])
+  end
+
+  @tag :tmp_dir
+  test "resolved terminal usage above the payload ceiling is a configuration failure", %{
+    tmp_dir: directory
+  } do
+    names =
+      for index <- 1..4 do
+        "m" <>
+          String.pad_leading(Integer.to_string(index), 2, "0") <>
+          String.duplicate("x", 124)
+      end
+
+    payload = EventBudget.minimum_normal_payload_bytes()
+    missions = Map.new(names, &{&1, %{}})
+
+    application =
+      write_application(
+        directory,
+        "limit-capacity-provider-free",
+        valid_manifest(%{
+          "limits" => %{"event_payload_bytes" => payload},
+          "missions" => missions
+        })
+      )
+
+    for argv <- [["validate", application], ["doctor", application]] do
+      assert {:ok, %CommandOutcome{}} = CommandEngine.prepare(argv)
+    end
+
+    expected_prefix = "event_payload_bytes effective limit #{payload} is below the required "
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["phase"] == "application"
+    assert outcome.envelope["error"]["code"] == "limit_capacity_invalid"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.envelope["execution"] == %{"state" => "not_started"}
+    assert String.starts_with?(outcome.envelope["error"]["message"], expected_prefix)
+    assert outcome.envelope["error"]["message"] =~ "or declare fewer capabilities or missions"
+    assert_schema_valid(outcome.envelope)
+
+    {:ok, message} = LimitCapacityDiagnostic.message(10_000, 20_000)
+
+    assert {:ok, active} =
+             CommandDiagnostic.new(:application, :limit_capacity_invalid,
+               message: message,
+               source: CommandSource.fixed(:application),
+               provider_activity: true
+             )
+
+    assert active.provider_activity == true
   end
 
   @tag :tmp_dir

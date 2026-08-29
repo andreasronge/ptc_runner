@@ -1184,29 +1184,32 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, mission} = MissionEnvironment.new([])
 
     build = fn payload_bytes, close ->
-      {:ok, limits} =
-        Limits.new(
-          event_payload_bytes: payload_bytes,
-          normal_event_count: 4,
-          normal_event_bytes: 200_000
-        )
+      case Limits.new(
+             event_payload_bytes: payload_bytes,
+             normal_event_count: 4,
+             normal_event_bytes: 200_000
+           ) do
+        {:ok, limits} ->
+          case EventSink.start(:normal, limits) do
+            {:ok, sink} ->
+              result =
+                RunConfig.new(
+                  workflow_environment: workflow,
+                  missions: %{"default" => mission},
+                  input: %{},
+                  limits: limits,
+                  event_sink: sink,
+                  provider_session: ProviderSessionFixture.start([close], limits)
+                )
 
-      case EventSink.start(:normal, limits) do
-        {:ok, sink} ->
-          result =
-            RunConfig.new(
-              workflow_environment: workflow,
-              missions: %{"default" => mission},
-              input: %{},
-              limits: limits,
-              event_sink: sink,
-              provider_session: ProviderSessionFixture.start([close], limits)
-            )
+              {result, sink, limits}
 
-          {result, sink, limits}
+            {:error, :invalid_event_sink} ->
+              {{:error, :invalid_event_sink}, nil, limits}
+          end
 
-        {:error, :invalid_event_sink} ->
-          {{:error, :invalid_event_sink}, nil, limits}
+        {:error, :invalid_limits} ->
+          {{:error, :invalid_limits}, nil, nil}
       end
     end
 
@@ -1216,11 +1219,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
           EventSink.stop(sink)
           true
 
-        {{:error, :invalid_run_config}, sink, _limits} ->
-          EventSink.stop(sink)
-          false
-
-        {{:error, :invalid_event_sink}, nil, _limits} ->
+        {{:error, _reason}, sink, _limits} ->
+          if sink, do: EventSink.stop(sink)
           false
       end
     end
@@ -1238,16 +1238,13 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     end
 
     minimum = search.(search, 1, 50_000)
-    assert minimum > 1
+    assert minimum == EventBudget.minimum_normal_payload_bytes()
 
-    {{:ok, accepted}, accepted_sink, _limits} = build.(minimum, fn -> :ok end)
+    {{:ok, _accepted}, accepted_sink, _limits} = build.(minimum, fn -> :ok end)
     EventSink.stop(accepted_sink)
 
-    {{:error, :invalid_run_config}, too_tight_sink, _limits} =
-      build.(minimum - 1, fn -> :ok end)
-
-    assert EventSink.begin_capacity?(too_tight_sink, accepted.run_started_metadata)
-    EventSink.stop(too_tight_sink)
+    assert {:error, :invalid_limits} =
+             Limits.new(event_payload_bytes: minimum - 1, normal_event_count: 4)
 
     cleanup_failure = fn -> {:error, :fixture_cleanup_failed} end
     {{:ok, runner_config}, runner_sink, _limits} = build.(minimum, cleanup_failure)
@@ -1386,7 +1383,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     {:ok, limits} =
       Limits.new(
-        event_payload_bytes: 7_000,
+        event_payload_bytes: 10_000,
         normal_event_count: 4,
         normal_event_bytes: 100_000
       )
@@ -1402,6 +1399,35 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                event_sink: sink
              )
 
+    EventSink.stop(sink)
+  end
+
+  test "run configuration reports terminal usage capacity as a distinguishable reason" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    names =
+      for index <- 1..4 do
+        "m" <>
+          String.pad_leading(Integer.to_string(index), 2, "0") <>
+          String.duplicate("x", 124)
+      end
+
+    missions = Map.new(names, &{&1, mission})
+    payload = EventBudget.minimum_normal_payload_bytes()
+    {:ok, limits} = Limits.new(event_payload_bytes: payload)
+    {:ok, sink} = EventSink.start(:normal, limits)
+
+    assert {:error, {:limit_capacity_invalid, ^payload, required}} =
+             RunConfig.new(
+               workflow_environment: workflow,
+               missions: missions,
+               input: %{},
+               limits: limits,
+               event_sink: sink
+             )
+
+    assert is_integer(required) and required > payload
     EventSink.stop(sink)
   end
 
@@ -1424,14 +1450,14 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                )
     end
 
-    {:ok, base_limits} = Limits.new(normal_event_count: 3, event_payload_bytes: 5_000)
+    {:ok, base_limits} = Limits.new(normal_event_count: 3, event_payload_bytes: 10_000)
     reserve = EventSink.terminal_reserve(:normal, base_limits)
 
     {:ok, tight_limits} =
       Limits.new(
         normal_event_count: 3,
         normal_event_bytes: reserve.bytes + 1,
-        event_payload_bytes: 5_000
+        event_payload_bytes: 10_000
       )
 
     {:ok, tight} = EventSink.start(:normal, tight_limits, run_id: "tight-run-started")
