@@ -9,6 +9,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SchemaViolation
 
   @manifest_narrowable [
@@ -376,6 +377,71 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     RunState.stop(state)
     assert MapSet.subset?(real_keys, floor_keys)
     assert MapSet.member?(floor_keys, :errors)
+
+    usage = EventBudget.catalog_floor_usage()
+    {:ok, duration} = LimitCatalog.fetch(:run_duration_ms)
+    {:ok, protocol} = LimitCatalog.fetch(:protocol_errors)
+    {:ok, eval_memory} = LimitCatalog.fetch(:evaluation_memory_bytes)
+    {:ok, eval_history} = LimitCatalog.fetch(:evaluation_history_bytes)
+    {:ok, subordinate_evals} = LimitCatalog.fetch(:subordinate_evaluations)
+    {:ok, source_checks} = LimitCatalog.fetch(:subordinate_source_checks)
+    {:ok, llm_tokens} = LimitCatalog.fetch(:llm_total_tokens)
+    {:ok, llm_cost} = LimitCatalog.fetch(:llm_cost_microusd)
+    integer_max = 9_007_199_254_740_991
+    drop_count = 4_294_967_295
+    fingerprint = "sha256:" <> String.duplicate("f", 64)
+    refusal_limit = SafeMetadata.capability_refusal_map_limit()
+
+    assert usage.closed? == true
+    assert usage.remaining_ms == duration.maximum
+    assert usage.capability_calls == %{workflow: %{}, mission: %{}}
+    assert usage.subordinate_evaluations == subordinate_evals.maximum
+    assert usage.evaluations_by_mission == %{}
+    assert usage.subordinate_source_checks == source_checks.maximum
+    assert usage.protocol_errors == protocol.maximum + 1
+    assert usage.agent_protocol_errors == drop_count
+    assert usage.evaluation_memory_bytes == eval_memory.maximum
+    assert usage.evaluation_history_bytes == eval_history.maximum
+    assert usage.evaluation_continuation_bytes == eval_memory.maximum + eval_history.maximum
+    assert usage.evaluation_busy? == true
+    assert usage.evaluation_missions == []
+    assert usage.errors == drop_count
+
+    expected_refusals =
+      1..refusal_limit
+      |> Map.new(fn index ->
+        {"workflow/#{fingerprint}/#{fingerprint}-#{index}", drop_count}
+      end)
+      |> Map.put("$overflow", drop_count)
+
+    assert usage.capability_refusals == expected_refusals
+
+    assert usage.llm_budget == %{
+             "total_tokens" => %{
+               "state" => "incomplete",
+               "limit" => llm_tokens.maximum,
+               "reserved" => 0,
+               "charged" => integer_max,
+               "remaining" => 0,
+               "refused" => integer_max
+             },
+             "cost" => %{
+               "state" => "incomplete",
+               "currency" => "USD",
+               "limit_microusd" => llm_cost.maximum,
+               "reserved_microusd" => 0,
+               "charged_microusd" => integer_max,
+               "remaining_microusd" => 0,
+               "refused" => integer_max
+             }
+           }
+
+    assert usage.llm_spend == %{
+             "state" => "available",
+             "input" => integer_max,
+             "output" => integer_max,
+             "total_cost" => %{"currency" => "USD", "microunits" => integer_max}
+           }
 
     for schema <- [HostConfig.schema(), Manifest.schema()] do
       assert get_in(schema, [
