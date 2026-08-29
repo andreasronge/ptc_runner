@@ -375,6 +375,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     floor_keys = EventBudget.catalog_floor_usage() |> Map.keys() |> MapSet.new()
     RunState.stop(state)
     assert MapSet.subset?(real_keys, floor_keys)
+    assert MapSet.member?(floor_keys, :errors)
 
     for schema <- [HostConfig.schema(), Manifest.schema()] do
       assert get_in(schema, [

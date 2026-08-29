@@ -115,23 +115,28 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
   def environment_failure_diagnostic(
         {:limit_capacity_invalid, payload, required},
-        %PreparedRun{},
+        %PreparedRun{} = prepared,
         provider_activity
       )
       when is_integer(payload) and is_integer(required) and is_boolean(provider_activity) do
-    case LimitCapacityDiagnostic.message(payload, required) do
-      {:ok, message} ->
-        {:ok,
-         CommandDiagnostic.new!(
-           :application,
-           :limit_capacity_invalid,
-           message: message,
-           source: CommandSource.fixed(:application),
-           provider_activity: provider_activity
-         )}
+    if PreparedRun.sealed?(prepared) and
+         prepared.request.package.limits.event_payload_bytes == payload do
+      case LimitCapacityDiagnostic.message(payload, required) do
+        {:ok, message} ->
+          {:ok,
+           CommandDiagnostic.new!(
+             :application,
+             :limit_capacity_invalid,
+             message: message,
+             source: CommandSource.fixed(:application),
+             provider_activity: provider_activity
+           )}
 
-      :error ->
-        :error
+        :error ->
+          :error
+      end
+    else
+      :error
     end
   end
 

@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
@@ -295,6 +296,55 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     assert {:error, %CommandDiagnostic{} = diagnostic} = observed
     assert diagnostic.phase == :result_cleanup
     assert diagnostic.code == :provider_cleanup_failed
+  end
+
+  test "terminal usage capacity after acquisition is an application diagnostic" do
+    names =
+      for index <- 1..4 do
+        "m" <>
+          String.pad_leading(Integer.to_string(index), 2, "0") <>
+          String.duplicate("x", 124)
+      end
+
+    {:ok, measured} = Limits.new()
+
+    required =
+      EventBudget.required_terminal_payload_bytes(
+        :normal,
+        EventBudget.maximum_terminal_usage(%{}, %{}, names, measured)
+      )
+
+    payload = required - 1
+
+    fixture =
+      provider_fixture(
+        manifest: %{
+          "limits" => %{"event_payload_bytes" => payload},
+          "missions" => Map.new(names, &{&1, %{}})
+        },
+        acquire: fn _context ->
+          {:ok, capability} = fixture_capability()
+
+          {:ok,
+           %{
+             capabilities: [capability],
+             snapshot: %{"ok" => true},
+             close: fn -> :ok end
+           }}
+        end
+      )
+
+    _started = start_owned_execution(fixture)
+
+    assert_receive {:execution_result, {:error, %CommandDiagnostic{} = diagnostic}}, 5_000
+    assert diagnostic.phase == :application
+    assert diagnostic.code == :limit_capacity_invalid
+    assert diagnostic.provider_activity
+
+    assert String.starts_with?(
+             diagnostic.message,
+             "event_payload_bytes effective limit #{payload} is below the required "
+           )
   end
 
   test "an unresolvable credential fails a run before any provider callback" do
@@ -820,18 +870,20 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     {:ok, execution} = ProviderExecution.new(catalog, services, [])
     {:ok, authority} = PublicationAuthority.new([])
 
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "main.clj"}],
-        "entry" => "app/run"
-      },
-      "input" => %{"value" => %{}},
-      "providers" => %{
-        "workflow" => [%{"name" => "selected", "config" => %{}}],
-        "mission" => []
+    manifest =
+      %{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "main.clj"}],
+          "entry" => "app/run"
+        },
+        "input" => %{"value" => %{}},
+        "providers" => %{
+          "workflow" => [%{"name" => "selected", "config" => %{}}],
+          "mission" => []
+        }
       }
-    }
+      |> Map.merge(Keyword.get(opts, :manifest, %{}))
 
     documents = %{
       "ptc.json" => Jason.encode!(manifest),
