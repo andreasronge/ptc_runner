@@ -274,6 +274,13 @@ defmodule PtcRunner.Lisp do
     - `:max_symbols` - Max unique symbols/keywords allowed (default: 10_000)
     - `:max_program_bytes` - Max source code size in bytes (default: 1_000_000)
     - `:max_print_length` - Max characters per `println` call (default: 2000)
+    - `:loop_limit` - Optional positive integer bound on one `loop` or
+      tail-`recur` function activation. Omitted or `nil` disables the counter
+      (default: `nil`). Sequential loops, nested loops, and separate higher-order
+      callback invocations are separate activations. Ordinary non-tail recursion
+      and host collection traversal (`map`, `reduce`, and similar) are not
+      counted. Invalid values return `:invalid_config`. Heap and elapsed-time
+      limits remain the containment boundaries.
     - `:filter_context` - Filter context to only include accessed data keys (default: true)
     - `:strict_data` - When true, a missing `data/<name>` is a runtime error
       instead of `nil` (default: false). The Kernel enables this at every one of
@@ -805,6 +812,7 @@ defmodule PtcRunner.Lisp do
         Keyword.get(opts, :parallel_deadline_cap, Keyword.get(opts, :run_deadline_ms)),
       turn_history: Keyword.get(opts, :turn_history, []),
       max_print_length: Keyword.get(opts, :max_print_length),
+      loop_limit: Keyword.get(opts, :loop_limit),
       filter_context: Keyword.get(opts, :filter_context, true),
       pmap_timeout: Keyword.get(opts, :pmap_timeout),
       pmap_max_concurrency: Keyword.get(opts, :pmap_max_concurrency),
@@ -846,6 +854,7 @@ defmodule PtcRunner.Lisp do
 
     # Normalize tools to Tool structs
     with :ok <- validate_parallel_config(params.worker_max_heap, params.max_parallel_workers),
+         :ok <- validate_loop_limit(params.loop_limit),
          {:ok, normalized_tools} <- normalize_tools(raw_tools),
          {:ok, parsed_signature} <- parse_signature(signature_str) do
       tool_failure_token = make_ref()
@@ -921,6 +930,15 @@ defmodule PtcRunner.Lisp do
       true ->
         :ok
     end
+  end
+
+  defp validate_loop_limit(nil), do: :ok
+
+  defp validate_loop_limit(limit) when is_integer(limit) and limit > 0, do: :ok
+
+  defp validate_loop_limit(limit) do
+    {:error,
+     {:invalid_config, ":loop_limit must be a positive integer or nil, got " <> inspect(limit)}}
   end
 
   @doc """
@@ -1208,6 +1226,7 @@ defmodule PtcRunner.Lisp do
       max_parallel_workers: max_parallel_workers,
       turn_history: turn_history,
       max_print_length: max_print_length,
+      loop_limit: loop_limit,
       filter_context: filter_context,
       pmap_timeout: pmap_timeout,
       pmap_max_concurrency: pmap_max_concurrency,
@@ -1248,6 +1267,7 @@ defmodule PtcRunner.Lisp do
     eval_opts =
       [
         max_print_length: max_print_length,
+        loop_limit: loop_limit,
         max_heap: max_heap,
         worker_max_heap: worker_max_heap,
         parallel_budget: parallel_budget,
@@ -1721,8 +1741,8 @@ defmodule PtcRunner.Lisp do
     "Unsupported method '#{name}'. Supported interop methods: #{available}. Use (.method obj) syntax."
   end
 
-  # Issue #884: friendly message for the loop iteration cap (DIV-01).
-  # Without this clause, the raw Elixir tuple {:loop_limit_exceeded, 1000}
+  # Issue #884/#1710: friendly message for an opt-in loop iteration cap (DIV-01).
+  # Without this clause, the raw Elixir tuple {:loop_limit_exceeded, n}
   # leaks to the LLM via the generic inspect-based fallback.
   def format_error({:loop_limit_exceeded, n}) do
     case EvaluatorError.lisp_message(:loop_limit_exceeded, %{limit: n}) do

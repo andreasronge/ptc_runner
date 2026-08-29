@@ -1199,7 +1199,7 @@ Syntactic sugar for defining named functions in the user namespace:
 ```
 
 **Safety Mechanism:**
-PTC-Lisp enforces an iteration limit on `loop`/`recur` jumps. If a `loop` or tail-recursive function using `recur` exceeds the allowed number of iterations (default 1000), execution is terminated with a `loop_limit_exceeded` error. Ordinary non-tail function recursion is not counted by this limit; it remains bounded by the sandbox timeout and memory limit.
+PTC-Lisp does not count `loop`/`recur` jumps by default. Direct embedders may pass `:loop_limit`, and Kernel hosts may enable `workflow_loop_iterations` or `evaluation_loop_iterations`. When a positive limit is configured, it applies to one `loop` or tail-recursive function activation: entering the loop or calling the function starts the counter at zero, and each `recur` jump to that head consumes one iteration. Sequential loops, nested loops, and separate higher-order callback invocations are separate activations. If that activation exceeds the configured limit, execution is terminated with a `loop_limit_exceeded` error. Ordinary non-tail function recursion and host collection traversal (`map`, `reduce`, and similar) are not counted. Heap and elapsed-time limits remain the containment boundaries.
 
 ### 5.17 `for` — Eager Comprehension
 
@@ -1357,6 +1357,47 @@ is distinct from an evaluator error returned under the outer `:error` tag.
 - The outer call to `PtcRunner.Lisp.run/2` succeeds and `Result.return` contains
   `{:__ptc_fail__, value}`
 - Cannot be used inside `pmap` or `pcalls` (raises an error)
+
+**What a `ptc run` caller observes.** A workflow entry that ends in `fail`
+exits 5 and reports `execution/explicit_failure`, whose message names where the
+failure value went:
+
+```console
+$ ptc run ptc-project.json
+error: execution/explicit_failure: the workflow signalled an explicit failure;
+its value is retained in the run's private inspection record
+```
+
+The value itself never reaches the envelope or the trace. Both are payload-free
+by construction — every caller-supplied label on a trace event is reduced to a
+one-way fingerprint — and a `fail` value is arbitrary application data. It is
+written instead to the run's private inspection artifact as an
+`explicit-failure-value` record. Retention is not unconditional, and the
+diagnostic's message distinguishes every outcome: the value is retained, or it
+was dropped because the run published no inspection artifact (enable
+`artifacts.inspection`, or pass `--inspect`), because that artifact did not
+reach its destination, because the value exceeded `terminal_result_bytes`, or
+because it cannot be represented as JSON. Read a retained value back with the
+analysis profile:
+
+```console
+ptc repl --profile private-run-analysis-v1 \
+  --resource traces=.ptc/traces --resource inspection=.ptc/inspection \
+  --session-trace-dir analysis-traces --private-unattended --format jsonl \
+  -e '(analysis/read "RUN_REF" {"collection" "explicit_failure_values"})'
+```
+
+A CI script separates a deliberate failure from an infrastructure one on
+`error.code`; distinguishing one deliberate failure from another is what the
+inspection record is for. See the
+[REPL reference](reference/repl.md#private-analysis-without-a-terminal).
+
+One `fail` does not always report `explicit_failure`. When the value is a
+capability refusal the Kernel itself issued — a quota or budget ceiling the run
+actually reached, or an authenticated provider failure — the run reports that
+class instead, so re-raising a refusal with `fail` does not disguise it as an
+application decision. A value the workflow authored keeps `explicit_failure`
+even when it imitates one of those shapes.
 
 ```clojure
 ;; Signal failure when a required condition isn't met.
@@ -4017,7 +4058,7 @@ identify the phase as `:setup`; evaluation-phase failures identify `:eval`.
 | `:unbound_var` | Unknown symbol/variable |
 | `:not_callable` | Attempt to call a non-callable value |
 | `:runtime_error` | General runtime evaluation error |
-| `:loop_limit_exceeded` | `loop`/`recur` iteration limit exceeded |
+| `:loop_limit_exceeded` | Configured `loop`/`recur` iteration limit exceeded |
 | `:unknown_tool` | Tool not registered |
 | `:tool_error` | Tool execution failed |
 | `:destructure_error` | Destructuring pattern mismatch |
@@ -4675,7 +4716,7 @@ does not promise a retry.
 | Concern | Mitigation |
 |---------|------------|
 | Memory exhaustion | Max memory size limit |
-| Infinite loops | Timeout + loop iteration limit (default 1000) |
+| Infinite loops | Timeout; optional per-activation loop/tail-recur limit when configured |
 | Unbounded recursion | Timeout + memory limit |
 | Tool abuse | Explicit capability grants; Kernel total/per-name quotas; optional direct `max_tool_calls` |
 | Data exfiltration | Tools are host-controlled, audited |

@@ -62,25 +62,72 @@ defmodule PtcRunner.Lisp.EvalLoopTest do
   end
 
   describe "safety limits" do
-    test "infinite loop is caught by iteration limit" do
+    test "finite loop/recur above the old default bound succeeds without a limit" do
+      code = "(loop [x 0] (if (< x 1500) (recur (inc x)) x))"
+      assert {:ok, %{return: 1500}} = Lisp.run(code)
+    end
+
+    test "an explicit loop limit stops one activation and names the configured value" do
+      code = "(loop [x 0] (if (< x 1500) (recur (inc x)) x))"
+
+      assert {:error, %{fail: %{reason: :loop_limit_exceeded, message: msg, details: details}}} =
+               Lisp.run(code, loop_limit: 1000)
+
+      assert details.limit == 1000
+      assert msg =~ "1000"
+    end
+
+    test "two sequential 600-jump loops pass under a limit of 1000" do
+      code = """
+      (do
+        (loop [i 0] (if (< i 600) (recur (inc i)) i))
+        (loop [i 0] (if (< i 600) (recur (inc i)) i)))
+      """
+
+      assert {:ok, %{return: 600}} = Lisp.run(code, loop_limit: 1000)
+    end
+
+    test "three separately invoked 600-jump inner loops pass under a limit of 1000" do
+      code = """
+      (reduce
+        (fn [acc _]
+          (loop [i 0] (if (< i 600) (recur (inc i)) i)))
+        0
+        [1 2 3])
+      """
+
+      assert {:ok, %{return: 600}} = Lisp.run(code, loop_limit: 1000)
+    end
+
+    test "one 1500-jump activation fails under a limit of 1000" do
+      code = "(loop [x 0] (if (< x 1500) (recur (inc x)) x))"
+      assert {:error, %{fail: %{reason: :loop_limit_exceeded}}} = Lisp.run(code, loop_limit: 1000)
+    end
+
+    test "tail-recursive function activations are counted separately" do
+      code = """
+      (defn walk [n]
+        (if (< n 600) (recur (inc n)) n))
+      (do (walk 0) (walk 0))
+      """
+
+      assert {:ok, %{return: 600}} = Lisp.run(code, loop_limit: 1000)
+    end
+
+    test "infinite loop is caught by an explicit iteration limit" do
       code = "(loop [x 0] (recur x))"
-      assert {:error, %{fail: %{reason: :loop_limit_exceeded}}} = Lisp.run(code)
+      assert {:error, %{fail: %{reason: :loop_limit_exceeded}}} = Lisp.run(code, loop_limit: 50)
     end
 
-    test "custom loop limit would fail similarly" do
-      code = "(loop [x 0] (recur (inc x)))"
-      # Default is 1000, so it should fail when x reaches 1000
-      assert {:error, %{fail: %{reason: :loop_limit_exceeded}}} = Lisp.run(code)
-    end
-
-    # Issue #884: format_error had no clause for :loop_limit_exceeded so
+    # Issue #884/#1710: format_error had no clause for :loop_limit_exceeded so
     # the message fell through to inspect/2 and rendered the raw Elixir
-    # tuple `{:loop_limit_exceeded, 1000}`. LLMs / human users shouldn't
+    # tuple `{:loop_limit_exceeded, n}`. LLMs / human users shouldn't
     # see internal tuple representation in error messages, and the message
-    # should suggest a recovery path (reduce / map over a finite seq).
+    # should suggest a recovery path that works under the activation-local rule.
     test "loop_limit_exceeded error has friendly message, not raw tuple" do
       code = "(loop [x 0] (recur (inc x)))"
-      assert {:error, %{fail: %{message: msg}}} = Lisp.run(code)
+
+      assert {:error, %{fail: %{message: msg}}} = Lisp.run(code, loop_limit: 1000)
 
       refute msg =~ "{:loop_limit_exceeded",
              "raw Elixir tuple leaked into user-visible message: #{inspect(msg)}"
@@ -90,8 +137,17 @@ defmodule PtcRunner.Lisp.EvalLoopTest do
 
       assert msg =~ "1000", "message should include the limit number: #{inspect(msg)}"
 
-      assert msg =~ ~r/reduce|map|finite/i,
+      assert msg =~ ~r/finite collection|separately entered loops|configured limit/i,
              "message should hint at a recovery path: #{inspect(msg)}"
+    end
+
+    test "invalid loop_limit values return invalid_config" do
+      for value <- [0, -1, 1.5, "1000", :none] do
+        assert {:error, %{fail: %{reason: :invalid_config, message: msg}}} =
+                 Lisp.run("(+ 1 1)", loop_limit: value)
+
+        assert msg =~ ":loop_limit"
+      end
     end
   end
 

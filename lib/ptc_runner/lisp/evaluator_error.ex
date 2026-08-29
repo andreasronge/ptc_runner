@@ -241,7 +241,7 @@ defmodule PtcRunner.Lisp.EvaluatorError do
   defp public_message(:loop_limit_exceeded, details) do
     with {:ok, limit} <- admitted_positive_integer(Map.get(details, :limit)) do
       ok_message(
-        "Loop iteration limit exceeded (#{limit} iterations). Use reduce/map over a finite sequence instead, or split work across smaller loops."
+        "Loop iteration limit exceeded (#{limit} iterations). Reduce the iterations in this loop, split the work into separately entered loops, use a finite collection operation, or raise the active configured limit."
       )
     end
   end

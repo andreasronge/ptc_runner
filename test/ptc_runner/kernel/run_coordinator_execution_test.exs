@@ -538,8 +538,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     activity_ref = Process.monitor(prepared.provider_activity.owner)
 
     try do
-      # `owner_pid` is running a loop built to take ~6s to reach its
-      # 1_000-iteration cap (see the comment above this test's
+      # `owner_pid` is running a loop built to take ~6s across 1_000 heavy
+      # iterations (see the comment above this test's
       # `prepared_run/2` call), so it must still be alive here. If it is
       # not, something ended the run far earlier than that -- fail with
       # that distinction instead of the opaque ArgumentError

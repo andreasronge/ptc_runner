@@ -11,6 +11,7 @@ config :llm_db, load_dotenv: false
 # deterministic PTC-Lisp program can be starved past the 1 s cap and
 # surface as a flaky `{:error, %Step{fail: %{reason: :timeout}}}` ("the
 # sandbox-timeout flake class" — see commit ae0cb3b). No test relies on
-# the 1 s default for correctness: infinite loops hit `:loop_limit_exceeded`,
-# and timeout-behaviour tests pass an explicit small `timeout:`.
+# the 1 s default for correctness: infinite `loop`/`recur` without an
+# explicit `loop_limit` hits the sandbox timeout, and timeout-behaviour
+# tests pass an explicit small `timeout:`.
 config :ptc_runner, default_timeout: 10_000

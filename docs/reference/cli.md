@@ -424,7 +424,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `application` | `installed_limit_exceeded` | no | an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling |
 | 3 | `application` | `invalid_json` | no | an application document is not valid JSON |
 | 3 | `application` | `limit_configuration_invalid` | no | normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes |
-| 3 | `application` | `limit_unavailable` | no | an optional application budget is unavailable because the host has not enabled it |
+| 3 | `application` | `limit_unavailable` | no | an optional application limit is unavailable because the host has not enabled it |
 | 3 | `application` | `override_invalid` | no | the component override is invalid |
 | 3 | `application` | `reference_missing` | no | a referenced document is unavailable; for --input/--private-input try an application-relative name or an absolute/working-directory path |
 | 3 | `application` | `required_property_missing` | no | the application manifest is missing a required property |
@@ -500,6 +500,7 @@ Every classified diagnostic and the status it exits with:
 | 4 | `provider_acquisition` | `provider_tool_missing` | no | the installed endpoint does not expose a declared tool |
 | 4 | `provider_acquisition` | `provider_unavailable` | no | the selected provider could not be acquired |
 | 5 | `execution` | `evaluation_failed` | no | the evaluation failed |
+| 5 | `execution` | `explicit_failure` | no | the workflow signalled an explicit failure |
 | 5 | `execution` | `invalid_agent_config` | no | an agent configuration option is outside its supported range |
 | 5 | `execution` | `llm_access_denied` | no | the LLM provider denied access to the configured model |
 | 5 | `execution` | `llm_authentication_failed` | no | the LLM provider rejected authentication; check the installed credential |

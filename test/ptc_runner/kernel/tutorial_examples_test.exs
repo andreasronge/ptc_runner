@@ -163,7 +163,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesTest do
 
     for journey <- ~w(01-recovery 02-bulk 03-limits 04-loop-limit 05-memory) do
       assert {:ok, manifest} =
-               Manifest.load(Path.join(@viewer_examples, "#{journey}.json"))
+               Manifest.load(Path.join(@viewer_examples, "#{journey}.json"), host.limits)
 
       assert Enum.map(manifest.providers.workflow, & &1["name"]) == ["deepseek"]
       assert Enum.map(manifest.providers.mission, & &1["name"]) == ["workspace"]

@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.DocumentationLibrary
   alias PtcRunner.Kernel.ExampleLibrary
+  alias PtcRunner.Kernel.ExplicitFailureDiagnostic
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
@@ -1310,6 +1311,12 @@ defmodule PtcRunner.Kernel.CommandContract do
        ),
        do: ModelOutputDiagnostic.message_schema(row.message)
 
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :explicit_failure} = row,
+         %{"type" => "null"}
+       ),
+       do: ExplicitFailureDiagnostic.message_schema(row.message)
+
   # Both dynamic messages above are admitted only against a null source, so the
   # sourced branches of the same rows must stay pinned to the catalog literal;
   # otherwise the published schema would accept a pairing the command refuses to
@@ -1322,6 +1329,12 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp diagnostic_message_schema(
          %{phase: :execution, code: :invalid_agent_config} = row,
+         _source
+       ),
+       do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :explicit_failure} = row,
          _source
        ),
        do: %{"const" => row.message}

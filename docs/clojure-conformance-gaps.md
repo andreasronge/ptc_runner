@@ -270,7 +270,7 @@ a normal function, not a discovery form).
 
 Documented differences where PTC-Lisp intentionally departs from Clojure for sandbox safety or simplicity.
 
-### DIV-01: Loop/recursion iteration limit
+### DIV-01: Optional loop/recursion iteration limit
 
 | Field | Value |
 |-------|-------|
@@ -278,16 +278,16 @@ Documented differences where PTC-Lisp intentionally departs from Clojure for san
 | **Status** | by design |
 | **Source** | SCI `recur-test` line 667 |
 
-PTC-Lisp enforces a default limit of 1,000 iterations (configurable up to 10,000) on `loop`/`recur` and recursive function calls. Clojure has no such limit.
+PTC-Lisp has no default `loop`/`recur` iteration counter. Direct embedders may pass `loop_limit` to `PtcRunner.Lisp.run/2`, and Kernel hosts may enable `workflow_loop_iterations` or `evaluation_loop_iterations`. When a positive limit is configured, it applies per `loop` or tail-`recur` function activation, not cumulatively across the evaluation. Ordinary non-tail function recursion and host collection traversal (`map`, `reduce`, and similar) are not counted. Clojure has no such limit.
 
 ```clojure
-;; Clojure: succeeds
+;; Clojure and default PTC-Lisp: succeeds
 (defn hello [x] (if (< x 10000) (recur (inc x)) x)) (hello 0)   ;=> 10000
 
-;; PTC-Lisp: loop_limit_exceeded (default limit 1000)
+;; PTC-Lisp with an explicit loop_limit of 1000: loop_limit_exceeded
 ```
 
-**Rationale:** Sandbox safety. LLM-generated code must terminate within bounded time/memory. See `lib/ptc_runner/lisp/eval/context.ex`.
+**Rationale:** Sandbox safety is provided by heap and elapsed-time containment. An optional activation-local counter can fail one runaway explicit loop quickly without scoring `loop`/`doseq` differently from `reduce`/`map`. See `lib/ptc_runner/lisp/eval/context.ex`.
 
 ### DIV-02: No lazy sequences
 

@@ -6768,8 +6768,8 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["loop", "recur"],
         "(loop [i 0] (if (< i 1001) (recur (inc i)) i))",
         "DIV-01",
-        {:error, :loop_limit_exceeded},
-        "Loop/recur execution is bounded for sandbox safety."
+        1001,
+        "By default loop/recur execution is unbounded like Clojure; an optional activation-local limit may be configured. Heap and elapsed time remain the containment."
       ),
       unsupported_case(
         "div/lazy-range-unsupported-001",

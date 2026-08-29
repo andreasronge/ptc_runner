@@ -1084,7 +1084,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          closure_env,
          %EvalContext{} = eval_context,
          metadata,
-         do_eval_fn
+         do_eval_fn,
+         loop_iteration \\ 0
        ) do
     eval_context = Capture.materialize_context(eval_context)
     caller_baseline = eval_context
@@ -1142,6 +1143,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         worker_max_heap: eval_context.worker_max_heap,
         parallel_budget: eval_context.parallel_budget,
         max_tool_call_result_bytes: eval_context.max_tool_call_result_bytes,
+        loop_limit: eval_context.loop_limit,
         tools_meta: eval_context.tools_meta
       )
 
@@ -1181,7 +1183,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           body: body,
           closure_env: closure_env,
           metadata: metadata,
-          do_eval_fn: do_eval_fn
+          do_eval_fn: do_eval_fn,
+          loop_iteration: loop_iteration
         }
 
         handle_hof_abort(
@@ -1234,25 +1237,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          %Abort{outcome: {:control, :recur, new_args, %EvalContext{} = abort_ctx}},
          _prelude_ns,
          caller_baseline,
-         %{
-           patterns: patterns,
-           body: body,
-           closure_env: closure_env,
-           metadata: metadata,
-           do_eval_fn: do_eval_fn
-         },
+         callback,
          _stacktrace
        ) do
-    recur_hof_closure(
-      new_args,
-      abort_ctx.effects,
-      patterns,
-      body,
-      closure_env,
-      caller_baseline,
-      metadata,
-      do_eval_fn
-    )
+    recur_hof_closure(new_args, abort_ctx.effects, caller_baseline, callback)
   end
 
   defp handle_hof_abort(
@@ -1313,12 +1301,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp recur_hof_closure(
          new_args,
          effects,
-         patterns,
-         body,
-         closure_env,
          %EvalContext{} = caller_ctx,
-         metadata,
-         do_eval_fn
+         %{
+           patterns: patterns,
+           body: body,
+           closure_env: closure_env,
+           metadata: metadata,
+           do_eval_fn: do_eval_fn,
+           loop_iteration: loop_iteration
+         }
        ) do
     recur_patterns =
       case patterns do
@@ -1328,9 +1319,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
     case check_arity(recur_patterns, new_args) do
       :ok ->
-        case EvalContext.increment_iteration(caller_ctx) do
-          {:ok, next_ctx} ->
-            next_ctx = EvalContext.restore_recur_effects(next_ctx, effects)
+        case EvalContext.consume_loop_iteration(loop_iteration, caller_ctx.loop_limit) do
+          {:ok, next_iteration} ->
+            next_ctx = EvalContext.restore_recur_effects(caller_ctx, effects)
 
             eval_closure_args(
               new_args,
@@ -1339,7 +1330,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               closure_env,
               next_ctx,
               metadata,
-              do_eval_fn
+              do_eval_fn,
+              next_iteration
             )
 
           {:error, :loop_limit_exceeded} ->
@@ -1522,7 +1514,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     %{
       caller_ctx
       | effects: closure_ctx.effects,
-        iteration_count: closure_ctx.iteration_count,
         failure_origin: closure_ctx.failure_origin,
         return_origin: closure_ctx.return_origin
     }
@@ -1538,7 +1529,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     %{
       caller_ctx
       | effects: closure_ctx.effects,
-        iteration_count: caller_ctx.iteration_count + closure_ctx.iteration_count,
         failure_origin: closure_ctx.failure_origin,
         return_origin: closure_ctx.return_origin
     }
@@ -1572,7 +1562,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          binding_patterns,
          args,
          %EvalContext{user_ns: user_ns} = caller_ctx,
-         do_eval_fn
+         do_eval_fn,
+         loop_iteration \\ 0
        ) do
     case bind_args(binding_patterns, args) do
       {:ok, bindings} ->
@@ -1663,7 +1654,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   rescue
     error in Abort ->
-      handle_direct_closure_abort(error, closure, meta, caller_ctx, do_eval_fn, __STACKTRACE__)
+      handle_direct_closure_abort(
+        error,
+        closure,
+        meta,
+        caller_ctx,
+        do_eval_fn,
+        loop_iteration,
+        __STACKTRACE__
+      )
   end
 
   defp handle_direct_closure_abort(
@@ -1672,6 +1671,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          meta,
          caller_ctx,
          _do_eval_fn,
+         _loop_iteration,
          _stacktrace
        ),
        do: rethrow_export_abort(:return, value, abort_ctx, meta, caller_ctx)
@@ -1682,6 +1682,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          meta,
          caller_ctx,
          _do_eval_fn,
+         _loop_iteration,
          _stacktrace
        ),
        do: rethrow_export_abort(:fail, value, abort_ctx, meta, caller_ctx)
@@ -1692,6 +1693,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          _meta,
          caller_ctx,
          do_eval_fn,
+         loop_iteration,
          _stacktrace
        ) do
     # For recur, variadic functions behave like fixed-arity functions
@@ -1706,18 +1708,18 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
     case check_arity(recur_patterns, new_args) do
       :ok ->
-        # Check iteration limit
-        case EvalContext.increment_iteration(caller_ctx) do
-          {:ok, updated_caller_ctx} ->
+        case EvalContext.consume_loop_iteration(loop_iteration, caller_ctx.loop_limit) do
+          {:ok, next_iteration} ->
             updated_caller_ctx =
-              EvalContext.restore_recur_effects(updated_caller_ctx, abort_ctx.effects)
+              EvalContext.restore_recur_effects(caller_ctx, abort_ctx.effects)
 
             do_execute_closure(
               closure,
               recur_patterns,
               new_args,
               updated_caller_ctx,
-              do_eval_fn
+              do_eval_fn,
+              next_iteration
             )
 
           {:error, :loop_limit_exceeded} ->
@@ -1735,6 +1737,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          meta,
          caller_ctx,
          _do_eval_fn,
+         _loop_iteration,
          _stacktrace
        ) do
     restored_ctx = restore_direct_caller(abort_ctx, caller_ctx, meta)
@@ -1751,6 +1754,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          _meta,
          _caller_ctx,
          _do_eval_fn,
+         _loop_iteration,
          stacktrace
        ),
        do: reraise(error, stacktrace)

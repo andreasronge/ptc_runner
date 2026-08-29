@@ -902,15 +902,14 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  # Carry the export body's side-effecting accumulators (ledger, prints, cache,
-  # iteration count) back onto the caller's context while keeping the caller's
+  # Carry the export body's side-effecting accumulators (ledger, prints, cache)
+  # back onto the caller's context while keeping the caller's
   # own `user_ns`/`env`/`prelude` tables — a prelude export cannot mutate user
   # memory, and user code cannot reach the private prelude env.
   defp merge_export_effects(%EvalContext{} = caller_ctx, %EvalContext{} = export_ctx) do
     %{
       caller_ctx
       | effects: export_ctx.effects,
-        iteration_count: export_ctx.iteration_count,
         failure_origin: export_ctx.failure_origin,
         return_origin: export_ctx.return_origin
     }
@@ -1914,20 +1913,20 @@ defmodule PtcRunner.Lisp.Eval do
   # Loop Execution
   # ============================================================
 
-  defp execute_loop(body, %EvalContext{} = ctx, bindings) do
+  defp execute_loop(body, %EvalContext{} = ctx, bindings, iteration \\ 0) do
     eval_child(body, ctx)
   rescue
     error in Abort ->
       case error.outcome do
         {:control, :recur, new_values, %EvalContext{} = abort_ctx} ->
-          continue_loop(body, ctx, bindings, new_values, abort_ctx.effects)
+          continue_loop(body, ctx, bindings, new_values, abort_ctx.effects, iteration)
 
         _other ->
           reraise error, __STACKTRACE__
       end
   end
 
-  defp continue_loop(body, ctx, bindings, new_values, effects) do
+  defp continue_loop(body, ctx, bindings, new_values, effects, iteration) do
     patterns = Enum.map(bindings, fn {:binding, pattern, _} -> pattern end)
     recur_ctx = EvalContext.restore_recur_effects(ctx, effects)
 
@@ -1935,8 +1934,14 @@ defmodule PtcRunner.Lisp.Eval do
       Abort.error!({:arity_mismatch, length(patterns), length(new_values)}, recur_ctx)
     else
       with {:ok, new_bindings} <- bind_recur_values(patterns, new_values),
-           {:ok, next_ctx} <- EvalContext.increment_iteration(recur_ctx) do
-        execute_loop(body, EvalContext.merge_env(next_ctx, new_bindings), bindings)
+           {:ok, next_iteration} <-
+             EvalContext.consume_loop_iteration(iteration, ctx.loop_limit) do
+        execute_loop(
+          body,
+          EvalContext.merge_env(recur_ctx, new_bindings),
+          bindings,
+          next_iteration
+        )
       else
         {:error, :loop_limit_exceeded} ->
           Abort.error!({:loop_limit_exceeded, ctx.loop_limit}, recur_ctx)

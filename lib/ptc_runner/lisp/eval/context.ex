@@ -13,7 +13,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   | Field | Default | Hard Cap | Purpose |
   |-------|---------|----------|---------|
-  | `loop_limit` | 1,000 | 10,000 | Max loop/recur jumps |
+  | `loop_limit` | `nil` | — | Optional per-activation `loop`/`recur` bound |
   | `max_print_length` | 2,000 | — | Max chars per `println` call |
   | `max_tool_call_result_bytes` | 16,384 | — | Per-entry cap on the `:result` retained in the in-eval tool ledger |
   | `pmap_max_concurrency` | build-time `schedulers * 2` | — | Max concurrent pmap/pcalls tasks |
@@ -57,8 +57,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :origin_stack,
     :prelude_caller_user_ns_stack,
     :turn_history,
-    iteration_count: 0,
-    loop_limit: 1000,
+    loop_limit: nil,
     max_print_length: @default_print_length,
     max_tool_calls: nil,
     # Shared atomic reservation counter for uncached tool invocations. Every
@@ -201,8 +200,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           origin_stack: [map()],
           prelude_caller_user_ns_stack: [map()],
           turn_history: list(),
-          iteration_count: integer(),
-          loop_limit: integer(),
+          loop_limit: pos_integer() | nil,
           max_tool_calls: pos_integer() | nil,
           tool_call_budget: :atomics.atomics_ref(),
           max_tool_call_result_bytes: pos_integer(),
@@ -239,6 +237,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   ## Options
 
+  - `:loop_limit` - Optional positive integer bound on one `loop` or
+    tail-`recur` function activation (default: nil = disabled). Sequential
+    loops, nested loops, and separate HOF callback invocations are separate
+    activations.
   - `:max_print_length` - Max characters per `println` call (default: #{@default_print_length})
   - `:pmap_timeout` - Shared absolute deadline in ms for each pmap/pcalls
     operation, including nested parallel calls (default: 5000). Increase for
@@ -284,6 +286,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
       origin_stack: Keyword.get(opts, :origin_stack, []),
       prelude_caller_user_ns_stack: Keyword.get(opts, :prelude_caller_user_ns_stack, []),
       turn_history: turn_history,
+      loop_limit: Keyword.get(opts, :loop_limit),
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
       tool_call_budget: Keyword.get_lazy(opts, :tool_call_budget, &RunResources.new_counter/0),
       max_tool_call_result_bytes:
@@ -623,6 +626,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
         transitive_namespace_requirers: source.transitive_namespace_requirers,
         prelude_export_mask: source.prelude_export_mask,
         max_tool_calls: source.max_tool_calls,
+        loop_limit: source.loop_limit,
         tool_call_budget: source.tool_call_budget,
         tool_activity: source.tool_activity,
         tool_failure_token: source.tool_failure_token,
@@ -768,14 +772,20 @@ defmodule PtcRunner.Lisp.Eval.Context do
     do: %{context | return_origin: :direct_tool_call}
 
   @doc """
-  Increments the iteration count and checks against the limit.
+  Consumes one `recur` jump against an activation-local iteration counter.
+
+  `nil` disables the bound. A positive limit applies to one `loop` or
+  tail-`recur` function activation, not to the whole evaluation.
   """
-  @spec increment_iteration(t()) :: {:ok, t()} | {:error, :loop_limit_exceeded}
-  def increment_iteration(%__MODULE__{iteration_count: count, loop_limit: limit} = context) do
+  @spec consume_loop_iteration(non_neg_integer(), pos_integer() | nil) ::
+          {:ok, non_neg_integer()} | {:error, :loop_limit_exceeded}
+  def consume_loop_iteration(_count, nil), do: {:ok, 0}
+
+  def consume_loop_iteration(count, limit) when is_integer(limit) and limit > 0 do
     if count >= limit do
       {:error, :loop_limit_exceeded}
     else
-      {:ok, %{context | iteration_count: count + 1}}
+      {:ok, count + 1}
     end
   end
 

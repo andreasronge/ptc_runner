@@ -31,6 +31,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
@@ -490,7 +491,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.envelope["artifact_class"] == "normal"
     assert outcome.envelope["error"]["phase"] == "execution"
-    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+
+    # No inspection artifact was requested, so the diagnostic says the value
+    # was dropped and names the switch that would have retained it.
+    assert outcome.envelope["error"]["message"] =~ "published no inspection artifact"
     assert outcome.envelope["error"]["provider_activity"] == false
     assert outcome.envelope["execution"]["state"] == "incomplete"
     assert is_map(outcome.envelope["execution"]["usage"])
@@ -499,7 +504,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(outcome.envelope)
 
     assert {:stderr, rendered} = CommandRenderer.render(outcome)
-    assert rendered =~ "error: execution/workflow_failed:"
+    assert rendered =~ "error: execution/explicit_failure:"
     refute rendered =~ "evaluation:"
   end
 
@@ -540,25 +545,44 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     tmp_dir: directory
   } do
     cases = [
-      {~S|(ns app) (defn run [_input] (return (count)))|, "arity_error"},
-      {~S|(ns app) (defn run [_input] (return (1 2 3)))|, "not_callable"},
-      {~S|(ns app) (defn run [_input] (loop [i 0] (if (< i 999999) (recur (inc i)) i)))|,
-       "loop_limit_exceeded"},
-      {~S|(ns app) (defn run [_input] (return (Math/round 1)))|, "java_type_error"}
+      {~S|(ns app) (defn run [_input] (return (count)))|, "arity_error", []},
+      {~S|(ns app) (defn run [_input] (return (1 2 3)))|, "not_callable", []},
+      {~S|(ns app) (defn run [_input] (return (Math/round 1)))|, "java_type_error", []}
     ]
 
-    Enum.with_index(cases, fn {source, kind}, index ->
+    Enum.with_index(cases, fn {source, kind, extra}, index ->
       application = write_application(directory, "evaluator-kind-#{index}", valid_manifest())
       File.write!(Path.join(Path.dirname(application), "main.clj"), source)
 
       assert {:error, %CommandOutcome{} = outcome} =
-               CommandEngine.dispatch(["run", application])
+               CommandEngine.dispatch(["run", application] ++ extra)
 
       assert outcome.envelope["error"]["code"] == "evaluation_failed"
       assert outcome.envelope["execution"]["last_evaluation_error"]["kind"] == kind
       refute Jason.encode!(outcome.envelope) =~ "PtcRunner.Lisp"
       assert_schema_valid(outcome.envelope)
     end)
+
+    host_path =
+      write_host_config(directory, "evaluator-loop-limit", %{
+        "install" => %{},
+        "limits" => %{"workflow_loop_iterations" => 50}
+      })
+
+    application = write_application(directory, "evaluator-kind-loop", valid_manifest())
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (loop [i 0] (if (< i 999999) (recur (inc i)) i)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["code"] == "evaluation_failed"
+    assert outcome.envelope["execution"]["last_evaluation_error"]["kind"] == "loop_limit_exceeded"
+    refute Jason.encode!(outcome.envelope) =~ "PtcRunner.Lisp"
+    assert_schema_valid(outcome.envelope)
   end
 
   @tag :tmp_dir
@@ -592,6 +616,57 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "an explicit fail value the boundary cannot project is not reported as oversized", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "explicit-fail-unprojectable", valid_manifest())
+    inspection = Path.join(directory, "run.ptcins")
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (fail (fn [x] x)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "cannot be represented as JSON"
+    refute outcome.envelope["error"]["message"] =~ "terminal result ceiling"
+    assert_schema_valid(outcome.envelope)
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
+    assert Enum.find(records, &(&1["record_type"] == "explicit-failure-value")) == nil
+  end
+
+  @tag :tmp_dir
+  test "an explicit fail value over terminal_result_bytes reports that it was not retained", %{
+    tmp_dir: directory
+  } do
+    manifest = narrow_terminal_result_manifest(100)
+
+    inspection = Path.join(directory, "run.ptcins")
+
+    application =
+      write_application(directory, "explicit-fail-oversized", manifest, [
+        {"wide.clj", ~s|(ns wide) (defn run [input] (fail "#{String.duplicate("x", 200)}"))|}
+      ])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "exceeded the terminal result ceiling"
+    assert_schema_valid(outcome.envelope)
+
+    # The artifact was published, so "not retained" has to mean the value
+    # itself is absent rather than the artifact being missing.
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
+    assert Enum.find(records, &(&1["record_type"] == "explicit-failure-value")) == nil
+    assert Enum.find(records, &(&1["record_type"] == "execution-error"))
+  end
+
+  @tag :tmp_dir
   test "an explicit fail value is retained only as a dedicated inspection record", %{
     tmp_dir: directory
   } do
@@ -606,7 +681,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:error, %CommandOutcome{} = outcome} =
              CommandEngine.dispatch(["run", application, "--inspect", inspection])
 
-    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "private inspection record"
     assert outcome.envelope["execution"]["last_evaluation_error"] == nil
     refute Jason.encode!(outcome.envelope) =~ "must-not-escape"
     assert_schema_valid(outcome.envelope)
@@ -698,7 +774,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:error, %CommandOutcome{} = outcome} =
              CommandEngine.dispatch(["run", application, "--inspect", inspection])
 
-    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "private inspection record"
     assert outcome.envelope["execution"]["last_evaluation_error"] == nil
     assert_schema_valid(outcome.envelope)
 
@@ -723,7 +800,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:error, %CommandOutcome{} = outcome} =
              CommandEngine.dispatch(["run", application, "--inspect", inspection])
 
-    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "private inspection record"
     assert outcome.envelope["execution"]["last_evaluation_error"] == nil
     refute Jason.encode!(outcome.envelope) =~ "__ptc_no_explicit_failure__"
     assert_schema_valid(outcome.envelope)
@@ -1661,16 +1739,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "a result over terminal_result_bytes names the limit, its value, and the manifest key", %{
     tmp_dir: directory
   } do
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "wide", "path" => "wide.clj"}],
-        "entry" => "wide/run"
-      },
-      "input" => %{"value" => %{}},
-      "limits" => %{"terminal_result_bytes" => 100},
-      "providers" => %{"workflow" => [], "mission" => []}
-    }
+    manifest = narrow_terminal_result_manifest(100)
 
     application =
       write_application(directory, "result-limit-exceeded", manifest, [
@@ -6158,14 +6227,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "host-disabled optional budgets name the unavailable limit and remedy", %{
     tmp_dir: directory
   } do
-    for {name, requested} <- [
-          {"llm_cost_microusd", 50},
-          {"llm_total_tokens", 9_007_199_254_740_991}
-        ] do
+    for row <- LimitCatalog.rows(:optional_manifest_narrowable),
+        requested <- [row.minimum, row.maximum] do
+      name = row.name
+
       application =
         write_application(
           directory,
-          "disabled-#{name}",
+          "disabled-#{name}-#{requested}",
           valid_manifest(%{"limits" => %{name => requested}})
         )
 
@@ -6232,6 +6301,55 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       )
 
     assert outcome.envelope["error"]["path"] == "/limits/llm_total_tokens"
+  end
+
+  @tag :tmp_dir
+  test "enabled optional non-LLM limits inherit, narrow, and distinguish an exceeded ceiling", %{
+    tmp_dir: directory
+  } do
+    for row <- LimitCatalog.rows(:optional_manifest_narrowable),
+        row.prerequisites == [] do
+      host_path =
+        write_host_config(directory, "enabled-#{row.name}", %{
+          "install" => %{},
+          "limits" => %{row.name => 1_000}
+        })
+
+      inherited = write_application(directory, "inherited-#{row.name}", valid_manifest())
+
+      assert {:ok, %CommandOutcome{} = inherited_outcome} =
+               CommandEngine.prepare(["validate", inherited, "--host-config", host_path])
+
+      assert inherited_outcome.exit_status == 0
+
+      narrowed =
+        write_application(
+          directory,
+          "narrowed-#{row.name}",
+          valid_manifest(%{"limits" => %{row.name => 500}})
+        )
+
+      assert {:ok, %CommandOutcome{} = narrowed_outcome} =
+               CommandEngine.prepare(["validate", narrowed, "--host-config", host_path])
+
+      assert narrowed_outcome.exit_status == 0
+
+      exceeded =
+        write_application(
+          directory,
+          "exceeded-#{row.name}",
+          valid_manifest(%{"limits" => %{row.name => 1_001}})
+        )
+
+      outcome =
+        assert_error(
+          ["validate", exceeded, "--host-config", host_path],
+          "application",
+          "installed_limit_exceeded"
+        )
+
+      assert outcome.envelope["error"]["path"] == "/limits/#{row.name}"
+    end
   end
 
   @tag :tmp_dir

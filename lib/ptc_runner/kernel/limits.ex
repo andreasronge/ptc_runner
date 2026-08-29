@@ -3,7 +3,8 @@ defmodule PtcRunner.Kernel.Limits do
   Normalized positive hard ceilings for one Kernel run.
 
   Every field, default, accepted range, scope, and identity rule comes from
-  `PtcRunner.Kernel.LimitCatalog`. There is no disabled or infinite form.
+  `PtcRunner.Kernel.LimitCatalog`. Ordinary rows have no disabled or infinite
+  form. Optional rows are `nil` until the host enables them.
   `new/1` accepts only cataloged fields and overlays them on `defaults/0`.
 
   The generated [Kernel limits reference](kernel-limits-reference.md) lists the
@@ -43,7 +44,9 @@ defmodule PtcRunner.Kernel.Limits do
   @type t :: %__MODULE__{
           run_duration_ms: pos_integer(),
           workflow_timeout_ms: pos_integer(),
+          workflow_loop_iterations: pos_integer() | nil,
           evaluation_timeout_ms: pos_integer(),
+          evaluation_loop_iterations: pos_integer() | nil,
           evaluation_admission_timeout_ms: pos_integer(),
           parallel_timeout_ms: pos_integer(),
           workflow_heap_words: pos_integer(),
