@@ -448,8 +448,8 @@ defmodule PtcRunner.Lisp.Introspection do
   end
 
   @spec attached_namespaces(Prelude.t() | nil) :: [String.t()]
-  defp attached_namespaces(%Prelude{exports: exports}),
-    do: Enum.map(exports, & &1.namespace)
+  defp attached_namespaces(%Prelude{namespaces: namespaces}) when is_list(namespaces),
+    do: namespaces
 
   defp attached_namespaces(_prelude), do: []
 

@@ -871,6 +871,24 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       refute printed =~ "has not attached"
     end
 
+    test "an attached private-only shipped namespace does not redirect" do
+      {:ok, prelude} =
+        Compiler.compile("""
+        (ns agent.core "Fake." {:visibility :prompt})
+        (defn- helper [x] x)
+        """)
+
+      assert prelude.namespaces == ["agent.core"]
+      assert prelude.exports == []
+
+      result = eval!(~S|(doc "agent.core/nope")|, prelude, @catalog_opts)
+
+      assert result.prints == [~s(No documentation found for "agent.core/nope".)]
+
+      refute Enum.join(eval!(~S|(apropos "agent")|, prelude, @catalog_opts).prints, "\n") =~
+               "agent.core"
+    end
+
     test "a malformed shipped-looking ref stays a generic miss" do
       for ref <- ["agent.core/", "/run", "agent.core/foo/bar"] do
         result = eval!(~s|(doc "#{ref}")|, nil, @catalog_opts)
