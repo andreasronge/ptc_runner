@@ -5842,6 +5842,24 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
+  # Only a run that already assembled providers can reach this code, so the
+  # commands that stop before assembly must not admit it at all.
+  test "the capacity refusal is admitted only by a run" do
+    for mode <- [:validate, :doctor, {:doctor, :connect}, :run_unclassified] do
+      refute CommandContract.diagnostic_allowed?(mode, :application, :limit_capacity_invalid),
+             "#{inspect(mode)} admits limit_capacity_invalid"
+
+      assert CommandContract.diagnostic_allowed?(
+               mode,
+               :application,
+               :limit_configuration_invalid
+             ),
+             "#{inspect(mode)} lost limit_configuration_invalid"
+    end
+
+    assert CommandContract.diagnostic_allowed?(:run, :application, :limit_capacity_invalid)
+  end
+
   # The refusal is computed after provider assembly, so it can be reported with
   # or without provider activity, and the dispatcher calls an active failure
   # incomplete. Every one of those outcomes has to seal, or the run that raised

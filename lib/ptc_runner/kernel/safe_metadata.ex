@@ -255,9 +255,10 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   Maximum distinct closed-class keys retained in `usage.capability_refusals`.
 
   Terminal usage admission reserves this many fingerprint-length keys plus
-  `$overflow`. Two named classes is the largest such map that still admits an
-  empty environment at the 7_000-byte `event_payload_bytes` floor used by
-  terminal preflight. Further classes increment `$overflow`.
+  `$overflow`, and `EventBudget.minimum_normal_payload_bytes/0` is derived with
+  that reservation already in the projection, so raising this constant raises
+  the published `event_payload_bytes` floor every manifest and host document
+  must clear. Further classes increment `$overflow`.
   """
   @spec capability_refusal_map_limit() :: 2
   def capability_refusal_map_limit, do: 2

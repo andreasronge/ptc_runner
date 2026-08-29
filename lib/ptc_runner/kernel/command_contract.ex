@@ -87,7 +87,13 @@ defmodule PtcRunner.Kernel.CommandContract do
   @project_codes Map.fetch!(@codes_by_phase, :project)
   @host_codes Map.fetch!(@codes_by_phase, :host)
   @application_codes Map.fetch!(@codes_by_phase, :application)
-  @static_application_codes @application_codes -- [:override_invalid, :event_identity_conflict]
+  # Every other application code is decided before provider assembly, so only
+  # the capacity refusal can come from a run that already has a result class:
+  # `validate`, `doctor`, and the unclassified run branch must not admit it.
+  @capacity_codes Enum.map(@capacity_pairs, &elem(&1, 1))
+  @preassembly_application_codes @application_codes -- @capacity_codes
+  @static_application_codes @preassembly_application_codes --
+                              [:override_invalid, :event_identity_conflict]
   @bundle_codes Map.fetch!(@codes_by_phase, :bundle)
   @provider_declaration_codes Map.fetch!(@codes_by_phase, :provider_declaration)
   @destination_codes Map.fetch!(@codes_by_phase, :destination)
@@ -990,7 +996,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: true
 
   defp diagnostic_pair_allowed?(:run_unclassified, :application, code)
-       when code in @application_codes,
+       when code in @preassembly_application_codes,
        do: true
 
   defp diagnostic_pair_allowed?(:run_unclassified, :destination, code)
