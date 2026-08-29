@@ -415,7 +415,7 @@ defmodule PtcRunner.Lisp.Introspection do
 
     catalog
     |> Enum.filter(fn id ->
-      not MapSet.member?(attached, id) and String.contains?(String.downcase(id), needle)
+      id not in attached and String.contains?(String.downcase(id), needle)
     end)
     |> Enum.sort()
   end
@@ -429,7 +429,7 @@ defmodule PtcRunner.Lisp.Introspection do
 
       library_id ->
         if MapSet.member?(catalog, library_id) and
-             not MapSet.member?(attached_namespaces(prelude), library_id) do
+             library_id not in attached_namespaces(prelude) do
           {:ok, library_id}
         else
           :error
@@ -445,10 +445,11 @@ defmodule PtcRunner.Lisp.Introspection do
     end
   end
 
+  @spec attached_namespaces(Prelude.t() | nil) :: [String.t()]
   defp attached_namespaces(%Prelude{exports: exports}),
-    do: MapSet.new(exports, & &1.namespace)
+    do: Enum.map(exports, & &1.namespace)
 
-  defp attached_namespaces(_prelude), do: MapSet.new()
+  defp attached_namespaces(_prelude), do: []
 
   defp unattached_library_message(ref, library_id) do
     kind =
