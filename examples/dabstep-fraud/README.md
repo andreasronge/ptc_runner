@@ -15,7 +15,8 @@ moment you take a model's answer seriously:
 
 1. **Did it actually do the work?** A correct string is not proof.
 2. **Can you afford to keep the proof?** Checking the work means recording what
-   the model saw, and a 23 MB source can turn into a 74 MB record.
+   the model saw. Here a 23 MB source becomes a 74 MB record — nearly twice the
+   memory the program itself was allowed to use.
 
 ## Run it
 
@@ -171,8 +172,28 @@ single-sample smoke on the merged runtime is in
 
 ## Keeping the evidence small
 
-The source is one 23,581,339-byte `data/payments.csv`. `fetch-data.sh` downloads
-it, checks its hash, header, and line count, and stops — it does not reshape the
+Three numbers that are easy to conflate:
+
+| | bytes |
+|---|---:|
+| source file | 23,581,339 |
+| evaluation heap ceiling | 40,000,000 |
+| evidence, captured in full | 74,373,399 |
+
+The program never holds the file. It streams one page at a time and keeps eight
+per-country pairs, so it finishes comfortably inside a 40 MB heap. The recording
+is what does not fit: capturing every byte that crossed the capability boundary
+costs about three times the source, and nearly twice the memory the program was
+allowed to use in the first place.
+
+That ceiling is real, not decorative — one cohort run tried to retain every row,
+hit it, and the model rewrote its own program as a streaming aggregation to
+finish. So a workflow can sit comfortably inside its sandbox and still be
+impossible to record. The two problems are separate; this section is the second
+one.
+
+That source is a single file, `data/payments.csv`. `fetch-data.sh` downloads it,
+checks its hash, header, and line count, and stops — it does not reshape the
 data, so nothing between the benchmark file and the model is authored by a
 helper script. The MCP installation can read that file and nothing else: not the
 answer-bearing `reference/dev.jsonl`, not the benchmark context.
@@ -189,10 +210,10 @@ Set the consumer ceiling one notch higher (`max_result_bytes` 1,048,576) —
 PtcRunner's accounting is slightly wider than the server's, and equal values are
 rejected as `mcp_response_exceeded`.
 
-**Record identities, not payloads.** Captured in full, this run writes
-74,373,399 bytes of private inspection, roughly three times the source, because
-an MCP result carries its payload in both `content` and `structuredContent`. The
-read mapping therefore declares `"inspection_capture": "digest_results"`:
+**Record identities, not payloads.** The full-capture figure above is three
+times the source because an MCP result carries its payload twice, in both
+`content` and `structuredContent`. The read mapping therefore declares
+`"inspection_capture": "digest_results"`:
 
 | | bytes |
 |---|---:|
