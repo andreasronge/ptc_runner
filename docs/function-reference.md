@@ -312,8 +312,8 @@ See also: [PTC-Lisp Specification](ptc-lisp-specification.md) | [Clojure Conform
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `fail` | `(fail ...)` |  |
-| `return` | `(return ...)` |  |
+| `fail` | `(fail error)` | End the evaluation with an explicit failure — Terminates the program immediately; a Kernel host aborts and rolls back the run. `ptc run` reports `execution/explicit_failure` — unless `error` re-raises a Kernel refusal, which keeps its own class — and its message says whether `error` was retained in the private inspection record or dropped. Not allowed inside `pmap` or `pcalls`. |
+| `return` | `(return value)` | End the evaluation with an explicit result — Terminates the program immediately and makes `value` the evaluation's result. Not allowed inside `pmap` or `pcalls`. |
 
 
 

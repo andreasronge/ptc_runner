@@ -547,7 +547,32 @@ language-level failure outcome. A Kernel host uses that outcome to abort and
 roll back a multi-turn run. Direct <code class="inline">PtcRunner.Lisp.run/2</code> reports it as a
 successful evaluation whose <code class="inline">Result.return</code> is <code class="inline">{:__ptc_fail__, value}</code>; this
 is distinct from an evaluator error returned under the outer <code class="inline">:error</code> tag.</p><p><strong>Syntax:</strong></p><pre><code class="clojure language-clojure">(fail error)</code></pre><p><strong>Semantics:</strong></p><ul><li>Immediately terminates the current program execution</li><li>The outer call to <code class="inline">PtcRunner.Lisp.run/2</code> succeeds and <code class="inline">Result.return</code> contains
-<code class="inline">{:__ptc_fail__, value}</code></li><li>Cannot be used inside <code class="inline">pmap</code> or <code class="inline">pcalls</code> (raises an error)</li></ul><pre><code class="clojure language-clojure">;; Signal failure when a required condition isn't met.
+<code class="inline">{:__ptc_fail__, value}</code></li><li>Cannot be used inside <code class="inline">pmap</code> or <code class="inline">pcalls</code> (raises an error)</li></ul><p><strong>What a <code class="inline">ptc run</code> caller observes.</strong> A workflow entry that ends in <code class="inline">fail</code>
+exits 5 and reports <code class="inline">execution/explicit_failure</code>, whose message names where the
+failure value went:</p><pre><code class="console language-console">$ ptc run ptc-project.json
+error: execution/explicit_failure: the workflow signalled an explicit failure;
+its value is retained in the run's private inspection record</code></pre><p>The value itself never reaches the envelope or the trace. Both are payload-free
+by construction — every caller-supplied label on a trace event is reduced to a
+one-way fingerprint — and a <code class="inline">fail</code> value is arbitrary application data. It is
+written instead to the run's private inspection artifact as an
+<code class="inline">explicit-failure-value</code> record. Retention is not unconditional, and the
+diagnostic's message distinguishes every outcome: the value is retained, or it
+was dropped because the run published no inspection artifact (enable
+<code class="inline">artifacts.inspection</code>, or pass <code class="inline">--inspect</code>), because that artifact did not
+reach its destination, because the value exceeded <code class="inline">terminal_result_bytes</code>, or
+because it cannot be represented as JSON. Read a retained value back with the
+analysis profile:</p><pre><code class="console language-console">ptc repl --profile private-run-analysis-v1 \
+  --resource traces=.ptc/traces --resource inspection=.ptc/inspection \
+  --session-trace-dir analysis-traces --private-unattended --format jsonl \
+  -e '(analysis/read &quot;RUN_REF&quot; {&quot;collection&quot; &quot;explicit_failure_values&quot;})'</code></pre><p>A CI script separates a deliberate failure from an infrastructure one on
+<code class="inline">error.code</code>; distinguishing one deliberate failure from another is what the
+inspection record is for. See the
+<a href="/reference/repl/#private-analysis-without-a-terminal">REPL reference</a>.</p><p>One <code class="inline">fail</code> does not always report <code class="inline">explicit_failure</code>. When the value is a
+capability refusal the Kernel itself issued — a quota or budget ceiling the run
+actually reached, or an authenticated provider failure — the run reports that
+class instead, so re-raising a refusal with <code class="inline">fail</code> does not disguise it as an
+application decision. A value the workflow authored keeps <code class="inline">explicit_failure</code>
+even when it imitates one of those shapes.</p><pre><code class="clojure language-clojure">;; Signal failure when a required condition isn't met.
 ;; This tests whether the granted value is `nil`, which is a different question
 ;; from whether the name was granted at all. Under the Kernel -- a workflow
 ;; entry, a mission run, or either REPL -- an ungranted `data/&lt;name&gt;` is a

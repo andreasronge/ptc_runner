@@ -1358,6 +1358,47 @@ is distinct from an evaluator error returned under the outer `:error` tag.
   `{:__ptc_fail__, value}`
 - Cannot be used inside `pmap` or `pcalls` (raises an error)
 
+**What a `ptc run` caller observes.** A workflow entry that ends in `fail`
+exits 5 and reports `execution/explicit_failure`, whose message names where the
+failure value went:
+
+```console
+$ ptc run ptc-project.json
+error: execution/explicit_failure: the workflow signalled an explicit failure;
+its value is retained in the run's private inspection record
+```
+
+The value itself never reaches the envelope or the trace. Both are payload-free
+by construction — every caller-supplied label on a trace event is reduced to a
+one-way fingerprint — and a `fail` value is arbitrary application data. It is
+written instead to the run's private inspection artifact as an
+`explicit-failure-value` record. Retention is not unconditional, and the
+diagnostic's message distinguishes every outcome: the value is retained, or it
+was dropped because the run published no inspection artifact (enable
+`artifacts.inspection`, or pass `--inspect`), because that artifact did not
+reach its destination, because the value exceeded `terminal_result_bytes`, or
+because it cannot be represented as JSON. Read a retained value back with the
+analysis profile:
+
+```console
+ptc repl --profile private-run-analysis-v1 \
+  --resource traces=.ptc/traces --resource inspection=.ptc/inspection \
+  --session-trace-dir analysis-traces --private-unattended --format jsonl \
+  -e '(analysis/read "RUN_REF" {"collection" "explicit_failure_values"})'
+```
+
+A CI script separates a deliberate failure from an infrastructure one on
+`error.code`; distinguishing one deliberate failure from another is what the
+inspection record is for. See the
+[REPL reference](reference/repl.md#private-analysis-without-a-terminal).
+
+One `fail` does not always report `explicit_failure`. When the value is a
+capability refusal the Kernel itself issued — a quota or budget ceiling the run
+actually reached, or an authenticated provider failure — the run reports that
+class instead, so re-raising a refusal with `fail` does not disguise it as an
+application decision. A value the workflow authored keeps `explicit_failure`
+even when it imitates one of those shapes.
+
 ```clojure
 ;; Signal failure when a required condition isn't met.
 ;; This tests whether the granted value is `nil`, which is a different question

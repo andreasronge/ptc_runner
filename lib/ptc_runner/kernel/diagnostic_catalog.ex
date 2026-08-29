@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
+  alias PtcRunner.Kernel.ExplicitFailureDiagnostic
   alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
@@ -227,6 +228,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:provider_acquisition, :capability_requirement_missing, 4, false,
      "a component requires a capability that the selected providers did not supply"},
     {:execution, :workflow_failed, 5, false, "the workflow failed"},
+    {:execution, :explicit_failure, 5, false, "the workflow signalled an explicit failure"},
     {:execution, :evaluation_failed, 5, false, "the evaluation failed"},
     {:execution, :invalid_agent_config, 5, false,
      "an agent configuration option is outside its supported range"},
@@ -373,6 +375,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :run_timeout, message: fallback}),
     do: RuntimeLimitDiagnostic.run_duration_message_schema(fallback)
 
+  def message_schema(%{phase: :execution, code: :explicit_failure, message: fallback}),
+    do: ExplicitFailureDiagnostic.message_schema(fallback)
+
   def message_schema(%{phase: :execution, code: :replay_fixture_missing, message: fallback}),
     do: LLMReplayDiagnostic.message_schema(fallback)
 
@@ -478,6 +483,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:execution, :run_timeout, message),
     do: RuntimeLimitDiagnostic.run_duration_message?(message)
+
+  defp valid_dynamic_message?(:execution, :explicit_failure, message),
+    do: ExplicitFailureDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:execution, :replay_fixture_missing, message),
     do: LLMReplayDiagnostic.valid_message?(message)

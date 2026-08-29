@@ -513,7 +513,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:error, command_outcome, _counters, _events} =
              project_run(source, config, run_id, run_ref)
 
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
   end
 
   test "spending an alias cap without a refused call cannot claim the runtime diagnostic" do
@@ -532,7 +532,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:error, command_outcome, _counters, _events} =
              project_run(source, config, run_id, run_ref)
 
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
   end
 
   test "agent.core exhausts a per-alias cap as the named runtime diagnostic" do
@@ -944,7 +944,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:error, command_outcome, _counters, _events} =
              project_run(source, config, run_id, run_ref)
 
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
   end
 
   test "agent.core exhausts a public per-name quota as the named runtime diagnostic" do
@@ -1086,7 +1086,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:error, command_outcome, _counters, events} =
              project_run(source, config, run_id, run_ref)
 
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
     refute Enum.any?(events, &(&1.type == "limit-exceeded"))
   end
 
@@ -1803,7 +1803,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:error, command_outcome, counters, events} =
              project_run(source, config, run_id, run_ref)
 
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
     usage = command_outcome.envelope["execution"]["usage"]
     assert usage["llm_usage_state"] == "available"
     assert usage["llm_usage"] == counters["llm_usage"]
