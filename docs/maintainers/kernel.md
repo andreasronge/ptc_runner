@@ -360,6 +360,24 @@ doctor, run, and REPL paths; a refusal is the pre-execution
 still uses a zero terminal reserve and is not subject to this normal-trace byte
 relationship.
 
+`event_payload_bytes` has its own floor, and it has two parts.
+`TerminalUsage.maximum/4` builds the largest `run-stopped` projection a
+configuration can emit. Its fixed part — the bounded terminal reason, the
+saturated reachable drop map, and every usage field at its catalog maximum with
+an empty inventory — is application-independent, so it is the catalog minimum
+`EventBudget.minimum_normal_payload_bytes/0` publishes and the manifest and host
+schemas enforce. Its remaining part is keyed by declared capability and mission
+names, so it grows with the manifest and cannot be a static minimum: `validate`
+and `doctor` cannot compute it, because the capability inventory is only
+resolved after provider assembly. `RunConfig.new/1` therefore measures the
+resolved requirement through `EventSink.required_terminal_payload_bytes/2` and
+refuses with `{:terminal_payload_capacity_exceeded, payload, required}`, which
+`RunBuilder.environment_failure_diagnostic/3` projects — on both the
+provider-free owner path and the active provider path — to
+`application/limit_capacity_invalid` at exit 3, execution `not_started`, and no
+trace requirement. It is the one application-phase code the classified run
+envelope admits, because it is the one decided after the run has a result class.
+
 The Lisp execution Telemetry prefix is `[:ptc_runner, :lisp, :execute]`. Its
 closed `caller` values are `:direct`, `:kernel`, and `:repl`. Stop metadata
 carries the semantic `outcome` while measurements carry duration, program and

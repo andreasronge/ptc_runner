@@ -198,6 +198,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     {:ok, run_duration} = LimitCatalog.fetch(:run_duration_ms)
     {:ok, workflow_timeout} = LimitCatalog.fetch(:workflow_timeout_ms)
     {:ok, normal_event_count} = LimitCatalog.fetch(:normal_event_count)
+    {:ok, event_payload_bytes} = LimitCatalog.fetch(:event_payload_bytes)
 
     content = """
     <!-- Auto-generated — do not edit by hand -->
@@ -232,7 +233,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     requires the selected installation's `ceilings.request_timeout_ms` to be
     raised to the requested value.
 
-    Normal trace limits also have structural rules. `event_payload_bytes` is large enough for every bounded terminal payload, and `normal_event_count` is at least #{normal_event_count.minimum}: one ordinary `run-started` event plus the two-event terminal reserve. After host/application resolution, `normal_event_bytes` must be at least `EventSink.terminal_reserve(:normal, effective_limits).bytes + EventBudget.maximum_event_bytes("run-started", event_payload_bytes)`, preserving one complete maximum-size `run-started` envelope in addition to the complete `events-dropped` and `run-stopped` envelopes. Invalid combinations are refused before execution as `application/limit_configuration_invalid`. Private trace policy keeps its zero terminal reserve and does not use this normal-trace byte relationship.
+    Normal trace limits also have structural rules. `event_payload_bytes` is at least #{format_integer(event_payload_bytes.minimum)}: the largest `run-stopped` payload an application-free manifest can emit. An application that declares capabilities or missions needs more, and because that requirement is only known once providers are assembled it is refused when the run starts, as `application/limit_capacity_invalid`, naming the effective limit and the bytes it must reach. `normal_event_count` is at least #{normal_event_count.minimum}: one ordinary `run-started` event plus the two-event terminal reserve. After host/application resolution, `normal_event_bytes` must be at least `EventSink.terminal_reserve(:normal, effective_limits).bytes + EventBudget.maximum_event_bytes("run-started", event_payload_bytes)`, preserving one complete maximum-size `run-started` envelope in addition to the complete `events-dropped` and `run-stopped` envelopes. Invalid combinations are refused before execution as `application/limit_configuration_invalid`. Private trace policy keeps its zero terminal reserve and does not use this normal-trace byte relationship.
 
     A breached ceiling names itself, its configured value, and the manifest key that raises it, so the error at the point of failure carries this rule too. A request above the ceiling is refused by name, with both numbers.
 

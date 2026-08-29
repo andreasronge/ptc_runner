@@ -852,7 +852,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   end
 
   defp oversized_metadata_prepared_run do
-    component_ids = Enum.map(1..96, &"component#{&1}")
+    padding = String.duplicate("a", 40)
+    component_ids = Enum.map(1..96, &"component#{padding}#{&1}")
 
     manifest = %{
       "version" => 1,
@@ -863,7 +864,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
         "entry" => "app/run"
       },
       "input" => %{"value" => %{}},
-      "limits" => %{"event_payload_bytes" => 5_000}
+      "limits" => %{"event_payload_bytes" => 8_000}
     }
 
     documents =

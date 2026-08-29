@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.Error
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.FrozenBundle
@@ -5700,7 +5701,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "impossible normal trace budgets are rejected identically before execution", %{
     tmp_dir: directory
   } do
-    payload_bytes = 7_000
+    payload_bytes = 8_000
     {:ok, base_limits} = Limits.new(event_payload_bytes: payload_bytes)
     required_bytes = LimitConfiguration.required_normal_event_bytes(base_limits)
     configured_bytes = required_bytes - 1
@@ -5758,6 +5759,54 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:ok, %CommandOutcome{}} = CommandEngine.prepare(["validate", admitted])
   end
 
+  # The fixed part of the terminal projection is a catalog minimum; the part
+  # keyed by declared capability and mission names cannot be, because it is only
+  # resolved when the run assembles. That refusal is still a limits decision, so
+  # it must arrive as a configuration diagnostic and not as an internal error.
+  @tag :tmp_dir
+  test "a resolved terminal usage above the payload ceiling is refused as a limits diagnostic",
+       %{tmp_dir: directory} do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    padding = String.duplicate("x", 120)
+
+    missions =
+      Map.new(1..3, fn index ->
+        {"m#{padding}#{String.pad_leading(Integer.to_string(index), 3, "0")}",
+         %{"components" => [], "data" => %{}, "providers" => []}}
+      end)
+
+    application =
+      write_application(
+        directory,
+        "resolved-terminal-usage-too-large",
+        valid_manifest(%{
+          "limits" => %{"event_payload_bytes" => payload_bytes},
+          "missions" => missions
+        })
+      )
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.prepare(["validate", application])
+
+    assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["run", application])
+    assert_schema_valid(outcome.envelope)
+    assert outcome.envelope["error"]["phase"] == "application"
+    assert outcome.envelope["error"]["code"] == "limit_capacity_invalid"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.exit_status == 3
+    assert outcome.envelope["execution"] == %{"state" => "not_started"}
+    assert outcome.envelope["artifact_state"]["trace"] == "not_requested"
+    assert outcome.envelope["error"]["path"] == nil
+
+    assert [_matched, reported, required] =
+             Regex.run(
+               ~r/\Aevent_payload_bytes effective limit (\d+) is below the required (\d+) bytes/,
+               outcome.envelope["error"]["message"]
+             )
+
+    assert String.to_integer(reported) == payload_bytes
+    assert String.to_integer(required) > payload_bytes
+  end
+
   @tag :tmp_dir
   test "normal trace count values below three use schema diagnostics", %{tmp_dir: directory} do
     for count <- [1, 2] do
@@ -5788,6 +5837,51 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         )
 
       assert outcome.envelope["error"]["path"] == "/limits/normal_event_count"
+      assert outcome.envelope["error"]["message"] =~ "minimum"
+    end
+  end
+
+  @tag :tmp_dir
+  test "event payload values below the catalog minimum use schema diagnostics", %{
+    tmp_dir: directory
+  } do
+    minimum = EventBudget.minimum_normal_payload_bytes()
+
+    for payload_bytes <- [1, minimum - 1] do
+      application =
+        write_application(
+          directory,
+          "invalid-event-payload-#{payload_bytes}",
+          valid_manifest(%{"limits" => %{"event_payload_bytes" => payload_bytes}})
+        )
+
+      for command <- ["validate", "run", "doctor"] do
+        outcome = assert_error([command, application], "application", "schema_violation")
+        assert outcome.envelope["error"]["path"] == "/limits/event_payload_bytes"
+        assert outcome.envelope["error"]["message"] =~ "minimum"
+      end
+
+      host =
+        write_host_config(directory, "invalid-event-payload-#{payload_bytes}", %{
+          "install" => %{},
+          "limits" => %{"event_payload_bytes" => payload_bytes}
+        })
+
+      admitted =
+        write_application(
+          directory,
+          "admitted-event-payload-#{payload_bytes}",
+          valid_manifest()
+        )
+
+      outcome =
+        assert_error(
+          ["validate", admitted, "--host-config", host],
+          "host",
+          "host_schema_invalid"
+        )
+
+      assert outcome.envelope["error"]["path"] == "/limits/event_payload_bytes"
       assert outcome.envelope["error"]["message"] =~ "minimum"
     end
   end

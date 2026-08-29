@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.EventBudget
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.LimitConfiguration
@@ -9,6 +10,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.SchemaViolation
+  alias PtcRunner.Kernel.TerminalUsage
 
   @manifest_narrowable [
     {"capability_argument_bytes", :capability_argument_bytes, 262_144, 4_000_000},
@@ -321,7 +323,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                  "/tmp"
                )
 
-      if row.name == "normal_event_count" do
+      if row.name in ["event_payload_bytes", "normal_event_count"] do
         assert {:error,
                 {:host_schema_invalid,
                  %SchemaViolation{
@@ -374,7 +376,6 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     minimum = EventBudget.minimum_normal_payload_bytes()
     dropped = EventBudget.maximum_dropped()
 
-    assert minimum == 4_826
     assert map_size(dropped) == 17
     assert dropped["$overflow"] == 4_294_967_295
 
@@ -399,8 +400,32 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     end
   end
 
+  # The constant is the schema authority for every manifest and host document,
+  # so it cannot be policed by asserting it against itself. Re-derive it here
+  # from the complete fixed `run-stopped` projection, and prove no admitted
+  # limit set needs more than the floor an application-free manifest is given.
+  test "the event payload minimum is derived from the maximum fixed run-stopped payload" do
+    sink = %EventSink{pid: self(), token: make_ref(), policy: :normal}
+    minimum = EventBudget.minimum_normal_payload_bytes()
+
+    {:ok, catalog_minima} = Limits.new(Map.new(LimitCatalog.rows(), &{&1.field, &1.minimum}))
+    {:ok, catalog_maxima} = Limits.new(Map.new(LimitCatalog.rows(), &{&1.field, &1.maximum}))
+    {:ok, defaults} = Limits.new()
+
+    for limits <- [defaults, catalog_minima, catalog_maxima] do
+      usage = TerminalUsage.maximum(%{}, %{}, [], limits)
+      assert EventSink.required_terminal_payload_bytes(sink, usage) <= minimum
+    end
+
+    usage = TerminalUsage.maximum(%{}, %{}, [], catalog_maxima)
+    assert EventSink.required_terminal_payload_bytes(sink, usage) == minimum
+
+    private = %EventSink{pid: self(), token: make_ref(), policy: :private}
+    assert EventSink.required_terminal_payload_bytes(private, usage) <= minimum
+  end
+
   test "effective normal trace bytes retain one ordinary event and terminal reserve" do
-    payload_bytes = 7_000
+    payload_bytes = 8_000
     {:ok, base} = Limits.new(event_payload_bytes: payload_bytes)
     required_bytes = LimitConfiguration.required_normal_event_bytes(base)
 

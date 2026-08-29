@@ -72,6 +72,13 @@ defmodule PtcRunner.Kernel.CommandContract do
   ]
   @preclassification_only_phases @unclassified_run_phases -- [:internal]
 
+  # The application phase is otherwise decided before a run has a result class.
+  # `limit_capacity_invalid` is the exception: the terminal-usage requirement it
+  # reports scales with the resolved capability and mission inventory, which is
+  # not known until provider assembly, by which point the run already carries
+  # its result class. It stays exit 3 with execution `not_started` and no trace.
+  @classified_preclassification_pairs [{:application, :limit_capacity_invalid}]
+
   @codes_by_phase DiagnosticCatalog.rows()
                   |> Enum.group_by(& &1.phase, & &1.code)
   @project_codes Map.fetch!(@codes_by_phase, :project)
@@ -160,12 +167,7 @@ defmodule PtcRunner.Kernel.CommandContract do
             false
           ),
         "classified_diagnostic" =>
-          diagnostic_schema(
-            Enum.reject(
-              DiagnosticCatalog.rows(),
-              &(&1.phase in @preclassification_only_phases)
-            )
-          ),
+          diagnostic_schema(Enum.reject(DiagnosticCatalog.rows(), &preclassification_only?/1)),
         "recovery_written_diagnostic" =>
           recovery_diagnostic_schema(@recovery_written_publication_codes),
         "finalization_uncertain_diagnostic" =>
@@ -890,6 +892,11 @@ defmodule PtcRunner.Kernel.CommandContract do
       })
     )
   end
+
+  defp preclassification_only?(%{phase: phase, code: code}),
+    do:
+      phase in @preclassification_only_phases and
+        {phase, code} not in @classified_preclassification_pairs
 
   defp diagnostic_rows(:run), do: DiagnosticCatalog.rows()
 
