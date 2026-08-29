@@ -287,7 +287,7 @@ PTC-Lisp has no default `loop`/`recur` iteration counter. Direct embedders may p
 ;; PTC-Lisp with an explicit loop_limit of 1000: loop_limit_exceeded
 ```
 
-**Rationale:** Sandbox safety is provided by heap and elapsed-time containment. An optional activation-local counter lets an operator fail one runaway explicit loop quickly without scoring `loop`/`doseq` differently from `reduce`/`map`. See `lib/ptc_runner/lisp/eval/context.ex`.
+**Rationale:** Sandbox safety is provided by heap and elapsed-time containment. An optional activation-local counter can fail one runaway explicit loop quickly without scoring `loop`/`doseq` differently from `reduce`/`map`. See `lib/ptc_runner/lisp/eval/context.ex`.
 
 ### DIV-02: No lazy sequences
 
