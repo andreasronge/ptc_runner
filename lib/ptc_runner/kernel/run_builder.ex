@@ -1121,6 +1121,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            result_contract: package.contracts.result,
            result_contract_source:
              get_in(package.manifest, ["contracts", "result_schema", "path"]),
+           phase_return_contracts: phase_return_contract_bindings(package),
            result_projection: request.policy.result_projection,
            inspection_sink: inspection_sink,
            provider_session: providers.provider_session,
@@ -1153,6 +1154,17 @@ defmodule PtcRunner.Kernel.RunBuilder do
       {:error, _reason} = error ->
         failed_build(error, sink, inspection_sink, failure_mode)
     end
+  end
+
+  defp phase_return_contract_bindings(package) do
+    Map.new(package.contracts.phase_returns, fn {name, contract} ->
+      {name,
+       %{
+         contract: contract,
+         source: get_in(package.manifest, ["contracts", "phase_return_schemas", name, "path"]),
+         projection: Map.fetch!(package.contract_prompt_projections.phase_returns, name)
+       }}
+    end)
   end
 
   # When capture is enabled, the exact effective prelude source of every

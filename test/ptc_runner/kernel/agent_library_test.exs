@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.ModelContract
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
@@ -1556,6 +1557,89 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _outcome_second}
   end
 
+  test "only validating entries render the active enum result contract" do
+    {:ok, result_contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["answer"],
+        "properties" => %{
+          "answer" => %{
+            "type" => "string",
+            "title" => "Allowed answer",
+            "enum" => ["allow", "deny"]
+          }
+        }
+      })
+
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "done", name: "run_ptc_lisp", args: %{"program" => ~S|(return {"answer" "allow"})|}}
+      ]
+    }
+
+    {:ok, validating} = agent_config([response], [], result_contract: result_contract)
+
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run-result-value "decide" {"max_turns" 1})|, validating)
+
+    assert_receive {:agent_request, %{"system" => visible}}
+    assert visible =~ "Application result contract"
+    assert visible =~ ~S(result["answer"] is one of ["allow","deny"])
+    assert visible =~ "Allowed answer"
+
+    {:ok, nonvalidating} = agent_config([response], [], result_contract: result_contract)
+
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run-value "decide" {"max_turns" 1})|, nonvalidating)
+
+    assert_receive {:agent_request, %{"system" => hidden}}
+    refute hidden =~ "Application result contract"
+    refute hidden =~ ~S(["allow","deny"])
+  end
+
+  test "a named non-final phase contract is visible, corrected, and required for transition" do
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["facts"],
+        "properties" => %{
+          "facts" => %{"type" => "array", "minItems" => 1, "items" => %{"type" => "string"}}
+        }
+      })
+
+    {:ok, projection} = ModelContract.value_contract(contract)
+    binding = %{contract: contract, source: "gather.schema.json", projection: projection}
+
+    responses = [
+      agent_return("bad", ~S|(return {"facts" []})|),
+      agent_return("good", ~S|(return {"facts" ["bounded"]})|),
+      agent_return("final", ~S|(return "done")|)
+    ]
+
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config(responses, [],
+        missions: %{"gather" => mission, "finish" => mission},
+        phase_return_contracts: %{"gathered" => binding}
+      )
+
+    source =
+      ~S|(agent.core/run-phased-result-value "work" {"phases" [{"mission" "gather" "max_turns" 2 "return_contract" "gathered"} {"mission" "finish" "max_turns" 1}]})|
+
+    assert {:ok, %{value: "done"}} = Kernel.run(source, config)
+    assert_receive {:agent_request, %{"system" => first}}
+    assert first =~ "Current phase return contract (gathered)"
+    assert first =~ "valid explicit (return value) is required"
+    assert_receive {:agent_request, %{"messages" => corrected}}
+    assert List.last(corrected)["content"] =~ "did not satisfy the current phase return contract"
+    assert_receive {:agent_request, %{"system" => final}}
+    refute final =~ "Current phase return contract"
+  end
+
   test "agent.core/run result-contract feedback omits rejected values and undeclared names" do
     invalid =
       agent_return(
@@ -2837,7 +2921,14 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     parent = self()
 
     recording_tools =
-      Map.put(required_agent_tools(), "kernel-runtime-limit-failure", %TrustedTool{
+      required_agent_tools()
+      |> Map.put("kernel-result-contract", %TrustedTool{
+        function: fn
+          %{"presentation" => true} -> %{status: :ok, value: nil}
+          _arguments -> %{status: :error}
+        end
+      })
+      |> Map.put("kernel-runtime-limit-failure", %TrustedTool{
         function: fn arguments ->
           send(parent, {:runtime_limit_failure, arguments})
           %{status: :error}
@@ -5067,6 +5158,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     config_opts =
       case Keyword.fetch(opts, :result_contract) do
         {:ok, result_contract} -> Keyword.put(config_opts, :result_contract, result_contract)
+        :error -> config_opts
+      end
+
+    config_opts =
+      case Keyword.fetch(opts, :phase_return_contracts) do
+        {:ok, contracts} -> Keyword.put(config_opts, :phase_return_contracts, contracts)
         :error -> config_opts
       end
 

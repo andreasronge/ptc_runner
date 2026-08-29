@@ -124,8 +124,16 @@ defmodule PtcRunner.Kernel.Manifest do
           entry: binary(),
           input_declaration: map(),
           input: map() | nil,
-          contracts: %{input: ValueContract.t() | nil, result: ValueContract.t() | nil},
-          contract_sources: %{input: binary() | nil, result: binary() | nil},
+          contracts: %{
+            input: ValueContract.t() | nil,
+            result: ValueContract.t() | nil,
+            phase_returns: %{binary() => ValueContract.t()}
+          },
+          contract_sources: %{
+            input: binary() | nil,
+            result: binary() | nil,
+            phase_returns: %{binary() => binary()}
+          },
           missions: %{
             binary() => %{
               components: [Component.t()],
@@ -472,22 +480,55 @@ defmodule PtcRunner.Kernel.Manifest do
     do: manifest_value_error([{:property, "workflow"}], :invalid_workflow_manifest)
 
   defp contract_declarations(value) when is_map(value) and not is_struct(value) do
-    with :ok <- section_keys(value, "contracts", ~w(input_schema result_schema), []) do
-      Enum.reduce_while(
-        [{"input_schema", :input_contract}, {"result_schema", :result_contract}],
-        :ok,
-        fn {name, role}, :ok ->
-          case optional_contract_declaration(value, name, role) do
-            :ok -> {:cont, :ok}
-            {:error, _reason} = error -> {:halt, error}
-          end
-        end
-      )
+    with :ok <-
+           section_keys(
+             value,
+             "contracts",
+             ~w(input_schema result_schema phase_return_schemas),
+             []
+           ),
+         :ok <-
+           Enum.reduce_while(
+             [{"input_schema", :input_contract}, {"result_schema", :result_contract}],
+             :ok,
+             fn {name, role}, :ok ->
+               case optional_contract_declaration(value, name, role) do
+                 :ok -> {:cont, :ok}
+                 {:error, _reason} = error -> {:halt, error}
+               end
+             end
+           ),
+         :ok <- phase_return_contract_declarations(Map.get(value, "phase_return_schemas", %{})) do
+      :ok
     end
   end
 
   defp contract_declarations(_value),
     do: {:error, {:manifest_path, [{:property, "contracts"}], :invalid_contracts_section}}
+
+  defp phase_return_contract_declarations(value) when is_map(value) and map_size(value) <= 16 do
+    Enum.reduce_while(value, :ok, fn {name, reference}, :ok ->
+      if valid_phase_contract_name?(name) do
+        case contract_declaration(reference, {:phase_return_contract, name}) do
+          :ok -> {:cont, :ok}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      else
+        {:halt,
+         manifest_value_error(
+           [{:property, "contracts"}, {:property, "phase_return_schemas"}],
+           :invalid_contract_name
+         )}
+      end
+    end)
+  end
+
+  defp phase_return_contract_declarations(_value),
+    do:
+      manifest_value_error(
+        [{:property, "contracts"}, {:property, "phase_return_schemas"}],
+        :invalid_phase_return_contracts
+      )
 
   defp optional_contract_declaration(value, name, role) do
     case Map.fetch(value, name) do
@@ -877,15 +918,27 @@ defmodule PtcRunner.Kernel.Manifest do
   defp materialize_input(_input, _source), do: {:error, :invalid_input}
 
   defp contracts(value, source) when is_map(value) do
-    with :ok <- section_keys(value, "contracts", ~w(input_schema result_schema), []),
+    with :ok <-
+           section_keys(
+             value,
+             "contracts",
+             ~w(input_schema result_schema phase_return_schemas),
+             []
+           ),
          {:ok, input, input_source} <-
            optional_contract(value, "input_schema", source, :input_contract),
          {:ok, result, result_source} <-
-           optional_contract(value, "result_schema", source, :result_contract) do
+           optional_contract(value, "result_schema", source, :result_contract),
+         {:ok, phase_returns, phase_return_sources} <-
+           phase_return_contracts(Map.get(value, "phase_return_schemas", %{}), source) do
       {:ok,
        %{
-         contracts: %{input: input, result: result},
-         sources: %{input: input_source, result: result_source}
+         contracts: %{input: input, result: result, phase_returns: phase_returns},
+         sources: %{
+           input: input_source,
+           result: result_source,
+           phase_returns: phase_return_sources
+         }
        }}
     else
       {:error, {:source_role, _role, _name, _reason}} = error ->
@@ -898,6 +951,53 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp contracts(_value, _source),
     do: {:error, {:manifest_path, [{:property, "contracts"}], :invalid_contracts_section}}
+
+  defp phase_return_contracts(value, source) when is_map(value) and map_size(value) <= 16 do
+    value
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.reduce_while({:ok, %{}, %{}, 0}, fn {name, reference},
+                                                {:ok, contracts, sources, bytes} ->
+      role = {:phase_return_contract, name}
+
+      if valid_phase_contract_name?(name) do
+        case contract(reference, source, role) do
+          {:ok, contract, raw} when bytes + byte_size(raw) <= 1_048_576 ->
+            {:cont,
+             {:ok, Map.put(contracts, name, contract), Map.put(sources, name, raw),
+              bytes + byte_size(raw)}}
+
+          {:ok, _contract, _raw} ->
+            {:halt,
+             {:error,
+              {:source_role, :phase_return_contract, name,
+               :aggregate_contract_source_limit_exceeded}}}
+
+          {:error, _reason} = error ->
+            {:halt, error}
+        end
+      else
+        {:halt,
+         {:error,
+          {:manifest_path, [{:property, "contracts"}, {:property, "phase_return_schemas"}],
+           :invalid_contract_name}}}
+      end
+    end)
+    |> case do
+      {:ok, contracts, sources, _bytes} -> {:ok, contracts, sources}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp phase_return_contracts(_value, _source),
+    do:
+      {:error,
+       {:manifest_path, [{:property, "contracts"}, {:property, "phase_return_schemas"}],
+        :invalid_phase_return_contracts}}
+
+  defp valid_phase_contract_name?(name) when is_binary(name),
+    do: byte_size(name) <= 128 and Regex.match?(@component_id, name)
+
+  defp valid_phase_contract_name?(_name), do: false
 
   defp optional_contract(contracts, name, source, role) do
     case Map.fetch(contracts, name) do
@@ -938,6 +1038,9 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp contract_reference_path(:result_contract),
     do: [{:property, "contracts"}, {:property, "result_schema"}]
+
+  defp contract_reference_path({:phase_return_contract, name}),
+    do: [{:property, "contracts"}, {:property, "phase_return_schemas"}, {:property, name}]
 
   defp load_contract(source, role, path) do
     case read_contract(source, path) do
@@ -1423,7 +1526,13 @@ defmodule PtcRunner.Kernel.Manifest do
 
     closed_object(%{
       "input_schema" => reference,
-      "result_schema" => reference
+      "result_schema" => reference,
+      "phase_return_schemas" => %{
+        "type" => "object",
+        "maxProperties" => 16,
+        "propertyNames" => component_id_schema(),
+        "additionalProperties" => reference
+      }
     })
   end
 

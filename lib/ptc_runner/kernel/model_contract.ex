@@ -20,10 +20,44 @@ defmodule PtcRunner.Kernel.ModelContract do
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.TypedCanonicalJSON
+  alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Lisp.Signature
 
   @identifier ~r/\A[A-Za-z_][A-Za-z0-9_-]*\z/
   @literal_symbols ~w(nil true false)
+  @projection_domain <<"ptc.contract-prompt-projection.v1", 0>>
+
+  @doc "Projects the complete normalized application value-contract profile."
+  @spec value_contract(ValueContract.t()) ::
+          {:ok, term()} | {:error, :unsupported_contract}
+  def value_contract(%ValueContract{schema: schema} = contract) do
+    if ValueContract.sealed?(contract),
+      do: json_schema(schema),
+      else: {:error, :unsupported_contract}
+  end
+
+  def value_contract(_contract), do: {:error, :unsupported_contract}
+
+  @doc "Returns the annotation-sensitive identity of a renderer-neutral projection."
+  @spec projection_hash(term()) :: {:ok, binary()} | {:error, :unsupported_contract}
+  def projection_hash(projection) do
+    with {:ok, json} <- DeterministicJSON.encode(projection),
+         {:ok, value} <- Jason.decode(json) do
+      TypedCanonicalJSON.encode(value)
+    end
+    |> case do
+      {:ok, encoded} ->
+        framed = <<byte_size(encoded)::unsigned-big-64, encoded::binary>>
+
+        {:ok,
+         "sha256:" <>
+           Base.encode16(:crypto.hash(:sha256, @projection_domain <> framed), case: :lower)}
+
+      {:error, _reason} ->
+        {:error, :unsupported_contract}
+    end
+  end
 
   @spec function(Signature.signature()) :: {:ok, term()} | {:error, :unsupported_contract}
   def function({:signature, params, return_type}) when is_list(params) do
@@ -169,7 +203,8 @@ defmodule PtcRunner.Kernel.ModelContract do
                   {"type", child_type}
                 ])}
              end
-           end) do
+           end),
+         {:ok, property_names} <- optional_property_names(schema) do
       {:ok,
        constrained_node(
          schema,
@@ -177,7 +212,22 @@ defmodule PtcRunner.Kernel.ModelContract do
            {"kind", "object"},
            {"nullable", false},
            {"closed", Map.get(schema, "additionalProperties", false) == false},
-           {"fields", fields}
+           {"fields", fields},
+           {"property_names", property_names}
+         ]
+       )}
+    end
+  end
+
+  defp json_schema(%{"oneOf" => branches} = schema) when is_list(branches) do
+    with {:ok, variants} <- map_types(branches, &union_variant/1) do
+      {:ok,
+       constrained_node(
+         schema,
+         [
+           {"kind", "tagged_union"},
+           {"nullable", false},
+           {"variants", Enum.sort_by(variants, &union_sort_key/1)}
          ]
        )}
     end
@@ -211,6 +261,43 @@ defmodule PtcRunner.Kernel.ModelContract do
     end
   end
 
+  defp optional_property_names(schema) do
+    case Map.fetch(schema, "propertyNames") do
+      {:ok, property_names} -> json_schema(property_names)
+      :error -> {:ok, nil}
+    end
+  end
+
+  defp union_variant(schema) do
+    with {:ok, projection} <- json_schema(schema),
+         {:object, pairs} <- projection,
+         {:ok, discriminator} <- discriminator_literal(schema) do
+      {:ok, object([{"discriminator", discriminator}, {"type", {:object, pairs}}])}
+    else
+      _invalid -> {:error, :unsupported_contract}
+    end
+  end
+
+  defp discriminator_literal(%{"properties" => properties}) when is_map(properties) do
+    properties
+    |> Enum.flat_map(fn
+      {name, %{"const" => literal}} -> [{name, literal}]
+      _field -> []
+    end)
+    |> case do
+      [{name, literal}] -> {:ok, object([{"name", name}, {"literal", literal}])}
+      _invalid -> {:error, :unsupported_contract}
+    end
+  end
+
+  defp discriminator_literal(_schema), do: {:error, :unsupported_contract}
+
+  defp union_sort_key({:object, pairs}) do
+    {"discriminator", {:object, discriminator}} = List.keyfind(pairs, "discriminator", 0)
+    {"literal", literal} = List.keyfind(discriminator, "literal", 0)
+    enum_sort_key(literal)
+  end
+
   defp constrained_node(schema, base_pairs) do
     kind = base_pairs |> Map.new() |> Map.fetch!("kind")
 
@@ -239,6 +326,10 @@ defmodule PtcRunner.Kernel.ModelContract do
   defp applicable_constraint_pairs(schema, "array") do
     optional_pair(schema, "minItems", "min_items") ++
       optional_pair(schema, "maxItems", "max_items")
+  end
+
+  defp applicable_constraint_pairs(schema, "object") do
+    optional_pair(schema, "maxProperties", "max_properties")
   end
 
   defp applicable_constraint_pairs(_schema, _kind), do: []

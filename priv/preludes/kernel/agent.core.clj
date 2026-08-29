@@ -69,7 +69,24 @@
            (nonblank-string? (get phase "instruction")))
        (or (nil? (get phase "terminal_only"))
            (true? (get phase "terminal_only"))
-           (false? (get phase "terminal_only")))))
+           (false? (get phase "terminal_only")))
+       (or (nil? (get phase "return_contract"))
+           (and (string? (get phase "return_contract"))
+                (re-matches #"[a-z][a-z0-9._-]{0,127}" (get phase "return_contract"))))))
+
+(defn- resolve-phase-contracts [phases]
+  (let [final-phase (last phases)]
+    (if (contains? final-phase "return_contract")
+      (fail (result/error :invalid-agent-config :final-phase-return-contract))
+      (mapv
+        (fn [phase]
+          (if (contains? phase "return_contract")
+            (let [projection (kernel/phase-return-contract-presentation (get phase "return_contract"))]
+              (if (= :error (get projection :status))
+                (fail (result/error :invalid-agent-config (get projection :reason)))
+                (assoc phase "return_contract_projection" projection)))
+            phase))
+        phases))))
 
 (defn- configured-phases [cfg default-max-turns]
   (if (contains? cfg "phases")
@@ -95,7 +112,7 @@
 
 (defn- loop-context [cfg projector-kind]
   (let [default-max-turns (bounded-option cfg "max_turns" 4 128)
-        phases (configured-phases cfg default-max-turns)
+        phases (resolve-phase-contracts (configured-phases cfg default-max-turns))
         total-max-turns (reduce + 0 (map #(get % "max_turns") phases))
         consolidate-at-turns-remaining
         (consolidation-threshold
@@ -104,10 +121,13 @@
         max-program-chars (bounded-option cfg "max_program_chars" 64000 1000000)
         max-observation-chars (bounded-option cfg "max_observation_chars" 2048 65536)
         max-transcript-chars (bounded-option cfg "max_transcript_chars" 262144 1000000)
+        presentation (when (not= projector-kind :none) (kernel/result-contract-presentation))
         effective-cfg (assoc cfg
                              "max_program_chars" max-program-chars
                              "max_observation_chars" max-observation-chars
-                             "max_transcript_chars" max-transcript-chars)]
+                             "max_transcript_chars" max-transcript-chars
+                             "result_contract" presentation
+                             "result_contract_mode" projector-kind)]
     {:effective-cfg effective-cfg
      :phases phases
      :total-max-turns total-max-turns
@@ -237,6 +257,14 @@
       (tool/kernel-result-contract-failure
         {"value" (get cmd :value) "agent_turns" (get cmd :agent-turns)})
 
+      (= :phase-contract-failure op)
+      (fail (result/error :phase-return-contract-failed
+                          {:completion (get cmd :completion)
+                           :phase_index (get cmd :phase-index)
+                           :mission (get cmd :mission)
+                           :contract (get cmd :contract-name)
+                           :max_turns (get cmd :max-turns)}))
+
       (= :config-failure op)
       (tool/kernel-agent-config-failure (get cmd :payload))
 
@@ -302,6 +330,19 @@
               (recur next {:type :validation
                            :action action
                            :projected projected
+                           :validation validation}))
+
+            (= :validate-phase op)
+            (let [next (get cmd :machine)
+                  value (get cmd :value)
+                  evaluation (get cmd :evaluation)
+                  action (get cmd :action)
+                  phase (machine-phase next)
+                  validation (kernel/validate-phase-return (get phase "return_contract") value)]
+              (recur next {:type :phase-validation
+                           :action action
+                           :value value
+                           :evaluation evaluation
                            :validation validation}))
 
             (= :done op)

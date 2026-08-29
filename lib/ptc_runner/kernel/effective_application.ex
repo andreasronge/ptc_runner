@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TypedCanonicalJSON
 
-  @domain <<"ptc.effective-application.v2", 0>>
+  @domain <<"ptc.effective-application.v3", 0>>
 
   @type normalized_providers :: %{
           required(:workflow) => [map()],
@@ -70,7 +70,18 @@ defmodule PtcRunner.Kernel.EffectiveApplication do
       },
       "contracts" => %{
         "input" => package.contract_behavior_hashes.input,
-        "result" => package.contract_behavior_hashes.result
+        "result" => %{
+          "validation" => package.contract_behavior_hashes.result,
+          "prompt" => package.contract_prompt_hashes.result
+        },
+        "phase_returns" =>
+          Map.new(package.contract_behavior_hashes.phase_returns, fn {name, validation} ->
+            {name,
+             %{
+               "validation" => validation,
+               "prompt" => Map.fetch!(package.contract_prompt_hashes.phase_returns, name)
+             }}
+          end)
       },
       "effective_event_policy" => Atom.to_string(effective_event_policy),
       "entry" => package.entry,

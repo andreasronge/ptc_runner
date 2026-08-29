@@ -93,6 +93,7 @@ defmodule PtcRunner.Kernel.RunConfig do
     :claim_id,
     result_contract: nil,
     result_contract_source: nil,
+    phase_return_contracts: %{},
     result_projection: :native,
     inspection_sink: nil,
     inspection_sink_owner: nil,
@@ -115,6 +116,7 @@ defmodule PtcRunner.Kernel.RunConfig do
           claim_id: reference(),
           result_contract: ValueContract.t() | nil,
           result_contract_source: binary() | nil,
+          phase_return_contracts: %{binary() => map()},
           result_projection: :native | :json,
           inspection_sink: InspectionSink.t() | nil,
           inspection_sink_owner: pid() | nil,
@@ -144,6 +146,7 @@ defmodule PtcRunner.Kernel.RunConfig do
                :event_sink,
                :result_contract,
                :result_contract_source,
+               :phase_return_contracts,
                :result_projection,
                :inspection_sink,
                :provider_session,
@@ -167,6 +170,7 @@ defmodule PtcRunner.Kernel.RunConfig do
              Keyword.get(opts, :result_contract_source)
            ),
          true <- result_projection?(Keyword.get(opts, :result_projection, :native)),
+         true <- phase_return_contracts?(Keyword.get(opts, :phase_return_contracts, %{})),
          {:ok, event_sink_owner} <- EventSink.owner(sink),
          true <- inspection?(Keyword.get(opts, :inspection_sink)),
          {:ok, inspection_sink_owner} <-
@@ -210,6 +214,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          claim_id: make_ref(),
          result_contract: Keyword.get(opts, :result_contract),
          result_contract_source: Keyword.get(opts, :result_contract_source),
+         phase_return_contracts: Keyword.get(opts, :phase_return_contracts, %{}),
          result_projection: Keyword.get(opts, :result_projection, :native),
          inspection_sink: Keyword.get(opts, :inspection_sink),
          inspection_sink_owner: inspection_sink_owner,
@@ -284,6 +289,19 @@ defmodule PtcRunner.Kernel.RunConfig do
     do: ApplicationSource.valid_name?(source)
 
   defp result_contract_source?(_contract, _source), do: false
+
+  defp phase_return_contracts?(contracts) when is_map(contracts) and map_size(contracts) <= 16 do
+    Enum.all?(contracts, fn
+      {name, %{contract: %ValueContract{} = contract, source: source, projection: projection}}
+      when is_binary(name) and is_binary(source) ->
+        ValueContract.sealed?(contract) and is_tuple(projection)
+
+      _binding ->
+        false
+    end)
+  end
+
+  defp phase_return_contracts?(_contracts), do: false
 
   defp result_projection?(projection), do: projection in [:native, :json]
 

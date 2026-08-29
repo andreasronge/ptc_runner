@@ -18,6 +18,44 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
+  test "named phase-return contracts are acquired identically from memory" do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "contracts" => %{
+        "phase_return_schemas" => %{
+          "gathered" => %{"path" => "gather.schema.json"}
+        }
+      }
+    }
+
+    schema = %{
+      "type" => "object",
+      "additionalProperties" => false,
+      "required" => ["facts"],
+      "properties" => %{"facts" => %{"type" => "array", "items" => %{"type" => "string"}}}
+    }
+
+    documents = %{
+      "ptc.json" => Jason.encode!(manifest),
+      "main.clj" => "(ns main) (defn run [_] (return {}))",
+      "gather.schema.json" => Jason.encode!(schema)
+    }
+
+    assert {:ok, loaded} = Manifest.load_memory("ptc.json", documents)
+    assert %ValueContract{} = loaded.contracts.phase_returns["gathered"]
+    assert loaded.contract_sources.phase_returns["gathered"] == Jason.encode!(schema)
+
+    assert {:ok, package, _input} = ApplicationPackage.acquire_memory("ptc.json", documents)
+    assert %ValueContract{} = package.contracts.phase_returns["gathered"]
+    assert <<_::binary-size(64)>> = package.contract_behavior_hashes.phase_returns["gathered"]
+    assert "sha256:" <> <<_::binary-size(64)>> = package.contract_prompt_hashes.phase_returns["gathered"]
+  end
+
   @tag :tmp_dir
   test "one strict manifest deterministically builds and runs the shared Kernel path", %{
     tmp_dir: dir
