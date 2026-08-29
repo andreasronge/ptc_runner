@@ -777,11 +777,20 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   def subject_operations(_phase, _code), do: []
 
+  # Doctor never produces these application rows: overrides and event-identity
+  # conflicts are run-command arguments, and terminal-usage capacity is only
+  # known after provider assembly.
+  @doctor_run_only_application_codes [
+    :override_invalid,
+    :event_identity_conflict,
+    :limit_capacity_invalid
+  ]
+
   @doc false
   @spec doctor_application_rows() :: [row()]
   def doctor_application_rows do
     Enum.filter(rows(), fn row ->
-      row.phase == :application and row.code not in [:override_invalid, :event_identity_conflict]
+      row.phase == :application and row.code not in @doctor_run_only_application_codes
     end)
   end
 
