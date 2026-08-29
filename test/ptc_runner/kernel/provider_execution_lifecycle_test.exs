@@ -870,20 +870,20 @@ defmodule PtcRunner.Kernel.ProviderExecutionLifecycleTest do
     {:ok, execution} = ProviderExecution.new(catalog, services, [])
     {:ok, authority} = PublicationAuthority.new([])
 
-    manifest =
-      %{
-        "version" => 1,
-        "workflow" => %{
-          "components" => [%{"id" => "app", "path" => "main.clj"}],
-          "entry" => "app/run"
-        },
-        "input" => %{"value" => %{}},
-        "providers" => %{
-          "workflow" => [%{"name" => "selected", "config" => %{}}],
-          "mission" => []
-        }
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "app", "path" => "main.clj"}],
+        "entry" => "app/run"
+      },
+      "input" => %{"value" => %{}},
+      "providers" => %{
+        "workflow" => [%{"name" => "selected", "config" => %{}}],
+        "mission" => []
       }
-      |> Map.merge(Keyword.get(opts, :manifest, %{}))
+    }
+
+    manifest = Map.merge(manifest, Keyword.get(opts, :manifest, %{}))
 
     documents = %{
       "ptc.json" => Jason.encode!(manifest),
