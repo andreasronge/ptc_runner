@@ -679,8 +679,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc false
-  @spec trusted_tools(map(), map()) :: map()
-  def trusted_tools(tools, limits) when is_map(tools) do
+  @spec trusted_tools(map(), map(), map()) :: map()
+  def trusted_tools(tools, limits, contracts \\ %{}) when is_map(tools) and is_map(contracts) do
     Map.new(tools, fn
       {"kernel-eval" = name, callback} ->
         {name,
@@ -746,7 +746,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          }}
 
       {name, callback} ->
-        {name, %TrustedTool{function: callback}}
+        {name, %TrustedTool{function: callback, contract: Map.get(contracts, name)}}
     end)
   end
 

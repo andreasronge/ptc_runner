@@ -4,8 +4,11 @@ defmodule PtcRunner.Lisp.Introspection do
 
   Backs the `dir`, `apropos`, `doc`, `export-meta`, and `source` builtins.
   `dir`, `export-meta`, and `source` describe the attached prelude. `apropos`
-  and `doc` additionally expose fixed built-ins and the bounded Java surface
-  from `PtcRunner.Lisp.Registry`. When the Kernel supplies a shipped-library
+  and `doc` additionally expose installed callable capability contracts, fixed
+  built-ins, and the bounded Java surface from `PtcRunner.Lisp.Registry`.
+  Capability discovery includes installed tools whose `model_visible` flag is
+  false: that flag controls prompt inventory, not runtime documentation. When
+  the Kernel supplies a shipped-library
   catalog, a miss in an unattached shipped namespace prints an attachment
   redirect; `apropos` prints the same class of advisory while still returning
   only callable names. The redirect identifies the library whose namespace
@@ -83,6 +86,8 @@ defmodule PtcRunner.Lisp.Introspection do
   so embedded `Lisp.run` callers stay unchanged.
   """
 
+  alias PtcRunner.Utf8
+
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
@@ -130,7 +135,7 @@ defmodule PtcRunner.Lisp.Introspection do
     do: {:ok, dir(context.prelude, namespace, filter(context))}
 
   defp invoke_normalized(:apropos, [query], %EvalContext{} = context) when is_binary(query) do
-    names = apropos(context.prelude, query, filter(context))
+    names = apropos(context.prelude, query, filter(context), context.tools_meta)
 
     case unattached_library_advisory(query, context.prelude, context.shipped_library_ids) do
       nil -> {:ok, names}
@@ -142,7 +147,15 @@ defmodule PtcRunner.Lisp.Introspection do
     do: {:ok, export_meta(context.prelude, ref, filter(context))}
 
   defp invoke_normalized(:doc, [ref], %EvalContext{} = context) when is_binary(ref),
-    do: {:print, render_doc(context.prelude, ref, filter(context), context.shipped_library_ids)}
+    do:
+      {:print,
+       render_doc(
+         context.prelude,
+         ref,
+         filter(context),
+         context.tools_meta,
+         context.shipped_library_ids
+       )}
 
   defp invoke_normalized(:source, [ref], %EvalContext{} = context) when is_binary(ref),
     do: {:print, render_source(context.prelude, ref, filter(context))}
@@ -225,6 +238,11 @@ defmodule PtcRunner.Lisp.Introspection do
   """
   @spec apropos(Prelude.t() | nil, String.t(), visible()) :: [String.t()]
   def apropos(prelude, query, visible) when is_binary(query) do
+    apropos(prelude, query, visible, %{})
+  end
+
+  @spec apropos(Prelude.t() | nil, String.t(), visible(), map()) :: [String.t()]
+  def apropos(prelude, query, visible, tools_meta) when is_binary(query) and is_map(tools_meta) do
     needle = String.downcase(String.trim(query))
 
     if needle == "" do
@@ -244,8 +262,14 @@ defmodule PtcRunner.Lisp.Introspection do
         |> Enum.reject(&MapSet.member?(hidden_registry_names, &1.name))
         |> Enum.map(& &1.name)
 
+      capability_matches =
+        tools_meta
+        |> Enum.filter(fn {_name, metadata} -> capability_matches?(metadata, needle) end)
+        |> Enum.map(fn {name, _metadata} -> "tool/" <> name end)
+
       prelude_matches
       |> Kernel.++(registry_matches)
+      |> Kernel.++(capability_matches)
       |> Enum.uniq()
       |> Enum.sort()
     end
@@ -278,9 +302,29 @@ defmodule PtcRunner.Lisp.Introspection do
   through to registry documentation when hidden.
   """
   @spec render_doc(Prelude.t() | nil, String.t(), visible()) :: String.t()
+  def render_doc(prelude, ref, visible) when is_binary(ref) do
+    render_doc(prelude, ref, visible, %{}, nil)
+  end
+
   @spec render_doc(Prelude.t() | nil, String.t(), visible(), MapSet.t(String.t()) | nil) ::
           String.t()
-  def render_doc(prelude, ref, visible, catalog \\ nil) when is_binary(ref) do
+  def render_doc(prelude, ref, visible, nil) when is_binary(ref) do
+    render_doc(prelude, ref, visible, %{}, nil)
+  end
+
+  def render_doc(prelude, ref, visible, %MapSet{} = catalog) when is_binary(ref) do
+    render_doc(prelude, ref, visible, %{}, catalog)
+  end
+
+  @spec render_doc(Prelude.t() | nil, String.t(), visible(), map()) :: String.t()
+  def render_doc(prelude, ref, visible, tools_meta) when is_binary(ref) and is_map(tools_meta) do
+    render_doc(prelude, ref, visible, tools_meta, nil)
+  end
+
+  @spec render_doc(Prelude.t() | nil, String.t(), visible(), map(), MapSet.t(String.t()) | nil) ::
+          String.t()
+  def render_doc(prelude, ref, visible, tools_meta, catalog)
+      when is_binary(ref) and is_map(tools_meta) do
     case fetch_attached(prelude, ref) do
       %Export{} = export ->
         if visible.(export),
@@ -288,9 +332,15 @@ defmodule PtcRunner.Lisp.Introspection do
           else: missing_doc(ref, prelude, catalog)
 
       nil ->
-        case Registry.doc(ref) do
-          nil -> missing_doc(ref, prelude, catalog)
-          entry -> render_registry_entry(entry)
+        case capability_contract(tools_meta, ref) do
+          nil ->
+            case Registry.doc(ref) do
+              nil -> missing_doc(ref, prelude, catalog)
+              entry -> render_registry_entry(entry)
+            end
+
+          contract ->
+            render_capability(ref, contract)
         end
     end
   end
@@ -473,6 +523,68 @@ defmodule PtcRunner.Lisp.Introspection do
     String.contains?(String.downcase(ref), needle) or
       (is_binary(doc) and String.contains?(String.downcase(doc), needle))
   end
+
+  defp capability_matches?(%{visibility: :public, contract: contract}, needle)
+       when is_map(contract) do
+    searchable_contract =
+      contract
+      |> Map.take([:name, :description, :input_schema, :effect])
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.new()
+      |> Map.put(:ref, "tool/" <> Map.fetch!(contract, :name))
+
+    contract_contains?(searchable_contract, needle)
+  end
+
+  defp capability_matches?(_metadata, _needle), do: false
+
+  defp capability_contract(tools_meta, "tool/" <> name) do
+    case Map.get(tools_meta, name) do
+      %{visibility: :public, contract: contract} when is_map(contract) -> contract
+      _other -> nil
+    end
+  end
+
+  defp capability_contract(_tools_meta, _ref), do: nil
+
+  defp render_capability(ref, contract) do
+    description = Map.get(contract, :description)
+
+    [
+      ref,
+      "  effect: #{Map.fetch!(contract, :effect)}",
+      if(is_binary(description) and description != "",
+        do: description |> Utf8.truncate_valid(4_096) |> indent()
+      ),
+      "  input schema:",
+      contract |> Map.fetch!(:input_schema) |> Jason.encode!(pretty: true) |> indent()
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp contract_contains?(value, needle) when is_map(value) do
+    Enum.any?(value, fn {key, item} ->
+      contract_contains?(key, needle) or contract_contains?(item, needle)
+    end)
+  end
+
+  defp contract_contains?(value, needle) when is_list(value),
+    do: Enum.any?(value, &contract_contains?(&1, needle))
+
+  defp contract_contains?(value, needle) when is_binary(value),
+    do:
+      value
+      |> Utf8.truncate_valid(byte_size(value))
+      |> String.downcase()
+      |> String.contains?(needle)
+
+  defp contract_contains?(nil, needle), do: String.contains?("null", needle)
+
+  defp contract_contains?(value, needle) when is_atom(value) or is_number(value),
+    do: value |> to_string() |> String.downcase() |> String.contains?(needle)
+
+  defp contract_contains?(_value, _needle), do: false
 
   defp meta_map(%Export{kind: :constant} = export) do
     base = %{

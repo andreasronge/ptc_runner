@@ -281,12 +281,13 @@ signatures, schema constraints and descriptions, effect metadata, and bounded
 documentation are rendered when available.</p><p>Top-level mission <code class="inline">data</code> keys are rendered as <code class="inline">data/&lt;name&gt;</code> values with their
 bounded structural types, but never their values. The inventory is the complete
 prompt-visible mission surface. <code class="inline">dir</code> and <code class="inline">export-meta</code> inspect visible
-attached prelude exports. <code class="inline">apropos</code> and <code class="inline">doc</code> cover those exports plus fixed
-built-ins and the bounded Java surface. When a shipped library is not attached,
+attached prelude exports. <code class="inline">apropos</code> and <code class="inline">doc</code> cover those exports plus installed
+callable capabilities, fixed built-ins, and the bounded Java surface. They do
+not enumerate data values. When a shipped library is not attached,
 they print an attachment redirect for a matching namespace or query. The
 catalog identifies only the library; it does not establish whether a requested
-export or its documentation exists. None enumerate data values or direct tool
-capabilities. When the inventory is empty, the prompt says so explicitly
+export or its documentation exists. When the inventory is empty, the prompt
+says so explicitly
 instead of leaving a blank heading.
 The generic examples do not name <code class="inline">data/input</code>; an agent sees that reference
 only when the selected mission actually grants an <code class="inline">input</code> data key.</p><p>Numeric Kernel limits remain enforced but are not copied into the default

@@ -2262,7 +2262,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:semantic_prompt, first_prompt}
     assert_receive {:semantic_prompt, second_prompt}
     assert first_prompt =~ "exactly once per turn"
-    assert first_prompt =~ "only against the advertised mission API"
+    assert first_prompt =~ "only against the installed mission API"
     assert first_prompt == second_prompt
     assert second_prompt =~ "each continuation message state how many programs remain"
   end
@@ -2289,10 +2289,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              ~r/\nAvailable API\n- No mission-specific data, functions, or tools are available\.\n\z/
 
     assert system =~
-             "Use (apropos \"term\") to search visible mission prelude exports plus fixed built-ins"
+             "Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins"
 
     assert system =~ "(source ns/name)"
-    assert system =~ "None enumerate data references or direct tool capabilities"
+    assert system =~ "Only apropos and doc cover installed direct tool capabilities"
   end
 
   test "default prompt advertises mission data names and types without values" do

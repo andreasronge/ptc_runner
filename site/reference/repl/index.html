@@ -181,21 +181,26 @@ lists declared missions in sorted order before sinks or provider activity.</p><p
 sessions explain that <code class="inline">:context</code> requires a manifest mission instead of
 attempting to use a manifest session internally.</p><p>The language functions are the canonical discovery interface in every input
 context, not only at a terminal: <code class="inline">(apropos &quot;term&quot;)</code> / <code class="inline">(apropos 'term)</code> searches
-attached prelude exports, fixed built-ins, and the bounded Java surface, while
-<code class="inline">(doc &quot;name&quot;)</code> / <code class="inline">(doc name)</code> prints documentation. When the selected
-environment has not attached a matching shipped library, <code class="inline">doc</code> or <code class="inline">apropos</code>
-prints an attachment redirect. Add <code class="inline">{&quot;library&quot;: &quot;&lt;id&gt;&quot;}</code> to
-<code class="inline">workflow.components</code> for a workflow or to <code class="inline">missions.&lt;name&gt;.components</code> for a
-mission, then restart the run or session. The redirect identifies a matching
-library namespace; it does not assert that the requested export exists.
-<code class="inline">(dir)</code> and <code class="inline">(export-meta &quot;ns/name&quot;)</code> / <code class="inline">(export-meta ns/name)</code> inspect the
-attached prelude API specifically, and <code class="inline">(source ns/name)</code> prints an attached
-prelude defining form when available. For <code class="inline">doc</code>/<code class="inline">dir</code>/<code class="inline">export-meta</code>/<code class="inline">source</code>,
-unquoted and quoted symbols are accepted the same way as strings; <code class="inline">apropos</code>
-accepts quoted symbols or strings (an unquoted query evaluates normally). An
-attached interactive terminal prints this guidance in its startup banner, and
-<code class="inline">:help</code> repeats it. Detached input, scripts, repeated <code class="inline">--eval</code>, stdin mode, and
-JSONL output do not print the startup hint.</p><p>See the <a href="/reference/ptc-lisp-specification/">PTC-Lisp specification</a> and <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">function
+attached prelude exports, installed callable capabilities, fixed built-ins, and
+the bounded Java surface, while <code class="inline">(doc &quot;name&quot;)</code> / <code class="inline">(doc name)</code> prints
+documentation. An installed capability is addressed as <code class="inline">tool/&lt;name&gt;</code>; its
+documentation includes its description, input schema, and effect. This remains
+true when its <code class="inline">model_visible</code> flag is false: that flag controls prompt inventory
+only, not runtime discovery or authority. Uninstalled capabilities and private
+Lisp runtime tools are not exposed. When the selected environment has not
+attached a matching shipped library, <code class="inline">doc</code> or <code class="inline">apropos</code> prints an attachment
+redirect. Add <code class="inline">{&quot;library&quot;: &quot;&lt;id&gt;&quot;}</code> to <code class="inline">workflow.components</code> for a workflow or
+to <code class="inline">missions.&lt;name&gt;.components</code> for a mission, then restart the run or session.
+The redirect identifies a matching library namespace; it does not assert that
+the requested export exists. <code class="inline">(dir)</code> and
+<code class="inline">(export-meta &quot;ns/name&quot;)</code> / <code class="inline">(export-meta ns/name)</code> inspect the attached
+prelude API specifically, and <code class="inline">(source ns/name)</code> prints an attached prelude
+defining form when available. For <code class="inline">doc</code>/<code class="inline">dir</code>/<code class="inline">export-meta</code>/<code class="inline">source</code>, unquoted
+and quoted symbols are accepted the same way as strings; <code class="inline">apropos</code> accepts
+quoted symbols or strings (an unquoted query evaluates normally). An attached interactive terminal prints
+this guidance in its startup banner, and <code class="inline">:help</code> repeats it. Detached input,
+scripts, repeated <code class="inline">--eval</code>, stdin mode, and JSONL output do not print the
+startup hint.</p><p>See the <a href="/reference/ptc-lisp-specification/">PTC-Lisp specification</a> and <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">function
 reference</a> for the full language surface.</p><p>Persist canonical session events with <code class="inline">--trace</code>:</p><pre><code class="console language-console">ptc repl --trace trace.jsonl
 ptc repl --manifest ptc.json --trace trace.jsonl</code></pre><p>A private manifest requires an attached terminal and
 <code class="inline">--private-terminal</code> before provider activity. It rejects scripts, stdin,

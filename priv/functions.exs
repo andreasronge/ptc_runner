@@ -2850,7 +2850,7 @@
     %{
       name: "apropos",
       description:
-        "Searches visible prelude exports and fixed function documentation, returning names.",
+        "Searches visible prelude exports, installed capabilities, and fixed function documentation, returning names.",
       binding: :special,
       category: :core,
       dispatch: :env,
@@ -2860,7 +2860,8 @@
       ptc_extension?: true,
       examples: [],
       notes:
-        "Case-insensitive literal substring match over prelude refs/docstrings and fixed " <>
+        "Case-insensitive literal substring match over prelude refs/docstrings, installed " <>
+          "capability names/contracts, and fixed " <>
           "canonical names, signatures, descriptions, notes, divergences, and sections. " <>
           "Qualified Java aliases in signatures are searchable; fixed results use canonical " <>
           "names. Results are sorted and deduplicated callable names. A blank query returns " <>
@@ -2876,7 +2877,7 @@
     %{
       name: "doc",
       description:
-        "Prints documentation for a visible prelude export or fixed function and returns `nil`.",
+        "Prints documentation for a visible prelude export, installed capability, or fixed function and returns `nil`.",
       binding: :special,
       category: :core,
       dispatch: :env,

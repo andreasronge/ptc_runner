@@ -52,7 +52,7 @@ defmodule PtcRunner.Kernel.Manifest do
   providers may accept a `model_visible` subset of their authorized `allow`
   names, including mappings whose host `model_visible` flag is false. Omitted,
   it defaults to the authorized names the host already marked visible.
-  Visibility controls discovery and model context only, never authority.
+  Visibility controls model context only, never authority or runtime discovery.
   Limit names are the `:manifest_narrowable` rows in
   `PtcRunner.Kernel.LimitCatalog`; version 1 accepts values no greater than the
   host-supplied installed ceilings. Omitted values use the normal runtime

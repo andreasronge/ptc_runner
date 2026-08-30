@@ -706,7 +706,10 @@ defmodule PtcRunner.Kernel.Runner do
       config.event_sink,
       config.workflow_environment.bundle
     )
-    |> RuntimeTools.trusted_tools(config.limits)
+    |> RuntimeTools.trusted_tools(
+      config.limits,
+      ToolGrant.capability_contracts(config.workflow_environment)
+    )
   end
 
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude
