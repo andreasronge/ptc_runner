@@ -113,5 +113,25 @@ defmodule PtcRunner.Kernel.DiscoverableReachabilityTest do
       assert [printed] = step.prints
       assert printed =~ "cap/unwrap!"
     end
+
+    test "doc uses exact unattached shipped-export guidance without expanding apropos", %{
+      session: session
+    } do
+      assert {:ok, step, session} = ReplSession.eval(session, ~S|(doc "agent.core/run")|)
+      assert [printed] = step.prints
+      assert printed =~ ~s|"agent.core/run" is an export of shipped library "agent.core"|
+
+      assert {:ok, typo, session} = ReplSession.eval(session, ~S|(doc "agent.core/typo")|)
+      assert typo.prints == [~s(No documentation found for "agent.core/typo".)]
+
+      Enum.reduce(["agent", "agent.core", "agent.core/run", "agent.core/typo"], session, fn
+        query, current_session ->
+          assert {:ok, result, next_session} =
+                   ReplSession.eval(current_session, ~s|(apropos "#{query}")|)
+
+          refute "agent.core/run" in result.return
+          next_session
+      end)
+    end
   end
 end

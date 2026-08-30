@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.BoundedPrints
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.EvaluatorEvidence
   alias PtcRunner.Kernel.Events
@@ -36,6 +37,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.Lisp.ShippedExportCatalog
   alias PtcRunner.LLM.OutputLimit
 
   # Matches the bound `PtcRunner.Kernel.AnalysisSession` already applies when
@@ -242,6 +244,8 @@ defmodule PtcRunner.Kernel.Runner do
       context: config.input,
       tools: workflow_tools(config, state, deadline_ms, evaluation_id),
       prelude: bundle_prelude(config.workflow_environment),
+      shipped_export_owners: ShippedExportCatalog.load(),
+      attached_component_ids: Environment.component_ids(config.workflow_environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
       run_deadline_ms: deadline_ms,

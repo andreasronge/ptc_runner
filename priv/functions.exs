@@ -2888,7 +2888,11 @@
           "resolve before fixed registry entries; a hidden collision does not fall through. " <>
           "Macro-like over the ref: accepts an unquoted symbol (`str`, `ns/name`), a quoted " <>
           "symbol (`'ns/name`), or a string. Use `export-meta` for attached export information " <>
-          "as data. A miss prints a not-found line and still returns `nil`.",
+          "as data. At Kernel boundaries, an exact generated-index match for a public export " <>
+          "of an unattached shipped component prints manifest attachment guidance. Typos, " <>
+          "hidden or overridden-away attached exports, and embedded runs without the index " <>
+          "print the ordinary not-found line. The index is diagnostic only and grants no " <>
+          "documentation or call authority.",
       see_also: ["apropos", "dir", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil

@@ -1496,7 +1496,15 @@ registry. Visibility is applied after that occupancy check, so a hidden
 attached export cannot reveal registry documentation through the same
 spelling. <code class="inline">apropos</code> similarly suppresses a colliding registry name when its
 attached export is hidden. This preserves the invariant that attached API
-discovery never advertises something the running program cannot call.</p><p>None of the forms enumerate <code class="inline">data/...</code> values or <code class="inline">tool/...</code> capabilities;
+discovery never advertises something the running program cannot call.</p><p>At workflow, mission, and REPL Kernel boundaries, an exact <code class="inline">doc</code> miss may be
+looked up in a build-generated map from shipped public export ref to owning
+component ID. When that owner is absent from the effective frozen component
+IDs, the diagnostic identifies the unattached shipped library and explains the
+manifest selection needed to attach it. This map is diagnostic metadata only:
+it adds no documentation or call authority and is never an <code class="inline">apropos</code> search
+surface. A typo, a masked attached export, or an indexed export removed by a
+selected component override is the ordinary exact not-found line. Embedded
+<code class="inline">PtcRunner.Lisp.run/2</code> without a supplied map also uses that ordinary miss.</p><p>None of the forms enumerate <code class="inline">data/...</code> values or <code class="inline">tool/...</code> capabilities;
 those appear in the mission inventory. <code class="inline">dir</code>, <code class="inline">export-meta</code>, and <code class="inline">source</code>
 remain attached prelude-only: namespace/export records and defining forms have
 no lossless equivalent for fixed registry entries. <code class="inline">source</code> has no registry

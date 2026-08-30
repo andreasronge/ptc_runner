@@ -123,6 +123,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
     direct_namespaces: MapSet.new(),
     transitive_namespace_requirers: %{},
     prelude_export_mask: nil,
+    shipped_export_owners: nil,
+    attached_component_ids: MapSet.new(),
     # The attached compiled prelude's PUBLIC
     # export table, a map from string ref (e.g. "crm/get-user") to a
     # `{callable, ns_env, export}` tuple — the callable captured from `private_env` plus
@@ -219,6 +221,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
           direct_namespaces: MapSet.t(String.t()),
           transitive_namespace_requirers: %{String.t() => [String.t()]},
           prelude_export_mask: %{String.t() => MapSet.t(String.t())} | nil,
+          shipped_export_owners: %{String.t() => String.t()} | nil,
+          attached_component_ids: MapSet.t(String.t()),
           prelude_exports: %{String.t() => {term(), map()}},
           prelude: PtcRunner.Lisp.Prelude.t() | nil
         }
@@ -307,6 +311,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
       transitive_namespace_requirers:
         normalize_namespace_requirers(Keyword.get(opts, :transitive_namespace_requirers, %{})),
       prelude_export_mask: normalize_export_mask(Keyword.get(opts, :prelude_export_mask)),
+      shipped_export_owners: Keyword.get(opts, :shipped_export_owners),
+      attached_component_ids: namespace_set(Keyword.get(opts, :attached_component_ids, [])),
       prelude_exports: prelude_exports(Keyword.get(opts, :prelude)),
       prelude: prelude_artifact(Keyword.get(opts, :prelude))
     }
@@ -610,6 +616,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
         direct_namespaces: source.direct_namespaces,
         transitive_namespace_requirers: source.transitive_namespace_requirers,
         prelude_export_mask: source.prelude_export_mask,
+        shipped_export_owners: source.shipped_export_owners,
+        attached_component_ids: source.attached_component_ids,
         max_tool_calls: source.max_tool_calls,
         loop_limit: source.loop_limit,
         tool_call_budget: source.tool_call_budget,

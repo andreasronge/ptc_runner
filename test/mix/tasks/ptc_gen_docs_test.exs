@@ -2,6 +2,7 @@ defmodule Mix.Tasks.Ptc.GenDocsTest do
   use ExUnit.Case, async: true
 
   alias Mix.Tasks.Ptc.GenDocs
+  alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.ProfileDiagnosticCatalog
@@ -56,6 +57,35 @@ defmodule Mix.Tasks.Ptc.GenDocsTest do
     assert reference =~ ~r/##### `llm\/request`.*?- \*\*Effect:\*\* `unknown`/s
     refute reference =~ "agent.feedback/cap-with-marker"
     refute reference =~ "agent.core/run-outcome*"
+  end
+
+  test "generated shipped export owners equal every compiled shipped public export" do
+    owners = File.read!("priv/shipped_export_owners.json") |> Jason.decode!()
+    {:ok, components} = Library.components(Library.component_ids())
+
+    assert owners == GenDocs.export_owner_index!(components)
+    assert owners["agent.core/run"] == "agent.core"
+  end
+
+  test "export ownership uses the supplied component ID and includes both visibilities and constants" do
+    {:ok, component} =
+      Component.new(
+        id: "catalog-owner",
+        source: """
+        (ns different.namespace "Fixture." {:visibility :prompt})
+        (defn prompt-fn [x] x)
+        (def public-value "Value." 7)
+        (defn- private-helper [x] x)
+        (ns different.discoverable "Fixture." {:visibility :discoverable})
+        (defn discoverable-fn [x] x)
+        """
+      )
+
+    assert GenDocs.export_owner_index!([component]) == %{
+             "different.namespace/prompt-fn" => "catalog-owner",
+             "different.namespace/public-value" => "catalog-owner",
+             "different.discoverable/discoverable-fn" => "catalog-owner"
+           }
   end
 
   @tag :tmp_dir

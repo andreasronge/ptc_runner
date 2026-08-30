@@ -313,6 +313,45 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert result.prints == [~s(No documentation found for "alpha/nope".)]
     end
 
+    test "an exact unattached shipped export gives attachment guidance", %{prelude: prelude} do
+      result =
+        eval!(~S|(doc "agent.core/run")|, prelude,
+          shipped_export_owners: %{"agent.core/run" => "agent.core"},
+          attached_component_ids: []
+        )
+
+      assert [printed] = result.prints
+      assert printed =~ ~s|"agent.core/run" is an export of shipped library "agent.core"|
+      assert printed =~ "--project PROJECT.json or --manifest MANIFEST.json"
+      assert printed =~ ~s|{"library": "agent.core"}|
+      assert printed =~ "workflow.components or missions.<name>.components"
+    end
+
+    test "a typo, attached missing export, and hidden attached export are ordinary misses", %{
+      prelude: prelude
+    } do
+      owners = %{"agent.core/run" => "agent.core", "alpha/greet" => "alpha-component"}
+
+      typo = eval!(~S|(doc "agent.core/typo")|, prelude, shipped_export_owners: owners)
+
+      removed =
+        eval!(~S|(doc "agent.core/run")|, prelude,
+          shipped_export_owners: owners,
+          attached_component_ids: ["agent.core"]
+        )
+
+      hidden =
+        eval!(~S|(doc "alpha/greet")|, prelude,
+          shipped_export_owners: owners,
+          attached_component_ids: ["alpha-component"],
+          prelude_export_mask: %{"alpha" => MapSet.new()}
+        )
+
+      assert typo.prints == [~s(No documentation found for "agent.core/typo".)]
+      assert removed.prints == [~s(No documentation found for "agent.core/run".)]
+      assert hidden.prints == [~s(No documentation found for "alpha/greet".)]
+    end
+
     test "output is subject to the print budget", %{prelude: prelude} do
       result = eval!(~S|(doc "alpha/greet")|, prelude, max_print_length: 12)
 

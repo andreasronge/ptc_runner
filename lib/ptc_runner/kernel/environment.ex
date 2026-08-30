@@ -31,6 +31,11 @@ defmodule PtcRunner.Kernel.Environment do
     end
   end
 
+  @doc false
+  @spec component_ids(%{bundle: FrozenBundle.t() | nil}) :: [binary()]
+  def component_ids(%{bundle: nil}), do: []
+  def component_ids(%{bundle: %FrozenBundle{component_ids: component_ids}}), do: component_ids
+
   @doc """
   Returns the whole-environment capability view.
 

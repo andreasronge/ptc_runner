@@ -3684,6 +3684,16 @@ spelling. `apropos` similarly suppresses a colliding registry name when its
 attached export is hidden. This preserves the invariant that attached API
 discovery never advertises something the running program cannot call.
 
+At workflow, mission, and REPL Kernel boundaries, an exact `doc` miss may be
+looked up in a build-generated map from shipped public export ref to owning
+component ID. When that owner is absent from the effective frozen component
+IDs, the diagnostic identifies the unattached shipped library and explains the
+manifest selection needed to attach it. This map is diagnostic metadata only:
+it adds no documentation or call authority and is never an `apropos` search
+surface. A typo, a masked attached export, or an indexed export removed by a
+selected component override is the ordinary exact not-found line. Embedded
+`PtcRunner.Lisp.run/2` without a supplied map also uses that ordinary miss.
+
 None of the forms enumerate `data/...` values or `tool/...` capabilities;
 those appear in the mission inventory. `dir`, `export-meta`, and `source`
 remain attached prelude-only: namespace/export records and defining forms have

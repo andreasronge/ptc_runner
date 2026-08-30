@@ -182,6 +182,14 @@ this guidance in its startup banner, and `:help` repeats it. Detached input,
 scripts, repeated `--eval`, stdin mode, and JSONL output do not print the
 startup hint.
 
+On an exact `doc` miss for a public export of an unattached shipped library,
+Kernel-backed sessions use the generated shipped-export index to identify the
+owning component and the manifest selection that attaches it. The index is
+diagnostic metadata, not a discovery or authority surface: `apropos` never
+searches it, and typos, masked exports, and exports removed by an attached
+component override keep the ordinary not-found response. Embedded
+`PtcRunner.Lisp.run/2` calls without the index do likewise.
+
 See the [PTC-Lisp specification](../ptc-lisp-specification.md) and [function
 reference](../function-reference.md) for the full language surface.
 

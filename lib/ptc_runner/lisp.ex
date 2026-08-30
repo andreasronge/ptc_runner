@@ -819,6 +819,8 @@ defmodule PtcRunner.Lisp do
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
       prelude_export_mask: Keyword.get(opts, :prelude_export_mask),
+      shipped_export_owners: Keyword.get(opts, :shipped_export_owners),
+      attached_component_ids: Keyword.get(opts, :attached_component_ids, []),
       prelude_filtered_exports: Keyword.get(opts, :prelude_filtered_exports, []),
       link: Keyword.get(opts, :link, false),
       telemetry_run: Keyword.get(opts, :telemetry_run)
@@ -1233,7 +1235,9 @@ defmodule PtcRunner.Lisp do
       private_tool_authority?: private_tool_authority?,
       direct_namespaces: direct_namespaces,
       transitive_namespace_requirers: transitive_namespace_requirers,
-      prelude_export_mask: prelude_export_mask
+      prelude_export_mask: prelude_export_mask,
+      shipped_export_owners: shipped_export_owners,
+      attached_component_ids: attached_component_ids
     } = opts
 
     prelude = Map.get(opts, :prelude)
@@ -1277,6 +1281,8 @@ defmodule PtcRunner.Lisp do
         direct_namespaces: direct_namespaces,
         transitive_namespace_requirers: transitive_namespace_requirers,
         prelude_export_mask: prelude_export_mask,
+        shipped_export_owners: shipped_export_owners,
+        attached_component_ids: attached_component_ids,
         prelude: prelude
       ]
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)

@@ -68,7 +68,12 @@ defmodule PtcRunner.Lisp.Introspection do
   applied. A hidden attached ref therefore cannot fall through to registry
   documentation for the same spelling. Otherwise `doc` falls back to the
   registry, and `apropos` merges visible attached refs with canonical registry
-  names. An unknown or malformed ref is a miss, not a failure.
+  names. At Kernel boundaries, an exact public export from the generated
+  shipped-export index reports how to attach its owning component when that
+  component ID is absent from the frozen environment. The index is diagnostic
+  metadata only: it is not searched by `apropos`, and attached hidden or
+  overridden-away exports remain ordinary misses. Embedded `Lisp.run/2` calls
+  without the index also retain the ordinary miss.
   """
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
@@ -120,7 +125,7 @@ defmodule PtcRunner.Lisp.Introspection do
     do: {:ok, export_meta(context.prelude, ref, filter(context))}
 
   defp invoke_normalized(:doc, [ref], %EvalContext{} = context) when is_binary(ref),
-    do: {:print, render_doc(context.prelude, ref, filter(context))}
+    do: {:print, render_context_doc(context, ref, filter(context))}
 
   defp invoke_normalized(:source, [ref], %EvalContext{} = context) when is_binary(ref),
     do: {:print, render_source(context.prelude, ref, filter(context))}
@@ -271,6 +276,19 @@ defmodule PtcRunner.Lisp.Introspection do
     end
   end
 
+  defp render_context_doc(%EvalContext{} = context, ref, visible) do
+    case fetch_attached(context.prelude, ref) do
+      %Export{} = export ->
+        if visible.(export), do: render_export(export), else: missing_doc(ref)
+
+      nil ->
+        case Registry.doc(ref) do
+          nil -> missing_doc(context, ref)
+          entry -> render_registry_entry(entry)
+        end
+    end
+  end
+
   @doc """
   Rendered defining form for one attached prelude ref, or a miss notice.
 
@@ -359,6 +377,23 @@ defmodule PtcRunner.Lisp.Introspection do
   defp hidden_registry_names(_prelude, _visible), do: MapSet.new()
 
   defp missing_doc(ref), do: ~s(No documentation found for "#{ref}".)
+
+  defp missing_doc(%EvalContext{shipped_export_owners: owners} = context, ref)
+       when is_map(owners) do
+    case Map.fetch(owners, ref) do
+      {:ok, component_id} ->
+        if MapSet.member?(context.attached_component_ids, component_id) do
+          missing_doc(ref)
+        else
+          ~s("#{ref}" is an export of shipped library "#{component_id}" that is not attached. Pass --project PROJECT.json or --manifest MANIFEST.json whose selected application attaches the library with {"library": "#{component_id}"} under workflow.components or missions.<name>.components.)
+        end
+
+      :error ->
+        missing_doc(ref)
+    end
+  end
+
+  defp missing_doc(%EvalContext{}, ref), do: missing_doc(ref)
   defp missing_source(ref), do: ~s(No source available for "#{ref}".)
 
   defp render_registry_entry(entry) do

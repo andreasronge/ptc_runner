@@ -167,7 +167,12 @@ None take a Clojure var or object.
 `dir`, `export-meta`, and `source` read attached prelude exports (`source`
 also covers reachable private helpers); `apropos` and `doc` also cover
 PTC-Lisp's fixed registry and bounded Java surface. The corresponding Clojure
-vars remain unimplemented — PTC-Lisp has no var namespace to reflect over, and
+surface has no equivalent of the Kernel-only exact shipped-export diagnostic
+index: it only advises attachment for an indexed public ref whose owning
+component ID is absent, never expands `apropos` or callable authority, and
+leaves typos and hidden or overridden-away attached refs as ordinary misses.
+The corresponding Clojure vars remain unimplemented — PTC-Lisp has no var
+namespace to reflect over, and
 `clojure.core/meta` has no metadata-carrying object model to return (and stays
 a normal function, not a discovery form).
 

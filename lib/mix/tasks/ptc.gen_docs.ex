@@ -15,10 +15,11 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   8. `priv/schemas/ptc-project-config.schema.json` — project launch JSON Schema
   9. `docs/kernel-limits-reference.md` — Kernel run-limit meanings and metadata
   10. `docs/prelude-reference.md` — shipped PTC-Lisp component and export catalog
-  11. `priv/preludes/kernel/agent.failure.clj` — generated LLM failure classifier
-  12. the exit-status catalog inside `docs/reference/cli.md`
-  13. the profile-frontend diagnostic catalog inside `docs/reference/cli.md`
-  14. the static-site guide pages under `site/guides/` (via `mix ptc.gen_site_guides`)
+  11. `priv/shipped_export_owners.json` — exact shipped-export diagnostic ownership
+  12. `priv/preludes/kernel/agent.failure.clj` — generated LLM failure classifier
+  13. the exit-status catalog inside `docs/reference/cli.md`
+  14. the profile-frontend diagnostic catalog inside `docs/reference/cli.md`
+  15. the static-site guide pages under `site/guides/` (via `mix ptc.gen_site_guides`)
 
   ## Usage
 
@@ -29,6 +30,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   """
   use Mix.Task
 
+  alias PtcRunner.Kernel.BundleCompiler
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandFrontend
   alias PtcRunner.Kernel.DeterministicJSON
@@ -55,6 +57,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   @limit_reference_path "docs/kernel-limits-reference.md"
   @agent_failure_path "priv/preludes/kernel/agent.failure.clj"
   @prelude_reference_path "docs/prelude-reference.md"
+  @shipped_export_catalog_path "priv/shipped_export_owners.json"
   @audit_index_path "docs/conformance/index.md"
   @host_schema_path "priv/schemas/ptc-host-config.schema.json"
   @manifest_schema_path "priv/schemas/ptc-application-manifest.schema.json"
@@ -165,6 +168,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     generate_exit_status_catalog(check?)
     generate_profile_diagnostic_catalog(check?)
     generate_prelude_reference(check?)
+    generate_shipped_export_catalog(check?)
     generate_function_reference(check?)
     Enum.each(all_audits(), &generate_audit(&1, check?))
     generate_audit_index(check?)
@@ -681,6 +685,36 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     else
       {:error, reason} ->
         Mix.raise("Cannot compile shipped prelude reference: #{inspect(reason)}")
+    end
+  end
+
+  defp generate_shipped_export_catalog(check?) do
+    {:ok, components} = Library.components(Library.component_ids())
+    index = export_owner_index!(components)
+    {:ok, encoded} = DeterministicJSON.encode(index)
+    content = encoded <> "\n"
+    write_or_check!(@shipped_export_catalog_path, content, check?)
+    report_generation(@shipped_export_catalog_path, map_size(index), "exports", check?)
+  end
+
+  @doc false
+  def export_owner_index!(components) do
+    case BundleCompiler.component_public_exports(components) do
+      {:ok, component_exports} ->
+        Enum.reduce(component_exports, %{}, fn {component_id, exports}, index ->
+          Enum.reduce(exports, index, &put_export_owner(&1, &2, component_id))
+        end)
+
+      {:error, reason} ->
+        Mix.raise("Cannot compile shipped export catalog: #{inspect(reason)}")
+    end
+  end
+
+  defp put_export_owner(export, index, component_id) do
+    case Map.fetch(index, export.ref) do
+      :error -> Map.put(index, export.ref, component_id)
+      {:ok, ^component_id} -> index
+      {:ok, other} -> Mix.raise("Export #{export.ref} belongs to #{other} and #{component_id}")
     end
   end
 
