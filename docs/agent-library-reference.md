@@ -183,6 +183,19 @@ string), and optional `terminal_only` (boolean). The sum of phase turn budgets
 must not exceed 128; an invalid vector fails with
 `invalid-agent-config/invalid-phases` before any provider request.
 
+A non-final phase may also select an application-declared named handoff schema
+with `return_contract`. Its complete contract is shown only in that phase's
+system prompt. Invalid explicit returns receive bounded correction feedback
+while a local turn remains; an invalid final-turn return or exhaustion without
+an explicit return fails instead of transitioning. The final phase rejects
+`return_contract` and uses the optional application result schema.
+
+Validating entries render the active application result schema in the final
+phase. Raw-result entries state that the exact returned value is validated.
+Envelope-producing `agent.core/run` states that the host validates the success
+envelope and tells the model to return only its value, avoiding double
+wrapping. `run-value` and `run-outcome` render no application result obligation.
+
 ### `agent.main/run`
 
 Set the manifest entry to `agent.main/run` and supply:

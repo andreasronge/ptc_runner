@@ -20,7 +20,11 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
     {source_role, source_name, reason} = source_role(reason)
     {code, path_value} = projection(source_role, reason)
 
-    source = command_source(source_role, source_name)
+    source =
+      if code == :contract_projection_limit_exceeded,
+        do: nil,
+        else: command_source(source_role, source_name)
+
     {source, path_value} = contract_diagnostic_parts(source, reason, path_value)
 
     CommandDiagnostic.new!(
@@ -89,13 +93,18 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
        when role in [:component, :input_contract, :result_contract] and is_binary(name),
        do: {role, name, reason}
 
+  defp source_role({:source_role, {:phase_return_contract, _contract_name}, name, reason})
+       when is_binary(name),
+       do: {:phase_return_contract, name, reason}
+
   defp source_role(reason), do: {:application, nil, reason}
 
   defp command_source(role, nil)
        when role in [:application, :external_input, :component_override],
        do: CommandSource.fixed(role)
 
-  defp command_source(role, name) when role in [:component, :input_contract, :result_contract] do
+  defp command_source(role, name)
+       when role in [:component, :input_contract, :result_contract, :phase_return_contract] do
     {:ok, source} = CommandSource.new(role, name)
     source
   end
@@ -181,12 +190,16 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
 
   defp projection(_role, :invalid_contracts), do: {:contract_invalid, nil}
 
+  defp projection(:application, :contract_projection_limit_exceeded),
+    do: {:contract_projection_limit_exceeded, nil}
+
   defp projection(role, {:contract_schema_invalid, %{path: path}})
-       when role in [:input_contract, :result_contract],
+       when role in [:input_contract, :result_contract, :phase_return_contract],
        do: {:contract_invalid, path}
 
-  defp projection(role, _reason) when role in [:input_contract, :result_contract],
-    do: {:contract_invalid, nil}
+  defp projection(role, _reason)
+       when role in [:input_contract, :result_contract, :phase_return_contract],
+       do: {:contract_invalid, nil}
 
   defp projection(_role, :input_contract_failed), do: {:input_contract_failed, nil}
 

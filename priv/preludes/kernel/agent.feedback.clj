@@ -195,3 +195,14 @@
     (str "The returned value did not satisfy the application result contract. "
          "Structural diagnostics: " bounded
          ". Send one corrected run_ptc_lisp call that returns a contract-valid value.")))
+
+(defn phase-result-contract
+  "Renders bounded correction guidance for an invalid phase handoff."
+  [validation]
+  (let [diagnostics (pr-str (get validation :details))
+        bounded (cap-with-marker diagnostics
+                                 (contract-diagnostic-max-chars)
+                                 (contract-diagnostic-truncation-marker))]
+    (str "The returned value did not satisfy the current phase return contract. "
+         "Structural diagnostics: " bounded
+         ". Send one corrected run_ptc_lisp call with a contract-valid explicit return.")))

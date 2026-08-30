@@ -416,6 +416,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `application` | `application_not_found` | no | the application manifest does not exist |
 | 3 | `application` | `application_unavailable` | no | the application is unavailable |
 | 3 | `application` | `contract_invalid` | no | an application value contract is invalid |
+| 3 | `application` | `contract_projection_limit_exceeded` | no | application contract prompt projections exceed their bounded admission limit |
 | 3 | `application` | `document_limit_exceeded` | no | the application document closure exceeds its limit |
 | 3 | `application` | `duplicate_property` | no | an application document contains a duplicate property |
 | 3 | `application` | `event_identity_conflict` | no | the command event identity conflicts with the application |

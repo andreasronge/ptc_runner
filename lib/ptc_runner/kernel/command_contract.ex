@@ -1255,7 +1255,8 @@ defmodule PtcRunner.Kernel.CommandContract do
             ],
        do: source_branch(kind, %{"const" => CommandSource.fixed(kind).name})
 
-  defp source_schema(kind) when kind in [:component, :input_contract, :result_contract] do
+  defp source_schema(kind)
+       when kind in [:component, :input_contract, :result_contract, :phase_return_contract] do
     source_branch(kind, %{
       "type" => "string",
       "minLength" => 1,
@@ -1388,7 +1389,7 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{phase: :application, code: :contract_invalid} = row,
          %{"properties" => %{"kind" => %{"const" => kind}}}
        )
-       when kind in ["input_contract", "result_contract"],
+       when kind in ["input_contract", "result_contract", "phase_return_contract"],
        do: ContractSchemaDiagnostic.message_schema(row.message)
 
   defp diagnostic_message_schema(%{phase: :application, code: :contract_invalid} = row, _source),

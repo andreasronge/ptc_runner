@@ -1203,6 +1203,13 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert projection["effective_event_policy"] == "normal"
     assert projection["inspection_capture_enabled"] == false
     assert projection["result_projection"] == "json"
+
+    assert projection["contracts"] == %{
+             "input" => nil,
+             "result" => %{"validation" => nil, "prompt" => nil},
+             "phase_returns" => %{}
+           }
+
     assert projection["limits"]["provider_cleanup_timeout_ms"] == 5_000
     assert projection["limits"]["selection_validation_timeout_ms"] == 5_000
     refute Map.has_key?(projection["limits"], "doctor_connectivity_timeout_ms")
@@ -1214,7 +1221,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       :crypto.hash(
         :sha256,
         [
-          <<"ptc.effective-application.v2", 0>>,
+          <<"ptc.effective-application.v3", 0>>,
           <<byte_size(encoded)::unsigned-big-64>>,
           encoded
         ]

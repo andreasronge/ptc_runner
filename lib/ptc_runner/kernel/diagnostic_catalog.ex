@@ -93,6 +93,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:application, :document_limit_exceeded, 3, false,
      "the application document closure exceeds its limit"},
     {:application, :contract_invalid, 3, false, "an application value contract is invalid"},
+    {:application, :contract_projection_limit_exceeded, 3, false,
+     "application contract prompt projections exceed their bounded admission limit"},
     {:application, :input_invalid, 3, false,
      "the selected input is not an admissible JSON object"},
     {:application, :input_contract_failed, 3, false,
@@ -848,10 +850,17 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       do: [:application]
 
   def source_kinds(:application, code) when code in [:invalid_json, :duplicate_property],
-    do: [:application, :external_input, :input_contract, :result_contract]
+    do: [:application, :external_input, :input_contract, :result_contract, :phase_return_contract]
 
   def source_kinds(:application, :reference_missing),
-    do: [:application, :external_input, :component, :input_contract, :result_contract]
+    do: [
+      :application,
+      :external_input,
+      :component,
+      :input_contract,
+      :result_contract,
+      :phase_return_contract
+    ]
 
   def source_kinds(:application, :document_limit_exceeded),
     do: [
@@ -860,11 +869,14 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       :component,
       :input_contract,
       :result_contract,
+      :phase_return_contract,
       :component_override
     ]
 
   def source_kinds(:application, :contract_invalid),
-    do: [:application, :input_contract, :result_contract]
+    do: [:application, :input_contract, :result_contract, :phase_return_contract]
+
+  def source_kinds(:application, :contract_projection_limit_exceeded), do: []
 
   def source_kinds(:application, :input_invalid),
     do: [:application, :external_input]
@@ -974,7 +986,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def path_policy(:application, :override_invalid, :component_override), do: :optional
 
   def path_policy(:application, code, kind)
-      when kind in [:input_contract, :result_contract] and
+      when kind in [:input_contract, :result_contract, :phase_return_contract] and
              code in [
                :invalid_json,
                :duplicate_property,

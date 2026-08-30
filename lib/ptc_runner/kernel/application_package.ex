@@ -16,15 +16,16 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   while its closure is acquired.
 
   Content identity is SHA-256 over
-  `"ptc.application-content.v2\\0"`, a big-endian `u32` record count, and
+  `"ptc.application-content.v3\\0"`, a big-endian `u32` record count, and
   records sorted by kind byte then UTF-8 logical name. Each record is
   `kind || u32(name-bytes) || name || u64(payload-bytes) || payload`.
   The closed kinds are projected-manifest `0x01`, effective-local-source
   `0x02`, shipped-library-source `0x03`, input-contract `0x04`,
   result-contract `0x05`, direct-dependencies `0x06`, and verified-override
-  identity `0x07`. Component records use `workflow/<id>` or
+  identity `0x07`, and raw named phase-return contract `0x08`. Component records use `workflow/<id>` or
   `mission/<mission-name>/<id>`;
-  contract names are `input` and `result`. Duplicate kind/name pairs are
+  input and result contract names are `input` and `result`; phase-return
+  contract records use their declared contract name. Duplicate kind/name pairs are
   invalid. Manifest, dependency, and override payloads use
   `PtcRunner.Kernel.TypedCanonicalJSON`; source and contract payloads retain
   their exact captured UTF-8 bytes. The complete framed projection is capped
@@ -42,6 +43,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.ModelContract
   alias PtcRunner.Kernel.ReplLimitProfile
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SemanticRevision
@@ -49,7 +51,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   alias PtcRunner.Kernel.TypedCanonicalJSON
   alias PtcRunner.Kernel.ValueContract
 
-  @content_domain <<"ptc.application-content.v2", 0>>
+  @content_domain <<"ptc.application-content.v3", 0>>
   @max_records 512
   @max_bytes 8_388_608
   @max_input_bytes 2_000_000
@@ -78,6 +80,8 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
     :labels,
     :component_overrides,
     :contract_behavior_hashes,
+    :contract_prompt_projections,
+    :contract_prompt_hashes,
     :application_content_digest,
     :document_count,
     :document_bytes,
@@ -91,8 +95,16 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
           workflow_components: [PtcRunner.Kernel.Component.t()],
           workflow_component_kinds: %{binary() => :local | :library},
           entry: binary(),
-          contracts: %{input: ValueContract.t() | nil, result: ValueContract.t() | nil},
-          contract_sources: %{input: binary() | nil, result: binary() | nil},
+          contracts: %{
+            input: ValueContract.t() | nil,
+            result: ValueContract.t() | nil,
+            phase_returns: %{binary() => ValueContract.t()}
+          },
+          contract_sources: %{
+            input: binary() | nil,
+            result: binary() | nil,
+            phase_returns: %{binary() => binary()}
+          },
           missions: map(),
           providers: %{workflow: [map()], mission: [map()]},
           limits: Limits.t(),
@@ -100,7 +112,13 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
           events: map(),
           labels: map(),
           component_overrides: [map()],
-          contract_behavior_hashes: %{input: binary() | nil, result: binary() | nil},
+          contract_behavior_hashes: %{
+            input: binary() | nil,
+            result: binary() | nil,
+            phase_returns: %{binary() => binary()}
+          },
+          contract_prompt_projections: %{result: term() | nil, phase_returns: map()},
+          contract_prompt_hashes: %{result: binary() | nil, phase_returns: map()},
           application_content_digest: binary(),
           document_count: non_neg_integer(),
           document_bytes: non_neg_integer(),
@@ -482,6 +500,8 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
     with {:ok, records} <- content_records(manifest, override_pairs),
          {:ok, contract_behavior_hashes} <- contract_behavior_hashes(manifest.contracts),
+         {:ok, contract_prompt_projections, contract_prompt_hashes} <-
+           contract_prompt_data(manifest.contracts),
          {:ok, document_count, document_bytes} <-
            complete_accounting(manifest, override_pairs, accounting),
          {:ok, digest} <- content_digest(records) do
@@ -500,6 +520,8 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         labels: manifest.labels,
         component_overrides: identities,
         contract_behavior_hashes: contract_behavior_hashes,
+        contract_prompt_projections: contract_prompt_projections,
+        contract_prompt_hashes: contract_prompt_hashes,
         application_content_digest: digest,
         document_count: document_count,
         document_bytes: document_bytes,
@@ -568,10 +590,13 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
   defp contract_records(manifest) do
     records =
-      [
-        contract_record(0x04, "input", manifest.contract_sources.input),
-        contract_record(0x05, "result", manifest.contract_sources.result)
-      ]
+      ([
+         contract_record(0x04, "input", manifest.contract_sources.input),
+         contract_record(0x05, "result", manifest.contract_sources.result)
+       ] ++
+         Enum.map(manifest.contract_sources.phase_returns, fn {name, source} ->
+           contract_record(0x08, name, source)
+         end))
       |> Enum.reject(&is_nil/1)
 
     {:ok, records}
@@ -582,8 +607,10 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
   defp contract_behavior_hashes(contracts) do
     with {:ok, input} <- contract_behavior_hash(contracts.input),
-         {:ok, result} <- contract_behavior_hash(contracts.result) do
-      {:ok, %{input: input, result: result}}
+         {:ok, result} <- contract_behavior_hash(contracts.result),
+         {:ok, phase_returns} <-
+           map_contract_hashes(contracts.phase_returns, &contract_behavior_hash/1) do
+      {:ok, %{input: input, result: result, phase_returns: phase_returns}}
     end
   end
 
@@ -593,6 +620,58 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
     do: {:ok, ValueContract.behavior_hash(contract)}
 
   defp contract_behavior_hash(_contract), do: {:error, :invalid_application_package}
+
+  defp contract_prompt_data(%{result: result, phase_returns: phase_returns}) do
+    bindings = [{:result, result} | Enum.sort_by(phase_returns, &elem(&1, 0))]
+
+    Enum.reduce_while(bindings, {:ok, %{}, %{}, 0}, fn {name, contract},
+                                                       {:ok, projections, hashes, aggregate} ->
+      case contract_prompt_binding(contract) do
+        {:ok, projection, hash, bytes} when aggregate + bytes <= 1_048_576 ->
+          {:cont,
+           {:ok, Map.put(projections, name, projection), Map.put(hashes, name, hash),
+            aggregate + bytes}}
+
+        _overflow ->
+          {:halt, {:error, :contract_projection_limit_exceeded}}
+      end
+    end)
+    |> case do
+      {:ok, projections, hashes, _bytes} ->
+        {:ok,
+         %{
+           result: Map.get(projections, :result),
+           phase_returns: Map.delete(projections, :result)
+         }, %{result: Map.get(hashes, :result), phase_returns: Map.delete(hashes, :result)}}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp contract_prompt_data(_contracts), do: {:error, :invalid_application_package}
+
+  defp contract_prompt_binding(nil), do: {:ok, nil, nil, 0}
+
+  defp contract_prompt_binding(%ValueContract{} = contract) do
+    with {:ok, projection} <- ModelContract.value_contract(contract),
+         {:ok, bytes} <- ModelContract.projection_bytes(projection),
+         true <- bytes <= 262_144,
+         {:ok, hash} <- ModelContract.projection_hash(projection) do
+      {:ok, projection, hash, bytes}
+    else
+      _unsupported -> {:error, :contract_projection_limit_exceeded}
+    end
+  end
+
+  defp map_contract_hashes(contracts, mapper) do
+    Enum.reduce_while(contracts, {:ok, %{}}, fn {name, contract}, {:ok, hashes} ->
+      case mapper.(contract) do
+        {:ok, hash} -> {:cont, {:ok, Map.put(hashes, name, hash)}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
 
   defp override_records(pairs) do
     Enum.reduce_while(pairs, {:ok, []}, fn {identity, _override, _accounting}, {:ok, records} ->
