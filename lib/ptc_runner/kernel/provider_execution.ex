@@ -345,6 +345,16 @@ defmodule PtcRunner.Kernel.ProviderExecution do
     end
   end
 
+  defp classify_marked_failure(
+         {:error, {:terminal_payload_capacity_exceeded, _payload, _required} = reason},
+         prepared
+       ) do
+    case RunBuilder.environment_failure_diagnostic(reason, prepared, true) do
+      {:ok, diagnostic} -> {:error, diagnostic}
+      :error -> {:error, internal_diagnostic()}
+    end
+  end
+
   defp classify_marked_failure({:error, _reason}, _prepared),
     do: {:error, internal_diagnostic()}
 

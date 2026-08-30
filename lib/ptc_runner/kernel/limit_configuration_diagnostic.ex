@@ -57,20 +57,14 @@ defmodule PtcRunner.Kernel.LimitConfigurationDiagnostic do
   def message_schema(fallback) when is_binary(fallback) do
     if not valid_message?(fallback), do: raise(ArgumentError, "invalid fallback message")
 
-    %{
-      "type" => "string",
-      "minLength" => 1,
-      "maxLength" => @maximum_message_bytes,
-      "pattern" =>
-        DiagnosticPattern.exact(
-          DiagnosticPattern.escape(@prefix) <>
-            @limit_pattern <>
-            DiagnosticPattern.escape(@required_middle) <>
-            @required_pattern <>
-            DiagnosticPattern.escape(@payload_middle) <>
-            @limit_pattern <>
-            DiagnosticPattern.escape(@suffix)
-        )
-    }
+    DiagnosticPattern.exact_message_schema(@maximum_message_bytes, [
+      {:literal, @prefix},
+      {:pattern, @limit_pattern},
+      {:literal, @required_middle},
+      {:pattern, @required_pattern},
+      {:literal, @payload_middle},
+      {:pattern, @limit_pattern},
+      {:literal, @suffix}
+    ])
   end
 end
