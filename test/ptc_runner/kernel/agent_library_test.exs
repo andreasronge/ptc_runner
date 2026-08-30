@@ -38,7 +38,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     final: "test/fixtures/prompts/agent-prompt-final-turn.txt"
   }
   @regenerate_prompt_artifacts "PTC_WRITE_PROMPT_ARTIFACTS=1 mix test test/ptc_runner/kernel/agent_library_test.exs"
-  @final_turn_character_ceiling 3_650
+  # The merged capability-discovery wording makes the canonical rendering
+  # 3,798 characters; retain a small explicit review margin without weakening
+  # the gate into an unreasoned round-number budget.
+  @final_turn_character_ceiling 3_850
 
   test "llm/request is an ordinary bounded workflow capability" do
     parent = self()

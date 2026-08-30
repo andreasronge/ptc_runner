@@ -33,7 +33,7 @@ defmodule PtcRunner.Lisp.LookupErrorMessageTest do
       assert message =~ "does not cover lexical bindings"
       assert message =~ "earlier turns"
       assert message =~ "data references"
-      assert message =~ "direct tool capabilities"
+      assert message =~ "installed direct capabilities"
     end
   end
 

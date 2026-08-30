@@ -383,12 +383,13 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   end
 
   # The search is offered as what it is. It covers visible prelude exports,
-  # fixed builtins, and the bounded Java surface, but cannot see lexical or
-  # continuation bindings, data references, or direct tool capabilities.
+  # fixed builtins, the bounded Java surface, and installed direct
+  # capabilities, but cannot see lexical or continuation bindings or data
+  # references.
   defp prelude_search_hint(name) do
-    ". Hint: (apropos #{inspect(name)}) searches visible prelude exports, fixed builtins, " <>
-      "and the bounded Java surface; it does not cover lexical bindings, definitions from " <>
-      "earlier turns, data references, or direct tool capabilities"
+    ". Hint: (apropos #{inspect(name)}) searches visible prelude exports, installed direct " <>
+      "capabilities, fixed builtins, and the bounded Java surface; it does not cover lexical " <>
+      "bindings, definitions from earlier turns, or data references"
   end
 
   @doc false

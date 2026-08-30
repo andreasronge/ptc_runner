@@ -44,7 +44,7 @@
         notes? (= notes-anchor (subs text api-end notes-start))]
     (if (= empty-api (subs text api-end api-limit))
       (into (into head [{"label" "api-empty" "text" empty-api}]) tail)
-      (if (and (occurs-once? (subs text 0 api-limit) legend)
+      (if (and (occurs-once? text legend)
              (or (not notes?) (occurs-once? text notes-anchor)))
       (let [legend-at (index-of text legend)
             legend-end (+ legend-at (count legend))
