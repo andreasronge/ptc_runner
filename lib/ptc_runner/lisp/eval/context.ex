@@ -113,9 +113,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # Kernel-supplied diagnostic used when `data/params` is missing under
     # strict data. `nil` treats `params` as an ordinary missing key.
     missing_data_params_message: nil,
-    # Kernel-supplied catalog of shipped library component IDs. `nil` means
-    # Introspection should not distinguish unattached shipped refs from
-    # unknown ones.
     # When true, session-authored code may only name prelude namespaces that
     # were directly attached. Prelude-internal calls remain allowed because the
     # compiler already validated their declared namespace deps.
