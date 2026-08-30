@@ -72,7 +72,14 @@ defmodule PtcRunner.Kernel.Environment do
   @doc "Returns bounded metadata for every installed capability, regardless of prompt visibility."
   @spec capability_contracts(map()) :: %{binary() => map()}
   def capability_contracts(%{capabilities: capabilities}) when is_map(capabilities) do
-    Map.new(capabilities, fn {name, capability} -> {name, capability_metadata(capability)} end)
+    Map.new(capabilities, fn {name, capability} ->
+      contract =
+        capability
+        |> capability_metadata()
+        |> Map.take([:name, :description, :input_schema, :effect])
+
+      {name, contract}
+    end)
   end
 
   @doc false

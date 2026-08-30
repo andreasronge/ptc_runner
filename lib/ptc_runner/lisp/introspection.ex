@@ -403,8 +403,12 @@ defmodule PtcRunner.Lisp.Introspection do
 
   defp capability_matches?(%{visibility: :public, contract: contract}, needle)
        when is_map(contract) do
-    contract
-    |> Map.take([:name, :description, :input_schema, :effect])
+    searchable_contract =
+      contract
+      |> Map.take([:name, :description, :input_schema, :effect])
+      |> Map.put(:ref, "tool/" <> Map.fetch!(contract, :name))
+
+    searchable_contract
     |> inspect(limit: :infinity)
     |> String.downcase()
     |> String.contains?(needle)
@@ -426,10 +430,10 @@ defmodule PtcRunner.Lisp.Introspection do
 
     [
       ref,
+      "  effect: #{Map.fetch!(contract, :effect)}",
       if(is_binary(description) and description != "", do: indent(description)),
       "  input schema:",
-      contract |> Map.fetch!(:input_schema) |> Jason.encode!(pretty: true) |> indent(),
-      "  effect: #{Map.fetch!(contract, :effect)}"
+      contract |> Map.fetch!(:input_schema) |> Jason.encode!(pretty: true) |> indent()
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")

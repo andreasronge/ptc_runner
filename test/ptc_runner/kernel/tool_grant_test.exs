@@ -26,11 +26,12 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
     contracts = ToolGrant.capability_contracts(environment_with([visible, hidden]))
 
     assert contracts["visible"].description == "Visible contract"
-    assert contracts["visible"].model_visible
     assert contracts["hidden"].description == "Hidden contract"
-    refute contracts["hidden"].model_visible
     assert contracts["hidden"].input_schema == @input_schema
     assert contracts["hidden"].effect == :unknown
+
+    assert Map.keys(contracts["hidden"]) |> Enum.sort() ==
+             [:description, :effect, :input_schema, :name]
   end
 
   test "projects routed capability contracts used by workflow llm-request" do
@@ -51,7 +52,6 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
     contracts = ToolGrant.capability_contracts(environment_with([routed]))
 
     assert contracts["llm-request"].description == "Submit a routed model request."
-    refute contracts["llm-request"].model_visible
     assert contracts["llm-request"].input_schema == @input_schema
   end
 

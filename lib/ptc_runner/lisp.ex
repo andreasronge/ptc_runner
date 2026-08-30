@@ -851,8 +851,14 @@ defmodule PtcRunner.Lisp do
          {:ok, parsed_signature} <- parse_signature(signature_str) do
       tool_failure_token = make_ref()
 
+      # Contracts are introspection data, not execution authority. Keep the
+      # bounded projection in tools_meta and strip it from the tool map captured
+      # by the executor so parallel workers do not copy every contract twice.
+      execution_tools =
+        Map.new(normalized_tools, fn {name, tool} -> {name, %{tool | contract: nil}} end)
+
       tool_executor = fn name, args, origin ->
-        execute_tool(normalized_tools, name, args, origin, tool_failure_token)
+        execute_tool(execution_tools, name, args, origin, tool_failure_token)
       end
 
       tools_meta =
@@ -869,11 +875,11 @@ defmodule PtcRunner.Lisp do
         end)
 
       private_tool_authority? =
-        Enum.any?(normalized_tools, fn {_name, tool} -> Tool.private?(tool) end)
+        Enum.any?(execution_tools, fn {_name, tool} -> Tool.private?(tool) end)
 
       opts =
         Map.merge(params, %{
-          normalized_tools: normalized_tools,
+          normalized_tools: execution_tools,
           tool_executor: tool_executor,
           parsed_signature: parsed_signature,
           signature_str: signature_str,

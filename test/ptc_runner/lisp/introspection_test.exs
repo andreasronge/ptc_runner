@@ -94,11 +94,29 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
       assert "tool/public-search" in eval!(~S|(apropos "catalog")|, prelude, tools: tools).return
 
+      assert "tool/public-search" in eval!(~S|(apropos "tool/public-search")|, prelude,
+               tools: tools
+             ).return
+
       assert "tool/private-search" in eval!(~S|(apropos "credential")|, prelude, tools: tools).return
 
       refute "tool/absent-search" in eval!(~S|(apropos "absent")|, prelude, tools: tools).return
 
       refute "tool/internal-helper" in eval!(~S|(apropos "internal")|, prelude, tools: tools).return
+    end
+
+    test "renders effect before long contract content reaches the print budget", %{
+      prelude: prelude
+    } do
+      tools = %{
+        "large" =>
+          trusted_capability("large", String.duplicate("x", 4_096), "query", :write, true)
+      }
+
+      result = eval!(~S|(doc "tool/large")|, prelude, tools: tools)
+
+      assert [printed] = result.prints
+      assert printed =~ "tool/large\n  effect: write"
     end
 
     test "matches on ref", %{prelude: prelude} do
