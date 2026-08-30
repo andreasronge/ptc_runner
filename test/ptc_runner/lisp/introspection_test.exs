@@ -333,7 +333,11 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
     test "a colliding local component ID does not count as an attached shipped library" do
       {:ok, component} =
-        Component.new(id: "agent.core", source: ~S|(ns local.component) (defn value [] 1)|)
+        Component.new(
+          id: "agent.core",
+          source: ~S|(ns local.component) (defn value [] 1)|,
+          origin: "priv/preludes/kernel/agent.core.clj"
+        )
 
       {:ok, bundle} = Kernel.compile_bundle([component])
       {:ok, environment} = WorkflowEnvironment.new(bundle: bundle)

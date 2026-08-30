@@ -23,13 +23,15 @@ defmodule PtcRunner.Kernel.Environment do
          true <- JSONValue.map?(data),
          {:ok, capability_map} <- capability_map(capabilities),
          :ok <- reserved_names(kind, capability_map),
-         :ok <- bundle_requirements(bundle, capability_map, kind) do
+         :ok <- bundle_requirements(bundle, capability_map, kind),
+         {:ok, shipped_component_ids} <-
+           normalize_shipped_component_ids(bundle, shipped_component_ids) do
       {:ok,
        %{
          bundle: bundle,
          capabilities: capability_map,
          data: data,
-         shipped_component_ids: normalize_shipped_component_ids(bundle, shipped_component_ids)
+         shipped_component_ids: shipped_component_ids
        }}
     else
       false -> {:error, :invalid_environment_data}
@@ -47,28 +49,31 @@ defmodule PtcRunner.Kernel.Environment do
   def shipped_component_ids(%{shipped_component_ids: nil}), do: []
   def shipped_component_ids(%{shipped_component_ids: component_ids}), do: component_ids
 
-  defp normalize_shipped_component_ids(nil, nil), do: []
-
-  defp normalize_shipped_component_ids(%FrozenBundle{components: components}, nil) do
-    shipped_ids = MapSet.new(Library.component_ids())
-
-    for %{id: id, origin: origin} <- components,
-        MapSet.member?(shipped_ids, id),
-        is_binary(origin) and String.starts_with?(origin, "priv/preludes/kernel/"),
-        do: id
-  end
+  defp normalize_shipped_component_ids(_bundle, nil), do: {:ok, []}
 
   defp normalize_shipped_component_ids(%FrozenBundle{component_ids: attached}, component_ids)
        when is_list(component_ids) do
     shipped_ids = MapSet.new(Library.component_ids())
 
-    component_ids
-    |> Enum.filter(&(&1 in attached and MapSet.member?(shipped_ids, &1)))
-    |> Enum.uniq()
-    |> Enum.sort()
+    if Enum.all?(component_ids, &is_binary/1) do
+      normalized =
+        component_ids
+        |> Enum.filter(&(&1 in attached and MapSet.member?(shipped_ids, &1)))
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      {:ok, normalized}
+    else
+      {:error, :invalid_shipped_component_ids}
+    end
   end
 
-  defp normalize_shipped_component_ids(nil, component_ids) when is_list(component_ids), do: []
+  defp normalize_shipped_component_ids(nil, component_ids) when is_list(component_ids) do
+    if component_ids == [], do: {:ok, []}, else: {:error, :invalid_shipped_component_ids}
+  end
+
+  defp normalize_shipped_component_ids(_bundle, _component_ids),
+    do: {:error, :invalid_shipped_component_ids}
 
   @doc """
   Returns the whole-environment capability view.
