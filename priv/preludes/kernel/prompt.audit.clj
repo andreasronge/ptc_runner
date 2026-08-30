@@ -75,8 +75,20 @@
         unique? (and (or (nil? result-at) (occurs-once? text result-anchor))
                      (or (nil? phase-at) (occurs-once? text phase-anchor)))
         ordered? (or (nil? result-at) (nil? phase-at) (< result-at phase-at))
-        api-limit (or result-at phase-at (count text))]
-    (if (and unique? ordered?)
+        api-limit (or result-at phase-at (count text))
+        result-text (when (not (nil? result-at))
+                      (subs text result-at (or phase-at (count text))))
+        phase-text (when (not (nil? phase-at)) (subs text phase-at))
+        result-valid? (or (nil? result-text)
+                          (and (or (starts-with? result-text
+                                                 "\nApplication result contract\nThe host validates the exact value passed to (return value).\nType: ")
+                                   (starts-with? result-text
+                                                 "\nApplication result contract\nThe host validates {\"ok\":true,\"value\":value}. Return only value; do not construct or return that envelope yourself.\nType: "))
+                               (ends-with? result-text "\n")))
+        phase-valid? (or (nil? phase-text)
+                         (and (index-of phase-text ")\nA valid explicit (return value) is required to transition to the next phase.\nType: ")
+                              (ends-with? phase-text "\n")))]
+    (if (and unique? ordered? result-valid? phase-valid?)
       {"api-limit" api-limit
        "tail" (into (if (nil? result-at)
                        []
@@ -146,12 +158,12 @@
       (unrecognised text))))
 
 
-;; Neither loop/recur nor a regex. Evaluation caps loops at a thousand
-;; iterations, and the regex runtime truncates its input at 32,768 bytes and
-;; would silently undercount a larger prompt rather than fail on it. Sequence
-;; functions are bounded by neither.
+;; Neither loop/recur, a regex, nor `(seq text)`. Evaluation caps loops at a
+;; thousand iterations, the regex runtime truncates at 32,768 bytes, and seq
+;; materialises every grapheme as a heap-heavy list. String replacement keeps
+;; the large payload in binaries while the difference gives the exact count.
 (defn- newline-count [text]
-  (count (filter #(= "\n" %) (seq text))))
+  (- (count text) (count (replace text "\n" ""))))
 
 (defn- text-characters [text]
   (if (string? text) (count text) 0))

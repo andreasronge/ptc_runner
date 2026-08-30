@@ -4505,6 +4505,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
         "required" => ["value"],
         "properties" => %{"value" => %{"type" => "string"}}
       })
+
     {:ok, result_config} = agent_config([response], [], result_contract: contract)
 
     result =

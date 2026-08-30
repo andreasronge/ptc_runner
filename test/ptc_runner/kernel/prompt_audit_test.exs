@@ -48,6 +48,19 @@ defmodule PtcRunner.Kernel.PromptAuditTest do
       assert rejoined(phased) == phased
     end
 
+    test "truncated contract suffixes are unrecognised" do
+      for suffix <- [
+            "\nApplication result contract\n",
+            "\nApplication result contract\nThe host validates the exact value passed to (return value).\n",
+            "\nCurrent phase return contract (draft)\n",
+            "\nCurrent phase return contract (draft)\nA valid explicit (return value) is required to transition to the next phase.\n"
+          ] do
+        prompt = final() <> suffix
+        assert labels(prompt) == ["unrecognised"]
+        assert measure(prompt)["recognised?"] == false
+      end
+    end
+
     test "a mission with no namespace docstring omits only api-notes" do
       assert labels(no_docstring()) ==
                ~w(marker protocol language examples api-heading api-legend api-entries)
@@ -175,11 +188,11 @@ defmodule PtcRunner.Kernel.PromptAuditTest do
       assert summed > total["tokens_estimated"]
     end
 
-    test "a large rendering counts every line, past both runtime limits" do
-      # Two limits sit under line counting and neither reports itself: loop/recur
-      # is capped at a thousand iterations, and the regex runtime truncates its
-      # input at 32,768 bytes and undercounts silently rather than failing.
-      filler = String.duplicate("- Value: fixture/filler\n", 2_000)
+    test "a near-limit rendering counts every line without expanding graphemes onto the heap" do
+      # Loop/recur is capped at a thousand iterations, the regex runtime
+      # truncates its input at 32,768 bytes, and turning the string into a
+      # grapheme list can exceed the evaluator heap before either limit.
+      filler = String.duplicate("- Value: fixture/filler\n", 30_000)
 
       large =
         String.replace(
@@ -189,8 +202,8 @@ defmodule PtcRunner.Kernel.PromptAuditTest do
           global: false
         )
 
-      assert byte_size(large) > 32_768,
-             "the fixture must exceed the regex input limit or this proves nothing"
+      assert byte_size(large) > 700_000,
+             "the fixture must exercise the evaluator heap risk or this proves nothing"
 
       measured = measure(large)
 
