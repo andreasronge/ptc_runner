@@ -24,7 +24,10 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
   @spec new(keyword()) :: {:ok, t()} | {:error, term()}
   @doc """
   Assembles a workflow environment from optional `:bundle`, `:capabilities`,
-  and JSON-like `:data` options. Unknown options are rejected.
+  and JSON-like `:data` options. `:shipped_component_ids` records the shipped
+  library selections represented by the bundle for exact diagnostic misses;
+  it is validated against both the bundle and installed library catalog.
+  Unknown options are rejected.
   """
   def new(opts) when is_list(opts) do
     with false <-
