@@ -289,6 +289,16 @@ defmodule PtcRunner.Lisp.Introspection do
 
   @spec render_doc(Prelude.t() | nil, String.t(), visible(), map()) :: String.t()
   def render_doc(prelude, ref, visible, tools_meta) when is_binary(ref) and is_map(tools_meta) do
+    resolve_doc(prelude, ref, visible, tools_meta, fn -> missing_doc(ref) end)
+  end
+
+  defp render_context_doc(%EvalContext{} = context, ref, visible) do
+    resolve_doc(context.prelude, ref, visible, context.tools_meta, fn ->
+      missing_doc(context, ref)
+    end)
+  end
+
+  defp resolve_doc(prelude, ref, visible, tools_meta, missing) do
     case fetch_attached(prelude, ref) do
       %Export{} = export ->
         if visible.(export),
@@ -299,26 +309,7 @@ defmodule PtcRunner.Lisp.Introspection do
         case capability_contract(tools_meta, ref) do
           nil ->
             case Registry.doc(ref) do
-              nil -> missing_doc(ref)
-              entry -> render_registry_entry(entry)
-            end
-
-          contract ->
-            render_capability(ref, contract)
-        end
-    end
-  end
-
-  defp render_context_doc(%EvalContext{} = context, ref, visible) do
-    case fetch_attached(context.prelude, ref) do
-      %Export{} = export ->
-        if visible.(export), do: render_export(export), else: missing_doc(ref)
-
-      nil ->
-        case capability_contract(context.tools_meta, ref) do
-          nil ->
-            case Registry.doc(ref) do
-              nil -> missing_doc(context, ref)
+              nil -> missing.()
               entry -> render_registry_entry(entry)
             end
 
