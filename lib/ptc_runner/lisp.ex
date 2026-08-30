@@ -295,12 +295,13 @@ defmodule PtcRunner.Lisp do
     - `:missing_data_params_message` - Optional diagnostic used when `data/params`
       is missing under `:strict_data`. The Kernel sets this so a no-params
       evaluation is not reported as a missing grant.
-      The Kernel passes `PtcRunner.Kernel.Library.component_ids/0` so `doc` and
-      `apropos` can name an unattached shipped library. The catalog contains
-      library IDs, not export refs, so a `doc` redirect does not assert that the
-      requested export exists.
-      `nil` (the default) keeps today's miss message, so embedded `run/2`
-      callers are unchanged.
+    - `:shipped_export_owners` - Optional exact public-export ref to shipped
+      component-ID map used only for `doc` miss diagnostics.
+    - `:attached_component_ids` - Shipped component selections attached to the
+      current environment. With the ownership map, this suppresses redirects
+      for selected overrides whose replacement source removed an export.
+      Omitting the ownership map keeps the ordinary miss, so embedded callers
+      are unchanged.
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
       SOURCE string, or a list of source-bearing selection maps accepted by
       `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code.
