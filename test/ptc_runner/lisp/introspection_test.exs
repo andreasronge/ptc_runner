@@ -100,6 +100,8 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
       assert "tool/private-search" in eval!(~S|(apropos "credential")|, prelude, tools: tools).return
 
+      assert "tool/private-search" in eval!(~S|(apropos "write")|, prelude, tools: tools).return
+
       refute "tool/absent-search" in eval!(~S|(apropos "absent")|, prelude, tools: tools).return
 
       refute "tool/internal-helper" in eval!(~S|(apropos "internal")|, prelude, tools: tools).return
@@ -126,6 +128,41 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       tools = %{"large" => trusted_capability("large", description, "query", :read, true)}
 
       assert "tool/large" in eval!(~S|(apropos "terminal-marker")|, prelude, tools: tools).return
+    end
+
+    test "searches literal schema scalars rather than Elixir inspect formatting", %{
+      prelude: prelude
+    } do
+      tool = trusted_capability("literal", "line one\nline two", "query", :read, true)
+
+      tool =
+        put_in(tool.contract.input_schema["properties"]["query"], %{
+          "type" => "integer",
+          "enum" => [97, 98]
+        })
+
+      tools = %{"literal" => tool}
+
+      assert "tool/literal" in eval!(~S|(apropos "line one\nline two")|, prelude, tools: tools).return
+
+      assert "tool/literal" in eval!(~S|(apropos "97")|, prelude, tools: tools).return
+      refute "tool/literal" in eval!(~S|(apropos "'ab'")|, prelude, tools: tools).return
+    end
+
+    test "sanitizes an invalid UTF-8 capability description", %{prelude: prelude} do
+      tools = %{"binary" => trusted_capability("binary", <<"valid", 255>>, "query", :read, false)}
+      result = eval!(~S|(doc "tool/binary")|, prelude, tools: tools)
+
+      assert [printed] = result.prints
+      assert String.valid?(printed)
+      assert printed =~ "valid"
+      assert "tool/binary" in eval!(~S|(apropos "valid")|, prelude, tools: tools).return
+    end
+
+    test "does not expose absent descriptions as Elixir nil", %{prelude: prelude} do
+      tools = %{"plain" => trusted_capability("plain", nil, "query", :read, true)}
+
+      refute "tool/plain" in eval!(~S|(apropos "nil")|, prelude, tools: tools).return
     end
 
     test "matches on ref", %{prelude: prelude} do

@@ -86,6 +86,8 @@ defmodule PtcRunner.Lisp.Introspection do
   so embedded `Lisp.run` callers stay unchanged.
   """
 
+  alias PtcRunner.Utf8
+
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Export
@@ -527,12 +529,11 @@ defmodule PtcRunner.Lisp.Introspection do
     searchable_contract =
       contract
       |> Map.take([:name, :description, :input_schema, :effect])
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.new()
       |> Map.put(:ref, "tool/" <> Map.fetch!(contract, :name))
 
-    searchable_contract
-    |> inspect(limit: :infinity, printable_limit: :infinity)
-    |> String.downcase()
-    |> String.contains?(needle)
+    contract_contains?(searchable_contract, needle)
   end
 
   defp capability_matches?(_metadata, _needle), do: false
@@ -552,13 +553,38 @@ defmodule PtcRunner.Lisp.Introspection do
     [
       ref,
       "  effect: #{Map.fetch!(contract, :effect)}",
-      if(is_binary(description) and description != "", do: indent(description)),
+      if(is_binary(description) and description != "",
+        do: description |> Utf8.truncate_valid(4_096) |> indent()
+      ),
       "  input schema:",
       contract |> Map.fetch!(:input_schema) |> Jason.encode!(pretty: true) |> indent()
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.join("\n")
   end
+
+  defp contract_contains?(value, needle) when is_map(value) do
+    Enum.any?(value, fn {key, item} ->
+      contract_contains?(key, needle) or contract_contains?(item, needle)
+    end)
+  end
+
+  defp contract_contains?(value, needle) when is_list(value),
+    do: Enum.any?(value, &contract_contains?(&1, needle))
+
+  defp contract_contains?(value, needle) when is_binary(value),
+    do:
+      value
+      |> Utf8.truncate_valid(byte_size(value))
+      |> String.downcase()
+      |> String.contains?(needle)
+
+  defp contract_contains?(nil, needle), do: String.contains?("null", needle)
+
+  defp contract_contains?(value, needle) when is_atom(value) or is_number(value),
+    do: value |> to_string() |> String.downcase() |> String.contains?(needle)
+
+  defp contract_contains?(_value, _needle), do: false
 
   defp meta_map(%Export{kind: :constant} = export) do
     base = %{
