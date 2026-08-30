@@ -2863,9 +2863,12 @@
         "Case-insensitive literal substring match over prelude refs/docstrings and fixed " <>
           "canonical names, signatures, descriptions, notes, divergences, and sections. " <>
           "Qualified Java aliases in signatures are searchable; fixed results use canonical " <>
-          "names. Results are sorted and deduplicated. A blank query returns an empty vector. " <>
-          "Accepts a string or a quoted symbol (via symbol-ref normalization). An unquoted " <>
-          "query evaluates normally — `apropos` is not macro-like.",
+          "names. Results are sorted and deduplicated callable names. A blank query returns " <>
+          "an empty vector. When a Kernel session supplies the shipped-library catalog, a " <>
+          "query that matches unattached shipped libraries prints an attachment advisory " <>
+          "instead of inserting those IDs into the result. Accepts a string or a quoted " <>
+          "symbol (via symbol-ref normalization). An unquoted query evaluates normally — " <>
+          "`apropos` is not macro-like.",
       see_also: ["dir", "doc", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil
@@ -2888,7 +2891,12 @@
           "resolve before fixed registry entries; a hidden collision does not fall through. " <>
           "Macro-like over the ref: accepts an unquoted symbol (`str`, `ns/name`), a quoted " <>
           "symbol (`'ns/name`), or a string. Use `export-meta` for attached export information " <>
-          "as data. A miss prints a not-found line and still returns `nil`.",
+          "as data. A miss prints a not-found line and still returns `nil`. When a Kernel " <>
+          "session supplies the shipped-library catalog, a miss whose namespace is a " <>
+          "shipped library that this session has not attached prints an attachment redirect " <>
+          "with environment-neutral component guidance. The catalog contains library IDs, " <>
+          "not export refs, so the redirect does not assert that the requested export exists. " <>
+          "A malformed ref or unknown namespace keeps the not-found line.",
       see_also: ["apropos", "dir", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil

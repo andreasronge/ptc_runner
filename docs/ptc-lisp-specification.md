@@ -3616,7 +3616,10 @@ Five builtins provide one language-level discovery interface. They answer
 identically in the REPL, in generated workflow or mission source, and inside a
 prelude export reading another prelude's documentation. `dir`, `export-meta`,
 and `source` describe the attached prelude API; `apropos` and `doc` also cover
-fixed built-ins and the bounded Java surface.
+fixed built-ins and the bounded Java surface. When a Kernel session supplies the
+shipped-library catalog, a miss in an unattached shipped namespace prints an
+attachment redirect. The catalog contains library IDs rather than export refs,
+so this redirect does not assert that the requested export exists.
 
 | Form | Result |
 |------|--------|
@@ -3682,7 +3685,11 @@ registry. Visibility is applied after that occupancy check, so a hidden
 attached export cannot reveal registry documentation through the same
 spelling. `apropos` similarly suppresses a colliding registry name when its
 attached export is hidden. This preserves the invariant that attached API
-discovery never advertises something the running program cannot call.
+discovery never advertises something the running program cannot call. A Kernel
+session may still *print* an attachment redirect for an unattached shipped
+library; that advisory is not a callable name in `apropos`'s result. Its
+component-list guidance is environment-neutral because the same function runs
+in workflow, mission, and direct REPL contexts.
 
 None of the forms enumerate `data/...` values or `tool/...` capabilities;
 those appear in the mission inventory. `dir`, `export-meta`, and `source`
@@ -3699,9 +3706,12 @@ that are transitively reachable from a public export.
 
 Attached prelude results for `dir`/`doc`/`apropos`/`export-meta` are filtered
 to what the running program may actually call. A miss is not a failure:
-`export-meta` returns `nil`, `doc` and `source` print a not-found line, and
+`export-meta` returns `nil`, `doc` and `source` print a not-found line (or, for
+`doc` on an unattached shipped library, an attachment redirect), and
 `dir` returns `[]`. A blank `apropos` query returns `[]` rather than every
-fixed and attached function.
+fixed and attached function. When the query matches unattached shipped
+libraries, `apropos` prints those library IDs and still returns only callable
+names.
 
 `export-meta` is not `clojure.core/meta`, which takes an object rather than a
 reference string and is not implemented.

@@ -194,6 +194,29 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert history_bytes > 0
   end
 
+  test "direct eval names an unattached shipped library" do
+    {:ok, session} = ReplSession.new()
+
+    assert {:ok, doc, session} = ReplSession.eval(session, ~S|(doc "agent.core/run")|)
+    assert doc.return == nil
+
+    assert Enum.join(doc.prints, "\n") ==
+             """
+             Shipped library "agent.core" is not attached, so "agent.core/run" cannot be resolved in this session.
+             Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
+             """
+
+    assert {:ok, apropos, session} = ReplSession.eval(session, ~S|(apropos "agent")|)
+    refute "agent.core" in apropos.return
+    assert Enum.join(apropos.prints, "\n") =~ "agent.core"
+    assert Enum.join(apropos.prints, "\n") =~ "agent.failure"
+
+    assert {:ok, unknown, session} = ReplSession.eval(session, ~S|(doc "missing/ns")|)
+    assert unknown.prints == [~s(No documentation found for "missing/ns".)]
+
+    assert {:ok, _events} = ReplSession.close(session)
+  end
+
   test "REPL sessions reject JSON-result configurations" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
