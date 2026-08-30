@@ -5,15 +5,35 @@
       {
         "id": "dabstep.workflow",
         "path": "workflow.clj",
-        "dependencies": ["agent.core"]
+        "dependencies": [
+          "agent.core",
+          "kernel"
+        ]
       },
-      {"library": "agent.core"}
+      {
+        "library": "agent.core"
+      },
+      {
+        "library": "kernel"
+      }
     ],
     "entry": "dabstep.workflow/run"
   },
   "contracts": {
-    "input_schema": {"path": "input.schema.json"},
-    "result_schema": {"path": "result.schema.json"}
+    "input_schema": {
+      "path": "input.schema.json"
+    },
+    "result_schema": {
+      "path": "result.schema.json"
+    },
+    "phase_return_schemas": {
+      "evidence": {
+        "path": "work.schema.json"
+      },
+      "findings": {
+        "path": "findings.schema.json"
+      }
+    }
   },
   "input": {
     "path": "inputs/deepseek.json"
@@ -21,28 +41,58 @@
   "missions": {
     "analysis": {
       "components": [
-        {"id": "dabstep.payments", "path": "payments.clj"}
+        {
+          "id": "dabstep.payments",
+          "path": "payments.clj"
+        }
       ],
-      "providers": ["payments_data"]
-    }
+      "providers": [
+        "payments_data"
+      ]
+    },
+    "recheck": {
+      "components": [
+        {
+          "id": "dabstep.payments",
+          "path": "payments.clj"
+        }
+      ],
+      "providers": [
+        "payments_data"
+      ]
+    },
+    "review": {}
   },
   "providers": {
-    "workflow": [{"name": "deepseek"}, {"name": "luna"}],
-    "mission": [{"name": "payments_data"}]
+    "workflow": [
+      {
+        "name": "deepseek"
+      },
+      {
+        "name": "luna"
+      }
+    ],
+    "mission": [
+      {
+        "name": "payments_data"
+      }
+    ]
   },
   "limits": {
-    "run_duration_ms": 900000,
-    "workflow_timeout_ms": 900000,
+    "run_duration_ms": 1800000,
+    "workflow_timeout_ms": 1800000,
     "evaluation_timeout_ms": 600000,
     "evaluation_heap_words": 5000000,
-    "mission_capability_calls": 256,
-    "mission_capability_calls_per_name": 256,
+    "mission_capability_calls": 512,
+    "mission_capability_calls_per_name": 512,
     "normal_event_count": 1024,
     "normal_event_bytes": 8000000
   },
   "labels": {
     "name": "dabstep-fraud-analysis",
     "provider": "openrouter",
-    "tags": {"mode": "agent"}
+    "tags": {
+      "mode": "agent"
+    }
   }
 }

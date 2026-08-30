@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["programs_reviewed", "defects"],
+  "properties": {
+    "programs_reviewed": {"type": "integer", "minimum": 0, "maximum": 128},
+    "defects": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["program_index", "severity", "claim"],
+        "properties": {
+          "program_index": {"type": "integer", "minimum": 0, "maximum": 127},
+          "severity": {"type": "string", "enum": ["blocking", "minor"]},
+          "claim": {"type": "string", "minLength": 1, "maxLength": 500}
+        }
+      }
+    }
+  }
+}
