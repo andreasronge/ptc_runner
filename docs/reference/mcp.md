@@ -549,7 +549,7 @@ exercising this exact host-document and command path.
 Interactive authorization is currently available only from a source checkout:
 
 ```console
-ptc run ptc.json --host-config ptc-host.json \
+mix ptc run ptc.json --host-config ptc-host.json \
   --authorize-mcp workspace
 ```
 

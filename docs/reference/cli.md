@@ -2,9 +2,10 @@
 
 This is the complete `ptc` command and process contract.
 
-Every installation
-exposes the same command grammar and runtime path.
-Run `ptc help COMMAND` for the exact switches accepted by an installed version.
+The runtime-included `ptc` frontend and the source-checkout `mix ptc` frontend
+share the command engine and runtime path, but frontend-owned switches may
+differ. Use `ptc help COMMAND` and `mix ptc help COMMAND` as the authoritative
+grammar for each frontend.
 
 ## Choose a command
 
@@ -24,8 +25,9 @@ Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 | `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |
 | `ptc viewer PROJECT.json --env-file FILE` | Use one exact dotenv file for Viewer-started workflows and missions |
 
-Help is generated from the same declarations as the strict parser, so use
-`ptc help COMMAND` as the canonical command and option reference.
+Help is generated from the same declarations as the strict parser, so use the
+help command for the frontend you invoke as its canonical command and option
+reference.
 
 A provider-bearing manifest needs a host configuration. A project document can
 remember that path and its environment file. Before running it, active provider
@@ -404,6 +406,11 @@ diagnostic behind it.
 
 Every classified diagnostic and the status it exits with:
 
+From shipped CLI input, `authorization_target_unknown` and
+`authorization_not_applicable` are reachable only through source-checkout
+`mix ptc run --authorize-mcp`; runtime-included `ptc` rejects that switch.
+Embedding runtimes can supply authorization targets directly.
+
 | Status | Phase | Code | Retryable | Message |
 | ---: | --- | --- | --- | --- |
 | 2 | `arguments` | `conflicting_arguments` | no | choose only one option from the conflicting argument group |
@@ -462,7 +469,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `provider_declaration` | `selection_unverifiable` | no | the provider selection cannot be verified declaratively |
 | 4 | `active_preflight` | `authentication_rejected` | no | provider authentication was rejected |
 | 4 | `active_preflight` | `authorization_rejected` | no | explicit provider authorization was rejected |
-| 4 | `active_preflight` | `authorization_required` | no | explicit provider authorization is required |
+| 4 | `active_preflight` | `authorization_required` | no | provider authorization is required; runtime-included ptc cannot initiate authorization; source-checkout mix ptc run ... --authorize-mcp NAME can initiate it, and embedding hosts may provide authorization |
 | 4 | `active_preflight` | `authorization_unavailable` | yes | the authorization service is temporarily unavailable |
 | 4 | `active_preflight` | `connectivity_outcome_unknown` | no | the connectivity outcome could not be committed safely |
 | 4 | `active_preflight` | `connectivity_protocol_error` | no | the provider returned an invalid connectivity response |

@@ -422,7 +422,7 @@ credential-free and cannot be combined with an <code class="inline">oauth</code>
 does not accept a custom CA path in the host document: use a certificate trusted
 by the runtime's operating-system trust store. The repository E2E harness is a
 test-only exception; it loads an ephemeral CA directly into the test VM before
-exercising this exact host-document and command path.</p><p>Interactive authorization is currently available only from a source checkout:</p><pre><code class="console language-console">ptc run ptc.json --host-config ptc-host.json \
+exercising this exact host-document and command path.</p><p>Interactive authorization is currently available only from a source checkout:</p><pre><code class="console language-console">mix ptc run ptc.json --host-config ptc-host.json \
   --authorize-mcp workspace</code></pre><p>The command prints a URL and waits on an operating-system-selected loopback
 port. The shipped CLI store is process-local, so a later invocation must
 authorize again; embedding hosts may provide a secure principal-scoped store.

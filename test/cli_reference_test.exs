@@ -27,4 +27,25 @@ defmodule PtcRunner.CLIReferenceTest do
     assert page =~ "| 0 | the command succeeded |"
     assert page =~ "| #{CommandFrontend.envelope_failure_exit_status()} | "
   end
+
+  test "the served CLI page distinguishes authorization diagnostics by frontend" do
+    {:ok, page} = DocumentationLibrary.fetch("cli")
+
+    assert page =~ """
+           From shipped CLI input, `authorization_target_unknown` and
+           `authorization_not_applicable` are reachable only through source-checkout
+           `mix ptc run --authorize-mcp`; runtime-included `ptc` rejects that switch.
+           """
+  end
+
+  test "the served MCP page uses the source-checkout authorization frontend" do
+    {:ok, page} = DocumentationLibrary.fetch("mcp")
+
+    assert page =~ """
+           ```console
+           mix ptc run ptc.json --host-config ptc-host.json \\
+             --authorize-mcp workspace
+           ```
+           """
+  end
 end
