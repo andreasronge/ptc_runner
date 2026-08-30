@@ -12,13 +12,14 @@ defmodule PtcRunner.Kernel.MissionEnvironment do
   data, and recorded tool requirements before execution begins.
   """
   alias PtcRunner.Kernel.Environment
-  @enforce_keys [:bundle, :capabilities, :data]
-  defstruct [:bundle, :capabilities, :data]
+  @enforce_keys [:bundle, :capabilities, :data, :shipped_component_ids]
+  defstruct [:bundle, :capabilities, :data, :shipped_component_ids]
 
   @type t :: %__MODULE__{
           bundle: PtcRunner.Kernel.FrozenBundle.t() | nil,
           capabilities: %{binary() => PtcRunner.Kernel.Capability.t()},
-          data: map()
+          data: map(),
+          shipped_component_ids: [binary()]
         }
   @spec new(keyword()) :: {:ok, t()} | {:error, term()}
   @doc """
@@ -26,13 +27,15 @@ defmodule PtcRunner.Kernel.MissionEnvironment do
   and JSON-like `:data` options. Unknown options are rejected.
   """
   def new(opts) when is_list(opts) do
-    with false <- Keyword.keys(opts) -- [:bundle, :capabilities, :data] != [],
+    with false <-
+           Keyword.keys(opts) -- [:bundle, :capabilities, :data, :shipped_component_ids] != [],
          {:ok, attributes} <-
            Environment.assemble(
              Keyword.get(opts, :bundle),
              Keyword.get(opts, :capabilities, []),
              Keyword.get(opts, :data, %{}),
-             :mission
+             :mission,
+             Keyword.get(opts, :shipped_component_ids)
            ) do
       {:ok, struct!(__MODULE__, attributes)}
     else

@@ -2,6 +2,7 @@ defmodule Mix.Tasks.Ptc.GenDocsTest do
   use ExUnit.Case, async: true
 
   alias Mix.Tasks.Ptc.GenDocs
+  alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LimitCatalog
@@ -62,8 +63,13 @@ defmodule Mix.Tasks.Ptc.GenDocsTest do
   test "generated shipped export owners equal every compiled shipped public export" do
     owners = File.read!("priv/shipped_export_owners.json") |> Jason.decode!()
     {:ok, components} = Library.components(Library.component_ids())
+    {:ok, bundle} = Kernel.compile_bundle(components)
 
     assert owners == GenDocs.export_owner_index!(components)
+
+    assert Enum.sort(Map.keys(owners)) ==
+             Enum.map(bundle.prelude.exports, & &1.ref) |> Enum.sort()
+
     assert owners["agent.core/run"] == "agent.core"
   end
 

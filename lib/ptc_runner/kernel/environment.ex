@@ -17,14 +17,20 @@ defmodule PtcRunner.Kernel.Environment do
   @workflow_implicit ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
 
   @doc "Validates common environment fields and returns normalized attributes."
-  def assemble(bundle, capabilities, data, kind)
+  def assemble(bundle, capabilities, data, kind, shipped_component_ids \\ nil)
       when kind in [:workflow, :mission] do
     with :ok <- valid_bundle(bundle),
          true <- JSONValue.map?(data),
          {:ok, capability_map} <- capability_map(capabilities),
          :ok <- reserved_names(kind, capability_map),
          :ok <- bundle_requirements(bundle, capability_map, kind) do
-      {:ok, %{bundle: bundle, capabilities: capability_map, data: data}}
+      {:ok,
+       %{
+         bundle: bundle,
+         capabilities: capability_map,
+         data: data,
+         shipped_component_ids: normalize_shipped_component_ids(bundle, shipped_component_ids)
+       }}
     else
       false -> {:error, :invalid_environment_data}
       error -> error
@@ -35,6 +41,34 @@ defmodule PtcRunner.Kernel.Environment do
   @spec component_ids(%{bundle: FrozenBundle.t() | nil}) :: [binary()]
   def component_ids(%{bundle: nil}), do: []
   def component_ids(%{bundle: %FrozenBundle{component_ids: component_ids}}), do: component_ids
+
+  @doc false
+  @spec shipped_component_ids(%{shipped_component_ids: [binary()]}) :: [binary()]
+  def shipped_component_ids(%{shipped_component_ids: nil}), do: []
+  def shipped_component_ids(%{shipped_component_ids: component_ids}), do: component_ids
+
+  defp normalize_shipped_component_ids(nil, nil), do: []
+
+  defp normalize_shipped_component_ids(%FrozenBundle{components: components}, nil) do
+    shipped_ids = MapSet.new(Library.component_ids())
+
+    for %{id: id, origin: origin} <- components,
+        MapSet.member?(shipped_ids, id),
+        is_binary(origin) and String.starts_with?(origin, "priv/preludes/kernel/"),
+        do: id
+  end
+
+  defp normalize_shipped_component_ids(%FrozenBundle{component_ids: attached}, component_ids)
+       when is_list(component_ids) do
+    shipped_ids = MapSet.new(Library.component_ids())
+
+    component_ids
+    |> Enum.filter(&(&1 in attached and MapSet.member?(shipped_ids, &1)))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp normalize_shipped_component_ids(nil, component_ids) when is_list(component_ids), do: []
 
   @doc """
   Returns the whole-environment capability view.

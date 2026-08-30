@@ -245,7 +245,7 @@ defmodule PtcRunner.Kernel.Runner do
       tools: workflow_tools(config, state, deadline_ms, evaluation_id),
       prelude: bundle_prelude(config.workflow_environment),
       shipped_export_owners: ShippedExportCatalog.load(),
-      attached_component_ids: Environment.component_ids(config.workflow_environment),
+      attached_component_ids: Environment.shipped_component_ids(config.workflow_environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
       run_deadline_ms: deadline_ms,

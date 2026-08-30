@@ -742,7 +742,12 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
     with {:ok, workflow} <- WorkflowEnvironment.new([]),
          {:ok, mission} <-
-           MissionEnvironment.new(bundle: bundle, capabilities: capabilities, data: spec.data) do
+           MissionEnvironment.new(
+             bundle: bundle,
+             capabilities: capabilities,
+             data: spec.data,
+             shipped_component_ids: library_component_ids(spec.kinds)
+           ) do
       build_config(
         {prepared.request, prepared.entry_source},
         providers,
@@ -854,7 +859,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
              MissionEnvironment.new(
                bundle: bundle,
                capabilities: capabilities,
-               data: spec.data
+               data: spec.data,
+               shipped_component_ids: library_component_ids(spec.kinds)
              ) do
         {:cont, {:ok, Map.put(acc, name, environment)}}
       else
@@ -892,7 +898,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
       with {:ok, workflow} <-
              WorkflowEnvironment.new(
                bundle: workflow_bundle,
-               capabilities: providers.workflow.capabilities
+               capabilities: providers.workflow.capabilities,
+               shipped_component_ids: library_component_ids(package.workflow_component_kinds)
              ),
            {:ok, missions} <- mission_environments(package, mission_bundles, providers),
            {:ok, publication_authority, sink, inspection_sink} <-
@@ -1715,6 +1722,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
     if inspection_sink, do: InspectionSink.stop(inspection_sink)
     EventSink.stop(event_sink)
     error
+  end
+
+  defp library_component_ids(kinds) do
+    for {id, :library} <- kinds, do: id
   end
 
   defp maybe_put(opts, _key, nil), do: opts

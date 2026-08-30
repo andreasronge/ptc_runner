@@ -26,6 +26,7 @@
     "priv/function_audit.exs",
     "priv/functions.exs",
     "priv/java_interop.exs",
+    "priv/shipped_export_owners.json",
     "priv/schemas/mcp-input-request-2026-07-28.schema.json"
   ],
   conditional_semantic_modules: [

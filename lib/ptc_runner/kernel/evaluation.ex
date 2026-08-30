@@ -386,7 +386,7 @@ defmodule PtcRunner.Kernel.Evaluation do
         ),
       prelude: bundle_prelude(environment),
       shipped_export_owners: ShippedExportCatalog.load(),
-      attached_component_ids: Environment.component_ids(environment),
+      attached_component_ids: Environment.shipped_component_ids(environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
       compile_max_heap: limits.evaluation_heap_words,

@@ -802,7 +802,8 @@ defmodule PtcRunner.Kernel.ReplSession do
         tools: tools(session, deadline_ms),
         prelude: prelude(session.config.workflow_environment),
         shipped_export_owners: ShippedExportCatalog.load(),
-        attached_component_ids: Environment.component_ids(session.config.workflow_environment),
+        attached_component_ids:
+          Environment.shipped_component_ids(session.config.workflow_environment),
         timeout: timeout_ms,
         compile_timeout: timeout_ms,
         run_deadline_ms: deadline_ms,

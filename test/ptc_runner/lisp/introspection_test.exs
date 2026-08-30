@@ -1,6 +1,10 @@
 defmodule PtcRunner.Lisp.IntrospectionTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.Environment
+  alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Introspection
   alias PtcRunner.Lisp.Prelude
@@ -325,6 +329,16 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert printed =~ "--project PROJECT.json or --manifest MANIFEST.json"
       assert printed =~ ~s|{"library": "agent.core"}|
       assert printed =~ "workflow.components or missions.<name>.components"
+    end
+
+    test "a colliding local component ID does not count as an attached shipped library" do
+      {:ok, component} =
+        Component.new(id: "agent.core", source: ~S|(ns local.component) (defn value [] 1)|)
+
+      {:ok, bundle} = Kernel.compile_bundle([component])
+      {:ok, environment} = WorkflowEnvironment.new(bundle: bundle)
+
+      assert Environment.shipped_component_ids(environment) == []
     end
 
     test "a typo, attached missing export, and hidden attached export are ordinary misses", %{
