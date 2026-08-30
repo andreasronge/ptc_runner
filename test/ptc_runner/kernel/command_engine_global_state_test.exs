@@ -98,6 +98,59 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     Application.put_env(
       :ptc_runner,
       :host_llm_test_result,
+      {:error,
+       ProviderError.new(:usage_unavailable, "PRIVATE USAGE RESPONSE",
+         dispatch_provenance: :dispatched
+       )}
+    )
+
+    usage_unavailable =
+      write_application(directory, "usage-unavailable", manifest, %{
+        "main.clj" => ~S|(ns app) (defn run [_input] (agent.core/run "answer" {"max_turns" 1}))|
+      })
+
+    assert {:error, %CommandOutcome{} = usage_outcome} =
+             CommandEngine.dispatch(["run", usage_unavailable, "--host-config", host_path])
+
+    assert usage_outcome.envelope["error"]["code"] == "llm_usage_unavailable"
+
+    assert usage_outcome.envelope["execution"]["usage"]["llm_spend"] == %{
+             "state" => "incomplete"
+           }
+
+    assert [usage_row] = usage_outcome.envelope["execution"]["usage"]["llm_usage"]
+    assert usage_row["missing_usage_calls"] == 1
+    refute Jason.encode!(usage_outcome.envelope) =~ "PRIVATE USAGE RESPONSE"
+    assert_schema_valid(usage_outcome.envelope)
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:error,
+       ProviderError.new(:invalid_request, "PRIVATE LOCAL VALIDATION",
+         dispatch_provenance: :not_dispatched
+       )}
+    )
+
+    not_dispatched =
+      write_application(directory, "not-dispatched", manifest, %{
+        "main.clj" => ~S|(ns app) (defn run [_input] (agent.core/run "answer" {"max_turns" 1}))|
+      })
+
+    assert {:error, %CommandOutcome{} = not_dispatched_outcome} =
+             CommandEngine.dispatch(["run", not_dispatched, "--host-config", host_path])
+
+    not_dispatched_usage = not_dispatched_outcome.envelope["execution"]["usage"]
+    assert not_dispatched_outcome.envelope["error"]["code"] == "llm_request_invalid"
+    assert not_dispatched_usage["llm_spend"] == %{"state" => "empty"}
+    assert [not_dispatched_row] = not_dispatched_usage["llm_usage"]
+    assert not_dispatched_row["missing_usage_calls"] == 0
+    refute Jason.encode!(not_dispatched_outcome.envelope) =~ "PRIVATE LOCAL VALIDATION"
+    assert_schema_valid(not_dispatched_outcome.envelope)
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
       {:error, ProviderError.new(:tool_calling_unsupported, "PRIVATE TOOL CAPABILITY RESPONSE")}
     )
 
@@ -762,5 +815,94 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     assert model_calls + usage["unattributed_model_calls"] == alias_calls
 
     assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "an uncataloged model warning reaches the V4 envelope and trace", %{tmp_dir: directory} do
+    keys = [
+      :llm_adapter,
+      :host_llm_test_owner,
+      :host_llm_test_result,
+      :host_llm_test_catalog_status,
+      :host_llm_test_public_model
+    ]
+
+    previous = Map.new(keys, &{&1, Application.fetch_env(:ptc_runner, &1)})
+
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+    Application.put_env(:ptc_runner, :host_llm_test_catalog_status, :uncataloged)
+    Application.put_env(:ptc_runner, :host_llm_test_public_model, true)
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:ok, %{content: "ok", tokens: %{input: 1, output: 1}}}
+    )
+
+    on_exit(fn ->
+      Enum.each(previous, fn
+        {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
+        {key, :error} -> Application.delete_env(:ptc_runner, key)
+      end)
+    end)
+
+    host_path =
+      write_host_config(directory, "uncataloged-warning", literal_credential_host("test-key"))
+
+    manifest =
+      valid_manifest(%{
+        "workflow" => %{
+          "components" => [
+            %{"id" => "app", "path" => "main.clj", "dependencies" => ["llm"]},
+            %{"library" => "llm"}
+          ],
+          "entry" => "app/run"
+        },
+        "providers" => %{
+          "workflow" => [%{"name" => "model", "config" => %{}}],
+          "mission" => []
+        }
+      })
+
+    application =
+      write_application(directory, "uncataloged-warning", manifest, %{
+        "main.clj" => ~S|(ns app) (defn run [_input] (llm/request {"messages" []}))|
+      })
+
+    trace_dir = Path.join(directory, "traces")
+    File.mkdir!(trace_dir)
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--host-config",
+               host_path,
+               "--trace-dir",
+               trace_dir
+             ])
+
+    warning = %{
+      "code" => "model_uncataloged",
+      "message" =>
+        "the configured model is not an exact catalog entry; pricing, limits, token estimation, and capability detection may be incomplete",
+      "provider" => "model",
+      "model" => "openrouter:test/model"
+    }
+
+    assert outcome.envelope["schema_version"] == 4
+    assert outcome.envelope["warnings"] == [warning]
+    assert_schema_valid(outcome.envelope)
+
+    assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
+
+    started =
+      trace_path
+      |> File.stream!()
+      |> Stream.map(&Jason.decode!/1)
+      |> Enum.find(&(&1["type"] == "run-started"))
+
+    assert started["data"]["warnings"] == [warning]
   end
 end

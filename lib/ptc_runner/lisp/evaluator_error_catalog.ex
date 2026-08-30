@@ -2,7 +2,7 @@ defmodule PtcRunner.Lisp.EvaluatorErrorCatalog do
   @moduledoc """
   Closed public catalog of PTC-Lisp evaluator error kinds.
 
-  These kinds may appear in a V3 command envelope's `last_evaluation_error`
+  These kinds may appear in a V4 command envelope's `last_evaluation_error`
   object. The catalog is the single owner of the wire names, schema enum, and
   REPL kind spelling. Compilation, timeout, and memory failures stay on their
   existing command codes and are not members of this table.

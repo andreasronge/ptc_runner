@@ -242,7 +242,9 @@ requester. A selector absent from the bundled model catalog remains usable when
 ReqLLM supports its provider, but PtcRunner emits one <code class="inline">model_uncataloged</code>
 warning for that requester. Catalog metadata such as pricing, limits, token
 estimation, and capability detection may then be incomplete; the warning does
-not mean the provider request itself is known to fail.</p><p>Preparation seals the exact controls into the target and requires the adapter
+not mean the provider request itself is known to fail. Run envelopes V4 publish
+the same fact in their closed <code class="inline">warnings</code> array, and canonical <code class="inline">run-started</code>
+metadata retains it for trace consumers; stderr remains the human presentation.</p><p>Preparation seals the exact controls into the target and requires the adapter
 to attest the same canonical map. The built-in adapter uses ReqLLM's strict
 unsupported-option policy and also refuses known lossy routes during local
 preflight, before credential loading. For example, Anthropic cannot combine
@@ -274,8 +276,12 @@ successful call reports non-negative <code class="inline">input</code> and <code
 <code class="inline">cost_currency: &quot;USD&quot;</code> additionally promises a total USD cost. <code class="inline">false</code> and
 <code class="inline">null</code> declare those observations optional, not zero. Preparation seals and
 attests the declaration, and a successful response or doctor connectivity
-probe that omits promised usage fails as a non-retryable invalid provider
-result. Changing either guarantee requires a new <code class="inline">installation_revision</code>.</p><p>Provider cost numbers and decimal strings are converted immediately to
+probe that omits promised usage fails as non-retryable
+<code class="inline">llm_usage_unavailable</code>. Changing either guarantee requires a new
+<code class="inline">installation_revision</code>. Token and cost guarantees are independent: a
+cost-only installation retains an authoritative provider charge even when the
+provider omits one or both token counts.</p><p>Provider cost numbers and decimal strings, including OpenRouter's reported
+<code class="inline">usage.cost</code>, are converted immediately to
 <code class="inline">{&quot;currency&quot;:&quot;USD&quot;,&quot;microunits&quot;:N}</code> by exact decimal parsing, with fractions
 rounded upward to one millionth of a dollar. The bounded integer <code class="inline">N</code> is in
 <code class="inline">0..9_007_199_254_740_991</code>; binary floating-point values are not retained as
@@ -389,7 +395,12 @@ ceilings for an application that selects no providers:</p><pre><code class="json
   &quot;limits&quot;: {
     &quot;workflow_heap_words&quot;: 16000000
   }
-}</code></pre><p>The four heap and concurrency rows (<code class="inline">workflow_heap_words</code>,
+}</code></pre><p>Optional rows (<code class="inline">llm_total_tokens</code>, <code class="inline">llm_cost_microusd</code>,
+<code class="inline">workflow_loop_iterations</code>, <code class="inline">evaluation_loop_iterations</code>) are disabled when
+omitted. A positive host value enables the row, becomes the inherited manifest
+default and installed ceiling, and may be narrowed by the application. The LLM
+budget rows also require live-installation prerequisites; the loop-iteration
+rows do not.</p><p>The four heap and concurrency rows (<code class="inline">workflow_heap_words</code>,
 <code class="inline">evaluation_heap_words</code>, <code class="inline">provider_heap_words</code>, <code class="inline">live_provider_tasks</code>) and
 <code class="inline">llm_request_timeout_ms</code> have no manifest headroom. Raising a heap or concurrency
 row needs both the host ceiling and a matching manifest request. Raising the LLM

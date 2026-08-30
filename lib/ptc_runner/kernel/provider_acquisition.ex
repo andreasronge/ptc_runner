@@ -41,6 +41,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   alias PtcRunner.Kernel.AcquisitionReason
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LLMRouter
@@ -387,6 +388,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
        |> Map.put(:workflow, workflow)
        |> Map.put(:mission, mission)
        |> Map.put(:snapshots, sort_snapshots(acquired.snapshots))
+       |> Map.put(:warnings, CommandWarning.sort(acquired.warnings))
        |> Map.put(:provider_session, session)
        |> Map.delete(:exports)}
     end
@@ -530,6 +532,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       workflow: %{capabilities: []},
       mission: %{capabilities: []},
       snapshots: [],
+      warnings: [],
       exports: %{},
       data_class: effective_class
     }
@@ -619,6 +622,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
             ]
           })
           |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
+          |> Map.update!(:warnings, &(&1 ++ built.warnings))
           |> Map.update!(:exports, &merge_provider_exports(&1, provider.provider, built.exports))
 
         {:cont, {:ok, next}}

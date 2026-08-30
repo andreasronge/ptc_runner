@@ -75,6 +75,7 @@ defmodule PtcRunner.Kernel.Manifest do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SchemaPath
@@ -446,6 +447,7 @@ defmodule PtcRunner.Kernel.Manifest do
          :ok <- mission_declarations(Map.get(manifest, "missions", %{}), providers),
          {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
+         :ok <- LimitConfiguration.validate_effective(limits, events.policy),
          {:ok, labels} <- labels(Map.get(manifest, "labels", %{})) do
       {:ok,
        %{
@@ -1116,7 +1118,9 @@ defmodule PtcRunner.Kernel.Manifest do
   defp limits(_value, _installed_limits),
     do: manifest_value_error([{:property, "limits"}], :invalid_limits)
 
-  defp normalize_limits([], _bounds, normalized), do: Limits.new(normalized)
+  defp normalize_limits([], _bounds, normalized) do
+    Limits.new(normalized)
+  end
 
   defp normalize_limits([{key, number} | rest], bounds, normalized) do
     case {Map.fetch(bounds, key), number} do

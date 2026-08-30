@@ -53,6 +53,7 @@ if Code.ensure_loaded?(ReqLLM) do
     @ollama_base_url "http://localhost:11434"
     @default_bedrock_region "eu-north-1"
     @usage_observation_key :ptc_runner_usage_observation
+    @reported_total_cost_key :ptc_runner_reported_total_cost
     @raw_input_usage_keys [
       :input,
       "input",
@@ -740,7 +741,10 @@ if Code.ensure_loaded?(ReqLLM) do
       do: ProviderError.new(:invalid_request, "LLM provider does not support structured output")
 
     defp normalize_provider_error(:tool_calling_not_supported),
-      do: ProviderError.new(:invalid_request, "LLM adapter route does not support tool calling")
+      do:
+        ProviderError.new(:invalid_request, "LLM adapter route does not support tool calling",
+          dispatch_provenance: :not_dispatched
+        )
 
     defp normalize_provider_error(_reason),
       do: ProviderError.new(:unavailable, "LLM provider unavailable", retryable?: true)
@@ -1730,8 +1734,13 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp capture_raw_usage({request, response}, model) do
-      observation = raw_usage_observation(response.body, model)
-      private = Map.put(response.private, @usage_observation_key, observation)
+      {observation, total_cost} = raw_usage_observation(response.body, model)
+
+      private =
+        response.private
+        |> Map.put(@usage_observation_key, observation)
+        |> maybe_put_reported_total_cost(total_cost)
+
       {request, %{response | private: private}}
     end
 
@@ -1744,7 +1753,12 @@ if Code.ensure_loaded?(ReqLLM) do
 
     defp project_usage_observation({request, %{body: %ReqLLM.Response{} = body} = response}) do
       observation = Map.get(response.private, @usage_observation_key, :missing)
-      provider_meta = Map.put(body.provider_meta, @usage_observation_key, observation)
+
+      provider_meta =
+        body.provider_meta
+        |> Map.put(@usage_observation_key, observation)
+        |> maybe_put_reported_total_cost(Map.get(response.private, @reported_total_cost_key))
+
       {request, %{response | body: %{body | provider_meta: provider_meta}}}
     end
 
@@ -1753,17 +1767,36 @@ if Code.ensure_loaded?(ReqLLM) do
     defp raw_usage_observation(body, model) do
       with {:ok, provider} <- ReqLLM.provider(model.provider),
            true <- function_exported?(provider, :extract_usage, 2),
-           {:ok, usage} when is_map(usage) <- provider.extract_usage(body, model),
-           true <- raw_token_pair?(usage) do
-        :reported
+           {:ok, usage} when is_map(usage) <- provider.extract_usage(body, model) do
+        observation = if raw_token_pair?(usage), do: :reported, else: :missing
+        {observation, provider_reported_total_cost(model.provider, usage)}
       else
-        _missing_or_invalid -> :missing
+        _missing_or_invalid -> {:missing, nil}
       end
     rescue
-      _exception -> :missing
+      _exception -> {:missing, nil}
     catch
-      _kind, _reason -> :missing
+      _kind, _reason -> {:missing, nil}
     end
+
+    # OpenRouter's chat-completions response reports the charged USD amount as
+    # `usage.cost`. ReqLLM's normalized response currently preserves only a
+    # field already named `total_cost`, so retain this bounded provider fact
+    # before decoding and project it under PtcRunner's canonical name.
+    defp provider_reported_total_cost(:openrouter, usage) do
+      case fetch_usage(usage, :cost, "cost") do
+        {:ok, cost} when is_integer(cost) or is_float(cost) -> cost
+        {:ok, cost} when is_binary(cost) and byte_size(cost) <= 64 -> cost
+        _missing_or_invalid -> nil
+      end
+    end
+
+    defp provider_reported_total_cost(_provider, _usage), do: nil
+
+    defp maybe_put_reported_total_cost(map, nil), do: map
+
+    defp maybe_put_reported_total_cost(map, total_cost),
+      do: Map.put(map, @reported_total_cost_key, total_cost)
 
     defp raw_token_pair?(usage) do
       Enum.any?(@raw_input_usage_keys, &Map.has_key?(usage, &1)) and
@@ -2401,7 +2434,7 @@ if Code.ensure_loaded?(ReqLLM) do
         cache_read: cache_read
       }
       |> maybe_put_observed_token_usage(usage, provider_meta)
-      |> maybe_put_total_cost(usage)
+      |> maybe_put_total_cost(usage, provider_meta)
     end
 
     @doc false
@@ -2426,10 +2459,16 @@ if Code.ensure_loaded?(ReqLLM) do
         Map.get(provider_meta, "response_cache_hit") == true
     end
 
-    defp maybe_put_total_cost(tokens, usage) do
-      case fetch_usage(usage, :total_cost, "total_cost") do
-        {:ok, total_cost} -> Map.put(tokens, :total_cost, total_cost)
-        :error -> tokens
+    defp maybe_put_total_cost(tokens, usage, provider_meta) do
+      case Map.fetch(provider_meta, @reported_total_cost_key) do
+        {:ok, total_cost} ->
+          Map.put(tokens, :total_cost, total_cost)
+
+        :error ->
+          case fetch_usage(usage, :total_cost, "total_cost") do
+            {:ok, total_cost} -> Map.put(tokens, :total_cost, total_cost)
+            :error -> tokens
+          end
       end
     end
 

@@ -513,7 +513,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:error, command_outcome, _counters, _events} =
              project_run(source, config, run_id, run_ref)
 
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
   end
 
   test "spending an alias cap without a refused call cannot claim the runtime diagnostic" do
@@ -532,7 +532,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:error, command_outcome, _counters, _events} =
              project_run(source, config, run_id, run_ref)
 
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
   end
 
   test "agent.core exhausts a per-alias cap as the named runtime diagnostic" do
@@ -944,7 +944,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:error, command_outcome, _counters, _events} =
              project_run(source, config, run_id, run_ref)
 
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
   end
 
   test "agent.core exhausts a public per-name quota as the named runtime diagnostic" do
@@ -1086,7 +1086,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:error, command_outcome, _counters, events} =
              project_run(source, config, run_id, run_ref)
 
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
     refute Enum.any?(events, &(&1.type == "limit-exceeded"))
   end
 
@@ -1803,7 +1803,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert {:error, command_outcome, counters, events} =
              project_run(source, config, run_id, run_ref)
 
-    assert command_outcome.envelope["error"]["code"] == "workflow_failed"
+    assert command_outcome.envelope["error"]["code"] == "explicit_failure"
     usage = command_outcome.envelope["execution"]["usage"]
     assert usage["llm_usage_state"] == "available"
     assert usage["llm_usage"] == counters["llm_usage"]
@@ -1901,7 +1901,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              )
 
     assert {:error, error} = capability.callback.(%{"messages" => []})
-    assert error.kind == :invalid_result
+    assert error.kind == :usage_unavailable
   end
 
   test "the response boundary measures the final fixed-point usage object" do
@@ -1947,7 +1947,7 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
     assert error.details == "LLM response exceeded its boundary"
   end
 
-  test "missing promised usage is a non-retryable invalid provider result" do
+  test "missing promised usage is a non-retryable dispatched usage failure" do
     assert {:ok, capability} =
              LLMCapability.new(
                requester: fn _request -> {:ok, %{content: "answer"}} end,
@@ -1955,8 +1955,9 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
              )
 
     assert {:error, error} = capability.callback.(%{"messages" => []})
-    assert error.kind == :invalid_result
+    assert error.kind == :usage_unavailable
     assert error.retryable? == false
+    assert error.dispatch_provenance == :dispatched
 
     assert {:ok, unpriced} =
              LLMCapability.new(

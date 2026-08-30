@@ -247,7 +247,9 @@ requester. A selector absent from the bundled model catalog remains usable when
 ReqLLM supports its provider, but PtcRunner emits one `model_uncataloged`
 warning for that requester. Catalog metadata such as pricing, limits, token
 estimation, and capability detection may then be incomplete; the warning does
-not mean the provider request itself is known to fail.
+not mean the provider request itself is known to fail. Run envelopes V4 publish
+the same fact in their closed `warnings` array, and canonical `run-started`
+metadata retains it for trace consumers; stderr remains the human presentation.
 
 Preparation seals the exact controls into the target and requires the adapter
 to attest the same canonical map. The built-in adapter uses ReqLLM's strict
@@ -287,10 +289,14 @@ successful call reports non-negative `input` and `output` counts;
 `cost_currency: "USD"` additionally promises a total USD cost. `false` and
 `null` declare those observations optional, not zero. Preparation seals and
 attests the declaration, and a successful response or doctor connectivity
-probe that omits promised usage fails as a non-retryable invalid provider
-result. Changing either guarantee requires a new `installation_revision`.
+probe that omits promised usage fails as non-retryable
+`llm_usage_unavailable`. Changing either guarantee requires a new
+`installation_revision`. Token and cost guarantees are independent: a
+cost-only installation retains an authoritative provider charge even when the
+provider omits one or both token counts.
 
-Provider cost numbers and decimal strings are converted immediately to
+Provider cost numbers and decimal strings, including OpenRouter's reported
+`usage.cost`, are converted immediately to
 `{"currency":"USD","microunits":N}` by exact decimal parsing, with fractions
 rounded upward to one millionth of a dollar. The bounded integer `N` is in
 `0..9_007_199_254_740_991`; binary floating-point values are not retained as
@@ -483,6 +489,13 @@ ceilings for an application that selects no providers:
   }
 }
 ```
+
+Optional rows (`llm_total_tokens`, `llm_cost_microusd`,
+`workflow_loop_iterations`, `evaluation_loop_iterations`) are disabled when
+omitted. A positive host value enables the row, becomes the inherited manifest
+default and installed ceiling, and may be narrowed by the application. The LLM
+budget rows also require live-installation prerequisites; the loop-iteration
+rows do not.
 
 The four heap and concurrency rows (`workflow_heap_words`,
 `evaluation_heap_words`, `provider_heap_words`, `live_provider_tasks`) and

@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.TraceEventValidation do
   @moduledoc false
 
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMUsageSummary
@@ -311,7 +312,7 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
     if is_map(data["missions"]) and Enum.all?(singular, &(not Map.has_key?(data, &1))) and
          not Map.has_key?(data, "mission_name") and
          valid_prelude_projection?(data["workflow_prelude"]) and
-         valid_mission_preludes?(data["missions"]) do
+         valid_mission_preludes?(data["missions"]) and valid_warnings?(data["warnings"]) do
       :ok
     else
       {:error, :malformed_source}
@@ -336,6 +337,13 @@ defmodule PtcRunner.Kernel.TraceEventValidation do
         if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
     end
   end
+
+  defp valid_warnings?(nil), do: true
+
+  defp valid_warnings?(warnings) when is_list(warnings) and length(warnings) <= 128,
+    do: Enum.all?(warnings, &CommandWarning.valid_map?/1)
+
+  defp valid_warnings?(_warnings), do: false
 
   defp valid_mission_preludes?(missions) do
     Enum.all?(missions, fn {_name, metadata} ->

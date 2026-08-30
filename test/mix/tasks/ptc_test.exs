@@ -126,9 +126,10 @@ defmodule Mix.Tasks.PtcTest do
     assert rendering == "1\n"
 
     assert %{
-             "schema_version" => 3,
+             "schema_version" => 4,
              "command" => "run",
              "status" => "ok",
+             "warnings" => [],
              "result" => %{"result_class" => "normal", "value" => 1},
              "execution" => %{"state" => "finished", "outcome" => "ok"}
            } = envelope

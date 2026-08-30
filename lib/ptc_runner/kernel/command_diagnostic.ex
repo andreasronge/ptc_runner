@@ -8,7 +8,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   inspects a lower-level reason or rejected value. Catalog-authorized dynamic
   message shapes contain only fixed literals plus bounded PTC-Lisp symbol
   names, sealed provider-selection field names, a catalog-validated runtime
-  ceiling or optional-budget request, a closed host budget prerequisite, a
+  ceiling or optional-limit request, a closed host budget prerequisite, a
   bounded agent turn ceiling, an opaque replay request hash, or a closed
   component-override field rule. Compile messages require
   component-source provenance; a missing capability message is rebuilt from
@@ -22,9 +22,9 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   has no source because the provider subject already locates the slot. Every
   other message is the catalog literal.
 
-  `notes` is reserved and always empty: the published V3 envelope schema pins
+  `notes` is reserved and always empty: the published V4 envelope schema pins
   it to `{"const": []}`, so a populated array would invalidate the envelope for
-  every strict V3 consumer. Reporting a rejected value against the bound it
+  every strict V4 consumer. Reporting a rejected value against the bound it
   broke is a later-version change, not a producer-side one.
   """
 
@@ -35,6 +35,8 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.ExplicitFailureDiagnostic
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
@@ -472,6 +474,15 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        ),
        do: ModelOutputDiagnostic.valid_message?(message)
 
+  # An explicit failure names no document: the retention outcome describes the
+  # run's own artifacts, not a manifest the command can point a source at.
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :explicit_failure},
+         nil
+       ),
+       do: ExplicitFailureDiagnostic.valid_message?(message)
+
   defp valid_message_source?(
          message,
          %{phase: :execution, code: :run_timeout},
@@ -507,6 +518,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: :application}
        ),
        do: OptionalBudgetDiagnostic.valid_unavailable_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :limit_configuration_invalid},
+         %CommandSource{kind: :application}
+       ),
+       do: LimitConfigurationDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          _message,

@@ -1125,6 +1125,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
            inspection_sink: inspection_sink,
            provider_session: providers.provider_session,
            connector_snapshots: providers.snapshots,
+           provider_warnings: providers.warnings,
            component_overrides: component_overrides,
            labels: package.labels
          ) do
@@ -1347,6 +1348,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
       mission: %{capabilities: []},
       provider_session: nil,
       snapshots: [],
+      warnings: [],
       data_class: data_class
     }
   end

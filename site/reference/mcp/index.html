@@ -247,7 +247,15 @@ tool:</p><pre><code class="clojure language-clojure">(ns my.files &quot;Mission 
       (get response :value)
       (fail response))))</code></pre><p>When prompt-visible wrappers exist, the model sees them instead of the raw
 <code class="inline">tool/...</code> entries. The underlying capability still enforces its schema, byte
-ceiling, timeout, quota, and manifest grant.</p><h2 id="choose-a-transport">Choose a transport</h2><p>Stdio launches one local process. Relative working directories resolve against
+ceiling, timeout, quota, and manifest grant.</p><p>The value handed to <code class="inline">fail</code> is application data, so it never reaches the envelope
+or the trace. A workflow entry that ends this way reports
+<code class="inline">execution/explicit_failure</code> — unless the value re-raises a Kernel refusal, which
+keeps its own class — and that diagnostic says where the value went: it
+is retained in the run's private inspection record when the run publishes one
+and the value fits under <code class="inline">terminal_result_bytes</code>, and the diagnostic names the
+reason when it is not. See
+<a href="/reference/ptc-lisp-specification/#5-20-fail-signal-failure">§5.20</a> for how to read a
+retained value back.</p><h2 id="choose-a-transport">Choose a transport</h2><p>Stdio launches one local process. Relative working directories resolve against
 the host document, and credentials enter through named bindings rather than
 literal environment values:</p><pre><code class="json language-json">&quot;transport&quot;: {
   &quot;type&quot;: &quot;stdio&quot;,

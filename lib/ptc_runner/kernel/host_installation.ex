@@ -45,6 +45,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BoundedWorker
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallationAuthority
@@ -1435,11 +1436,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
              max_response_bytes: selected.max_response_bytes
            ),
          {:ok, snapshot} <-
-           llm_snapshot(installation, selected, context.provider, public_model) do
+           llm_snapshot(installation, selected, context.provider, public_model),
+         {:ok, warnings} <- llm_warnings(prepared_model, context.provider) do
       {:ok,
        %{
          capabilities: [capability],
          snapshot: snapshot,
+         warnings: warnings,
          close: nil,
          data_class: installation.data_class,
          accepts_data: installation.accepts_data
@@ -1449,6 +1452,19 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   rescue
     _exception -> {:error, :invalid_llm_provider}
+  end
+
+  defp llm_warnings(prepared_model, provider_alias) do
+    case PtcRunner.LLM.catalog_warning(prepared_model) do
+      nil ->
+        {:ok, []}
+
+      {:model_uncataloged, public_model} ->
+        case CommandWarning.model_uncataloged(provider_alias, public_model) do
+          {:ok, warning} -> {:ok, [warning]}
+          :error -> {:error, :invalid_llm_provider}
+        end
+    end
   end
 
   defp llm_requester_context(%{llm_request_deadline_ms: deadline})
@@ -1483,7 +1499,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
              "the #{application} provider application is not started; " <>
                "start it before building this provider, or run through the " <>
                "prepared-run path that admits it",
-             retryable?: false
+             retryable?: false,
+             dispatch_provenance: :not_dispatched
            )}
         end
     end

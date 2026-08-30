@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -61,6 +62,13 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
 
   defp message_option({:limit_unavailable, name, requested}) do
     case OptionalBudgetDiagnostic.unavailable_message(name, requested) do
+      {:ok, message} -> [message: message]
+      :error -> []
+    end
+  end
+
+  defp message_option({:limit_configuration_invalid, bytes, required, payload}) do
+    case LimitConfigurationDiagnostic.message(bytes, required, payload) do
       {:ok, message} -> [message: message]
       :error -> []
     end
@@ -152,6 +160,13 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
       :error -> {:schema_violation, nil}
     end
   end
+
+  defp projection(
+         :application,
+         {:limit_configuration_invalid, bytes, required, payload}
+       )
+       when is_integer(bytes) and is_integer(required) and is_integer(payload),
+       do: {:limit_configuration_invalid, nil}
 
   defp projection(_role, reason)
        when reason in [:document_limit_exceeded, :json_depth_exceeded, :json_node_limit_exceeded],

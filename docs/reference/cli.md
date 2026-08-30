@@ -146,13 +146,19 @@ Useful run switches are:
   `<run_ref>.private.jsonl` according to the run's artifact class.
 - `--inspect FILE` writes sensitive execution evidence to an owner-only
   `.ptcins` file.
-- `--envelope FILE` atomically publishes a convenience copy of the stable V3
+- `--envelope FILE` atomically publishes a convenience copy of the stable V4
   command envelope. When a project enables `artifacts.envelope`, the project's
   `.ptc/envelopes/<run_ref>.json` ledger entry is still written for that run.
   `run`, `validate`, `doctor`, `models`, and `init` all accept the flag; the
   document it publishes carries status, run reference, result or classified
-  error, and artifact state. Parse it rather than scraping stdout, which is a
-  human presentation channel that may also carry application output.
+  error, artifact state, and a closed `warnings` array. For `run`, an uncataloged
+  installed model appears there as `model_uncataloged` with its provider alias
+  and an adapter-attested public selector; the same warning is retained in
+  `run-started` metadata. Non-run commands require an empty warnings
+  array. In particular, `doctor --connect` retains uncataloged-model notices on
+  stderr rather than claiming run metadata it does not produce. Parse the
+  envelope rather than scraping stdout, which is a human
+  presentation channel that may also carry application output.
 
 The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.
@@ -196,7 +202,13 @@ is only a lower bound, while any aggregate overflow makes `llm_spend` exactly
 `llm-request` `capability-started` with its `capability-stopped` by
 `capability_id`. An unmatched start is one observed call with unknown usage:
 `calls` increments, `successful_calls` does not, and `missing_usage_calls`
-increments. A row includes `total_cost` only when every call that could carry
+increments. A matched error that may have dispatched likewise increments
+`missing_usage_calls` when no usage was observed and makes `llm_spend`
+`incomplete`. When that error retains valid provider-reported usage, the call
+instead increments `usage_calls`, contributes its tokens and cost, and can make
+`llm_spend` `available` even though `successful_calls` remains zero. Trusted
+`not_dispatched` errors are excluded because no provider request could have
+been billed. A row includes `total_cost` only when every call that could carry
 usage has valid priced usage; an unmatched or unpriced call leaves the
 aggregate cost unknown and omitted, not reported as zero, while measured
 input/output totals are retained. `llm_usage_state: "available"` means the
@@ -246,7 +258,7 @@ documented in the repository's maintainer guide on embedding.
 ## Read results and failures
 
 A successful normal run prints the compact JSON result value. A private run
-does not print its value. The V3 envelope records the result class, artifact
+does not print its value. The V4 envelope records the result class, artifact
 states, bounded usage, retained-memory counts, and the closed diagnostic when
 one exists.
 
@@ -292,7 +304,7 @@ retains one bounded class when the adapter can prove it:
 `llm_authentication_failed`, `llm_payment_required`, `llm_rate_limited`,
 `llm_model_not_found`, `llm_tool_calling_unsupported`, `llm_request_invalid`,
 `llm_access_denied`,
-`llm_timeout`, `llm_provider_unavailable`, or the non-retryable fallback
+`llm_usage_unavailable`, `llm_timeout`, `llm_provider_unavailable`, or the non-retryable fallback
 `llm_provider_failed`. No response body is retained.
 The failing model alias remains attributable through usage/provider evidence;
 run `ptc doctor PROJECT --connect` for a minimal provider check and use private
@@ -320,7 +332,7 @@ ptc run ptc.json --envelope command-envelope.json
 The standalone streams are human presentation channels and may also contain
 output from applications or children. The envelope is an atomic, no-replace
 file whose JSON Schema this executable serves as `ptc docs schema-envelope`
-(`priv/schemas/ptc-command-envelope-v3.schema.json` in the repository). Its
+(`priv/schemas/ptc-command-envelope-v4.schema.json` in the repository). Its
 status and exit-code relationship is sealed by the same command contract.
 
 After arguments parse, an ordinary or caught command outcome publishes one
@@ -411,7 +423,8 @@ Every classified diagnostic and the status it exits with:
 | 3 | `application` | `input_invalid` | no | the selected input is not an admissible JSON object |
 | 3 | `application` | `installed_limit_exceeded` | no | an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling |
 | 3 | `application` | `invalid_json` | no | an application document is not valid JSON |
-| 3 | `application` | `limit_unavailable` | no | an optional application budget is unavailable because the host has not enabled it |
+| 3 | `application` | `limit_configuration_invalid` | no | normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes |
+| 3 | `application` | `limit_unavailable` | no | an optional application limit is unavailable because the host has not enabled it |
 | 3 | `application` | `override_invalid` | no | the component override is invalid |
 | 3 | `application` | `reference_missing` | no | a referenced document is unavailable; for --input/--private-input try an application-relative name or an absolute/working-directory path |
 | 3 | `application` | `required_property_missing` | no | the application manifest is missing a required property |
@@ -487,6 +500,7 @@ Every classified diagnostic and the status it exits with:
 | 4 | `provider_acquisition` | `provider_tool_missing` | no | the installed endpoint does not expose a declared tool |
 | 4 | `provider_acquisition` | `provider_unavailable` | no | the selected provider could not be acquired |
 | 5 | `execution` | `evaluation_failed` | no | the evaluation failed |
+| 5 | `execution` | `explicit_failure` | no | the workflow signalled an explicit failure |
 | 5 | `execution` | `invalid_agent_config` | no | an agent configuration option is outside its supported range |
 | 5 | `execution` | `llm_access_denied` | no | the LLM provider denied access to the configured model |
 | 5 | `execution` | `llm_authentication_failed` | no | the LLM provider rejected authentication; check the installed credential |
@@ -498,6 +512,7 @@ Every classified diagnostic and the status it exits with:
 | 5 | `execution` | `llm_request_invalid` | no | the LLM provider rejected the configured request |
 | 5 | `execution` | `llm_timeout` | yes | the LLM provider request timed out |
 | 5 | `execution` | `llm_tool_calling_unsupported` | no | the configured model does not support tool calling |
+| 5 | `execution` | `llm_usage_unavailable` | no | the LLM provider did not return the promised usage or cost metadata |
 | 5 | `execution` | `mission_failed` | no | a subordinate mission failed |
 | 5 | `execution` | `provider_failed` | no | a provider failed during execution |
 | 5 | `execution` | `replay_fixture_missing` | no | no replay fixture matches the workflow request |

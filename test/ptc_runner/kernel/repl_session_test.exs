@@ -803,7 +803,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   test "a terminal sink failure cannot hide already committed continuation state" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(normal_event_count: 2)
+    {:ok, limits} = Limits.new(normal_event_count: 3)
     {:ok, sink} = EventSink.start(:private, limits, run_id: "repl-commit-sink-failure")
 
     {:ok, config} =
@@ -816,6 +816,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
       )
 
     {:ok, session} = ReplSession.new(config: config)
+    assert :ok = EventSink.emit(sink, "occupied", %{})
 
     assert {:error, %{fail: %{reason: :event_sink_error}}, returned} =
              ReplSession.eval(session, "(def committed 42)")
@@ -1324,11 +1325,14 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     # sink instead of an oversized payload.
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(normal_event_count: 1)
+    {:ok, limits} = Limits.new(normal_event_count: 3)
     {:ok, private_sink} = EventSink.start(:private, limits, run_id: "repl-constructor")
     failed_pid = private_sink.pid
     failed_ref = Process.monitor(failed_pid)
-    :ok = EventSink.emit(private_sink, "run-started", %{missions: %{}})
+
+    for _index <- 1..3 do
+      :ok = EventSink.emit(private_sink, "run-started", %{missions: %{}})
+    end
 
     assert {:error, :invalid_run_config} =
              RunConfig.new(

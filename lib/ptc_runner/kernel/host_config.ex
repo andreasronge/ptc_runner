@@ -523,10 +523,14 @@ defmodule PtcRunner.Kernel.HostConfig do
       installed = Map.from_struct(Limits.installed_defaults())
 
       schema_limits =
-        Map.new(limits, fn {name, _value} ->
-          {:ok, field} = Limits.name(name)
-          {:ok, row} = LimitCatalog.fetch(field)
-          {name, Map.fetch!(installed, field) || row.minimum}
+        Map.new(limits, fn {name, value} ->
+          if schema_minimum_violation?(name, value) do
+            {name, value}
+          else
+            {:ok, field} = Limits.name(name)
+            {:ok, row} = LimitCatalog.fetch(field)
+            {name, Map.fetch!(installed, field) || row.minimum}
+          end
         end)
 
       Map.put(value, "limits", schema_limits)
@@ -536,6 +540,13 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp command_schema_value(value), do: value
+
+  defp schema_minimum_violation?("normal_event_count", value) when is_integer(value) do
+    {:ok, row} = LimitCatalog.fetch(:normal_event_count)
+    value < row.minimum
+  end
+
+  defp schema_minimum_violation?(_name, _value), do: false
 
   defp safe_host_path(path), do: SchemaPath.explained_prefix(path, schema())
 
@@ -1514,8 +1525,7 @@ defmodule PtcRunner.Kernel.HostConfig do
               "Installed ceiling for #{row.name}; a manifest may only request less."
 
             :optional_manifest_narrowable ->
-              "Optional aggregate budget for #{row.name}; omission disables it. " <>
-                row.prerequisite_description
+              optional_limit_schema_description(row)
 
             :installed_only ->
               "Installed-only operational limit for #{row.name}; applications cannot declare it."
@@ -1531,6 +1541,15 @@ defmodule PtcRunner.Kernel.HostConfig do
       "description",
       "Optional installed ceilings. Omitted limits keep their cataloged installed defaults."
     )
+  end
+
+  defp optional_limit_schema_description(%{name: name, prerequisite_description: description})
+       when is_binary(description) and description != "" do
+    "Optional limit for #{name}; omission disables it. " <> description
+  end
+
+  defp optional_limit_schema_description(%{name: name}) do
+    "Optional limit for #{name}; omission disables it. A positive value enables it and becomes the inherited manifest default and installed ceiling."
   end
 
   defp runtime_schema do

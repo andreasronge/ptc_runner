@@ -6,7 +6,9 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.ExplicitFailureDiagnostic
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -24,6 +26,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:bundle, :duplicate_definition},
     {:bundle, :undefined_variable},
     {:bundle, :unknown_namespace},
+    {:execution, :explicit_failure},
     {:execution, :replay_fixture_missing},
     {:execution, :model_output_truncated},
     {:host, :host_schema_invalid},
@@ -152,6 +155,46 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
                limit_ms: 0,
                phase: :execution
              })
+  end
+
+  # A row whose dynamic message is admitted only against a null source must
+  # publish the catalog literal for its sourced branch, or the schema accepts a
+  # pairing `CommandDiagnostic.new/3` refuses to build and the envelope contract
+  # stops describing the producer.
+  test "an explicit failure message is admitted and published only without a source" do
+    assert {:ok, schema} =
+             JSV.build(CommandContract.catalog_diagnostic_schema(),
+               atoms: false,
+               warnings: :silent
+             )
+
+    for retention <- ExplicitFailureDiagnostic.retentions() do
+      {:ok, message} = ExplicitFailureDiagnostic.message(retention)
+
+      assert {:ok, diagnostic} =
+               CommandDiagnostic.new(:execution, :explicit_failure, message: message)
+
+      rendered = CommandDiagnostic.to_map(diagnostic)
+      assert {:ok, _validated} = JSV.validate(rendered, schema, cast: false)
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :explicit_failure,
+                 message: message,
+                 source: CommandSource.fixed(:runtime)
+               )
+
+      # A real runtime source, taken from a diagnostic the command does build,
+      # so the refusal below is the message pairing rather than a bad shape.
+      sourced =
+        :execution
+        |> CommandDiagnostic.new!(:explicit_failure, source: CommandSource.fixed(:runtime))
+        |> CommandDiagnostic.to_map()
+
+      assert {:ok, _literal} = JSV.validate(sourced, schema, cast: false)
+
+      assert {:error, _refused} =
+               JSV.validate(Map.put(sourced, "message", message), schema, cast: false)
+    end
   end
 
   test "every catalog row with a dynamic message either names a setting or is listed as prose" do
@@ -570,6 +613,15 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         value: "5000",
         remedy: "enable llm_total_tokens in the host document",
         build: fn -> OptionalBudgetDiagnostic.unavailable_message("llm_total_tokens", 5_000) end
+      },
+      %{
+        phase: :application,
+        code: :limit_configuration_invalid,
+        source: :application,
+        setting: "normal_event_bytes",
+        value: "24449",
+        remedy: "raise limits.normal_event_bytes",
+        build: fn -> LimitConfigurationDiagnostic.message(24_449, 24_450, 7_000) end
       }
     ]
   end

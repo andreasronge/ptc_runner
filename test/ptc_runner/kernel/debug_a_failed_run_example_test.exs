@@ -37,7 +37,7 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     File.rm_rf!(Path.join(example, "debugger/.ptc"))
 
     assert {target_output, 5} = run(Path.join(example, "target.ptc-project.json"))
-    assert target_output =~ "execution/workflow_failed"
+    assert target_output =~ "execution/explicit_failure"
 
     assert {debugger_output, 0} = run(Path.join(example, "debugger.ptc-project.json"))
     assert Jason.decode!(debugger_output) == %{"artifact_class" => "private", "status" => "ok"}
@@ -354,7 +354,7 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
 
     target = Path.join(example, "target-workflow-control.ptc-project.json")
     assert {target_output, 5} = run(target)
-    assert target_output =~ "execution/workflow_failed"
+    assert target_output =~ "execution/explicit_failure"
 
     base = File.read!(Path.join(example, "target-workflow-control/main.clj"))
 

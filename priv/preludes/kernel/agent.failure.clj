@@ -41,6 +41,8 @@
                       (= reason "rate_limited")
                       (= reason "tool-calling-unsupported")
                       (= reason "tool_calling_unsupported")
+                      (= reason "usage-unavailable")
+                      (= reason "usage_unavailable")
                       (= reason "timeout")
                       (= reason "transport-error")
                       (= reason "transport_error")

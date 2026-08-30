@@ -277,6 +277,11 @@ omission uses the normal runtime default capped by a lower installed ceiling.
 Limits also bound time, heaps, concurrency, retained definitions/history,
 source, capability values, and trace events.
 
+Optional rows such as `llm_total_tokens`, `llm_cost_microusd`,
+`workflow_loop_iterations`, and `evaluation_loop_iterations` stay disabled
+until the host enables them. A manifest cannot turn a host-disabled optional
+limit on; it may only inherit or narrow an enabled host value.
+
 Installed-only operational timeouts cannot appear in a manifest. The generated
 [Kernel limits reference](../kernel-limits-reference.md) lists every name,
 meaning, unit, default, range, and scope.

@@ -1177,7 +1177,7 @@ defmodule PtcRunner.Kernel.TraceLogTest do
                "calls" => 3,
                "successful_calls" => 2,
                "usage_calls" => 2,
-               "missing_usage_calls" => 0,
+               "missing_usage_calls" => 1,
                "usage_overflow" => false,
                "usage" => %{"input" => 8, "output" => 2}
              }

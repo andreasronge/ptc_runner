@@ -160,12 +160,13 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
 
   def run_success_fixture(artifact_class, result) do
     %{
-      "schema_version" => 3,
+      "schema_version" => 4,
       "command" => "run",
       "status" => "ok",
       "run_ref" => CommandRunRef.encode(@zero_entropy),
       "result" => result,
       "secondary_errors" => [],
+      "warnings" => [],
       "artifact_state" => %{
         "trace" => "not_requested",
         "inspection" => "not_requested",
@@ -432,6 +433,23 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
       end
     end)
     |> MapSet.new()
+  end
+
+  @doc """
+  A one-component manifest whose entry is `wide/run`, with a terminal result
+  ceiling small enough that a 200-byte terminal value cannot fit under it.
+  """
+  def narrow_terminal_result_manifest(limit_bytes) do
+    %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "wide", "path" => "wide.clj"}],
+        "entry" => "wide/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"terminal_result_bytes" => limit_bytes},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
   end
 
   def write_application(directory, name, manifest, extra_documents \\ []) do

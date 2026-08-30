@@ -2920,8 +2920,7 @@
     },
     %{
       name: "source",
-      description:
-        "Prints the defining form of an attached prelude ref and returns `nil`.",
+      description: "Prints the defining form of an attached prelude ref and returns `nil`.",
       binding: :special,
       category: :core,
       dispatch: :env,
@@ -4371,7 +4370,7 @@
       see_also: [],
       clojure_var: "defn",
       divergences:
-        "DIV-01: self-recursion is subject to the iteration cap (default 1000, configurable up to 10000). DIV-15: no multi-arity head form ([x] x ([x y] ...)). DIV-16: no :pre/:post conditions. See docs/clojure-conformance-gaps.md."
+        "DIV-01: self-recursion has no default iteration cap; an optional per-activation loop/tail-recur limit may be configured. DIV-15: no multi-arity head form ([x] x ([x y] ...)). DIV-16: no :pre/:post conditions. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "defonce",
@@ -4423,17 +4422,18 @@
     },
     %{
       name: "fail",
-      description: "",
+      description: "End the evaluation with an explicit failure",
       binding: nil,
       category: :core,
       dispatch: :analyze,
-      signatures: ["(fail ...)"],
+      signatures: ["(fail error)"],
       since: nil,
       section: "Agent Control",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "Terminates the program immediately; a Kernel host aborts and rolls back the run. `ptc run` reports `execution/explicit_failure` — unless `error` re-raises a Kernel refusal, which keeps its own class — and its message says whether `error` was retained in the private inspection record or dropped. Not allowed inside `pmap` or `pcalls`.",
+      see_also: ["return"],
       clojure_var: "fail",
       divergences: nil
     },
@@ -4582,7 +4582,7 @@
       see_also: [],
       clojure_var: "loop",
       divergences:
-        "DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md."
+        "DIV-01: no default iteration cap; an optional per-activation loop/tail-recur limit may be configured. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "or",
@@ -4687,21 +4687,22 @@
       see_also: [],
       clojure_var: "recur",
       divergences:
-        "DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md."
+        "DIV-01: no default iteration cap; an optional per-activation loop/tail-recur limit may be configured. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "return",
-      description: "",
+      description: "End the evaluation with an explicit result",
       binding: nil,
       category: :core,
       dispatch: :analyze,
-      signatures: ["(return ...)"],
+      signatures: ["(return value)"],
       since: nil,
       section: "Agent Control",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "Terminates the program immediately and makes `value` the evaluation's result. Not allowed inside `pmap` or `pcalls`.",
+      see_also: ["fail"],
       clojure_var: "return",
       divergences: nil
     },

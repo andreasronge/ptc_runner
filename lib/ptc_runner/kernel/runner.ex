@@ -249,6 +249,7 @@ defmodule PtcRunner.Kernel.Runner do
       max_heap: config.limits.workflow_heap_words,
       max_parallel_workers: config.limits.live_provider_tasks,
       max_program_bytes: config.limits.entry_source_bytes,
+      loop_limit: config.limits.workflow_loop_iterations,
       filter_context: false,
       caller: :kernel,
       telemetry_run: state.pid,
@@ -381,27 +382,32 @@ defmodule PtcRunner.Kernel.Runner do
     private_details = Map.merge(private_details, boundary_producer_details(step))
     private_error = %{public_error | details: Map.merge(public_error.details, private_details)}
 
-    with :ok <-
-           emit_explicit_failure_value(
-             config,
-             evaluation_id,
-             explicit_value
-           ),
-         :ok <-
-           emit_execution_diagnostics(
-             config.inspection_sink,
-             evaluation_id,
-             step.prints,
-             private_error
-           ) do
-      :ok
-    else
-      {:error, :inspection_sink_error} ->
-        :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
-    end
+    # Only the value emit decides retention: a later diagnostics failure does
+    # not unwrite a value the sink already accepted.
+    retention =
+      case emit_explicit_failure_value(config, evaluation_id, explicit_value) do
+        {:ok, retention} ->
+          :ok =
+            emit_execution_diagnostics_or_fail(config, state, evaluation_id, step, private_error)
 
-    {:error, public_error}
+          retention
+
+        {:error, :inspection_sink_error} ->
+          :ok = RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
+          :unwritten
+      end
+
+    {:error, put_explicit_failure_retention(public_error, explicit_value, retention)}
   end
+
+  # The retention outcome is the one fact about an explicit failure the
+  # payload-free envelope can carry: it names where the value went without
+  # naming the value. Only the terminal workflow-fail path supplies one, so
+  # every other failure keeps the details map it already had.
+  defp put_explicit_failure_retention(error, :absent, _retention), do: error
+
+  defp put_explicit_failure_retention(error, {:present, _value}, retention),
+    do: %{error | details: Map.put(error.details, :explicit_failure_retention, retention)}
 
   # A direct return of one successful `kernel-eval` result is the narrow case
   # where the evaluator's return-origin marker and ledger together prove
@@ -458,6 +464,16 @@ defmodule PtcRunner.Kernel.Runner do
     end
   end
 
+  defp emit_execution_diagnostics_or_fail(config, state, evaluation_id, step, error) do
+    case emit_execution_diagnostics(config.inspection_sink, evaluation_id, step.prints, error) do
+      :ok ->
+        :ok
+
+      {:error, :inspection_sink_error} ->
+        RunState.fail(state, :inspection_sink_error, :inspection_sink_error)
+    end
+  end
+
   defp emit_execution_diagnostics(nil, _evaluation_id, _prints, _error), do: :ok
 
   defp emit_execution_diagnostics(sink, evaluation_id, prints, error) do
@@ -509,34 +525,39 @@ defmodule PtcRunner.Kernel.Runner do
     end
   end
 
-  defp emit_explicit_failure_value(_config, _evaluation_id, :absent), do: :ok
+  defp emit_explicit_failure_value(_config, _evaluation_id, :absent), do: {:ok, nil}
 
   defp emit_explicit_failure_value(%{inspection_sink: nil}, _evaluation_id, {:present, _value}),
-    do: :ok
+    do: {:ok, :unrequested}
 
   defp emit_explicit_failure_value(config, evaluation_id, {:present, value}) do
     case admitted_explicit_failure_json(value, config.limits.terminal_result_bytes) do
       {:ok, json} ->
-        InspectionSink.emit(
-          config.inspection_sink,
-          "explicit-failure-value",
-          %{evaluation_id: evaluation_id},
-          %{environment: :workflow, value: json}
-        )
+        with :ok <-
+               InspectionSink.emit(
+                 config.inspection_sink,
+                 "explicit-failure-value",
+                 %{evaluation_id: evaluation_id},
+                 %{environment: :workflow, value: json}
+               ) do
+          {:ok, :retained}
+        end
 
-      :error ->
-        :ok
+      refusal ->
+        {:ok, refusal}
     end
   end
 
+  # A value the boundary cannot project and one that projects but does not fit
+  # are different facts about the same silent drop, and telling a caller their
+  # small value broke a byte ceiling would send them after the wrong remedy.
   defp admitted_explicit_failure_json(value, max_bytes) do
     with {:ok, projected} <- Lisp.project_boundary_value(value, :kernel_json),
          {:ok, json} <- JSONValue.normalize(projected),
-         {:ok, encoded} <- DeterministicJSON.encode(json),
-         true <- byte_size(encoded) <= max_bytes do
-      {:ok, json}
+         {:ok, encoded} <- DeterministicJSON.encode(json) do
+      if byte_size(encoded) <= max_bytes, do: {:ok, json}, else: :oversized
     else
-      _closed -> :error
+      _closed -> :unrepresentable
     end
   end
 

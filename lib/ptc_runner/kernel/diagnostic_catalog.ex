@@ -11,6 +11,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
+  alias PtcRunner.Kernel.ExplicitFailureDiagnostic
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
@@ -78,7 +80,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:application, :installed_limit_exceeded, 3, false,
      "an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling"},
     {:application, :limit_unavailable, 3, false,
-     "an optional application budget is unavailable because the host has not enabled it"},
+     "an optional application limit is unavailable because the host has not enabled it"},
+    {:application, :limit_configuration_invalid, 3, false,
+     "normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes"},
     {:application, :required_property_missing, 3, false,
      "the application manifest is missing a required property"},
     {:application, :reference_missing, 3, false,
@@ -224,6 +228,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:provider_acquisition, :capability_requirement_missing, 4, false,
      "a component requires a capability that the selected providers did not supply"},
     {:execution, :workflow_failed, 5, false, "the workflow failed"},
+    {:execution, :explicit_failure, 5, false, "the workflow signalled an explicit failure"},
     {:execution, :evaluation_failed, 5, false, "the evaluation failed"},
     {:execution, :invalid_agent_config, 5, false,
      "an agent configuration option is outside its supported range"},
@@ -242,6 +247,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the LLM provider denied access to the configured model"},
     {:execution, :llm_timeout, 5, true, "the LLM provider request timed out"},
     {:execution, :llm_provider_unavailable, 5, true, "the LLM provider is unavailable"},
+    {:execution, :llm_usage_unavailable, 5, false,
+     "the LLM provider did not return the promised usage or cost metadata"},
     {:execution, :llm_provider_failed, 5, false, "the LLM provider request failed"},
     {:execution, :mission_failed, 5, false, "a subordinate mission failed"},
     {:execution, :capability_quota_exceeded, 6, false, "a capability quota was exceeded"},
@@ -368,6 +375,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def message_schema(%{phase: :execution, code: :run_timeout, message: fallback}),
     do: RuntimeLimitDiagnostic.run_duration_message_schema(fallback)
 
+  def message_schema(%{phase: :execution, code: :explicit_failure, message: fallback}),
+    do: ExplicitFailureDiagnostic.message_schema(fallback)
+
   def message_schema(%{phase: :execution, code: :replay_fixture_missing, message: fallback}),
     do: LLMReplayDiagnostic.message_schema(fallback)
 
@@ -385,6 +395,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   def message_schema(%{phase: :host, code: :installed_limit_invalid, message: fallback}),
     do: OptionalBudgetDiagnostic.prerequisite_message_schema(fallback)
+
+  def message_schema(%{
+        phase: :application,
+        code: :limit_configuration_invalid,
+        message: fallback
+      }),
+      do: LimitConfigurationDiagnostic.message_schema(fallback)
 
   def message_schema(%{phase: :host, code: :host_schema_invalid, message: fallback}),
     do:
@@ -467,6 +484,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   defp valid_dynamic_message?(:execution, :run_timeout, message),
     do: RuntimeLimitDiagnostic.run_duration_message?(message)
 
+  defp valid_dynamic_message?(:execution, :explicit_failure, message),
+    do: ExplicitFailureDiagnostic.valid_message?(message)
+
   defp valid_dynamic_message?(:execution, :replay_fixture_missing, message),
     do: LLMReplayDiagnostic.valid_message?(message)
 
@@ -484,6 +504,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:host, :installed_limit_invalid, message),
     do: OptionalBudgetDiagnostic.valid_prerequisite_message?(message)
+
+  defp valid_dynamic_message?(:application, :limit_configuration_invalid, message),
+    do: LimitConfigurationDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:host, :host_schema_invalid, message),
     do:
@@ -808,6 +831,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
              :schema_violation,
              :installed_limit_exceeded,
              :limit_unavailable,
+             :limit_configuration_invalid,
              :required_property_missing,
              :event_identity_conflict
            ],

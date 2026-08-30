@@ -21,7 +21,13 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     llm_request_timeout_ms: 1_800_000,
     llm_total_tokens: 9_007_199_254_740_991
   }
-  @minimums %{llm_request_timeout_ms: 100}
+  @minimums %{
+    # EventBudget owns the retained-size upper bound; the catalog test keeps
+    # this schema authority synchronized with that runtime contract.
+    event_payload_bytes: 4_826,
+    llm_request_timeout_ms: 100,
+    normal_event_count: 3
+  }
 
   # `{field, effective default, installed ceiling}`.
   #
@@ -116,18 +122,24 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   ]
 
   @optional_manifest_narrowable [
-    {:llm_total_tokens, 1, 9_007_199_254_740_991, [:usage_tokens],
-     "Requires usage_guarantees.tokens: true on every live LLM installation."},
+    {:evaluation_loop_iterations, 1, @generic_maximum},
     {:llm_cost_microusd, 1, 9_007_199_254_740_991,
      [:usage_tokens, :usage_cost_currency, :reservation_tariff],
-     "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", and an explicit USD reservation_tariff on every live LLM installation."}
+     "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", and an explicit USD reservation_tariff on every live LLM installation."},
+    {:llm_total_tokens, 1, 9_007_199_254_740_991, [:usage_tokens],
+     "Requires usage_guarantees.tokens: true on every live LLM installation."},
+    {:workflow_loop_iterations, 1, @generic_maximum}
   ]
 
   @descriptions %{
     run_duration_ms:
       "Complete ordinary run after optional provider application admission, including active preflight and Kernel execution.",
     workflow_timeout_ms: "One workflow evaluation.",
+    workflow_loop_iterations:
+      "Optional per-activation loop/tail-recur bound for one workflow evaluation.",
     evaluation_timeout_ms: "One subordinate mission evaluation, and one interactive REPL form.",
+    evaluation_loop_iterations:
+      "Optional per-activation loop/tail-recur bound for one subordinate mission evaluation and one interactive REPL form.",
     evaluation_admission_timeout_ms:
       "Wait for the single subordinate-evaluation lease before execution begins.",
     parallel_timeout_ms: "One pmap or pcalls operation, clamped by the run deadline.",
@@ -173,7 +185,9 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   @units %{
     run_duration_ms: :milliseconds,
     workflow_timeout_ms: :milliseconds,
+    workflow_loop_iterations: :count,
     evaluation_timeout_ms: :milliseconds,
+    evaluation_loop_iterations: :count,
     evaluation_admission_timeout_ms: :milliseconds,
     parallel_timeout_ms: :milliseconds,
     workflow_heap_words: :heap_words,
@@ -237,7 +251,16 @@ defmodule PtcRunner.Kernel.LimitCatalog do
            end) ++
            Enum.map(
              @optional_manifest_narrowable,
-             fn {field, minimum, maximum, prerequisites, prerequisite_description} ->
+             fn row ->
+               {field, minimum, maximum, prerequisites, prerequisite_description} =
+                 case row do
+                   {field, minimum, maximum} ->
+                     {field, minimum, maximum, [], nil}
+
+                   {field, minimum, maximum, prerequisites, prerequisite_description} ->
+                     {field, minimum, maximum, prerequisites, prerequisite_description}
+                 end
+
                %{
                  field: field,
                  name: Atom.to_string(field),
@@ -264,7 +287,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
           optional(:prerequisites) => [
             :usage_tokens | :usage_cost_currency | :reservation_tariff
           ],
-          optional(:prerequisite_description) => binary(),
+          optional(:prerequisite_description) => binary() | nil,
           field: atom(),
           name: binary(),
           scope: scope(),
