@@ -172,6 +172,11 @@ defmodule PtcRunner.Kernel.RunConfig do
            ),
          true <- result_projection?(Keyword.get(opts, :result_projection, :native)),
          true <- phase_return_contracts?(Keyword.get(opts, :phase_return_contracts, %{})),
+         true <-
+           contract_prompt_projections?(
+             Keyword.get(opts, :result_contract),
+             Keyword.get(opts, :phase_return_contracts, %{})
+           ),
          {:ok, event_sink_owner} <- EventSink.owner(sink),
          true <- inspection?(Keyword.get(opts, :inspection_sink)),
          {:ok, inspection_sink_owner} <-
@@ -293,9 +298,12 @@ defmodule PtcRunner.Kernel.RunConfig do
 
   defp phase_return_contracts?(contracts) when is_map(contracts) and map_size(contracts) <= 16 do
     Enum.all?(contracts, fn
-      {name, %{contract: %ValueContract{} = contract, source: source, projection: projection}}
+      {name,
+       %{contract: %ValueContract{} = contract, source: source, projection: projection} = binding}
       when is_binary(name) and is_binary(source) ->
-        ValueContract.sealed?(contract) and
+        not is_struct(binding) and
+          Enum.sort(Map.keys(binding)) == [:contract, :projection, :source] and
+          ValueContract.sealed?(contract) and
           byte_size(name) in 1..128 and
           Regex.match?(~r/\A[a-z][a-z0-9._-]*\z/, name) and
           ApplicationSource.valid_name?(source) and
@@ -307,6 +315,28 @@ defmodule PtcRunner.Kernel.RunConfig do
   end
 
   defp phase_return_contracts?(_contracts), do: false
+
+  defp contract_prompt_projections?(result_contract, phase_contracts) do
+    projections =
+      if is_nil(result_contract) do
+        []
+      else
+        case ModelContract.value_contract(result_contract) do
+          {:ok, projection} -> [projection]
+          {:error, _reason} -> [:invalid]
+        end
+      end ++ Enum.map(phase_contracts, fn {_name, binding} -> binding.projection end)
+
+    Enum.reduce_while(projections, 0, fn projection, aggregate ->
+      case ModelContract.projection_bytes(projection) do
+        {:ok, bytes} when bytes <= 262_144 and aggregate + bytes <= 1_048_576 ->
+          {:cont, aggregate + bytes}
+
+        _invalid ->
+          {:halt, :invalid}
+      end
+    end) != :invalid
+  end
 
   defp result_projection?(projection), do: projection in [:native, :json]
 

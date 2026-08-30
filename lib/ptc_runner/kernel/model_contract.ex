@@ -52,11 +52,7 @@ defmodule PtcRunner.Kernel.ModelContract do
   @doc "Returns the annotation-sensitive identity of a renderer-neutral projection."
   @spec projection_hash(term()) :: {:ok, binary()} | {:error, :unsupported_contract}
   def projection_hash(projection) do
-    with {:ok, json} <- DeterministicJSON.encode(projection),
-         {:ok, value} <- Jason.decode(json) do
-      TypedCanonicalJSON.encode(value)
-    end
-    |> case do
+    case encoded_projection(projection) do
       {:ok, encoded} ->
         framed = <<byte_size(encoded)::unsigned-big-64, encoded::binary>>
 
@@ -66,6 +62,15 @@ defmodule PtcRunner.Kernel.ModelContract do
 
       {:error, _reason} ->
         {:error, :unsupported_contract}
+    end
+  end
+
+  @doc false
+  @spec projection_bytes(term()) :: {:ok, non_neg_integer()} | {:error, :unsupported_contract}
+  def projection_bytes(projection) do
+    case encoded_projection(projection) do
+      {:ok, encoded} -> {:ok, byte_size(encoded)}
+      {:error, _reason} -> {:error, :unsupported_contract}
     end
   end
 
@@ -222,9 +227,9 @@ defmodule PtcRunner.Kernel.ModelContract do
            {"kind", "object"},
            {"nullable", false},
            {"closed", Map.get(schema, "additionalProperties", false) == false},
-           {"fields", fields},
-           {"property_names", property_names}
-         ]
+           {"fields", fields}
+         ] ++
+           if(is_nil(property_names), do: [], else: [{"property_names", property_names}])
        )}
     end
   end
@@ -434,4 +439,10 @@ defmodule PtcRunner.Kernel.ModelContract do
   end
 
   defp object(pairs), do: {:object, pairs}
+
+  defp encoded_projection(projection) do
+    with {:ok, json} <- DeterministicJSON.encode(projection),
+         {:ok, value} <- Jason.decode(json),
+         do: TypedCanonicalJSON.encode(value)
+  end
 end

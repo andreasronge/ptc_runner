@@ -1642,6 +1642,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   test "caller contract fields cannot inject system-prompt obligations" do
     response = agent_return("done", ~S|(return "done")|)
+
     {:ok, config} = agent_config([response])
 
     source =
@@ -1713,6 +1714,79 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert List.first(request["messages"])["content"] =~
              "Exhaustion without an explicit return fails"
+
+    assert Enum.any?(EventSink.events(config.event_sink), fn event ->
+             event.type == "run-stopped" and
+               event.data[:failure_kind] == "phase-return-contract-failed"
+           end)
+  end
+
+  test "an explicitly null optional phase contract is treated as absent" do
+    responses = [
+      agent_return("handoff", ~S|(return "ready")|),
+      agent_return("done", ~S|(return "done")|)
+    ]
+
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config(responses, [], missions: %{"gather" => mission, "finish" => mission})
+
+    source =
+      ~S|(agent.core/run-phased-result-value "work" {"phases" [{"mission" "gather" "max_turns" 1 "return_contract" nil} {"mission" "finish" "max_turns" 1}]})|
+
+    assert {:ok, %{value: "done"}} = Kernel.run(source, config)
+  end
+
+  test "direct run configuration enforces the aggregate phase projection bound" do
+    properties =
+      for index <- 1..128, into: %{} do
+        {"field#{index}",
+         %{
+           "type" => "string",
+           "description" => String.duplicate("d", 390),
+           "minLength" => 1
+         }}
+      end
+
+    schema = %{
+      "type" => "object",
+      "additionalProperties" => false,
+      "properties" => properties
+    }
+
+    {:ok, contract} = ValueContract.compile(schema)
+    {:ok, projection} = ModelContract.value_contract(contract)
+
+    bindings =
+      Map.new(1..16, fn index ->
+        {"phase#{index}",
+         %{contract: contract, source: "phase#{index}.schema.json", projection: projection}}
+      end)
+
+    assert {:error, :invalid_run_config} =
+             agent_config([], [], phase_return_contracts: bindings)
+  end
+
+  test "direct run configuration rejects open phase contract bindings" do
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "additionalProperties" => false,
+        "properties" => %{"value" => %{"type" => "string"}}
+      })
+
+    {:ok, projection} = ModelContract.value_contract(contract)
+
+    binding = %{
+      contract: contract,
+      source: "phase.schema.json",
+      projection: projection,
+      injected: String.duplicate("x", 1_000_000)
+    }
+
+    assert {:error, :invalid_run_config} =
+             agent_config([], [], phase_return_contracts: %{"phase" => binding})
   end
 
   test "agent.core/run result-contract feedback omits rejected values and undeclared names" do

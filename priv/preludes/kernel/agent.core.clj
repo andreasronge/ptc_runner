@@ -70,7 +70,7 @@
        (or (nil? (get phase "terminal_only"))
            (true? (get phase "terminal_only"))
            (false? (get phase "terminal_only")))
-       (or (not (contains? phase "return_contract"))
+       (or (nil? (get phase "return_contract"))
            (and (string? (get phase "return_contract"))
                 (re-matches #"[a-z][a-z0-9._-]{0,127}" (get phase "return_contract"))))))
 

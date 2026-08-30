@@ -38,7 +38,6 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.ConfinedFile
-  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.Library
@@ -656,12 +655,10 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
   defp contract_prompt_binding(%ValueContract{} = contract) do
     with {:ok, projection} <- ModelContract.value_contract(contract),
-         {:ok, json} <- DeterministicJSON.encode(projection),
-         {:ok, value} <- Jason.decode(json),
-         {:ok, encoded} <- TypedCanonicalJSON.encode(value),
-         true <- byte_size(encoded) <= 262_144,
+         {:ok, bytes} <- ModelContract.projection_bytes(projection),
+         true <- bytes <= 262_144,
          {:ok, hash} <- ModelContract.projection_hash(projection) do
-      {:ok, projection, hash, byte_size(encoded)}
+      {:ok, projection, hash, bytes}
     else
       _unsupported -> {:error, :contract_projection_limit_exceeded}
     end
