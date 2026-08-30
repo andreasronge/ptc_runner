@@ -12,6 +12,7 @@ defmodule PtcRunner.Lisp.Tool do
     :type,
     :expose,
     :native_result,
+    :contract,
     argument_collisions: :reject,
     argument_projection: :tool,
     prelude_namespaces: :any,
@@ -30,6 +31,7 @@ defmodule PtcRunner.Lisp.Tool do
           type: atom() | nil,
           expose: atom() | nil,
           native_result: keyword() | nil,
+          contract: map() | nil,
           ledger_arguments: :full | (map() -> map()),
           argument_collisions: :reject | :pass,
           argument_projection: :tool | :raw,
@@ -46,6 +48,7 @@ defmodule PtcRunner.Lisp.Tool do
         name,
         %TrustedTool{
           function: function,
+          contract: contract,
           argument_projection: argument_projection,
           ledger_arguments: ledger_arguments,
           prelude_namespaces: prelude_namespaces,
@@ -61,6 +64,7 @@ defmodule PtcRunner.Lisp.Tool do
           ledger_arguments: ledger_arguments,
           prelude_namespaces: prelude_namespaces,
           visibility: visibility,
+          contract: contract,
           type: :native,
           argument_collisions: :pass
         })

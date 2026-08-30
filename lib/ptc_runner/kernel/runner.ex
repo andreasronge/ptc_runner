@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ProjectionError
@@ -254,7 +255,8 @@ defmodule PtcRunner.Kernel.Runner do
       caller: :kernel,
       telemetry_run: state.pid,
       strict_data: true,
-      data_grants: DataKeys.source_referenceable_forms(config.input)
+      data_grants: DataKeys.source_referenceable_forms(config.input),
+      shipped_library_ids: Library.component_ids()
     ]
 
     case Lisp.run_native(entry_source, opts) do
@@ -704,7 +706,10 @@ defmodule PtcRunner.Kernel.Runner do
       config.event_sink,
       config.workflow_environment.bundle
     )
-    |> RuntimeTools.trusted_tools(config.limits)
+    |> RuntimeTools.trusted_tools(
+      config.limits,
+      ToolGrant.capability_contracts(config.workflow_environment)
+    )
   end
 
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude

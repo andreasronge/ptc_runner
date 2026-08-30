@@ -181,8 +181,18 @@ lists declared missions in sorted order before sinks or provider activity.</p><p
 sessions explain that <code class="inline">:context</code> requires a manifest mission instead of
 attempting to use a manifest session internally.</p><p>The language functions are the canonical discovery interface in every input
 context, not only at a terminal: <code class="inline">(apropos &quot;term&quot;)</code> / <code class="inline">(apropos 'term)</code> searches
-attached prelude exports, fixed built-ins, and the bounded Java surface, while
-<code class="inline">(doc &quot;name&quot;)</code> / <code class="inline">(doc name)</code> prints documentation. <code class="inline">(dir)</code> and
+attached prelude exports, installed callable capabilities, fixed built-ins, and
+the bounded Java surface, while <code class="inline">(doc &quot;name&quot;)</code> / <code class="inline">(doc name)</code> prints
+documentation. An installed capability is addressed as <code class="inline">tool/&lt;name&gt;</code>; its
+documentation includes its description, input schema, and effect. This remains
+true when its <code class="inline">model_visible</code> flag is false: that flag controls prompt inventory
+only, not runtime discovery or authority. Uninstalled capabilities and private
+Lisp runtime tools are not exposed. When the selected environment has not
+attached a matching shipped library, <code class="inline">doc</code> or <code class="inline">apropos</code> prints an attachment
+redirect. Add <code class="inline">{&quot;library&quot;: &quot;&lt;id&gt;&quot;}</code> to <code class="inline">workflow.components</code> for a workflow or
+to <code class="inline">missions.&lt;name&gt;.components</code> for a mission, then restart the run or session.
+The redirect identifies a matching library namespace; it does not assert that
+the requested export exists. <code class="inline">(dir)</code> and
 <code class="inline">(export-meta &quot;ns/name&quot;)</code> / <code class="inline">(export-meta ns/name)</code> inspect the attached
 prelude API specifically, and <code class="inline">(source ns/name)</code> prints an attached prelude
 defining form when available. For <code class="inline">doc</code>/<code class="inline">dir</code>/<code class="inline">export-meta</code>/<code class="inline">source</code>, unquoted

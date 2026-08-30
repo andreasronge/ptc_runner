@@ -171,8 +171,18 @@ attempting to use a manifest session internally.
 
 The language functions are the canonical discovery interface in every input
 context, not only at a terminal: `(apropos "term")` / `(apropos 'term)` searches
-attached prelude exports, fixed built-ins, and the bounded Java surface, while
-`(doc "name")` / `(doc name)` prints documentation. `(dir)` and
+attached prelude exports, installed callable capabilities, fixed built-ins, and
+the bounded Java surface, while `(doc "name")` / `(doc name)` prints
+documentation. An installed capability is addressed as `tool/<name>`; its
+documentation includes its description, input schema, and effect. This remains
+true when its `model_visible` flag is false: that flag controls prompt inventory
+only, not runtime discovery or authority. Uninstalled capabilities and private
+Lisp runtime tools are not exposed. When the selected environment has not
+attached a matching shipped library, `doc` or `apropos` prints an attachment
+redirect. Add `{"library": "<id>"}` to `workflow.components` for a workflow or
+to `missions.<name>.components` for a mission, then restart the run or session.
+The redirect identifies a matching library namespace; it does not assert that
+the requested export exists. `(dir)` and
 `(export-meta "ns/name")` / `(export-meta ns/name)` inspect the attached
 prelude API specifically, and `(source ns/name)` prints an attached prelude
 defining form when available. For `doc`/`dir`/`export-meta`/`source`, unquoted

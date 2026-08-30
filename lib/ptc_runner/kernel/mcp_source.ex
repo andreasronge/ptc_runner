@@ -245,7 +245,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   `mimeType`; response ceilings bound the complete decoded result before
   normalization. Each sorted tool entry contains only its public `name`, fixed
   operator-declared `effect`,
-  model-visibility flag, one-way upstream-name and nullable prompt-visible
+  model-visibility flag, one-way upstream-name and nullable runtime-visible
   description hashes, `input_schema_hash`, nullable `output_schema_hash`, and
   nullable `http_headers_hash`. The `effect` is the selected operator-declared
   `"read"` or `"write"` value. Hashes are lowercase SHA-256; endpoints, raw
@@ -1004,8 +1004,7 @@ defmodule PtcRunner.Kernel.MCPSource do
            transport_header_parameters_hash(transport.type, contract.header_parameters) do
       upstream_name_hash = sha256(upstream)
 
-      description_hash =
-        if capability.model_visible, do: optional_text_hash(capability.description), else: nil
+      description_hash = optional_text_hash(capability.description)
 
       {:ok, capability,
        %{

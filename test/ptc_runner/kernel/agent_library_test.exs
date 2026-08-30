@@ -2269,7 +2269,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:semantic_prompt, first_prompt}
     assert_receive {:semantic_prompt, second_prompt}
     assert first_prompt =~ "exactly once per turn"
-    assert first_prompt =~ "only against the advertised mission API"
+    assert first_prompt =~ "only against the installed mission API"
     assert first_prompt == second_prompt
     assert second_prompt =~ "each continuation message state how many programs remain"
   end
@@ -2296,10 +2296,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              ~r/\nAvailable API\n- No mission-specific data, functions, or tools are available\.\n\z/
 
     assert system =~
-             "Use (apropos \"term\") to search visible mission prelude exports plus fixed built-ins"
+             "Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins"
 
     assert system =~ "(source ns/name)"
-    assert system =~ "None enumerate data references or direct tool capabilities"
+    assert system =~ "Only apropos and doc cover installed direct tool capabilities"
   end
 
   test "default prompt advertises mission data names and types without values" do
@@ -4495,7 +4495,13 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     empty = capture_system(empty_config, ~S|(agent.core/run "work" {"max_turns" 1})|)
     assert prompt_labels(empty) |> List.last() == "api-empty"
 
-    {:ok, contract} = ValueContract.compile(%{"type" => "string"})
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["value"],
+        "properties" => %{"value" => %{"type" => "string"}}
+      })
     {:ok, result_config} = agent_config([response], [], result_contract: contract)
 
     result =

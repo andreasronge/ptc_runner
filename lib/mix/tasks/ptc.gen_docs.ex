@@ -679,7 +679,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     Effects below use the same conservative, environment-independent projection as `(doc ...)` and `(export-meta ...)`: an export that reaches a capability is `unknown` unless its chain declares `write`. The authoritative model-visible effect belongs to the assembled mission inventory, where installed capability effects may resolve that value to `read` or `write`.
 
-    `:prompt` exports appear in model inventory. `:discoverable` exports stay out of that prompt inventory but remain callable and can be found with `(dir)`, `(dir "namespace")`, `(apropos "term")`, `(doc "namespace/name")`, `(export-meta "namespace/name")`, and `(source namespace/name)`. `apropos` and `doc` additionally cover fixed built-ins and the bounded Java surface; `dir`, `export-meta`, and `source` remain attached-prelude views. Hiding an export from the prompt does not narrow authority.
+    `:prompt` exports appear in model inventory. `:discoverable` exports stay out of that prompt inventory but remain callable and can be found with `(dir)`, `(dir "namespace")`, `(apropos "term")`, `(doc "namespace/name")`, `(export-meta "namespace/name")`, and `(source namespace/name)`. `apropos` and `doc` additionally cover installed callable capabilities, fixed built-ins, and the bounded Java surface; `dir`, `export-meta`, and `source` remain attached-prelude views. When a session has not attached a shipped library, `doc` and `apropos` print an attachment redirect. The shipped catalog identifies libraries rather than exact exports, so the redirect does not assert that the requested export exists. Hiding an export or capability from the prompt does not narrow authority or runtime discovery.
 
     ## Customize or replace a component
 
