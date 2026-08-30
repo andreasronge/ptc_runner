@@ -119,6 +119,15 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert printed =~ "tool/large\n  effect: write"
     end
 
+    test "searches contract text beyond Inspect's default printable limit", %{
+      prelude: prelude
+    } do
+      description = String.duplicate("x", 4_096) <> "terminal-marker"
+      tools = %{"large" => trusted_capability("large", description, "query", :read, true)}
+
+      assert "tool/large" in eval!(~S|(apropos "terminal-marker")|, prelude, tools: tools).return
+    end
+
     test "matches on ref", %{prelude: prelude} do
       assert "beta/hidden" in eval!(~S|(apropos "hidden")|, prelude).return
     end

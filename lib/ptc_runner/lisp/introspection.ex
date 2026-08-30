@@ -409,7 +409,7 @@ defmodule PtcRunner.Lisp.Introspection do
       |> Map.put(:ref, "tool/" <> Map.fetch!(contract, :name))
 
     searchable_contract
-    |> inspect(limit: :infinity)
+    |> inspect(limit: :infinity, printable_limit: :infinity)
     |> String.downcase()
     |> String.contains?(needle)
   end
