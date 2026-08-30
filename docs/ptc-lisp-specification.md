@@ -3719,11 +3719,10 @@ that are transitively reachable from a public export.
 Attached prelude results for `dir`/`doc`/`apropos`/`export-meta` are filtered
 to what the running program may actually call. A miss is not a failure:
 `export-meta` returns `nil`, `doc` and `source` print a not-found line (or, for
-`doc` on an unattached shipped library, an attachment redirect), and
+`doc` on an exact indexed export of an unattached shipped library, an attachment redirect), and
 `dir` returns `[]`. A blank `apropos` query returns `[]` rather than every
-fixed and attached function. When the query matches unattached shipped
-libraries, `apropos` prints those library IDs and still returns only callable
-names.
+fixed and attached function. `apropos` searches only callable/discoverable names
+and never consults the shipped-export diagnostic index.
 
 `export-meta` is not `clojure.core/meta`, which takes an object rather than a
 reference string and is not implemented.

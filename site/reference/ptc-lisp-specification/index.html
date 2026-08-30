@@ -1525,11 +1525,10 @@ the exception for implementation inspection: it also reveals private helpers
 that are transitively reachable from a public export.</p><p>Attached prelude results for <code class="inline">dir</code>/<code class="inline">doc</code>/<code class="inline">apropos</code>/<code class="inline">export-meta</code> are filtered
 to what the running program may actually call. A miss is not a failure:
 <code class="inline">export-meta</code> returns <code class="inline">nil</code>, <code class="inline">doc</code> and <code class="inline">source</code> print a not-found line (or, for
-<code class="inline">doc</code> on an unattached shipped library, an attachment redirect), and
+<code class="inline">doc</code> on an exact indexed export of an unattached shipped library, an attachment redirect), and
 <code class="inline">dir</code> returns <code class="inline">[]</code>. A blank <code class="inline">apropos</code> query returns <code class="inline">[]</code> rather than every
-fixed and attached function. When the query matches unattached shipped
-libraries, <code class="inline">apropos</code> prints those library IDs and still returns only callable
-names.</p><p><code class="inline">export-meta</code> is not <code class="inline">clojure.core/meta</code>, which takes an object rather than a
+fixed and attached function. <code class="inline">apropos</code> searches only callable/discoverable names
+and never consults the shipped-export diagnostic index.</p><p><code class="inline">export-meta</code> is not <code class="inline">clojure.core/meta</code>, which takes an object rather than a
 reference string and is not implemented.</p><h2 id="10-complete-examples">10. Complete Examples</h2><h3 id="10-1-filter-and-sum-pure-query">10.1 Filter and Sum (Pure Query)</h3><p>Filter expenses by category and sum amounts:</p><pre><code class="clojure language-clojure">(-&gt;&gt; data/expenses
      (filter (fn [e] (= (:category e) &quot;travel&quot;)))
      (sum-by :amount))</code></pre><p>Returns a number. No memory is updated because the program contains no <code class="inline">def</code>;
