@@ -604,8 +604,15 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
        reference.reference_id,
        nil,
        "Java member expects #{format_arities(expected)} argument(s), got #{actual}",
-       %{expected: expected, actual: actual}
+       %{name: reference_spelling(reference), expected: expected, actual: actual}
      )}
+  end
+
+  defp reference_spelling(reference) do
+    case reference.spellings do
+      [spelling | _] -> spelling
+      [] -> nil
+    end
   end
 
   defp type_error(reference, candidates, receiver, arguments),
@@ -622,7 +629,12 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
          reference.reference_id,
          nil,
          "Java member receiver does not match an admitted class",
-         %{receiver: true, expected: receiver_profiles, actual: value_type(receiver)}
+         %{
+           name: reference_spelling(reference),
+           receiver: true,
+           expected: receiver_profiles,
+           actual: value_type(receiver)
+         }
        )}
     else
       argument_type_error(reference, candidates, arguments, argument_coercer)

@@ -36,16 +36,19 @@
 ;; namespace docstring can reproduce an anchor; when that makes an anchor occur
 ;; twice the provenance of every boundary after it is unknowable from the string
 ;; alone, and guessing would report authored characters that a manifest wrote.
-(defn- api-segments [text head api-end]
+(defn- api-segments [text head api-end api-limit tail]
   (let [legend "In map types, field? means the field may be omitted; type? means nil is allowed.\n\n"
+        empty-api "- No mission-specific data, functions, or tools are available.\n"
         notes-anchor "API notes\n"
         notes-start (+ api-end (count notes-anchor))
         notes? (= notes-anchor (subs text api-end notes-start))]
-    (if (and (occurs-once? text legend)
+    (if (= empty-api (subs text api-end api-limit))
+      (into (into head [{"label" "api-empty" "text" empty-api}]) tail)
+      (if (and (occurs-once? (subs text 0 api-limit) legend)
              (or (not notes?) (occurs-once? text notes-anchor)))
       (let [legend-at (index-of text legend)
             legend-end (+ legend-at (count legend))
-            entries (subs text legend-end)
+            entries (subs text legend-end api-limit)
             notes-end (if notes? (notes-terminator text notes-start legend-at) api-end)]
         ;; Every rendered entry ends in a newline and render-api appends one
         ;; more, so a complete entry list ends in a blank line. Requiring only a
@@ -54,28 +57,51 @@
         (if (and (not (nil? notes-end))
                  (>= legend-at notes-end)
                  (ends-with? entries "\n\n"))
-          (into (into head
-                      (if (= notes-end api-end)
-                        []
-                        [{"label" "api-notes" "text" (subs text api-end notes-end)}]))
-                [{"label" "api-legend" "text" (subs text notes-end legend-end)}
-                 {"label" "api-entries" "text" entries}])
+          (into (into (into head
+                            (if (= notes-end api-end)
+                              []
+                              [{"label" "api-notes" "text" (subs text api-end notes-end)}]))
+                      [{"label" "api-legend" "text" (subs text notes-end legend-end)}
+                       {"label" "api-entries" "text" entries}])
+                tail)
           (unrecognised text)))
-      (unrecognised text))))
+        (unrecognised text)))))
+
+(defn- contract-tail [text api-end]
+  (let [result-anchor "\nApplication result contract\n"
+        phase-anchor "\nCurrent phase return contract ("
+        result-at (index-of text result-anchor api-end)
+        phase-at (index-of text phase-anchor api-end)
+        unique? (and (or (nil? result-at) (occurs-once? text result-anchor))
+                     (or (nil? phase-at) (occurs-once? text phase-anchor)))
+        ordered? (or (nil? result-at) (nil? phase-at) (< result-at phase-at))
+        api-limit (or result-at phase-at (count text))]
+    (if (and unique? ordered?)
+      {"api-limit" api-limit
+       "tail" (into (if (nil? result-at)
+                       []
+                       [{"label" "result-contract"
+                         "text" (subs text result-at (or phase-at (count text)))}])
+                     (if (nil? phase-at)
+                       []
+                       [{"label" "phase-return-contract"
+                         "text" (subs text phase-at)}]))}
+      nil)))
 
 (defn segments
   "Splits a rendered agent system prompt into its ordered emission segments.
 
   Returns a vector of {\"label\" .. \"text\" ..} in the order `render` emits
   them: marker, protocol, language, examples, api-heading, api-notes,
-  api-legend, api-entries. Each label occurs at most once. `api-notes` and
-  `api-entries` hold manifest-derived text; the rest is authored in
+  api-legend, api-entries, result-contract, phase-return-contract. Each label
+  occurs at most once. `api-notes`, `api-entries`, and both optional contract
+  projections are manifest-derived; the remaining segments are authored in
   `agent.prompt`. The order is the structure — the rendering interleaves
   authored and dynamic text, so no unordered value can encode reassembly.
 
-  The empty-API rendering stops after `api-heading` and yields the first five
-  segments. `api-notes` is absent when the mission declares no namespace
-  docstrings.
+  The authored empty-API sentence is an `api-empty` segment. `api-notes` is absent
+  when the mission declares no namespace docstrings. Result and phase-return
+  contracts are optional dynamic suffix segments.
 
   Any string that is not a shipped rendering — a manifest's own prompt, a
   malformed one, or one whose manifest text reproduces an anchor — returns a
@@ -109,10 +135,13 @@
                       {"label" "protocol" "text" (subs text protocol-at language-at)}
                       {"label" "language" "text" (subs text language-at examples-at)}
                       {"label" "examples" "text" (subs text examples-at api-at)}
-                      {"label" "api-heading" "text" (subs text api-at api-end)}]]
-            (if (= api-end (count text))
-              head
-              (api-segments text head api-end)))
+                      {"label" "api-heading" "text" (subs text api-at api-end)}]
+                contracts (contract-tail text api-end)]
+            (if (nil? contracts)
+              (unrecognised text)
+              (api-segments text head api-end
+                            (get contracts "api-limit")
+                            (get contracts "tail"))))
           (unrecognised text)))
       (unrecognised text))))
 
@@ -151,7 +180,10 @@
 
 (defn- authored-row? [row]
   (let [label (get row "label")]
-    (not (or (= "api-notes" label) (= "api-entries" label)))))
+    (not (or (= "api-notes" label)
+             (= "api-entries" label)
+             (= "result-contract" label)
+             (= "phase-return-contract" label)))))
 
 (defn- derived-row [label rows]
   (row label
@@ -174,11 +206,12 @@
   their own aggregated character count rather than by summing per-segment
   estimates, which would differ.
 
-  `authored` sums every segment except `api-notes` and `api-entries`, which
-  `dynamic` sums; an `unrecognised` segment counts as authored. So
+  `authored` sums the fixed prompt-policy segments. `dynamic` sums `api-notes`,
+  `api-entries`, and the manifest-driven result and phase contract projections;
+  an `unrecognised` segment counts as authored. So
   authored + dynamic equals total in both cases. Treat the split as approximate
-  reporting: the dynamic segments carry authored formatter text — the
-  \"API notes\" heading, the per-entry `Call`, `Type` and `Docs` labels — so it
+  reporting: the dynamic segments carry authored formatter text — headings and
+  the per-entry `Call`, `Type` and `Docs` labels — so it
   says roughly how much of a rendering a manifest drove, and no more. A budget
   reads `total`."
   [text]

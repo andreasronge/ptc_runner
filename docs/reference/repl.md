@@ -12,7 +12,7 @@ environments deliberately separate:
 | Manifest workflow | `--project` or `--manifest` | manifest workflow | workflow capabilities and model routes |
 | Manifest mission | `--project` or `--manifest` plus `--mission NAME` | selected manifest mission | direct mission capabilities plus provider dependency closure |
 | Public analysis profile | `--profile run-analysis-v1` | fixed code-owned mission | immutable traces |
-| Private analysis profile | `--profile private-run-analysis-v1` | fixed code-owned mission | correlated traces and private inspection records |
+| Private analysis profile | `--profile private-run-analysis-v2` | fixed code-owned mission | correlated traces and private inspection records |
 | Private catalog profile | `--profile private-run-catalog-v1` | fixed code-owned mission | safe metadata from bounded trace and inspection probes |
 
 Successful definitions and exact `*1`, `*2`, and `*3` history persist for one
@@ -422,7 +422,7 @@ ptc repl --profile private-run-catalog-v1 \
   -e '(analysis/catalog {"state" "admissible" "limit" 20})'
 
 # Session 2: re-verify and admit only the explicit set (at most sixteen).
-ptc repl --profile private-run-analysis-v1 \
+ptc repl --profile private-run-analysis-v2 \
   --run cmd-00000000000000000000000001 \
   --run cmd-00000000000000000000000002 \
   --resource traces=tmp/tutorial-traces \
@@ -448,7 +448,7 @@ authorization:
 
 ```console
 ptc repl \
-  --profile private-run-analysis-v1 \
+  --profile private-run-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \
@@ -461,7 +461,7 @@ interactive terminal with those definitions available. `--eval`, scripts, and
 stdin remain unattended input and require `--private-unattended` instead.
 
 Repeat `--run RUN_ID` one through sixteen times to admit one exact, bounded
-cohort. Selection is available only with `private-run-analysis-v1`; a single
+cohort. Selection is available only with `private-run-analysis-v2`; a single
 flag still uses the selected-set path, while no flags retain whole-directory
 capture. Values are validated as a complete list and then treated as an
 order-independent set. Selected capture resolves only each run's exact normal
@@ -553,6 +553,21 @@ source; page-level evidence reports incomplete or ambiguous reconstruction
 without guessing. The repeated system prompt is omitted from turns and remains
 available in the raw `model_exchanges` collection.
 
+The private profile installs the pure `prompt.audit` component so a recorded
+system prompt can be measured without adding a capability grant:
+
+```clojure
+(def exchanges
+  (analysis/read run-id {"collection" "model_exchanges" "limit" 1}))
+(def system-prompt
+  (get-in exchanges ["items" 0 "arguments" "system"]))
+(prompt.audit/measure system-prompt)
+```
+
+Use `prompt.audit/segments` for the ordered authored/dynamic sections, or
+`prompt.audit/delta` to compare two rendered prompts. A non-shipped rendering
+returns one `unrecognised` segment instead of guessed boundaries.
+
 For one complete conversation, use the simpler one-shot command:
 
 ```console
@@ -594,7 +609,7 @@ mutually exclusive with `--private-terminal`:
 
 ```console
 ptc repl \
-  --profile private-run-analysis-v1 \
+  --profile private-run-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \

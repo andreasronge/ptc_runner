@@ -10,7 +10,8 @@ Use (return value) only when the task is complete; (return value) completes succ
 Use (fail value) only when the task cannot be completed; (fail value) aborts the run.
 Generated programs run only against the advertised mission API below.
 Do not repeat irreversible capability effects merely to reconstruct state.
-FINAL TURN: the next program must call (return value) or (fail value).
+The task and each continuation message state how many programs remain; use that budget to pace exploration.
+When a budget notice says FINAL TURN, the next program must call (return value) or (fail value).
 Do not answer in prose.
 
 PTC-Lisp
@@ -22,7 +23,8 @@ PTC-Lisp
 - Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.
 - Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.
 - Value references are values; call only function references.
-- The API below is the prompt-visible subset: (dir) lists namespaces, (dir "ns") its exports, (apropos "term") searches, (doc "ns/name") prints documentation, (export-meta "ns/name") returns it as data. Exports found this way are callable.
+- The Available API section below is complete for mission data, prompt-visible mission functions, and granted tools.
+- Use (apropos "term") to search visible mission prelude exports plus fixed built-ins and the bounded Java surface; use (doc "name") to print their documentation. (dir) lists attached prelude namespaces, (dir "ns") their exports, (export-meta "ns/name") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. None enumerate data references or direct tool capabilities.
 - Call granted capabilities only with the exact tool/... forms shown below.
 - Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.
 - No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.
@@ -30,7 +32,6 @@ PTC-Lisp
 Examples
 Turn 1: (defn add-one [x] (+ x 1))
 Turn 2: (return (add-one 41))
-(let [rows (get data/input "rows") active (filter #(true? (get % "active")) rows)] (return (mapv #(get % "id") active)))
 (let [response (tool/exact-name {"query" "value"})] (if (= :ok (get response :status)) (return (get response :value)) (fail response)))
 
 Available API
@@ -41,9 +42,8 @@ Calls beginning with tool/ take exactly one argument map and return a result env
 In map types, field? means the field may be omitted; type? means nil is allowed.
 
 - Call: (tool/sample-lookup {"id" id})
-  Type: (arguments {id :string, limit? :int}) -> {value :string}
-  Constraints: arguments has no additional fields; arguments["id"] length >= 1; arguments["limit"] >= 1; arguments["limit"] <= 50; return has no additional fields
-  Schema docs: arguments["id"]: Identifier to look up.
+  Type: (arguments {id :string}) -> {value :string}
+  Constraints: arguments has no additional fields; return has no additional fields
   Effect: read
   Docs: Look one sample up by identifier.
 

@@ -188,6 +188,15 @@ defmodule PtcRunner.Lisp.EvaluatorError do
     end
   end
 
+  defp retain_public_details(:java_arity_error, details), do: retain_arity_details(details)
+
+  defp retain_public_details(:java_type_error, details) do
+    case admitted_java_member_name(details) do
+      {:ok, name} -> %{name: name}
+      :error -> %{}
+    end
+  end
+
   defp retain_public_details(:loop_limit_exceeded, details) do
     case admitted_positive_integer(Map.get(details, :limit) || Map.get(details, "limit")) do
       {:ok, limit} -> %{limit: limit}
@@ -202,10 +211,11 @@ defmodule PtcRunner.Lisp.EvaluatorError do
     |> maybe_put_arity_name(details)
     |> maybe_put(:expected, Map.get(details, :expected) || Map.get(details, "expected"))
     |> maybe_put(:actual, Map.get(details, :actual) || Map.get(details, "actual"))
+    |> maybe_put_receiver_required(details)
   end
 
   defp maybe_put_arity_name(map, details) do
-    case admitted_public_name(details) do
+    case admitted_arity_name(details) do
       {:ok, name} -> Map.put(map, :name, name)
       :error -> map
     end
@@ -213,6 +223,12 @@ defmodule PtcRunner.Lisp.EvaluatorError do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp maybe_put_receiver_required(map, details) do
+    if Map.get(details, :receiver_required?) == true,
+      do: Map.put(map, :receiver_required?, true),
+      else: map
+  end
 
   defp lisp_prefix(:arity_error), do: "arity error: "
   defp lisp_prefix(_reason), do: ""
@@ -259,6 +275,28 @@ defmodule PtcRunner.Lisp.EvaluatorError do
     end
   end
 
+  defp public_message(:java_arity_error, details) do
+    with {:ok, name} <- admitted_arity_name(details),
+         {:ok, actual} <- admitted_nonneg_integer(Map.get(details, :actual)) do
+      if Map.get(details, :receiver_required?) do
+        ok_message("#{name} requires a receiver, got #{actual} argument(s)")
+      else
+        with {:ok, expected} <- format_expected_arity(Map.get(details, :expected)) do
+          ok_message("#{name} expects #{expected}, got #{actual}")
+        end
+      end
+    else
+      _closed -> ok_message(@java_messages.java_arity_error)
+    end
+  end
+
+  defp public_message(:java_type_error, details) do
+    case admitted_java_member_name(details) do
+      {:ok, name} -> ok_message("Java member #{name} does not accept this receiver")
+      :error -> ok_message(@java_messages.java_type_error)
+    end
+  end
+
   defp public_message(:loop_limit_exceeded, details) do
     with {:ok, limit} <- admitted_positive_integer(Map.get(details, :limit)) do
       ok_message(
@@ -302,6 +340,13 @@ defmodule PtcRunner.Lisp.EvaluatorError do
       {:ok, name}
     else
       :error
+    end
+  end
+
+  defp admitted_arity_name(details) do
+    case admitted_public_name(details) do
+      {:ok, name} -> {:ok, name}
+      :error -> admitted_java_member_name(details)
     end
   end
 

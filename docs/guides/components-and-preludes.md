@@ -42,11 +42,6 @@ installs its immutable dependency closure, but does not add tools. Mission tools
 still come only from providers installed in `ptc-host.json` and selected for
 that mission in `ptc.json`.
 
-The shipped `prompt.audit` component provides pure `segments`, `measure`, and
-`delta` functions over a rendered agent system-prompt string. The private run
-analysis profile installs it so recorded prompts can be measured without
-granting additional capabilities.
-
 Keep reusable components narrow:
 
 - expose a small documented public surface;

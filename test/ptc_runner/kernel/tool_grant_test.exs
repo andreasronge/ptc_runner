@@ -67,7 +67,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
     assert ratio < 10, "expected roughly linear growth, got #{inspect(sizes)}"
   end
 
-  test "a thirteen-capability grant, shaped like private-run-analysis-v1, stays well under budget" do
+  test "a thirteen-capability grant, shaped like private-run-analysis-v2, stays well under budget" do
     capabilities =
       for i <- 1..13 do
         capability("inspection-cap-#{i}",

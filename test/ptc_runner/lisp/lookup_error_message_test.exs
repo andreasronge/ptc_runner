@@ -22,16 +22,18 @@ defmodule PtcRunner.Lisp.LookupErrorMessageTest do
 
       assert message =~ "Undefined variable: unresolved-name"
       assert message =~ ~s|(apropos "unresolved-name")|
-      assert message =~ "prelude exports"
+      assert message =~ "visible prelude exports"
+      assert message =~ "fixed builtins"
+      assert message =~ "bounded Java surface"
     end
 
-    test "it does not claim the search covers builtins or earlier definitions" do
-      # apropos reads prelude exports only. An unqualified "search for it" would
-      # send the model looking in three places the form cannot see.
+    test "it states the surfaces that search cannot inspect" do
       message = message("unresolved-name")
 
-      assert message =~ "does not cover builtins"
+      assert message =~ "does not cover lexical bindings"
       assert message =~ "earlier turns"
+      assert message =~ "data references"
+      assert message =~ "direct tool capabilities"
     end
   end
 

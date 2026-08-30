@@ -965,7 +965,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
   test "unknown profiles report the accepted profile ids" do
     assert_raise Mix.Error,
-                 ~r/unsupported session profile; accepted: private-run-analysis-v1, private-run-catalog-v1, run-analysis-v1/,
+                 ~r/unsupported session profile; accepted: private-run-analysis-v2, private-run-catalog-v1, run-analysis-v1/,
                  fn ->
                    run_repl(["--describe-profile", "missing-profile"])
                  end
@@ -1018,7 +1018,7 @@ defmodule PtcRunner.ReplFrontendTest do
   test "private profile frontend policy fails before opening declared sources" do
     missing_resources = [
       "--profile",
-      "private-run-analysis-v1",
+      "private-run-analysis-v2",
       "--resource",
       "traces=/definitely/missing/private-traces",
       "--resource",
@@ -1054,7 +1054,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
     base = [
       "--profile",
-      "private-run-analysis-v1",
+      "private-run-analysis-v2",
       "--private-unattended",
       "--format",
       "jsonl",
@@ -1088,7 +1088,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
     for profile <- ["run-analysis-v1", "private-run-catalog-v1"] do
       capture_io(fn ->
-        assert_raise Mix.Error, ~r/--run.*private-run-analysis-v1/, fn ->
+        assert_raise Mix.Error, ~r/--run.*private-run-analysis-v2/, fn ->
           run_repl([
             "--profile",
             profile,
@@ -1198,7 +1198,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
     args = [
       "--profile",
-      "private-run-analysis-v1",
+      "private-run-analysis-v2",
       "--resource",
       "traces=#{first.traces}",
       "--resource",
@@ -1232,7 +1232,7 @@ defmodule PtcRunner.ReplFrontendTest do
   test "private_unattended admits eval and jsonl output, reaching source preflight" do
     args = [
       "--profile",
-      "private-run-analysis-v1",
+      "private-run-analysis-v2",
       "--resource",
       "traces=/definitely/missing/private-traces",
       "--resource",
@@ -1254,7 +1254,7 @@ defmodule PtcRunner.ReplFrontendTest do
   test "private_unattended with jsonl and no input is rejected, not silently interactive" do
     args = [
       "--profile",
-      "private-run-analysis-v1",
+      "private-run-analysis-v2",
       "--resource",
       "traces=/definitely/missing/private-traces",
       "--resource",
@@ -1287,7 +1287,7 @@ defmodule PtcRunner.ReplFrontendTest do
       capture_io(fn ->
         run_repl([
           "--profile",
-          "private-run-analysis-v1",
+          "private-run-analysis-v2",
           "--resource",
           "traces=#{fixture.traces}",
           "--resource",
@@ -1335,7 +1335,7 @@ defmodule PtcRunner.ReplFrontendTest do
       capture_io(fn ->
         run_repl([
           "--profile",
-          "private-run-analysis-v1",
+          "private-run-analysis-v2",
           "--resource",
           "traces=#{fixture.traces}",
           "--resource",
@@ -1420,7 +1420,7 @@ defmodule PtcRunner.ReplFrontendTest do
       capture_io(fn ->
         run_repl([
           "--profile",
-          "private-run-analysis-v1",
+          "private-run-analysis-v2",
           "--resource",
           "traces=#{healthy.traces}",
           "--resource",
@@ -1467,7 +1467,7 @@ defmodule PtcRunner.ReplFrontendTest do
       assert_raise Mix.Error, message, fn ->
         run_repl([
           "--profile",
-          "private-run-analysis-v1",
+          "private-run-analysis-v2",
           "--resource",
           "traces=#{fixture.traces}",
           "--resource",
@@ -1571,7 +1571,7 @@ defmodule PtcRunner.ReplFrontendTest do
     capture_io(fn ->
       run_repl([
         "--profile",
-        "private-run-analysis-v1",
+        "private-run-analysis-v2",
         "--resource",
         "traces=#{fixture.traces}",
         "--resource",
@@ -1921,7 +1921,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
     private_args = [
       "--profile",
-      "private-run-analysis-v1",
+      "private-run-analysis-v2",
       "--private-unattended",
       "-e",
       "42"
@@ -2022,7 +2022,7 @@ defmodule PtcRunner.ReplFrontendTest do
 
     argv = [
       "--profile",
-      "private-run-analysis-v1",
+      "private-run-analysis-v2",
       "--private-unattended",
       "--resource",
       "traces=#{directory}",
@@ -2331,7 +2331,7 @@ defmodule PtcRunner.ReplFrontendTest do
         run_repl(
           [
             "--profile",
-            "private-run-analysis-v1",
+            "private-run-analysis-v2",
             "--resource",
             "traces=#{cohort.traces}",
             "--resource",

@@ -25,8 +25,27 @@ defmodule PtcRunner.Kernel.PromptAuditTest do
       end
     end
 
-    test "the empty-API branch yields exactly the first five segments" do
-      assert labels(empty_api()) == ~w(marker protocol language examples api-heading)
+    test "the current empty-API branch retains its explanatory sentence" do
+      assert labels(empty_api()) ==
+               ~w(marker protocol language examples api-heading api-empty)
+    end
+
+    test "current result-contract suffixes are recognised and rejoin exactly" do
+      result =
+        final() <>
+          "\nApplication result contract\n" <>
+          "The host validates the exact value passed to (return value).\nType: :string\n"
+
+      phased =
+        result <>
+          "\nCurrent phase return contract (draft)\n" <>
+          "A valid explicit (return value) is required to transition to the next phase.\n" <>
+          "Type: :string\n"
+
+      assert List.last(labels(result)) == "result-contract"
+      assert Enum.take(labels(phased), -2) == ~w(result-contract phase-return-contract)
+      assert rejoined(result) == result
+      assert rejoined(phased) == phased
     end
 
     test "a mission with no namespace docstring omits only api-notes" do
@@ -183,7 +202,7 @@ defmodule PtcRunner.Kernel.PromptAuditTest do
       rows = delta(final(), empty_api())["rows"]
 
       assert Enum.map(rows, & &1["label"]) ==
-               ~w(marker protocol language examples api-heading authored dynamic total
+               ~w(marker protocol language examples api-heading api-empty authored dynamic total
                   api-notes api-legend api-entries)
     end
 
@@ -226,12 +245,13 @@ defmodule PtcRunner.Kernel.PromptAuditTest do
   defp ordinary, do: File.read!(@ordinary_artifact)
   defp final, do: File.read!(@final_artifact)
 
-  # The empty-API rendering stops after the heading; the no-docstring one keeps
-  # everything but the namespace notes. Both are cut from a committed artifact
-  # so they stay real renderings rather than hand-written approximations.
+  # Both variants are cut from a committed artifact and use the exact current
+  # renderer literals rather than hand-written approximations.
   defp empty_api do
     [head, _rest] = String.split(final(), "Available API\n", parts: 2)
-    head <> "Available API\n"
+
+    head <>
+      "Available API\n- No mission-specific data, functions, or tools are available.\n"
   end
 
   defp no_docstring do

@@ -382,13 +382,13 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     end
   end
 
-  # The search is offered as what it is. The name could have been a builtin, a
-  # lexical binding, a definition from an earlier turn, or a prelude export, and
-  # apropos covers only the last; an unqualified "search for it" sends the model
-  # looking in three places this form cannot see.
+  # The search is offered as what it is. It covers visible prelude exports,
+  # fixed builtins, and the bounded Java surface, but cannot see lexical or
+  # continuation bindings, data references, or direct tool capabilities.
   defp prelude_search_hint(name) do
-    ". Hint: (apropos #{inspect(name)}) searches prelude exports by name; " <>
-      "it does not cover builtins, lexical bindings, or definitions from earlier turns"
+    ". Hint: (apropos #{inspect(name)}) searches visible prelude exports, fixed builtins, " <>
+      "and the bounded Java surface; it does not cover lexical bindings, definitions from " <>
+      "earlier turns, data references, or direct tool capabilities"
   end
 
   @doc false

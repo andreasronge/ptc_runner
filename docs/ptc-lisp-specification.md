@@ -1381,7 +1381,7 @@ because it cannot be represented as JSON. Read a retained value back with the
 analysis profile:
 
 ```console
-ptc repl --profile private-run-analysis-v1 \
+ptc repl --profile private-run-analysis-v2 \
   --resource traces=.ptc/traces --resource inspection=.ptc/inspection \
   --session-trace-dir analysis-traces --private-unattended --format jsonl \
   -e '(analysis/read "RUN_REF" {"collection" "explicit_failure_values"})'

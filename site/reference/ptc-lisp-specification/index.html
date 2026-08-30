@@ -561,7 +561,7 @@ was dropped because the run published no inspection artifact (enable
 <code class="inline">artifacts.inspection</code>, or pass <code class="inline">--inspect</code>), because that artifact did not
 reach its destination, because the value exceeded <code class="inline">terminal_result_bytes</code>, or
 because it cannot be represented as JSON. Read a retained value back with the
-analysis profile:</p><pre><code class="console language-console">ptc repl --profile private-run-analysis-v1 \
+analysis profile:</p><pre><code class="console language-console">ptc repl --profile private-run-analysis-v2 \
   --resource traces=.ptc/traces --resource inspection=.ptc/inspection \
   --session-trace-dir analysis-traces --private-unattended --format jsonl \
   -e '(analysis/read &quot;RUN_REF&quot; {&quot;collection&quot; &quot;explicit_failure_values&quot;})'</code></pre><p>A CI script separates a deliberate failure from an infrastructure one on
