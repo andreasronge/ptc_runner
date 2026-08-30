@@ -237,9 +237,9 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
 
   @impl GenServer
   # ex_dna:disable-for-next-line — GenServer callbacks, intentionally per-module.
-  # An owner's reaction to its owner's death and the redaction of its own state
-  # are part of that owner's contract; routing them through a shared module
-  # would couple the lifecycles of otherwise independent snapshots.
+  # An owner's fallback and reaction to its owner's death are part of that
+  # owner's lifecycle contract; sharing them would couple otherwise independent
+  # snapshots.
   def handle_cast(_request, state), do: {:noreply, state}
 
   @impl GenServer
