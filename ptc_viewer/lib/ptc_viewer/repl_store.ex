@@ -11,6 +11,8 @@ defmodule PtcViewer.ReplStore do
 
   use GenServer
 
+  alias PtcViewer.OwnerStatusRedaction
+
   @operation_timeout_ms 25_000
   @short_timeout_ms 2_000
   @recovery_retry_ms 1_000
@@ -288,13 +290,13 @@ defmodule PtcViewer.ReplStore do
 
   if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
     @impl GenServer
-    def format_status(status), do: redact_status(status)
+    def format_status(status), do: OwnerStatusRedaction.format(status)
   else
-    def format_status(status), do: redact_status(status)
+    def format_status(status), do: OwnerStatusRedaction.format(status)
   end
 
   @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
+  def format_status(reason, status), do: OwnerStatusRedaction.format(reason, status)
 
   @impl GenServer
   def terminate(_reason, state) do
@@ -1100,14 +1102,6 @@ defmodule PtcViewer.ReplStore do
   end
 
   defp authorize_nonce(_actual, _expected), do: {:error, :forbidden_request}
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
-  end
 
   defp call(store, request) do
     GenServer.call(store, request, :infinity)

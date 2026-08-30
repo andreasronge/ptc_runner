@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
   @moduledoc false
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.ConnectivityResult
@@ -362,16 +363,6 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-    def format_status(status), do: redact_status(status)
-  else
-    def format_status(status), do: redact_status(status)
-  end
-
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
-
   @impl GenServer
   def terminate(_reason, state) do
     _state = abort(state)
@@ -731,13 +722,5 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwner do
     PreparedRun.close(prepared)
   catch
     :exit, _reason -> :ok
-  end
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:authority, :state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
   end
 end
