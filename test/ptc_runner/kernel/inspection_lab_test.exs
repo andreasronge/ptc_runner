@@ -9,11 +9,20 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
   use ExUnit.Case, async: false
 
   alias PtcRunner.Examples.KernelInspectionLab
-  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.ViewerAdapter
+  alias PtcRunner.MixCommandAdapter
+  alias PtcRunner.TestSupport.StreamingInspection
+  alias PtcRunner.TestSupport.TestHelpers
 
+  if reason = TestHelpers.executable_skip_reason(["node", "npm"]) do
+    @moduletag skip: reason
+  end
+
+  # One scripted example walk (~4.2 s serial): file, native, and MCP journeys
+  # through Viewer. In-process inspection and Viewer tests cover the Kernel
+  # contracts; this is the operator-path lab, so it runs in `mix nightly`.
   @tag :tmp_dir
-  @tag :slow
+  @tag :nightly
   test "scripted file, native, and MCP journeys produce inspectable Viewer artifacts", %{
     tmp_dir: dir
   } do
@@ -23,7 +32,12 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
     assert wrapper.name == "wrapper"
 
     for journey <- [direct, wrapper] do
-      assert {:ok, records} = InspectionArtifact.load(journey.inspection)
+      assert Path.basename(Path.dirname(journey.trace)) == "traces"
+      assert Path.basename(Path.dirname(journey.inspection)) == "inspection"
+
+      assert {:ok, records} =
+               StreamingInspection.read_path(journey.inspection)
+
       assert File.read!(journey.trace) =~ "mcp-2026-07-28"
 
       inspection_body = File.read!(journey.inspection)
@@ -64,8 +78,8 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       assert Enum.any?(records, fn record ->
                record["record_type"] == "capability-output" and
                  record["payload"]["name"] == "filesystem.read" and
-                 get_in(record, ["payload", "result", "value", "lines"]) == [
-                   %{"line" => 1, "text" => "fixture-file"}
+                 get_in(record, ["payload", "result", "value", "items"]) == [
+                   %{"byte_offset" => 0, "text" => "fixture-file"}
                  ]
              end)
 
@@ -106,12 +120,12 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
         inspection_adapter: ViewerAdapter
       ]
 
-      inspection =
-        Plug.Test.conn(:get, "/api/inspection/runs/#{journey.run_id}")
+      conversation =
+        Plug.Test.conn(:get, "/api/analysis/runs/#{journey.run_id}/conversation")
         |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
 
-      assert inspection.status == 200
-      assert %{"records" => ^records} = Jason.decode!(inspection.resp_body)
+      assert conversation.status == 200
+      assert %{"streams" => [%{"turns" => [_ | _]}]} = Jason.decode!(conversation.resp_body)
 
       metadata =
         Plug.Test.conn(:get, "/api/kernel/runs/#{journey.run_id}")
@@ -134,29 +148,26 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
 
       metadata_path = Path.join(dir, "#{journey.name}-metadata.json")
       turns_path = Path.join(dir, "#{journey.name}-turns.json")
-      inspection_path = Path.join(dir, "#{journey.name}-inspection.json")
+      conversation_path = Path.join(dir, "#{journey.name}-conversation.json")
       File.write!(metadata_path, metadata.resp_body)
       File.write!(turns_path, turns.resp_body)
-      File.write!(inspection_path, inspection.resp_body)
+      File.write!(conversation_path, conversation.resp_body)
 
       {rendered, 0} =
         System.cmd(
           "node",
           [
-            Path.expand("../../../ptc_viewer/test/render_viewer.mjs", __DIR__),
+            Path.expand("../../../ptc_viewer/test/render_semantic_viewer.mjs", __DIR__),
             metadata_path,
             turns_path,
-            inspection_path
+            conversation_path
           ],
           stderr_to_stdout: true
         )
 
-      assert rendered =~ "Private inspection overlay loaded"
-      assert rendered =~ "Advanced/private records"
-      assert rendered =~ "evaluation-source"
-      assert rendered =~ "remote.structured"
-      assert rendered =~ "remote.text"
-      assert rendered =~ "remote.fail"
+      assert rendered =~ "Private analysis"
+      assert rendered =~ "Model conversation"
+      assert rendered =~ "Turn 1"
       assert rendered =~ "Canonical Kernel trace"
       assert rendered =~ "Mission inventory"
       assert rendered =~ "Connector"
@@ -164,6 +175,32 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
       refute turns.resp_body =~ "fixture-text"
       refute turns.resp_body =~ "fixture-file"
       PtcViewer.InspectionStore.stop(inspection_store)
+
+      journey_directory = journey.trace |> Path.dirname() |> Path.dirname()
+      transcript_directory = Path.join(journey_directory, "transcript")
+      File.mkdir!(transcript_directory)
+      transcript = Path.join(transcript_directory, "conversation.private.json")
+
+      presentation =
+        MixCommandAdapter.execute([
+          "transcript",
+          journey.run_id,
+          "--traces",
+          Path.dirname(journey.trace),
+          "--inspection",
+          Path.dirname(journey.inspection),
+          "--private-unattended",
+          "--private-output",
+          transcript
+        ])
+
+      assert presentation.exit_status == 0
+
+      assert %{"run_id" => run_id, "conversation" => %{"complete?" => true}} =
+               transcript |> File.read!() |> Jason.decode!()
+
+      assert run_id == journey.run_id
+      assert File.stat!(transcript).mode |> Bitwise.band(0o777) == 0o600
     end
 
     direct_request = model_request(direct.inspection)
@@ -175,7 +212,7 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
   end
 
   defp model_request(path) do
-    {:ok, records} = InspectionArtifact.load(path)
+    {:ok, records} = StreamingInspection.read_path(path)
 
     records
     |> Enum.find(

@@ -10,17 +10,23 @@ defmodule PtcRunner.ReplFrontend do
       ptc repl -
       ptc repl --manifest ptc.json
       ptc repl --manifest ptc.json --host-config ptc-host.json
+      ptc repl --project ptc-project.json --mission review
+      ptc repl --manifest ptc.json --host-config ptc-host.json --mission review
       ptc repl --manifest ptc.json --trace trace.jsonl
-      ptc repl --profile log-analysis-v2 --resource traces=tmp/traces
-      ptc repl --profile inspection-analysis-v3 \
+      ptc repl --profile run-analysis-v1 --resource traces=tmp/traces
+      ptc repl --profile private-run-analysis-v1 \
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
         --private-terminal
-      ptc repl --profile inspection-analysis-v3 \
+      ptc repl --profile private-run-analysis-v1 \
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
-        --private-unattended --format jsonl -e '(inspection/runs {})'
-      ptc repl --describe-profile log-analysis-v2
+        --private-unattended --format jsonl -e '(analysis/runs {})'
+      ptc repl --profile private-run-catalog-v1 \
+        --resource traces=tmp/traces \
+        --resource inspection=tmp/inspection \
+        --private-unattended --format jsonl -e '(analysis/catalog {})'
+      ptc repl --describe-profile run-analysis-v1
 
   Options:
 
@@ -29,19 +35,27 @@ defmodule PtcRunner.ReplFrontend do
     * `-l, --load` — evaluate a setup file before expressions or interaction;
     * `-m, --manifest` — reuse a strict Kernel manifest's workflow bundle,
       capabilities, limits, input, labels, and event policy;
+    * `--mission` — evaluate one manifest mission directly, with only its
+      components, data, direct capabilities, and provider dependency closure;
     * `--host-config` — manifest-only trusted provider installation document;
     * `-t, --trace` — append this session's canonical events to a JSONL file;
     * `--profile` — select a code-owned mission session profile;
     * `--resource NAME=VALUE` — supply a required profile resource; repeatable;
+    * `--run RUN_ID` — select an exact run for `private-run-analysis-v1`;
+      repeat one through sixteen times to admit one bounded cohort;
     * `--session-trace-dir` — existing output directory for a profile session's
       separate canonical trace;
+    * `--output` / `--private-output` — atomically publish the value of exactly
+      one non-interactive public/private profile evaluation;
     * `--private-terminal` — explicitly authorize an attached terminal as the
-      private output sink required by `inspection-analysis-v3`;
+      private output sink required by a private analysis profile;
     * `--private-unattended` — explicitly authorize this command's own streams
       as that sink instead, admitting `-e`/`--load`/script/stdin and
       `--format jsonl`. Mutually exclusive with `--private-terminal`;
     * `--format clojure|jsonl` — choose human output or non-interactive
       profile-mode JSON Lines;
+    * `--preview-chars COUNT` — set the structural preview character ceiling
+      for direct, manifest, and profile human output (64–65536; default 2048);
     * `--continue-on-error` — evaluate later repeated `--eval` forms after a
       recoverable profile evaluation error, then exit unsuccessfully;
     * `--describe-profile` — print a safe static profile contract;
@@ -49,9 +63,29 @@ defmodule PtcRunner.ReplFrontend do
 
   A positional file runs as one script. `-` reads one script from standard
   input. With no script or `--eval`, the task starts an interactive multi-line
-  REPL. Ctrl+D exits.
+  REPL; `:quit` exits it. That line loop receives the same dedicated bounded
+  session profile whether input is attached or piped. A lone `--load` is setup
+  for the loop; repeated `--eval`, scripts, explicit `-` stdin, and loads that
+  precede those inputs retain ordinary effective limits.
 
-  Direct and manifest sessions evaluate the workflow environment. Profile mode
+  Direct interactive sessions widen only their session lifetime and retained
+  normal-event capacity. Interactive manifest and mission sessions default
+  omitted session-lifetime and retained-event limits to installed host ceilings
+  while preserving explicit narrower values. Every session keeps one finite
+  absolute deadline, including time spent at the prompt; its owner closes
+  provider resources at expiry without waiting for another form.
+
+  An interactive workflow REPL attached to a terminal runs under the Erlang
+  line editor, so emacs key bindings, arrow-key history, and reverse search
+  work, `Ctrl+D` deletes forward rather than exiting, and `Ctrl+C` opens the
+  BEAM break menu. A direct session persists its history under the user cache
+  directory; a manifest session, which can carry a private event policy, keeps
+  history in memory. Profile sessions and every non-terminal input path keep
+  the plain reader, where `Ctrl+D` still ends input.
+
+  Direct sessions and manifest sessions without `--mission` evaluate the
+  workflow environment. A manifest mission session evaluates a fresh serialized
+  mission continuation and exposes no workflow or model route. Profile mode
   evaluates one serialized mission continuation over the exact resources
   declared by its closed profile. Its analysis trace is atomically published
   outside captured private resources; without `--session-trace-dir`, the task
@@ -61,65 +95,121 @@ defmodule PtcRunner.ReplFrontend do
   `session-started`, `evaluation`, and successfully persisted `session-closed`
   records for lifecycle stages that are reached. An unsuccessful command ends
   with `command-error`; validation failures can therefore emit that record
-  alone. Evaluation records contain the existing bounded public mission result
-  projection and never add a raw source field. A failing command raises
-  a closed frontend error; this shared module never halts the VM.
+  alone. Profile selection and source-capture records carry the stable code
+  from `PtcRunner.ProfileDiagnosticCatalog`; the outer one-shot error uses the
+  same `repl/CODE`. Evaluation records contain the existing bounded public
+  mission result projection and never add a raw source field. A failing command
+  raises a closed frontend error; this shared module never halts the VM.
   """
 
+  alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.AnalysisDirectory
   alias PtcRunner.Kernel.AnalysisProfileRegistry
   alias PtcRunner.Kernel.AnalysisSession
   alias PtcRunner.Kernel.AnalysisSessionBuilder
   alias PtcRunner.Kernel.AnalysisTerminal
   alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandDiagnosticRenderer
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.DirectorySeparation
   alias PtcRunner.Kernel.ManifestRepl
+  alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
-  alias PtcRunner.Lisp.Format
-  alias PtcRunner.Lisp.Registry
+  alias PtcRunner.Kernel.SelectedCanonicalSource
+  alias PtcRunner.Lisp.EvaluatorError
+  alias PtcRunner.Lisp.NamespaceDiagnostic
+  alias PtcRunner.Lisp.Result, as: LispResult
+  alias PtcRunner.Lisp.ValuePreview
+  alias PtcRunner.ProfileDiagnosticCatalog
   alias PtcRunner.ReplError
+  alias PtcRunner.ReplLineEditor, as: LineEditor
 
-  @spec run(CommandArguments.t(), CommandRuntime.t()) :: :ok | {:error, binary()}
+  @spec run(CommandArguments.t(), CommandRuntime.t()) ::
+          :ok | {:error, binary()} | {:error, atom(), binary()}
+  def run(arguments, runtime), do: run(arguments, runtime, [])
+
+  @doc false
+  @spec run(CommandArguments.t(), CommandRuntime.t(), keyword()) ::
+          :ok | {:error, binary()} | {:error, atom(), binary()}
   def run(
         %CommandArguments{command: :repl, application: script, ordered_options: opts},
-        %CommandRuntime{} = runtime
+        %CommandRuntime{} = runtime,
+        frontend_opts
       ) do
-    arguments = if is_binary(script), do: [script], else: []
+    if valid_frontend_opts?(frontend_opts) and CommandRuntime.valid?(runtime) do
+      {:ok, runtime} = Dotenv.attach_environment(runtime, opts)
+      arguments = if is_binary(script), do: [script], else: []
+      terminal_attached? = terminal_attached?(frontend_opts)
 
-    case validate_command(opts, arguments, []) do
-      {:ok, :describe} ->
-        describe_profile(opts)
+      case validate_command(opts, arguments, [], terminal_attached?) do
+        {:ok, :describe} ->
+          describe_profile(opts)
 
-      {:ok, :profile} ->
-        run_profile_session(opts, arguments)
+        {:ok, :profile} ->
+          run_profile_session(
+            Keyword.put(opts, :terminal_attached, terminal_attached?),
+            arguments
+          )
 
-      {:ok, :manifest} ->
-        run_manifest_session(Keyword.put(opts, :command_runtime, runtime), arguments)
+        {:ok, :manifest} ->
+          opts =
+            opts
+            |> Keyword.put(:command_runtime, runtime)
+            |> Keyword.put(:terminal_attached, terminal_attached?)
 
-      {:ok, :direct} ->
-        run_direct_session(opts, arguments)
+          run_manifest_session(opts, arguments)
 
-      {:error, message} ->
-        command_error(opts, :cli, message)
+        {:ok, :direct} ->
+          run_direct_session(
+            Keyword.put(opts, :terminal_attached, terminal_attached?),
+            arguments
+          )
+
+        {:error, %{code: code, message: message}} ->
+          command_error(opts, :cli, code, message)
+
+        {:error, message} ->
+          command_error(opts, :cli, message)
+      end
+
+      :ok
+    else
+      {:error, "invalid repl frontend options"}
     end
-
-    :ok
   rescue
-    error in ReplError -> {:error, error.message}
+    error in ReplError -> repl_error(error)
   end
 
-  defp validate_command(opts, arguments, invalid) do
+  def run(_arguments, _runtime, _frontend_opts), do: {:error, "invalid repl frontend options"}
+
+  defp valid_frontend_opts?(opts) do
+    Keyword.keyword?(opts) and Keyword.keys(opts) -- [:terminal_attached] == [] and
+      length(opts) == MapSet.size(MapSet.new(Keyword.keys(opts))) and
+      Keyword.get(opts, :terminal_attached, false) in [true, false]
+  end
+
+  defp repl_error(%ReplError{code: code, message: message})
+       when is_atom(code) and not is_nil(code),
+       do: {:error, code, message}
+
+  defp repl_error(%ReplError{message: message}), do: {:error, message}
+
+  defp terminal_attached?(opts),
+    do: Keyword.get_lazy(opts, :terminal_attached, &AnalysisTerminal.attached?/0)
+
+  defp validate_command(opts, arguments, invalid, terminal_attached?) do
     format = Keyword.get(opts, :format, "clojure")
     evals = Keyword.get_values(opts, :eval)
     resources = Keyword.get_values(opts, :resource)
+    preview_chars = Keyword.get(opts, :preview_chars)
 
-    with :ok <- validate_common_command(arguments, invalid, evals, format) do
-      select_command(opts, arguments, evals, resources, format)
+    with :ok <- validate_common_command(arguments, invalid, evals, format, preview_chars) do
+      select_command(opts, arguments, evals, resources, format, terminal_attached?)
     end
   end
 
-  defp validate_common_command(arguments, invalid, evals, format) do
+  defp validate_common_command(arguments, invalid, evals, format, preview_chars) do
     cond do
       invalid != [] ->
         {:error, "invalid ptc repl options: #{inspect(invalid)}"}
@@ -133,18 +223,34 @@ defmodule PtcRunner.ReplFrontend do
       format not in ["clojure", "jsonl"] ->
         {:error, "invalid ptc repl format: #{inspect(format)}"}
 
+      not is_nil(preview_chars) and preview_chars not in 64..65_536 ->
+        {:error, "--preview-chars must be between 64 and 65536"}
+
       true ->
         :ok
     end
   end
 
-  defp select_command(opts, arguments, evals, resources, format) do
+  defp select_command(opts, arguments, evals, resources, format, terminal_attached?) do
+    with :ok <- validate_mission_command(opts) do
+      select_command_mode(opts, arguments, evals, resources, format, terminal_attached?)
+    end
+  end
+
+  defp select_command_mode(opts, arguments, evals, resources, format, terminal_attached?) do
     cond do
       opts[:describe_profile] ->
         validate_description(opts, arguments)
 
       opts[:profile] ->
-        validate_profile_command(opts, arguments, evals, resources, format)
+        validate_profile_command(
+          opts,
+          arguments,
+          evals,
+          resources,
+          format,
+          terminal_attached?
+        )
 
       opts[:manifest] ->
         validate_manifest_command(opts, resources, format)
@@ -155,7 +261,7 @@ defmodule PtcRunner.ReplFrontend do
       resources != [] or not is_nil(opts[:session_trace_dir]) or
         Keyword.has_key?(opts, :continue_on_error) or
         Keyword.has_key?(opts, :private_terminal) or
-          Keyword.has_key?(opts, :private_unattended) ->
+        Keyword.has_key?(opts, :private_unattended) or Keyword.has_key?(opts, :run) ->
         {:error, "profile options require --profile"}
 
       format == "jsonl" ->
@@ -163,6 +269,22 @@ defmodule PtcRunner.ReplFrontend do
 
       true ->
         {:ok, :direct}
+    end
+  end
+
+  defp validate_mission_command(opts) do
+    cond do
+      opts[:mission] && opts[:profile] ->
+        {:error, "--mission cannot be combined with --profile"}
+
+      opts[:mission] && opts[:describe_profile] ->
+        {:error, "--mission cannot be combined with --describe-profile"}
+
+      opts[:mission] && !opts[:manifest] ->
+        {:error, "--mission requires --manifest"}
+
+      true ->
+        :ok
     end
   end
 
@@ -198,8 +320,16 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp validate_profile_command(opts, arguments, evals, resources, format) do
+  defp validate_profile_command(
+         opts,
+         arguments,
+         evals,
+         resources,
+         format,
+         terminal_attached?
+       ) do
     with {:ok, recipe} <- AnalysisProfileRegistry.fetch(opts[:profile]),
+         :ok <- validate_selected_runs(recipe, opts),
          :ok <-
            validate_profile_combinations(
              recipe,
@@ -216,12 +346,23 @@ defmodule PtcRunner.ReplFrontend do
              continue_on_error: Keyword.get(opts, :continue_on_error, false),
              private_terminal: Keyword.get(opts, :private_terminal, false),
              private_unattended: Keyword.get(opts, :private_unattended, false),
-             terminal_attached: AnalysisTerminal.attached?()
+             terminal_attached: terminal_attached?
            }) do
       {:ok, :profile}
     else
-      {:error, :unsupported_analysis_profile} -> {:error, unsupported_profile_message()}
-      {:error, reason} when is_atom(reason) -> {:error, profile_frontend_error(reason)}
+      {:error, :unsupported_analysis_profile} ->
+        {:error, unsupported_profile_message()}
+
+      {:error, reason}
+      when reason in [
+             :invalid_run_reference,
+             :selected_set_limit_exceeded,
+             :duplicate_selected_run
+           ] ->
+        {:error, ProfileDiagnosticCatalog.classify!(reason)}
+
+      {:error, reason} when is_atom(reason) ->
+        {:error, profile_frontend_error(reason)}
     end
   end
 
@@ -231,8 +372,10 @@ defmodule PtcRunner.ReplFrontend do
     if output_format(opts) == :jsonl do
       emit_jsonl(Map.merge(description, %{"schema_version" => 1, "type" => "profile"}))
     else
-      {formatted, _truncated?} = Format.to_clojure(description)
-      info(formatted)
+      description
+      |> ValuePreview.render_with_notice(max_chars: preview_chars(opts))
+      |> Map.fetch!(:text)
+      |> info()
     end
   end
 
@@ -309,10 +452,10 @@ defmodule PtcRunner.ReplFrontend do
     do: "selected profile does not allow --continue-on-error"
 
   defp profile_frontend_error(:private_terminal_required),
-    do: "inspection-analysis-v3 requires --private-terminal"
+    do: "selected private analysis profile requires --private-terminal"
 
   defp profile_frontend_error(:interactive_terminal_required),
-    do: "inspection-analysis-v3 requires attached stdin and stdout terminals"
+    do: "selected private analysis profile requires attached stdin and stdout terminals"
 
   defp profile_frontend_error(:private_terminal_unsupported),
     do: "--private-terminal is supported only by a private analysis profile"
@@ -320,13 +463,55 @@ defmodule PtcRunner.ReplFrontend do
   defp profile_frontend_error(:private_destination_conflict),
     do: "--private-terminal and --private-unattended are mutually exclusive"
 
+  defp profile_frontend_error(:selected_runs_unsupported),
+    do: "--run is supported only with --profile private-run-analysis-v1"
+
   defp profile_frontend_error(_reason), do: "invalid profile command"
 
+  defp validate_selected_runs(recipe, opts) do
+    case Keyword.get_values(opts, :run) do
+      [] ->
+        :ok
+
+      run_refs when recipe == PtcRunner.Kernel.PrivateRunAnalysisProfile ->
+        case SelectedCanonicalSource.validate_run_refs(run_refs) do
+          {:ok, _validated} -> :ok
+          {:error, _reason} = error -> error
+        end
+
+      _run_refs ->
+        {:error, :selected_runs_unsupported}
+    end
+  end
+
   defp run_profile_session(opts, arguments) do
+    case reserve_profile_result(opts) do
+      {:ok, nil} ->
+        run_profile_session(opts, arguments, nil, nil)
+
+      {:ok, result_handle, result_role} ->
+        try do
+          run_profile_session(opts, arguments, result_handle, result_role)
+        after
+          PublicationHandle.discard(result_handle)
+        end
+
+      {:error, _reason} ->
+        command_error(opts, :cli, "profile result destination unavailable")
+    end
+  end
+
+  defp run_profile_session(opts, arguments, result_handle, result_role) do
     with {:ok, recipe} <- AnalysisProfileRegistry.fetch(opts[:profile]),
          {:ok, resources} <- profile_resources(opts, recipe),
          {:ok, output_directory, temporary?} <- profile_output_directory(opts) do
-      case separate_directories(Map.values(resources), output_directory) do
+      case separate_directories(
+             resources,
+             output_directory,
+             temporary?,
+             result_handle,
+             result_role
+           ) do
         {:ok, output_identity} ->
           start_profile_session(
             opts,
@@ -334,15 +519,39 @@ defmodule PtcRunner.ReplFrontend do
             resources,
             output_directory,
             temporary?,
-            output_identity
+            output_identity,
+            result_handle
           )
 
-        {:error, message} ->
+        {:error, message, extra} ->
           cleanup_temporary_directory(output_directory, temporary?)
-          command_error(opts, :cli, message)
+          command_error(opts, :cli, message, extra)
       end
     else
       {:error, category, message} -> command_error(opts, category, message)
+    end
+  end
+
+  defp reserve_profile_result(opts) do
+    case {opts[:output], opts[:private_output]} do
+      {nil, nil} ->
+        {:ok, nil}
+
+      {path, nil} when is_binary(path) ->
+        reserved_result(path, %{id: "output", label: "--output"})
+
+      {nil, path} when is_binary(path) ->
+        reserved_result(path, %{id: "private_output", label: "--private-output"})
+
+      _ ->
+        {:error, :invalid_destination}
+    end
+  end
+
+  defp reserved_result(path, role) do
+    case PublicationHandle.reserve(path, :result, 0o600) do
+      {:ok, handle} -> {:ok, handle, role}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -438,13 +647,61 @@ defmodule PtcRunner.ReplFrontend do
     _exception -> {:error, :setup, "could not create a private session trace directory"}
   end
 
-  defp separate_directories(input_directories, output_directory) do
-    with {:ok, output} <- AnalysisDirectory.resolve(output_directory),
-         {:ok, inputs} <- AnalysisDirectory.resolve_all(input_directories),
-         true <- AnalysisDirectory.pairwise_separate?([output | inputs]) do
+  defp separate_directories(resources, output_directory, temporary?, result_handle, result_role) do
+    with {:ok, inputs} <- resource_directories(resources),
+         {:ok, {_role, output} = session_trace} <-
+           resolve_role_directory(output_directory, session_trace_role(temporary?)),
+         {:ok, result_outputs} <- result_output_directories(result_handle, result_role),
+         :ok <- DirectorySeparation.verify(inputs ++ [session_trace] ++ result_outputs) do
       {:ok, output.identity}
     else
-      _ -> {:error, "input and session trace directories must be physically separate"}
+      {:error, {:unavailable, role}} ->
+        {:error, "#{role.label} became unavailable before the analysis session started", %{}}
+
+      {:error, conflict} ->
+        {:error, conflict.message,
+         %{
+           "directory_conflict" => %{
+             "left_role" => conflict.left_role,
+             "right_role" => conflict.right_role,
+             "relation" => conflict.relation
+           }
+         }}
+    end
+  end
+
+  defp resource_directories(resources) do
+    resources
+    |> Enum.sort()
+    |> Enum.reduce_while({:ok, []}, fn {name, directory}, {:ok, resolved} ->
+      role = %{id: "resource.#{name}", label: "--resource #{name}"}
+
+      case resolve_role_directory(directory, role) do
+        {:ok, labelled} -> {:cont, {:ok, resolved ++ [labelled]}}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp resolve_role_directory(directory, role) do
+    case AnalysisDirectory.resolve(directory) do
+      {:ok, resolved} -> {:ok, {role, resolved}}
+      {:error, _reason} -> {:error, {:unavailable, role}}
+    end
+  end
+
+  defp session_trace_role(true),
+    do: %{id: "session_trace_auto", label: "the auto-created session trace directory"}
+
+  defp session_trace_role(false),
+    do: %{id: "session_trace", label: "--session-trace-dir"}
+
+  defp result_output_directories(nil, _role), do: {:ok, []}
+
+  defp result_output_directories(handle, role) do
+    case handle |> PublicationHandle.path() |> Path.dirname() |> resolve_role_directory(role) do
+      {:ok, labelled} -> {:ok, [labelled]}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -454,11 +711,16 @@ defmodule PtcRunner.ReplFrontend do
          resources,
          output_directory,
          temporary?,
-         output_identity
+         output_identity,
+         result_handle
        ) do
     builder_options =
-      [expected_destination_identity: output_identity]
+      [
+        expected_destination_identity: output_identity,
+        preview_chars: preview_chars(opts)
+      ]
       |> maybe_private_terminal(opts)
+      |> maybe_selected_runs(opts)
 
     case AnalysisSessionBuilder.start(
            opts[:profile],
@@ -472,7 +734,7 @@ defmodule PtcRunner.ReplFrontend do
         try do
           present_profile_started(opts, info)
           state = evaluate_profile_mode(session, opts, arguments)
-          finish_profile_session(session, opts, state, trace_path)
+          finish_profile_session(session, opts, state, trace_path, result_handle)
         rescue
           exception ->
             safe_profile_abort(session, :frontend_exception)
@@ -487,34 +749,8 @@ defmodule PtcRunner.ReplFrontend do
 
       {:error, reason} ->
         cleanup_temporary_directory(output_directory, temporary?)
-        command_error(opts, :setup, profile_setup_error(reason))
+        command_error(opts, :setup, ProfileDiagnosticCatalog.classify!(reason))
     end
-  end
-
-  defp profile_setup_error(
-         {:source_retained_limit_exceeded,
-          %{source: source, measured_bytes: measured_bytes, limit_bytes: limit_bytes}}
-       )
-       when source in [:ptc_trace_snapshot, :ptc_inspection_snapshot] and
-              is_integer(measured_bytes) and is_integer(limit_bytes) do
-    "ptc repl profile setup failed: #{source} retains #{measured_bytes} bytes " <>
-      "(limit: #{limit_bytes} bytes)"
-  end
-
-  defp profile_setup_error(:empty_traces_resource),
-    do: empty_resource_error("traces", "*.jsonl trace files")
-
-  defp profile_setup_error(:empty_inspection_resource),
-    do: empty_resource_error("inspection", "*.inspection.jsonl records")
-
-  defp profile_setup_error(reason) when is_atom(reason),
-    do: "ptc repl profile setup failed: #{reason}"
-
-  defp profile_setup_error(_reason), do: "ptc repl profile setup failed"
-
-  defp empty_resource_error(resource, artifacts) do
-    "ptc repl profile setup failed: the #{resource} resource directory contains no " <>
-      "#{artifacts} at its own level; artifacts in subdirectories are not captured"
   end
 
   defp maybe_private_terminal(builder_options, opts) do
@@ -524,12 +760,28 @@ defmodule PtcRunner.ReplFrontend do
         else: builder_options
 
     if Keyword.get(opts, :private_terminal, false),
-      do: Keyword.put(builder_options, :private_terminal, true),
+      do:
+        builder_options
+        |> Keyword.put(:private_terminal, true)
+        |> Keyword.put(:terminal_attached, Keyword.fetch!(opts, :terminal_attached)),
       else: builder_options
   end
 
+  defp maybe_selected_runs(builder_options, opts) do
+    case Keyword.get_values(opts, :run) do
+      [] -> builder_options
+      run_refs -> Keyword.put(builder_options, :selected_run_refs, run_refs)
+    end
+  end
+
   defp evaluate_profile_mode(session, opts, arguments) do
-    initial = %{next_index: 1, failed_indexes: [], failure: nil}
+    initial = %{
+      next_index: 1,
+      failed_indexes: [],
+      failure: nil,
+      evaluation_diagnostic: nil,
+      result: :unavailable
+    }
 
     case maybe_profile_load(session, opts, initial) do
       {:ok, state} -> run_profile_input(session, opts, arguments, state)
@@ -556,7 +808,7 @@ defmodule PtcRunner.ReplFrontend do
             {:ok, next}
 
           {_disposition, next} ->
-            {:halt, put_failure(next, :setup, "profile load evaluation failed")}
+            {:halt, put_failure(next, :setup, evaluation_diagnostic(next))}
         end
 
       {:error, :source_limit_exceeded} ->
@@ -592,10 +844,10 @@ defmodule PtcRunner.ReplFrontend do
         {:error, next} ->
           if opts[:continue_on_error],
             do: {:cont, next},
-            else: {:halt, put_failure(next, :evaluation, "profile evaluation failed")}
+            else: {:halt, put_failure(next, :evaluation, evaluation_diagnostic(next))}
 
         {:terminal, next} ->
-          {:halt, put_failure(next, :lifecycle, "profile session became terminal")}
+          {:halt, put_failure(next, :lifecycle, evaluation_diagnostic(next))}
       end
     end)
     |> ensure_evaluation_failure()
@@ -638,13 +890,20 @@ defmodule PtcRunner.ReplFrontend do
   defp profile_single_source(session, opts, source, input_kind, state) do
     case evaluate_profile_source(session, opts, source, input_kind, state) do
       {:ok, next} -> next
-      {:error, next} -> put_failure(next, :evaluation, "profile evaluation failed")
-      {:terminal, next} -> put_failure(next, :lifecycle, "profile session became terminal")
+      {:error, next} -> put_failure(next, :evaluation, evaluation_diagnostic(next))
+      {:terminal, next} -> put_failure(next, :lifecycle, evaluation_diagnostic(next))
     end
   end
 
+  # The profile reader is bounded per character to enforce the profile source
+  # limit, which the interactive line editor cannot drive, so this loop keeps
+  # the plain reader and with it `Ctrl+D`.
   defp interactive_profile(session, opts, state) do
-    info("PTC-Lisp REPL [#{opts[:profile]}] (Ctrl+D to exit; :help for commands)\n")
+    banner =
+      "PTC-Lisp REPL [#{opts[:profile]}] (Ctrl+D or :quit to exit; :help for commands)" <>
+        terminal_hint(Keyword.fetch!(opts, :terminal_attached))
+
+    info(banner)
 
     profile_loop(session, opts, state)
   end
@@ -662,8 +921,15 @@ defmodule PtcRunner.ReplFrontend do
           "profile interactive input exceeds the #{profile_source_bytes(opts)}-byte source limit"
         )
 
+      {:error, reason} ->
+        put_failure(state, :frontend, "profile interactive input failed: #{inspect(reason)}")
+
       "" ->
         profile_loop(session, opts, state)
+
+      command when command in [":quit", ":exit"] ->
+        info("Goodbye!")
+        ensure_evaluation_failure(state)
 
       ":" <> command ->
         handle_profile_command(String.trim(command), opts[:profile])
@@ -671,9 +937,14 @@ defmodule PtcRunner.ReplFrontend do
 
       source ->
         case evaluate_profile_source(session, opts, source, :interactive, state) do
-          {:ok, next} -> profile_loop(session, opts, next)
-          {:error, next} -> profile_loop(session, opts, next)
-          {:terminal, next} -> put_failure(next, :lifecycle, "profile session became terminal")
+          {:ok, next} ->
+            profile_loop(session, opts, next)
+
+          {:error, next} ->
+            profile_loop(session, opts, next)
+
+          {:terminal, next} ->
+            put_failure(next, :lifecycle, evaluation_diagnostic(next))
         end
     end
   end
@@ -684,12 +955,19 @@ defmodule PtcRunner.ReplFrontend do
     case AnalysisSession.evaluate(session, source) do
       {:ok, result} ->
         present_profile_result(opts, index, input_kind, result)
-        next = %{state | next_index: index + 1}
+
+        next =
+          state
+          |> Map.put(:next_index, index + 1)
+          |> retain_profile_result(result)
 
         if result.status == :ok do
           {:ok, next}
         else
-          next = %{next | failed_indexes: [index | next.failed_indexes]}
+          next =
+            next
+            |> Map.put(:failed_indexes, [index | next.failed_indexes])
+            |> retain_evaluation_diagnostic(result)
 
           case AnalysisSession.info(session) do
             {:ok, %{lifecycle: :open}} -> {:error, next}
@@ -703,7 +981,7 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp ensure_evaluation_failure(%{failure: nil, failed_indexes: [_ | _]} = state),
-    do: put_failure(state, :evaluation, "one or more profile evaluations failed")
+    do: put_failure(state, :evaluation, evaluation_diagnostic(state))
 
   defp ensure_evaluation_failure(state), do: state
 
@@ -712,14 +990,40 @@ defmodule PtcRunner.ReplFrontend do
 
   defp put_failure(state, _category, _message), do: state
 
-  defp finish_profile_session(session, opts, state, trace_path) do
+  defp retain_evaluation_diagnostic(%{evaluation_diagnostic: nil} = state, result),
+    do: %{state | evaluation_diagnostic: classify_evaluation_result(result)}
+
+  defp retain_evaluation_diagnostic(state, _result), do: state
+
+  defp classify_evaluation_result(%{outcome: :result_exceeded}),
+    do: ProfileDiagnosticCatalog.classify!(:result_limit_exceeded)
+
+  defp classify_evaluation_result(_result),
+    do: ProfileDiagnosticCatalog.classify!(:profile_evaluation_failed)
+
+  defp evaluation_diagnostic(%{evaluation_diagnostic: nil}),
+    do: ProfileDiagnosticCatalog.classify!(:profile_evaluation_failed)
+
+  defp evaluation_diagnostic(%{evaluation_diagnostic: diagnostic}), do: diagnostic
+
+  defp retain_profile_result(state, %{status: :ok, value_available?: true, value: value}),
+    do: %{state | result: {:ok, value}}
+
+  defp retain_profile_result(state, _result), do: state
+
+  defp finish_profile_session(session, opts, state, trace_path, result_handle) do
     case close_profile_session(session) do
       {:ok, info} ->
         present_profile_closed(opts, info, trace_path)
 
         case state.failure do
           nil ->
-            :ok
+            publish_profile_result(result_handle, state.result)
+
+          {category, %{code: code, message: message}} ->
+            command_error(opts, category, code, message, %{
+              "evaluation_indexes" => Enum.reverse(state.failed_indexes)
+            })
 
           {category, message} ->
             command_error(opts, category, message, %{
@@ -731,6 +1035,23 @@ defmodule PtcRunner.ReplFrontend do
         command_error(opts, :persistence, "profile trace persistence failed: #{reason}")
     end
   end
+
+  defp publish_profile_result(nil, _result), do: :ok
+
+  defp publish_profile_result(handle, {:ok, value}) do
+    with {:ok, encoded} <- value |> json_projection() |> DeterministicJSON.encode(),
+         :ok <- PublicationHandle.write(handle, encoded <> "\n"),
+         :ok <- PublicationHandle.sync(handle),
+         :ok <- PublicationHandle.publish(handle),
+         :ok <- PublicationHandle.release(handle) do
+      :ok
+    else
+      _ -> fail("profile result publication failed")
+    end
+  end
+
+  defp publish_profile_result(_handle, :unavailable),
+    do: fail("profile evaluation produced no publishable value")
 
   defp close_profile_session(session) do
     case AnalysisSession.close(session) do
@@ -751,19 +1072,25 @@ defmodule PtcRunner.ReplFrontend do
         "capture" => Map.new(capture_summary(info.snapshot))
       })
     else
-      Enum.each(capture_summary(info.snapshot), fn {resource, counts} ->
-        info(
-          "Captured #{resource}: #{pluralize(counts["file_count"], "file")}, " <>
-            pluralize(counts["run_count"], "run")
-        )
-      end)
+      Enum.each(capture_summary(info.snapshot), &present_capture_summary/1)
     end
   end
 
-  # The log profile reports its one trace capture directly; the private profile
-  # reports one entry per captured resource.
+  # Run-evidence profiles report trace/inspection captures. Catalog discovery
+  # reports its one frozen safe-metadata generation instead.
   defp capture_summary(%{traces: traces, inspection: inspection}),
     do: capture_summary(traces, "traces") ++ capture_summary(inspection, "inspection")
+
+  defp capture_summary(%{
+         source: :ptc_run_catalog,
+         row_count: row_count,
+         excluded_files: excluded_files
+       })
+       when is_integer(row_count) and is_integer(excluded_files) do
+    [
+      {"catalog", %{"row_count" => row_count, "excluded_files" => excluded_files}}
+    ]
+  end
 
   defp capture_summary(snapshot), do: capture_summary(snapshot, "traces")
 
@@ -772,6 +1099,20 @@ defmodule PtcRunner.ReplFrontend do
        do: [{resource, %{"file_count" => file_count, "run_count" => run_count}}]
 
   defp capture_summary(_info, _resource), do: []
+
+  defp present_capture_summary({"catalog", counts}) do
+    info(
+      "Captured catalog: #{pluralize(counts["row_count"], "row")}, " <>
+        pluralize(counts["excluded_files"], "excluded file")
+    )
+  end
+
+  defp present_capture_summary({resource, counts}) do
+    info(
+      "Captured #{resource}: #{pluralize(counts["file_count"], "file")}, " <>
+        pluralize(counts["run_count"], "run")
+    )
+  end
 
   defp pluralize(1, noun), do: "1 #{noun}"
   defp pluralize(count, noun), do: "#{count} #{noun}s"
@@ -823,22 +1164,49 @@ defmodule PtcRunner.ReplFrontend do
 
     info("""
     Commands:
-      :doc <name>      Show core function documentation
-      :find <pattern>  Search core functions
       :help            Show this help
+      :quit            Leave the REPL
+
+    #{introspection_hint()}
 
     Profile: #{profile_id}; components: #{components}; exported namespaces: #{namespaces}
     Use (tool/runtime-usage {}) to inspect remaining bounded usage.
     """)
   end
 
-  defp handle_profile_command(command, _profile_id), do: handle_command(command, nil)
+  defp handle_profile_command("context", _profile_id),
+    do: info(":context is available only in a manifest mission REPL")
+
+  defp handle_profile_command(_command, _profile_id),
+    do: info("Unknown command. Available: :help, :quit")
+
+  @spec command_error(keyword(), atom(), map()) :: no_return()
+  defp command_error(opts, category, %{code: code, message: message})
+       when is_atom(code) and is_binary(message),
+       do: command_error(opts, category, code, message)
 
   @spec command_error(keyword(), atom(), binary()) :: no_return()
-  defp command_error(opts, category, message), do: command_error(opts, category, message, %{})
+  defp command_error(opts, category, message) when is_binary(message),
+    do: command_error(opts, category, message, %{})
+
+  @spec command_error(keyword(), atom(), atom(), binary()) :: no_return()
+  defp command_error(opts, category, code, message) when is_atom(code) and is_binary(message),
+    do: command_error(opts, category, code, message, %{})
 
   @spec command_error(keyword(), atom(), binary(), map()) :: no_return()
-  defp command_error(opts, category, message, extra) do
+  defp command_error(opts, category, message, extra) when is_binary(message) and is_map(extra) do
+    emit_command_error(opts, category, message, extra)
+    fail(message)
+  end
+
+  @spec command_error(keyword(), atom(), atom(), binary(), map()) :: no_return()
+  defp command_error(opts, category, code, message, extra)
+       when is_atom(code) and is_binary(message) and is_map(extra) do
+    emit_command_error(opts, category, message, Map.put(extra, "code", Atom.to_string(code)))
+    fail(code, message)
+  end
+
+  defp emit_command_error(opts, category, message, extra) do
     if output_format(opts) == :jsonl do
       emit_jsonl(
         Map.merge(
@@ -852,8 +1220,6 @@ defmodule PtcRunner.ReplFrontend do
         )
       )
     end
-
-    fail(message)
   end
 
   defp output_format(opts),
@@ -986,7 +1352,12 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp run_direct_session(opts, arguments) do
-    case ReplSession.new(trace_path: opts[:trace]) do
+    constructor =
+      if interactive_input?(opts, arguments),
+        do: &ReplSession.new_interactive/1,
+        else: &ReplSession.new/1
+
+    case constructor.(trace_path: opts[:trace]) do
       {:ok, session} -> run_workflow_session(session, opts, arguments)
       {:error, reason} -> fail("ptc repl setup failed: #{inspect(reason)}")
     end
@@ -997,21 +1368,36 @@ defmodule PtcRunner.ReplFrontend do
          {:ok, session} <-
            ManifestRepl.open(opts[:manifest], opts[:host_config],
              runtime: runtime,
+             mission: opts[:mission],
              trace_path: opts[:trace],
              private_terminal: Keyword.get(opts, :private_terminal, false),
-             terminal_attached: AnalysisTerminal.attached?(),
-             input_mode: manifest_input_mode(opts, arguments)
+             terminal_attached: Keyword.fetch!(opts, :terminal_attached),
+             input_mode: manifest_input_mode(opts, arguments),
+             interactive_loop: interactive_input?(opts, arguments)
            ) do
       run_workflow_session(session, opts, arguments)
     else
-      {:error, %{code: code}} -> fail(manifest_repl_error(code))
-      {:error, reason} -> fail("ptc repl setup failed: #{inspect(reason)}")
+      {:error, %{code: :unknown_mission, declared: declared}} ->
+        fail("unknown mission #{inspect(opts[:mission])}; declared: #{Enum.join(declared, ", ")}")
+
+      {:error, %{code: code, diagnostic: diagnostic}} ->
+        case CommandDiagnosticRenderer.render(diagnostic) do
+          {:ok, rendered} -> fail(rendered)
+          {:error, :invalid_command_diagnostic} -> fail(manifest_repl_error(code))
+        end
+
+      {:error, %{code: code}} ->
+        fail(manifest_repl_error(code))
+
+      {:error, reason} ->
+        fail("ptc repl setup failed: #{inspect(reason)}")
     end
   end
 
   defp run_workflow_session(session, opts, arguments) do
-    outcome = evaluate_mode(session, opts, arguments)
-    finish(outcome)
+    render = render_context(opts)
+    outcome = evaluate_mode(session, opts, arguments, render)
+    finish(outcome, render)
   rescue
     exception ->
       abort_session(session, :frontend_exception)
@@ -1031,6 +1417,9 @@ defmodule PtcRunner.ReplFrontend do
       true -> :interactive
     end
   end
+
+  defp interactive_input?(opts, arguments),
+    do: Keyword.get_values(opts, :eval) == [] and arguments == []
 
   defp manifest_runtime(opts) do
     case Keyword.fetch(opts, :command_runtime) do
@@ -1057,25 +1446,61 @@ defmodule PtcRunner.ReplFrontend do
   defp manifest_repl_error(:trace_preflight_failed),
     do: "ptc repl trace destination is unavailable"
 
+  defp manifest_repl_error(:environment_file_not_found),
+    do: "the named environment file does not exist"
+
+  defp manifest_repl_error(:environment_file_not_regular),
+    do: "the named environment file is not a regular file"
+
+  defp manifest_repl_error(:environment_file_unreadable),
+    do: "the named environment file cannot be read safely"
+
+  defp manifest_repl_error(:environment_file_too_large),
+    do: "the named environment file exceeds the 1 MB limit"
+
+  defp manifest_repl_error(:environment_file_invalid_utf8),
+    do: "the named environment file is not valid UTF-8"
+
   defp manifest_repl_error(code) when is_atom(code),
     do: "ptc repl setup failed: #{code}"
 
-  defp evaluate_mode(session, opts, arguments) do
-    with {:ok, session} <- maybe_load(session, opts[:load]) do
+  defp evaluate_mode(session, opts, arguments, render) do
+    with {:ok, session} <- maybe_load(session, opts[:load], render) do
       cond do
-        opts[:eval] -> run_sources(session, Keyword.get_values(opts, :eval))
-        arguments == ["-"] -> read_stdin(session)
-        arguments != [] -> run_file(session, hd(arguments))
-        true -> interactive(session)
+        opts[:eval] ->
+          run_sources(session, Keyword.get_values(opts, :eval), render)
+
+        arguments == ["-"] ->
+          read_stdin(session, render)
+
+        arguments != [] ->
+          run_file(session, hd(arguments), render)
+
+        true ->
+          interactive(
+            session,
+            session_mode(opts),
+            render,
+            Keyword.fetch!(opts, :terminal_attached)
+          )
       end
     end
   end
 
-  defp maybe_load(session, nil), do: {:ok, session}
+  # `--mission` is manifest-only, so a direct session must not be told to pass
+  # it. The frontend is the only layer that knows which one this is: a direct
+  # session still carries one synthetic mission environment, indistinguishable
+  # in the session read model from a manifest that declares exactly one.
+  defp render_context(opts),
+    do: %{preview_chars: preview_chars(opts), mission_selectable?: opts[:manifest] != nil}
 
-  defp maybe_load(session, path) do
+  defp preview_chars(opts), do: Keyword.get(opts, :preview_chars, 2_048)
+
+  defp maybe_load(session, nil, _render), do: {:ok, session}
+
+  defp maybe_load(session, path, render) do
     with {:ok, source} <- File.read(path),
-         {:ok, _step, session} <- evaluate(session, source, :noninteractive) do
+         {:ok, _step, session} <- evaluate(session, source, :noninteractive, render) do
       info("Loaded #{path}")
       {:ok, session}
     else
@@ -1084,66 +1509,128 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp run_sources(session, sources) do
+  defp run_sources(session, sources, render) do
     Enum.reduce_while(sources, {:ok, session}, fn source, {:ok, current} ->
-      case evaluate(current, source, :noninteractive) do
+      case evaluate(current, source, :noninteractive, render) do
         {:ok, _step, next} -> {:cont, {:ok, next}}
         {:error, step, next} -> {:halt, {:error, step, next}}
       end
     end)
   end
 
-  defp read_stdin(session) do
+  defp read_stdin(session, render) do
     case IO.read(:stdio, :eof) do
-      source when is_binary(source) -> evaluate_outcome(session, source)
+      source when is_binary(source) -> evaluate_outcome(session, source, render)
       :eof -> {:ok, session}
       {:error, reason} -> {:error, reason, session}
     end
   end
 
-  defp run_file(session, path) do
+  defp run_file(session, path, render) do
     case File.read(path) do
-      {:ok, source} -> evaluate_outcome(session, source)
+      {:ok, source} -> evaluate_outcome(session, source, render)
       {:error, reason} -> {:error, reason, session}
     end
   end
 
-  defp evaluate_outcome(session, source) do
-    case evaluate(session, source, :noninteractive) do
+  defp evaluate_outcome(session, source, render) do
+    case evaluate(session, source, :noninteractive, render) do
       {:ok, _step, session} -> {:ok, session}
       {:error, step, session} -> {:error, step, session}
     end
   end
 
-  defp interactive(session) do
-    info("PTC-Lisp REPL (Ctrl+D to exit; :help for commands)\n")
-    loop(session)
+  # A manifest session can carry a private event policy, so it line-edits
+  # without persisting anything to disk. See `PtcRunner.ReplLineEditor`.
+  defp session_mode(opts), do: if(opts[:manifest], do: :manifest, else: :direct)
+
+  # The line editor owns the banner: under the interactive reader it is the
+  # reader's own slogan, which keeps it ahead of the first prompt instead of
+  # racing it.
+  defp interactive(session, mode, render, terminal_attached?) do
+    banner = session_banner(ReplSession.mode_info(session), terminal_attached?)
+    LineEditor.run(mode, banner, fn -> loop(session, render) end)
   end
 
-  defp loop(session) do
-    case read_expression("ptc> ", "") do
+  defp session_banner(
+         %{
+           kind: :mission,
+           mission: name,
+           component_ids: component_ids,
+           direct_provider_aliases: provider_aliases,
+           inventory_hash: hash
+         },
+         terminal_attached?
+       ) do
+    components = Enum.join(component_ids, ", ")
+    providers = if provider_aliases == [], do: "none", else: Enum.join(provider_aliases, ", ")
+
+    "PTC-Lisp mission REPL [#{name}; components: #{components}; providers: #{providers}; " <>
+      "inventory #{String.slice(hash, 0, 12)}; no workflow/model access] " <>
+      "(:quit to exit; :help for commands)" <> terminal_hint(terminal_attached?)
+  end
+
+  defp session_banner(_mode, terminal_attached?),
+    do: LineEditor.banner() <> terminal_hint(terminal_attached?)
+
+  defp terminal_hint(true), do: "\n" <> introspection_hint()
+  defp terminal_hint(false), do: ""
+
+  defp introspection_hint do
+    ~S|Explore functions with (apropos "term") and (doc "name"); inspect attached APIs with (dir), (export-meta "ns/name"), and (source ns/name).|
+  end
+
+  defp loop(session, render) do
+    input = read_expression("ptc> ", "")
+
+    case ReplSession.terminal_error(session) do
+      {:error, step} -> {:error, step, session}
+      :none -> handle_loop_input(input, session, render)
+    end
+  end
+
+  defp handle_loop_input(input, session, render) do
+    case input do
       :eof ->
         info("\nGoodbye!")
         {:ok, session}
 
       "" ->
-        loop(session)
+        loop(session, render)
+
+      command when command in [":quit", ":exit"] ->
+        info("Goodbye!")
+        {:ok, session}
 
       ":" <> command ->
         handle_command(String.trim(command), session)
-        loop(session)
+        loop(session, render)
 
       source ->
-        case evaluate(session, source, :interactive) do
-          {:ok, _step, next} -> loop(next)
-          {:error, _step, next} -> loop(next)
+        case evaluate(session, source, :interactive, render) do
+          {:ok, _step, next} ->
+            loop(next, render)
+
+          {:error, step, next} ->
+            if ReplSession.terminal?(next),
+              do: {:error, step, next},
+              else: loop(next, render)
         end
     end
   end
 
+  # An interrupted read answers an error tuple rather than a line and is not
+  # end of input: the prompt returns. Any other read error means the stream is
+  # no longer usable, and looping on it would spin.
   defp read_expression(prompt, buffer) do
     case IO.gets(prompt) do
       :eof ->
+        :eof
+
+      {:error, :interrupted} ->
+        read_expression(prompt, buffer)
+
+      {:error, _reason} ->
         :eof
 
       line ->
@@ -1170,38 +1657,101 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
-  defp evaluate(session, source, mode) do
+  defp evaluate(session, source, mode, render) do
     case ReplSession.eval(session, source) do
       {:ok, step, next} ->
-        print_step(step)
+        print_step(step, render)
         {:ok, step, next}
 
       {:error, step, next} ->
-        message = format_error(step)
-        if mode == :interactive, do: info(message), else: error(message)
+        message = format_error(step, next, render)
+
+        cond do
+          mode == :interactive and not ReplSession.terminal?(next) -> info(message)
+          mode == :noninteractive -> error(message)
+          true -> :ok
+        end
+
         {:error, step, next}
     end
   end
 
-  defp print_step(step) do
+  defp print_step(step, %{preview_chars: preview_chars}) do
     Enum.each(step.prints, &info/1)
-    {formatted, _truncated?} = Format.to_clojure(step.return)
-    info(formatted)
+
+    preview =
+      ValuePreview.render_with_notice(LispResult.unwrap_return(step.return),
+        max_chars: preview_chars,
+        max_bytes: preview_chars * 4
+      )
+
+    info(preview.text)
   end
 
-  defp format_error(%{fail: %{reason: reason, message: message}}),
-    do: "Error (#{reason}): #{message}"
+  defp format_error(
+         %{fail: %{reason: reason, message: message, details: details}} = step,
+         session,
+         render
+       )
+       when is_atom(reason) and is_binary(message) do
+    case EvaluatorError.public_evidence(reason, details || %{}) do
+      {:ok, %{kind: kind, message: public_message}} ->
+        "Error (#{kind}): " <> mission_hint(step, session, render) <> public_message
 
-  defp finish({:ok, session}) do
+      :error ->
+        body = String.replace_prefix(message, "#{reason}: ", "")
+        "Error (#{reason}): " <> mission_hint(step, session, render) <> body
+    end
+  end
+
+  defp format_error(%{fail: %{reason: reason, message: message}} = step, session, render),
+    do: "Error (#{reason}): " <> mission_hint(step, session, render) <> to_string(message)
+
+  # The analyzer answers an unknown namespace with the language's own list,
+  # thirty-odd entries that name no mission, because a workflow session cannot
+  # reach one. A `data/<name>` form answers from the language instead: an
+  # ungranted name is the strict missing-grant error and a granted one called
+  # as a function is `not_callable`, because `data/` is a language namespace
+  # the workflow environment does carry. Which switch would add mission names
+  # is a REPL fact rather than a language fact, so it is said here instead of
+  # in the shared diagnostic -- whose exact text is also reverse-parsed by
+  # `NamespaceDiagnostic.rejected_namespace/1`.
+  #
+  # It leads, because the enumeration that follows is long enough to be
+  # truncated by the one-shot renderer and is the least actionable part of the
+  # answer.
+  defp mission_hint(%{fail: %{message: message}}, session, %{mission_selectable?: true})
+       when is_binary(message) do
+    with true <- workflow_mission_hint?(message),
+         %{kind: :workflow, declared_missions: [_ | _] = declared} <-
+           ReplSession.mode_info(session) do
+      "this session evaluates the workflow environment and carries no mission " <>
+        "namespaces; pass --mission NAME to evaluate one instead " <>
+        "(declared: #{Enum.join(declared, ", ")}). "
+    else
+      _other -> ""
+    end
+  end
+
+  defp mission_hint(_step, _session, _render), do: ""
+
+  defp workflow_mission_hint?(message) do
+    NamespaceDiagnostic.unknown_namespace?(message) or
+      NamespaceDiagnostic.data_not_callable?(message) or
+      NamespaceDiagnostic.missing_data_grant?(message)
+  end
+
+  defp finish({:ok, session}, _render) do
     stop_session(session)
   end
 
-  defp finish({:error, %{} = step, session}) do
+  defp finish({:error, %{} = step, session}, render) do
+    message = format_error(step, session, render)
     stop_session(session)
-    fail(format_error(step))
+    fail(message)
   end
 
-  defp finish({:error, reason, session}) do
+  defp finish({:error, reason, session}, _render) do
     stop_session(session)
     fail("ptc repl failed: #{inspect(reason)}")
   end
@@ -1243,46 +1793,51 @@ defmodule PtcRunner.ReplFrontend do
     :ok
   end
 
-  defp handle_command("help", _session) do
-    info("""
-    Commands:
-      :doc <name>      Show core function documentation
-      :find <pattern>  Search core functions
-      :help            Show this help
+  defp handle_command("help", session) do
+    context =
+      case ReplSession.mode_info(session) do
+        %{kind: :mission} -> "  :context         Show the frozen mission model context\n"
+        _mode -> ""
+      end
 
-    Successful results and definitions persist. *1, *2, and *3 read recent results.
-    """)
+    info(
+      "Commands:\n" <>
+        context <>
+        "  :help            Show this help\n" <>
+        "  :quit            Leave the REPL\n\n" <>
+        introspection_hint() <>
+        "\n\n" <>
+        "Successful results and definitions persist. *1, *2, and *3 read recent results."
+    )
   end
 
-  defp handle_command("doc " <> name, _session) do
-    case Registry.doc(String.trim(name)) do
-      nil -> info("No documentation found for: #{String.trim(name)}")
-      entry -> info(format_registry_doc(entry))
+  defp handle_command("context", session) do
+    case ReplSession.mission_context(session) do
+      {:ok, context} ->
+        info("Mission: #{context.mission}")
+        info("Model context SHA-256: #{context.model_context_hash}")
+        info(context.model_context)
+
+      {:error, :not_mission_session} ->
+        info(":context is available only in a mission REPL")
+
+      {:error, reason} ->
+        info("Unable to read mission context: #{reason}")
     end
   end
 
-  defp handle_command("find " <> pattern, _session) do
-    pattern
-    |> String.trim()
-    |> Registry.find_doc()
-    |> Enum.each(fn entry ->
-      info("#{entry.name} — #{Enum.join(entry.signatures, " | ")}")
-    end)
-  end
+  defp handle_command(_command, session) do
+    commands =
+      case ReplSession.mode_info(session) do
+        %{kind: :mission} -> ":context, :help, :quit"
+        _mode -> ":help, :quit"
+      end
 
-  defp handle_command(_command, _session),
-    do: info("Unknown command. Available: :doc <name>, :find <pattern>, :help")
-
-  defp format_registry_doc(entry) do
-    details =
-      [entry.description, entry.notes, entry.divergences]
-      |> Enum.reject(&(&1 in [nil, ""]))
-      |> Enum.join("\n  ")
-
-    Enum.join(entry.signatures, "\n") <> "\n  " <> details
+    info("Unknown command. Available: #{commands}")
   end
 
   defp info(message), do: IO.puts(message)
   defp error(message), do: IO.puts(:stderr, message)
   defp fail(message), do: raise(ReplError, message: message)
+  defp fail(code, message), do: raise(ReplError, code: code, message: message)
 end

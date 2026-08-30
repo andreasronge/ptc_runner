@@ -11,12 +11,19 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -56,6 +63,8 @@ func main() {
 	addressFile := flag.String("address-file", "", "optional file for the bound HTTP endpoint")
 	bearerToken := flag.String("bearer-token", "", "optional bearer token required for every MCP request")
 	oauth := flag.Bool("oauth", false, "serve the deterministic local OAuth interoperability harness")
+	useTLS := flag.Bool("tls", false, "serve HTTPS with an ephemeral test-only certificate")
+	caFile := flag.String("ca-file", "", "write the ephemeral TLS root certificate to this file")
 	flag.Parse()
 
 	server := mcp.NewServer(
@@ -80,7 +89,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen: %v", err)
 	}
-	endpoint := "http://" + listener.Addr().String()
+	scheme := "http"
+	if *useTLS {
+		config, err := ephemeralTLSConfig(*caFile)
+		if err != nil {
+			listener.Close()
+			log.Fatalf("configure TLS: %v", err)
+		}
+		listener = tls.NewListener(listener, config)
+		scheme = "https"
+	}
+	endpoint := scheme + "://" + listener.Addr().String()
 
 	var httpHandler http.Handler
 	if *oauth {
@@ -117,6 +136,63 @@ func main() {
 	}
 	log.Printf("stateless MCP interoperability server listening on %s", endpoint)
 	log.Fatal(http.Serve(listener, httpHandler))
+}
+
+func ephemeralTLSConfig(caFile string) (*tls.Config, error) {
+	if caFile == "" {
+		return nil, fmt.Errorf("-ca-file is required with -tls")
+	}
+
+	now := time.Now()
+	rootKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
+	root := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "PtcRunner MCP test root"},
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+	rootDER, err := x509.CreateCertificate(rand.Reader, root, root, &rootKey.PublicKey, rootKey)
+	if err != nil {
+		return nil, err
+	}
+
+	leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, err
+	}
+	leaf := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "127.0.0.1"},
+		NotBefore:    now.Add(-time.Minute),
+		NotAfter:     now.Add(time.Hour),
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		DNSNames:     []string{"localhost"},
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leaf, root, &leafKey.PublicKey, rootKey)
+	if err != nil {
+		return nil, err
+	}
+
+	rootPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: rootDER})
+	if err := os.WriteFile(caFile, rootPEM, 0o600); err != nil {
+		return nil, err
+	}
+	leafPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(leafKey)})
+	certificate, err := tls.X509KeyPair(leafPEM, keyPEM)
+	if err != nil {
+		return nil, err
+	}
+
+	return &tls.Config{Certificates: []tls.Certificate{certificate}, MinVersion: tls.VersionTLS12}, nil
 }
 
 func (h *oauthHarness) protectedResourceMetadata(response http.ResponseWriter, _ *http.Request) {

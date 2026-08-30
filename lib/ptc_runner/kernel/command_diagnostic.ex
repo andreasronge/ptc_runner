@@ -3,23 +3,48 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   Closed privacy-safe command diagnostic.
 
   Construction accepts only a catalog pair, a catalog-authorized message, and
-  typed safe provenance.
-  Contract-authorized paths must also match the sealed contract authority bound
-  to their source classification. Rendering never inspects a lower-level
-  reason or rejected value. The two catalog-authorized compile message shapes
-  contain only fixed literals plus bounded PTC-Lisp symbol names and require
-  component-source provenance; every other message is the catalog literal.
+  typed safe provenance. Contract-authorized paths must also match the sealed
+  contract authority bound to their source classification. Rendering never
+  inspects a lower-level reason or rejected value. Catalog-authorized dynamic
+  message shapes contain only fixed literals plus bounded PTC-Lisp symbol
+  names, sealed provider-selection field names, a catalog-validated runtime
+  ceiling or optional-limit request, a closed host budget prerequisite, a
+  bounded agent turn ceiling, an opaque replay request hash, or a closed
+  component-override field rule. Compile messages require
+  component-source provenance; a missing capability message is rebuilt from
+  the frozen bundle's sorted tool requirements. A missing MCP tool message may
+  retain only the validated, declaration-owned upstream name and carries no
+  provider catalog payload. Kernel runtime and replay messages require fixed
+  runtime provenance. An agent turn-limit message and an out-of-range agent
+  option have no source because `max_turns` and the other bounded options
+  belong to one `agent.core` call rather than a host or manifest document. A
+  provider-selection message names sealed rule fields and a closed rule; it
+  has no source because the provider subject already locates the slot. Every
+  other message is the catalog literal.
 
-  `notes` is reserved and always empty: the published V2 envelope schema pins
+  `notes` is reserved and always empty: the published V4 envelope schema pins
   it to `{"const": []}`, so a populated array would invalidate the envelope for
-  every strict V2 consumer. Reporting a rejected value against the bound it
+  every strict V4 consumer. Reporting a rejected value against the bound it
   broke is a later-version change, not a producer-side one.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.ComponentOverrideDiagnostic
+  alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.ExplicitFailureDiagnostic
+  alias PtcRunner.Kernel.LimitCapacityDiagnostic
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
+  alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
+  alias PtcRunner.Kernel.ModelOutputDiagnostic
+  alias PtcRunner.Kernel.OptionalBudgetDiagnostic
+  alias PtcRunner.Kernel.ResultContractDiagnostic
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.SchemaViolationDiagnostic
+  alias PtcRunner.Kernel.SelectionRulesDiagnostic
 
   @enforce_keys [
     :phase,
@@ -224,30 +249,59 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
 
   defp valid_path_for_row?(
          %CommandPath{authority: authority},
-         %CommandSource{kind: kind, contract_authority: contract_authority},
+         %CommandSource{kind: kind} = source,
          row
        ) do
     DiagnosticCatalog.path_policy(row.phase, row.code, kind) == :optional and
-      valid_path_authority?(authority, contract_authority, kind, row)
+      valid_path_authority?(authority, source, row)
   end
 
   defp valid_path_for_row?(_path, _source, _row), do: false
 
-  defp valid_path_authority?(:manifest, nil, :application, %{phase: :application}), do: true
-  defp valid_path_authority?(:host, nil, :host, %{phase: :host}), do: true
+  defp valid_path_authority?(
+         :project,
+         %CommandSource{kind: :project, contract_authority: nil},
+         %{phase: :project}
+       ),
+       do: true
+
+  defp valid_path_authority?(
+         :manifest,
+         %CommandSource{kind: :application, contract_authority: nil},
+         %{phase: :application}
+       ),
+       do: true
+
+  defp valid_path_authority?(
+         :host,
+         %CommandSource{kind: :host, contract_authority: nil},
+         %{phase: :host}
+       ),
+       do: true
+
+  # A contract that failed to compile has no compiled contract authority to
+  # bind, so its fault is located inside the submitted schema document instead.
+  # The authority carries the document's logical name and must equal the source
+  # the diagnostic names, so a pointer minted for one contract file can never be
+  # attached to a diagnostic about another.
+  defp valid_path_authority?(
+         {:value_contract_schema, name},
+         %CommandSource{kind: kind, name: name, contract_authority: nil},
+         %{phase: :application, code: :contract_invalid}
+       )
+       when kind in [:input_contract, :result_contract, :phase_return_contract],
+       do: true
 
   defp valid_path_authority?(
          :component_override,
-         nil,
-         :component_override,
+         %CommandSource{kind: :component_override, contract_authority: nil},
          %{phase: :application, code: :override_invalid}
        ),
        do: true
 
   defp valid_path_authority?(
          {:contract, authority},
-         authority,
-         kind,
+         %CommandSource{kind: kind, contract_authority: authority},
          %{phase: :application, code: :input_contract_failed}
        )
        when kind in [:application, :external_input, :input_contract],
@@ -255,23 +309,21 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
 
   defp valid_path_authority?(
          {:contract, authority},
-         authority,
-         kind,
+         %CommandSource{kind: kind, contract_authority: authority},
          %{phase: :application, code: code}
        )
-       when kind in [:input_contract, :result_contract] and
+       when kind in [:input_contract, :result_contract, :phase_return_contract] and
               code in [:invalid_json, :duplicate_property, :contract_invalid],
        do: true
 
   defp valid_path_authority?(
          {:contract, authority},
-         authority,
-         :result_contract,
+         %CommandSource{kind: :result_contract, contract_authority: authority},
          %{phase: :result_cleanup, code: :result_contract_failed}
        ),
        do: true
 
-  defp valid_path_authority?(_authority, _contract_authority, _kind, _row), do: false
+  defp valid_path_authority?(_authority, _source, _row), do: false
 
   defp valid_span?(nil, _source), do: true
 
@@ -289,12 +341,219 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_message_source?(message, %{message: message}, _source), do: true
 
   defp valid_message_source?(
+         message,
+         %{phase: :project, code: :project_schema_invalid},
+         %CommandSource{kind: :project}
+       ),
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :project,
+           SchemaViolationDiagnostic.rules(:project, :project_schema_invalid),
+           message
+         )
+
+  defp valid_message_source?(
+         message,
+         %{phase: :host, code: :host_schema_invalid},
+         %CommandSource{kind: :host}
+       ),
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :host,
+           SchemaViolationDiagnostic.rules(:host, :host_schema_invalid),
+           message
+         )
+
+  defp valid_message_source?(
+         message,
+         %{phase: :host, code: :installed_limit_invalid},
+         %CommandSource{kind: :host}
+       ),
+       do: OptionalBudgetDiagnostic.valid_prerequisite_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: code},
+         %CommandSource{kind: :application}
+       )
+       when code in [:schema_violation, :required_property_missing],
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :application,
+           SchemaViolationDiagnostic.rules(:application, code),
+           message
+         )
+
+  defp valid_message_source?(
+         message,
+         %{phase: :result_cleanup, code: :result_contract_failed},
+         %CommandSource{kind: :result_contract}
+       ),
+       do: ResultContractDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :contract_invalid},
+         %CommandSource{kind: kind}
+       )
+       when kind in [:input_contract, :result_contract, :phase_return_contract],
+       do: ContractSchemaDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :override_invalid},
+         %CommandSource{kind: :component_override}
+       ),
+       do: ComponentOverrideDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
          _message,
          %{phase: :bundle, code: code},
          %CommandSource{kind: :component}
        )
-       when code in [:undefined_variable, :duplicate_definition],
+       when code in [:undefined_variable, :duplicate_definition, :unknown_namespace],
        do: true
+
+  defp valid_message_source?(
+         _message,
+         %{phase: :provider_acquisition, code: :capability_requirement_missing},
+         nil
+       ),
+       do: true
+
+  defp valid_message_source?(
+         _message,
+         %{phase: :provider_acquisition, code: :provider_tool_missing},
+         nil
+       ),
+       do: true
+
+  defp valid_message_source?(
+         _message,
+         %{phase: :provider_acquisition, code: :provider_protocol_version_unsupported},
+         nil
+       ),
+       do: true
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :runtime_limit_exceeded},
+         %CommandSource{kind: :runtime}
+       ),
+       do:
+         RuntimeLimitDiagnostic.subordinate_evaluations_message?(message) or
+           RuntimeLimitDiagnostic.timeout_message?(message) or
+           RuntimeLimitDiagnostic.heap_words_message?(message) or
+           RuntimeLimitDiagnostic.protocol_errors_message?(message) or
+           RuntimeLimitDiagnostic.budget_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :runtime_limit_exceeded},
+         nil
+       ),
+       do: RuntimeLimitDiagnostic.transcript_chars_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :capability_quota_exceeded},
+         %CommandSource{kind: :runtime}
+       ),
+       do: RuntimeLimitDiagnostic.capability_quota_limit_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :turn_limit_exceeded},
+         nil
+       ),
+       do: RuntimeLimitDiagnostic.agent_turns_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :model_output_truncated},
+         nil
+       ),
+       do: ModelOutputDiagnostic.valid_message?(message)
+
+  # An explicit failure names no document: the retention outcome describes the
+  # run's own artifacts, not a manifest the command can point a source at.
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :explicit_failure},
+         nil
+       ),
+       do: ExplicitFailureDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :run_timeout},
+         %CommandSource{kind: :runtime}
+       ),
+       do: RuntimeLimitDiagnostic.run_duration_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :execution, code: :invalid_agent_config},
+         nil
+       ),
+       do: AgentConfigDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :result_cleanup, code: :result_limit_exceeded},
+         nil
+       ),
+       do: RuntimeLimitDiagnostic.result_limit_message?(message)
+
+  # The refused value lives in the manifest, so this one does name its document.
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :installed_limit_exceeded},
+         %CommandSource{kind: :application}
+       ),
+       do: RuntimeLimitDiagnostic.installed_ceiling_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :limit_unavailable},
+         %CommandSource{kind: :application}
+       ),
+       do: OptionalBudgetDiagnostic.valid_unavailable_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :limit_configuration_invalid},
+         %CommandSource{kind: :application}
+       ),
+       do: LimitConfigurationDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :limit_capacity_invalid},
+         %CommandSource{kind: :application}
+       ),
+       do: LimitCapacityDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         _message,
+         %{phase: :execution, code: :replay_fixture_missing},
+         %CommandSource{kind: :runtime}
+       ),
+       do: true
+
+  # A refused replay fixture belongs to the host installation that named it, not
+  # to a document the command can point a source at, so its bounded message
+  # carries the provider subject alone.
+  defp valid_message_source?(message, %{phase: :local_preflight, code: code}, nil)
+       when code in [:environment_unavailable, :fixtures_unreadable],
+       do: LLMReplayFixtureDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :provider_declaration, code: :selection_invalid},
+         nil
+       ),
+       do: SelectionRulesDiagnostic.valid_message?(message)
 
   defp valid_message_source?(_message, _row, _source), do: false
 end

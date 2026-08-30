@@ -1,8 +1,7 @@
 defmodule PtcRunner.Kernel.FrozenBundleTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel
-  alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.Library
@@ -40,8 +39,10 @@ defmodule PtcRunner.Kernel.FrozenBundleTest do
              FrozenBundle.trace_metadata(nil)
 
     {:ok, components} =
-      Library.components(~w(agent.feedback agent.native agent.prompt agent.retry kernel llm result
-        workflow.event agent.core))
+      Library.components(
+        ~w(agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry kernel llm result
+        workflow.event agent.core)
+      )
 
     {:ok, bundle} = Kernel.compile_bundle(components)
     assert {:ok, metadata} = FrozenBundle.trace_metadata(bundle)
@@ -55,7 +56,7 @@ defmodule PtcRunner.Kernel.FrozenBundleTest do
     agent_core_indices = Enum.at(metadata.dependency_indices, agent_core_position)
 
     expected =
-      ~w(agent.feedback agent.native agent.prompt agent.retry kernel llm result workflow.event)
+      ~w(agent.machine agent.native agent.prompt kernel llm result workflow.event)
       |> Enum.map(&Map.fetch!(positions, &1))
       |> Enum.sort()
 
@@ -70,30 +71,26 @@ defmodule PtcRunner.Kernel.FrozenBundleTest do
     assert Enum.at(metadata.dependency_indices, Map.fetch!(positions, "kernel")) == []
   end
 
-  test "concurrent first seals share one attestation key" do
-    storage_key = {Attestation, FrozenBundle}
-    :persistent_term.erase(storage_key)
-    parent = self()
-    component = Library.component("kernel") |> elem(1)
+  test "identity refuses a malformed component set instead of raising" do
+    valid = %{id: "a", dependencies: [], source_hash: String.duplicate("0", 64)}
 
-    tasks =
-      for _index <- 1..64 do
-        Task.async(fn ->
-          send(parent, {:ready, self()})
-          receive do: (:seal -> Kernel.compile_bundle([component]))
-        end)
-      end
+    assert {:ok, _identity} = FrozenBundle.identity([valid])
+    assert {:error, :invalid_bundle} = FrozenBundle.identity(:not_a_list)
+    assert {:error, :invalid_bundle} = FrozenBundle.identity([%{dependencies: [], id: "a"}])
+    assert {:error, :invalid_bundle} = FrozenBundle.identity([valid, %{missing: :keys}])
+    assert {:error, :invalid_bundle} = FrozenBundle.identity([%{valid | id: :a}])
+    assert {:error, :invalid_bundle} = FrozenBundle.identity([%{valid | source_hash: nil}])
+    assert {:error, :invalid_bundle} = FrozenBundle.identity([%{valid | dependencies: [:b]}])
+  end
 
-    pids =
-      for _index <- 1..64 do
-        assert_receive {:ready, pid}
-        pid
-      end
+  test "identity is stable under caller ordering and dependency repetition" do
+    a = %{id: "a", dependencies: ["z", "z", "m"], source_hash: String.duplicate("1", 64)}
+    m = %{id: "m", dependencies: [], source_hash: String.duplicate("2", 64)}
+    z = %{id: "z", dependencies: [], source_hash: String.duplicate("3", 64)}
 
-    Enum.each(pids, &send(&1, :seal))
-
-    bundles = Enum.map(tasks, fn task -> task |> Task.await(30_000) |> elem(1) end)
-    assert Enum.all?(bundles, &FrozenBundle.valid?/1)
+    assert {:ok, identity} = FrozenBundle.identity([a, m, z])
+    assert {:ok, ^identity} = FrozenBundle.identity([z, a, m])
+    assert {:ok, ^identity} = FrozenBundle.identity([%{a | dependencies: ["m", "z"]}, m, z])
   end
 
   defp component!(id, source, dependencies \\ []) do

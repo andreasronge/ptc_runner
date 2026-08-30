@@ -212,6 +212,22 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
       assert ast1 == ast2
     end
 
+    test "analyzer-generated case and condp temporaries format as parseable source" do
+      source =
+        "(let [__ptc_serialized_0 42 x 1] " <>
+          "[__ptc_serialized_0 (case x 1 :one :other) (condp = x 1 :one :other)])"
+
+      assert {:ok, raw_ast} = Parser.parse(source)
+      assert {:ok, core_ast} = Analyze.analyze(raw_ast)
+
+      reformatted = CoreToSource.format(core_ast)
+
+      refute String.contains?(reformatted, <<0>>)
+      assert {:ok, _raw_ast} = Parser.parse(reformatted)
+      assert {:ok, %{return: [42, one, one]}} = Lisp.run_native(reformatted)
+      assert one == Keyword.new("one")
+    end
+
     test "def with expression" do
       {ast1, ast2, _} = roundtrip("(def x (+ 1 2))")
       assert ast1 == ast2
@@ -375,12 +391,13 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
     test "round-trips analyzer-generated temporary identifiers" do
       assert {:ok, first} =
                Lisp.run_native("""
-               (fn [x]
+               (fn [__ptc_serialized_0 x]
                  [(case x 1 :one :other)
                   (condp = x 1 :one :other)
                   (cond-> x true inc)
                   (some-> x inc)
-                  (when-first [item [x]] item)])
+                  (when-first [item [x]] item)
+                  __ptc_serialized_0])
                """)
 
       closure = first.return
@@ -393,8 +410,8 @@ defmodule PtcRunner.Lisp.CoreToSourceTest do
       for source <- ["(def f #{closure_source})", namespace_source] do
         assert {:ok, hydrated} = Lisp.run_native(source)
 
-        assert {:ok, %{return: [one, one, 2, 2, 1]}} =
-                 Lisp.run_native("(f 1)", memory: hydrated.memory)
+        assert {:ok, %{return: [one, one, 2, 2, 1, "authored"]}} =
+                 Lisp.run_native(~S|(f "authored" 1)|, memory: hydrated.memory)
 
         assert one == Keyword.new("one")
       end

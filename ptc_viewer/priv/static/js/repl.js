@@ -4,10 +4,10 @@ const POLL_INTERVAL_MS = 1000;
 const RELOAD_MARKER = 'ptc-viewer-repl-reload-attempted';
 
 const EXAMPLES = [
-  ['Runs', '(log/runs {})'],
-  ['Run', '(log/run "run-id")'],
-  ['Turns', '(log/turns "run-id" {})'],
-  ['Counters', '(log/counters {})']
+  ['Runs', '(analysis/runs {})'],
+  ['Run', '(analysis/open "run-id")'],
+  ['Turns', '(analysis/read "run-id" {"collection" "activity"})'],
+  ['Errors', '(analysis/read "run-id" {"collection" "activity" "status" "error"})']
 ];
 
 const STOPPED_RETRY_ERRORS = new Map([
@@ -20,7 +20,7 @@ const STOPPED_RETRY_ERRORS = new Map([
 
 export function readViewerConfig(documentRef = document) {
   const meta = documentRef.querySelector('meta[name="ptc-viewer-config"]');
-  if (!meta) return { repl_enabled: false };
+  if (!meta) return { repl_enabled: false, live_enabled: false };
 
   try {
     const encoded = meta.content.replace(/-/g, '+').replace(/_/g, '/');
@@ -28,9 +28,9 @@ export function readViewerConfig(documentRef = document) {
     const config = JSON.parse(atob(padded));
     return config && typeof config.repl_enabled === 'boolean'
       ? config
-      : { repl_enabled: false };
+      : { repl_enabled: false, live_enabled: false };
   } catch {
-    return { repl_enabled: false };
+    return { repl_enabled: false, live_enabled: false };
   }
 }
 
@@ -84,8 +84,8 @@ export function createAnalyzeButton(label, kind, runId, requestTemplate, documen
   return button;
 }
 
-export function nextTabName(current, key) {
-  const tabs = ['runs', 'repl'];
+export function nextTabName(current, key, tabs = ['runs', 'repl', 'live']) {
+  if (!Array.isArray(tabs) || tabs.length === 0) return current;
   if (key === 'Home') return tabs[0];
   if (key === 'End') return tabs.at(-1);
   const index = Math.max(tabs.indexOf(current), 0);

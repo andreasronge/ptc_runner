@@ -41,9 +41,11 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   alias PtcRunner.Kernel.AcquisitionReason
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LLMRouter
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderCallbackBoundary
   alias PtcRunner.Kernel.ProviderRegistry
@@ -53,7 +55,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   @type input_class :: :normal | :private_inspection
   @type artifact_preflight :: (input_class() -> :ok | {:error, term()})
   @type occurrence :: %{destination: :workflow | :mission, index: non_neg_integer()}
-  @type targets :: [occurrence()] | :all
+  @type targets :: [occurrence()] | :all | map()
   @type result ::
           {:ok, map()}
           | {:error, term()}
@@ -115,14 +117,15 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         targets,
         credentials
       )
-      when (is_list(targets) or targets == :all) and is_map(credentials) and
+      when (is_list(targets) or targets == :all or is_struct(targets, MissionReplTarget)) and
+             is_map(credentials) and
              not is_struct(credentials) do
     package = prepared.request.package
     max_heap_words = package.limits.provider_heap_words
 
     with :ok <- bound(prepared, catalog, session),
          {:ok, occurrences} <- sealed_occurrences(prepared, catalog),
-         {:ok, closure} <- sealed_closure(occurrences, targets),
+         {:ok, closure} <- sealed_closure(occurrences, targets, prepared, catalog),
          {:ok, preparations} <-
            prepare_providers(package, registry, session, max_heap_words, closure),
          :ok <- declarations_honored(preparations, closure, session) do
@@ -130,7 +133,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
         preparations,
         registry,
         session,
-        prepared.effective_data_class,
+        target_effective_data_class(prepared, targets),
         max_heap_words,
         credentials
       )
@@ -249,13 +252,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
           provides: descriptor.provides,
           credential_names: descriptor.credential_names,
           workflow_llm?: descriptor.workflow_llm?,
-          workflow_llm_route:
-            workflow_llm_route(
-              descriptor.workflow_llm?,
-              descriptor.source,
-              descriptor.installation_revision,
-              declaration.config
-            ),
+          workflow_llm_route: workflow_llm_route(descriptor, declaration.config),
           data_class: descriptor.data_class,
           accepts_data: descriptor.accepts_data
         }
@@ -270,14 +267,24 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   # occurrence. An application that reaches acquisition with none is refused
   # rather than succeeding with nothing acquired, exactly as an empty target
   # list is.
-  defp sealed_closure([], :all), do: {:error, :invalid_provider_acquisition}
-  defp sealed_closure(occurrences, :all), do: {:ok, occurrences}
+  defp sealed_closure([], :all, _prepared, _catalog),
+    do: {:error, :invalid_provider_acquisition}
+
+  defp sealed_closure(occurrences, :all, _prepared, _catalog), do: {:ok, occurrences}
+
+  defp sealed_closure(occurrences, %MissionReplTarget{} = target, prepared, catalog) do
+    sites = MapSet.new(target.closure_occurrences, &site/1)
+
+    if MissionReplTarget.valid_for?(target, prepared, catalog) and MapSet.size(sites) > 0,
+      do: {:ok, Enum.filter(occurrences, &MapSet.member?(sites, site(&1)))},
+      else: {:error, :invalid_provider_acquisition}
+  end
 
   # The closure comes from sealed `requires`/`provides` alone, so it is decided
   # before any builder runs. Phase 5 already proved the graph is satisfiable and
   # acyclic over these same values, which is why following it to a fixed point
   # terminates and cannot silently drop a requirement.
-  defp sealed_closure(occurrences, targets) do
+  defp sealed_closure(occurrences, targets, _prepared, _catalog) do
     by_site = Map.new(occurrences, &{{&1.destination, &1.index}, &1})
 
     if targets != [] and Enum.all?(targets, &Map.has_key?(by_site, site(&1))) do
@@ -292,6 +299,11 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       {:error, :invalid_provider_acquisition}
     end
   end
+
+  defp target_effective_data_class(_prepared, %MissionReplTarget{} = target),
+    do: target.effective_data_class
+
+  defp target_effective_data_class(prepared, _targets), do: prepared.effective_data_class
 
   defp site(%{destination: destination, index: index}), do: {destination, index}
 
@@ -376,6 +388,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
        |> Map.put(:workflow, workflow)
        |> Map.put(:mission, mission)
        |> Map.put(:snapshots, sort_snapshots(acquired.snapshots))
+       |> Map.put(:warnings, CommandWarning.sort(acquired.warnings))
        |> Map.put(:provider_session, session)
        |> Map.delete(:exports)}
     end
@@ -519,6 +532,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
       workflow: %{capabilities: []},
       mission: %{capabilities: []},
       snapshots: [],
+      warnings: [],
       exports: %{},
       data_class: effective_class
     }
@@ -608,6 +622,7 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
             ]
           })
           |> Map.update!(:snapshots, &maybe_append(&1, built.snapshot))
+          |> Map.update!(:warnings, &(&1 ++ built.warnings))
           |> Map.update!(:exports, &merge_provider_exports(&1, provider.provider, built.exports))
 
         {:cont, {:ok, next}}
@@ -747,14 +762,42 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
   end
 
   defp llm_route(entry) do
-    %{
+    route = %{
       alias: entry.provider,
       source: entry.workflow_llm_route.source,
       installation_revision: entry.workflow_llm_route.installation_revision,
       default?: entry.workflow_llm_route.default,
-      capability: List.first(entry.capabilities)
+      capability: List.first(entry.capabilities),
+      max_calls: Map.get(entry.workflow_llm_route, :max_calls)
+    }
+
+    route = Map.merge(route, llm_reservation_route(List.first(entry.capabilities)))
+
+    route =
+      case Map.get(entry.workflow_llm_route, :structured_output_mode) do
+        nil -> route
+        mode -> Map.put(route, :structured_output_mode, mode)
+      end
+
+    case Map.get(entry.workflow_llm_route, :request_timeout_ms) do
+      timeout_ms when is_integer(timeout_ms) ->
+        Map.put(route, :request_timeout_ms, timeout_ms)
+
+      _absent ->
+        route
+    end
+  end
+
+  defp llm_reservation_route(%{llm_reservation: %{source: "llm"} = reservation}) do
+    %{
+      output_tokens: reservation.output_tokens,
+      reservation_tariff: reservation.tariff,
+      reservation_bound: reservation.bound
     }
   end
+
+  defp llm_reservation_route(%{llm_reservation: %{source: "llm_replay"}}), do: %{}
+  defp llm_reservation_route(_capability), do: %{}
 
   defp validate_provider_dependencies(preparations) do
     provided = Enum.flat_map(preparations, & &1.provides)
@@ -784,14 +827,51 @@ defmodule PtcRunner.Kernel.ProviderAcquisition do
     if defaults > 1, do: {:error, :ambiguous_workflow_llm_default}, else: :ok
   end
 
-  defp workflow_llm_route(false, _source, _revision, _config), do: nil
+  defp workflow_llm_route(%{workflow_llm?: false}, _config), do: nil
 
-  defp workflow_llm_route(true, source, revision, config) do
-    %{
-      source: Atom.to_string(source),
-      installation_revision: revision,
+  defp workflow_llm_route(descriptor, config) do
+    route = %{
+      source: Atom.to_string(descriptor.source),
+      installation_revision: descriptor.installation_revision,
       default: Map.get(config, "default", false)
     }
+
+    route =
+      case Map.get(config, "max_calls") do
+        max_calls when is_integer(max_calls) and max_calls > 0 ->
+          Map.put(route, :max_calls, max_calls)
+
+        _absent ->
+          route
+      end
+
+    route =
+      case descriptor.structured_output_mode do
+        mode when mode in [:json_schema, :json_object, :unsupported] ->
+          Map.put(route, :structured_output_mode, mode)
+
+        _absent ->
+          route
+      end
+
+    route =
+      case descriptor.usage_guarantees do
+        guarantees when is_map(guarantees) -> Map.put(route, :usage_guarantees, guarantees)
+        _absent -> route
+      end
+
+    route =
+      if descriptor.source == :llm,
+        do: Map.put(route, :reservation_tariff, descriptor.reservation_tariff),
+        else: route
+
+    case descriptor.request_timeout_ms do
+      timeout_ms when is_integer(timeout_ms) ->
+        Map.put(route, :request_timeout_ms, timeout_ms)
+
+      _absent ->
+        route
+    end
   end
 
   # Occurrence identity is `{destination, index}` with the index restarting per

@@ -1,21 +1,39 @@
 defmodule PtcRunner.Kernel.CommandContract do
   @moduledoc """
-  Generated-in-source JSON Schema for the V2 command envelope.
+  Generated-in-source JSON Schema for the V4 command envelope.
 
   The checked-in JSON artifact is produced from this module. Diagnostic
   phase/code/retryability/message rows come only from `DiagnosticCatalog`.
+
+  Envelope validation compiles that schema once per VM and reuses the JSV
+  root. `schema/0` still materializes the source map for generators and docs.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.CommandWarning
+  alias PtcRunner.Kernel.ComponentOverrideDiagnostic
+  alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.DocumentationLibrary
+  alias PtcRunner.Kernel.ExampleLibrary
+  alias PtcRunner.Kernel.ExplicitFailureDiagnostic
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.ModelOutputDiagnostic
+  alias PtcRunner.Kernel.ResultContractDiagnostic
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.SelectionRulesDiagnostic
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
 
-  @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v2.schema.json"
+  @id "https://ptc-runner.dev/schemas/ptc-command-envelope-v4.schema.json"
+  @envelope_root_key {__MODULE__, :envelope_root}
   @non_run_schema_modes [
     {"help", :help, false, false},
     {"version", :version, false, false},
+    {"docs", :docs, false, false},
     {"init", :init, false, false},
     {"validate", :validate, false, false},
     {"doctor", {:doctor, :connect}, :catalog, true},
@@ -26,8 +44,10 @@ defmodule PtcRunner.Kernel.CommandContract do
   @hash "^[0-9a-f]{64}$(?![\\s\\S])"
   @digest "^sha256:[0-9a-f]{64}$(?![\\s\\S])"
   @alias "^[a-z][a-z0-9._-]{0,127}$(?![\\s\\S])"
-  @installation_revision ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @capability_name "^(?:workflow|mission)/[a-z][a-z0-9._/-]{0,127}$(?![\\s\\S])"
+  @capability_refusal_class "(?:[a-z][a-z0-9_]{0,63}|unknown|sha256:[0-9a-f]{64})"
+  @capability_refusal_key "^(?:workflow|mission)/#{@capability_refusal_class}/#{@capability_refusal_class}$(?![\\s\\S])"
+  @installation_revision ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @event_type "^[a-z][a-z0-9-]{0,127}$(?![\\s\\S])"
   @json_pointer "^(?:/(?:[^~/]|~[01])*)*$(?![\\s\\S])"
   @doctor_provider_name ~r/\Aprovider\/(?<alias>[a-z][a-z0-9._-]{0,127})\/(?<operation>local|selection|credentials|authorization|connectivity)\z/
@@ -42,6 +62,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   @finalization_uncertain_publication_codes [:result_publication_failed]
   @unclassified_run_phases [
     :arguments,
+    :project,
     :host,
     :application,
     :bundle,
@@ -51,17 +72,36 @@ defmodule PtcRunner.Kernel.CommandContract do
   ]
   @preclassification_only_phases @unclassified_run_phases -- [:internal]
 
+  # The application phase is otherwise decided before a run has a result class.
+  # `limit_capacity_invalid` is the exception: the terminal-usage requirement it
+  # reports scales with the resolved capability and mission inventory, which is
+  # not known until provider assembly, by which point the run already carries
+  # its result class. It gets its own branch rather than joining the general
+  # classified union, so the envelope keeps stating what the code means — the
+  # run never started and wrote nothing.
+  @capacity_pairs [{:application, :limit_capacity_invalid}]
+  @capacity_artifact_states ~w(not_requested not_written)
+
   @codes_by_phase DiagnosticCatalog.rows()
                   |> Enum.group_by(& &1.phase, & &1.code)
+  @project_codes Map.fetch!(@codes_by_phase, :project)
   @host_codes Map.fetch!(@codes_by_phase, :host)
   @application_codes Map.fetch!(@codes_by_phase, :application)
-  @static_application_codes @application_codes -- [:override_invalid, :event_identity_conflict]
+  # Every other application code is decided before provider assembly, so only
+  # the capacity refusal can come from a run that already has a result class:
+  # `validate`, `doctor`, and the unclassified run branch must not admit it.
+  @capacity_codes Enum.map(@capacity_pairs, &elem(&1, 1))
+  @preassembly_application_codes @application_codes -- @capacity_codes
+  @static_application_codes @preassembly_application_codes --
+                              [:override_invalid, :event_identity_conflict]
   @bundle_codes Map.fetch!(@codes_by_phase, :bundle)
   @provider_declaration_codes Map.fetch!(@codes_by_phase, :provider_declaration)
   @destination_codes Map.fetch!(@codes_by_phase, :destination)
   @local_preflight_codes Map.fetch!(@codes_by_phase, :local_preflight)
   @active_preflight_codes Map.fetch!(@codes_by_phase, :active_preflight)
-  @provider_acquisition_codes Map.fetch!(@codes_by_phase, :provider_acquisition)
+  @doctor_provider_acquisition_codes DiagnosticCatalog.doctor_attributable_rows()
+                                     |> Enum.filter(&(&1.phase == :provider_acquisition))
+                                     |> Enum.map(& &1.code)
   @result_cleanup_codes Map.fetch!(@codes_by_phase, :result_cleanup)
   @provider_cleanup_codes @result_cleanup_codes --
                             [:result_invalid, :result_contract_failed, :result_limit_exceeded]
@@ -70,14 +110,21 @@ defmodule PtcRunner.Kernel.CommandContract do
                                        {Atom.to_string(operation),
                                         Enum.map(codes, &Atom.to_string/1)}
                                      end)
-  @version Mix.Project.config() |> Keyword.fetch!(:version)
+  @doctor_application_failure_codes DiagnosticCatalog.doctor_application_rows()
+                                    |> Enum.map(& &1.code)
+                                    |> Enum.map(&Atom.to_string/1)
   @doctor_notice "doctor --connect may perform one or more real provider requests and may incur provider cost"
+  @init_notices [
+    "DIRECTORY must not already exist",
+    "init assembles the complete scaffold or selected example tree and publishes it atomically without replacing anything",
+    "to add PtcRunner to an existing repository, initialize a new sibling or subdirectory and deliberately copy or move the generated files the repository wants"
+  ]
   @spec schema() :: map()
   def schema do
     %{
       "$schema" => "https://json-schema.org/draft/2020-12/schema",
       "$id" => @id,
-      "title" => "PtcRunner command envelope V2",
+      "title" => "PtcRunner command envelope V4",
       "oneOf" =>
         Enum.map(@non_run_schema_modes, fn {command, mode, provider_activity, compound?} ->
           error_envelope(command, diagnostic_rows(mode), provider_activity, compound?)
@@ -91,12 +138,11 @@ defmodule PtcRunner.Kernel.CommandContract do
               "unclassified_diagnostic",
               %{"const" => []}
             ),
-            run_error_envelope(
-              ~w(normal private),
+            run_classified_error_envelope(
               @artifact_states -- @recovery_artifact_states,
-              execution_schema(),
               "classified_diagnostic"
             ),
+            run_capacity_error_envelope("capacity_diagnostic"),
             run_recovery_error_envelope(
               "recovery_written",
               "recovery_written_diagnostic"
@@ -107,6 +153,7 @@ defmodule PtcRunner.Kernel.CommandContract do
             ),
             success_envelope("help", help_result_schema()),
             success_envelope("version", version_result_schema()),
+            success_envelope("docs", docs_result_schema()),
             success_envelope("init", init_result()),
             success_envelope("validate", validate_result()),
             run_success_envelope(
@@ -136,6 +183,8 @@ defmodule PtcRunner.Kernel.CommandContract do
               &(&1.phase in @preclassification_only_phases)
             )
           ),
+        "capacity_diagnostic" =>
+          diagnostic_schema(Enum.filter(DiagnosticCatalog.rows(), &capacity_pair?/1)),
         "recovery_written_diagnostic" =>
           recovery_diagnostic_schema(@recovery_written_publication_codes),
         "finalization_uncertain_diagnostic" =>
@@ -167,10 +216,14 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   @doc false
+  @spec envelope_schema_root() :: {:ok, term()} | {:error, term()}
+  def envelope_schema_root, do: compiled_jsv_root(@envelope_root_key, &schema/0)
+
+  @doc false
   @spec valid_envelope?(term()) :: boolean()
   def valid_envelope?(envelope) do
     with true <- JSONValue.value?(envelope),
-         {:ok, root} <- JSV.build(schema(), atoms: false, warnings: :silent),
+         {:ok, root} <- envelope_schema_root(),
          {:ok, _validated} <- JSV.validate(envelope, root, cast: false),
          true <- valid_envelope_semantics?(envelope) do
       true
@@ -202,12 +255,12 @@ defmodule PtcRunner.Kernel.CommandContract do
   @doc false
   @spec valid_success_result?(atom(), term()) :: boolean()
   def valid_success_result?(command, result)
-      when command in [:help, :version, :init, :validate, :doctor, :models] do
+      when command in [:help, :version, :docs, :init, :validate, :doctor, :models] do
     with true <- JSONValue.value?(result),
          {:ok, root} <-
-           command
-           |> success_result_schema()
-           |> JSV.build(atoms: false, warnings: :silent),
+           compiled_jsv_root({__MODULE__, :success_root, command}, fn ->
+             success_result_schema(command)
+           end),
          {:ok, _validated} <- JSV.validate(result, root, cast: false),
          true <- valid_success_semantics?(command, result) do
       true
@@ -233,7 +286,8 @@ defmodule PtcRunner.Kernel.CommandContract do
           "checks" => checks,
           "model_aliases" => model_aliases,
           "provider_activity" => provider_activity,
-          "readiness" => readiness
+          "readiness" => readiness,
+          "usage" => usage
         }
       ) do
     case checks do
@@ -247,6 +301,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
         common =
           model_aliases_valid?(model_aliases) and
+            doctor_usage_valid?(usage, provider_activity, model_aliases) and
             Enum.all?(keys, &is_tuple/1) and
             keys == Enum.sort(keys) and
             keys == Enum.uniq(keys) and
@@ -292,7 +347,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   def valid_success_semantics?(command, _result)
-      when command in [:help, :version, :init, :validate],
+      when command in [:help, :version, :docs, :init, :validate],
       do: true
 
   def valid_success_semantics?(_command, _result), do: false
@@ -306,22 +361,30 @@ defmodule PtcRunner.Kernel.CommandContract do
            "checks" => checks,
            "model_aliases" => model_aliases,
            "provider_activity" => provider_activity,
-           "readiness" => "failed"
+           "readiness" => "failed",
+           "usage" => usage
          } <- result,
          [
            %{"name" => "runtime"},
-           %{"name" => "application", "status" => "pass", "code" => "valid"} =
-             application_check,
+           %{"name" => "application"} = application_check,
            %{"name" => "viewer"}
            | provider_checks
          ] <- checks,
          keys = Enum.map(provider_checks, &doctor_provider_key/1),
          true <- model_aliases_valid?(model_aliases),
+         true <- doctor_usage_valid?(usage, provider_activity, model_aliases),
          true <- Enum.all?(keys, &is_tuple/1),
          true <- keys == Enum.sort(keys) and keys == Enum.uniq(keys),
          true <- provider_groups_start_with_local?(keys),
          true <- provider_groups_match_application?(keys, application_check),
-         true <- doctor_failure_checks_consistent?(provider_checks, primary),
+         true <-
+           doctor_failure_checks_consistent?(
+             application_check,
+             provider_checks,
+             model_aliases,
+             primary,
+             secondary
+           ),
          true <- provider_activity == diagnostic_activity([primary | secondary]) do
       true
     else
@@ -333,9 +396,25 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   def valid_doctor_failure_result?(_result, _primary, _secondary), do: false
 
+  @doc false
+  @spec valid_doctor_failure_result?(
+          term(),
+          term(),
+          term(),
+          :doctor | {:doctor, :connect}
+        ) :: boolean()
+  def valid_doctor_failure_result?(result, primary, secondary, command_mode)
+      when command_mode in [:doctor, {:doctor, :connect}] do
+    valid_doctor_failure_result?(result, primary, secondary) and
+      doctor_failure_mode_consistent?(result, primary, secondary, command_mode)
+  end
+
+  def valid_doctor_failure_result?(_result, _primary, _secondary, _command_mode), do: false
+
   defp valid_doctor_result_shape?(result) do
     with true <- JSONValue.value?(result),
-         {:ok, root} <- JSV.build(doctor_failure_result(), atoms: false, warnings: :silent),
+         {:ok, root} <-
+           compiled_jsv_root({__MODULE__, :doctor_failure_root}, &doctor_failure_result/0),
          {:ok, _validated} <- JSV.validate(result, root, cast: false) do
       true
     else
@@ -343,7 +422,63 @@ defmodule PtcRunner.Kernel.CommandContract do
     end
   end
 
-  defp doctor_failure_checks_consistent?(checks, primary) do
+  defp doctor_failure_checks_consistent?(
+         %{"status" => "pass", "code" => "valid"},
+         checks,
+         _model_aliases,
+         primary,
+         secondary
+       ) do
+    default_local_failure_checks_consistent?(checks, primary, secondary) or
+      connect_failure_checks_consistent?(checks, primary)
+  end
+
+  defp doctor_failure_checks_consistent?(
+         %{"status" => "fail", "code" => code},
+         checks,
+         model_aliases,
+         %{"phase" => "application", "code" => code},
+         []
+       ) do
+    code in @doctor_application_failure_codes and
+      Enum.all?(checks, &indeterminate_provider_check?/1) and
+      Enum.all?(model_aliases, &(&1["selected"] == false and is_nil(&1["default"])))
+  end
+
+  defp doctor_failure_checks_consistent?(
+         _application,
+         _checks,
+         _model_aliases,
+         _primary,
+         _secondary
+       ),
+       do: false
+
+  defp default_local_failure_checks_consistent?(
+         checks,
+         %{"phase" => "local_preflight"} = primary,
+         []
+       ) do
+    with {:ok, expected_name, expected_code} <- failure_row_identity(primary),
+         failed when failed != [] <- Enum.filter(checks, &(&1["status"] == "fail")),
+         true <-
+           %{
+             "name" => expected_name,
+             "status" => "fail",
+             "code" => expected_code
+           } in failed,
+         true <- Enum.all?(failed, &default_local_failure_check?/1) do
+      Enum.all?(checks, fn check ->
+        check["status"] == "fail" or default_application_provider_check?(check)
+      end)
+    else
+      _invalid -> false
+    end
+  end
+
+  defp default_local_failure_checks_consistent?(_checks, _primary, _secondary), do: false
+
+  defp connect_failure_checks_consistent?(checks, primary) do
     with {:ok, expected_name, expected_code} <- failure_row_identity(primary),
          [failed] <- Enum.filter(checks, &(&1["status"] == "fail")),
          true <-
@@ -359,6 +494,43 @@ defmodule PtcRunner.Kernel.CommandContract do
       _invalid -> false
     end
   end
+
+  defp default_local_failure_check?(%{
+         "name" => "provider/" <> name,
+         "status" => "fail",
+         "code" => code
+       }) do
+    String.ends_with?(name, "/local") and
+      code in Map.get(@doctor_failure_codes_by_operation, "local", [])
+  end
+
+  defp default_local_failure_check?(_check), do: false
+
+  defp doctor_failure_mode_consistent?(
+         %{"checks" => [_runtime, %{"status" => "fail"}, _viewer | _provider_checks]},
+         %{"phase" => "application"},
+         [],
+         _command_mode
+       ),
+       do: true
+
+  defp doctor_failure_mode_consistent?(
+         %{"checks" => [_runtime, %{"status" => "pass"} = _application, _viewer | checks]},
+         primary,
+         secondary,
+         :doctor
+       ),
+       do: default_local_failure_checks_consistent?(checks, primary, secondary)
+
+  defp doctor_failure_mode_consistent?(
+         %{"checks" => [_runtime, %{"status" => "pass"} = _application, _viewer | checks]},
+         primary,
+         _secondary,
+         {:doctor, :connect}
+       ),
+       do: connect_failure_checks_consistent?(checks, primary)
+
+  defp doctor_failure_mode_consistent?(_result, _primary, _secondary, _command_mode), do: false
 
   defp failure_row_identity(%{
          "code" => code,
@@ -415,6 +587,60 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp model_aliases_valid?(_aliases), do: false
 
+  # A command that activated no provider spent nothing, so it may not claim its
+  # account is unavailable and it may not report rows for calls it never made.
+  # Rows are keyed by alias and revision, sorted and unique, the way a run's are,
+  # and every key names a model alias the same report says was selected: spend
+  # attributed to a declaration the report does not list is spend a reader
+  # cannot check.
+  defp doctor_usage_valid?(
+         %{"llm_usage_state" => "unavailable", "llm_usage" => nil},
+         true,
+         _aliases
+       ),
+       do: true
+
+  defp doctor_usage_valid?(
+         %{"llm_usage_state" => "available", "llm_usage" => rows},
+         activity,
+         aliases
+       )
+       when is_list(rows) do
+    keys = Enum.map(rows, &{&1["alias"], &1["installation_revision"]})
+
+    selected =
+      for %{"selected" => true} = row <- aliases,
+          do: {row["alias"], row["installation_revision"]}
+
+    keys == Enum.sort(Enum.uniq(keys)) and (activity or rows == []) and
+      Enum.all?(keys, &(&1 in selected)) and Enum.all?(rows, &usage_row_coherent?/1)
+  end
+
+  defp doctor_usage_valid?(_usage, _activity, _aliases), do: false
+
+  # The counter relationships `LLMUsageSummary` produces. A row exists because
+  # calls happened. Each success is either measured or missing usage, unmatched
+  # in-flight starts are missing even though they are not successes, and a
+  # known failed completion does not become missing merely because it carries
+  # no usage. `missing_usage_calls` may therefore exceed `successful_calls`.
+  # Any missing call leaves the aggregate cost incomplete.
+  defp usage_row_coherent?(%{
+         "calls" => calls,
+         "successful_calls" => successful,
+         "usage_calls" => measured,
+         "missing_usage_calls" => missing,
+         "usage_overflow" => usage_overflow,
+         "usage" => usage
+       })
+       when is_map(usage) do
+    is_boolean(usage_overflow) and calls >= 1 and successful <= calls and measured <= successful and
+      successful <= measured + missing and measured + missing <= calls and
+      (measured > 0 or usage == %{}) and
+      (missing == 0 or not Map.has_key?(usage, "total_cost"))
+  end
+
+  defp usage_row_coherent?(_row), do: false
+
   defp valid_installation_revision?(revision) when is_binary(revision),
     do: revision =~ @installation_revision
 
@@ -459,6 +685,9 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"status" => "skipped", "code" => "not_requested"}
        ),
        do: true
+
+  defp provider_groups_match_application?(_keys, %{"status" => "fail", "code" => code}),
+    do: code in @doctor_application_failure_codes
 
   defp provider_groups_match_application?(_keys, _application_check), do: false
 
@@ -610,21 +839,46 @@ defmodule PtcRunner.Kernel.CommandContract do
         "topic" => Atom.to_string(topic),
         "usage" => CommandDeclaration.usage(topic),
         "options" => CommandDeclaration.help_options(topic, frontend),
-        "notices" => if(topic == :doctor, do: [@doctor_notice], else: [])
+        "notices" => help_notices(topic)
       }
     else
       raise ArgumentError, "invalid help topic"
     end
   end
 
+  defp help_notices(:doctor), do: [@doctor_notice]
+  defp help_notices(:init), do: @init_notices
+  defp help_notices(_topic), do: []
+
   @spec version_result() :: map()
-  def version_result, do: %{"version" => @version}
+  def version_result do
+    identity = PtcRunner.BuildIdentity.current()
+
+    %{
+      "version" => identity.version,
+      "source_revision" => identity.source_revision,
+      "source_dirty" => identity.source_dirty
+    }
+  end
+
+  @doc """
+  Builds the `docs` result: the served listing, or one embedded page.
+  """
+  @spec docs_result(binary() | nil) :: map()
+  def docs_result(nil), do: %{"pages" => DocumentationLibrary.listing()}
+
+  def docs_result(page) when is_binary(page) do
+    case DocumentationLibrary.fetch(page) do
+      {:ok, content} -> %{"page" => page, "content" => content}
+      :error -> raise ArgumentError, "invalid docs page"
+    end
+  end
 
   defp error_envelope(command, rows, provider_activity, compound?) do
     diagnostic = diagnostic_schema(rows, provider_activity)
 
     closed(
-      ~w(schema_version command status run_ref error secondary_errors),
+      ~w(schema_version command status run_ref error secondary_errors warnings),
       base_properties([command], "error")
       |> Map.merge(%{
         "error" => diagnostic,
@@ -638,11 +892,11 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   defp doctor_failure_envelope do
-    primary_diagnostic = diagnostic_schema(DiagnosticCatalog.doctor_attributable_rows())
+    primary_diagnostic = diagnostic_schema(DiagnosticCatalog.doctor_finding_rows())
     secondary_diagnostic = diagnostic_schema(diagnostic_rows({:doctor, :connect}))
 
     closed(
-      ~w(schema_version command status run_ref error secondary_errors result),
+      ~w(schema_version command status run_ref error secondary_errors warnings result),
       base_properties(["doctor"], "error")
       |> Map.merge(%{
         "error" => primary_diagnostic,
@@ -655,6 +909,8 @@ defmodule PtcRunner.Kernel.CommandContract do
       })
     )
   end
+
+  defp capacity_pair?(%{phase: phase, code: code}), do: {phase, code} in @capacity_pairs
 
   defp diagnostic_rows(:run), do: DiagnosticCatalog.rows()
 
@@ -673,9 +929,32 @@ defmodule PtcRunner.Kernel.CommandContract do
             ] and code in [:invalid_arguments, :conflicting_arguments],
        do: true
 
-  defp diagnostic_pair_allowed?(mode, :arguments, :invalid_arguments)
-       when mode in [:help, :version],
+  # Only the two commands that need a host installation can reach it: `models`
+  # reports installed aliases, and `doctor --connect` makes real requests.
+  defp diagnostic_pair_allowed?(mode, :arguments, :project_host_undeclared)
+       when mode in [:models, :doctor, {:doctor, :connect}],
        do: true
+
+  # Every command that accepts `--envelope` can be refused for naming a
+  # destination that already exists. `:run` admits the whole catalog, and a run
+  # refused at admission is reported unclassified.
+  defp diagnostic_pair_allowed?(mode, :arguments, :envelope_destination_exists)
+       when mode in [
+              :init,
+              :validate,
+              :models,
+              :doctor,
+              {:doctor, :connect},
+              :run_unclassified
+            ],
+       do: true
+
+  defp diagnostic_pair_allowed?(mode, :arguments, :invalid_arguments)
+       when mode in [:help, :version, :docs],
+       do: true
+
+  defp diagnostic_pair_allowed?(:docs, :arguments, :docs_page_unknown), do: true
+  defp diagnostic_pair_allowed?(:init, :arguments, :example_unknown), do: true
 
   defp diagnostic_pair_allowed?(:run_unclassified, :arguments, code)
        when code in [:invalid_arguments, :conflicting_arguments],
@@ -686,7 +965,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: true
 
   defp diagnostic_pair_allowed?(mode, :internal, :internal_error)
-       when mode in [:help, :version, :init, :validate, :models, :doctor, :unknown],
+       when mode in [:help, :version, :docs, :init, :validate, :models, :doctor, :unknown],
        do: true
 
   defp diagnostic_pair_allowed?({:doctor, :connect}, :internal, :internal_error), do: true
@@ -706,13 +985,18 @@ defmodule PtcRunner.Kernel.CommandContract do
               code in @host_codes,
        do: true
 
+  defp diagnostic_pair_allowed?(mode, :project, code)
+       when mode in [:validate, :models, :doctor, {:doctor, :connect}, :run_unclassified] and
+              code in @project_codes,
+       do: true
+
   defp diagnostic_pair_allowed?(mode, :application, code)
        when mode in [:validate, :doctor, {:doctor, :connect}] and
               code in @static_application_codes,
        do: true
 
   defp diagnostic_pair_allowed?(:run_unclassified, :application, code)
-       when code in @application_codes,
+       when code in @preassembly_application_codes,
        do: true
 
   defp diagnostic_pair_allowed?(:run_unclassified, :destination, code)
@@ -740,12 +1024,20 @@ defmodule PtcRunner.Kernel.CommandContract do
        when mode in [:doctor, {:doctor, :connect}] and code in @local_preflight_codes,
        do: true
 
+  # `validate` reads the fixture file a replay installation declares, so it can
+  # report that file being unusable and the phase budget running out while it
+  # was read. It acquires nothing: the check is process-free and marks no
+  # provider activity, which is why no other local code is admitted here.
+  defp diagnostic_pair_allowed?(:validate, :local_preflight, code)
+       when code in [:environment_unavailable, :local_check_timeout],
+       do: true
+
   defp diagnostic_pair_allowed?({:doctor, :connect}, :active_preflight, code)
        when code in @active_preflight_codes,
        do: true
 
   defp diagnostic_pair_allowed?({:doctor, :connect}, :provider_acquisition, code)
-       when code in @provider_acquisition_codes,
+       when code in @doctor_provider_acquisition_codes,
        do: true
 
   defp diagnostic_pair_allowed?({:doctor, :connect}, :result_cleanup, code)
@@ -770,41 +1062,75 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp run_error_envelope(artifact_class, states, execution, diagnostic, secondary_errors) do
     closed(
-      ~w(schema_version command status run_ref error secondary_errors artifact_state artifact_class execution),
+      ~w(schema_version command status run_ref error secondary_errors warnings artifact_state artifact_class execution),
       base_properties(["run"], "error")
       |> Map.merge(%{
         "error" => ref(diagnostic),
         "secondary_errors" => secondary_errors,
         "artifact_state" => artifact_state(states),
-        "artifact_class" => enum_or_const(artifact_class),
+        "artifact_class" => %{"const" => artifact_class},
         "execution" => execution
       })
     )
   end
 
+  defp run_classified_error_envelope(states, diagnostic) do
+    %{
+      "oneOf" =>
+        Enum.map(~w(normal private), fn artifact_class ->
+          run_error_envelope(
+            artifact_class,
+            states,
+            execution_schema(artifact_class),
+            diagnostic
+          )
+        end)
+    }
+  end
+
+  defp run_capacity_error_envelope(diagnostic) do
+    %{
+      "oneOf" =>
+        Enum.map(~w(normal private), fn artifact_class ->
+          run_error_envelope(
+            artifact_class,
+            @capacity_artifact_states,
+            unfinished_execution_schema(artifact_class),
+            diagnostic,
+            %{"const" => []}
+          )
+        end)
+    }
+  end
+
   defp run_recovery_error_envelope(state, diagnostic) do
-    ~w(normal private)
-    |> run_error_envelope(
-      @artifact_states,
-      execution_schema(),
-      "classified_diagnostic"
-    )
-    |> put_in(["properties", "artifact_state"], recovery_artifact_state(state))
-    |> Map.put("anyOf", [
-      %{
-        "properties" => %{
-          "error" => ref(diagnostic)
-        }
-      },
-      %{
-        "properties" => %{
-          "secondary_errors" => %{
-            "contains" => ref(diagnostic),
-            "minContains" => 1
-          }
-        }
-      }
-    ])
+    %{
+      "oneOf" =>
+        Enum.map(~w(normal private), fn artifact_class ->
+          artifact_class
+          |> run_error_envelope(
+            @artifact_states,
+            execution_schema(artifact_class),
+            "classified_diagnostic"
+          )
+          |> put_in(["properties", "artifact_state"], recovery_artifact_state(state))
+          |> Map.put("anyOf", [
+            %{
+              "properties" => %{
+                "error" => ref(diagnostic)
+              }
+            },
+            %{
+              "properties" => %{
+                "secondary_errors" => %{
+                  "contains" => ref(diagnostic),
+                  "minContains" => 1
+                }
+              }
+            }
+          ])
+        end)
+    }
   end
 
   defp recovery_diagnostic_schema(publication_codes) do
@@ -817,7 +1143,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp success_envelope(command, result) do
     closed(
-      ~w(schema_version command status run_ref result),
+      ~w(schema_version command status run_ref result warnings),
       base_properties([command], "ok")
       |> Map.put("result", result)
     )
@@ -825,31 +1151,47 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp run_success_envelope(artifact_class, result) do
     closed(
-      ~w(schema_version command status run_ref result secondary_errors artifact_state artifact_class execution),
+      ~w(schema_version command status run_ref result secondary_errors warnings artifact_state artifact_class execution),
       base_properties(["run"], "ok")
       |> Map.merge(%{
         "result" => result,
         "secondary_errors" => %{"const" => []},
         "artifact_state" => success_artifact_state(artifact_class),
         "artifact_class" => %{"const" => artifact_class},
-        "execution" =>
-          closed(~w(state outcome diagnostic usage evaluation_memory), %{
-            "state" => %{"const" => "finished"},
-            "outcome" => %{"const" => "ok"},
-            "diagnostic" => %{"type" => "null"},
-            "usage" => ref("usage"),
-            "evaluation_memory" => ref("evaluation_memory")
-          })
+        "execution" => finished_ok_execution_schema()
       })
     )
   end
 
   defp base_properties(commands, status) do
     %{
-      "schema_version" => %{"const" => 2},
+      "schema_version" => %{"const" => 4},
       "command" => %{"enum" => commands},
       "status" => %{"const" => status},
-      "run_ref" => %{"type" => "string", "pattern" => @run_ref}
+      "run_ref" => %{"type" => "string", "pattern" => @run_ref},
+      "warnings" => warnings_schema(commands)
+    }
+  end
+
+  defp warnings_schema(["run"]), do: warning_schema()
+  defp warnings_schema(_commands), do: %{"const" => []}
+
+  defp warning_schema do
+    %{
+      "type" => "array",
+      "maxItems" => 128,
+      "items" =>
+        closed(~w(code message provider model), %{
+          "code" => %{"const" => "model_uncataloged"},
+          "message" => %{"const" => CommandWarning.message()},
+          "provider" => %{"type" => "string", "pattern" => @alias},
+          "model" => %{
+            "oneOf" => [
+              %{"type" => "null"},
+              %{"type" => "string", "minLength" => 1, "maxLength" => 256}
+            ]
+          }
+        })
     }
   end
 
@@ -903,10 +1245,18 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   defp source_schema(kind)
-       when kind in [:host, :application, :external_input, :component_override, :runtime],
+       when kind in [
+              :host,
+              :project,
+              :application,
+              :external_input,
+              :component_override,
+              :runtime
+            ],
        do: source_branch(kind, %{"const" => CommandSource.fixed(kind).name})
 
-  defp source_schema(kind) when kind in [:component, :input_contract, :result_contract] do
+  defp source_schema(kind)
+       when kind in [:component, :input_contract, :result_contract, :phase_return_contract] do
     source_branch(kind, %{
       "type" => "string",
       "minLength" => 1,
@@ -921,6 +1271,141 @@ defmodule PtcRunner.Kernel.CommandContract do
       "name" => name_schema
     })
   end
+
+  defp diagnostic_message_schema(%{code: :capability_requirement_missing} = row, _source),
+    do: DiagnosticCatalog.message_schema(row)
+
+  defp diagnostic_message_schema(%{code: :provider_tool_missing} = row, _source),
+    do: DiagnosticCatalog.message_schema(row)
+
+  defp diagnostic_message_schema(
+         %{code: :provider_protocol_version_unsupported} = row,
+         _source
+       ),
+       do: DiagnosticCatalog.message_schema(row)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :runtime_limit_exceeded} = row,
+         %{"type" => "null"}
+       ),
+       do: RuntimeLimitDiagnostic.transcript_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :turn_limit_exceeded} = row,
+         %{"type" => "null"}
+       ),
+       do: RuntimeLimitDiagnostic.turn_limit_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :local_preflight, code: code} = row,
+         %{"type" => "null"}
+       )
+       when code in [:environment_unavailable, :fixtures_unreadable],
+       do: DiagnosticCatalog.message_schema(row)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :runtime_limit_exceeded} = row,
+         %{"properties" => %{"kind" => %{"const" => "runtime"}}}
+       ),
+       do: RuntimeLimitDiagnostic.runtime_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :capability_quota_exceeded} = row,
+         %{"properties" => %{"kind" => %{"const" => "runtime"}}}
+       ),
+       do: RuntimeLimitDiagnostic.capability_quota_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :run_timeout} = row,
+         %{"properties" => %{"kind" => %{"const" => "runtime"}}}
+       ),
+       do: RuntimeLimitDiagnostic.run_duration_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :result_cleanup, code: :result_contract_failed} = row,
+         %{"properties" => %{"kind" => %{"const" => "result_contract"}}}
+       ),
+       do: ResultContractDiagnostic.message_schema(row.message)
+
+  # The terminal-result ceiling belongs to the effective limits and the agent
+  # option to one agent.core/run call, so both publish their bounded message
+  # against a null source.
+  defp diagnostic_message_schema(
+         %{phase: :result_cleanup, code: :result_limit_exceeded} = row,
+         %{"type" => "null"}
+       ),
+       do: RuntimeLimitDiagnostic.result_limit_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :invalid_agent_config} = row,
+         %{"type" => "null"}
+       ),
+       do: AgentConfigDiagnostic.message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :model_output_truncated} = row,
+         %{"type" => "null"}
+       ),
+       do: ModelOutputDiagnostic.message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :explicit_failure} = row,
+         %{"type" => "null"}
+       ),
+       do: ExplicitFailureDiagnostic.message_schema(row.message)
+
+  # Both dynamic messages above are admitted only against a null source, so the
+  # sourced branches of the same rows must stay pinned to the catalog literal;
+  # otherwise the published schema would accept a pairing the command refuses to
+  # build.
+  defp diagnostic_message_schema(
+         %{phase: :result_cleanup, code: :result_limit_exceeded} = row,
+         _source
+       ),
+       do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :invalid_agent_config} = row,
+         _source
+       ),
+       do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :explicit_failure} = row,
+         _source
+       ),
+       do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
+         %{phase: :application, code: :installed_limit_exceeded} = row,
+         %{"properties" => %{"kind" => %{"const" => "application"}}}
+       ),
+       do: RuntimeLimitDiagnostic.installed_ceiling_message_schema(row.message)
+
+  # Only a contract source carries a rule-derived message. The application
+  # source reports the same code for a malformed `contracts` section, which has
+  # no schema document to locate a rule in, so it keeps the catalog literal.
+  defp diagnostic_message_schema(
+         %{phase: :application, code: :contract_invalid} = row,
+         %{"properties" => %{"kind" => %{"const" => kind}}}
+       )
+       when kind in ["input_contract", "result_contract", "phase_return_contract"],
+       do: ContractSchemaDiagnostic.message_schema(row.message)
+
+  defp diagnostic_message_schema(%{phase: :application, code: :contract_invalid} = row, _source),
+    do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
+         %{phase: :application, code: :override_invalid} = row,
+         %{"properties" => %{"kind" => %{"const" => "component_override"}}}
+       ),
+       do: ComponentOverrideDiagnostic.message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :provider_declaration, code: :selection_invalid} = row,
+         %{"type" => "null"}
+       ),
+       do: SelectionRulesDiagnostic.message_schema(row.message)
 
   defp diagnostic_message_schema(row, %{"type" => "null"}), do: %{"const" => row.message}
   defp diagnostic_message_schema(row, _source_schema), do: DiagnosticCatalog.message_schema(row)
@@ -1039,54 +1524,246 @@ defmodule PtcRunner.Kernel.CommandContract do
     })
   end
 
-  defp execution_schema do
+  # A run that failed before it could start reaches only these two states: the
+  # provider-free path never started, and the active path is conservatively
+  # incomplete because provider work already happened.
+  defp unfinished_execution_schema(artifact_class) when artifact_class in ~w(normal private) do
     %{
       "oneOf" => [
         closed(~w(state), %{"state" => %{"const" => "not_started"}}),
-        closed(~w(state usage evaluation_memory), %{
+        closed(~w(state usage evaluation_memory last_evaluation_error), %{
           "state" => %{"const" => "incomplete"},
           "usage" => nullable_ref("usage"),
-          "evaluation_memory" => nullable_ref("evaluation_memory")
-        }),
-        closed(~w(state outcome diagnostic usage evaluation_memory), %{
-          "state" => %{"const" => "finished"},
-          "outcome" => %{"const" => "ok"},
-          "diagnostic" => %{"type" => "null"},
-          "usage" => ref("usage"),
-          "evaluation_memory" => ref("evaluation_memory")
-        }),
-        closed(~w(state outcome diagnostic usage evaluation_memory), %{
-          "state" => %{"const" => "finished"},
-          "outcome" => %{"const" => "error"},
-          "diagnostic" => ref("execution_diagnostic"),
-          "usage" => ref("usage"),
-          "evaluation_memory" => ref("evaluation_memory")
+          "evaluation_memory" => nullable_ref("evaluation_memory"),
+          "last_evaluation_error" => last_evaluation_error_schema(artifact_class)
         })
       ]
     }
+  end
+
+  defp execution_schema(artifact_class) when artifact_class in ~w(normal private) do
+    %{
+      "oneOf" =>
+        Map.fetch!(unfinished_execution_schema(artifact_class), "oneOf") ++
+          [
+            finished_ok_execution_schema(),
+            closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
+              "state" => %{"const" => "finished"},
+              "outcome" => %{"const" => "error"},
+              "diagnostic" => ref("execution_diagnostic"),
+              "usage" => ref("usage"),
+              "evaluation_memory" => ref("evaluation_memory"),
+              "last_evaluation_error" => last_evaluation_error_schema(artifact_class)
+            })
+          ]
+    }
+  end
+
+  defp last_evaluation_error_schema("normal") do
+    %{
+      "oneOf" => [
+        %{"type" => "null"},
+        closed(~w(kind message), %{
+          "kind" => %{"enum" => EvaluatorErrorCatalog.wire_names()},
+          "message" => %{
+            "type" => "string",
+            "minLength" => 1,
+            "maxLength" => 1024
+          }
+        })
+      ]
+    }
+  end
+
+  defp last_evaluation_error_schema("private"), do: %{"type" => "null"}
+
+  defp finished_ok_execution_schema do
+    closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
+      "state" => %{"const" => "finished"},
+      "outcome" => %{"const" => "ok"},
+      "diagnostic" => %{"type" => "null"},
+      "usage" => ref("usage"),
+      "evaluation_memory" => ref("evaluation_memory"),
+      "last_evaluation_error" => %{"type" => "null"}
+    })
   end
 
   defp usage_schema do
     capability_counts = count_map(@capability_name)
     event_counts = count_map(@event_type, ["$overflow"])
 
+    refusal_counts =
+      count_map(
+        @capability_refusal_key,
+        ["$overflow"],
+        SafeMetadata.capability_refusal_map_limit() + 1
+      )
+
+    required =
+      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors agent_protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped capability_refusals llm_budget llm_spend llm_usage_state llm_usage llm_usage_by_model unattributed_model_calls)
+
+    common = %{
+      "remaining_ms" => nonnegative_integer(),
+      "capability_calls" => capability_counts,
+      "subordinate_evaluations" => nonnegative_integer(),
+      "evaluations_by_mission" => count_map(@alias),
+      "protocol_errors" => nonnegative_integer(),
+      "agent_protocol_errors" => nonnegative_integer(),
+      "evaluation_memory_bytes" => nonnegative_integer(),
+      "evaluation_history_bytes" => nonnegative_integer(),
+      "evaluation_continuation_bytes" => nonnegative_integer(),
+      "events_dropped" => event_counts,
+      "capability_refusals" => refusal_counts,
+      "llm_budget" => llm_budget_schema(),
+      "llm_spend" => llm_spend_schema()
+    }
+
+    %{
+      "oneOf" => [
+        closed(
+          required,
+          Map.merge(common, %{
+            "llm_usage_state" => %{"const" => "available"},
+            "llm_usage" => llm_usage_rows(llm_alias_row_schema()),
+            "llm_usage_by_model" => llm_usage_rows(llm_model_row_schema()),
+            "unattributed_model_calls" => nonnegative_integer()
+          })
+        ),
+        closed(
+          required,
+          Map.merge(common, %{
+            "llm_usage_state" => %{"const" => "unavailable"},
+            "llm_usage" => %{"type" => "null"},
+            "llm_usage_by_model" => %{"type" => "null"},
+            "unattributed_model_calls" => %{"type" => "null"}
+          })
+        )
+      ]
+    }
+  end
+
+  defp llm_budget_schema do
+    closed(~w(total_tokens cost), %{
+      "total_tokens" => %{
+        "oneOf" => [%{"type" => "null"}, total_tokens_budget_schema()]
+      },
+      "cost" => %{
+        "oneOf" => [%{"type" => "null"}, cost_budget_schema()]
+      }
+    })
+  end
+
+  defp total_tokens_budget_schema do
+    closed(~w(state limit reserved charged remaining refused), %{
+      "state" => %{"enum" => ~w(available incomplete overrun)},
+      "limit" => positive_usage_integer(),
+      "reserved" => %{"const" => 0},
+      "charged" => usage_integer(),
+      "remaining" => usage_integer(),
+      "refused" => usage_integer()
+    })
+  end
+
+  defp cost_budget_schema do
     closed(
-      ~w(remaining_ms capability_calls subordinate_evaluations evaluations_by_mission protocol_errors evaluation_memory_bytes evaluation_history_bytes evaluation_continuation_bytes events_dropped),
+      ~w(state currency limit_microusd reserved_microusd charged_microusd remaining_microusd refused),
       %{
-        "remaining_ms" => nonnegative_integer(),
-        "capability_calls" => capability_counts,
-        "subordinate_evaluations" => nonnegative_integer(),
-        "evaluations_by_mission" => count_map(@alias),
-        "protocol_errors" => nonnegative_integer(),
-        "evaluation_memory_bytes" => nonnegative_integer(),
-        "evaluation_history_bytes" => nonnegative_integer(),
-        "evaluation_continuation_bytes" => nonnegative_integer(),
-        "events_dropped" => event_counts
+        "state" => %{"enum" => ~w(available incomplete overrun)},
+        "currency" => %{"const" => "USD"},
+        "limit_microusd" => positive_usage_integer(),
+        "reserved_microusd" => %{"const" => 0},
+        "charged_microusd" => usage_integer(),
+        "remaining_microusd" => usage_integer(),
+        "refused" => usage_integer()
       }
     )
   end
 
-  defp count_map(name_pattern, exceptions \\ []) do
+  defp llm_spend_schema do
+    %{
+      "oneOf" => [
+        closed(["state"], %{"state" => %{"const" => "empty"}}),
+        closed(["state"], %{"state" => %{"const" => "incomplete"}}),
+        closed(["state"], %{"state" => %{"const" => "overflow"}}),
+        closed(~w(state input output), %{
+          "state" => %{"const" => "unpriced"},
+          "input" => usage_integer(),
+          "output" => usage_integer()
+        }),
+        closed(~w(state input output total_cost), %{
+          "state" => %{"const" => "available"},
+          "input" => usage_integer(),
+          "output" => usage_integer(),
+          "total_cost" => usd_cost_schema()
+        })
+      ]
+    }
+  end
+
+  defp llm_usage_rows(row),
+    do: %{"type" => "array", "maxItems" => 128, "items" => row}
+
+  defp llm_alias_row_schema do
+    llm_usage_row_schema(
+      ~w(alias installation_revision),
+      %{
+        "alias" => %{"type" => "string", "pattern" => @alias},
+        "installation_revision" => %{"type" => "string", "pattern" => @alias}
+      }
+    )
+  end
+
+  defp llm_model_row_schema do
+    llm_usage_row_schema(
+      ["resolved_model"],
+      %{
+        "resolved_model" => %{
+          "type" => "string",
+          "minLength" => 1,
+          "maxLength" => 256
+        }
+      }
+    )
+  end
+
+  defp llm_usage_row_schema(identity_fields, identity_properties) do
+    counters =
+      Map.new(~w(calls successful_calls usage_calls missing_usage_calls), fn name ->
+        {name, nonnegative_integer()}
+      end)
+
+    closed(
+      identity_fields ++ Map.keys(counters) ++ ["usage_overflow", "usage"],
+      identity_properties
+      |> Map.merge(counters)
+      |> Map.put("usage_overflow", %{"type" => "boolean"})
+      |> Map.put("usage", llm_usage_values_schema())
+    )
+  end
+
+  defp llm_usage_values_schema do
+    token_properties =
+      Map.new(~w(input output cache_creation cache_read), fn name ->
+        {name, usage_integer()}
+      end)
+
+    closed([], Map.put(token_properties, "total_cost", usd_cost_schema()))
+  end
+
+  defp usage_integer,
+    do: %{"type" => "integer", "minimum" => 0, "maximum" => 9_007_199_254_740_991}
+
+  defp positive_usage_integer,
+    do: %{"type" => "integer", "minimum" => 1, "maximum" => 9_007_199_254_740_991}
+
+  defp usd_cost_schema do
+    closed(~w(currency microunits), %{
+      "currency" => %{"const" => "USD"},
+      "microunits" => usage_integer()
+    })
+  end
+
+  defp count_map(name_pattern, exceptions \\ [], max_properties \\ 512) do
     property_names =
       case exceptions do
         [] ->
@@ -1105,7 +1782,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       "type" => "object",
       "propertyNames" => property_names,
       "additionalProperties" => nonnegative_integer(),
-      "maxProperties" => 512
+      "maxProperties" => max_properties
     }
   end
 
@@ -1131,17 +1808,81 @@ defmodule PtcRunner.Kernel.CommandContract do
     }
   end
 
-  defp version_result_schema, do: version_result() |> const_object()
+  defp version_result_schema do
+    closed(~w(version source_revision source_dirty), %{
+      "version" => %{
+        "type" => "string",
+        "pattern" => "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+      },
+      "source_revision" => %{"type" => "string", "pattern" => "^[0-9a-f]{40}$"},
+      "source_dirty" => %{"type" => "boolean"}
+    })
+  end
 
-  defp init_result,
-    do: closed(~w(created), %{"created" => %{"const" => ["main.clj", "ptc.json"]}})
+  # The listing is pinned by identity and order: one positional name constant
+  # per served page, an exact length, and no additional entries, so an omitted,
+  # reordered, duplicated, or renamed page cannot be sealed. Titles, sizes, and
+  # bodies stay structural on purpose — they are derived from the shipped
+  # documents, and pinning them here would rebuild this artifact, and fail the
+  # staleness gate, on every documentation edit.
+  defp docs_result_schema do
+    names = DocumentationLibrary.names()
+
+    %{
+      "oneOf" => [
+        closed(~w(pages), %{
+          "pages" => %{
+            "type" => "array",
+            "minItems" => length(names),
+            "maxItems" => length(names),
+            "prefixItems" => Enum.map(names, &listed_page_schema/1),
+            "items" => false
+          }
+        }),
+        closed(~w(page content), %{
+          "page" => %{"enum" => names},
+          "content" => %{"type" => "string", "minLength" => 1}
+        })
+      ]
+    }
+  end
+
+  defp listed_page_schema(name) do
+    closed(~w(name title bytes), %{
+      "name" => %{"const" => name},
+      "title" => %{"type" => "string", "minLength" => 1},
+      "bytes" => %{"type" => "integer", "minimum" => 1}
+    })
+  end
+
+  # The scaffold's own list, plus one sealed list per embedded example tree, so
+  # `--example` cannot publish a top-level entry the contract did not admit.
+  defp init_result do
+    scaffold = ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
+
+    examples =
+      Enum.map(ExampleLibrary.names(), fn name ->
+        {:ok, created} = ExampleLibrary.created(name)
+        %{"const" => created}
+      end)
+
+    closed(~w(created), %{
+      "created" => %{"oneOf" => [%{"const" => scaffold} | examples]}
+    })
+  end
 
   defp validate_result do
     closed(
-      ~w(application_content_digest effective_application_digest workflow_bundle_hash mission_bundle_hashes provider_activity),
+      ~w(application_content_digest effective_application_digest installation_config_digests workflow_bundle_hash mission_bundle_hashes mission_grants provider_activity),
       %{
         "application_content_digest" => %{"type" => "string", "pattern" => @digest},
         "effective_application_digest" => %{"type" => "string", "pattern" => @digest},
+        "installation_config_digests" => %{
+          "type" => "object",
+          "propertyNames" => %{"pattern" => @alias},
+          "additionalProperties" => %{"type" => "string", "pattern" => @digest},
+          "maxProperties" => 128
+        },
         "workflow_bundle_hash" => %{"type" => "string", "pattern" => @hash},
         "mission_bundle_hashes" => %{
           "type" => "object",
@@ -1151,9 +1892,52 @@ defmodule PtcRunner.Kernel.CommandContract do
           },
           "maxProperties" => 16
         },
+        "mission_grants" => %{
+          "type" => "object",
+          "propertyNames" => %{"pattern" => "^[a-z][a-z0-9._-]{0,127}$"},
+          "additionalProperties" => mission_grants_entry(),
+          "maxProperties" => 16
+        },
         "provider_activity" => %{"const" => false}
       }
     )
+  end
+
+  defp mission_grants_entry do
+    # Ceilings follow StrictJSON admission (max 100_000 nodes) and the
+    # application-manifest byte budget rather than inventing tighter
+    # validate-only caps: CommandOutcome seals against this schema, so an
+    # under-bound here turns a legal package into an internal_error after
+    # successful preparation.
+    closed(~w(data exports providers), %{
+      "data" => %{
+        "type" => "array",
+        "maxItems" => 100_000,
+        "items" => %{
+          "type" => "string",
+          "minLength" => 6,
+          "maxLength" => 1_000_000,
+          "pattern" => "^data/.+$(?![\\s\\S])"
+        }
+      },
+      "exports" => %{
+        "type" => "array",
+        "maxItems" => 100_000,
+        "items" => %{
+          "type" => "string",
+          "minLength" => 1,
+          "maxLength" => 1_000_000
+        }
+      },
+      "providers" => %{
+        "type" => "array",
+        "maxItems" => 32,
+        "items" => %{
+          "type" => "string",
+          "pattern" => "^[a-z][a-z0-9._-]{0,127}$(?![\\s\\S])"
+        }
+      }
+    })
   end
 
   defp doctor_success_result, do: doctor_result(:success)
@@ -1161,9 +1945,11 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp doctor_result(mode) when mode in [:success, :failure] do
     application_pairs =
-      if mode == :success,
-        do: [{"pass", "valid"}, {"skipped", "not_requested"}],
-        else: [{"pass", "valid"}]
+      if mode == :success do
+        [{"pass", "valid"}, {"skipped", "not_requested"}]
+      else
+        [{"pass", "valid"}] ++ Enum.map(@doctor_application_failure_codes, &{"fail", &1})
+      end
 
     fixed = [
       doctor_fixed_check_schema("runtime", [{"pass", "supported"}, {"warn", "unsupported"}]),
@@ -1174,7 +1960,8 @@ defmodule PtcRunner.Kernel.CommandContract do
       ])
     ]
 
-    closed(~w(checks model_aliases provider_activity readiness), %{
+    closed(~w(checks model_aliases provider_activity readiness usage), %{
+      "usage" => doctor_usage_schema(),
       "checks" => %{
         "type" => "array",
         "minItems" => 3,
@@ -1197,7 +1984,7 @@ defmodule PtcRunner.Kernel.CommandContract do
               "oneOf" => [%{"type" => "boolean"}, %{"type" => "null"}]
             },
             "selected" => %{"type" => "boolean"},
-            "model_selector" => %{"type" => "string", "maxLength" => 4_096}
+            "model_selector" => model_selector_schema()
           }
         }
       },
@@ -1208,6 +1995,25 @@ defmodule PtcRunner.Kernel.CommandContract do
           else: %{"const" => "failed"}
         )
     })
+  end
+
+  # The LLM half of the shape a run reports, on the same rows. `doctor --connect`
+  # bills a real request per probed occurrence; a command that could not account
+  # for what it spent says so with the run's own `unavailable` state rather than
+  # reporting zero.
+  defp doctor_usage_schema do
+    %{
+      "oneOf" => [
+        closed(~w(llm_usage_state llm_usage), %{
+          "llm_usage_state" => %{"const" => "available"},
+          "llm_usage" => llm_usage_rows(llm_alias_row_schema())
+        }),
+        closed(~w(llm_usage_state llm_usage), %{
+          "llm_usage_state" => %{"const" => "unavailable"},
+          "llm_usage" => %{"type" => "null"}
+        })
+      ]
+    }
   end
 
   defp doctor_provider_check_schema(mode) do
@@ -1247,14 +2053,19 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp doctor_check_pairs(:success, _operation, pairs), do: pairs
 
   defp doctor_check_pairs(:failure, operation, _success_pairs) do
-    static =
+    settled =
       case operation do
-        "local" -> [{"pass", "available"}]
-        "selection" -> [{"pass", "declarative"}]
-        _other -> []
+        "local" ->
+          [{"pass", "available"}, {"skipped", "active_check_required"}]
+
+        "selection" ->
+          [{"pass", "declarative"}, {"skipped", "active_check_required"}]
+
+        operation when operation in ["credentials", "authorization", "connectivity"] ->
+          [{"skipped", "requires_connect"}]
       end
 
-    static ++
+    settled ++
       [{"skipped", "not_verified_due_to_failure"}] ++
       Enum.map(Map.get(@doctor_failure_codes_by_operation, operation, []), fn code ->
         {"fail", code}
@@ -1280,7 +2091,8 @@ defmodule PtcRunner.Kernel.CommandContract do
         %{
           "alias" => %{"type" => "string", "pattern" => @alias},
           "source" => %{
-            "enum" => ~w(mcp llm llm_replay ptc_trace_snapshot ptc_inspection_snapshot custom)
+            "enum" =>
+              ~w(mcp llm llm_replay ptc_trace_snapshot ptc_private_trace_snapshot ptc_inspection_snapshot custom)
           },
           "installation_revision" => %{
             "type" => "string",
@@ -1300,7 +2112,8 @@ defmodule PtcRunner.Kernel.CommandContract do
             "maxItems" => 2,
             "uniqueItems" => true,
             "items" => %{"enum" => ~w(workflow mission)}
-          }
+          },
+          "model_selector" => model_selector_schema()
         }
       )
 
@@ -1309,8 +2122,19 @@ defmodule PtcRunner.Kernel.CommandContract do
     })
   end
 
+  # `ModelSelectorDisclosure` withholds endpoint-bearing selectors; the closed
+  # envelope refuses one rather than trusting every producer to remember.
+  defp model_selector_schema do
+    %{
+      "type" => "string",
+      "maxLength" => 4_096,
+      "not" => %{"pattern" => "^openai-compat:"}
+    }
+  end
+
   defp success_result_schema(:help), do: help_result_schema()
   defp success_result_schema(:version), do: version_result_schema()
+  defp success_result_schema(:docs), do: docs_result_schema()
   defp success_result_schema(:init), do: init_result()
   defp success_result_schema(:validate), do: validate_result()
   defp success_result_schema(:doctor), do: doctor_success_result()
@@ -1321,9 +2145,6 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp ref(name), do: %{"$ref" => "#/$defs/#{name}"}
   defp nonnegative_integer, do: %{"type" => "integer", "minimum" => 0}
-
-  defp enum_or_const(value) when is_binary(value), do: %{"const" => value}
-  defp enum_or_const(values) when is_list(values), do: %{"enum" => values}
 
   defp const_object(map) do
     closed(Map.keys(map), Map.new(map, fn {key, value} -> {key, %{"const" => value}} end))
@@ -1336,5 +2157,22 @@ defmodule PtcRunner.Kernel.CommandContract do
       "required" => required,
       "properties" => properties
     }
+  end
+
+  defp compiled_jsv_root(key, schema_fun) when is_function(schema_fun, 0) do
+    case :persistent_term.get(key, :unset) do
+      :unset ->
+        case JSV.build(schema_fun.(), atoms: false, warnings: :silent) do
+          {:ok, root} = ok ->
+            :persistent_term.put(key, root)
+            ok
+
+          error ->
+            error
+        end
+
+      root ->
+        {:ok, root}
+    end
   end
 end

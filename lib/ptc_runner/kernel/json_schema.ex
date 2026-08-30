@@ -4,11 +4,11 @@ defmodule PtcRunner.Kernel.JSONSchema do
 
   The accepted profile is a strict subset of JSON Schema 2020-12 containing
   `type`, `title`, `description`, `default`, `properties`, `required`,
-  `additionalProperties`, `items`, `enum`, `const`, `minimum`, `maximum`,
-  `minLength`, `maxLength`, `minItems`, `maxItems`, and the single bounded
-  `sha256` string format. Types are scalar rather than unions, roots are
-  objects, and a missing `additionalProperties` on an object is normalized to
-  `false`.
+  `additionalProperties`, `propertyNames`, `items`, `enum`, `const`, `minimum`,
+  `maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`, `maxProperties`,
+  and the single bounded `sha256` string format. Types are scalar rather than
+  unions, roots are objects, and a missing `additionalProperties` on an object
+  is normalized to `false`.
 
   `$schema` selects the schema dialect; absence means the MCP default
   (2020-12). Because the accepted profile is a common subset of the
@@ -22,14 +22,26 @@ defmodule PtcRunner.Kernel.JSONSchema do
   rejected.
 
   Each normalized schema is at most 64 KiB with maximum depth 16, 128
-  properties per object, and 256 enum members. Schemas are compiled once with
-  JSV. Runtime validation delegates to the compiled JSV root. Input rejection
-  may retain a small explanation containing only schema-declared paths,
-  keywords, and bounds; submitted values and undeclared property names never
-  enter that explanation. Validation and explanation projection run together
-  in one time- and heap-bounded worker. Proven schema invalidity is distinct
-  from validator timeout, heap exhaustion, crashes, and malformed validator
-  results.
+  properties per object, and 256 enum members. Host construction compiles with
+  `compile/1`. Request-scoped schemas compile with `compile_bounded/3` in the
+  same time- and heap-bounded worker used for runtime validation. Proven schema
+  invalidity is distinct from compiler or validator timeout, heap exhaustion,
+  crashes, and malformed worker results. Runtime validation delegates to the
+  compiled JSV root. Input rejection may retain a small explanation containing
+  only schema-declared paths, keywords, and bounds; submitted values and
+  undeclared property names never enter that explanation. Validation and
+  explanation projection run together in one bounded worker. `valid?/2` remains
+  a host-side predicate for construction, tests, and the MCP structured-result
+  check inside the already-bounded provider process. Dispatcher output
+  admission uses `validate/5`.
+
+  Rejection reports the first proven fault as a closed `rule` atom plus the
+  segments locating it inside the submitted schema document. Every segment is
+  a key or index the submitted document actually carries, so the location
+  always resolves in the file the author opens. The profile is deliberately
+  closed, and its edges are not guessable from a bare refusal: an unsupported
+  keyword, a misspelled type, and an unsatisfiable bound are three different
+  authoring mistakes and must not report identically.
   """
 
   alias PtcRunner.Kernel.BoundedWorker
@@ -37,7 +49,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
   alias PtcRunner.Kernel.JSONSchema.SHA256Format
   alias PtcRunner.Kernel.JSONValue
 
-  @allowed ~w(type title description properties required additionalProperties items enum const minimum maximum minLength maxLength minItems maxItems format)
+  @allowed ~w(type title description properties required additionalProperties propertyNames items enum const minimum maximum minLength maxLength minItems maxItems maxProperties format)
   @types ~w(null boolean object array number integer string)
   @max_schema_bytes 65_536
   @max_depth 16
@@ -49,7 +61,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
   @max_argument_bytes 512
   @max_expected_bytes 256
   @simple_argument_segment ~r/\A[A-Za-z_][A-Za-z0-9_]*\z/
-  @expected_constraints ~w(minimum maximum minLength maxLength minItems maxItems)
+  @expected_constraints ~w(minimum maximum minLength maxLength minItems maxItems maxProperties)
 
   @constraint_keys %{
     type: "type",
@@ -61,6 +73,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
     maxLength: "maxLength",
     minItems: "minItems",
     maxItems: "maxItems",
+    maxProperties: "maxProperties",
     format: "format",
     required: "required",
     additionalProperties: "additionalProperties"
@@ -72,30 +85,122 @@ defmodule PtcRunner.Kernel.JSONSchema do
           required(:constraint) => binary(),
           optional(:expected) => term()
         }
+  @type segment :: {:property, binary()} | {:index, non_neg_integer()}
+  @type rejection :: %{rule: atom(), segments: [segment()]}
 
   @dialects [
     "https://json-schema.org/draft/2020-12/schema",
     "http://json-schema.org/draft-07/schema#"
   ]
 
-  @spec compile(map()) :: {:ok, map(), compiled()} | {:error, :invalid_schema}
-  def compile(schema) when is_map(schema) and not is_struct(schema) do
-    with {:ok, schema} <- validate_dialect(schema),
-         {:ok, normalized} <- normalize(schema, 1),
-         true <- normalized["type"] == "object",
-         {:ok, encoded} <- DeterministicJSON.encode(normalized),
-         true <- byte_size(encoded) <= @max_schema_bytes,
-         {:ok, root} <-
-           JSV.build(normalized, atoms: false, formats: [SHA256Format], warnings: :silent) do
-      {:ok, normalized, root}
-    else
-      _reason -> {:error, :invalid_schema}
-    end
+  @spec compile(term()) :: {:ok, map(), compiled()} | {:error, {:invalid_schema, rejection()}}
+  def compile(schema) do
+    compile_document(schema)
   rescue
-    _exception -> {:error, :invalid_schema}
+    _exception -> {:error, {:invalid_schema, rejection(:unsupported_schema, [])}}
   end
 
-  def compile(_schema), do: {:error, :invalid_schema}
+  @doc """
+  Compiles a request-scoped schema in a caller-cancelled bounded worker.
+
+  Proven profile rejections stay `{:error, {:invalid_schema, rejection}}`.
+  Worker timeout, heap exhaustion, cancellation, crashes, and malformed worker
+  results are `{:unavailable, cause}` and must not be treated as an invalid
+  document.
+  """
+  @spec compile_bounded(term(), pos_integer(), pos_integer()) ::
+          {:ok, map(), compiled()}
+          | {:error, {:invalid_schema, rejection()}}
+          | {:unavailable, atom()}
+  def compile_bounded(schema, timeout_ms, max_heap_words)
+      when is_integer(timeout_ms) and timeout_ms > 0 and is_integer(max_heap_words) and
+             max_heap_words > 0 do
+    case BoundedWorker.run(fn -> compile_document(schema) end,
+           timeout_ms: timeout_ms,
+           max_heap_words: max_heap_words,
+           cancel_with_caller: true
+         ) do
+      {:ok, {:ok, normalized, compiled}} ->
+        {:ok, normalized, compiled}
+
+      {:ok, {:error, {:invalid_schema, %{rule: rule, segments: segments} = rejection}}}
+      when is_atom(rule) and is_list(segments) ->
+        {:error, {:invalid_schema, rejection}}
+
+      {:ok, _unexpected} ->
+        {:unavailable, :unexpected_compiler_result}
+
+      {:error, cause} ->
+        {:unavailable, cause}
+    end
+  end
+
+  @doc """
+  Returns every rule a rejection can carry, most specific first.
+
+  The set is closed so a diagnostic boundary can render each rule from a fixed
+  literal instead of forwarding compiler prose.
+  """
+  @spec rules() :: [atom()]
+  def rules do
+    [
+      :not_a_schema_object,
+      :unsupported_keyword,
+      :type_missing,
+      :unsupported_type,
+      :unsupported_format,
+      :keyword_not_applicable,
+      :invalid_keyword_value,
+      :bounds_inverted,
+      :required_property_undeclared,
+      :root_not_object,
+      :unsupported_dialect,
+      :depth_exceeded,
+      :too_many_properties,
+      :too_many_enum_members,
+      :schema_too_large,
+      :unsupported_schema
+    ]
+  end
+
+  defp compile_document(schema) when is_map(schema) and not is_struct(schema) do
+    with {:ok, schema} <- validate_dialect(schema),
+         {:ok, normalized} <- normalize(schema, [], 1),
+         :ok <- validate_root_object(normalized),
+         {:ok, encoded} <- encode_normalized(normalized),
+         :ok <- validate_schema_size(encoded),
+         {:ok, root} <- build(normalized) do
+      {:ok, normalized, root}
+    else
+      {:error, %{rule: _rule} = rejection} -> {:error, {:invalid_schema, rejection}}
+    end
+  end
+
+  defp compile_document(_schema),
+    do: {:error, {:invalid_schema, rejection(:not_a_schema_object, [])}}
+
+  defp validate_root_object(%{"type" => "object"}), do: :ok
+  defp validate_root_object(_normalized), do: {:error, rejection(:root_not_object, [])}
+
+  defp encode_normalized(normalized) do
+    case DeterministicJSON.encode(normalized) do
+      {:ok, encoded} -> {:ok, encoded}
+      {:error, _reason} -> {:error, rejection(:unsupported_schema, [])}
+    end
+  end
+
+  defp validate_schema_size(encoded) do
+    if byte_size(encoded) <= @max_schema_bytes,
+      do: :ok,
+      else: {:error, rejection(:schema_too_large, [])}
+  end
+
+  defp build(normalized) do
+    case JSV.build(normalized, atoms: false, formats: [SHA256Format], warnings: :silent) do
+      {:ok, root} -> {:ok, root}
+      _invalid -> {:error, rejection(:unsupported_schema, [])}
+    end
+  end
 
   @spec valid?(compiled(), term()) :: boolean()
   def valid?(root, value) do
@@ -205,7 +310,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
     with kind when is_atom(kind) <- Map.get(error, :kind),
          {:ok, constraint} <- Map.fetch(@constraint_keys, kind),
          schema_path when is_list(schema_path) <- Map.get(error, :schema_path),
-         {:ok, node, path} <- schema_context(schema, schema_path),
+         {:ok, node, path} <- schema_context(schema, schema_path, constraint),
          {:ok, argument} <- render_argument(path),
          {:ok, declared} <- Map.fetch(node, constraint) do
       violation = %{argument: argument, constraint: constraint}
@@ -223,26 +328,49 @@ defmodule PtcRunner.Kernel.JSONSchema do
   # the rejected value. Resolve every property and item step against the frozen
   # schema before retaining it. Array positions become `[]`, because a
   # submitted index is not a declared schema fact.
-  defp schema_context(schema, schema_path),
-    do: schema_path |> Enum.reverse() |> walk_schema_context(schema, [])
+  defp schema_context(schema, schema_path, constraint),
+    do: schema_path |> Enum.reverse() |> walk_schema_context(schema, [], constraint)
 
-  defp walk_schema_context([], node, path), do: {:ok, node, Enum.reverse(path)}
+  defp walk_schema_context([], node, path, _constraint), do: {:ok, node, Enum.reverse(path)}
 
-  defp walk_schema_context([:root | rest], node, path),
-    do: walk_schema_context(rest, node, path)
+  defp walk_schema_context([:root | rest], node, path, constraint),
+    do: walk_schema_context(rest, node, path, constraint)
 
-  defp walk_schema_context([{:properties, name} | rest], %{"properties" => properties}, path)
+  defp walk_schema_context(
+         [{:properties, name} | rest],
+         %{"properties" => properties},
+         path,
+         constraint
+       )
        when is_map(properties) do
     case Map.fetch(properties, name) do
-      {:ok, child} -> walk_schema_context(rest, child, [name | path])
+      {:ok, child} -> walk_schema_context(rest, child, [name | path], constraint)
       :error -> :error
     end
   end
 
-  defp walk_schema_context([:items | rest], %{"items" => child}, path),
-    do: walk_schema_context(rest, child, [:item | path])
+  defp walk_schema_context([:items | rest], %{"items" => child}, path, constraint),
+    do: walk_schema_context(rest, child, [:item | path], constraint)
 
-  defp walk_schema_context(_segments, _node, _path), do: :error
+  # JSV may prefix an object node's schema path with `:propertyNames` even for
+  # a sibling keyword such as `maxProperties`. Stay on the object when it
+  # declares the violated constraint; otherwise descend into the nested names
+  # schema. Never retain a caller-authored property name on the argument path.
+  defp walk_schema_context([:propertyNames | rest], node, path, constraint)
+       when is_map(node) and is_binary(constraint) do
+    cond do
+      Map.has_key?(node, constraint) ->
+        walk_schema_context(rest, node, path, constraint)
+
+      is_map(node["propertyNames"]) ->
+        walk_schema_context(rest, node["propertyNames"], path, constraint)
+
+      true ->
+        :error
+    end
+  end
+
+  defp walk_schema_context(_segments, _node, _path, _constraint), do: :error
 
   defp render_argument([]), do: {:ok, "$"}
 
@@ -289,13 +417,38 @@ defmodule PtcRunner.Kernel.JSONSchema do
 
   defp project_expected(_constraint, _value), do: :omit
 
-  defp normalize(_schema, depth) when depth > @max_depth, do: {:error, :invalid_schema}
+  @doc false
+  @spec declared_expected(atom(), map()) :: {:ok, number()} | :omit
+  def declared_expected(kind, schema) when is_atom(kind) and is_map(schema) do
+    with {:ok, constraint} <- Map.fetch(@constraint_keys, kind),
+         {:ok, declared} <- Map.fetch(schema, constraint) do
+      project_expected(constraint, declared)
+    else
+      _unsupported_or_absent -> :omit
+    end
+  end
 
-  defp normalize(schema, depth) when is_map(schema) and not is_struct(schema) do
-    with true <- JSONValue.map?(schema),
-         schema = drop_ignored_annotations(schema),
-         true <- Map.keys(schema) -- @allowed == [],
-         type when type in @types <- schema["type"],
+  def declared_expected(_kind, _schema), do: :omit
+
+  defp normalize(_schema, path, depth) when depth > @max_depth,
+    do: reject(:depth_exceeded, path)
+
+  defp normalize(schema, path, depth) when is_map(schema) and not is_struct(schema) do
+    if JSONValue.map?(schema),
+      do: schema |> drop_ignored_annotations() |> normalize_node(path, depth),
+      else: reject(:not_a_schema_object, path)
+  end
+
+  defp normalize(_schema, path, _depth), do: reject(:not_a_schema_object, path)
+
+  # Local checks locate themselves relative to this node and are lifted onto
+  # `path` here; recursive child normalization already carries the full path
+  # and reports absolute segments.
+  defp normalize_node(schema, path, depth) do
+    type = schema["type"]
+
+    with :ok <- validate_keywords(schema),
+         :ok <- validate_type(schema),
          :ok <- validate_text(schema, "title"),
          :ok <- validate_text(schema, "description"),
          :ok <- validate_number_bounds(schema),
@@ -304,34 +457,68 @@ defmodule PtcRunner.Kernel.JSONSchema do
          :ok <- validate_format(schema, type),
          :ok <- validate_const(schema),
          :ok <- validate_enum(schema),
-         {:ok, properties} <- normalize_properties(schema, type, depth),
-         {:ok, items} <- normalize_items(schema, type, depth),
+         {:ok, properties} <- normalize_properties(schema, type, path, depth),
+         {:ok, items} <- normalize_items(schema, type, path, depth),
+         {:ok, property_names} <- normalize_property_names(schema, type, path, depth),
          :ok <- validate_required(schema, type, properties),
-         :ok <- validate_additional_properties(schema, type) do
+         :ok <- validate_additional_properties(schema, type),
+         :ok <- validate_max_properties(schema, type) do
       normalized =
         schema
         |> maybe_put("properties", properties)
         |> maybe_put("items", items)
+        |> maybe_put("propertyNames", property_names)
         |> normalize_additional_properties(type)
 
       {:ok, normalized}
     else
-      _reason -> {:error, :invalid_schema}
+      {:error, {rule, suffix}} when is_atom(rule) -> reject(rule, path, suffix)
+      {:error, %{rule: _rule}} = absolute -> absolute
     end
   end
-
-  defp normalize(_schema, _depth), do: {:error, :invalid_schema}
 
   # A root "$schema" selects the dialect: absence defaults to 2020-12, a
   # supported URI is removed after validation, anything else is rejected.
-  # Nested "$schema" is rejected in normalize/2 like any unknown keyword.
+  # Nested "$schema" is rejected in normalize/3 like any unknown keyword.
   defp validate_dialect(schema) do
     case Map.fetch(schema, "$schema") do
-      :error -> {:ok, schema}
-      {:ok, dialect} when dialect in @dialects -> {:ok, Map.delete(schema, "$schema")}
-      {:ok, _dialect} -> {:error, :invalid_schema}
+      :error ->
+        {:ok, schema}
+
+      {:ok, dialect} when dialect in @dialects ->
+        {:ok, Map.delete(schema, "$schema")}
+
+      {:ok, _dialect} ->
+        {:error, rejection(:unsupported_dialect, [{:property, "$schema"}])}
     end
   end
+
+  defp validate_keywords(schema) do
+    case schema |> Map.keys() |> Enum.reject(&(&1 in @allowed)) |> Enum.sort() do
+      [] -> :ok
+      [keyword | _rest] -> {:error, {:unsupported_keyword, keyword_segments(keyword)}}
+    end
+  end
+
+  # A profile node is typed: `enum` and `const` alone do not imply one here,
+  # even though bare `enum` is the idiomatic JSON Schema spelling. Reporting
+  # that as a missing `type` rather than as a generic refusal is the whole
+  # difference between a one-line fix and bisecting the schema by hand.
+  defp validate_type(schema) do
+    case Map.fetch(schema, "type") do
+      {:ok, type} when type in @types -> :ok
+      {:ok, _type} -> {:error, {:unsupported_type, [{:property, "type"}]}}
+      :error -> {:error, {:type_missing, []}}
+    end
+  end
+
+  defp keyword_segments(keyword) when is_binary(keyword), do: [{:property, keyword}]
+  defp keyword_segments(_keyword), do: []
+
+  defp rejection(rule, segments), do: %{rule: rule, segments: segments}
+
+  defp reject(rule, path, suffix \\ []),
+    do: {:error, rejection(rule, Enum.reverse(path, suffix))}
 
   # Vendor "x-…" extension keys and JSON Schema's non-validating "default"
   # annotation are discarded as deliberate client policy; mainstream MCP SDKs
@@ -343,31 +530,30 @@ defmodule PtcRunner.Kernel.JSONSchema do
     end)
   end
 
-  defp normalize_properties(schema, "object", depth) do
+  defp normalize_properties(schema, "object", path, depth) do
     case Map.fetch(schema, "properties") do
       :error ->
         {:ok, nil}
 
-      {:ok, properties}
-      when is_map(properties) and not is_struct(properties) and
-             map_size(properties) <= @max_properties ->
-        normalize_schema_map(properties, depth + 1)
+      {:ok, properties} when is_map(properties) and not is_struct(properties) ->
+        if map_size(properties) <= @max_properties,
+          do: normalize_schema_map(properties, path, depth + 1),
+          else: {:error, {:too_many_properties, [{:property, "properties"}]}}
 
       {:ok, _properties} ->
-        {:error, :invalid_schema}
+        {:error, {:invalid_keyword_value, [{:property, "properties"}]}}
     end
   end
 
-  defp normalize_properties(schema, _type, _depth) do
-    if Map.has_key?(schema, "properties"),
-      do: {:error, :invalid_schema},
-      else: {:ok, nil}
-  end
+  defp normalize_properties(schema, _type, _path, _depth),
+    do: not_applicable(schema, "properties")
 
-  defp normalize_schema_map(properties, depth) do
-    Enum.reduce_while(properties, {:ok, %{}}, fn
+  defp normalize_schema_map(properties, path, depth) do
+    properties
+    |> Enum.sort()
+    |> Enum.reduce_while({:ok, %{}}, fn
       {name, child}, {:ok, normalized} when is_binary(name) ->
-        case normalize(child, depth) do
+        case normalize(child, [{:property, name}, {:property, "properties"} | path], depth) do
           {:ok, normalized_child} ->
             {:cont, {:ok, Map.put(normalized, name, normalized_child)}}
 
@@ -376,55 +562,102 @@ defmodule PtcRunner.Kernel.JSONSchema do
         end
 
       _property, _acc ->
-        {:halt, {:error, :invalid_schema}}
+        {:halt, {:error, {:invalid_keyword_value, [{:property, "properties"}]}}}
     end)
   end
 
-  defp normalize_items(schema, "array", depth) do
+  defp normalize_items(schema, "array", path, depth) do
     case Map.fetch(schema, "items") do
-      {:ok, items} -> normalize(items, depth + 1)
+      {:ok, items} -> normalize(items, [{:property, "items"} | path], depth + 1)
       :error -> {:ok, nil}
     end
   end
 
-  defp normalize_items(schema, _type, _depth) do
-    if Map.has_key?(schema, "items"),
-      do: {:error, :invalid_schema},
+  defp normalize_items(schema, _type, _path, _depth), do: not_applicable(schema, "items")
+
+  defp normalize_property_names(schema, "object", path, depth) do
+    case Map.fetch(schema, "propertyNames") do
+      {:ok, names} ->
+        normalize(names, [{:property, "propertyNames"} | path], depth + 1)
+
+      :error ->
+        {:ok, nil}
+    end
+  end
+
+  defp normalize_property_names(schema, _type, _path, _depth),
+    do: not_applicable(schema, "propertyNames")
+
+  defp validate_max_properties(schema, "object") do
+    case Map.fetch(schema, "maxProperties") do
+      :error ->
+        :ok
+
+      {:ok, value} when is_integer(value) and value >= 0 ->
+        :ok
+
+      {:ok, _value} ->
+        {:error, {:invalid_keyword_value, [{:property, "maxProperties"}]}}
+    end
+  end
+
+  defp validate_max_properties(schema, _type) do
+    case not_applicable(schema, "maxProperties") do
+      {:ok, nil} -> :ok
+      error -> error
+    end
+  end
+
+  defp not_applicable(schema, keyword) do
+    if Map.has_key?(schema, keyword),
+      do: {:error, {:keyword_not_applicable, [{:property, keyword}]}},
       else: {:ok, nil}
   end
 
   defp validate_required(schema, "object", properties) do
     case Map.get(schema, "required", []) do
       required when is_list(required) and length(required) <= @max_properties ->
-        unique = MapSet.new(required)
-
-        if Enum.all?(required, &is_binary/1) and MapSet.size(unique) == length(required) and
-             Enum.all?(required, &Map.has_key?(properties || %{}, &1)),
-           do: :ok,
-           else: {:error, :invalid_schema}
+        validate_required_names(required, properties)
 
       _required ->
-        {:error, :invalid_schema}
+        {:error, {:invalid_keyword_value, [{:property, "required"}]}}
     end
   end
 
   defp validate_required(schema, _type, _properties) do
-    if Map.has_key?(schema, "required"),
-      do: {:error, :invalid_schema},
-      else: :ok
+    case not_applicable(schema, "required") do
+      {:ok, nil} -> :ok
+      error -> error
+    end
+  end
+
+  defp validate_required_names(required, properties) do
+    unique = MapSet.new(required)
+
+    cond do
+      not Enum.all?(required, &is_binary/1) or MapSet.size(unique) != length(required) ->
+        {:error, {:invalid_keyword_value, [{:property, "required"}]}}
+
+      not Enum.all?(required, &Map.has_key?(properties || %{}, &1)) ->
+        {:error, {:required_property_undeclared, [{:property, "required"}]}}
+
+      true ->
+        :ok
+    end
   end
 
   defp validate_additional_properties(schema, "object") do
     case Map.get(schema, "additionalProperties", false) do
       value when is_boolean(value) -> :ok
-      _value -> {:error, :invalid_schema}
+      _value -> {:error, {:invalid_keyword_value, [{:property, "additionalProperties"}]}}
     end
   end
 
   defp validate_additional_properties(schema, _type) do
-    if Map.has_key?(schema, "additionalProperties"),
-      do: {:error, :invalid_schema},
-      else: :ok
+    case not_applicable(schema, "additionalProperties") do
+      {:ok, nil} -> :ok
+      error -> error
+    end
   end
 
   defp normalize_additional_properties(schema, "object"),
@@ -436,56 +669,50 @@ defmodule PtcRunner.Kernel.JSONSchema do
     case Map.fetch(schema, key) do
       :error -> :ok
       {:ok, value} when is_binary(value) -> :ok
-      {:ok, _value} -> {:error, :invalid_schema}
+      {:ok, _value} -> {:error, {:invalid_keyword_value, [{:property, key}]}}
     end
   end
 
-  defp validate_number_bounds(schema) do
-    minimum = Map.get(schema, "minimum")
-    maximum = Map.get(schema, "maximum")
-
-    cond do
-      not valid_optional_number?(minimum) ->
-        {:error, :invalid_schema}
-
-      not valid_optional_number?(maximum) ->
-        {:error, :invalid_schema}
-
-      is_number(minimum) and is_number(maximum) and minimum > maximum ->
-        {:error, :invalid_schema}
-
-      true ->
-        :ok
-    end
-  end
+  defp validate_number_bounds(schema),
+    do: validate_bounds(schema, "minimum", "maximum", &valid_optional_number?/1)
 
   defp validate_format(schema, "string") do
     case Map.fetch(schema, "format") do
       :error -> :ok
       {:ok, "sha256"} -> :ok
-      {:ok, _format} -> {:error, :invalid_schema}
+      {:ok, _format} -> {:error, {:unsupported_format, [{:property, "format"}]}}
     end
   end
 
   defp validate_format(schema, _type) do
-    if Map.has_key?(schema, "format"),
-      do: {:error, :invalid_schema},
-      else: :ok
+    case not_applicable(schema, "format") do
+      {:ok, nil} -> :ok
+      error -> error
+    end
   end
 
-  defp validate_size_bounds(schema, minimum_key, maximum_key) do
+  defp validate_size_bounds(schema, minimum_key, maximum_key),
+    do:
+      validate_bounds(
+        schema,
+        minimum_key,
+        maximum_key,
+        &valid_optional_non_negative_integer?/1
+      )
+
+  defp validate_bounds(schema, minimum_key, maximum_key, valid?) do
     minimum = Map.get(schema, minimum_key)
     maximum = Map.get(schema, maximum_key)
 
     cond do
-      not valid_optional_non_negative_integer?(minimum) ->
-        {:error, :invalid_schema}
+      not valid?.(minimum) ->
+        {:error, {:invalid_keyword_value, [{:property, minimum_key}]}}
 
-      not valid_optional_non_negative_integer?(maximum) ->
-        {:error, :invalid_schema}
+      not valid?.(maximum) ->
+        {:error, {:invalid_keyword_value, [{:property, maximum_key}]}}
 
-      is_integer(minimum) and is_integer(maximum) and minimum > maximum ->
-        {:error, :invalid_schema}
+      is_number(minimum) and is_number(maximum) and minimum > maximum ->
+        {:error, {:bounds_inverted, [{:property, minimum_key}]}}
 
       true ->
         :ok
@@ -494,8 +721,13 @@ defmodule PtcRunner.Kernel.JSONSchema do
 
   defp validate_const(schema) do
     case Map.fetch(schema, "const") do
-      :error -> :ok
-      {:ok, value} -> if JSONValue.value?(value), do: :ok, else: {:error, :invalid_schema}
+      :error ->
+        :ok
+
+      {:ok, value} ->
+        if JSONValue.value?(value),
+          do: :ok,
+          else: {:error, {:invalid_keyword_value, [{:property, "const"}]}}
     end
   end
 
@@ -504,18 +736,24 @@ defmodule PtcRunner.Kernel.JSONSchema do
       :error ->
         :ok
 
-      {:ok, values}
-      when is_list(values) and values != [] and length(values) <= @max_enum_members ->
-        with true <- Enum.all?(values, &JSONValue.value?/1),
-             {:ok, encoded} <- encode_enum_members(values),
-             true <- MapSet.size(MapSet.new(encoded)) == length(encoded) do
-          :ok
-        else
-          _reason -> {:error, :invalid_schema}
-        end
+      {:ok, values} when is_list(values) and length(values) > @max_enum_members ->
+        {:error, {:too_many_enum_members, [{:property, "enum"}]}}
+
+      {:ok, values} when is_list(values) and values != [] ->
+        validate_enum_members(values)
 
       {:ok, _values} ->
-        {:error, :invalid_schema}
+        {:error, {:invalid_keyword_value, [{:property, "enum"}]}}
+    end
+  end
+
+  defp validate_enum_members(values) do
+    with true <- Enum.all?(values, &JSONValue.value?/1),
+         {:ok, encoded} <- encode_enum_members(values),
+         true <- MapSet.size(MapSet.new(encoded)) == length(encoded) do
+      :ok
+    else
+      _reason -> {:error, {:invalid_keyword_value, [{:property, "enum"}]}}
     end
   end
 
@@ -523,7 +761,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
     Enum.reduce_while(values, {:ok, []}, fn value, {:ok, encoded} ->
       case DeterministicJSON.encode(value) do
         {:ok, member} -> {:cont, {:ok, [member | encoded]}}
-        _error -> {:halt, {:error, :invalid_schema}}
+        _error -> {:halt, :error}
       end
     end)
   end

@@ -167,6 +167,28 @@ defmodule PtcRunner.TestSupport.MCPStdioFixture do
     respond(id, "stale-response-flood")
   end
 
+  defp handle_request(id, "stderr-echo", _line, _marker) when is_integer(id) do
+    IO.write(:stderr, "child diagnostic\n")
+    # Delay the response so multiplexed launcher E frames reach the transport
+    # before the O-framed JSON response under suite load.
+    respond_after(id, "stderr-echo", 75)
+  end
+
+  defp handle_request(id, "stderr-overflow", _line, _marker) when is_integer(id) do
+    IO.write(:stderr, "abcdefghijklmnopqrstuvwxyz\n")
+    respond_after(id, "stderr-overflow", 75)
+  end
+
+  defp handle_request(id, "stderr-slow", _line, _marker) when is_integer(id) do
+    IO.write(:stderr, "slow diagnostic\n")
+    respond_after(id, "stderr-slow", 75)
+  end
+
+  defp handle_request(id, "stderr-fast", _line, _marker) when is_integer(id) do
+    IO.write(:stderr, "fast diagnostic\n")
+    respond_after(id, "stderr-fast", 5)
+  end
+
   defp handle_request(id, method, _line, _marker)
        when is_integer(id) and is_binary(method),
        do: respond(id, method)

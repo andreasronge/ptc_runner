@@ -7,19 +7,68 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   lower-level reasons never add a public code.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.CompileDiagnostic
+  alias PtcRunner.Kernel.ComponentOverrideDiagnostic
+  alias PtcRunner.Kernel.ContractSchemaDiagnostic
+  alias PtcRunner.Kernel.ExplicitFailureDiagnostic
+  alias PtcRunner.Kernel.LimitCapacityDiagnostic
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
+  alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
+  alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
+  alias PtcRunner.Kernel.ModelOutputDiagnostic
+  alias PtcRunner.Kernel.OptionalBudgetDiagnostic
+  alias PtcRunner.Kernel.ResultContractDiagnostic
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.SchemaViolationDiagnostic
+  alias PtcRunner.Kernel.SelectionRulesDiagnostic
+
+  # A refused replay fixture is reported through the environment code on a run
+  # and the fixtures code in doctor, and both carry the same bounded message.
+  @fixture_codes [:environment_unavailable, :fixtures_unreadable]
+
+  @endpoint_codes [
+    :installation_endpoint_invalid,
+    :installation_endpoint_insecure_loopback_required,
+    :installation_endpoint_literal_loopback_required,
+    :installation_endpoint_insecure_loopback_forbidden,
+    :installation_endpoint_credentials_require_https
+  ]
 
   @rows [
     {:arguments, :invalid_command, 2, false, "use one of the supported commands"},
     {:arguments, :invalid_arguments, 2, false, "use the documented arguments for this command"},
     {:arguments, :conflicting_arguments, 2, false,
      "choose only one option from the conflicting argument group"},
+    {:arguments, :project_host_undeclared, 2, false,
+     "the project document declares no host block; add one to use this command"},
+    {:arguments, :envelope_destination_exists, 2, false,
+     "the envelope destination already exists"},
+    {:arguments, :docs_page_unknown, 2, false, "no documentation page is served under that name"},
+    {:arguments, :example_unknown, 2, false, "no example is embedded under that name"},
+    {:project, :project_schema_invalid, 3, false,
+     "the project configuration does not satisfy its schema"},
+    {:project, :schema_validation_unavailable, 3, true,
+     "project schema validation timed out or exceeded its resource bound; retry the command"},
     {:host, :host_unavailable, 3, false, "the host configuration is unavailable"},
     {:host, :host_invalid, 3, false, "the host configuration is invalid"},
     {:host, :host_schema_invalid, 3, false, "the host configuration does not satisfy its schema"},
+    {:host, :schema_validation_unavailable, 3, true,
+     "host schema validation timed out or exceeded its resource bound; retry the command"},
     {:host, :installed_limit_invalid, 3, false, "an installed limit is invalid"},
     {:host, :installation_revision_missing, 3, false,
      "an installed provider is missing its behavior revision"},
+    {:host, :installation_endpoint_invalid, 3, false,
+     "an installed MCP endpoint is not admissible; streamable_http requires an https URL, or allow_insecure_loopback with a credential-free plain-http loopback address"},
+    {:host, :installation_endpoint_insecure_loopback_required, 3, false,
+     "a plain-http MCP endpoint requires allow_insecure_loopback"},
+    {:host, :installation_endpoint_literal_loopback_required, 3, false,
+     "allow_insecure_loopback requires a literal 127.0.0.1 or [::1] address"},
+    {:host, :installation_endpoint_insecure_loopback_forbidden, 3, false,
+     "allow_insecure_loopback is not permitted on an https endpoint; remove it"},
+    {:host, :installation_endpoint_credentials_require_https, 3, false,
+     "configured MCP credentials require an https endpoint"},
     {:application, :application_unavailable, 3, false, "the application is unavailable"},
     {:application, :application_not_found, 3, false, "the application manifest does not exist"},
     {:application, :invalid_json, 3, false, "an application document is not valid JSON"},
@@ -27,15 +76,25 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "an application document contains a duplicate property"},
     {:application, :schema_violation, 3, false,
      "the application manifest does not satisfy its schema"},
+    {:application, :schema_validation_unavailable, 3, true,
+     "application schema validation timed out or exceeded its resource bound; retry the command"},
     {:application, :installed_limit_exceeded, 3, false,
      "an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling"},
+    {:application, :limit_unavailable, 3, false,
+     "an optional application limit is unavailable because the host has not enabled it"},
+    {:application, :limit_configuration_invalid, 3, false,
+     "normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes"},
+    {:application, :limit_capacity_invalid, 3, false,
+     "event_payload_bytes effective limit 8211 is below the required 12000 bytes for this application's resolved terminal usage; raise limits.event_payload_bytes, and its installed host ceiling if it is lower, or declare fewer capabilities or missions"},
     {:application, :required_property_missing, 3, false,
      "the application manifest is missing a required property"},
     {:application, :reference_missing, 3, false,
-     "a referenced application document is unavailable"},
+     "a referenced document is unavailable; for --input/--private-input try an application-relative name or an absolute/working-directory path"},
     {:application, :document_limit_exceeded, 3, false,
      "the application document closure exceeds its limit"},
     {:application, :contract_invalid, 3, false, "an application value contract is invalid"},
+    {:application, :contract_projection_limit_exceeded, 3, false,
+     "application contract prompt projections exceed their bounded admission limit"},
     {:application, :input_invalid, 3, false,
      "the selected input is not an admissible JSON object"},
     {:application, :input_contract_failed, 3, false,
@@ -51,7 +110,11 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the component source contains an undefined variable reference"},
     {:bundle, :duplicate_definition, 3, false,
      "the component bundle defines the same name more than once"},
+    {:bundle, :unknown_namespace, 3, false,
+     "the component source references an unavailable namespace"},
     {:bundle, :entry_invalid, 3, false, "the workflow entry is not a public bundle export"},
+    {:bundle, :mission_undeclared, 3, false,
+     "the workflow entry evaluates into a mission and the manifest declares none"},
     {:provider_declaration, :provider_unknown, 3, false,
      "the selected provider is not installed"},
     {:provider_declaration, :selection_invalid, 3, false, "the provider selection is invalid"},
@@ -71,14 +134,18 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the trace destination is unavailable"},
     {:destination, :trace_destination_unsafe, 7, false, "the trace destination is unsafe"},
     {:destination, :invalid_inspection_destination, 7, false,
-     "the inspection destination is invalid"},
+     "--inspect must name a valid destination ending in .ptcins"},
     {:destination, :inspection_destination_unavailable, 7, false,
      "the inspection destination is unavailable"},
+    {:destination, :inspection_directory_missing, 7, false,
+     "--inspect must name a file in an existing directory"},
     {:destination, :inspection_destination_unsafe, 7, false,
      "the inspection destination is unsafe"},
     {:destination, :invalid_result_destination, 7, false, "the result destination is invalid"},
     {:destination, :result_destination_unavailable, 7, false,
      "the result destination is unavailable"},
+    {:destination, :result_directory_missing, 7, false,
+     "--output and --private-output must name a file in an existing directory"},
     {:destination, :result_destination_unsafe, 7, false, "the result destination is unsafe"},
     {:destination, :destination_exists, 7, false, "an artifact destination already exists"},
     {:destination, :private_destination_required, 7, false,
@@ -87,8 +154,29 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the private result recovery reservation failed"},
     {:local_preflight, :environment_unavailable, 4, false,
      "a required local environment is unavailable"},
+    {:local_preflight, :environment_file_not_found, 4, false,
+     "the named environment file does not exist"},
+    {:local_preflight, :environment_file_not_regular, 4, false,
+     "the named environment file is not a regular file"},
+    {:local_preflight, :environment_file_unreadable, 4, false,
+     "the named environment file cannot be read safely"},
+    {:local_preflight, :environment_file_too_large, 4, false,
+     "the named environment file exceeds the 1 MB limit"},
+    {:local_preflight, :environment_file_invalid_utf8, 4, false,
+     "the named environment file is not valid UTF-8"},
+    {:local_preflight, :authorization_target_unknown, 4, false,
+     "--authorize-mcp must name an installed provider the application selects"},
+    {:local_preflight, :authorization_not_applicable, 4, false,
+     "--authorize-mcp applies only to an installation that declares OAuth"},
+    {:local_preflight, :command_not_found, 4, false,
+     "a required provider command could not be found"},
+    {:local_preflight, :executable_unavailable, 4, false,
+     "a required provider executable is unusable"},
+    {:local_preflight, :fixtures_unreadable, 4, false, "provider fixtures could not be read"},
     {:local_preflight, :adapter_unavailable, 4, false,
      "a required provider adapter is unavailable"},
+    {:local_preflight, :model_contract_unsupported, 4, false,
+     "the selected model cannot honor its installed model contract"},
     {:local_preflight, :launcher_unavailable, 4, false,
      "a required provider launcher is unavailable"},
     {:local_preflight, :local_check_timeout, 4, false, "a local provider check timed out"},
@@ -126,18 +214,60 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
      "the provider connectivity operation is rate limited"},
     {:provider_acquisition, :provider_unavailable, 4, false,
      "the selected provider could not be acquired"},
+    {:provider_acquisition, :provider_acquisition_timeout, 4, true,
+     "the selected provider exceeded its acquisition timeout budget"},
+    {:provider_acquisition, :provider_endpoint_connection_refused, 4, true,
+     "the installed endpoint refused the connection"},
+    {:provider_acquisition, :provider_endpoint_name_unresolved, 4, false,
+     "the installed endpoint hostname could not be resolved"},
+    {:provider_acquisition, :provider_endpoint_tls_failed, 4, false,
+     "the installed endpoint did not complete a TLS handshake"},
     {:provider_acquisition, :provider_protocol_error, 4, false,
      "the selected provider returned an invalid acquisition response"},
+    {:provider_acquisition, :provider_protocol_version_unsupported, 4, false,
+     "the endpoint did not advertise support for MCP protocol 2026-07-28"},
+    {:provider_acquisition, :provider_tool_missing, 4, false,
+     "the installed endpoint does not expose a declared tool"},
     {:provider_acquisition, :provider_policy_changed, 4, false,
      "the selected provider policy changed during acquisition"},
+    {:provider_acquisition, :capability_requirement_missing, 4, false,
+     "a component requires a capability that the selected providers did not supply"},
     {:execution, :workflow_failed, 5, false, "the workflow failed"},
+    {:execution, :explicit_failure, 5, false, "the workflow signalled an explicit failure"},
+    {:execution, :evaluation_failed, 5, false, "the evaluation failed"},
+    {:execution, :invalid_agent_config, 5, false,
+     "an agent configuration option is outside its supported range"},
+    {:execution, :llm_authentication_failed, 5, false,
+     "the LLM provider rejected authentication; check the installed credential"},
+    {:execution, :llm_payment_required, 5, false,
+     "the LLM provider rejected the request for billing or credit reasons"},
+    {:execution, :llm_rate_limited, 5, true, "the LLM provider rate limited the request"},
+    {:execution, :llm_model_not_found, 5, false,
+     "the LLM provider could not find the configured model"},
+    {:execution, :llm_tool_calling_unsupported, 5, false,
+     "the configured model does not support tool calling"},
+    {:execution, :llm_request_invalid, 5, false,
+     "the LLM provider rejected the configured request"},
+    {:execution, :llm_access_denied, 5, false,
+     "the LLM provider denied access to the configured model"},
+    {:execution, :llm_timeout, 5, true, "the LLM provider request timed out"},
+    {:execution, :llm_provider_unavailable, 5, true, "the LLM provider is unavailable"},
+    {:execution, :llm_usage_unavailable, 5, false,
+     "the LLM provider did not return the promised usage or cost metadata"},
+    {:execution, :llm_provider_failed, 5, false, "the LLM provider request failed"},
     {:execution, :mission_failed, 5, false, "a subordinate mission failed"},
+    {:execution, :capability_quota_exceeded, 6, false, "a capability quota was exceeded"},
     {:execution, :runtime_limit_exceeded, 6, false, "a runtime limit was exceeded"},
+    {:execution, :turn_limit_exceeded, 6, false, "the agent turn limit was exceeded"},
+    {:execution, :model_output_truncated, 6, false,
+     "model output was truncated before producing a usable agent action"},
     {:execution, :run_timeout, 6, false, "the run duration limit was exceeded"},
     {:execution, :provider_failed, 5, false, "a provider failed during execution"},
+    {:execution, :replay_fixture_missing, 5, false,
+     "no replay fixture matches the workflow request"},
     {:execution, :event_capture_limit_exceeded, 7, false,
-     "the canonical event capture limit was exceeded"},
-    {:execution, :event_sink_unavailable, 7, false, "the canonical event sink is unavailable"},
+     "the trace event capture limit was exceeded"},
+    {:execution, :event_sink_unavailable, 7, false, "the trace event sink is unavailable"},
     {:execution, :inspection_capture_limit_exceeded, 7, false,
      "the private inspection capture limit was exceeded"},
     {:execution, :inspection_sink_unavailable, 7, false,
@@ -155,7 +285,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:publication, :destination_collision, 7, false,
      "an artifact destination appeared before publication"},
     {:publication, :initialization_target_exists, 7, false,
-     "the initialization target already exists"},
+     "ptc init publishes only to a new directory; choose a target that does not already exist"},
     {:publication, :initialization_parent_missing, 7, false,
      "the initialization target's parent directory does not exist"},
     {:publication, :initialization_parent_unusable, 7, false,
@@ -166,6 +296,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @type phase ::
           :arguments
+          | :project
           | :host
           | :application
           | :bundle
@@ -217,16 +348,229 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   @spec valid_message?(phase(), atom(), term()) :: boolean()
   def valid_message?(phase, code, message) do
     case fetch(phase, code) do
-      {:ok, %{message: ^message}} -> true
-      {:ok, _row} -> CompileDiagnostic.valid_message?(code, message)
-      :error -> false
+      {:ok, %{message: ^message}} ->
+        true
+
+      {:ok, _row} ->
+        valid_dynamic_message?(phase, code, message)
+
+      :error ->
+        false
     end
   end
 
   @doc false
   @spec message_schema(row()) :: map()
+  def message_schema(%{phase: :execution, code: :runtime_limit_exceeded, message: fallback}),
+    do: RuntimeLimitDiagnostic.message_schema(fallback)
+
+  def message_schema(%{
+        phase: :execution,
+        code: :capability_quota_exceeded,
+        message: fallback
+      }),
+      do: RuntimeLimitDiagnostic.capability_quota_message_schema(fallback)
+
+  def message_schema(%{phase: :execution, code: :turn_limit_exceeded, message: fallback}),
+    do: RuntimeLimitDiagnostic.turn_limit_message_schema(fallback)
+
+  def message_schema(%{phase: :execution, code: :model_output_truncated, message: fallback}),
+    do: ModelOutputDiagnostic.message_schema(fallback)
+
+  def message_schema(%{phase: :execution, code: :run_timeout, message: fallback}),
+    do: RuntimeLimitDiagnostic.run_duration_message_schema(fallback)
+
+  def message_schema(%{phase: :execution, code: :explicit_failure, message: fallback}),
+    do: ExplicitFailureDiagnostic.message_schema(fallback)
+
+  def message_schema(%{phase: :execution, code: :replay_fixture_missing, message: fallback}),
+    do: LLMReplayDiagnostic.message_schema(fallback)
+
+  def message_schema(%{phase: :execution, code: :invalid_agent_config, message: fallback}),
+    do: AgentConfigDiagnostic.message_schema(fallback)
+
+  def message_schema(%{phase: :result_cleanup, code: :result_limit_exceeded, message: fallback}),
+    do: RuntimeLimitDiagnostic.result_limit_message_schema(fallback)
+
+  def message_schema(%{phase: :application, code: :installed_limit_exceeded, message: fallback}),
+    do: RuntimeLimitDiagnostic.installed_ceiling_message_schema(fallback)
+
+  def message_schema(%{phase: :application, code: :limit_unavailable, message: fallback}),
+    do: OptionalBudgetDiagnostic.unavailable_message_schema(fallback)
+
+  def message_schema(%{phase: :host, code: :installed_limit_invalid, message: fallback}),
+    do: OptionalBudgetDiagnostic.prerequisite_message_schema(fallback)
+
+  def message_schema(%{
+        phase: :application,
+        code: :limit_configuration_invalid,
+        message: fallback
+      }),
+      do: LimitConfigurationDiagnostic.message_schema(fallback)
+
+  def message_schema(%{phase: :application, code: :limit_capacity_invalid, message: fallback}),
+    do: LimitCapacityDiagnostic.message_schema(fallback)
+
+  def message_schema(%{phase: :host, code: :host_schema_invalid, message: fallback}),
+    do:
+      SchemaViolationDiagnostic.message_schema(
+        :host,
+        SchemaViolationDiagnostic.rules(:host, :host_schema_invalid),
+        fallback
+      )
+
+  def message_schema(%{phase: :project, code: :project_schema_invalid, message: fallback}),
+    do:
+      SchemaViolationDiagnostic.message_schema(
+        :project,
+        SchemaViolationDiagnostic.rules(:project, :project_schema_invalid),
+        fallback
+      )
+
+  def message_schema(%{phase: :application, code: code, message: fallback})
+      when code in [:schema_violation, :required_property_missing],
+      do:
+        SchemaViolationDiagnostic.message_schema(
+          :application,
+          SchemaViolationDiagnostic.rules(:application, code),
+          fallback
+        )
+
+  def message_schema(%{phase: :local_preflight, code: code, message: fallback})
+      when code in @fixture_codes,
+      do: LLMReplayFixtureDiagnostic.message_schema(fallback)
+
+  def message_schema(%{
+        phase: :result_cleanup,
+        code: :result_contract_failed,
+        message: fallback
+      }),
+      do: ResultContractDiagnostic.message_schema(fallback)
+
+  def message_schema(%{phase: :application, code: :contract_invalid, message: fallback}),
+    do: ContractSchemaDiagnostic.message_schema(fallback)
+
+  def message_schema(%{phase: :application, code: :override_invalid, message: fallback}),
+    do: ComponentOverrideDiagnostic.message_schema(fallback)
+
+  def message_schema(%{
+        phase: :provider_acquisition,
+        code: :provider_protocol_version_unsupported,
+        message: fallback
+      }),
+      do: MCPAcquisitionDiagnostic.protocol_version_message_schema(fallback)
+
+  def message_schema(%{
+        phase: :provider_acquisition,
+        code: :provider_tool_missing,
+        message: fallback
+      }),
+      do: MCPAcquisitionDiagnostic.missing_tool_message_schema(fallback)
+
+  def message_schema(%{
+        phase: :provider_declaration,
+        code: :selection_invalid,
+        message: fallback
+      }),
+      do: SelectionRulesDiagnostic.message_schema(fallback)
+
   def message_schema(%{code: code, message: fallback}),
     do: CompileDiagnostic.message_schema(code, fallback)
+
+  defp valid_dynamic_message?(:execution, :runtime_limit_exceeded, message),
+    do: RuntimeLimitDiagnostic.runtime_limit_message?(message)
+
+  defp valid_dynamic_message?(:execution, :capability_quota_exceeded, message),
+    do: RuntimeLimitDiagnostic.capability_quota_limit_message?(message)
+
+  defp valid_dynamic_message?(:execution, :turn_limit_exceeded, message),
+    do: RuntimeLimitDiagnostic.agent_turns_message?(message)
+
+  defp valid_dynamic_message?(:execution, :model_output_truncated, message),
+    do: ModelOutputDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:execution, :run_timeout, message),
+    do: RuntimeLimitDiagnostic.run_duration_message?(message)
+
+  defp valid_dynamic_message?(:execution, :explicit_failure, message),
+    do: ExplicitFailureDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:execution, :replay_fixture_missing, message),
+    do: LLMReplayDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:execution, :invalid_agent_config, message),
+    do: AgentConfigDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:result_cleanup, :result_limit_exceeded, message),
+    do: RuntimeLimitDiagnostic.result_limit_message?(message)
+
+  defp valid_dynamic_message?(:application, :installed_limit_exceeded, message),
+    do: RuntimeLimitDiagnostic.installed_ceiling_message?(message)
+
+  defp valid_dynamic_message?(:application, :limit_unavailable, message),
+    do: OptionalBudgetDiagnostic.valid_unavailable_message?(message)
+
+  defp valid_dynamic_message?(:host, :installed_limit_invalid, message),
+    do: OptionalBudgetDiagnostic.valid_prerequisite_message?(message)
+
+  defp valid_dynamic_message?(:application, :limit_configuration_invalid, message),
+    do: LimitConfigurationDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:application, :limit_capacity_invalid, message),
+    do: LimitCapacityDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:host, :host_schema_invalid, message),
+    do:
+      SchemaViolationDiagnostic.valid_message?(
+        :host,
+        SchemaViolationDiagnostic.rules(:host, :host_schema_invalid),
+        message
+      )
+
+  defp valid_dynamic_message?(:project, :project_schema_invalid, message),
+    do:
+      SchemaViolationDiagnostic.valid_message?(
+        :project,
+        SchemaViolationDiagnostic.rules(:project, :project_schema_invalid),
+        message
+      )
+
+  defp valid_dynamic_message?(:application, code, message)
+       when code in [:schema_violation, :required_property_missing],
+       do:
+         SchemaViolationDiagnostic.valid_message?(
+           :application,
+           SchemaViolationDiagnostic.rules(:application, code),
+           message
+         )
+
+  defp valid_dynamic_message?(:local_preflight, code, message) when code in @fixture_codes,
+    do: LLMReplayFixtureDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:result_cleanup, :result_contract_failed, message),
+    do: ResultContractDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:application, :contract_invalid, message),
+    do: ContractSchemaDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:application, :override_invalid, message),
+    do: ComponentOverrideDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:provider_acquisition, :provider_tool_missing, message),
+    do: MCPAcquisitionDiagnostic.valid_missing_tool_message?(message)
+
+  defp valid_dynamic_message?(
+         :provider_acquisition,
+         :provider_protocol_version_unsupported,
+         message
+       ),
+       do: MCPAcquisitionDiagnostic.valid_protocol_version_message?(message)
+
+  defp valid_dynamic_message?(:provider_declaration, :selection_invalid, message),
+    do: SelectionRulesDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(_phase, code, message),
+    do: CompileDiagnostic.valid_message?(code, message)
 
   @spec rows() :: [row()]
   def rows do
@@ -330,6 +674,12 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec subject_policy(phase(), atom()) :: :required | :optional | :forbidden
   def subject_policy(:host, :installation_revision_missing), do: :required
+  def subject_policy(:host, code) when code in @endpoint_codes, do: :required
+
+  # A missing bundle requirement describes the capability surface assembled
+  # from all providers granted to an environment. No single occurrence is the
+  # authoritative cause, so attributing one would be arbitrary.
+  def subject_policy(:provider_acquisition, :capability_requirement_missing), do: :forbidden
 
   # The one active-preflight outcome that belongs to the operation rather than
   # to an occurrence. A budget spent before or between occurrences cannot be
@@ -337,12 +687,24 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   # provider as unreachable when nothing had reached it yet.
   def subject_policy(:active_preflight, :connectivity_timeout), do: :forbidden
 
+  # The environment file is named by `--env-file` or by the project host block,
+  # so it belongs to the invocation rather than to any one installed provider.
+  def subject_policy(:local_preflight, code)
+      when code in [
+             :environment_file_not_found,
+             :environment_file_not_regular,
+             :environment_file_unreadable,
+             :environment_file_too_large,
+             :environment_file_invalid_utf8
+           ],
+      do: :forbidden
+
   def subject_policy(phase, code) do
     cond do
       phase in [:provider_declaration, :local_preflight, :active_preflight, :provider_acquisition] ->
         :required
 
-      phase == :execution and code == :provider_failed ->
+      phase == :execution and code in [:provider_failed, :model_output_truncated] ->
         :required
 
       phase == :result_cleanup and
@@ -356,6 +718,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   @spec subject_operations(phase(), atom()) :: [atom()]
   def subject_operations(:host, :installation_revision_missing), do: [:declaration]
+  def subject_operations(:host, code) when code in @endpoint_codes, do: [:declaration]
   def subject_operations(:provider_declaration, :provider_unknown), do: [:declaration]
 
   def subject_operations(:provider_declaration, code)
@@ -404,6 +767,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def subject_operations(:active_preflight, _code), do: [:connectivity]
   def subject_operations(:provider_acquisition, _code), do: [:acquisition]
   def subject_operations(:execution, :provider_failed), do: [:execution]
+  def subject_operations(:execution, :model_output_truncated), do: [:execution]
 
   def subject_operations(:result_cleanup, code)
       when code in [:provider_cleanup_failed, :provider_cleanup_timeout],
@@ -412,12 +776,30 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def subject_operations(_phase, _code), do: []
 
   @doc false
+  @spec doctor_application_rows() :: [row()]
+  def doctor_application_rows do
+    Enum.filter(rows(), fn row ->
+      row.phase == :application and row.code not in [:override_invalid, :event_identity_conflict]
+    end)
+  end
+
+  @doc false
+  @spec doctor_finding_rows() :: [row()]
+  def doctor_finding_rows, do: doctor_application_rows() ++ doctor_attributable_rows()
+
+  # Both answer for `--authorize-mcp`, which only `run` accepts, so doctor can
+  # never produce them. They are subject-bearing local-preflight rows and would
+  # otherwise be attributed to a doctor check that cannot report them.
+  @run_only_local_codes [:authorization_target_unknown, :authorization_not_applicable]
+
+  @doc false
   @spec doctor_attributable_rows() :: [row()]
   def doctor_attributable_rows do
     operations = [:local, :selection, :credentials, :authorization, :connectivity]
 
     Enum.filter(rows(), fn row ->
       row.phase in [:local_preflight, :active_preflight, :provider_acquisition] and
+        row.code not in @run_only_local_codes and
         subject_policy(row.phase, row.code) != :forbidden and
         Enum.any?(subject_operations(row.phase, row.code), fn subject_operation ->
           doctor_report_operation(subject_operation) in operations
@@ -444,25 +826,41 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   defp doctor_report_operation(operation), do: operation
 
   @spec source_kinds(phase(), atom()) :: [atom()]
+  def source_kinds(:project, code)
+      when code in [:project_schema_invalid, :schema_validation_unavailable],
+      do: [:project]
+
   def source_kinds(:host, :installation_revision_missing), do: []
+  def source_kinds(:host, code) when code in @endpoint_codes, do: []
   def source_kinds(:host, _code), do: [:host]
 
   def source_kinds(:application, code)
       when code in [
              :application_unavailable,
              :application_not_found,
+             :schema_validation_unavailable,
              :schema_violation,
              :installed_limit_exceeded,
+             :limit_unavailable,
+             :limit_configuration_invalid,
+             :limit_capacity_invalid,
              :required_property_missing,
              :event_identity_conflict
            ],
       do: [:application]
 
   def source_kinds(:application, code) when code in [:invalid_json, :duplicate_property],
-    do: [:application, :external_input, :input_contract, :result_contract]
+    do: [:application, :external_input, :input_contract, :result_contract, :phase_return_contract]
 
   def source_kinds(:application, :reference_missing),
-    do: [:application, :external_input, :component, :input_contract, :result_contract]
+    do: [
+      :application,
+      :external_input,
+      :component,
+      :input_contract,
+      :result_contract,
+      :phase_return_contract
+    ]
 
   def source_kinds(:application, :document_limit_exceeded),
     do: [
@@ -471,11 +869,14 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       :component,
       :input_contract,
       :result_contract,
+      :phase_return_contract,
       :component_override
     ]
 
   def source_kinds(:application, :contract_invalid),
-    do: [:application, :input_contract, :result_contract]
+    do: [:application, :input_contract, :result_contract, :phase_return_contract]
+
+  def source_kinds(:application, :contract_projection_limit_exceeded), do: []
 
   def source_kinds(:application, :input_invalid),
     do: [:application, :external_input]
@@ -486,6 +887,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def source_kinds(:application, :override_invalid), do: [:component_override]
 
   def source_kinds(:bundle, _code), do: [:component]
+  def source_kinds(:execution, :turn_limit_exceeded), do: []
   def source_kinds(:execution, code) when code != :provider_failed, do: [:runtime]
 
   def source_kinds(:result_cleanup, code)
@@ -496,9 +898,15 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def source_kinds(_phase, _code), do: []
 
   @spec provider_activity_policy(phase(), atom()) :: false | true | :boolean
+  # Every other application-phase code is decided before any provider work. This
+  # one is computed after provider assembly, so it spans the marker: the
+  # provider-free owner path reports false and the active path reports true.
+  def provider_activity_policy(:application, :limit_capacity_invalid), do: :boolean
+
   def provider_activity_policy(phase, _code)
       when phase in [
              :arguments,
+             :project,
              :host,
              :application,
              :bundle,
@@ -516,9 +924,27 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   # conditions through the same codes and differ only here, which is what the
   # flag is for — pinning the phase would force one of the two steps to borrow
   # another phase's codes and, with them, an operation name that did not fail.
+  # These three answer for the invocation rather than for a provider occurrence
+  # and are all decided before any provider runs, so unlike the rest of their
+  # phase they can assert no activity rather than admitting either value.
+  def provider_activity_policy(:local_preflight, code)
+      when code in [
+             :environment_file_not_found,
+             :environment_file_not_regular,
+             :environment_file_unreadable,
+             :environment_file_too_large,
+             :environment_file_invalid_utf8,
+             :authorization_target_unknown,
+             :authorization_not_applicable
+           ],
+      do: false
+
   def provider_activity_policy(phase, _code)
       when phase in [:local_preflight, :active_preflight],
       do: :boolean
+
+  def provider_activity_policy(:provider_acquisition, :capability_requirement_missing),
+    do: :boolean
 
   def provider_activity_policy(:provider_acquisition, _code), do: true
 
@@ -533,6 +959,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   @spec path_policy(phase(), atom(), atom() | nil) :: :optional | :forbidden
   def path_policy(_phase, _code, nil), do: :forbidden
 
+  def path_policy(:project, :project_schema_invalid, :project), do: :optional
+
   def path_policy(:host, code, :host)
       when code in [:host_schema_invalid, :installed_limit_invalid],
       do: :optional
@@ -543,6 +971,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
              :duplicate_property,
              :schema_violation,
              :installed_limit_exceeded,
+             :limit_unavailable,
              :required_property_missing,
              :contract_invalid,
              :input_contract_failed,
@@ -557,7 +986,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def path_policy(:application, :override_invalid, :component_override), do: :optional
 
   def path_policy(:application, code, kind)
-      when kind in [:input_contract, :result_contract] and
+      when kind in [:input_contract, :result_contract, :phase_return_contract] and
              code in [
                :invalid_json,
                :duplicate_property,
@@ -575,6 +1004,14 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     do: :forbidden
 
   def subject_occurrence_policy(:provider_declaration, _code, _operation), do: :required
+
+  # An authorization target comes from `--authorize-mcp`, which names an alias
+  # and not a selection slot. The unknown-target case has no occurrence to name
+  # by definition: the alias the operator typed appears in no selection at all.
+  def subject_occurrence_policy(:local_preflight, code, _operation)
+      when code in [:authorization_target_unknown, :authorization_not_applicable],
+      do: :forbidden
+
   def subject_occurrence_policy(:local_preflight, _code, _operation), do: :required
 
   def subject_occurrence_policy(:active_preflight, code, _operation)
@@ -596,6 +1033,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def subject_occurrence_policy(:active_preflight, _code, :authorization), do: :optional
   def subject_occurrence_policy(:provider_acquisition, _code, _operation), do: :required
   def subject_occurrence_policy(:execution, :provider_failed, _operation), do: :required
+  def subject_occurrence_policy(:execution, :model_output_truncated, _operation), do: :forbidden
 
   def subject_occurrence_policy(:result_cleanup, code, _operation)
       when code in [:provider_cleanup_failed, :provider_cleanup_timeout],

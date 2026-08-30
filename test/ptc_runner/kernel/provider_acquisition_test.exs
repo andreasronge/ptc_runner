@@ -224,7 +224,11 @@ defmodule PtcRunner.Kernel.ProviderAcquisitionTest do
 
     assert {:error, %CommandDiagnostic{} = diagnostic} = acquire(context, [workflow(1)])
     assert diagnostic.phase == :provider_acquisition
-    assert diagnostic.code == :provider_unavailable
+    # A budget that expired is not the same fact as a provider that could not be
+    # reached, and it is the one an operator can act on: it names the ceiling to
+    # raise. Retryable, because the common cause is a cold first launch.
+    assert diagnostic.code == :provider_acquisition_timeout
+    assert diagnostic.retryable
     assert diagnostic.subject.name == "leaf"
 
     embedded = fixture(failing: "leaf", failing_reason: :mcp_timeout, embedding: true)

@@ -10,11 +10,93 @@ defmodule PtcRunner.Kernel.ManifestTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.SchemaViolation
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Lisp.Format
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
+
+  test "named phase-return contracts are acquired identically from memory" do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "contracts" => %{
+        "phase_return_schemas" => %{
+          "gathered" => %{"path" => "gather.schema.json"}
+        }
+      }
+    }
+
+    schema = %{
+      "type" => "object",
+      "additionalProperties" => false,
+      "required" => ["facts"],
+      "properties" => %{"facts" => %{"type" => "array", "items" => %{"type" => "string"}}}
+    }
+
+    documents = %{
+      "ptc.json" => Jason.encode!(manifest),
+      "main.clj" => "(ns main) (defn run [_] (return {}))",
+      "gather.schema.json" => Jason.encode!(schema)
+    }
+
+    assert {:ok, loaded} = Manifest.load_memory("ptc.json", documents)
+    assert %ValueContract{} = loaded.contracts.phase_returns["gathered"]
+    assert loaded.contract_sources.phase_returns["gathered"] == Jason.encode!(schema)
+
+    assert {:ok, package, _input} = ApplicationPackage.acquire_memory("ptc.json", documents)
+    assert %ValueContract{} = package.contracts.phase_returns["gathered"]
+    assert <<_::binary-size(64)>> = package.contract_behavior_hashes.phase_returns["gathered"]
+
+    assert "sha256:" <> <<_::binary-size(64)>> =
+             package.contract_prompt_hashes.phase_returns["gathered"]
+  end
+
+  test "aggregate phase-return prompt projections fail inert acquisition at the boundary" do
+    names = for index <- 1..16, do: "phase#{index}"
+
+    schema = %{
+      "type" => "object",
+      "additionalProperties" => false,
+      "properties" =>
+        Map.new(1..128, fn index ->
+          {"field#{index}",
+           %{
+             "type" => "string",
+             "description" => String.duplicate("d", 390),
+             "minLength" => 1
+           }}
+        end)
+    }
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "contracts" => %{
+        "phase_return_schemas" => Map.new(names, &{&1, %{"path" => "#{&1}.schema.json"}})
+      }
+    }
+
+    documents =
+      %{
+        "ptc.json" => Jason.encode!(manifest),
+        "main.clj" => "(ns main) (defn run [_] (return {}))"
+      }
+      |> Map.merge(Map.new(names, &{"#{&1}.schema.json", Jason.encode!(schema)}))
+
+    assert {:error, :contract_projection_limit_exceeded} =
+             ApplicationPackage.acquire_memory("ptc.json", documents)
+  end
 
   @tag :tmp_dir
   test "one strict manifest deterministically builds and runs the shared Kernel path", %{
@@ -66,6 +148,27 @@ defmodule PtcRunner.Kernel.ManifestTest do
              |> ApplicationPackage.request_directory(installed_limits: registry.installed_limits)
              |> RunLifecycle.build(registry)
              |> RunLifecycle.execute()
+  end
+
+  test "wide manifests report bounded schema validation as unavailable" do
+    components =
+      for index <- 1..10_000 do
+        %{"invalid-#{index}" => true}
+      end
+
+    raw =
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{"components" => components, "entry" => "main/run"},
+        "input" => %{"value" => %{}}
+      })
+
+    task = Task.async(fn -> Manifest.load_memory("ptc.json", %{"ptc.json" => raw}) end)
+
+    assert {:ok, {:error, {:schema_validation_unavailable, reason}}} =
+             Task.yield(task, 3_000)
+
+    assert reason in [:timeout, :heap_exceeded, :worker_failed]
   end
 
   @tag :tmp_dir
@@ -136,16 +239,17 @@ defmodule PtcRunner.Kernel.ManifestTest do
   end
 
   @tag :tmp_dir
-  test "directory and memory manifests reject non-object JSON roots without raising", %{
+  test "directory and memory manifests classify non-object JSON roots", %{
     tmp_dir: dir
   } do
     for {name, raw} <- [{"array", "[]"}, {"null", "null"}, {"number", "1"}] do
       path = Path.join(dir, "#{name}.json")
       File.write!(path, raw)
 
-      assert {:error, :invalid_manifest} = Manifest.load(path)
+      assert {:error, {:manifest_schema_invalid, %SchemaViolation{rule: :type, path: []}}} =
+               Manifest.load(path)
 
-      assert {:error, :invalid_manifest} =
+      assert {:error, {:manifest_schema_invalid, %SchemaViolation{rule: :type, path: []}}} =
                Manifest.load_memory("#{name}.json", %{"#{name}.json" => raw})
     end
   end
@@ -183,15 +287,18 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     {:ok, registry} =
       ProviderRegistry.new(%{
-        "probe" => fn _config, _context ->
-          send(parent, :provider_prepared)
+        "probe" =>
+          TestHelpers.staged_provider(fn _config, _context ->
+            send(parent, :provider_prepared)
 
-          Capability.new(
-            name: "probe",
-            input_schema: @input_schema,
-            callback: fn _arguments -> {:ok, true} end
-          )
-        end
+            with {:ok, capability} <-
+                   Capability.new(
+                     name: "probe",
+                     input_schema: @input_schema,
+                     callback: fn _arguments -> {:ok, true} end
+                   ),
+                 do: {:ok, %{capabilities: [capability]}}
+          end)
       })
 
     assert {:ok, loaded} = Manifest.load(path)
@@ -273,12 +380,15 @@ defmodule PtcRunner.Kernel.ManifestTest do
     File.write!(path, Jason.encode!(escaped))
 
     assert {:error,
-            {:manifest_path,
-             [
-               {:property, "contracts"},
-               {:property, "input_schema"},
-               {:property, "path"}
-             ], :invalid_contract_reference}} = Manifest.load(path)
+            {:manifest_schema_invalid,
+             %SchemaViolation{
+               rule: :pattern,
+               path: [
+                 {:property, "contracts"},
+                 {:property, "input_schema"},
+                 {:property, "path"}
+               ]
+             }}} = Manifest.load(path)
   end
 
   @tag :tmp_dir
@@ -317,16 +427,19 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     {:ok, registry} =
       ProviderRegistry.new(%{
-        "probe" => fn _config, _context ->
-          Capability.new(
-            name: "probe",
-            input_schema: @input_schema,
-            callback: fn _arguments ->
-              send(parent, :provider_called)
-              {:ok, true}
-            end
-          )
-        end
+        "probe" =>
+          TestHelpers.staged_provider(fn _config, _context ->
+            with {:ok, capability} <-
+                   Capability.new(
+                     name: "probe",
+                     input_schema: @input_schema,
+                     callback: fn _arguments ->
+                       send(parent, :provider_called)
+                       {:ok, true}
+                     end
+                   ),
+                 do: {:ok, %{capabilities: [capability]}}
+          end)
       })
 
     manifest = %{
@@ -515,15 +628,21 @@ defmodule PtcRunner.Kernel.ManifestTest do
     File.write!(path, Jason.encode!(credential_labels))
 
     assert {:error,
-            {:manifest_path, [{:property, "labels"}, {:property, "tags"}], :unknown_properties}} =
-             Manifest.load(path)
+            {:manifest_schema_invalid,
+             %SchemaViolation{
+               rule: :unknown_property,
+               path: [{:property, "labels"}, {:property, "tags"}]
+             }}} = Manifest.load(path)
 
     private = "PRIVATE GENERATED SOURCE (return 42)"
     File.write!(path, Jason.encode!(Map.put(base, "labels", %{"name" => private})))
 
     assert {:error,
-            {:manifest_path, [{:property, "labels"}, {:property, "name"}], :invalid_manifest}} =
-             Manifest.load(path)
+            {:manifest_schema_invalid,
+             %SchemaViolation{
+               rule: :pattern,
+               path: [{:property, "labels"}, {:property, "name"}]
+             }}} = Manifest.load(path)
   end
 
   @tag :tmp_dir
@@ -536,14 +655,16 @@ defmodule PtcRunner.Kernel.ManifestTest do
         "components" => [%{"id" => "main", "path" => "main.clj"}],
         "entry" => "main/run"
       },
-      "input" => %{"value" => %{"inspect" => "requested.inspection.jsonl"}},
-      "inspect" => "requested.inspection.jsonl"
+      "input" => %{"value" => %{"inspect" => "requested.ptcins"}},
+      "inspect" => "requested.ptcins"
     }
 
     path = Path.join(dir, "inspection.json")
     File.write!(path, Jason.encode!(manifest))
 
-    assert {:error, :unknown_properties} = Manifest.load(path)
+    assert {:error,
+            {:manifest_schema_invalid, %SchemaViolation{rule: :unknown_property, path: []}}} =
+             Manifest.load(path)
 
     manifest = Map.delete(manifest, "inspect")
     File.write!(path, Jason.encode!(manifest))
@@ -555,7 +676,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
              |> RunLifecycle.build(registry)
              |> RunLifecycle.execute()
 
-    refute File.exists?(Path.join(dir, "requested.inspection.jsonl"))
+    refute File.exists?(Path.join(dir, "requested.ptcins"))
   end
 
   @tag :tmp_dir
@@ -602,13 +723,55 @@ defmodule PtcRunner.Kernel.ManifestTest do
 
     assert {:error,
             {:manifest_path, [{:property, "limits"}, {:property, "evaluation_timeout_ms"}],
-             {:installed_limit_exceeded, 20_000, 500}}} = Manifest.load(path, lower_ceiling)
+             {:installed_limit_exceeded, "evaluation_timeout_ms", 20_000, 500}}} =
+             Manifest.load(path, lower_ceiling)
 
     manifest = put_in(manifest, ["limits"], %{})
     File.write!(path, Jason.encode!(manifest))
     assert {:ok, lowered_defaults} = Manifest.load(path, lower_ceiling)
+
+    # With no manifest request the effective value is the smaller of the
+    # compiled default and the installed ceiling. Only `evaluation_timeout_ms`
+    # is clamped by a ceiling installed below its default; `run_duration_ms`
+    # stays at the lower compiled default.
     assert lowered_defaults.limits.run_duration_ms == 30_000
     assert lowered_defaults.limits.evaluation_timeout_ms == 500
+  end
+
+  @tag :tmp_dir
+  test "a protected heap ceiling moves only when the host raises it and the manifest requests it",
+       %{tmp_dir: dir} do
+    File.write!(Path.join(dir, "main.clj"), "(ns main) (defn run [_] (return 1))")
+
+    requested = 16_000_000
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "main", "path" => "main.clj"}],
+        "entry" => "main/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"workflow_heap_words" => requested}
+    }
+
+    path = Path.join(dir, "heap.json")
+    File.write!(path, Jason.encode!(manifest))
+
+    assert {:error,
+            {:manifest_path, [{:property, "limits"}, {:property, "workflow_heap_words"}],
+             {:installed_limit_exceeded, "workflow_heap_words", ^requested, 8_000_000}}} =
+             Manifest.load(path)
+
+    {:ok, raised_ceiling} = Limits.new(workflow_heap_words: requested)
+
+    File.write!(path, Jason.encode!(put_in(manifest, ["limits"], %{})))
+    assert {:ok, host_only} = Manifest.load(path, raised_ceiling)
+    assert host_only.limits.workflow_heap_words == 8_000_000
+
+    File.write!(path, Jason.encode!(manifest))
+    assert {:ok, both} = Manifest.load(path, raised_ceiling)
+    assert both.limits.workflow_heap_words == requested
   end
 
   @tag :tmp_dir
@@ -622,6 +785,9 @@ defmodule PtcRunner.Kernel.ManifestTest do
         "entry" => "agent.main/run"
       },
       "input" => %{"value" => %{}},
+      # The agent loop evaluates into a mission, so a manifest declaring none is
+      # refused before it can run.
+      "missions" => %{"default" => %{}},
       "providers" => %{"workflow" => [%{"name" => "fixture"}]}
     }
 
@@ -629,14 +795,17 @@ defmodule PtcRunner.Kernel.ManifestTest do
     File.write!(path, Jason.encode!(manifest))
 
     builder = fn _config, _context ->
-      Capability.new(
-        name: "llm-request",
-        input_schema: @input_schema,
-        callback: fn _request -> {:error, ProviderError.new(:unavailable)} end
-      )
+      with {:ok, capability} <-
+             Capability.new(
+               name: "llm-request",
+               input_schema: @input_schema,
+               callback: fn _request -> {:error, ProviderError.new(:unavailable)} end
+             ),
+           do: {:ok, %{capabilities: [capability]}}
     end
 
-    {:ok, registry} = ProviderRegistry.new(%{"fixture" => builder})
+    {:ok, registry} =
+      ProviderRegistry.new(%{"fixture" => TestHelpers.staged_provider(builder)})
 
     assert {:ok, built} =
              path
@@ -644,6 +813,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
              |> RunLifecycle.build(registry)
 
     assert built.config.workflow_environment.bundle.component_ids == [
+             "agent.failure",
              "agent.feedback",
              "agent.native",
              "agent.retry",
@@ -651,6 +821,7 @@ defmodule PtcRunner.Kernel.ManifestTest do
              "agent.prompt",
              "llm",
              "result",
+             "agent.machine",
              "workflow.event",
              "agent.core",
              "agent.main"
@@ -760,21 +931,29 @@ defmodule PtcRunner.Kernel.ManifestTest do
              |> RunLifecycle.build(registry)
 
     assert {:ok, _explicit_registry} =
-             ProviderRegistry.new(%{"llm" => fn _config, _context -> :ok end})
+             ProviderRegistry.new(%{
+               "llm" =>
+                 TestHelpers.staged_provider(fn _config, _context ->
+                   {:error, :not_selected}
+                 end)
+             })
 
     parent = self()
 
     builder = fn config, context ->
       send(parent, {:provider_built, config, context.destination})
 
-      Capability.new(
-        name: "fixture",
-        input_schema: @input_schema,
-        callback: fn _arguments -> {:ok, true} end
-      )
+      with {:ok, capability} <-
+             Capability.new(
+               name: "fixture",
+               input_schema: @input_schema,
+               callback: fn _arguments -> {:ok, true} end
+             ),
+           do: {:ok, %{capabilities: [capability]}}
     end
 
-    {:ok, custom_registry} = ProviderRegistry.new(%{"fixture" => builder})
+    {:ok, custom_registry} =
+      ProviderRegistry.new(%{"fixture" => TestHelpers.staged_provider(builder)})
 
     custom_manifest =
       put_in(manifest, ["providers", "workflow"], [

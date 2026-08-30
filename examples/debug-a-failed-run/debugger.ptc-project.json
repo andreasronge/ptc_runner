@@ -1,0 +1,24 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {
+    "path": "debugger/ptc.json"
+  },
+  "host": {
+    "path": "ptc-host.json"
+  },
+  "artifacts": {
+    "root": "debugger/.ptc",
+    "trace": true,
+    "inspection": true,
+    "result": true,
+    "envelope": true
+  },
+  "viewer": {
+    "port": 4124,
+    "open": true,
+    "repl": true,
+    "private": true
+  }
+}

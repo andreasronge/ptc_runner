@@ -5,6 +5,20 @@ defmodule PtcRunner.Kernel.MCPOAuth.DiscoveryTest do
   alias PtcRunner.Kernel.MCPOAuth.Discovery
   alias PtcRunner.Kernel.MCPOAuth.Metadata
 
+  test "collapses endpoint connection causes at the OAuth boundary" do
+    for reason <- [:connection_refused, :name_not_resolved, :tls_handshake_failed] do
+      assert {:error, :transport_error} =
+               Discovery.discover(authority(),
+                 request: fn _method, _url, _headers, _body, _timeout -> {:error, reason} end
+               )
+    end
+
+    assert {:error, :transport_error} =
+             Discovery.discover(authority(),
+               resolver: fn _hostname -> {:error, :nxdomain} end
+             )
+  end
+
   test "runs challenge, resource, and authorization-server fallbacks in order" do
     authority = authority()
     parent = self()

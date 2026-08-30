@@ -30,6 +30,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.TypedCanonicalJSON
   alias PtcRunner.Test.MCPOAuthRecordingStore
   alias PtcRunner.TestSupport.HostBoundFixture
+  alias PtcRunner.TestSupport.TestHelpers
 
   @moduletag :tmp_dir
   @dense_services ~w(
@@ -162,6 +163,15 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
 
     assert {:ok, shipped} = ProviderDescriptor.new(Keyword.put(base, :source, :llm))
     assert shipped.local_preflight == :audited_local
+    assert shipped.structured_output_mode == :unsupported
+
+    assert {:error, :invalid_provider_descriptor} =
+             ProviderDescriptor.new(
+               Keyword.merge(base,
+                 local_preflight: :unverified,
+                 structured_output_mode: :json_schema
+               )
+             )
 
     builder = fn _selection, _context -> {:error, :inactive_provider} end
     probe = fn _selection, _context, _services -> :ok end
@@ -314,6 +324,9 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
 
     assert {:error, :invalid_selection} =
              SelectionRules.normalize(rules, %{"allow" => []}, Limits.installed_defaults())
+
+    assert {:error, {:field, "allow"}} =
+             SelectionRules.explain(rules, %{"allow" => []}, Limits.installed_defaults())
   end
 
   test "runtime normalization admits only the exact sealed canonical form" do
@@ -376,6 +389,49 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
 
     assert first["acquisition_identity_hash"] ==
              :crypto.hash(:sha256, acquisition_bytes) |> Base.encode16(case: :lower)
+  end
+
+  test "installation config digest changes snapshot identity without changing acquisition identity" do
+    assert {:ok, catalog} = custom_catalog()
+    descriptor = catalog.descriptors["selected"]
+    digest_a = "sha256:" <> String.duplicate("a", 64)
+    digest_b = "sha256:" <> String.duplicate("b", 64)
+
+    assert {:ok, first} =
+             ProviderSnapshot.build(
+               descriptor,
+               "selected",
+               %{"mode" => "a"},
+               %{"count" => 1},
+               nil,
+               digest_a
+             )
+
+    assert {:ok, second} =
+             ProviderSnapshot.build(
+               descriptor,
+               "selected",
+               %{"mode" => "a"},
+               %{"count" => 1},
+               nil,
+               digest_b
+             )
+
+    assert {:ok, omitted} =
+             ProviderSnapshot.build(
+               descriptor,
+               "selected",
+               %{"mode" => "a"},
+               %{"count" => 1}
+             )
+
+    assert first["acquisition_identity_hash"] == second["acquisition_identity_hash"]
+    assert first["acquisition_identity_hash"] == omitted["acquisition_identity_hash"]
+    refute first["snapshot_hash"] == second["snapshot_hash"]
+    refute first["snapshot_hash"] == omitted["snapshot_hash"]
+    assert first["installation_config_digest"] == digest_a
+    assert second["installation_config_digest"] == digest_b
+    refute Map.has_key?(omitted, "installation_config_digest")
   end
 
   test "host authority follows its creator and transfers an explicit registry closer" do
@@ -963,6 +1019,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
         },
         "live" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "installation_revision" => "live-v1",
           "model" => "provider:private-selector",
           "credential" => "llm-key"
@@ -1039,6 +1097,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert catalog.descriptors["live"].connectivity_mode == :probe
     assert catalog.descriptors["live"].probe_effect == :completion
     assert catalog.descriptors["replay"].connectivity_mode == :none
+    assert catalog.descriptors["replay"].local_preflight == :audited_local
     assert catalog.descriptors["trace"].provides == [:canonical_trace_snapshot]
     assert catalog.descriptors["trace"].data_class == :normal
     assert catalog.descriptors["trace"].accepts_data == [:normal, :private_inspection]
@@ -1144,6 +1203,13 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert projection["effective_event_policy"] == "normal"
     assert projection["inspection_capture_enabled"] == false
     assert projection["result_projection"] == "json"
+
+    assert projection["contracts"] == %{
+             "input" => nil,
+             "result" => %{"validation" => nil, "prompt" => nil},
+             "phase_returns" => %{}
+           }
+
     assert projection["limits"]["provider_cleanup_timeout_ms"] == 5_000
     assert projection["limits"]["selection_validation_timeout_ms"] == 5_000
     refute Map.has_key?(projection["limits"], "doctor_connectivity_timeout_ms")
@@ -1155,7 +1221,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       :crypto.hash(
         :sha256,
         [
-          <<"ptc.effective-application.v2", 0>>,
+          <<"ptc.effective-application.v3", 0>>,
           <<byte_size(encoded)::unsigned-big-64>>,
           encoded
         ]
@@ -1392,6 +1458,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
         :effective_event_policy,
         :effective_application_projection,
         :effective_application_digest,
+        :installation_config_digests,
         :post_selection_context
       ])
       |> update_in([:provider_declarations, Access.at(0), :validation_state], fn _state ->
@@ -1422,8 +1489,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                other_catalog,
                runtime_services,
                false,
-               %{},
-               []
+               nil,
+               {%{}, []}
              )
 
     assert :ok = PreparedRun.close(prepared)
@@ -1590,6 +1657,50 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert diagnostic.subject.occurrence == nil
   end
 
+  test "inspection rejects two selected providers for the canonical trace service", %{
+    tmp_dir: dir
+  } do
+    document = %{
+      "install" => %{
+        "normal-trace" => %{
+          "source" => "ptc_trace_snapshot",
+          "installation_revision" => "normal-v1",
+          "directory" => "traces"
+        },
+        "private-trace" => %{
+          "source" => "ptc_private_trace_snapshot",
+          "installation_revision" => "private-v1",
+          "directory" => "traces"
+        },
+        "inspection" => %{
+          "source" => "ptc_inspection_snapshot",
+          "installation_revision" => "inspection-v1",
+          "directory" => "inspection"
+        }
+      }
+    }
+
+    host_path = Path.join(dir, "host.json")
+    File.write!(host_path, Jason.encode!(document))
+    assert {:ok, host} = HostConfig.load(host_path)
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+
+    invalid_manifest =
+      put_in(manifest(), ["providers"], %{
+        "workflow" => [],
+        "mission" => [
+          %{"name" => "normal-trace"},
+          %{"name" => "private-trace"},
+          %{"name" => "inspection"}
+        ]
+      })
+
+    assert {:error, diagnostic} = prepare_identity(invalid_manifest, catalog)
+    assert diagnostic.phase == :provider_declaration
+    assert diagnostic.code == :dependency_invalid
+    assert diagnostic.subject.name == "inspection"
+  end
+
   test "provider dependency validation remains bounded for a dense near-limit DAG" do
     assert {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
 
@@ -1680,6 +1791,107 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     assert outcome.exit_status == 3
     assert outcome.envelope["error"]["phase"] == "provider_declaration"
     assert outcome.envelope["error"]["code"] == "selection_invalid"
+
+    assert outcome.envelope["error"]["message"] ==
+             "the provider selection field allow is invalid"
+
+    omitted_manifest =
+      put_in(manifest(), ["providers"], %{
+        "workflow" => [],
+        "mission" => [%{"name" => "remote"}]
+      })
+
+    omitted_application =
+      write_application(directory, "omitted-write-allow", documents(omitted_manifest))
+
+    assert {:error, %CommandOutcome{} = omitted_outcome} =
+             CommandEngine.prepare(["validate", omitted_application, "--host-config", host_path])
+
+    assert omitted_outcome.envelope["error"]["message"] ==
+             "the provider selection field allow is required because the installation maps a write"
+  end
+
+  test "command validation accepts a model_visible subset of allow and names remaining selection rules",
+       %{tmp_dir: directory} do
+    host_document = %{
+      "install" => %{
+        "workspace" => %{
+          "source" => "mcp",
+          "installation_revision" => "workspace-v1",
+          "transport" => %{
+            "type" => "stdio",
+            "command" => "/bin/echo",
+            "args" => ["."]
+          },
+          "tools" => %{
+            "read_text_file" => %{"as" => "workspace.read", "effect" => "read"},
+            "write_file" => %{"as" => "workspace.write", "effect" => "write"}
+          }
+        }
+      }
+    }
+
+    host_path = Path.join(directory, "ptc-host.json")
+    File.write!(host_path, Jason.encode!(host_document))
+
+    selected = fn config ->
+      put_in(manifest(), ["providers"], %{
+        "workflow" => [],
+        "mission" => [%{"name" => "workspace", "config" => config}]
+      })
+    end
+
+    documented =
+      selected.(%{
+        "allow" => ["workspace.read", "workspace.write"],
+        "model_visible" => ["workspace.read"]
+      })
+
+    application = write_application(directory, "model-visible-documented", documents(documented))
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["validate", application, "--host-config", host_path])
+
+    assert outcome.exit_status == 0
+
+    uninstalled =
+      selected.(%{
+        "allow" => ["workspace.read", "workspace.write"],
+        "model_visible" => ["nope.x"]
+      })
+
+    uninstalled_path =
+      write_application(directory, "model-visible-uninstalled", documents(uninstalled))
+
+    assert {:error, %CommandOutcome{} = uninstalled_outcome} =
+             CommandEngine.prepare(["validate", uninstalled_path, "--host-config", host_path])
+
+    assert uninstalled_outcome.envelope["error"]["code"] == "selection_invalid"
+
+    assert uninstalled_outcome.envelope["error"]["message"] ==
+             "the provider selection field model_visible contains a name outside its allowed set"
+
+    assert uninstalled_outcome.envelope["error"]["subject"] == %{
+             "kind" => "provider",
+             "name" => "workspace",
+             "operation" => "selection",
+             "occurrence" => %{"destination" => "mission", "index" => 0}
+           }
+
+    outside_allow =
+      selected.(%{
+        "allow" => ["workspace.read"],
+        "model_visible" => ["workspace.write"]
+      })
+
+    outside_path =
+      write_application(directory, "model-visible-outside-allow", documents(outside_allow))
+
+    assert {:error, %CommandOutcome{} = outside_outcome} =
+             CommandEngine.prepare(["validate", outside_path, "--host-config", host_path])
+
+    assert outside_outcome.envelope["error"]["message"] ==
+             "the provider selection field model_visible must be a subset of allow"
   end
 
   test "successful validate returns the exact digest envelope without provider activity", %{
@@ -1699,23 +1911,61 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
                outcome.envelope["result"]["application_content_digest"],
              "effective_application_digest" =>
                outcome.envelope["result"]["effective_application_digest"],
+             "installation_config_digests" => %{},
              "workflow_bundle_hash" => outcome.envelope["result"]["workflow_bundle_hash"],
              "mission_bundle_hashes" => %{},
+             "mission_grants" => %{},
              "provider_activity" => false
            }
   end
 
-  defp manifest do
-    %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "main.clj"}],
-        "entry" => "app/run"
-      },
-      "input" => %{"value" => %{}},
-      "providers" => %{"workflow" => [], "mission" => []}
-    }
+  test "successful validate summarizes per-mission data, exports, and providers", %{
+    tmp_dir: directory
+  } do
+    manifest =
+      manifest()
+      |> Map.put("missions", %{
+        "intake" => %{
+          "components" => [
+            %{"id" => "intake", "path" => "intake.clj"},
+            %{"id" => "intake-internal", "path" => "intake-internal.clj"}
+          ],
+          "data" => %{"customer" => %{"id" => "c1"}},
+          "providers" => []
+        }
+      })
+
+    application =
+      write_application(directory, "validate-authority", %{
+        "ptc.json" => Jason.encode!(manifest),
+        "main.clj" => "(ns app) (defn run [input] (return input))",
+        "intake.clj" => """
+        (ns intake "Intake." {:visibility :prompt})
+        (defn summarize "Summarize." [value] value)
+        """,
+        "intake-internal.clj" => """
+        (ns intake.internal "Intake internals." {:visibility :discoverable})
+        (defn normalize "Normalize." [value] value)
+        """
+      })
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["validate", application])
+
+    assert outcome.exit_status == 0
+
+    assert outcome.envelope["result"]["mission_grants"] == %{
+             "intake" => %{
+               "data" => ["data/customer"],
+               "exports" => ["intake.internal/normalize", "intake/summarize"],
+               "providers" => []
+             }
+           }
+
+    assert Map.keys(outcome.envelope["result"]["mission_bundle_hashes"]) == ["intake"]
   end
+
+  defp manifest, do: TestHelpers.valid_manifest()
 
   defp documents(manifest) do
     %{
@@ -1952,17 +2202,37 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
     Path.join(root, "ptc.json")
   end
 
+  # Scanning `Process.list/0` for the authority marker alone reports every
+  # owner in the VM, and this case is `async: true` beside a dozen other files
+  # that build host installations. A concurrent case starting an owner between
+  # the two calls that bracket an assertion made it fail on an unrelated pid.
+  # `HostInstallationOwner.start/1` goes through `GenServer.start/3`, so
+  # `proc_lib` records the creating process in `$ancestors`; keeping only our
+  # own descendants makes the count a property of this test rather than of the
+  # whole suite.
   defp host_installation_owners do
     marker = {PtcRunner.Kernel.HostInstallationOwner, :authority}
+    creator = self()
 
     Process.list()
     |> Enum.filter(fn pid ->
       case Process.info(pid, :dictionary) do
-        {:dictionary, dictionary} -> List.keymember?(dictionary, marker, 0)
-        nil -> false
+        {:dictionary, dictionary} ->
+          List.keymember?(dictionary, marker, 0) and
+            creator in ancestors(dictionary)
+
+        nil ->
+          false
       end
     end)
     |> MapSet.new()
+  end
+
+  defp ancestors(dictionary) do
+    case List.keyfind(dictionary, :"$ancestors", 0) do
+      {_key, ancestors} when is_list(ancestors) -> ancestors
+      _other -> []
+    end
   end
 
   defp wait_until_expired(deadline) do

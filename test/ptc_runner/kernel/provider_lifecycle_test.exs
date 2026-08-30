@@ -15,31 +15,33 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.TraceEventValidation
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.LLM.ReqLLMAdapter
   alias PtcRunner.TestSupport.ProviderSessionFixture
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.StreamingInspection
   alias ReqLLM.ToolCall
 
   @schema %{"type" => "object", "additionalProperties" => false}
 
-  test "registry normalizes legacy capabilities and validates resource-bearing builds" do
+  test "registry accepts only staged builders and normalized provider builds" do
     {:ok, capability} = capability("fixture")
 
     builders = %{
-      "legacy" => fn _config, _context -> {:ok, capability} end,
-      "resource" => fn _config, context ->
-        assert context.owner == self()
-        assert context.limits.workflow_timeout_ms > 0
+      "resource" =>
+        staged_builder(fn _config, context ->
+          assert context.owner == self()
+          assert context.limits.workflow_timeout_ms > 0
 
-        {:ok,
-         %{
-           capabilities: [capability],
-           snapshot: %{"provider" => "resource"},
-           close: fn -> :ok end
-         }}
-      end
+          {:ok,
+           %{
+             capabilities: [capability],
+             snapshot: %{"provider" => "resource"},
+             close: fn -> :ok end
+           }}
+        end)
     }
 
     {:ok, registry} = ProviderRegistry.new(builders)
@@ -53,9 +55,6 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       installed_limits: limits
     }
 
-    assert {:ok, %{capabilities: [^capability], snapshot: nil, close: nil}} =
-             ProviderRegistry.build(registry, "legacy", %{}, context)
-
     assert {:ok,
             %{
               capabilities: [^capability],
@@ -64,20 +63,34 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
             }} = ProviderRegistry.build(registry, "resource", %{}, context)
 
     assert is_function(close, 0)
+
+    refute match?({:ok, _registry}, ProviderRegistry.new(%{"raw" => fn _, _ -> :ok end}))
+
+    invalid =
+      ProviderRegistry.staged(fn _config, _context ->
+        {:ok,
+         %{credential_names: [], preflight: fn -> {:ok, fn %{} -> {:ok, capability} end} end}}
+      end)
+
+    {:ok, invalid_registry} = ProviderRegistry.new(%{"single" => invalid})
+
+    assert {:error, :invalid_provider_build} =
+             ProviderRegistry.build(invalid_registry, "single", %{}, context)
   end
 
   test "registry rejects directory-bearing provider contexts before invoking a builder" do
     parent = self()
 
-    builder = fn _config, _context ->
-      send(parent, :provider_invoked)
-      capability("fixture")
-    end
+    builder =
+      staged_builder(fn _config, _context ->
+        send(parent, :provider_invoked)
+        provider_build("fixture")
+      end)
 
     {:ok, registry} = ProviderRegistry.new(%{"fixture" => builder})
     limits = limits()
 
-    legacy_context = %{
+    directory_bearing_context = %{
       directory: "/application",
       destination: :workflow,
       owner: self(),
@@ -86,7 +99,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     }
 
     assert {:error, :invalid_provider_context} =
-             ProviderRegistry.build(registry, "fixture", %{}, legacy_context)
+             ProviderRegistry.build(registry, "fixture", %{}, directory_bearing_context)
 
     refute_received :provider_invoked
   end
@@ -94,10 +107,11 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
   test "registry convenience builds reject registrar-backed contexts" do
     parent = self()
 
-    builder = fn _config, _context ->
-      send(parent, :provider_invoked)
-      capability("fixture")
-    end
+    builder =
+      staged_builder(fn _config, _context ->
+        send(parent, :provider_invoked)
+        provider_build("fixture")
+      end)
 
     {:ok, registry} = ProviderRegistry.new(%{"fixture" => builder})
     limits = limits()
@@ -139,8 +153,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
            {:ok,
             fn %{"shared" => "secret"} ->
               send(parent, {:provider_phase, :acquire, id})
-              {:ok, capability} = capability("provided.#{id}")
-              {:ok, capability}
+              provider_build("provided.#{id}")
             end}
          end
        }}
@@ -603,7 +616,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
        }}
     end
 
-    {:ok, registry} = ProviderRegistry.new(%{"owned" => builder})
+    {:ok, registry} = ProviderRegistry.new(%{"owned" => staged_builder(builder)})
 
     assert {:error, {:missing_capability_requirement, ["missing"]}} =
              RunBuilder.build(request, registry)
@@ -670,7 +683,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
            {:ok,
             fn %{} ->
               send(parent, :trace_provider_acquired)
-              capability("provided.trace-preflight")
+              provider_build("provided.trace-preflight")
             end}
          end
        }}
@@ -715,7 +728,8 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
        }}
     end
 
-    {:ok, registry} = ProviderRegistry.new(%{"cleanup-fails" => builder})
+    {:ok, registry} =
+      ProviderRegistry.new(%{"cleanup-fails" => staged_builder(builder)})
 
     assert {:error,
             %PtcRunner.Kernel.Error{
@@ -849,7 +863,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
       {:ok, sink} = EventSink.start(:normal, limits)
 
       {:ok, inspection} =
-        InspectionSink.start(
+        StreamingInspection.start(
           run_id: "invalid-built-#{index}",
           trace_id: "invalid-built-#{index}"
         )
@@ -901,7 +915,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert :ok =
              ProviderSession.bind_lifecycle(session, self(), state.pid, state.provider_tracker)
 
-    provider = start_provider_task(state, "wedged")
+    {provider, reservation_id} = start_provider_task(state, "wedged")
     provider_monitor = Process.monitor(provider)
     root_monitor = Process.monitor(root)
     session_monitor = Process.monitor(session.pid)
@@ -913,7 +927,9 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert_receive {:DOWN, ^session_monitor, :process, _, :killed}
     assert_receive {:DOWN, ^provider_monitor, :process, ^provider, :killed}
     assert_receive {:DOWN, ^root_monitor, :process, ^root, _reason}
-    assert {:error, :closed} = RunState.attach_provider(state, spawn(fn -> :ok end))
+
+    assert {:error, :closed} =
+             RunState.attach_provider(state, reservation_id, spawn(fn -> :ok end))
 
     RunState.close(state)
     RunState.stop(state)
@@ -931,7 +947,7 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     assert :ok =
              ProviderSession.bind_lifecycle(session, self(), state.pid, state.provider_tracker)
 
-    provider = start_provider_task(state, "drained")
+    {provider, _reservation_id} = start_provider_task(state, "drained")
 
     assert :ok =
              ResourceRegistrar.commit(registrar, fn ->
@@ -1010,6 +1026,10 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
       assert_receive {:preflight_resource_closed, ^close_result}
       refute_receive {:preflight_resource_closed, ^close_result}
+
+      events = sink |> EventSink.events() |> Jason.encode!() |> Jason.decode!()
+      assert :ok = TraceEventValidation.validate(events)
+
       EventSink.stop(sink)
     end
   end
@@ -1426,7 +1446,10 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     {:ok, event_sink} = EventSink.start(:normal, limits())
 
     {:ok, inspection_sink} =
-      InspectionSink.start(run_id: "finite-stop", trace_id: "finite-stop")
+      StreamingInspection.start(
+        run_id: "finite-stop",
+        trace_id: "finite-stop"
+      )
 
     true = :erlang.suspend_process(event_sink.pid)
     true = :erlang.suspend_process(inspection_sink.pid)
@@ -1457,7 +1480,22 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
        }}
     end
 
-    ProviderRegistry.new(%{"owned" => builder})
+    ProviderRegistry.new(%{"owned" => staged_builder(builder)})
+  end
+
+  defp staged_builder(acquire) do
+    ProviderRegistry.staged(fn config, context ->
+      {:ok,
+       %{
+         credential_names: [],
+         preflight: fn -> {:ok, fn %{} -> acquire.(config, context) end} end
+       }}
+    end)
+  end
+
+  defp provider_build(name) do
+    with {:ok, capability} <- capability(name),
+         do: {:ok, %{capabilities: [capability]}}
   end
 
   defp capability(name) do
@@ -1488,8 +1526,8 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
     Task.async(fn ->
       task = spawn(fn -> receive do: (:stop -> :ok) end)
       monitor = Process.monitor(task)
-      :ok = RunState.reserve_capability(state, :workflow, "late")
-      attached = RunState.attach_provider(state, task)
+      {:ok, reservation_id} = RunState.reserve_capability(state, :workflow, "late")
+      attached = RunState.attach_provider(state, reservation_id, task)
       if attached == :ok, do: Process.exit(task, :kill)
 
       receive do
@@ -1501,9 +1539,9 @@ defmodule PtcRunner.Kernel.ProviderLifecycleTest do
 
   defp start_provider_task(state, name) do
     provider = spawn(fn -> receive do: (:stop -> :ok) end)
-    assert :ok = RunState.reserve_capability(state, :workflow, name)
-    assert :ok = RunState.attach_provider(state, provider)
-    provider
+    assert {:ok, reservation_id} = RunState.reserve_capability(state, :workflow, name)
+    assert :ok = RunState.attach_provider(state, reservation_id, provider)
+    {provider, reservation_id}
   end
 
   defp limits do

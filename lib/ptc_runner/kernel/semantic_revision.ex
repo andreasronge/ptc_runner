@@ -3,13 +3,14 @@ defmodule PtcRunner.Kernel.SemanticRevision do
   Conservative code-owned PTC execution-semantics revision.
 
   The generated build projection covers the checked-in semantic source
-  inventory and publisher dependency lock identities. Starting from audited
-  runtime roots, the runtime projection follows required, included, and
-  optional application metadata and adds the exact Elixir, OTP, ERTS, BEAM
-  architecture, conditionally compiled semantic-module presence, and resolved
-  regular-file artifact identities, including executable classification. The
-  final revision is deliberately stricter than observed behavioral
-  equivalence.
+  inventory and publisher dependency lock identities. Every build adds the
+  exact Elixir, OTP, ERTS, BEAM architecture, compiled scheduler default, and
+  conditionally compiled semantic-module presence. Release-oriented builds also
+  follow audited runtime roots through required, included, and optional
+  application metadata and add resolved regular-file artifact identities,
+  including executable classification. The verified revision is
+  deliberately stricter than observed behavioral equivalence; development and
+  test builds avoid that release-only filesystem audit.
   """
 
   alias PtcRunner.Kernel.TypedCanonicalJSON
@@ -30,12 +31,22 @@ defmodule PtcRunner.Kernel.SemanticRevision do
   @domain <<"ptc.semantic-revision.v1", 0>>
   @dependency_domain <<"ptc.runtime-dependency-artifacts.v1", 0>>
   @artifact_chunk_bytes 65_536
+  # Keep the decision in the compiled module so package consumers get the same
+  # fast dev/test behavior without adding application configuration. Any custom
+  # environment remains release-safe by default.
+  @runtime_dependency_artifacts_verified Mix.env() not in [:dev, :test]
+  @runtime_dependency_artifact_mode if(@runtime_dependency_artifacts_verified,
+                                      do: :verified,
+                                      else: :build_projection
+                                    )
 
   @spec current() :: binary()
   @doc "Returns the semantic revision for this build and running BEAM."
   def current do
     runtime_identity = runtime_identity()
-    storage_key = {__MODULE__, :current, @build_identity, runtime_identity}
+
+    storage_key =
+      {__MODULE__, :current, @build_identity, @runtime_dependency_artifact_mode, runtime_identity}
 
     case :persistent_term.get(storage_key, :missing) do
       :missing ->
@@ -55,6 +66,10 @@ defmodule PtcRunner.Kernel.SemanticRevision do
         revision
     end
   end
+
+  @doc false
+  @spec runtime_dependency_artifacts_verified?() :: boolean()
+  def runtime_dependency_artifacts_verified?, do: @runtime_dependency_artifacts_verified
 
   @spec revision_for(map(), map()) :: binary()
   @doc false
@@ -118,15 +133,26 @@ defmodule PtcRunner.Kernel.SemanticRevision do
          {elixir, erts, otp_release, system_architecture, compiled_pmap_max_concurrency}
        ) do
     %{
-      "actual_runtime_dependencies" => actual_dependency_projection(@actual_dependency_roots),
       "compiled_pmap_max_concurrency" => compiled_pmap_max_concurrency,
       "compiled_semantic_features" =>
         actual_compile_feature_projection(@conditional_semantic_modules),
       "elixir" => elixir,
       "erts" => erts,
       "otp_release" => otp_release,
+      "runtime_dependency_artifacts" => runtime_dependency_artifacts(),
       "system_architecture" => system_architecture
     }
+  end
+
+  defp runtime_dependency_artifacts do
+    if @runtime_dependency_artifacts_verified do
+      %{
+        "mode" => Atom.to_string(@runtime_dependency_artifact_mode),
+        "dependencies" => actual_dependency_projection(@actual_dependency_roots)
+      }
+    else
+      %{"mode" => Atom.to_string(@runtime_dependency_artifact_mode)}
+    end
   end
 
   defp collect_dependency(app, resolver, dependencies) do

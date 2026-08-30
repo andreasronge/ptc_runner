@@ -1177,7 +1177,9 @@ defmodule PtcRunner.Kernel.ProviderSessionTest do
     Process.send_after(suspender, :resume, 300)
 
     assert {:ok, deadline} = ProviderSession.anchor_cleanup_deadline(session)
-    assert Deadline.remaining(deadline) <= 700
+    # Allow timer/monotonic-clock granularity while staying well below the
+    # roughly 1,000 ms that a dequeue-time anchor would incorrectly retain.
+    assert Deadline.remaining(deadline) <= 750
     assert :ok = ProviderSession.close(session)
   end
 

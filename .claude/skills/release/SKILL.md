@@ -41,8 +41,8 @@ Run the authoritative local release gate from `docs/RELEASING.md` (the source of
 truth, together with `.github/workflows/release.yml`). Run each in order and fix
 all issues before proceeding:
 
-1. `mix precommit` - format, compile (warnings-as-errors), credo, schema, spec, tests
-2. `mix prepush` - dialyzer, unused-deps
+1. `mix precommit` - nested fetch, format, compile (warnings-as-errors), credo, schema, spec, generated artifacts
+2. `FORCE_FULL_PRE_PUSH=1 .githooks/pre-push` - docs, tests, Dialyzer, release, Viewer, launcher
 3. `MIX_ENV=prod mix hex.build` - package-content verification
 4. `MIX_ENV=dev mix docs --warnings-as-errors` - documentation gate
 5. `mix bench.check` - deterministic eval-reduction baseline

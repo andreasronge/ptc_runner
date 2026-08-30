@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   @moduledoc """
   Sealed command result returned to frontends.
 
-  It carries a validated V2 envelope and status. Frontends must call
+  It carries a validated V4 envelope and status. Frontends must call
   `to_map/1` at the rendering boundary so a mutated or caller-authored struct
   cannot be emitted. Outcomes never write a stream, raise through Mix, halt the
   VM, or exit the operating-system process.
@@ -13,11 +13,13 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.DiagnosticCatalog
 
   @non_run_modes [
     :help,
     :version,
+    :docs,
     :init,
     :validate,
     :doctor,
@@ -25,8 +27,17 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     :models,
     :unknown
   ]
-  @success_modes [:help, :version, :init, :validate, :doctor, {:doctor, :connect}, :models]
-  @static_modes [:help, :version, :init, :validate, :doctor, :models, :unknown]
+  @success_modes [
+    :help,
+    :version,
+    :docs,
+    :init,
+    :validate,
+    :doctor,
+    {:doctor, :connect},
+    :models
+  ]
+  @static_modes [:help, :version, :docs, :init, :validate, :doctor, :models, :unknown]
   @exit_statuses [0, 2, 3, 4, 5, 6, 7, 70]
   @artifact_names ~w(trace inspection result)
   @unclassified_artifact_states ~w(not_requested not_written)
@@ -51,6 +62,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   @type command_mode ::
           :help
           | :version
+          | :docs
           | :init
           | :validate
           | :run
@@ -95,34 +107,44 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   end
 
   @doc false
-  @spec doctor_failure(binary(), map(), CommandDiagnostic.t(), [CommandDiagnostic.t()]) :: t()
-  def doctor_failure(run_ref, result, diagnostic, secondary \\ [])
+  @spec doctor_failure(
+          :doctor | {:doctor, :connect},
+          binary(),
+          map(),
+          CommandDiagnostic.t(),
+          [CommandDiagnostic.t()]
+        ) :: t()
+  def doctor_failure(command_mode, run_ref, result, diagnostic, secondary \\ [])
 
-  def doctor_failure(run_ref, result, %CommandDiagnostic{} = diagnostic, secondary)
-      when is_map(result) and is_list(secondary) and length(secondary) <= 6 do
+  def doctor_failure(command_mode, run_ref, result, %CommandDiagnostic{} = diagnostic, secondary)
+      when command_mode in [:doctor, {:doctor, :connect}] and is_map(result) and
+             is_list(secondary) and length(secondary) <= 6 do
     rendered_primary = CommandDiagnostic.to_map(diagnostic)
     rendered_secondary = Enum.map(secondary, &CommandDiagnostic.to_map/1)
 
     if CommandRunRef.valid?(run_ref) and
-         valid_mode_diagnostics?({:doctor, :connect}, [diagnostic | secondary]) and
+         (command_mode == {:doctor, :connect} or secondary == []) and
+         doctor_failure_mode_allowed?(command_mode, diagnostic) and
+         valid_mode_diagnostics?(command_mode, [diagnostic | secondary]) and
          valid_compound_diagnostics?(diagnostic, secondary) and
          CommandContract.valid_doctor_failure_result?(
            result,
            rendered_primary,
-           rendered_secondary
+           rendered_secondary,
+           command_mode
          ) do
       envelope =
-        {:doctor, :connect}
+        command_mode
         |> error_envelope(run_ref, diagnostic, secondary)
         |> Map.put("result", result)
 
-      seal({:doctor, :connect}, envelope, diagnostic.exit_status)
+      seal(command_mode, envelope, diagnostic.exit_status)
     else
       raise ArgumentError, "invalid closed doctor failure outcome"
     end
   end
 
-  def doctor_failure(_run_ref, _result, _diagnostic, _secondary),
+  def doctor_failure(_command_mode, _run_ref, _result, _diagnostic, _secondary),
     do: raise(ArgumentError, "invalid closed doctor failure outcome")
 
   @spec run_error(
@@ -153,10 +175,18 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   end
 
   @doc false
-  @spec run_success(binary(), :normal | :private, term(), map(), map(), map()) :: t()
-  def run_success(run_ref, result_class, value, artifact_state, usage, evaluation_memory)
+  @spec run_success(binary(), :normal | :private, term(), map(), map(), map(), [map()]) :: t()
+  def run_success(
+        run_ref,
+        result_class,
+        value,
+        artifact_state,
+        usage,
+        evaluation_memory,
+        warnings \\ []
+      )
       when result_class in [:normal, :private] and is_map(artifact_state) and is_map(usage) and
-             is_map(evaluation_memory) do
+             is_map(evaluation_memory) and is_list(warnings) do
     result =
       case result_class do
         :normal -> %{"result_class" => "normal", "value" => value}
@@ -164,12 +194,13 @@ defmodule PtcRunner.Kernel.CommandOutcome do
       end
 
     envelope = %{
-      "schema_version" => 2,
+      "schema_version" => 4,
       "command" => "run",
       "status" => "ok",
       "run_ref" => run_ref,
       "result" => result,
       "secondary_errors" => [],
+      "warnings" => warnings,
       "artifact_state" => artifact_state,
       "artifact_class" => Atom.to_string(result_class),
       "execution" => %{
@@ -177,7 +208,8 @@ defmodule PtcRunner.Kernel.CommandOutcome do
         "outcome" => "ok",
         "diagnostic" => nil,
         "usage" => usage,
-        "evaluation_memory" => evaluation_memory
+        "evaluation_memory" => evaluation_memory,
+        "last_evaluation_error" => nil
       }
     }
 
@@ -191,7 +223,8 @@ defmodule PtcRunner.Kernel.CommandOutcome do
           CommandDiagnostic.t(),
           [CommandDiagnostic.t()],
           map(),
-          map()
+          map(),
+          [map()]
         ) :: t()
   def run_classified_error(
         run_ref,
@@ -199,17 +232,21 @@ defmodule PtcRunner.Kernel.CommandOutcome do
         %CommandDiagnostic{} = diagnostic,
         secondary,
         artifact_state,
-        execution
+        execution,
+        warnings \\ []
       )
       when result_class in [:normal, :private] and is_list(secondary) and
-             length(secondary) <= 6 and is_map(artifact_state) and is_map(execution) do
+             length(secondary) <= 6 and is_map(artifact_state) and is_map(execution) and
+             is_list(warnings) do
     if CommandRunRef.valid?(run_ref) and CommandDiagnostic.valid?(diagnostic) and
          Enum.all?(secondary, &CommandDiagnostic.valid?/1) and
+         valid_warnings?(warnings) and
          valid_mode_diagnostics?(:run, [diagnostic | secondary]) and
          valid_compound_diagnostics?(diagnostic, secondary) do
       envelope =
         error_envelope(:run, run_ref, diagnostic, secondary)
         |> Map.merge(%{
+          "warnings" => warnings,
           "artifact_state" => artifact_state,
           "artifact_class" => Atom.to_string(result_class),
           "execution" => execution
@@ -230,11 +267,12 @@ defmodule PtcRunner.Kernel.CommandOutcome do
       seal(
         command_mode,
         %{
-          "schema_version" => 2,
+          "schema_version" => 4,
           "command" => Atom.to_string(public_command),
           "status" => "ok",
           "run_ref" => run_ref,
-          "result" => result
+          "result" => result,
+          "warnings" => []
         },
         0
       )
@@ -247,7 +285,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     do: raise(ArgumentError, "invalid closed command outcome")
 
   @doc """
-  Checks the complete sealed outcome, including its exact fields, V2 envelope,
+  Checks the complete sealed outcome, including its exact fields, V4 envelope,
   command mode, exit status, and in-VM construction attestation.
   """
   @spec valid?(term()) :: boolean()
@@ -269,7 +307,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
 
   def valid?(_outcome), do: false
 
-  @doc "Returns the validated V2 envelope for rendering."
+  @doc "Returns the validated V4 envelope for rendering."
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = outcome) do
     if valid?(outcome),
@@ -281,12 +319,13 @@ defmodule PtcRunner.Kernel.CommandOutcome do
 
   defp error_envelope(command_mode, run_ref, diagnostic, secondary) do
     %{
-      "schema_version" => 2,
+      "schema_version" => 4,
       "command" => command_mode |> public_command() |> Atom.to_string(),
       "status" => "error",
       "run_ref" => run_ref,
       "error" => CommandDiagnostic.to_map(diagnostic),
-      "secondary_errors" => Enum.map(secondary, &CommandDiagnostic.to_map/1)
+      "secondary_errors" => Enum.map(secondary, &CommandDiagnostic.to_map/1),
+      "warnings" => []
     }
   end
 
@@ -306,6 +345,11 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   end
 
   defp payload(outcome), do: {outcome.command_mode, outcome.envelope, outcome.exit_status}
+
+  defp valid_warnings?(warnings) when is_list(warnings) and length(warnings) <= 128,
+    do: Enum.all?(warnings, &CommandWarning.valid_map?/1)
+
+  defp valid_warnings?(_warnings), do: false
 
   defp public_command({:doctor, :connect}), do: :doctor
   defp public_command(command) when is_atom(command), do: command
@@ -346,7 +390,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
        do: CommandRunRef.valid?(run_ref) and result_class in ["normal", "private"]
 
   defp valid_envelope_mode?(
-         {:doctor, :connect} = command_mode,
+         command_mode,
          %{
            "command" => "doctor",
            "status" => "error",
@@ -357,11 +401,12 @@ defmodule PtcRunner.Kernel.CommandOutcome do
          },
          exit_status
        )
-       when is_list(secondary) do
+       when command_mode in [:doctor, {:doctor, :connect}] and is_list(secondary) do
     CommandRunRef.valid?(run_ref) and
+      doctor_failure_mode_allowed?(command_mode, primary) and
       valid_rendered_diagnostics?(command_mode, [primary | secondary]) and
       rendered_exit_status(primary) == exit_status and
-      CommandContract.valid_doctor_failure_result?(result, primary, secondary)
+      CommandContract.valid_doctor_failure_result?(result, primary, secondary, command_mode)
   end
 
   defp valid_envelope_mode?(
@@ -402,6 +447,16 @@ defmodule PtcRunner.Kernel.CommandOutcome do
   end
 
   defp valid_envelope_mode?(_command_mode, _envelope, _exit_status), do: false
+
+  defp doctor_failure_mode_allowed?(:doctor, %CommandDiagnostic{phase: :application}), do: true
+
+  defp doctor_failure_mode_allowed?(:doctor, %CommandDiagnostic{phase: :local_preflight}),
+    do: true
+
+  defp doctor_failure_mode_allowed?(:doctor, %{"phase" => "application"}), do: true
+  defp doctor_failure_mode_allowed?(:doctor, %{"phase" => "local_preflight"}), do: true
+  defp doctor_failure_mode_allowed?({:doctor, :connect}, _diagnostic), do: true
+  defp doctor_failure_mode_allowed?(_command_mode, _diagnostic), do: false
 
   defp valid_rendered_diagnostics?(command_mode, diagnostics) do
     Enum.all?(diagnostics, fn diagnostic ->

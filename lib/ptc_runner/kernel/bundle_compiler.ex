@@ -3,21 +3,18 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   Internal implementation of `PtcRunner.Kernel.compile_bundle/1`.
 
   It bounds the closed component set, resolves its component-ID dependency DAG
-  deterministically, compiles the combined prelude in a bounded worker, limits
-  diagnostics and artifact size, and seals the resulting bundle.
+  deterministically, composes the validated component preludes in a bounded
+  worker, limits diagnostics and artifact size, and seals the resulting bundle.
   """
 
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.Component
-  alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.FrozenBundle
-  alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Prelude.ErrorSpan
   alias PtcRunner.Lisp.Prelude.ValidationError
 
-  @bundle_hash_domain <<"ptc.frozen-bundle.v2", 0>>
   @max_components 128
   @max_edges 512
   @max_source_bytes 2_000_000
@@ -28,7 +25,7 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   @max_span_locator_bytes 4_096
   @max_artifact_bytes 4_000_000
   @max_diagnostic_bytes 65_536
-  @public_compile_reasons [:parse_error, :unbound_var, :duplicate_ref]
+  @public_compile_reasons [:parse_error, :unbound_var, :duplicate_ref, :unknown_namespace]
 
   @spec compile([Component.t()]) :: {:ok, FrozenBundle.t()} | {:error, map()}
   @doc "Compiles and attests a bounded closed component set."
@@ -41,23 +38,26 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   def compile(_components), do: {:error, %{reason: :invalid_components}}
 
   @doc false
-  @spec compile_named(map(), integer(), non_neg_integer(), pos_integer()) ::
+  @spec compile_named(map(), integer(), non_neg_integer(), pos_integer(), [tuple()]) ::
           {:ok, map()} | {:error, {map(), [Component.t()]}}
-  def compile_named(missions, deadline_ms, initial_bytes, max_bytes)
+  def compile_named(missions, deadline_ms, initial_bytes, max_bytes, reusable)
       when is_map(missions) and is_integer(deadline_ms) and is_integer(initial_bytes) and
-             initial_bytes >= 0 and is_integer(max_bytes) and max_bytes > 0 do
+             initial_bytes >= 0 and is_integer(max_bytes) and max_bytes > 0 and
+             is_list(reusable) do
+    cache = reusable_cache(reusable)
+
     Enum.reduce_while(
       missions |> Enum.sort_by(&elem(&1, 0)),
-      {:ok, %{}, initial_bytes},
-      fn {name, %{components: components}}, {:ok, bundles, bytes} ->
-        result = if components == [], do: {:ok, nil}, else: compile(components, deadline_ms)
+      {:ok, %{}, initial_bytes, cache},
+      fn {name, %{components: components}}, {:ok, bundles, bytes, compiled_cache} ->
+        result = compile_reusing(components, deadline_ms, compiled_cache)
 
         case result do
-          {:ok, bundle} ->
+          {:ok, bundle, next_cache} ->
             next_bytes = bytes + if(is_nil(bundle), do: 0, else: :erlang.external_size(bundle))
 
             if next_bytes <= max_bytes,
-              do: {:cont, {:ok, Map.put(bundles, name, bundle), next_bytes}},
+              do: {:cont, {:ok, Map.put(bundles, name, bundle), next_bytes, next_cache}},
               else: {:halt, {:error, {%{reason: :bundle_limit_exceeded}, components}}}
 
           {:error, failure} ->
@@ -66,10 +66,56 @@ defmodule PtcRunner.Kernel.BundleCompiler do
       end
     )
     |> case do
-      {:ok, bundles, _bytes} -> {:ok, bundles}
+      {:ok, bundles, _bytes, _cache} -> {:ok, bundles}
       {:error, {_failure, _components}} = error -> error
     end
   end
+
+  defp reusable_cache(reusable) do
+    Enum.reduce(reusable, %{}, fn
+      {components, %FrozenBundle{} = bundle}, cache ->
+        case component_cache_key(components) do
+          nil -> cache
+          key -> Map.put(cache, key, bundle)
+        end
+
+      _invalid, cache ->
+        cache
+    end)
+  end
+
+  defp compile_reusing([], _deadline_ms, cache), do: {:ok, nil, cache}
+
+  defp compile_reusing(components, deadline_ms, cache) do
+    if deadline_ms <= System.monotonic_time(:millisecond) do
+      {:error, %{reason: :bundle_compile_timeout}}
+    else
+      compile_reusing_before_deadline(components, deadline_ms, cache)
+    end
+  end
+
+  defp compile_reusing_before_deadline(components, deadline_ms, cache) do
+    key = component_cache_key(components)
+
+    case Map.fetch(cache, key) do
+      {:ok, bundle} ->
+        {:ok, bundle, cache}
+
+      :error ->
+        case compile(components, deadline_ms) do
+          {:ok, bundle} -> {:ok, bundle, Map.put(cache, key, bundle)}
+          {:error, _failure} = error -> error
+        end
+    end
+  end
+
+  defp component_cache_key(components) when is_list(components) do
+    if Enum.all?(components, &match?(%Component{}, &1)),
+      do: Enum.sort_by(components, & &1.id),
+      else: nil
+  end
+
+  defp component_cache_key(_components), do: nil
 
   @doc false
   def compile(components, deadline_ms) when is_list(components) and is_integer(deadline_ms) do
@@ -110,18 +156,12 @@ defmodule PtcRunner.Kernel.BundleCompiler do
          :ok <- dependencies_exist(by_id),
          {:ok, ordered} <- topological_order(by_id),
          {:ok, compiled} <- describe_ordered(ordered),
-         {:ok, prelude} <- compile_prelude(ordered, compiled) do
-      ids = Enum.map(compiled, & &1.id)
-
-      hash =
-        compiled
-        |> bundle_hash_bytes()
-        |> then(&:crypto.hash(:sha256, &1))
-        |> Base.encode16(case: :lower)
-
+         {:ok, prelude} <- compile_prelude(ordered, compiled),
+         frozen_components = Enum.map(compiled, &Map.delete(&1, :prelude)),
+         {:ok, hash} <- FrozenBundle.identity(frozen_components) do
       bundle = %FrozenBundle{
-        components: compiled,
-        component_ids: ids,
+        components: frozen_components,
+        component_ids: Enum.map(frozen_components, & &1.id),
         hash: hash,
         prelude: prelude
       }
@@ -256,12 +296,13 @@ defmodule PtcRunner.Kernel.BundleCompiler do
 
   defp describe_ordered(components) do
     Enum.reduce_while(components, {:ok, []}, fn component, {:ok, compiled} ->
-      with {:ok, namespaces} <- component_namespaces(component.source),
+      with {:ok, description} <- Compiler.describe_unlocated(component.source),
+           namespaces = description.namespaces,
            dependencies = dependency_components(compiled, component.dependencies),
            namespace_deps =
              Map.new(namespaces, &{&1, dependency_namespaces(dependencies)}),
            {:ok, prelude} <-
-             Compiler.compile_unlocated(component.source,
+             Compiler.compile_description(description,
                deps: Enum.map(dependencies, & &1.prelude),
                namespace_deps: namespace_deps
              ) do
@@ -309,18 +350,19 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   end
 
   defp compile_prelude(components, compiled) do
-    namespace_deps = namespace_dependencies(compiled)
     source = Enum.map_join(components, "\n", & &1.source)
 
-    Compiler.compile_unlocated(source, namespace_deps: namespace_deps)
+    metadata =
+      Enum.map(compiled, fn component ->
+        Map.take(component, [:id, :origin, :source_hash, :namespaces])
+      end)
+
+    compiled
+    |> Enum.map(& &1.prelude)
+    |> Compiler.compose(source, metadata)
     |> case do
       {:ok, prelude} ->
-        metadata =
-          Enum.map(compiled, fn component ->
-            Map.take(component, [:id, :origin, :source_hash, :namespaces])
-          end)
-
-        {:ok, %{prelude | metadata: Map.put(prelude.metadata, :components, metadata)}}
+        {:ok, prelude}
 
       {:error, error} ->
         {:error,
@@ -332,85 +374,11 @@ defmodule PtcRunner.Kernel.BundleCompiler do
     end
   end
 
-  defp namespace_dependencies(components) do
-    by_id = Map.new(components, &{&1.id, &1})
-
-    components
-    |> Enum.flat_map(fn component ->
-      dependency_namespaces =
-        component.dependencies
-        |> Enum.flat_map(&Map.fetch!(by_id, &1).namespaces)
-        |> Enum.uniq()
-        |> Enum.sort()
-
-      Enum.map(component.namespaces, &{&1, dependency_namespaces})
-    end)
-    |> Map.new()
-  end
-
-  defp component_namespaces(source) do
-    case Parser.parse_with_position(source) do
-      {:ok, ast} ->
-        namespaces = ast |> top_level_forms() |> Enum.flat_map(&namespace_form/1) |> Enum.uniq()
-
-        if namespaces == [],
-          do: {:error, "component declares no namespace"},
-          else: {:ok, namespaces}
-
-      {:error, {:parse_error, message, position}} ->
-        {:error, ValidationError.new(:parse_error, message, span: parse_position_span(position))}
-    end
-  end
-
-  defp parse_position_span(position) when is_integer(position) and position >= 0,
-    do: {position, 0}
-
-  defp parse_position_span(_position), do: nil
-
-  defp top_level_forms({:program, forms}), do: forms
-  defp top_level_forms(form), do: [form]
-
-  defp namespace_form({:list, [{:symbol, name}, {:symbol, namespace} | _metadata]})
-       when name in [:ns, "ns"],
-       do: [to_string(namespace)]
-
-  defp namespace_form(_form), do: []
-
   defp source_hash(source),
     do: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
 
-  defp bundle_hash_bytes(components) do
-    records =
-      components
-      |> Enum.sort_by(& &1.id)
-      |> Enum.map(&bundle_component_record/1)
-
-    IO.iodata_to_binary([@bundle_hash_domain, <<length(records)::unsigned-big-32>>, records])
-  end
-
-  defp bundle_component_record(component) do
-    {:ok, payload} =
-      DeterministicJSON.encode(
-        {:object,
-         [
-           {"dependencies", Enum.sort(Enum.uniq(component.dependencies))},
-           {"source_hash", component.source_hash}
-         ]}
-      )
-
-    [
-      <<0x01>>,
-      <<byte_size(component.id)::unsigned-big-32>>,
-      component.id,
-      <<byte_size(payload)::unsigned-big-64>>,
-      payload
-    ]
-  end
-
   defp error_message(%{message: message}) when is_binary(message),
     do: String.slice(message, 0, 4_096)
-
-  defp error_message(error), do: inspect(error, limit: 10, printable_limit: 4_096)
 
   # Only reasons with fixed, catalog-owned public projections cross the bundle
   # boundary. Every other compiler reason deliberately retains the generic
@@ -427,8 +395,6 @@ defmodule PtcRunner.Kernel.BundleCompiler do
       :error -> nil
     end
   end
-
-  defp compile_details(_error), do: nil
 
   # The locator crosses the diagnostic-size gate before being consumed. Strip
   # the source-derived message and bound the remaining namespace/ref strings so
@@ -449,8 +415,6 @@ defmodule PtcRunner.Kernel.BundleCompiler do
         nil
     end
   end
-
-  defp span_locator(_error), do: nil
 
   # Span attribution is optional diagnostic work, so it runs only after the
   # bounded compilation result is final. A costly scan can therefore lose its

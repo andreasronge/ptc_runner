@@ -256,8 +256,16 @@ defmodule PtcRunner.Kernel.ViewerReplBackend do
       ) do
     if Map.has_key?(state.sessions, session_ref) and kind in [:run, :turns] and
          valid_run_id?(run_id) do
-      args = [{:string, run_id}] ++ if(kind == :turns, do: [{:map, []}], else: [])
-      source = Formatter.format({:list, [{:ns_symbol, :log, kind} | args]})
+      operation = if(kind == :run, do: :open, else: :read)
+
+      args =
+        [{:string, run_id}] ++
+          if(kind == :turns,
+            do: [{:map, [{{:string, "collection"}, {:string, "activity"}}]}],
+            else: []
+          )
+
+      source = Formatter.format({:list, [{:ns_symbol, :analysis, operation} | args]})
       {:reply, {:ok, %{source: source}}, state}
     else
       {:reply, {:error, :invalid_template}, state}

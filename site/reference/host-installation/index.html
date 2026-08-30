@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Host-configuration reference · PtcRunner</title>
+<meta name="description" content="This is the complete contract for installed providers, credentials, transports,
+data classes, and outer limits.">
+<link rel="canonical" href="https://ptc-runner.dev/reference/host-installation/">
+<meta property="og:title" content="Host-configuration reference · PtcRunner">
+<meta property="og:description" content="This is the complete contract for installed providers, credentials, transports,
+data classes, and outer limits.">
+<meta property="og:url" content="https://ptc-runner.dev/reference/host-installation/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/" class="current" aria-current="page">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="host-configuration-reference">Host-configuration reference</h1><p>This is the complete contract for installed providers, credentials, transports,
+data classes, and outer limits.</p><p>The strict <code class="inline">ptc-host.json</code> file keeps them
+separate from the application manifest:</p><pre><code class="console language-console">ptc run MANIFEST --host-config ptc-host.json</code></pre><p>A manifest may select an installed alias and ask for less. It cannot add a provider,
+change an endpoint or executable, supply a credential, or raise a ceiling. A
+provider-bearing manifest requires <code class="inline">--host-config</code>; a manifest with no providers
+does not.</p><p>For a checkout used repeatedly, store the host and optional environment-file
+references in the separate
+<a href="/reference/project-files/">project configuration</a>:</p><pre><code class="console language-console">ptc run ptc-project.json
+ptc doctor ptc-project.json --connect</code></pre><p>Loading validates bounded, path-confined JSON without reading credentials,
+resolving executables, starting processes, or contacting endpoints. Those
+actions happen later during preflight and acquisition.</p><p>A host schema diagnostic names the bounded rule that failed and includes a
+safe JSON Pointer. Installation aliases and other caller-selected map keys are
+rendered as <code class="inline">*</code>; unknown keys and rejected values are never copied into the
+diagnostic. For example, an excessive installation timeout is located at
+<code class="inline">/install/*/ceilings/timeout_ms</code> and classified as a <code class="inline">maximum</code> rule failure.</p><h2 id="start-with-a-small-document">Start with a small document</h2><pre><code class="json language-json">{
+  &quot;credentials&quot;: {
+    &quot;openrouter_key&quot;: {&quot;env&quot;: &quot;OPENROUTER_API_KEY&quot;}
+  },
+  &quot;install&quot;: {
+    &quot;deepseek&quot;: {
+      &quot;source&quot;: &quot;llm&quot;,
+      &quot;structured_output_mode&quot;: &quot;unsupported&quot;,
+      &quot;usage_guarantees&quot;: {&quot;tokens&quot;: true, &quot;cost_currency&quot;: &quot;USD&quot;},
+      &quot;installation_revision&quot;: &quot;deepseek-policy-v1&quot;,
+      &quot;model&quot;: &quot;openrouter:deepseek/deepseek-v4-flash&quot;,
+      &quot;credential&quot;: &quot;openrouter_key&quot;,
+      &quot;cache&quot;: false
+    },
+    &quot;workspace&quot;: {
+      &quot;source&quot;: &quot;mcp&quot;,
+      &quot;installation_revision&quot;: &quot;workspace-v1&quot;,
+      &quot;transport&quot;: {
+        &quot;type&quot;: &quot;stdio&quot;,
+        &quot;command&quot;: &quot;node&quot;,
+        &quot;args&quot;: [&quot;server.js&quot;]
+      },
+      &quot;tools&quot;: {
+        &quot;read_text_file&quot;: {&quot;as&quot;: &quot;workspace.read&quot;, &quot;effect&quot;: &quot;read&quot;}
+      }
+    }
+  }
+}</code></pre><p>Only <code class="inline">install</code> is required. The other top-level keys are <code class="inline">$schema</code>,
+<code class="inline">credentials</code>, <code class="inline">limits</code>, and <code class="inline">runtime</code>; unknown and duplicate keys are
+rejected. Use <code class="inline">ptc docs schema-host</code>
+(<code class="inline">priv/schemas/ptc-host-config.schema.json</code> in the repository) for the complete
+structural vocabulary, defaults, bounds, and editor completion. Runtime
+validation remains authoritative for semantic checks.</p><p>Every installation needs a public, non-secret <code class="inline">installation_revision</code>. Change
+it whenever installed behavior or authority changes, including model routing,
+MCP mappings and effects, replay fixtures, snapshot policy, or adapter and
+launcher builds.</p><p><code class="inline">installation_config_digest</code> is computed evidence for that same declaration. It
+hashes the normalized <code class="inline">install.&lt;alias&gt;</code> configuration after ordinary host
+decoding, with a distinct TJCS domain from application identity. Set-valued
+declaration fields such as <code class="inline">accepts_data</code> and OAuth <code class="inline">redirect_uris</code> are ordered
+canonically before hashing, so reversing them is not configuration drift;
+ordered lists such as transport <code class="inline">args</code> keep their written sequence. Matching
+digests mean the same declared installation was selected. They do not prove
+that a local process, remote endpoint, credential, filesystem path, or server
+still grants the same effective authority.</p><p>The digest is a sibling of <code class="inline">application_content_digest</code> and
+<code class="inline">effective_application_digest</code>. Host configuration stays out of those
+application hashes. <code class="inline">ptc validate</code> prints <code class="inline">installation_config_digests</code> for
+aliases selected by the effective application, without contacting providers.
+The same selected map is recorded on <code class="inline">run-started</code>, and each connector snapshot
+carries the singular digest used while loading the host document.</p><p>Documented meaning by source:</p><ul><li>MCP stdio: the same normalized command and configuration declaration, not
+the resolved executable, working-directory target, symlink target, ambient
+environment, or server-enforced scope.</li><li>MCP streamable HTTP: the same declared endpoint, authentication policy, tool
+mappings, and limits; not the server implementation behind the URL.</li><li>LLM: the same declared model, parameters, limits, and credential binding
+name; not the secret value, account permissions, or provider behavior.</li><li>Snapshot, replay, and other file-backed sources: the same declared path and
+provider configuration; not the current file contents unless a separate
+content hash attests them.</li></ul><p>Paths are hashed as written after ordinary configuration normalization. The
+digest does not expand them against the current directory, resolve symlinks, or
+bake machine-local real paths. Changing <code class="inline">installation_revision</code> alone leaves
+the digest stable; changing the declaration without bumping the revision still
+changes the digest. Rotating a credential value does not change it; renaming
+the binding does. Compare identifiers, not confidentiality: the digest never
+includes secrets.</p><h2 id="declare-credentials-once">Declare credentials once</h2><p>Credentials have exactly one source:</p><pre><code class="json language-json">&quot;credentials&quot;: {
+  &quot;openrouter_key&quot;: {&quot;env&quot;: &quot;OPENROUTER_API_KEY&quot;},
+  &quot;vendor_token&quot;: {&quot;file&quot;: &quot;secrets/vendor.token&quot;},
+  &quot;development_key&quot;: {&quot;literal&quot;: &quot;not-a-real-key&quot;}
+}</code></pre><ul><li><code class="inline">env</code> reads a portable environment variable during acquisition.</li><li><code class="inline">file</code> reads at most 64 KiB. Relative paths stay beneath the host document's
+directory; absolute paths are canonicalized.</li><li><code class="inline">literal</code> embeds the secret. Reserve it for local development or documents
+rendered by a secret manager.</li></ul><p>Credentials are resolved once and passed explicitly to the provider. A
+missing, empty, or unreadable value fails with <code class="inline">credential_unavailable</code>; there
+is no ambient provider-specific fallback. Never put credentials in a manifest,
+PTC-Lisp, traces, or committed files.</p><p>Surrounding whitespace is not part of a secret and is trimmed from every
+source, so <code class="inline">gh auth token &gt; vendor.token</code> and an editor that adds a trailing
+newline both work. Interior structure is preserved: a PEM block or a JSON
+service-account key is one credential, and <code class="inline">transport.env</code> hands it to the
+child process whole. An HTTP header cannot carry a newline, so a credential
+bound to <code class="inline">transport.auth</code> that still holds one after trimming reports
+<code class="inline">authentication_rejected</code> — the same class the endpoint's own refusal
+reports — rather than an internal fault.</p><p><code class="inline">ptc</code> and <code class="inline">mix ptc</code> accept <code class="inline">--env-file FILE</code> on <code class="inline">run</code>, active <code class="inline">doctor</code>, and
+manifest-backed <code class="inline">repl</code>. When any selected installation binds an <code class="inline">env</code>
+credential — an LLM through <code class="inline">credential</code>, or an MCP transport through
+<code class="inline">transport.env</code> or <code class="inline">transport.auth</code> — the frontend loads that exact file before
+provider activity; it never searches for one. Embedded hosts load no dotenv
+file implicitly.</p><h2 id="choose-a-provider-source">Choose a provider source</h2><p>The source set and placement are closed:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;"><code class="inline">source</code></th><th style="text-align: left;">Purpose</th><th style="text-align: left;">Environment</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">llm</code></td><td style="text-align: left;">Live language model</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">llm_replay</code></td><td style="text-align: left;">Frozen model responses</td><td style="text-align: left;">Workflow</td></tr><tr><td style="text-align: left;"><code class="inline">mcp</code></td><td style="text-align: left;">External tool server</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_trace_snapshot</code></td><td style="text-align: left;">Trace queries</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_private_trace_snapshot</code></td><td style="text-align: left;">Trace queries joined with authorized private records</td><td style="text-align: left;">Mission</td></tr><tr><td style="text-align: left;"><code class="inline">ptc_inspection_snapshot</code></td><td style="text-align: left;">Private inspection queries</td><td style="text-align: left;">Mission</td></tr></tbody></table></div><p>Selecting an alias into the wrong environment fails with
+<code class="inline">provider_destination_denied</code>. This keeps model authority out of
+model-authored mission code.</p><h3 id="live-models">Live models</h3><p>A live installation fixes the full model selector, credential, cache policy,
+optional request parameters, and request/response ceilings. <code class="inline">ceilings.max_calls</code>
+optionally caps how many times that alias may be invoked. Omitted, it defaults
+to the catalog installed default for <code class="inline">workflow_capability_calls_per_name</code>
+(2048), independent of the host <code class="inline">limits</code> block; a larger value could never
+bind and is refused at load. The application may narrow it
+with <code class="inline">config.max_calls</code>; asking above the host ceiling is refused rather than
+clamped. When that selected cap is at or above the run's per-name
+<code class="inline">llm-request</code> budget, the public per-name quota still binds first.</p><p><code class="inline">ceilings.request_timeout_ms</code> is the selected installation's whole-call
+deadline. Omitted, it defaults to 120000 ms, clamped by the host
+<code class="inline">limits.llm_request_timeout_ms</code> ceiling (also 120000 unless the host document
+widens or narrows it). The accepted range is 100 through that host ceiling.
+Applications may only narrow <code class="inline">limits.llm_request_timeout_ms</code>; they cannot raise
+the installation ceiling. Changing <code class="inline">ceilings.request_timeout_ms</code> requires a new
+<code class="inline">installation_revision</code>. Dispatcher samples one absolute deadline immediately
+before admission and enforces it through the provider worker and structured
+output validation. When that LLM clock wins over the enclosing run or workflow
+clocks, the public result is retryable <code class="inline">timeout/llm_request_timeout</code>. Replay
+installations do not carry this deadline.</p><pre><code class="json language-json">&quot;deepseek&quot;: {
+  &quot;source&quot;: &quot;llm&quot;,
+  &quot;structured_output_mode&quot;: &quot;unsupported&quot;,
+  &quot;usage_guarantees&quot;: {&quot;tokens&quot;: true, &quot;cost_currency&quot;: &quot;USD&quot;},
+  &quot;installation_revision&quot;: &quot;deepseek-policy-v1&quot;,
+  &quot;model&quot;: &quot;openrouter:deepseek/deepseek-v4-flash&quot;,
+  &quot;credential&quot;: &quot;openrouter_key&quot;,
+  &quot;cache&quot;: false,
+  &quot;params&quot;: {
+    &quot;temperature&quot;: 0.2,
+    &quot;seed&quot;: 42,
+    &quot;max_tokens&quot;: 4096,
+    &quot;top_p&quot;: 0.9,
+    &quot;presence_penalty&quot;: 0.0,
+    &quot;frequency_penalty&quot;: 0.0,
+    &quot;reasoning_effort&quot;: &quot;medium&quot;
+  }
+}</code></pre><p><code class="inline">params</code> is a closed installation-owned map. Except for <code class="inline">max_tokens</code>, omitted
+fields use the selected adapter/model default; an <code class="inline">llm/request</code> cannot add or
+replace them. The Kernel always supplies its effective output-token limit as
+<code class="inline">max_tokens</code>, bounded by an installed value when one is present.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Field</th><th style="text-align: left;">Accepted value</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">temperature</code></td><td style="text-align: left;">number from 0.0 through 2.0</td></tr><tr><td style="text-align: left;"><code class="inline">seed</code></td><td style="text-align: left;">integer from 0 through 2147483647</td></tr><tr><td style="text-align: left;"><code class="inline">max_tokens</code></td><td style="text-align: left;">integer from 1 through 1000000</td></tr><tr><td style="text-align: left;"><code class="inline">top_p</code></td><td style="text-align: left;">number greater than 0.0 and at most 1.0</td></tr><tr><td style="text-align: left;"><code class="inline">presence_penalty</code></td><td style="text-align: left;">number from -2.0 through 2.0</td></tr><tr><td style="text-align: left;"><code class="inline">frequency_penalty</code></td><td style="text-align: left;">number from -2.0 through 2.0</td></tr><tr><td style="text-align: left;"><code class="inline">reasoning_effort</code></td><td style="text-align: left;"><code class="inline">none</code>, <code class="inline">minimal</code>, <code class="inline">low</code>, <code class="inline">medium</code>, or <code class="inline">high</code></td></tr></tbody></table></div><p>These normalized controls are part of installation identity and the
+installation configuration digest. Change <code class="inline">installation_revision</code> whenever
+they change. Provider option maps, stop payloads, reasoning token budgets, and
+the <code class="inline">xhigh</code> and <code class="inline">max</code> reasoning levels are not admitted.</p><p>Set <code class="inline">params.max_tokens</code> explicitly when the installation needs a narrower
+output budget than the effective Kernel limit. The tutorial keeps the value
+explicit so changing only its model selector retains the same request contract.</p><p>The built-in adapter prepares the selected model once before constructing its
+requester. A selector absent from the bundled model catalog remains usable when
+ReqLLM supports its provider, but PtcRunner emits one <code class="inline">model_uncataloged</code>
+warning for that requester. Catalog metadata such as pricing, limits, token
+estimation, and capability detection may then be incomplete; the warning does
+not mean the provider request itself is known to fail. Run envelopes V4 publish
+the same fact in their closed <code class="inline">warnings</code> array, and canonical <code class="inline">run-started</code>
+metadata retains it for trace consumers; stderr remains the human presentation.</p><p>Preparation seals the exact controls into the target and requires the adapter
+to attest the same canonical map. The built-in adapter uses ReqLLM's strict
+unsupported-option policy and also refuses known lossy routes during local
+preflight, before credential loading. For example, Anthropic cannot combine
+<code class="inline">temperature</code> with <code class="inline">top_p</code> or accept OpenAI-style presence/frequency penalties;
+several provider families translate reasoning effort to a fixed level or token
+budget; and Ollama's direct route admits <code class="inline">temperature</code>, <code class="inline">seed</code>, and <code class="inline">top_p</code> but
+not the two penalties or reasoning effort. The direct <code class="inline">openai-compat:</code> route
+transmits the complete admitted set. OpenRouter does the same for positive
+seeds; seed zero is refused because ReqLLM's current option boundary cannot
+encode it. A refused combination reports
+<code class="inline">local_preflight/model_contract_unsupported</code> without publishing the option
+value or contacting the provider.</p><p>Every live model installation must declare <code class="inline">structured_output_mode</code> as
+<code class="inline">json_schema</code>, <code class="inline">json_object</code>, or <code class="inline">unsupported</code>. <code class="inline">json_schema</code> asks the provider
+to enforce the request schema with its native schema mechanism and is refused
+at prepare when the adapter can only fall back to a synthetic tool.
+<code class="inline">json_object</code> asks the provider only for a JSON object, then the Kernel
+decodes and validates it. It is refused at prepare unless the adapter can send
+that provider's actual JSON-object control: OpenAI-style <code class="inline">response_format</code>
+<code class="inline">json_object</code> on OpenRouter, OpenAI, Groq, Fireworks, xAI, Azure OpenAI, and
+Vertex OpenAI-compatible MaaS. Anthropic, Bedrock, Google AI Studio, Vertex
+Claude/Gemini, and Azure Claude have no such control and stay <code class="inline">unsupported</code> or
+<code class="inline">json_schema</code>. Direct <code class="inline">ollama:</code> and <code class="inline">openai-compat:</code> selectors are refused for
+both structured modes. <code class="inline">unsupported</code> refuses a request <code class="inline">schema</code> before dispatch.
+Changing the mode requires a new <code class="inline">installation_revision</code>. A schema
+together with a non-empty <code class="inline">tools</code> list is invalid. Success is a
+<code class="inline">structured_output</code> object; encoded <code class="inline">content</code> is not duplicated.</p><h3 id="usage-guarantees">Usage guarantees</h3><p>Every live model installation also declares the exact closed
+<code class="inline">usage_guarantees</code> object. <code class="inline">tokens: true</code> promises that every dispatched
+successful call reports non-negative <code class="inline">input</code> and <code class="inline">output</code> counts;
+<code class="inline">cost_currency: &quot;USD&quot;</code> additionally promises a total USD cost. <code class="inline">false</code> and
+<code class="inline">null</code> declare those observations optional, not zero. Preparation seals and
+attests the declaration, and a successful response or doctor connectivity
+probe that omits promised usage fails as non-retryable
+<code class="inline">llm_usage_unavailable</code>. Changing either guarantee requires a new
+<code class="inline">installation_revision</code>. Token and cost guarantees are independent: a
+cost-only installation retains an authoritative provider charge even when the
+provider omits one or both token counts.</p><p>Provider cost numbers and decimal strings, including OpenRouter's reported
+<code class="inline">usage.cost</code>, are converted immediately to
+<code class="inline">{&quot;currency&quot;:&quot;USD&quot;,&quot;microunits&quot;:N}</code> by exact decimal parsing, with fractions
+rounded upward to one millionth of a dollar. The bounded integer <code class="inline">N</code> is in
+<code class="inline">0..9_007_199_254_740_991</code>; binary floating-point values are not retained as
+accounting authority.</p><p>If the host enables <code class="inline">llm_total_tokens</code> or <code class="inline">llm_cost_microusd</code>, each live call
+must obtain a bounded, request-specific reservation attestation from the
+prepared adapter before admission, and every live installation must declare
+<code class="inline">usage_guarantees.tokens: true</code>. A cost budget additionally requires
+<code class="inline">usage_guarantees.cost_currency: &quot;USD&quot;</code> and an explicit
+<code class="inline">reservation_tariff: {&quot;currency&quot;:&quot;USD&quot;,&quot;id&quot;:&quot;...&quot;}</code>. Cost reservations bind
+to that prepared tariff identity; tariff details remain private. A token
+reservation must be at least the request's authorized output-token ceiling.
+Attestation performs no credential lookup or remote work. An absent, crashing,
+timed-out, undersized, or otherwise malformed attestation refuses the call
+before provider dispatch. Provider errors and
+successful calls without valid promised usage conservatively charge the full
+reservation and mark the affected ledger incomplete; authenticated usage above
+the bound charges the actual value, marks overrun, and prevents later calls.
+Replay installations are excluded from these operational ledgers. A reservation
+that does not fit remains a recoverable <code class="inline">limit_exceeded</code> envelope until the
+workflow aborts it; aborting the authenticated envelope reports
+<code class="inline">execution/runtime_limit_exceeded</code> naming the refused reservation, distinct
+from realized overspend.</p><p>Model selectors are provider-qualified strings. These are the provider paths
+PtcRunner configures and exercises directly:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Prefix</th><th style="text-align: left;">Example selector</th><th style="text-align: left;">Credential binding normally backed by</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">openrouter:</code></td><td style="text-align: left;"><code class="inline">openrouter:deepseek/deepseek-v4-flash</code></td><td style="text-align: left;"><code class="inline">OPENROUTER_API_KEY</code></td></tr><tr><td style="text-align: left;"><code class="inline">anthropic:</code></td><td style="text-align: left;"><code class="inline">anthropic:claude-sonnet-4-6</code></td><td style="text-align: left;"><code class="inline">ANTHROPIC_API_KEY</code></td></tr><tr><td style="text-align: left;"><code class="inline">openai:</code></td><td style="text-align: left;"><code class="inline">openai:gpt-5-mini</code></td><td style="text-align: left;"><code class="inline">OPENAI_API_KEY</code></td></tr><tr><td style="text-align: left;"><code class="inline">google:</code></td><td style="text-align: left;"><code class="inline">google:gemini-2.5-flash</code></td><td style="text-align: left;"><code class="inline">GOOGLE_API_KEY</code></td></tr><tr><td style="text-align: left;"><code class="inline">groq:</code></td><td style="text-align: left;"><code class="inline">groq:openai/gpt-oss-20b</code></td><td style="text-align: left;"><code class="inline">GROQ_API_KEY</code></td></tr><tr><td style="text-align: left;"><code class="inline">amazon_bedrock:</code></td><td style="text-align: left;"><code class="inline">amazon_bedrock:anthropic.claude-sonnet-4-5-20250929-v1:0</code></td><td style="text-align: left;">AWS credentials</td></tr></tbody></table></div><p>The examples are release-catalog examples, not promises that a provider still
+serves an alias. A requester emits <code class="inline">model_uncataloged</code> when its selector misses
+the bundled catalog; <code class="inline">ptc doctor PROJECT --connect --show-model-selectors</code>
+tests the selected provider and includes selectors that are safe to disclose.
+Direct Anthropic selectors, Anthropic models through OpenRouter, and Claude
+models on Bedrock support the adapter's prompt-cache policy when the
+installation sets <code class="inline">&quot;cache&quot;: true</code>.</p><p>Agent loops and other requests that give the model callable tools require a
+model endpoint with tool-calling support. A model may work for an ordinary
+completion while refusing that tool-bearing request; the run then reports
+<code class="inline">llm_tool_calling_unsupported</code> rather than claiming the configured model is
+missing.</p><p>The manifest selects only <code class="inline">deepseek</code>; it cannot change any field above. When
+the adapter attests that the resolved model is safe public identity, provider
+snapshots and model-grouped usage include it. Endpoint-bearing or otherwise
+private targets remain absent, while alias/revision usage stays attributable.</p><p>Use <code class="inline">source: &quot;llm_replay&quot;</code> when responses must be deterministic. The
+<a href="/guides/evaluating-with-replay/">replay evaluation guide</a> owns fixture authoring, the
+network-free example, candidate materialization, and component overrides.</p><p>Fixture matching is exact: changed messages, tools, schema, or provider-neutral
+parameters produce another <code class="inline">request_hash</code> rather than silently consuming
+unrelated evidence. A structured-output fixture uses the public
+<code class="inline">structured_output</code> object rather than encoded <code class="inline">content</code>. A miss is a provider error — <code class="inline">kind</code> <code class="inline">provider_error</code>,
+<code class="inline">reason</code> <code class="inline">not_found</code> — and <code class="inline">llm/request</code> returns that envelope as a value with
+<code class="inline">:status :error</code> rather than failing the evaluation, so a workflow that wants a
+miss to be fatal calls <code class="inline">cap/unwrap!</code> on the raw <code class="inline">tool/llm-request</code> envelope. The
+run envelope records the miss in usage: that alias's <code class="inline">successful_calls</code> stays 0
+while <code class="inline">calls</code> increments, and <code class="inline">capability_refusals</code> records
+<code class="inline">workflow/provider_error/not_found</code>.</p><p><code class="inline">doctor --connect</code> performs a real minimal completion for each selected live
+model and may incur provider cost; the readiness report's <code class="inline">usage</code> field
+attributes what each probe spent, on the rows a run reports. <code class="inline">--show-model-selectors</code> adds only safe
+selectors; endpoint-bearing <code class="inline">openai-compat:</code> selectors remain hidden. <code class="inline">ptc models</code> reports the same <code class="inline">model_selector</code> field under the same rule, without a
+flag and without reading the application.</p><h3 id="resolve-local-transport-paths">Resolve local transport paths</h3><p>Stdio <code class="inline">cwd</code> and relative command arguments resolve from the host document, not
+from PtcRunner's source checkout and not from the shell's current directory.
+For an application in a separate repository, keep its MCP server bundle in
+that repository (for example <code class="inline">tools/files/server.js</code>) and use a host-relative
+path, or install the server executable at a stable absolute location. A
+cross-repository <code class="inline">../ptc_runner/examples/...</code> path is useful for local
+experimentation but does not make the application independently cloneable.</p><p>The self-contained PtcRunner release does not include the repository's example
+MCP bundles. Copy or package any selected example server with the application,
+including any runtime that server requires.</p><h3 id="mcp-servers">MCP servers</h3><p>An MCP installation fixes its stdio or streamable-HTTP transport and maps
+upstream tool names to stable public capability names with host-declared
+read/write effects. A manifest selects and narrows that mapping but cannot
+change its executable, endpoint, credentials, or effect declarations.</p><p><a href="/reference/mcp/">Connecting tools with MCP</a> owns the complete
+task-shaped setup, including tool mapping, prompt-visible facades, transport
+bindings, OAuth authorization, immutable snapshot identity, and the runnable
+filesystem example.</p><h3 id="trace-and-inspection-snapshots">Trace and inspection snapshots</h3><p>Native snapshot installations expose bounded run-evidence navigation over
+immutable captures:</p><pre><code class="json language-json">&quot;history&quot;: {
+  &quot;source&quot;: &quot;ptc_private_trace_snapshot&quot;,
+  &quot;installation_revision&quot;: &quot;history-v1&quot;,
+  &quot;directory&quot;: &quot;traces&quot;
+},
+&quot;private-history&quot;: {
+  &quot;source&quot;: &quot;ptc_inspection_snapshot&quot;,
+  &quot;installation_revision&quot;: &quot;private-history-v1&quot;,
+  &quot;directory&quot;: &quot;inspection&quot;
+}</code></pre><p>Directories resolve against the host document and are captured once.
+<code class="inline">ptc_trace_snapshot</code> reads ordinary traces.
+<code class="inline">ptc_private_trace_snapshot</code> reads ordinary and <code class="inline">.private.jsonl</code> traces and
+classifies the run as <code class="inline">private_inspection</code>. An inspection snapshot requires
+exactly one of those trace sources so it can validate every private artifact
+against the captured trace evidence.</p><p>Whole-directory trace snapshots admit filename-bound <code class="inline">&lt;run-id&gt;.jsonl</code> or
+<code class="inline">&lt;run-id&gt;.private.jsonl</code> members containing exactly one matching run and trace
+identity. Stable malformed, mismatched, split, or conflicting members are
+isolated by connected identity component while disjoint valid runs remain
+queryable. Selected namespace mutation rejects the complete capture; it never
+installs a partial snapshot. Explicit single-file trace sources remain a
+separate filename-agnostic aggregate contract.</p><p>Set a trace selection's manifest config to <code class="inline">{&quot;expose&quot;: false}</code> when it exists
+only as the inspection source's dependency. It still supplies the frozen trace
+capture without creating a second analysis namespace. The
+<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md#query-contract">TraceLog and run-analysis reference</a>
+defines query
+shapes and bounds; <a href="/reference/repl/">Kernel REPL</a> shows them in use.</p><h2 id="keep-data-classes-compatible">Keep data classes compatible</h2><p><code class="inline">data_class</code> says what an installation contributes; <code class="inline">accepts_data</code> says which
+effective classes it may run beside. Both default to <code class="inline">normal</code> and
+<code class="inline">[&quot;normal&quot;]</code>:</p><pre><code class="json language-json">&quot;data_class&quot;: &quot;normal&quot;,
+&quot;accepts_data&quot;: [&quot;normal&quot;]</code></pre><p>Assembly computes the strictest selected class and requires every provider to
+accept it before any provider opens. Private trace and inspection sources fix
+their class to <code class="inline">private_inspection</code>, and such a run is forced onto the private
+event policy. This prevents a normal vendor connector from silently receiving
+or running beside private inspection data.</p><h2 id="set-installed-ceilings">Set installed ceilings</h2><p>The optional <code class="inline">limits</code> object sets maximums the manifest may narrow:</p><pre><code class="json language-json">&quot;limits&quot;: {
+  &quot;run_duration_ms&quot;: 86400000,
+  &quot;workflow_timeout_ms&quot;: 86400000,
+  &quot;subordinate_evaluations&quot;: 500,
+  &quot;workflow_capability_calls&quot;: 1000,
+  &quot;mission_capability_calls&quot;: 8000,
+  &quot;normal_event_count&quot;: 20000
+}</code></pre><p>Raising <code class="inline">run_duration_ms</code> alone rarely lengthens an agent loop. Check the
+workflow timeout, model-call and mission-call quotas, subordinate evaluations,
+parallel timeout, and event count/byte ceilings too. Source checks have their
+own quota and do not execute code.</p><p><code class="inline">install</code> is required and may be empty. A limits-only host document raises
+ceilings for an application that selects no providers:</p><pre><code class="json language-json">{
+  &quot;install&quot;: {},
+  &quot;limits&quot;: {
+    &quot;workflow_heap_words&quot;: 16000000
+  }
+}</code></pre><p>Optional rows (<code class="inline">llm_total_tokens</code>, <code class="inline">llm_cost_microusd</code>,
+<code class="inline">workflow_loop_iterations</code>, <code class="inline">evaluation_loop_iterations</code>) are disabled when
+omitted. A positive host value enables the row, becomes the inherited manifest
+default and installed ceiling, and may be narrowed by the application. The LLM
+budget rows also require live-installation prerequisites; the loop-iteration
+rows do not.</p><p>The four heap and concurrency rows (<code class="inline">workflow_heap_words</code>,
+<code class="inline">evaluation_heap_words</code>, <code class="inline">provider_heap_words</code>, <code class="inline">live_provider_tasks</code>) and
+<code class="inline">llm_request_timeout_ms</code> have no manifest headroom. Raising a heap or concurrency
+row needs both the host ceiling and a matching manifest request. Raising the LLM
+deadline needs three matching values: the host <code class="inline">llm_request_timeout_ms</code>, the
+selected live installation's <code class="inline">ceilings.request_timeout_ms</code>, and the manifest
+request. Every other application-narrowable row can be raised from the manifest
+alone, up to its installed ceiling.</p><p>Four timeouts are host-only: <code class="inline">provider_cleanup_timeout_ms</code>,
+<code class="inline">local_preflight_timeout_ms</code>, <code class="inline">selection_validation_timeout_ms</code>, and
+<code class="inline">doctor_connectivity_timeout_ms</code>. A manifest cannot declare them.</p><p>The generated <a href="/reference/kernel-limits-reference/">Kernel limits reference</a> is the
+complete table of names, meanings, units, scopes, defaults, accepted ranges,
+and identity participation. The host schema is generated from the same
+catalog.</p><h2 id="verify-selected-providers">Verify selected providers</h2><p>Run active local, credential, authorization, and connectivity checks without
+invoking the workflow:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
+ptc doctor kernel-tutorial/02-deepseek-extract.ptc-project.json --connect</code></pre><p><code class="inline">readiness</code> is <code class="inline">ready</code> only after successful active checks. Plain doctor is
+<code class="inline">unverified</code>; a failed active check is <code class="inline">failed</code> and exits nonzero. The report
+does not expose endpoints, commands, paths, credentials, or OAuth authority.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/application-manifest/">Manifests and capabilities</a> selects and
+narrows these aliases.</li><li><a href="/guides/building-agents/">Building agents</a> uses the installed model and mission
+capabilities.</li><li><a href="/reference/cli/">Running and debugging</a> runs and inspects the
+application.</li><li><a href="/reference/mcp/">Connecting tools with MCP</a> installs external
+tools without putting transport authority in a manifest.</li><li><a href="/guides/evaluating-with-replay/">Evaluating with replay</a> fixes model responses for
+deterministic comparisons.</li></ul>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/application-manifest/">&larr; Application-manifest reference</a><a class="pager-next" href="/reference/project-files/">Project-configuration reference &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/host-installation.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

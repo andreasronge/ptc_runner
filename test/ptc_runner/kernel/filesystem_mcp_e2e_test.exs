@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
   use ExUnit.Case, async: false
 
   @moduledoc """
-  Runs the committed TypeScript filesystem sample through host installation,
+  Runs the published `ptc-fs-mcp@0.1.0` package through host installation,
   manifest selection, MCP stdio, and the PTC-Lisp mission boundary.
 
   The server is intentionally not represented by an Elixir provider builder:
@@ -16,16 +16,21 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.TestSupport.PtcFsMCP
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
 
-  @server Path.expand("../../../examples/mcp/filesystem/dist/server.js", __DIR__)
+  if reason = TestHelpers.executable_skip_reason(["node", "npm"]) do
+    @moduletag skip: reason
+  end
 
   @tag :tmp_dir
-  test "host JSON installs an immutable nested-filesystem capability without Elixir wiring", %{
+  test "host JSON installs a live nested-filesystem capability without Elixir wiring", %{
     tmp_dir: dir
   } do
     node = System.find_executable("node") || flunk("Node.js is required for this E2E")
-    paths = write_application(dir, node)
+    cli = PtcFsMCP.install!(dir)
+    paths = write_application(dir, node, cli)
 
     assert {:ok, host} = HostConfig.load(paths.host)
 
@@ -49,7 +54,14 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
     assert snapshot["acquisition"]["launcher_sha256"] =~ ~r/\A[0-9a-f]{64}\z/
     assert snapshot["acquisition"]["server_executable_sha256"] =~ ~r/\A[0-9a-f]{64}\z/
     assert snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
-    assert length(snapshot["acquisition"]["tools"]) == 5
+    assert snapshot["installation_config_digest"] =~ ~r/\Asha256:[0-9a-f]{64}\z/
+    refute Map.has_key?(snapshot, "content_snapshot_hash")
+
+    assert built.config.run_started_metadata.installation_config_digests == %{
+             "workspace" => snapshot["installation_config_digest"]
+           }
+
+    assert length(snapshot["acquisition"]["tools"]) == 4
 
     assert {:ok, result} =
              paths.manifest
@@ -63,28 +75,40 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
            } = result.value
 
     assert %{
-             "info" => %{"status" => "ok", "value" => info},
              "listed" => %{"status" => "ok", "value" => listed},
              "found" => %{"status" => "ok", "value" => found},
              "matches" => %{"status" => "ok", "value" => matches},
              "read" => %{"status" => "ok", "value" => read}
            } = values
 
-    snapshot_hash = info["snapshot_hash"]
-    assert info["file_count"] == 2
-    assert listed["snapshot_hash"] == snapshot_hash
+    assert content_hash?(listed["content_hash"])
     assert Enum.any?(listed["items"], &(&1["path"] == "lib/nested"))
     assert found["items"] == [%{"path" => "lib/nested/target.txt"}]
+    assert content_hash?(found["content_hash"])
 
     assert [%{"path" => "lib/nested/target.txt", "line" => 2, "text" => "needle"}] =
              matches["items"]
 
-    assert read["snapshot_hash"] == snapshot_hash
-    assert read["lines"] == [%{"line" => 2, "text" => "needle"}]
+    assert content_hash?(matches["content_hash"])
+    assert content_hash?(read["content_hash"])
+
+    assert read["items"] == [
+             %{
+               "byte_offset" => 0,
+               "text" => "first\nneedle\nlast\n"
+             }
+           ]
+
+    assert read["next_cursor"] == nil
     refute inspect(values) =~ "TOP-SECRET"
   end
 
-  defp write_application(dir, node) do
+  defp content_hash?(value) when is_binary(value),
+    do: value =~ ~r/\A(?:sha256:)?[0-9a-f]{64}\z/
+
+  defp content_hash?(_value), do: false
+
+  defp write_application(dir, node, cli) do
     File.mkdir_p!(Path.join(dir, "lib/nested"))
     File.mkdir_p!(Path.join(dir, "lib/private"))
     File.write!(Path.join(dir, "lib/readme.txt"), "visible\n")
@@ -93,19 +117,16 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
 
     File.write!(
       Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"kind" :source "source" (get input "program")})))|
+      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"mission" "default" "kind" :source "source" (get input "program")})))|
     )
 
     program = """
-    (let [info (tool/workspace.snapshot-info {})
-          listed (tool/workspace.list {"path" "lib"})
+    (let [listed (tool/workspace.list {"path" "lib"})
           found (tool/workspace.find {"query" "target"})
           matches (tool/workspace.search {"query" "needle"})
-          read (tool/workspace.read
-                 {"path" "lib/nested/target.txt" "start_line" 2 "line_count" 1})]
+          read (tool/workspace.read {"path" "lib/nested/target.txt"})]
       (return
-        {"info" info
-         "listed" listed
+        {"listed" listed
          "found" found
          "matches" matches
          "read" read}))
@@ -140,7 +161,7 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
             "command" => node,
             "cwd" => dir,
             "args" => [
-              @server,
+              cli,
               "--root",
               dir,
               "--include",
@@ -156,13 +177,9 @@ defmodule PtcRunner.Kernel.FilesystemMCPE2ETest do
             "list_directory" => %{"as" => "workspace.list", "effect" => "read"},
             "search_files" => %{"as" => "workspace.find", "effect" => "read"},
             "search_text" => %{"as" => "workspace.search", "effect" => "read"},
-            "read_text_file" => %{"as" => "workspace.read", "effect" => "read"},
-            "snapshot_info" => %{
-              "as" => "workspace.snapshot-info",
-              "effect" => "read"
-            }
+            "read_text_file" => %{"as" => "workspace.read", "effect" => "read"}
           },
-          "installation_revision" => "filesystem-sample-0.1.0",
+          "installation_revision" => "ptc-fs-mcp-0.1.0",
           "ceilings" => %{
             "timeout_ms" => 15_000,
             "max_catalog_tools" => 8,

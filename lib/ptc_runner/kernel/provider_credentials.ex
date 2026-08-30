@@ -51,6 +51,7 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderSession
@@ -70,11 +71,28 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
           boolean()
         ) :: {:ok, %{binary() => binary()}} | {:error, CommandDiagnostic.t()}
   def resolve(prepared, catalog, registry, session, provider_activity) do
+    resolve_scoped(prepared, catalog, registry, session, provider_activity, :all)
+  end
+
+  @doc false
+  def resolve(
+        prepared,
+        catalog,
+        registry,
+        session,
+        provider_activity,
+        %MissionReplTarget{} = target
+      ) do
+    resolve_scoped(prepared, catalog, registry, session, provider_activity, target)
+  end
+
+  defp resolve_scoped(prepared, catalog, registry, session, provider_activity, target) do
     with true <- is_boolean(provider_activity),
          true <- bound?(prepared, catalog, registry),
+         {:ok, declarations} <- MissionReplTarget.declarations_for(prepared, catalog, target),
          {:ok, deadline} when not is_nil(deadline) <-
            ProviderSession.execution_deadline(session) do
-      prepared
+      declarations
       |> required_names(catalog)
       |> resolve_required(
         prepared,
@@ -82,7 +100,8 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
         registry,
         session,
         deadline,
-        provider_activity
+        provider_activity,
+        declarations
       )
     else
       _invalid -> {:error, internal_diagnostic()}
@@ -97,9 +116,9 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
   # was briefly public, justified by a consumer that could prove it received the
   # union it was promised; no such consumer was ever written, and an unused
   # abstraction is worse than a smaller one.
-  @spec required_names(PreparedRun.t(), InstallationCatalog.t()) :: [binary()]
-  defp required_names(%PreparedRun{} = prepared, %InstallationCatalog{} = catalog) do
-    prepared.provider_declarations
+  @spec required_names([map()], InstallationCatalog.t()) :: [binary()]
+  defp required_names(declarations, %InstallationCatalog{} = catalog) do
+    declarations
     |> Enum.flat_map(&Map.fetch!(catalog.descriptors, &1.name).credential_names)
     |> Enum.uniq()
     |> Enum.sort()
@@ -123,7 +142,8 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
          _registry,
          _session,
          _deadline,
-         _provider_activity
+         _provider_activity,
+         _declarations
        ),
        do: {:ok, %{}}
 
@@ -134,7 +154,8 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
          registry,
          session,
          deadline,
-         provider_activity
+         provider_activity,
+         declarations
        ) do
     max_heap_words = prepared.request.package.limits.provider_heap_words
 
@@ -157,17 +178,17 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
     # would let the step hand a credential to work the operation may no longer
     # do, so the deadline decides rather than the worker.
     if Deadline.expired?(deadline) do
-      unavailable(prepared, catalog, provider_activity)
+      unavailable(prepared, catalog, provider_activity, declarations)
     else
       case result do
         {:ok, {:ok, credentials}} -> {:ok, credentials}
-        _failure -> unavailable(prepared, catalog, provider_activity)
+        _failure -> unavailable(prepared, catalog, provider_activity, declarations)
       end
     end
   end
 
-  defp unavailable(prepared, catalog, provider_activity) do
-    with name when is_binary(name) <- attributed_alias(prepared, catalog),
+  defp unavailable(_prepared, catalog, provider_activity, declarations) do
+    with name when is_binary(name) <- attributed_alias(declarations, catalog),
          {:ok, subject} <- CommandSubject.provider(name, :credentials) do
       {:error,
        CommandDiagnostic.new!(:active_preflight, :credential_unavailable,
@@ -182,8 +203,8 @@ defmodule PtcRunner.Kernel.ProviderCredentials do
   # Reachable only with a non-empty union, so a declaration bearing credentials
   # always exists. The fail-closed `nil` is what the caller turns into an
   # internal error rather than an unattributed credential failure.
-  defp attributed_alias(prepared, catalog) do
-    Enum.find_value(prepared.provider_declarations, fn declaration ->
+  defp attributed_alias(declarations, catalog) do
+    Enum.find_value(declarations, fn declaration ->
       descriptor = Map.fetch!(catalog.descriptors, declaration.name)
       if descriptor.credential_names != [], do: declaration.name
     end)

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signature reference · PtcRunner</title>
+<meta name="description" content="Use signatures to describe component and model-visible tool inputs and outputs,
+then validate both sides of each call.">
+<link rel="canonical" href="https://ptc-runner.dev/reference/signature-syntax/">
+<meta property="og:title" content="Signature reference · PtcRunner">
+<meta property="og:description" content="Use signatures to describe component and model-visible tool inputs and outputs,
+then validate both sides of each call.">
+<meta property="og:url" content="https://ptc-runner.dev/reference/signature-syntax/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/" class="current" aria-current="page">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="signature-reference">Signature reference</h1><p>Use signatures to describe component and model-visible tool inputs and outputs,
+then validate both sides of each call.</p><p>Signatures tell a model what a function accepts and returns, and let PtcRunner
+validate both sides of the call. They are compact enough to include in model
+context while remaining readable in application source.</p><h2 id="shape">Shape</h2><p>An input-and-output signature uses an arrow:</p><pre><code class="text language-text">(query :string, limit :int) -&gt; {count :int, items [{id :int}]}</code></pre><p>Output-only signatures omit the empty input list:</p><pre><code class="text language-text">{name :string, price :float}</code></pre><p>This is equivalent to:</p><pre><code class="text language-text">() -&gt; {name :string, price :float}</code></pre><h2 id="primitive-types">Primitive types</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Type</th><th style="text-align: left;">Accepts</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">:string</code></td><td style="text-align: left;">UTF-8 strings</td></tr><tr><td style="text-align: left;"><code class="inline">:int</code></td><td style="text-align: left;">integers</td></tr><tr><td style="text-align: left;"><code class="inline">:float</code></td><td style="text-align: left;">finite floating-point values and integers</td></tr><tr><td style="text-align: left;"><code class="inline">:bool</code></td><td style="text-align: left;"><code class="inline">true</code> or <code class="inline">false</code></td></tr><tr><td style="text-align: left;"><code class="inline">:keyword</code></td><td style="text-align: left;">PTC-Lisp keywords</td></tr><tr><td style="text-align: left;"><code class="inline">:datetime</code></td><td style="text-align: left;">a runtime datetime value supplied by the runtime or host</td></tr><tr><td style="text-align: left;"><code class="inline">:map</code></td><td style="text-align: left;">a map with unrestricted string-like keys and values</td></tr><tr><td style="text-align: left;"><code class="inline">:any</code></td><td style="text-align: left;">any public PTC-Lisp value</td></tr></tbody></table></div><p>There are no <code class="inline">:list</code>, <code class="inline">:array</code>, <code class="inline">:tuple</code>, or <code class="inline">:object</code> primitive names. Use a
+collection or typed map instead.</p><h2 id="collections-and-maps">Collections and maps</h2><p>A vector containing one type describes a list:</p><pre><code class="text language-text">[:int]
+[:string]
+[{id :int, name :string}]</code></pre><p>A map describes required named fields:</p><pre><code class="text language-text">{id :int, name :string}
+{customer {id :int, name :string}}</code></pre><p>Use <code class="inline">:map</code> only when the keys cannot be declared in advance. Typed maps give
+models better guidance and produce more precise validation feedback.</p><h2 id="optional-values">Optional values</h2><p>Append <code class="inline">?</code> to allow <code class="inline">nil</code>. For a typed map field, the suffix also permits the
+field to be absent:</p><pre><code class="text language-text">{id :int, email :string?}
+(cursor :string?) -&gt; {items [:any], next_cursor :string?}</code></pre><h2 id="named-parameters">Named parameters</h2><p>Inputs are comma-separated named parameters:</p><pre><code class="text language-text">(user {id :int, name :string}, limit :int) -&gt; [{order_id :int}]</code></pre><p>Names document the call, appear in model-visible schemas, and can be referenced
+by prompt templates. A duplicate or malformed name is rejected when the
+component contract is compiled.</p><h2 id="field-naming">Field naming</h2><p>Signatures use underscore-separated public field names because tool arguments
+and results cross a JSON-shaped boundary:</p><pre><code class="text language-text">(user_id :int) -&gt; {order_count :int, is_active :bool}</code></pre><p>PTC-Lisp code may use idiomatic hyphenated keywords:</p><pre><code class="clojure language-clojure">(return {:order-count 5 :is-active true})</code></pre><p>At the public boundary, <code class="inline">:order-count</code> corresponds to <code class="inline">&quot;order_count&quot;</code>.
+Normalization applies recursively to typed tool arguments and results. Prefer
+one spelling within a map; do not rely on collisions between already-normalized
+keys.</p><h2 id="validation">Validation</h2><p>Inputs are validated before the function or capability runs. Outputs are
+validated before the value crosses its declared boundary. A failure returns a
+bounded structured evaluation error that identifies the contract path without
+calling the rejected capability again.</p><p>Validation is strict except for these admitted representations:</p><ul><li>an integer satisfies <code class="inline">:float</code> without changing its value;</li><li>JSON-shaped string keys may match declared public fields;</li><li>missing or <code class="inline">nil</code> values satisfy an optional type.</li></ul><p>A numeric string does not satisfy <code class="inline">:int</code> or <code class="inline">:float</code>. A timestamp without an
+offset does not satisfy <code class="inline">:datetime</code>, and neither does an ISO 8601 string: the
+value must already be the runtime's datetime value. Signature maps validate
+their declared fields and allow additional fields. A closed map created from a
+JSON Schema with <code class="inline">additionalProperties: false</code> rejects unknown fields instead.</p><h2 id="tool-contracts">Tool contracts</h2><p>Model-visible functions should use named inputs and bounded outputs:</p><pre><code class="text language-text">(path :string, cursor :string?) -&gt; {
+  items [:string],
+  next_cursor :string?,
+  snapshot_hash :string
+}</code></pre><p>The corresponding PTC-Lisp wrapper can call a granted capability and return
+only the declared shape:</p><pre><code class="clojure language-clojure">(defn read-page
+  {:signature &quot;(path :string, cursor :string?) -&gt; :any&quot;}
+  [path cursor]
+  (tool/workspace.read
+    (if cursor {&quot;path&quot; path &quot;cursor&quot; cursor} {&quot;path&quot; path})))</code></pre><p>A signature documents and validates a capability; it does not grant one.
+<code class="inline">ptc-host.json</code> must still install the tool, and <code class="inline">ptc.json</code> must select it for
+the mission.</p><h2 id="prompt-schemas">Prompt schemas</h2><p>PtcRunner projects signatures into the model-visible tool schema. The schema
+contains the parameter names, nested collection and map shapes, required and
+optional fields, and descriptions supplied by the component. Runtime validation
+remains authoritative even when a provider performs its own structured-output
+validation.</p><p>Keep contracts small enough that a model can act on the feedback:</p><ul><li>page large collections instead of returning an unbounded list;</li><li>use explicit nested fields instead of <code class="inline">:any</code> where the shape is stable;</li><li>describe units and bounds in the function documentation; and</li><li>return an opaque cursor rather than exposing provider state.</li></ul><h2 id="grammar-summary">Grammar summary</h2><pre><code class="text language-text">signature     = output | &quot;(&quot; [parameters] &quot;)&quot; &quot;-&gt;&quot; output
+parameters    = parameter {&quot;,&quot; parameter}
+parameter     = name type
+type          = primitive [&quot;?&quot;] | list [&quot;?&quot;] | map [&quot;?&quot;]
+primitive     = &quot;:string&quot; | &quot;:int&quot; | &quot;:float&quot; | &quot;:bool&quot;
+              | &quot;:keyword&quot; | &quot;:datetime&quot; | &quot;:map&quot; | &quot;:any&quot;
+list          = &quot;[&quot; type &quot;]&quot;
+map           = &quot;{&quot; [field {&quot;,&quot; field}] &quot;}&quot;
+field         = name type</code></pre><p>Nesting is bounded by the signature parser and the runtime's public-value
+limits. Empty typed maps and lists are valid. Future-looking enum, union, or
+refinement syntax is not part of the current grammar.</p><p>See <a href="/reference/component-contracts/">Components and preludes</a> for where
+contracts live, the <a href="/reference/ptc-lisp-specification/">PTC-Lisp specification</a> for
+public component semantics, and the <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">function reference</a>
+for the shipped callable surface.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/prelude-reference/">&larr; Shipped prelude reference</a><a class="pager-next" href="/reference/application-manifest/">Application-manifest reference &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/signature-syntax.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

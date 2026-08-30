@@ -10,8 +10,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   One-shot execution consumes the prepared run inside an execution-session
   owner. That owner constructs both sinks, keeps responding to caller death
   while a subordinate worker performs provider setup and runs the Kernel, and
-  returns only sealed, path-free execution evidence. Publication remains a
-  separate caller operation.
+  returns only sealed, filesystem-path-free execution evidence. Publication
+  remains a separate caller operation.
   """
 
   alias PtcRunner.Kernel.ApplicationSource
@@ -26,7 +26,10 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.LocalPreflight
+  alias PtcRunner.Kernel.MissionInventory
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
@@ -36,6 +39,9 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.Kernel.SelectionRulesDiagnostic
+  alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.LiveStatus.Target
 
   @mission_compile_timeout_ms 5_000
   @mission_bundles_bytes 4_000_000
@@ -53,9 +59,17 @@ defmodule PtcRunner.Kernel.RunCoordinator do
            compile_named_missions(
              request.package.missions,
              compile_deadline,
-             external_size(workflow_bundle)
+             external_size(workflow_bundle),
+             request.package.workflow_components,
+             workflow_bundle
            ),
          :ok <- validate_entry(workflow_bundle, request.package.entry),
+         :ok <-
+           validate_entry_missions(
+             workflow_bundle,
+             request.package.entry,
+             request.package.missions
+           ),
          {:ok, declarations} <-
            prepare_providers(request, workflow_bundle, mission_bundles, catalog),
          {:ok, derived} <-
@@ -71,7 +85,15 @@ defmodule PtcRunner.Kernel.RunCoordinator do
                "(#{request.package.entry} data/input)",
                activity,
                catalog,
-               Map.put(derived, :provider_declarations, prepared_declarations)
+               derived
+               |> Map.put(:provider_declarations, prepared_declarations)
+               |> Map.put(
+                 :installation_config_digests,
+                 InstallationConfigDigest.selected(
+                   catalog.installation_config_digests,
+                   prepared_declarations
+                 )
+               )
              )
            end) do
       {:ok, prepared}
@@ -92,15 +114,14 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   @doc """
   Runs the audited-local phase-7 step for one sealed preparation.
 
-  This is the only entry to that step. Applicability is derived from the sealed
-  trio rather than supplied, so no caller can narrow the work, and the result is
-  only success or one catalogued diagnostic — never a per-occurrence report a
-  caller could turn into a passing row. The coordinator anchors the single
-  deadline the whole step spends.
+  This is the fail-fast runtime entry to that step. Applicability is derived
+  from the sealed trio rather than supplied, so no caller can narrow the work,
+  and the result is only success or one catalogued diagnostic. Default doctor
+  uses `local_check_findings/3` below to retain attributable per-occurrence
+  failures for its report. Both entries anchor one deadline for the whole step.
 
   Every active command crosses it before provider activity is marked: run and
-  `doctor --connect` through `ProviderExecution`, and default doctor by calling
-  this directly because it opens no provider session. Manifest-backed REPL
+  `doctor --connect` through `ProviderExecution`. Manifest-backed REPL
   opening crosses the same step before provider activity, through
   `ProviderExecution.open_repl/6` when providers are selected and directly for
   provider-free manifests. Direct and analysis-profile REPL sessions do not
@@ -128,6 +149,76 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   def local_checks(_prepared, _catalog, _services), do: internal_error()
 
+  @doc false
+  @spec local_checks(
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t(),
+          MissionReplTarget.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def local_checks(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services,
+        %MissionReplTarget{} = target
+      ) do
+    LocalPreflight.run(prepared, catalog, services, local_deadline(prepared), target)
+  end
+
+  def local_checks(_prepared, _catalog, _services, _target), do: internal_error()
+
+  @doc """
+  Runs the declaration-owned local input checks for `validate`.
+
+  `validate` acquires no provider and marks no activity, but a replay
+  installation names a fixture file the declaration owns. Reading it here is
+  the same class of work as compiling the components the manifest names, and
+  keeps `validate` from passing a host document whose fixtures `run` cannot
+  load.
+  """
+  @spec declared_input_checks(
+          PreparedRun.t() | nil,
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t()
+        ) :: :ok | {:error, CommandDiagnostic.t()}
+  def declared_input_checks(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services
+      ) do
+    LocalPreflight.run_declared_inputs(prepared, catalog, services, local_deadline(prepared))
+  end
+
+  def declared_input_checks(nil, %InstallationCatalog{} = catalog, %ProviderRuntimeServices{}),
+    do: if(InstallationCatalog.valid?(catalog), do: :ok, else: internal_error())
+
+  def declared_input_checks(_prepared, _catalog, _services), do: internal_error()
+
+  @doc """
+  Collects every attributable audited-local finding for default doctor.
+
+  This uses the same sealed declarations, callbacks, and absolute phase budget
+  as `local_checks/3`, but retains ordinary failures instead of stopping at the
+  first one so doctor can settle every provider-local row.
+  """
+  @spec local_check_findings(
+          PreparedRun.t() | nil,
+          InstallationCatalog.t(),
+          ProviderRuntimeServices.t()
+        ) :: {:ok, [CommandDiagnostic.t()]} | {:error, CommandDiagnostic.t()}
+  def local_check_findings(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRuntimeServices{} = services
+      ) do
+    LocalPreflight.collect(prepared, catalog, services, local_deadline(prepared))
+  end
+
+  def local_check_findings(nil, %InstallationCatalog{} = catalog, %ProviderRuntimeServices{}),
+    do: if(InstallationCatalog.valid?(catalog), do: {:ok, []}, else: internal_error())
+
+  def local_check_findings(_prepared, _catalog, _services), do: internal_error()
+
   defp internal_error, do: {:error, diagnostic(:internal, :internal_error)}
 
   defp local_deadline(prepared) do
@@ -142,11 +233,23 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | :invalid_publication_authority
              | :provider_session_required
              | term()}
-  def execute(%PreparedRun{} = prepared, authority), do: open_free(prepared, authority, :run)
-
+  def execute(%PreparedRun{} = prepared, authority), do: execute(prepared, authority, nil)
   def execute(_prepared, _authority), do: {:error, :invalid_prepared_run}
 
-  defp open_free(prepared, authority, operation) do
+  @doc false
+  @spec execute(PreparedRun.t(), PublicationAuthority.t(), Target.t() | nil) ::
+          {:ok, ExecutionOutcome.t()}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :provider_session_required
+             | term()}
+  def execute(%PreparedRun{} = prepared, authority, live_status),
+    do: open_free(prepared, authority, :run, live_status)
+
+  def execute(_prepared, _authority, _live_status), do: {:error, :invalid_prepared_run}
+
+  defp open_free(prepared, authority, operation, live_status) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -159,7 +262,15 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
       true ->
         with {:ok, owner} <-
-               ExecutionSessionOwner.start(prepared, authority, self(), nil, nil, operation),
+               ExecutionSessionOwner.start(
+                 prepared,
+                 authority,
+                 self(),
+                 nil,
+                 nil,
+                 operation,
+                 live_status
+               ),
              do: ExecutionSessionOwner.await(owner)
     end
   end
@@ -179,9 +290,30 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | term()}
   def execute(%PreparedRun{} = prepared, authority, provider_execution, notifier)
       when is_nil(notifier) or is_function(notifier, 1),
-      do: open_active(prepared, authority, provider_execution, notifier, :run)
+      do: execute(prepared, authority, provider_execution, notifier, nil)
 
   def execute(_prepared, _authority, _provider_execution, _notifier),
+    do: {:error, :invalid_prepared_run}
+
+  @doc false
+  @spec execute(
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          ProviderExecution.t(),
+          (binary() -> term()) | nil,
+          Target.t() | nil
+        ) ::
+          {:ok, ExecutionOutcome.t()}
+          | {:error,
+             :invalid_prepared_run
+             | :invalid_publication_authority
+             | :invalid_provider_execution
+             | term()}
+  def execute(%PreparedRun{} = prepared, authority, provider_execution, notifier, live_status)
+      when is_nil(notifier) or is_function(notifier, 1),
+      do: open_active(prepared, authority, provider_execution, notifier, :run, live_status)
+
+  def execute(_prepared, _authority, _provider_execution, _notifier, _live_status),
     do: {:error, :invalid_prepared_run}
 
   # Internal only, like its `execute/4` neighbour.
@@ -204,12 +336,12 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              | :invalid_provider_execution
              | term()}
   def connect(%PreparedRun{} = prepared, authority, provider_execution),
-    do: open_active(prepared, authority, provider_execution, nil, :connect)
+    do: open_active(prepared, authority, provider_execution, nil, :connect, nil)
 
   def connect(_prepared, _authority, _provider_execution),
     do: {:error, :invalid_prepared_run}
 
-  defp open_active(prepared, authority, provider_execution, notifier, operation) do
+  defp open_active(prepared, authority, provider_execution, notifier, operation, live_status) do
     cond do
       not PreparedRun.valid?(prepared) ->
         {:error, :invalid_prepared_run}
@@ -231,7 +363,8 @@ defmodule PtcRunner.Kernel.RunCoordinator do
                  self(),
                  provider_execution,
                  notifier,
-                 operation
+                 operation,
+                 live_status
                ),
              do: ExecutionSessionOwner.await(owner)
     end
@@ -244,12 +377,19 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     end
   end
 
-  defp compile_named_missions(missions, deadline_ms, initial_bytes) do
+  defp compile_named_missions(
+         missions,
+         deadline_ms,
+         initial_bytes,
+         workflow_components,
+         workflow_bundle
+       ) do
     case BundleCompiler.compile_named(
            missions,
            deadline_ms,
            initial_bytes,
-           @mission_bundles_bytes
+           @mission_bundles_bytes,
+           [{workflow_components, workflow_bundle}]
          ) do
       {:ok, bundles} -> {:ok, bundles}
       {:error, {failure, components}} -> {:error, bundle_diagnostic(failure, components)}
@@ -270,13 +410,10 @@ defmodule PtcRunner.Kernel.RunCoordinator do
        do: diagnostic(:bundle, :bundle_limit_exceeded, source_opts(failure, components))
 
   defp bundle_diagnostic(%{reason: reason} = failure, components)
-       when reason in [:component_compile_error, :bundle_compile_error, :bundle_compile_failed],
-       do:
-         diagnostic(
-           :bundle,
-           compile_diagnostic_code(Map.get(failure, :compile_reason)),
-           compile_diagnostic_opts(failure, components)
-         )
+       when reason in [:component_compile_error, :bundle_compile_error, :bundle_compile_failed] do
+    {code, opts} = compile_diagnostic(failure, components)
+    diagnostic(:bundle, code, opts)
+  end
 
   defp bundle_diagnostic(failure, components),
     do: diagnostic(:bundle, :bundle_invalid, source_opts(failure, components))
@@ -290,31 +427,42 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   defp source_opts(_failure, _components), do: []
 
-  defp compile_diagnostic_opts(failure, components),
-    do: source_opts(failure, components) ++ compile_message_opts(failure, components)
+  defp compile_diagnostic(failure, components) do
+    reason = Map.get(failure, :compile_reason)
+    source = source_opts(failure, components)
 
-  defp compile_message_opts(
+    case compile_message(failure, components) do
+      {:ok, message} ->
+        {compile_diagnostic_code(reason), source ++ [message: message]}
+
+      :error when reason == :unknown_namespace ->
+        {:compile_failed, source}
+
+      :error ->
+        {compile_diagnostic_code(reason), source}
+    end
+  end
+
+  defp compile_message(
          %{id: id, compile_reason: reason, compile_details: details},
          components
        )
        when is_binary(id) do
     case Enum.find(components, &match?(%Component{id: ^id}, &1)) do
       %Component{source: source} when is_binary(source) ->
-        case CompileDiagnostic.rebuild(reason, details, source) do
-          {:ok, message} -> [message: message]
-          :error -> []
-        end
+        CompileDiagnostic.rebuild(reason, details, source)
 
       _missing ->
-        []
+        :error
     end
   end
 
-  defp compile_message_opts(_failure, _components), do: []
+  defp compile_message(_failure, _components), do: :error
 
   defp compile_diagnostic_code(:parse_error), do: :syntax_invalid
   defp compile_diagnostic_code(:unbound_var), do: :undefined_variable
   defp compile_diagnostic_code(:duplicate_ref), do: :duplicate_definition
+  defp compile_diagnostic_code(:unknown_namespace), do: :unknown_namespace
   defp compile_diagnostic_code(_reason), do: :compile_failed
 
   # Provenance is bound to the exact component bytes the compiler read, which
@@ -353,6 +501,38 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       do: :ok,
       else: {:error, diagnostic(:bundle, :entry_invalid)}
   end
+
+  @doc """
+  Rejects an entry that evaluates into a mission when the manifest declares none.
+
+  `kernel-mission-model-context` answers `unknown_mission` for every name a
+  manifest without missions can supply, so a run that reaches it cannot reach its
+  first model request. Both facts are in the documents `validate` already parses:
+  the compiled entry's transitive tool references, and whether the manifest's
+  mission map is empty. Which mission the entry will *name* is not decidable here
+  — it comes from runtime configuration — so nothing else is checked.
+
+  The reference set is a may-call set, so an entry that reaches the capability
+  only on a branch its input never takes is refused too. That is the deliberate
+  trade: such a manifest carries a mission-evaluating library it never uses, the
+  remedy is one declared mission, and the failure it replaces is a paid run
+  ending in `execution/workflow_failed` with nothing naming the cause.
+  """
+  @spec validate_entry_missions(PtcRunner.Kernel.FrozenBundle.t(), binary(), map() | nil) ::
+          :ok | {:error, CommandDiagnostic.t()}
+  def validate_entry_missions(workflow_bundle, entry, missions) do
+    if map_size(missions || %{}) == 0 and mission_context_entry?(workflow_bundle, entry),
+      do: {:error, diagnostic(:bundle, :mission_undeclared)},
+      else: :ok
+  end
+
+  defp mission_context_entry?(%{prelude: prelude}, entry) when is_binary(entry) do
+    "kernel-mission-model-context" in Prelude.export_tool_refs(prelude, entry)
+  rescue
+    _exception -> false
+  end
+
+  defp mission_context_entry?(_bundle, _entry), do: false
 
   defp prepare_providers(request, workflow_bundle, mission_bundles, catalog) do
     request.package.providers
@@ -405,7 +585,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              occurrence
            ),
          {:ok, normalized} <-
-           SelectionRules.normalize(descriptor.selection_rules, config, request.package.limits) do
+           SelectionRules.explain(descriptor.selection_rules, config, request.package.limits) do
       declaration = %{
         name: name,
         destination: occurrence.destination,
@@ -425,9 +605,16 @@ defmodule PtcRunner.Kernel.RunCoordinator do
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:halt, {:error, diagnostic}}
 
-      {:error, :invalid_selection} ->
+      {:error, reason} ->
         {:ok, subject} = CommandSubject.provider(name, :selection, occurrence)
-        {:halt, {:error, diagnostic(:provider_declaration, :selection_invalid, subject: subject)}}
+
+        {:halt,
+         {:error,
+          diagnostic(
+            :provider_declaration,
+            :selection_invalid,
+            [subject: subject] ++ selection_invalid_message(reason)
+          )}}
     end
   end
 
@@ -538,11 +725,31 @@ defmodule PtcRunner.Kernel.RunCoordinator do
            "application_content_digest" =>
              "sha256:" <> prepared.request.package.application_content_digest,
            "effective_application_digest" => prepared.effective_application_digest,
+           "installation_config_digests" => prepared.installation_config_digests,
            "workflow_bundle_hash" => prepared.workflow_bundle.hash,
            "mission_bundle_hashes" => mission_bundle_hashes(prepared.mission_bundles),
+           "mission_grants" => mission_grants(prepared),
            "provider_activity" => false
          }}
     end
+  end
+
+  defp mission_grants(%PreparedRun{} = prepared) do
+    providers = prepared.request.package.providers.mission
+
+    Map.new(prepared.request.package.missions, fn {name, mission} ->
+      provider_names =
+        Enum.map(mission.provider_occurrences, fn index ->
+          providers |> Enum.at(index) |> Map.fetch!("name")
+        end)
+
+      {name,
+       MissionInventory.grant_summary(
+         mission.data,
+         Map.get(prepared.mission_bundles, name),
+         provider_names
+       )}
+    end)
   end
 
   defp first_active_declaration(declarations) do
@@ -562,4 +769,11 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   defp diagnostic(phase, code, opts \\ []),
     do: CommandDiagnostic.new!(phase, code, opts)
+
+  defp selection_invalid_message(reason) do
+    case SelectionRulesDiagnostic.message(reason) do
+      {:ok, message} -> [message: message]
+      :error -> []
+    end
+  end
 end

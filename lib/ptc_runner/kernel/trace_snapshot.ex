@@ -3,9 +3,11 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   use GenServer
 
-  alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.BoundedCapture
   alias PtcRunner.Kernel.ResourceRegistrar
+  alias PtcRunner.Kernel.ResultLimit
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.SelectedCanonicalSource
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.RetainedSize
 
@@ -15,6 +17,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   @default_directory_entries 4_096
   @default_trace_files 1_024
   @capture_heap_words 10_000_000
+  @capture_timeout_ms 15_000
   @operations [:list_runs, :get_run, :list_turns, :counters]
 
   @enforce_keys [:pid, :token]
@@ -25,16 +28,112 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   @type retained_limit_error ::
           {:source_retained_limit_exceeded,
            %{
-             source: :ptc_trace_snapshot,
+             source: :ptc_trace_snapshot | :ptc_private_trace_snapshot,
              measured_bytes: pos_integer(),
              limit_bytes: pos_integer()
            }}
 
-  @spec start({:directory, binary()}, keyword()) ::
-          {:ok, t()} | {:error, atom() | retained_limit_error()}
+  @spec start(term(), keyword()) :: {:ok, t()} | {:error, atom() | retained_limit_error()}
   def start(source, opts \\ [])
 
-  def start({:directory, directory}, opts) when is_binary(directory) and is_list(opts) do
+  def start({:directory, directory}, opts) when is_binary(directory) and is_list(opts),
+    do: start_capture({:directory, directory}, :ptc_trace_snapshot, :sanitized, nil, opts)
+
+  def start({:private_authorized_directory, directory}, opts)
+      when is_binary(directory) and is_list(opts),
+      do:
+        start_capture(
+          {:directory, directory},
+          :ptc_private_trace_snapshot,
+          :private,
+          nil,
+          opts
+        )
+
+  @doc false
+  def start({:private_viewer_directory, directory}, opts)
+      when is_binary(directory) and is_list(opts),
+      do:
+        start_capture(
+          {:private_viewer_directory, directory},
+          :ptc_private_trace_snapshot,
+          :private,
+          nil,
+          opts
+        )
+
+  def start({:file, path, run_ref}, opts) when is_binary(path) and is_list(opts),
+    do: start_capture({:file, path}, :ptc_trace_snapshot, :sanitized, run_ref, opts)
+
+  @doc false
+  def start({:viewer_file, path}, opts) when is_binary(path) and is_list(opts),
+    do: start_capture({:file, path}, :ptc_trace_snapshot, :sanitized, nil, opts)
+
+  def start({:private_authorized_file, path, run_ref}, opts)
+      when is_binary(path) and is_list(opts),
+      do:
+        start_capture(
+          {:file, path},
+          :ptc_private_trace_snapshot,
+          :private,
+          run_ref,
+          opts
+        )
+
+  @doc false
+  def start({:private_viewer_file, path}, opts) when is_binary(path) and is_list(opts),
+    do: start_capture({:file, path}, :ptc_private_trace_snapshot, :private, nil, opts)
+
+  def start({:selected_canonical, directory, run_ref}, opts)
+      when is_binary(directory) and is_binary(run_ref) and is_list(opts) do
+    case SelectedCanonicalSource.resolve_trace(directory, run_ref) do
+      {:ok, {:file, path, ^run_ref}} ->
+        start_capture(
+          {:selected_file, path, directory},
+          :ptc_private_trace_snapshot,
+          :sanitized,
+          run_ref,
+          opts
+        )
+
+      {:ok, {:private_authorized_file, path, ^run_ref}} ->
+        start_capture(
+          {:selected_file, path, directory},
+          :ptc_private_trace_snapshot,
+          :private,
+          run_ref,
+          opts
+        )
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  def start({:selected_canonical_set, directory, run_refs}, opts)
+      when is_binary(directory) and is_list(run_refs) and is_list(opts) do
+    case SelectedCanonicalSource.resolve_traces(directory, run_refs) do
+      {:ok, selected} ->
+        run_refs = Enum.map(selected, & &1.run_ref)
+
+        start_capture(
+          {:selected_set, Path.expand(directory), selected},
+          :ptc_private_trace_snapshot,
+          :private,
+          %{directory: Path.expand(directory), run_refs: run_refs, sources: selected},
+          opts
+        )
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  def start(_source, _opts), do: {:error, :invalid_snapshot}
+
+  defp start_capture(capture_source, source, source_kind, selected_run_ref, opts)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] and
+              source_kind in [:sanitized, :private] and is_list(opts) do
     allowed = [
       :owner,
       :resource_registrar,
@@ -44,12 +143,12 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
       :max_directory_entries,
       :max_trace_files,
       :capture_heap_words,
+      :capture_deadline_ms,
       :capture_hook,
       :listing_hook
     ]
 
     with true <- Keyword.keys(opts) -- allowed == [],
-         true <- String.valid?(directory),
          owner when is_pid(owner) <- Keyword.get(opts, :owner, self()),
          registrar <- Keyword.get(opts, :resource_registrar),
          max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
@@ -65,6 +164,12 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
            Keyword.get(opts, :max_trace_files, @default_trace_files),
          capture_heap_words when capture_heap_words in 233..@capture_heap_words <-
            Keyword.get(opts, :capture_heap_words, @capture_heap_words),
+         capture_deadline_ms when is_integer(capture_deadline_ms) <-
+           Keyword.get(
+             opts,
+             :capture_deadline_ms,
+             System.monotonic_time(:millisecond) + @capture_timeout_ms
+           ),
          capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
            Keyword.get(opts, :capture_hook),
          listing_hook when is_nil(listing_hook) or is_function(listing_hook, 0) <-
@@ -73,9 +178,10 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
       case GenServer.start(
              __MODULE__,
-             {directory, owner, registrar, token, max_source_bytes, max_retained_bytes,
-              max_result_bytes, max_directory_entries, max_trace_files, capture_heap_words,
-              capture_hook, listing_hook}
+             {capture_source, source, source_kind, selected_run_ref, owner, registrar, token,
+              max_source_bytes, max_retained_bytes, max_result_bytes, max_directory_entries,
+              max_trace_files, capture_heap_words, capture_deadline_ms, capture_hook,
+              listing_hook}
            ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
         {:error, {:source_retained_limit_exceeded, _details} = reason} -> {:error, reason}
@@ -87,7 +193,8 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     end
   end
 
-  def start(_source, _opts), do: {:error, :invalid_snapshot}
+  defp start_capture(_capture_source, _source, _source_kind, _selected_run_ref, _opts),
+    do: {:error, :invalid_snapshot}
 
   @spec query(t(), :list_runs | :get_run | :list_turns | :counters, map()) ::
           {:ok, map()} | {:error, atom()}
@@ -102,11 +209,54 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   def info(_snapshot), do: {:error, :invalid_snapshot}
 
   @doc false
-  @spec validate_inspection(t(), [map()]) :: :ok | {:error, atom()}
-  def validate_inspection(%__MODULE__{} = snapshot, records) when is_list(records),
-    do: call(snapshot, {:validate_inspection, records})
+  @spec source(term()) ::
+          {:ok, :ptc_trace_snapshot | :ptc_private_trace_snapshot} | {:error, atom()}
+  def source(%__MODULE__{} = snapshot), do: call(snapshot, :source)
+  def source(_snapshot), do: {:error, :invalid_snapshot}
 
-  def validate_inspection(_snapshot, _records), do: {:error, :invalid_snapshot}
+  @doc false
+  @spec result_limit(t()) :: {:ok, pos_integer()} | {:error, atom()}
+  def result_limit(%__MODULE__{} = snapshot), do: call(snapshot, :result_limit)
+  def result_limit(_snapshot), do: {:error, :invalid_snapshot}
+
+  @doc false
+  @spec run_exists?(t(), binary()) :: {:ok, boolean()} | {:error, atom()}
+  def run_exists?(%__MODULE__{} = snapshot, run_id) when is_binary(run_id),
+    do: call(snapshot, {:run_exists, run_id})
+
+  def run_exists?(_snapshot, _run_id), do: {:error, :invalid_query}
+
+  @doc false
+  @spec analysis_facts(t(), [binary()]) :: {:ok, map()} | {:error, atom()}
+  def analysis_facts(%__MODULE__{} = snapshot, run_ids) when is_list(run_ids),
+    do: call(snapshot, {:analysis_facts, run_ids})
+
+  def analysis_facts(_snapshot, _run_ids), do: {:error, :invalid_snapshot}
+
+  @doc false
+  @spec resolve_inspection_identity(t(), binary(), binary()) ::
+          {:ok, %{run_id: binary(), trace_id: binary()}}
+          | {:error, atom()}
+  def resolve_inspection_identity(%__MODULE__{} = snapshot, run_digest, trace_digest)
+      when is_binary(run_digest) and byte_size(run_digest) == 32 and is_binary(trace_digest) and
+             byte_size(trace_digest) == 32,
+      do: call(snapshot, {:resolve_inspection_identity, run_digest, trace_digest})
+
+  def resolve_inspection_identity(_snapshot, _run_digest, _trace_digest),
+    do: {:error, :invalid_snapshot}
+
+  @doc false
+  @spec resolve_directory_inspection_identity(t(), binary(), binary()) ::
+          {:ok, %{run_id: binary(), trace_id: binary()}}
+          | {:isolated, %{run_id: binary(), trace_id: binary()}}
+          | {:error, atom()}
+  def resolve_directory_inspection_identity(%__MODULE__{} = snapshot, run_digest, trace_digest)
+      when is_binary(run_digest) and byte_size(run_digest) == 32 and is_binary(trace_digest) and
+             byte_size(trace_digest) == 32,
+      do: call(snapshot, {:resolve_directory_inspection_identity, run_digest, trace_digest})
+
+  def resolve_directory_inspection_identity(_snapshot, _run_digest, _trace_digest),
+    do: {:error, :invalid_snapshot}
 
   @doc false
   @spec transfer_owner(t(), pid()) :: :ok | {:error, atom()}
@@ -115,7 +265,7 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   def transfer_owner(_snapshot, _owner), do: {:error, :invalid_snapshot}
 
-  @spec stop(t()) :: :ok
+  @spec stop(term()) :: :ok
   def stop(%__MODULE__{} = snapshot) do
     case call(snapshot, :stop) do
       :ok -> :ok
@@ -139,28 +289,30 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   @impl GenServer
   def init(
-        {directory, owner, registrar, token, max_source_bytes, max_retained_bytes,
-         max_result_bytes, max_directory_entries, max_trace_files, capture_heap_words,
-         capture_hook, listing_hook}
+        {capture_source, source, source_kind, selected_run_ref, owner, registrar, token,
+         max_source_bytes, max_retained_bytes, max_result_bytes, max_directory_entries,
+         max_trace_files, capture_heap_words, capture_deadline_ms, capture_hook, listing_hook}
       ) do
     owner_ref = Process.monitor(owner)
 
+    capture_config = %{
+      source: source,
+      source_kind: source_kind,
+      selected_run_ref: selected_run_ref,
+      max_source_bytes: max_source_bytes,
+      max_retained_bytes: max_retained_bytes,
+      max_directory_entries: max_directory_entries,
+      max_trace_files: max_trace_files
+    }
+
     capture = fn ->
-      capture(
-        directory,
-        max_source_bytes,
-        max_retained_bytes,
-        max_directory_entries,
-        max_trace_files,
-        capture_hook,
-        listing_hook
-      )
+      capture(capture_source, capture_config, capture_hook, listing_hook)
     end
 
     with :ok <- ResourceRegistrar.register_root(registrar),
          {:ok, capture, retained_bytes} <-
-           capture_for_owner(capture, owner, owner_ref, capture_heap_words) do
-      {:ok, snapshot_state(capture, retained_bytes, token, owner_ref, max_result_bytes)}
+           capture_for_owner(capture, owner, owner_ref, capture_heap_words, capture_deadline_ms) do
+      {:ok, snapshot_state(capture, source, retained_bytes, token, owner_ref, max_result_bytes)}
     else
       {:error, reason} -> {:stop, reason}
     end
@@ -170,32 +322,68 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   def handle_call({token, :info}, _from, %{token: token} = state),
     do: {:reply, {:ok, state.info}, state}
 
-  def handle_call({token, {:query, operation, arguments}}, _from, %{token: token} = state) do
-    {:reply, query_with_snapshot_hash(state, operation, arguments), state}
-  end
+  def handle_call({token, :source}, _from, %{token: token} = state),
+    do: {:reply, {:ok, state.info.source}, state}
 
-  def handle_call(
-        {token,
-         {:validate_inspection, [%{"run_id" => run_id, "trace_id" => trace_id} | _] = records}},
-        _from,
-        %{token: token} = state
-      ) do
-    matching_identity? =
-      Enum.any?(
-        state.events,
-        &(&1["run_id"] == run_id and &1["trace_id"] == trace_id)
-      )
+  def handle_call({token, :result_limit}, _from, %{token: token} = state),
+    do: {:reply, {:ok, state.max_result_bytes}, state}
 
+  def handle_call({token, {:run_exists, run_id}}, _from, %{token: token} = state) do
     result =
-      if matching_identity?,
-        do: InspectionArtifact.validate_correlations(records, state.events),
-        else: {:error, :inspection_correlation_missing}
+      cond do
+        not valid_run_id?(run_id) -> {:error, :invalid_query}
+        Map.has_key?(state.analysis.runs_by_id, run_id) -> {:ok, true}
+        isolated_run?(state, run_id) -> {:error, :run_isolated}
+        true -> {:ok, false}
+      end
 
     {:reply, result, state}
   end
 
-  def handle_call({token, {:validate_inspection, _records}}, _from, %{token: token} = state),
-    do: {:reply, {:error, :inspection_correlation_missing}, state}
+  def handle_call({token, {:query, operation, arguments}}, _from, %{token: token} = state) do
+    {:reply, query_with_snapshot_hash(state, operation, arguments), state}
+  end
+
+  def handle_call({token, {:analysis_facts, run_ids}}, _from, %{token: token} = state) do
+    result =
+      if length(run_ids) <= @default_trace_files and run_ids == Enum.uniq(run_ids) and
+           Enum.all?(run_ids, &valid_run_id?/1) do
+        {:ok,
+         %{
+           "trace_snapshot_hash" => state.info.snapshot_hash,
+           "runs" => Map.take(state.analysis.facts_by_run_id, run_ids)
+         }}
+      else
+        {:error, :invalid_query}
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call(
+        {token, {:resolve_inspection_identity, run_digest, trace_digest}},
+        _from,
+        %{token: token} = state
+      ) do
+    {:reply, admitted_inspection_identity(state, run_digest, trace_digest), state}
+  end
+
+  def handle_call(
+        {token, {:resolve_directory_inspection_identity, run_digest, trace_digest}},
+        _from,
+        %{token: token} = state
+      ) do
+    result =
+      case admitted_inspection_identity(state, run_digest, trace_digest) do
+        {:ok, _identity} = ok ->
+          ok
+
+        {:error, :inspection_correlation_missing} ->
+          isolated_inspection_identity(state, run_digest, trace_digest)
+      end
+
+    {:reply, result, state}
+  end
 
   def handle_call({token, :stop}, _from, %{token: token} = state),
     do: {:stop, :normal, :ok, state}
@@ -243,39 +431,17 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
 
   defp call(_snapshot, _request), do: {:error, :invalid_snapshot}
 
-  defp capture(
-         directory,
-         max_source_bytes,
-         max_retained_bytes,
-         max_directory_entries,
-         max_trace_files,
-         capture_hook,
-         listing_hook
-       ) do
-    with {:ok, capture} <-
-           TraceLog.capture_directory(directory,
-             max_source_bytes: max_source_bytes,
-             max_directory_entries: max_directory_entries,
-             max_trace_files: max_trace_files,
-             capture_hook: capture_hook,
-             listing_hook: listing_hook
-           ),
-         retained_bytes when is_integer(retained_bytes) and retained_bytes <= max_retained_bytes <-
-           RetainedSize.bytes(capture.events) do
-      retained_capture = %{capture | events: RetainedSize.detach_binaries(capture.events)}
-      {:ok, retained_capture, retained_bytes}
-    else
-      retained_bytes when is_integer(retained_bytes) ->
-        {:error,
-         {:source_retained_limit_exceeded,
-          %{
-            source: :ptc_trace_snapshot,
-            measured_bytes: retained_bytes,
-            limit_bytes: max_retained_bytes
-          }}}
-
-      :oversized ->
-        {:error, :source_retained_limit_exceeded}
+  defp capture({:directory, directory}, config, capture_hook, listing_hook) do
+    case TraceLog.capture_directory(directory,
+           max_source_bytes: config.max_source_bytes,
+           max_directory_entries: config.max_directory_entries,
+           max_trace_files: config.max_trace_files,
+           source_kind: config.source_kind,
+           capture_hook: capture_hook,
+           listing_hook: listing_hook
+         ) do
+      {:ok, capture} ->
+        retain_capture(capture, config)
 
       {:error, :invalid_trace_log} ->
         {:error, :invalid_snapshot}
@@ -285,68 +451,239 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
     end
   end
 
-  defp capture_for_owner(capture, owner, owner_ref, capture_heap_words) do
-    reply_alias = Process.alias()
-    reply_ref = make_ref()
+  defp capture({:private_viewer_directory, directory}, config, capture_hook, listing_hook) do
+    case TraceLog.capture_directory(directory,
+           max_source_bytes: config.max_source_bytes,
+           max_directory_entries: config.max_directory_entries,
+           max_trace_files: config.max_trace_files,
+           source_kind: :private,
+           include_sanitized: false,
+           capture_hook: capture_hook,
+           listing_hook: listing_hook
+         ) do
+      {:ok, capture} -> retain_capture(capture, config)
+      {:error, :invalid_trace_log} -> {:error, :invalid_snapshot}
+      {:error, reason} when is_atom(reason) -> {:error, reason}
+    end
+  end
 
-    {worker, worker_ref} =
-      Process.spawn(
-        fn -> send(reply_alias, {reply_ref, capture.()}) end,
-        [
-          {:max_heap_size,
-           %{
-             size: capture_heap_words,
-             kill: true,
-             error_logger: false,
-             include_shared_binaries: true
-           }},
-          :monitor
-        ]
-      )
+  defp capture({:file, path}, config, capture_hook, _listing_hook) do
+    capture_file_source(path, config, capture_hook, fn -> :ok end)
+  end
 
-    receive do
-      {^reply_ref, result} ->
-        Process.unalias(reply_alias)
-        Process.demonitor(worker_ref, [:flush])
+  defp capture({:selected_file, path, directory}, config, capture_hook, _listing_hook) do
+    capture_file_source(path, config, capture_hook, fn ->
+      prove_selected_trace(directory, path, config)
+    end)
+  end
 
-        if Process.alive?(owner),
-          do: result,
-          else: {:error, :snapshot_unavailable}
+  defp capture({:selected_set, directory, selected}, config, capture_hook, _listing_hook) do
+    result =
+      if length(selected) <= config.max_trace_files do
+        TraceLog.capture_selected(selected,
+          max_source_bytes: config.max_source_bytes,
+          capture_hook: capture_hook
+        )
+      else
+        {:error, :source_limit_exceeded}
+      end
 
-      {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
-        terminate_capture(worker, worker_ref, reply_alias)
-        {:error, :snapshot_unavailable}
+    case result do
+      {:ok, capture} ->
+        with {:ok, current} <-
+               SelectedCanonicalSource.resolve_traces(directory, config.selected_run_ref.run_refs),
+             true <- current == selected,
+             {:ok, source_id} <- selected_source_id(config, capture) do
+          capture
+          |> Map.put(:source_id, source_id)
+          |> retain_capture(config)
+        else
+          false -> {:error, :source_changed}
+          {:error, _reason} = error -> error
+        end
 
-      {:DOWN, ^worker_ref, :process, ^worker, :killed} ->
-        Process.unalias(reply_alias)
+      {:error, :invalid_trace_log} ->
+        {:error, :invalid_snapshot}
+
+      {:error, reason} when is_atom(reason) ->
+        {:error, reason}
+    end
+  end
+
+  defp capture_file_source(path, config, capture_hook, after_capture) do
+    case TraceLog.capture_file(path,
+           max_source_bytes: config.max_source_bytes,
+           source_kind: config.source_kind,
+           capture_hook: capture_hook
+         ) do
+      {:ok, capture} ->
+        with :ok <- after_capture.(),
+             {:ok, source_id} <- selected_source_id(config, capture) do
+          capture
+          |> Map.put(:source_id, source_id)
+          |> retain_capture(config)
+        end
+
+      {:error, :invalid_trace_log} ->
+        {:error, :invalid_snapshot}
+
+      {:error, reason} when is_atom(reason) ->
+        {:error, reason}
+    end
+  end
+
+  defp prove_selected_trace(directory, path, config) do
+    case SelectedCanonicalSource.resolve_trace(directory, config.selected_run_ref) do
+      {:ok, {:file, ^path, _run_ref}} when config.source_kind == :sanitized ->
+        :ok
+
+      {:ok, {:private_authorized_file, ^path, _run_ref}} when config.source_kind == :private ->
+        :ok
+
+      {:ok, _resolved} ->
+        {:error, :source_changed}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp selected_source_id(%{selected_run_ref: nil}, capture), do: {:ok, capture.source_id}
+
+  defp selected_source_id(%{selected_run_ref: %{run_refs: run_refs, sources: selected}}, capture) do
+    with [] <- Map.get(capture, :isolated_components, []),
+         events_by_run = Enum.group_by(capture.events, & &1["run_id"]),
+         true <- events_by_run |> Map.keys() |> Enum.sort() == run_refs,
+         proofs = Map.new(capture.source_proofs, &{&1.raw_name, &1}),
+         true <- map_size(proofs) == length(selected),
+         {:ok, commitments} <- selected_trace_commitments(selected, events_by_run, proofs) do
+      {:ok, SelectedCanonicalSource.trace_set_source_id(commitments)}
+    else
+      [_ | _] = isolated -> {:error, selected_isolation_error(isolated)}
+      false -> {:error, :selected_run_mismatch}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp selected_source_id(config, capture) do
+    with {:ok, trace_id} <-
+           SelectedCanonicalSource.prove_trace_events(capture.events, config.selected_run_ref) do
+      {:ok,
+       SelectedCanonicalSource.trace_source_id(
+         config.selected_run_ref,
+         config.source,
+         config.source_kind,
+         capture.source_id,
+         trace_id
+       )}
+    end
+  end
+
+  defp selected_trace_commitments(selected, events_by_run, proofs) do
+    Enum.reduce_while(selected, {:ok, []}, fn source, {:ok, commitments} ->
+      with {:ok, trace_id} <-
+             SelectedCanonicalSource.prove_trace_events(
+               Map.get(events_by_run, source.run_ref, []),
+               source.run_ref
+             ),
+           {:ok, proof} <- Map.fetch(proofs, Path.basename(source.path)) do
+        commitment = %{
+          run_ref: source.run_ref,
+          source_kind: source.source_kind,
+          evidence_digest: proof.content_digest,
+          trace_id: trace_id
+        }
+
+        {:cont, {:ok, [commitment | commitments]}}
+      else
+        _invalid -> {:halt, {:error, :selected_run_mismatch}}
+      end
+    end)
+    |> case do
+      {:ok, commitments} -> {:ok, Enum.reverse(commitments)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp selected_isolation_error(components) do
+    reasons = components |> Enum.flat_map(& &1.reasons) |> MapSet.new()
+
+    cond do
+      MapSet.member?(reasons, :unsupported_version) -> :unsupported_schema
+      MapSet.member?(reasons, :filename_run_mismatch) -> :selected_run_mismatch
+      MapSet.member?(reasons, :run_identity_conflict) -> :selected_run_mismatch
+      MapSet.member?(reasons, :trace_identity_conflict) -> :selected_run_mismatch
+      true -> :malformed_source
+    end
+  end
+
+  defp retain_capture(capture, config) do
+    capture =
+      Map.put_new_lazy(capture, :analysis, fn ->
+        TraceLog.compile_analysis(capture.events, capture.run_sources)
+      end)
+
+    retained_capture = RetainedSize.detach_binaries(capture)
+
+    retained_value =
+      if retained_capture[:version] == :directory_admission_v1,
+        do: retained_capture,
+        else: {retained_capture.events, retained_capture.run_sources, retained_capture.analysis}
+
+    retained_bytes = RetainedSize.bytes(retained_value)
+
+    cond do
+      is_integer(retained_bytes) and retained_bytes <= config.max_retained_bytes ->
+        {:ok, retained_capture, retained_bytes}
+
+      is_integer(retained_bytes) ->
+        {:error,
+         {:source_retained_limit_exceeded,
+          %{
+            source: config.source,
+            measured_bytes: retained_bytes,
+            limit_bytes: config.max_retained_bytes
+          }}}
+
+      retained_bytes == :oversized ->
         {:error, :source_retained_limit_exceeded}
 
-      {:DOWN, ^worker_ref, :process, ^worker, _reason} ->
-        Process.unalias(reply_alias)
+      true ->
         {:error, :source_unavailable}
     end
   end
 
-  defp terminate_capture(worker, worker_ref, reply_alias) do
-    Process.unalias(reply_alias)
-    Process.exit(worker, :kill)
-
-    receive do
-      {:DOWN, ^worker_ref, :process, ^worker, _reason} -> :ok
+  defp capture_for_owner(capture, owner, owner_ref, capture_heap_words, capture_deadline_ms) do
+    case BoundedCapture.for_owner(capture,
+           owner: owner,
+           owner_ref: owner_ref,
+           max_heap_words: capture_heap_words,
+           deadline_ms: capture_deadline_ms
+         ) do
+      {:ok, result} -> result
+      {:error, :owner_down} -> {:error, :snapshot_unavailable}
+      {:error, :heap_exceeded} -> {:error, :source_retained_limit_exceeded}
+      {:error, _failure} -> {:error, :source_unavailable}
     end
   end
 
-  defp snapshot_state(capture, retained_bytes, token, owner_ref, max_result_bytes) do
+  defp snapshot_state(capture, source, retained_bytes, token, owner_ref, max_result_bytes) do
     %{
       token: token,
       owner_ref: owner_ref,
       events: capture.events,
+      run_sources: capture.run_sources,
+      analysis: capture.analysis,
+      directory_admission:
+        if(capture[:version] == :directory_admission_v1, do: capture, else: nil),
       source_id: capture.source_id,
       max_result_bytes: max_result_bytes,
       info: %{
         capture_id: capture.source_id,
         captured_at: DateTime.utc_now(),
         file_count: capture.file_count,
+        excluded_trace_files: capture.excluded_trace_files,
+        source: source,
         run_count: capture.events |> MapSet.new(& &1["run_id"]) |> MapSet.size(),
         snapshot_hash: SafeMetadata.fingerprint(capture.source_id),
         source_bytes: capture.source_bytes,
@@ -356,26 +693,103 @@ defmodule PtcRunner.Kernel.TraceSnapshot do
   end
 
   defp query_with_snapshot_hash(state, operation, arguments) do
-    snapshot_hash = state.info.snapshot_hash
-    metadata_bytes = byte_size(Jason.encode!(%{"snapshot_hash" => snapshot_hash}))
-    query_bytes = state.max_result_bytes - metadata_bytes
+    metadata =
+      %{"snapshot_hash" => state.info.snapshot_hash}
+      |> Map.merge(TraceLog.source_presence_metadata(operation, source_metadata(state)))
 
-    if query_bytes > 0 do
-      case TraceLog.query_loaded(
-             state.events,
-             state.source_id,
-             operation,
-             arguments,
-             query_bytes,
-             :sanitized
-           ) do
-        {:ok, result} -> {:ok, Map.put(result, "snapshot_hash", snapshot_hash)}
-        {:error, _reason} = error -> error
-      end
-    else
-      {:error, :result_limit_exceeded}
+    snapshot_query(state, operation, arguments, state.max_result_bytes, metadata)
+  end
+
+  defp source_metadata(%{directory_admission: %{} = admission}),
+    do: TraceLog.directory_source_metadata(admission)
+
+  defp source_metadata(state), do: state.info.excluded_trace_files
+
+  defp snapshot_query(
+         state,
+         :get_run,
+         %{"run_id" => run_id} = arguments,
+         max_bytes,
+         metadata
+       )
+       when map_size(arguments) == 1 and is_binary(run_id) do
+    case Map.fetch(state.analysis.runs_by_id, run_id) do
+      {:ok, run} ->
+        result = Map.merge(run, metadata)
+
+        with :ok <- ResultLimit.validate(result, max_bytes), do: {:ok, result}
+
+      :error ->
+        if isolated_run?(state, run_id),
+          do: {:error, :run_isolated},
+          else: {:error, :not_found}
     end
   end
+
+  defp snapshot_query(state, operation, arguments, max_bytes, metadata) do
+    TraceLog.query_loaded(
+      state.events,
+      state.source_id,
+      operation,
+      arguments,
+      max_bytes,
+      state.run_sources,
+      metadata,
+      known_isolated_run_ids(state)
+    )
+  end
+
+  defp isolated_run?(state, run_id),
+    do: MapSet.member?(known_isolated_run_ids(state), run_id)
+
+  defp known_isolated_run_ids(%{directory_admission: %{known_isolated_run_ids: run_ids}}),
+    do: run_ids
+
+  defp known_isolated_run_ids(_state), do: MapSet.new()
+
+  defp admitted_inspection_identity(state, run_digest, trace_digest) do
+    matches =
+      Enum.filter(state.analysis.facts_by_run_id, fn {run_id, facts} ->
+        :crypto.hash(:sha256, run_id) == run_digest and
+          :crypto.hash(:sha256, facts["trace_id"]) == trace_digest
+      end)
+
+    case matches do
+      [{run_id, %{"trace_id" => trace_id}}] -> {:ok, %{run_id: run_id, trace_id: trace_id}}
+      _none_or_ambiguous -> {:error, :inspection_correlation_missing}
+    end
+  end
+
+  defp isolated_inspection_identity(
+         %{directory_admission: %{isolated_components: components}},
+         run_digest,
+         trace_digest
+       ) do
+    Enum.reduce_while(components, {:error, :inspection_correlation_missing}, fn component,
+                                                                                _missing ->
+      case {digest_match(component.run_claims, run_digest),
+            digest_match(component.trace_claims, trace_digest)} do
+        {{:ok, run_id}, {:ok, trace_id}} ->
+          {:halt, {:isolated, %{run_id: run_id, trace_id: trace_id}}}
+
+        _not_this_component ->
+          {:cont, {:error, :inspection_correlation_missing}}
+      end
+    end)
+  end
+
+  defp isolated_inspection_identity(_state, _run_digest, _trace_digest),
+    do: {:error, :inspection_correlation_missing}
+
+  defp digest_match(claims, expected) do
+    case Enum.filter(claims, &(:crypto.hash(:sha256, &1) == expected)) do
+      [claim] -> {:ok, claim}
+      _none_or_ambiguous -> :error
+    end
+  end
+
+  defp valid_run_id?(run_id),
+    do: is_binary(run_id) and byte_size(run_id) in 1..4_096 and String.valid?(run_id)
 
   defp redact_status(status) do
     Map.new(status, fn

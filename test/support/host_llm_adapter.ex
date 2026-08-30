@@ -3,18 +3,45 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
 
   @behaviour PtcRunner.LLM
 
+  alias PtcRunner.LLM.Invocation
+  alias PtcRunner.LLM.Requirements
+
   @impl true
-  def call(model, request) do
+  def prepare_model(model, requirements) do
+    case Requirements.canonical(requirements) do
+      {:ok, canonical} ->
+        status = Application.get_env(:ptc_runner, :host_llm_test_catalog_status, :unavailable)
+        {:ok, %{selector: model, exact_options: canonical.exact_options}, status, canonical}
+
+      :error ->
+        {:error, :unsupported_model_option}
+    end
+  end
+
+  @impl true
+  def call(%{selector: model} = target, %Invocation{} = invocation) do
     send(Application.fetch_env!(:ptc_runner, :host_llm_test_owner), {
       :host_llm_request,
       model,
-      Map.put(request, :probe_pid, self())
+      Map.merge(invocation.request, %{
+        probe_pid: self(),
+        credential: invocation.credential,
+        cache: invocation.cache,
+        exact_options: Map.get(target, :exact_options, %{}),
+        llm_request_deadline_ms: invocation.llm_request_deadline_ms
+      })
     })
 
     # Mirrors an adapter whose backing application was started and then stopped:
     # its registry is gone, so it raises instead of returning an error tuple.
     if Application.get_env(:ptc_runner, :host_llm_test_raise, false) do
       raise ArgumentError, "unknown registry: FakeAdapter.Finch"
+    end
+
+    if Application.get_env(:ptc_runner, :host_llm_test_block, false) do
+      receive do
+        :host_llm_test_unblock -> :ok
+      end
     end
 
     Application.get_env(
@@ -24,13 +51,28 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
     )
   end
 
-  @impl true
-  def stream(_model, _request), do: {:error, :streaming_not_supported}
+  def call(_target, _invocation), do: {:error, :invalid_llm_invocation}
 
   # Defaults to nil so every other test keeps the unclassified transport path.
   @impl true
-  def provider_application(_model),
-    do: Application.get_env(:ptc_runner, :host_llm_test_provider_application)
+  def provider_application(model) do
+    if owner = Application.get_env(:ptc_runner, :host_llm_provider_application_owner) do
+      send(owner, {:host_llm_provider_application, model})
+    end
+
+    Application.get_env(:ptc_runner, :host_llm_test_provider_application)
+  end
+
+  @impl true
+  def public_model(model) do
+    if owner = Application.get_env(:ptc_runner, :host_llm_public_model_owner) do
+      send(owner, {:host_llm_public_model, model})
+    end
+
+    if Application.get_env(:ptc_runner, :host_llm_test_public_model, false),
+      do: {:ok, model},
+      else: :private
+  end
 
   @impl true
   def ensure_ready do

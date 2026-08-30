@@ -10,6 +10,8 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   alias PtcRunner.Kernel.DoctorEnvironment
   alias PtcRunner.Kernel.DoctorPlan
   alias PtcRunner.Kernel.HostInstallation
+  alias PtcRunner.Kernel.LLMUsageSummary
+  alias PtcRunner.Kernel.ModelSelectorDisclosure
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderExecution
@@ -53,7 +55,14 @@ defmodule PtcRunner.Kernel.CommandDoctor do
         try do
           case local_checks(host, catalog, prepared, runtime) do
             {:ok, checks} ->
-              doctor_success(
+              doctor_success(:doctor, arguments, run_ref, host, catalog, prepared, %{
+                checks: checks,
+                provider_activity: false,
+                usage: inert_usage()
+              })
+
+            {:finding, checks, %CommandDiagnostic{} = diagnostic} ->
+              doctor_failure(
                 :doctor,
                 arguments,
                 run_ref,
@@ -61,7 +70,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
                 catalog,
                 prepared,
                 checks,
-                false
+                {diagnostic, []}
               )
 
             {:error, diagnostic} ->
@@ -70,6 +79,9 @@ defmodule PtcRunner.Kernel.CommandDoctor do
         after
           if prepared, do: PreparedRun.close(prepared)
         end
+
+      {:error, %CommandDiagnostic{phase: :application} = diagnostic} ->
+        application_failure(:doctor, arguments, run_ref, host, catalog, diagnostic)
 
       {:error, diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
@@ -82,12 +94,18 @@ defmodule PtcRunner.Kernel.CommandDoctor do
     do: CommandAcquisition.prepare_request(arguments, catalog, run_ref)
 
   defp local_checks(host, catalog, prepared, runtime) do
-    with {:ok, rows} <- DoctorPlan.new(catalog, prepared, DoctorEnvironment.facts(), :default),
+    environment = DoctorEnvironment.facts()
+
+    with {:ok, rows} <- DoctorPlan.new(catalog, prepared, environment, :default),
          {:ok, services} <- runtime_services(host, runtime),
-         :ok <- RunCoordinator.local_checks(prepared, catalog, services),
-         {:ok, settled} <- DoctorPlan.settle_pending(rows),
+         {:ok, findings} <- RunCoordinator.local_check_findings(prepared, catalog, services),
+         {:ok, settled} <-
+           DoctorPlan.settle_local(rows, findings, prepared, catalog, environment),
          {:ok, checks} <- DoctorPlan.checks(settled) do
-      {:ok, checks}
+      case findings do
+        [] -> {:ok, checks}
+        [primary | _rest] -> {:finding, checks, primary}
+      end
     else
       {:error, %CommandDiagnostic{} = diagnostic} -> {:error, diagnostic}
       {:error, _reason} -> {:error, diagnostic(:internal, :internal_error)}
@@ -112,6 +130,9 @@ defmodule PtcRunner.Kernel.CommandDoctor do
           PreparedRun.close(prepared)
         end
 
+      {:error, %CommandDiagnostic{phase: :application} = diagnostic} ->
+        application_failure({:doctor, :connect}, arguments, run_ref, host, catalog, diagnostic)
+
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, arguments_outcome(arguments, run_ref, diagnostic)}
     end
@@ -119,29 +140,19 @@ defmodule PtcRunner.Kernel.CommandDoctor do
 
   defp connect_prepared(arguments, run_ref, host, catalog, prepared, runtime) do
     with :ok <- maybe_setup_environment(host, prepared, runtime),
-         {:ok, checks, provider_activity} <-
-           connect_checks(host, catalog, prepared, run_ref, runtime) do
-      doctor_success(
-        {:doctor, :connect},
-        arguments,
-        run_ref,
-        host,
-        catalog,
-        prepared,
-        checks,
-        provider_activity
-      )
+         {:ok, report} <- connect_checks(host, catalog, prepared, run_ref, runtime) do
+      doctor_success({:doctor, :connect}, arguments, run_ref, host, catalog, prepared, report)
     else
       {:finding, checks, %CommandDiagnostic{} = diagnostic, secondary} ->
         doctor_failure(
+          {:doctor, :connect},
           arguments,
           run_ref,
           host,
           catalog,
           prepared,
           checks,
-          diagnostic,
-          secondary
+          {diagnostic, secondary}
         )
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
@@ -154,20 +165,15 @@ defmodule PtcRunner.Kernel.CommandDoctor do
 
   defp maybe_setup_environment(host, prepared, runtime) do
     if CommandAcquisition.environment_setup_required?(host, prepared),
-      do: CommandRuntime.setup_environment(runtime),
+      do: CommandRuntime.setup_environment_diagnostic(runtime),
       else: :ok
   end
 
-  defp doctor_success(
-         mode,
-         arguments,
-         run_ref,
-         host,
-         catalog,
-         prepared,
-         checks,
-         provider_activity
-       ) do
+  # One projection: what the checks found, whether a provider was activated, and
+  # what that activity spent. They are produced together and travel together.
+  defp doctor_success(mode, arguments, run_ref, host, catalog, prepared, report) do
+    %{checks: checks, provider_activity: provider_activity, usage: usage} = report
+
     with {:ok, aliases} <- DoctorPlan.model_aliases(catalog, prepared) do
       aliases = maybe_add_model_selectors(aliases, host, arguments.options)
 
@@ -176,24 +182,25 @@ defmodule PtcRunner.Kernel.CommandDoctor do
          "checks" => checks,
          "model_aliases" => aliases,
          "provider_activity" => provider_activity,
-         "readiness" => readiness(mode)
+         "readiness" => readiness(mode),
+         "usage" => usage
        })}
     end
   rescue
-    _exception -> connect_interrupted(arguments, run_ref, provider_activity)
+    _exception -> connect_interrupted(arguments, run_ref, report.provider_activity)
   catch
-    _kind, _reason -> connect_interrupted(arguments, run_ref, provider_activity)
+    _kind, _reason -> connect_interrupted(arguments, run_ref, report.provider_activity)
   end
 
   defp doctor_failure(
+         mode,
          arguments,
          run_ref,
          host,
          catalog,
          prepared,
          checks,
-         diagnostic,
-         secondary
+         {diagnostic, secondary}
        ) do
     provider_activity =
       Enum.any?([diagnostic | secondary], & &1.provider_activity)
@@ -205,10 +212,18 @@ defmodule PtcRunner.Kernel.CommandDoctor do
         "checks" => checks,
         "model_aliases" => aliases,
         "provider_activity" => provider_activity,
-        "readiness" => "failed"
+        "readiness" => "failed",
+        "usage" => failure_usage(provider_activity)
       }
 
-      {:error, CommandOutcome.doctor_failure(run_ref, result, diagnostic, secondary)}
+      {:error,
+       CommandOutcome.doctor_failure(
+         mode,
+         run_ref,
+         result,
+         diagnostic,
+         secondary
+       )}
     end
   rescue
     _exception ->
@@ -218,27 +233,45 @@ defmodule PtcRunner.Kernel.CommandDoctor do
       connect_interrupted(arguments, run_ref, diagnostic_activity(diagnostic, secondary))
   end
 
+  defp application_failure(mode, arguments, run_ref, host, catalog, diagnostic) do
+    environment = DoctorEnvironment.facts()
+
+    with {:ok, rows} <-
+           DoctorPlan.application_failure(catalog, diagnostic, environment, plan_mode(mode)),
+         {:ok, checks} <- DoctorPlan.checks(rows),
+         {:ok, aliases} <- DoctorPlan.model_aliases(catalog, nil) do
+      result = %{
+        "checks" => checks,
+        "model_aliases" => maybe_add_model_selectors(aliases, host, arguments.options),
+        "provider_activity" => false,
+        "readiness" => "failed",
+        "usage" => inert_usage()
+      }
+
+      {:error, CommandOutcome.doctor_failure(mode, run_ref, result, diagnostic)}
+    else
+      {:error, _reason} ->
+        {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
+    end
+  rescue
+    _exception ->
+      {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
+  catch
+    _kind, _reason ->
+      {:error, arguments_outcome(arguments, run_ref, diagnostic(:internal, :internal_error))}
+  end
+
+  defp plan_mode(:doctor), do: :default
+  defp plan_mode({:doctor, :connect}), do: :connect
+
   defp readiness(:doctor), do: "unverified"
   defp readiness({:doctor, :connect}), do: "ready"
 
   defp diagnostic_activity(diagnostic, secondary),
     do: Enum.any?([diagnostic | secondary], & &1.provider_activity)
 
-  defp maybe_add_model_selectors(aliases, nil, _options), do: aliases
-
-  defp maybe_add_model_selectors(aliases, host, %{show_model_selectors: true}) do
-    Enum.map(aliases, fn row ->
-      case Map.fetch(host.install, row["alias"]) do
-        {:ok, %{source: :llm, model: selector}} when is_binary(selector) ->
-          if String.starts_with?(selector, "openai-compat:"),
-            do: row,
-            else: Map.put(row, "model_selector", selector)
-
-        _other ->
-          row
-      end
-    end)
-  end
+  defp maybe_add_model_selectors(aliases, host, %{show_model_selectors: true}),
+    do: ModelSelectorDisclosure.annotate(aliases, host)
 
   defp maybe_add_model_selectors(aliases, _host, _options), do: aliases
 
@@ -266,7 +299,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
          _run_ref,
          _runtime
        ),
-       do: connect_projection(rows, false)
+       do: connect_projection(rows, false, inert_usage())
 
   defp connect_operation(host, catalog, prepared, rows, environment, run_ref, runtime) do
     with {:ok, services} <- runtime_services(host, runtime),
@@ -289,7 +322,11 @@ defmodule PtcRunner.Kernel.CommandDoctor do
       {:ok, result} ->
         case DoctorPlan.settle_connect(rows, result, prepared, catalog) do
           {:ok, settled} ->
-            connect_projection(settled, ConnectivityResult.provider_activity(result))
+            connect_projection(
+              settled,
+              ConnectivityResult.provider_activity(result),
+              probe_usage(ConnectivityResult.usage(result), catalog)
+            )
 
           {:error, _reason} ->
             {:error, active_diagnostic(:internal, :internal_error)}
@@ -338,12 +375,59 @@ defmodule PtcRunner.Kernel.CommandDoctor do
       else: diagnostic(:internal, :internal_error)
   end
 
-  defp connect_projection(rows, provider_activity) do
+  defp connect_projection(rows, provider_activity, usage) do
     case DoctorPlan.checks(rows) do
-      {:ok, checks} -> {:ok, checks, provider_activity}
-      {:error, _reason} -> {:error, projection_diagnostic(provider_activity)}
+      {:ok, checks} ->
+        {:ok, %{checks: checks, provider_activity: provider_activity, usage: usage}}
+
+      {:error, _reason} ->
+        {:error, projection_diagnostic(provider_activity)}
     end
   end
+
+  # What the probes spent, attributed by alias on the row shape a run reports.
+  # An account the report cannot name is not published with a hole in it: the
+  # whole thing is reported as unavailable instead.
+  defp probe_usage(entries, catalog) do
+    entries
+    |> Enum.reduce_while([], fn entry, calls ->
+      case attribution(Map.get(catalog.descriptors, entry.name), entry) do
+        {:ok, call} -> {:cont, [call | calls]}
+        :nothing_spent -> {:cont, calls}
+        :unattributable -> {:halt, :unattributable}
+      end
+    end)
+    |> case do
+      :unattributable -> unattributed_usage()
+      calls -> attributed_usage(calls |> Enum.reverse() |> LLMUsageSummary.alias_rows())
+    end
+  end
+
+  # Only a workflow model alias appears in `model_aliases`, so only such an
+  # alias has a row a reader could check the spend against. A probed occurrence
+  # that is not one and reported nothing has nothing to account for; one that
+  # reported something leaves the account unattributable, as does an occurrence
+  # whose descriptor cannot be read at all.
+  defp attribution(%{workflow_llm?: true, installation_revision: revision}, entry),
+    do: {:ok, {entry.name, revision, entry.usage}}
+
+  defp attribution(%{}, %{usage: nil}), do: :nothing_spent
+  defp attribution(_descriptor, _entry), do: :unattributable
+
+  # A command that activated no provider spent nothing, and an empty account is
+  # the true one. A failure that did activate one may have been billed for work
+  # no result accounts for, so it reports the spend as unavailable rather than
+  # as zero.
+  defp failure_usage(false), do: inert_usage()
+  defp failure_usage(true), do: unattributed_usage()
+
+  defp inert_usage, do: attributed_usage([])
+
+  defp attributed_usage(rows),
+    do: %{"llm_usage_state" => "available", "llm_usage" => rows}
+
+  defp unattributed_usage,
+    do: %{"llm_usage_state" => "unavailable", "llm_usage" => nil}
 
   defp projection_diagnostic(false), do: diagnostic(:internal, :internal_error)
   defp projection_diagnostic(true), do: active_diagnostic(:internal, :internal_error)

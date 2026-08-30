@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"library": "cap"},
+      {"id": "example.replay", "path": "workflow.clj", "dependencies": ["cap"]}
+    ],
+    "entry": "example.replay/run"
+  },
+  "input": {"value": {}},
+  "providers": {
+    "workflow": [{"name": "frozen-model"}]
+  },
+  "labels": {
+    "name": "llm-replay",
+    "tags": {"mode": "deterministic"}
+  }
+}

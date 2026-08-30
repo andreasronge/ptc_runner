@@ -4,7 +4,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   alias PtcRunner.Examples.KernelInspectionLab.MCPFixture
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
-  alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.ProviderRegistry
@@ -12,7 +12,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   alias PtcRunner.Kernel.RunBuilder
 
   @task "Use every available read-only fixture and return their results in one map."
-  @filesystem_server Path.expand("../../mcp/filesystem/dist/server.js", __DIR__)
+  @ptc_fs_mcp_package "ptc-fs-mcp@0.1.0"
 
   @direct_program ~S|(let [file (tool/filesystem.read {"path" "value.txt"}) native (tool/native-echo {"value" "fixture"}) structured (tool/remote.structured {"query" "fixture"}) text (tool/remote.text {"query" "fixture"}) failed (tool/remote.fail {"query" "fixture"})] (return {"file" file "native" native "structured" structured "text" text "failed" failed}))|
   @wrapper_program ~S|(return {"file" (lab.tools/read-file) "native" (lab.tools/echo) "structured" (lab.tools/remote-structured) "text" (lab.tools/remote-text) "failed" (lab.tools/remote-failure)})|
@@ -20,13 +20,14 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   def run(output_dir) when is_binary(output_dir) do
     output_dir = Path.expand(output_dir)
     :ok = File.mkdir_p(output_dir)
+    cli = install_ptc_fs_mcp!(output_dir)
     fixture = MCPFixture.start(&mcp_response/1)
 
     try do
       with {:ok, direct} <-
-             run_journey(output_dir, fixture.endpoint, "direct", @direct_program, false),
+             run_journey(output_dir, fixture.endpoint, "direct", @direct_program, false, cli),
            {:ok, wrapper} <-
-             run_journey(output_dir, fixture.endpoint, "wrapper", @wrapper_program, true) do
+             run_journey(output_dir, fixture.endpoint, "wrapper", @wrapper_program, true, cli) do
         {:ok, [direct, wrapper]}
       end
     after
@@ -34,11 +35,27 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
     end
   end
 
-  defp run_journey(output_dir, endpoint, name, program, wrapper?) do
+  defp run_journey(output_dir, endpoint, name, program, wrapper?, cli) do
     directory = Path.join(output_dir, name)
     :ok = File.mkdir(directory)
+    # The conventional project artifact root: exactly these four children, each
+    # owner-only. Laying the journey out this way lets `ptc viewer` read it
+    # directly, and gives the private inspection artifact a parent as
+    # restrictive as the artifact itself.
+    artifacts = Path.join(directory, "artifacts")
+    traces = Path.join(artifacts, "traces")
+    inspection = Path.join(artifacts, "inspection")
     files = Path.join(directory, "files")
-    :ok = File.mkdir(files)
+    :ok = File.mkdir(artifacts)
+    :ok = File.chmod(artifacts, 0o700)
+
+    Enum.each(~w(envelopes inspection results traces), fn child ->
+      child_path = Path.join(artifacts, child)
+      :ok = File.mkdir!(child_path)
+      :ok = File.chmod(child_path, 0o700)
+    end)
+
+    File.mkdir!(files)
     :ok = File.write(Path.join(files, "value.txt"), "fixture-file")
     :ok = File.write(Path.join(directory, "workflow.clj"), workflow_source())
 
@@ -52,30 +69,36 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
 
     manifest = manifest(name, mission_components, wrapper?)
     manifest_path = Path.join(directory, "ptc.json")
-    trace_path = Path.join(directory, "run.jsonl")
-    inspection_path = Path.join(directory, "run.inspection.jsonl")
     :ok = File.write(manifest_path, Jason.encode!(manifest))
-    registry = registry(endpoint, program, wrapper?, directory)
+    registry = registry(endpoint, program, wrapper?, directory, cli)
 
-    with {:ok, request} <-
+    # Artifact discovery is filename-bound: `ptc transcript` selects
+    # `<run-ref>.jsonl` / `<run-ref>.ptcins`, and whole-directory admission
+    # isolates any trace whose stem is not its run ID. The lab therefore takes
+    # the same command run reference the CLI generates and names both artifacts
+    # after it, rather than inventing a run ID and a fixed filename.
+    with {:ok, run_ref} <- CommandRunRef.generate(),
+         trace_path = Path.join(traces, run_ref <> ".jsonl"),
+         inspection_path = Path.join(inspection, run_ref <> ".ptcins"),
+         {:ok, request} <-
            ApplicationPackage.request_directory(manifest_path,
              installed_limits: registry.installed_limits,
-             inspection_capture: true
+             inspection_capture: true,
+             event_identity: run_ref
            ),
          {:ok, built} <-
            RunBuilder.build(request, registry,
              trace_path: trace_path,
              inspect: inspection_path
            ),
-         {:ok, result} <- execute_and_publish(built),
-         {:ok, records} <- InspectionArtifact.load(inspection_path) do
+         {:ok, result} <- execute_and_publish(built) do
       {:ok,
        %{
          name: name,
          result: result,
          trace: trace_path,
          inspection: inspection_path,
-         run_id: records |> hd() |> Map.fetch!("run_id")
+         run_id: request.policy.run_id
        }}
     end
   end
@@ -125,46 +148,52 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   defp prefer_cleanup_error(_result, {:error, _reason} = cleanup), do: cleanup
   defp prefer_cleanup_error(result, :ok), do: result
 
-  defp registry(endpoint, program, wrapper?, directory) do
+  defp registry(endpoint, program, wrapper?, directory, cli) do
     turn = :atomics.new(1, signed: false)
 
-    scripted = fn config, _context ->
-      if config == %{} do
-        LLMCapability.new(
-          requester: fn _request ->
-            current = :atomics.add_get(turn, 1, 1)
-            generated = if current == 1, do: "(missing/function)", else: program
-            {:ok, model_response(generated, current)}
-          end
-        )
-      else
-        {:error, :invalid_scripted_model_config}
-      end
-    end
+    scripted =
+      staged_provider(fn config, _context ->
+        if config == %{} do
+          with {:ok, capability} <-
+                 LLMCapability.new(
+                   requester: fn _request ->
+                     current = :atomics.add_get(turn, 1, 1)
+                     generated = if current == 1, do: "(missing/function)", else: program
+                     {:ok, model_response(generated, current)}
+                   end
+                 ),
+               do: {:ok, %{capabilities: [capability]}}
+        else
+          {:error, :invalid_scripted_model_config}
+        end
+      end)
 
-    native = fn config, _context ->
-      if config in [%{}, %{"model_visible" => false}] do
-        Capability.new(
-          name: "native-echo",
-          description: "Return one fixture string through the native provider seam",
-          model_visible: Map.get(config, "model_visible", true),
-          effect: :read,
-          input_schema: %{
-            "type" => "object",
-            "properties" => %{"value" => %{"type" => "string"}},
-            "required" => ["value"]
-          },
-          output_schema: %{
-            "type" => "object",
-            "properties" => %{"echo" => %{"type" => "string"}},
-            "required" => ["echo"]
-          },
-          callback: fn %{"value" => value} -> {:ok, %{"echo" => value}} end
-        )
-      else
-        {:error, :invalid_native_config}
-      end
-    end
+    native =
+      staged_provider(fn config, _context ->
+        if config in [%{}, %{"model_visible" => false}] do
+          with {:ok, capability} <-
+                 Capability.new(
+                   name: "native-echo",
+                   description: "Return one fixture string through the native provider seam",
+                   model_visible: Map.get(config, "model_visible", true),
+                   effect: :read,
+                   input_schema: %{
+                     "type" => "object",
+                     "properties" => %{"value" => %{"type" => "string"}},
+                     "required" => ["value"]
+                   },
+                   output_schema: %{
+                     "type" => "object",
+                     "properties" => %{"echo" => %{"type" => "string"}},
+                     "required" => ["echo"]
+                   },
+                   callback: fn %{"value" => value} -> {:ok, %{"echo" => value}} end
+                 ),
+               do: {:ok, %{capabilities: [capability]}}
+        else
+          {:error, :invalid_native_config}
+        end
+      end)
 
     mcp =
       MCPSource.builder(
@@ -188,7 +217,7 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
            executable: node,
            executable_sha256: :crypto.hash(:sha256, executable),
            cwd: directory,
-           args: [@filesystem_server, "--root", "files", "--include", "**"],
+           args: [cli, "--root", "files", "--include", "**"],
            env: %{},
            start_timeout_ms: 15_000},
         tools: %{
@@ -199,7 +228,8 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
           }
         },
         timeout_ms: 15_000,
-        max_result_bytes: 64_000
+        max_result_bytes: 64_000,
+        installation_revision: "ptc-fs-mcp-0.1.0"
       )
 
     {:ok, registry} =
@@ -211,6 +241,16 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
       })
 
     registry
+  end
+
+  defp staged_provider(acquire) do
+    ProviderRegistry.staged(fn config, context ->
+      {:ok,
+       %{
+         credential_names: [],
+         preflight: fn -> {:ok, fn %{} -> acquire.(config, context) end} end
+       }}
+    end)
   end
 
   defp manifest(name, mission_components, wrapper?) do
@@ -254,7 +294,6 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
         ]
       },
       "limits" => %{"evaluation_timeout_ms" => 10_000, "run_duration_ms" => 60_000},
-      "events" => %{"run_id" => "inspection-lab-#{name}"},
       "labels" => %{"name" => "inspection-lab-#{name}", "tags" => %{"mode" => name}}
     }
   end
@@ -370,5 +409,25 @@ defmodule PtcRunner.Examples.KernelInspectionLab do
   defp json(id, result, headers \\ []) do
     body = Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
     {200, headers ++ [{"content-type", "application/json"}], body}
+  end
+
+  defp install_ptc_fs_mcp!(dir) do
+    System.find_executable("npm") || raise "npm is required for the inspection lab"
+
+    {output, 0} =
+      System.cmd("npm", ["install", "--no-save", @ptc_fs_mcp_package],
+        cd: dir,
+        stderr_to_stdout: true
+      )
+
+    {resolved, 0} =
+      System.cmd("node", ["-p", "require.resolve('ptc-fs-mcp/package.json')"],
+        cd: dir,
+        stderr_to_stdout: true
+      )
+
+    cli = resolved |> String.trim() |> Path.dirname() |> Path.join("dist/cli.js")
+    File.exists?(cli) || raise "ptc-fs-mcp CLI missing after install: #{output}"
+    cli
   end
 end

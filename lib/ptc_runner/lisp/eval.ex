@@ -71,6 +71,7 @@ defmodule PtcRunner.Lisp.Eval do
   alias PtcRunner.Lisp.KeyNormalizer
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Metadata
+  alias PtcRunner.Lisp.NamespaceDiagnostic
   alias PtcRunner.Lisp.PreludeClosure
   alias PtcRunner.Lisp.RuntimeCallable
   alias PtcRunner.Lisp.UntrustedRenderer
@@ -299,9 +300,7 @@ defmodule PtcRunner.Lisp.Eval do
     with :error <- resolve_local(name, locals, env, eval_ctx),
          :error <- resolve_user_ns(name, user_ns, eval_ctx),
          :error <- resolve_env(name, env, eval_ctx),
-         :error <- resolve_builtin(name, eval_ctx),
-         :error <- resolve_legacy_user_ns(name, user_ns, eval_ctx),
-         :error <- resolve_legacy_env(name, env, eval_ctx) do
+         :error <- resolve_builtin(name, eval_ctx) do
       unresolved_var(name)
     end
   end
@@ -310,16 +309,15 @@ defmodule PtcRunner.Lisp.Eval do
   #
   # When `strict_data: true`, accessing a key that was not supplied raises a
   # runtime error naming the binding. In permissive mode the lookup returns
-  # `nil` for unknown keys.
+  # `nil` for unknown keys. The Kernel mission boundary passes the granted-name
+  # list in; Eval never derives it from `Map.keys(ctx)`.
   defp do_eval({:data, key}, %EvalContext{ctx: ctx, strict_data: true} = eval_ctx) do
     case data_fetch(ctx, key) do
       {:ok, value} ->
         {:ok, value, eval_ctx}
 
       :error ->
-        {:error,
-         {:runtime_error,
-          "data/#{key} is not bound: the `context` object did not provide a `#{key}` key", nil}}
+        {:error, {:runtime_error, strict_data_error(key, eval_ctx), nil}}
     end
   end
 
@@ -403,30 +401,24 @@ defmodule PtcRunner.Lisp.Eval do
       # persist ephemeral private-tool authority from a value-position prelude ref.
       value = value |> merge_docstring_into_closure(opts) |> strip_prelude_tool_authority()
 
-      new_user_ns =
-        eval_ctx2.user_ns
-        |> delete_legacy_user_ns_key(name)
-        |> Map.put(name, value)
+      new_user_ns = Map.put(eval_ctx2.user_ns, user_ns_key(name), value)
 
       {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
     end
-  end
-
-  # Backward compatibility: 3-tuple format without opts
-  defp do_eval({:def, name, value_ast}, %EvalContext{} = eval_ctx) do
-    do_eval({:def, name, value_ast, %{}}, eval_ctx)
   end
 
   # Idempotent define: (defonce name value opts)
   # Binds name only if not already defined in user_ns.
   # Value expression is NOT evaluated when name is already bound.
   defp do_eval({:defonce, name, value_ast, opts}, %EvalContext{user_ns: user_ns} = eval_ctx) do
-    if Map.has_key?(user_ns, name) or (is_binary(name) and legacy_var_present?(user_ns, name)) do
+    key = user_ns_key(name)
+
+    if Map.has_key?(user_ns, key) do
       {:ok, %Var{name: name}, eval_ctx}
     else
       with {:ok, value, eval_ctx2} <- eval_child(value_ast, eval_ctx) do
         value = value |> merge_docstring_into_closure(opts) |> strip_prelude_tool_authority()
-        new_user_ns = Map.put(eval_ctx2.user_ns, name, value)
+        new_user_ns = Map.put(eval_ctx2.user_ns, key, value)
         {:ok, %Var{name: name}, EvalContext.update_user_ns(eval_ctx2, new_user_ns)}
       end
     end
@@ -565,6 +557,16 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  # Calling `data/<name>` resolves the grant first (so a miss is a missing-grant
+  # error under strict data), then reports `not_callable` with the symbol
+  # rather than rendering the value into the diagnostic or the trace.
+  defp do_eval({:call, {:data, key}, arg_asts}, %EvalContext{} = eval_ctx) do
+    with {:ok, _value, eval_ctx1} <- do_eval({:data, key}, eval_ctx),
+         {:ok, _args, _eval_ctx2} <- eval_all(arg_asts, eval_ctx1) do
+      {:error, {:not_callable, {:data_ref, data_symbol(key)}}}
+    end
+  end
+
   defp do_eval({:call, fun_ast, arg_asts}, %EvalContext{} = eval_ctx) do
     with {:ok, fun_val, eval_ctx1} <- eval_child(fun_ast, eval_ctx),
          {:ok, arg_vals, eval_ctx2} <- eval_all(arg_asts, eval_ctx1) do
@@ -605,9 +607,17 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:pmap, fn_ast, coll_asts}, %EvalContext{} = eval_ctx) do
-    with {:ok, fn_val, eval_ctx1} <- eval_child(fn_ast, eval_ctx),
-         {:ok, coll_vals, eval_ctx2} <- eval_all(coll_asts, eval_ctx1) do
-      Parallel.eval_pmap(fn_val, coll_vals, eval_ctx2, &do_eval/2)
+    case resolve_user_ns(:pmap, eval_ctx.user_ns, eval_ctx) do
+      {:ok, callable, callable_ctx} ->
+        with {:ok, args, args_ctx} <- eval_all([fn_ast | coll_asts], callable_ctx) do
+          Apply.apply_fun(callable, args, args_ctx, &do_eval/2)
+        end
+
+      :error ->
+        with {:ok, fn_val, eval_ctx1} <- eval_child(fn_ast, eval_ctx),
+             {:ok, coll_vals, eval_ctx2} <- eval_all(coll_asts, eval_ctx1) do
+          Parallel.eval_pmap(fn_val, coll_vals, eval_ctx2, &do_eval/2)
+        end
     end
   end
 
@@ -616,18 +626,31 @@ defmodule PtcRunner.Lisp.Eval do
   # ============================================================
 
   defp do_eval({:pcalls, fn_asts}, %EvalContext{} = eval_ctx) do
-    case eval_all(fn_asts, eval_ctx) do
-      {:ok, fn_vals, eval_ctx2} ->
-        Parallel.eval_pcalls(fn_vals, eval_ctx2, &do_eval/2)
+    case resolve_user_ns(:pcalls, eval_ctx.user_ns, eval_ctx) do
+      {:ok, callable, callable_ctx} ->
+        with {:ok, args, args_ctx} <- eval_all(fn_asts, callable_ctx) do
+          Apply.apply_fun(callable, args, args_ctx, &do_eval/2)
+        end
 
-      {:error, _} = err ->
-        err
+      :error ->
+        case eval_all(fn_asts, eval_ctx) do
+          {:ok, fn_vals, eval_ctx2} ->
+            Parallel.eval_pcalls(fn_vals, eval_ctx2, &do_eval/2)
+
+          {:error, _} = err ->
+            err
+        end
     end
   end
 
   # Control flow signals: return and fail
   defp do_eval({:return, value_ast}, %EvalContext{} = eval_ctx) do
     with {:ok, value, eval_ctx2} <- eval_child(value_ast, eval_ctx) do
+      eval_ctx2 =
+        if match?({:tool_call, _name, _arguments}, value_ast),
+          do: EvalContext.mark_direct_tool_return(eval_ctx2),
+          else: eval_ctx2
+
       Abort.control!(:return, value, eval_ctx2)
     end
   end
@@ -879,16 +902,16 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
-  # Carry the export body's side-effecting accumulators (ledger, prints, cache,
-  # iteration count) back onto the caller's context while keeping the caller's
+  # Carry the export body's side-effecting accumulators (ledger, prints, cache)
+  # back onto the caller's context while keeping the caller's
   # own `user_ns`/`env`/`prelude` tables — a prelude export cannot mutate user
   # memory, and user code cannot reach the private prelude env.
   defp merge_export_effects(%EvalContext{} = caller_ctx, %EvalContext{} = export_ctx) do
     %{
       caller_ctx
       | effects: export_ctx.effects,
-        iteration_count: export_ctx.iteration_count,
-        failure_origin: export_ctx.failure_origin
+        failure_origin: export_ctx.failure_origin,
+        return_origin: export_ctx.return_origin
     }
   end
 
@@ -919,15 +942,9 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp resolve_user_ns(name, user_ns, eval_ctx) do
-    cond do
-      Map.has_key?(user_ns, name) ->
-        {:ok, Map.get(user_ns, name), eval_ctx}
-
-      is_atom(name) and Map.has_key?(user_ns, Atom.to_string(name)) ->
-        {:ok, Map.get(user_ns, Atom.to_string(name)), eval_ctx}
-
-      true ->
-        :error
+    case Map.fetch(user_ns, user_ns_key(name)) do
+      {:ok, value} -> {:ok, value, eval_ctx}
+      :error -> :error
     end
   end
 
@@ -951,26 +968,6 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp zero_number?(n) when is_number(n), do: n == 0
   defp zero_number?(_), do: false
-
-  defp resolve_legacy_user_ns(name, user_ns, eval_ctx) do
-    with true <- is_binary(name),
-         {:ok, atom} <- safe_to_existing_atom(name),
-         {:ok, value} <- Map.fetch(user_ns, atom) do
-      {:ok, value, eval_ctx}
-    else
-      _ -> :error
-    end
-  end
-
-  defp resolve_legacy_env(name, env, eval_ctx) do
-    with true <- is_binary(name),
-         {:ok, atom} <- safe_to_existing_atom(name),
-         {:ok, value} <- Map.fetch(env, atom) do
-      {:ok, unwrap_binding(value), eval_ctx}
-    else
-      _ -> :error
-    end
-  end
 
   defp unwrap_binding(%CapabilityResult{value: value}), do: value
   defp unwrap_binding(value), do: unwrap_constant(value)
@@ -1670,6 +1667,14 @@ defmodule PtcRunner.Lisp.Eval do
   defp maybe_put_private_tool(tool_call, true), do: Map.put(tool_call, :private, true)
   defp maybe_put_private_tool(tool_call, false), do: tool_call
 
+  defp ledger_tool_args(args, true, projection) when is_function(projection, 1) do
+    projection.(args)
+  rescue
+    _exception -> %{"redacted" => true}
+  catch
+    _kind, _reason -> %{"redacted" => true}
+  end
+
   defp ledger_tool_args(args, true, _projection), do: redact_source_args(args)
   defp ledger_tool_args(args, false, :full), do: args
 
@@ -1787,6 +1792,30 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp fetch_symbol_ref_data_key(_ctx, _key), do: :error
 
+  defp data_symbol(key), do: "data/" <> data_key_name(key)
+
+  defp data_key_name(key) when is_atom(key), do: Atom.to_string(key)
+  defp data_key_name(key) when is_binary(key), do: key
+  defp data_key_name(key), do: to_string(key)
+
+  defp strict_data_error(key, %EvalContext{} = eval_ctx) do
+    cond do
+      params_key?(key) and is_binary(eval_ctx.missing_data_params_message) ->
+        eval_ctx.missing_data_params_message
+
+      is_list(eval_ctx.data_grants) ->
+        missing_grant_error(key, eval_ctx.data_grants)
+
+      true ->
+        data_symbol(key) <> " is not bound"
+    end
+  end
+
+  defp params_key?(key), do: data_key_name(key) == "params"
+
+  defp missing_grant_error(key, grants),
+    do: NamespaceDiagnostic.missing_data_grant_message(data_symbol(key), grants)
+
   # ============================================================
   # Sequential evaluation helpers
   # ============================================================
@@ -1884,20 +1913,20 @@ defmodule PtcRunner.Lisp.Eval do
   # Loop Execution
   # ============================================================
 
-  defp execute_loop(body, %EvalContext{} = ctx, bindings) do
+  defp execute_loop(body, %EvalContext{} = ctx, bindings, iteration \\ 0) do
     eval_child(body, ctx)
   rescue
     error in Abort ->
       case error.outcome do
         {:control, :recur, new_values, %EvalContext{} = abort_ctx} ->
-          continue_loop(body, ctx, bindings, new_values, abort_ctx.effects)
+          continue_loop(body, ctx, bindings, new_values, abort_ctx.effects, iteration)
 
         _other ->
           reraise error, __STACKTRACE__
       end
   end
 
-  defp continue_loop(body, ctx, bindings, new_values, effects) do
+  defp continue_loop(body, ctx, bindings, new_values, effects, iteration) do
     patterns = Enum.map(bindings, fn {:binding, pattern, _} -> pattern end)
     recur_ctx = EvalContext.restore_recur_effects(ctx, effects)
 
@@ -1905,8 +1934,14 @@ defmodule PtcRunner.Lisp.Eval do
       Abort.error!({:arity_mismatch, length(patterns), length(new_values)}, recur_ctx)
     else
       with {:ok, new_bindings} <- bind_recur_values(patterns, new_values),
-           {:ok, next_ctx} <- EvalContext.increment_iteration(recur_ctx) do
-        execute_loop(body, EvalContext.merge_env(next_ctx, new_bindings), bindings)
+           {:ok, next_iteration} <-
+             EvalContext.consume_loop_iteration(iteration, ctx.loop_limit) do
+        execute_loop(
+          body,
+          EvalContext.merge_env(recur_ctx, new_bindings),
+          bindings,
+          next_iteration
+        )
       else
         {:error, :loop_limit_exceeded} ->
           Abort.error!({:loop_limit_exceeded, ctx.loop_limit}, recur_ctx)
@@ -1973,22 +2008,11 @@ defmodule PtcRunner.Lisp.Eval do
   end
 
   defp capture_referenced_binding(name, env, locals, initial, acc) do
-    name
-    |> referenced_env_keys()
-    |> Enum.reduce(acc, fn key, inner_acc ->
-      with {:ok, value} <- Map.fetch(env, key),
-           true <- MapSet.member?(locals, key) or not Map.has_key?(initial, key) do
-        Map.put(inner_acc, key, value)
-      else
-        _ -> inner_acc
-      end
-    end)
-  end
-
-  defp referenced_env_keys(name) when is_binary(name) do
-    case safe_to_existing_atom(name) do
-      {:ok, atom} -> [name, atom]
-      :error -> [name]
+    with {:ok, value} <- Map.fetch(env, name),
+         true <- MapSet.member?(locals, name) or not Map.has_key?(initial, name) do
+      Map.put(acc, name, value)
+    else
+      _ -> acc
     end
   end
 
@@ -2008,25 +2032,6 @@ defmodule PtcRunner.Lisp.Eval do
   defp keyword_runtime?(atom) when is_atom(atom), do: not is_nil(atom) and not is_boolean(atom)
   defp keyword_runtime?(_), do: false
 
-  defp legacy_var_present?(map, name) when is_map(map) and is_binary(name) do
-    case safe_to_existing_atom(name) do
-      {:ok, atom} -> Map.has_key?(map, atom)
-      :error -> false
-    end
-  end
-
-  defp delete_legacy_user_ns_key(map, name) when is_map(map) and is_binary(name) do
-    case safe_to_existing_atom(name) do
-      {:ok, atom} -> Map.delete(map, atom)
-      :error -> map
-    end
-  end
-
-  defp delete_legacy_user_ns_key(map, _name), do: map
-
-  defp safe_to_existing_atom(name) do
-    {:ok, String.to_existing_atom(name)}
-  rescue
-    ArgumentError -> :error
-  end
+  defp user_ns_key(name) when is_atom(name), do: Atom.to_string(name)
+  defp user_ns_key(name), do: name
 end

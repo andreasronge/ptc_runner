@@ -2,6 +2,8 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   @moduledoc false
 
   alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandDeclaration
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandEnvelope
@@ -9,6 +11,18 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.ProjectArtifactRoot
+
+  @frontend_commands CommandDeclaration.frontend_commands()
+
+  # A publication failure cannot be reported through the envelope it failed to
+  # write, so it is the one status that is not a catalog row. `EX_IOERR` says
+  # what happened without claiming a diagnostic the reader cannot go read.
+  @envelope_failure_exit_status 74
+
+  @doc "The exit status of an envelope that could not be published."
+  @spec envelope_failure_exit_status() :: 74
+  def envelope_failure_exit_status, do: @envelope_failure_exit_status
 
   @type bootstrap ::
           (CommandArguments.t() ->
@@ -28,12 +42,21 @@ defmodule PtcRunner.Kernel.CommandFrontend do
 
   @doc false
   @spec present_entry(CommandEntry.t(), bootstrap()) :: CommandPresentation.t()
+  def present_entry(
+        %CommandEntry{diagnostic: %CommandDiagnostic{} = _diagnostic} = entry,
+        _bootstrap
+      ) do
+    {:error, outcome} = CommandEngine.entry_failure(entry)
+    present(entry, outcome, nil)
+  end
+
   def present_entry(%CommandEntry{rejection: %{} = _rejection} = entry, _bootstrap) do
     {:error, outcome} = CommandEngine.entry_failure(entry)
     present(entry, outcome, entry.rejection)
   end
 
-  def present_entry(%CommandEntry{arguments: %{command: :repl}} = entry, _bootstrap) do
+  def present_entry(%CommandEntry{arguments: %{command: command}} = entry, _bootstrap)
+      when command in @frontend_commands do
     {:error, outcome} = CommandEngine.dispatch_entry(entry, CommandRuntime.standalone())
     present(entry, outcome, nil)
   end
@@ -77,12 +100,24 @@ defmodule PtcRunner.Kernel.CommandFrontend do
          rejection
        )
        when is_binary(path) do
-    case CommandEnvelope.publish(outcome, path) do
+    paths = CommandEnvelope.destinations(entry.arguments, path, entry.run_ref)
+
+    result =
+      with :ok <- ProjectArtifactRoot.ensure_for(entry.arguments),
+           do: CommandEnvelope.publish_all(outcome, paths)
+
+    case result do
       :ok ->
         rendered_presentation(outcome, path, rejection)
 
-      {:error, :envelope_publication_failed} ->
-        presentation(outcome, nil, "", CommandRenderer.envelope_failure(entry.run_ref), 74)
+      {:error, reason} ->
+        presentation(
+          outcome,
+          nil,
+          "",
+          CommandRenderer.envelope_failure(entry.run_ref, reason),
+          @envelope_failure_exit_status
+        )
     end
   end
 

@@ -4,10 +4,16 @@ defmodule PtcViewer.Server do
   use GenServer
 
   alias PtcViewer.InspectionStore
+  alias PtcViewer.LiveSecurity
   alias PtcViewer.ReplConnection
   alias PtcViewer.ReplStore
 
   @shutdown_timeout_ms 30_000
+  @loopback {127, 0, 0, 1}
+  # Closed, so a typo cannot become a different exposure. The wildcard exists
+  # for one reason: inside a container it is the only address a published port
+  # can forward to, and the host exposure decision moves to the publish rule.
+  @addresses [@loopback, {0, 0, 0, 0}]
 
   def start(opts), do: GenServer.start(__MODULE__, opts)
   def stop(pid), do: GenServer.call(pid, :stop, @shutdown_timeout_ms + 5_000)
@@ -18,23 +24,47 @@ defmodule PtcViewer.Server do
   def init(opts) do
     Process.flag(:trap_exit, true)
 
-    port = Keyword.get(opts, :port, 4123)
+    port = Keyword.get(opts, :port, 0)
+    ip = Keyword.get(opts, :ip, @loopback)
     trace_dir = opts |> Keyword.get(:trace_dir, "traces") |> Path.expand()
     kernel_adapter = Keyword.get(opts, :kernel_trace_adapter)
     inspection_file = Keyword.get(opts, :inspection_file)
     inspection_adapter = Keyword.get(opts, :inspection_adapter)
+    inspection_absence = Keyword.get(opts, :inspection_absence)
     repl_adapter = Keyword.get(opts, :repl_adapter)
     repl_config = Keyword.get(opts, :repl_config, %{})
+    private_traces = Keyword.get(opts, :private_traces, false) == true
+    trace_source = Keyword.get(opts, :trace_source)
+    inspection_source = Keyword.get(opts, :inspection_source)
+    launch = Keyword.get(opts, :launch)
+    project_adapter = Keyword.get(opts, :project_adapter)
+    live_trace_refresh = Keyword.get(opts, :live_trace_refresh)
+    live_token = Keyword.get(opts, :live_token)
+    live_mutation_nonce = LiveSecurity.nonce()
 
-    if is_integer(port) and port in 0..65_535 do
+    if is_integer(port) and port in 0..65_535 and ip in @addresses and
+         PtcViewer.LiveLaunch.validate(launch) == :ok and
+         PtcViewer.LiveProject.validate(project_adapter) == :ok and
+         valid_trace_refresh?(live_trace_refresh) and
+         LiveSecurity.validate_token(live_token) == :ok do
       params = %{
         port: port,
+        ip: ip,
         trace_dir: trace_dir,
         kernel_adapter: kernel_adapter,
         inspection_file: inspection_file,
         inspection_adapter: inspection_adapter,
+        inspection_absence: inspection_absence,
         repl_adapter: repl_adapter,
-        repl_config: repl_config
+        repl_config: repl_config,
+        private_traces: private_traces,
+        trace_source: trace_source,
+        inspection_source: inspection_source,
+        launch: launch,
+        project_adapter: project_adapter,
+        live_trace_refresh: live_trace_refresh,
+        live_token: live_token,
+        live_mutation_nonce: live_mutation_nonce
       }
 
       case start_resources(params) do
@@ -51,7 +81,7 @@ defmodule PtcViewer.Server do
   end
 
   defp start_resources(params) do
-    case pin_inspection(params.inspection_file, params.inspection_adapter, params.trace_dir) do
+    case pin_inspection_source(params) do
       {:ok, inspection_store} -> start_connection(params, inspection_store)
       {:error, reason} -> {:error, reason}
     end
@@ -94,20 +124,23 @@ defmodule PtcViewer.Server do
   end
 
   defp start_bandit(params, inspection_store, connection, task_supervisor, repl_store) do
+    # Bound to this server by monitor: any server exit stops the store, so no
+    # cleanup threading is needed on the error paths below.
+    {:ok, live_store} = PtcViewer.LiveStore.start(self())
+
     config =
       router_config(
-        params.trace_dir,
-        params.kernel_adapter,
+        params,
         inspection_store,
-        params.inspection_adapter,
         repl_store,
+        live_store,
         self()
       )
 
     case Bandit.start_link(
            plug: {PtcViewer.Router, config},
            port: params.port,
-           ip: {127, 0, 0, 1}
+           ip: params.ip
          ) do
       {:ok, bandit} ->
         Process.unlink(bandit)
@@ -227,36 +260,51 @@ defmodule PtcViewer.Server do
     )
   end
 
-  defp router_config(
-         trace_dir,
-         kernel_adapter,
-         inspection_store,
-         inspection_adapter,
-         repl_store,
-         server
-       ) do
+  defp router_config(params, inspection_store, repl_store, live_store, server) do
     [
-      trace_dir: trace_dir,
-      kernel_trace_adapter: kernel_adapter,
+      trace_dir: params.trace_dir,
+      private_traces: params.private_traces,
+      trace_source: params.trace_source,
+      kernel_trace_adapter: params.kernel_adapter,
       inspection_store: inspection_store,
-      inspection_adapter: inspection_adapter,
+      inspection_adapter: params.inspection_adapter,
+      inspection_absence: params.inspection_absence,
       repl_store: repl_store,
       repl_enabled: not is_nil(repl_store),
+      live_store: live_store,
+      live_launch: params.launch,
+      live_project: params.project_adapter,
+      live_trace_refresh: params.live_trace_refresh,
+      live_token_digest: LiveSecurity.token_digest(params.live_token),
+      live_mutation_nonce: params.live_mutation_nonce,
       viewer_server: server
     ]
   end
 
-  defp pin_inspection(nil, nil, _trace_dir), do: {:ok, nil}
+  defp trace_source(%{private_traces: true, trace_dir: trace_dir}),
+    do: {:private_directory, trace_dir}
+
+  defp trace_source(%{trace_dir: trace_dir}), do: {:directory, trace_dir}
+
+  defp valid_trace_refresh?(nil), do: true
+  defp valid_trace_refresh?(callback), do: is_function(callback, 1)
+
+  defp pin_inspection_source(%{inspection_source: source}) when not is_nil(source),
+    do: InspectionStore.start(source)
+
+  defp pin_inspection_source(params),
+    do: pin_inspection(params.inspection_file, params.inspection_adapter, trace_source(params))
+
+  defp pin_inspection(nil, nil, _trace_source), do: {:ok, nil}
 
   defp pin_inspection(path, nil, _trace_dir) when is_binary(path),
     do: {:error, :invalid_inspection_config}
 
-  defp pin_inspection(path, adapter, trace_dir) when is_binary(path) and is_atom(adapter) do
-    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :pin_inspection, 2) and
-         function_exported?(adapter, :inspection, 2) do
+  defp pin_inspection(path, adapter, trace_source) when is_binary(path) and is_atom(adapter) do
+    if valid_inspection_adapter?(adapter) do
       with {:ok, source} <-
              adapter
-             |> apply(:pin_inspection, [Path.expand(path), {:directory, trace_dir}])
+             |> apply(:pin_inspection, [Path.expand(path), trace_source])
              |> normalize_pin_result(),
            {:ok, store} <- InspectionStore.start(source) do
         {:ok, store}
@@ -272,8 +320,25 @@ defmodule PtcViewer.Server do
 
   defp pin_inspection(_path, _adapter, _trace_dir), do: {:error, :invalid_inspection_config}
 
+  defp valid_inspection_adapter?(adapter) do
+    Code.ensure_loaded?(adapter) and
+      Enum.all?(
+        [
+          :pin_inspection,
+          :conversation,
+          :preludes,
+          :execution_errors,
+          :explicit_failure_values
+        ],
+        fn operation ->
+          function_exported?(adapter, operation, 2)
+        end
+      )
+  end
+
   defp normalize_pin_result({:ok, source}) when not is_nil(source), do: {:ok, source}
   defp normalize_pin_result({:error, reason}) when is_atom(reason), do: {:error, reason}
+
   defp normalize_pin_result(_invalid), do: {:error, :inspection_adapter_failure}
 
   defp attach_inspection_store(nil, _owner), do: :ok
@@ -337,8 +402,37 @@ defmodule PtcViewer.Server do
   defp maybe_open(false, _listener_info), do: :ok
 
   defp maybe_open(true, {_address, port}) do
-    _result = System.cmd("open", ["http://localhost:#{port}"])
+    case browser_opener() do
+      nil -> :ok
+      opener -> run_opener(opener, "http://localhost:#{port}")
+    end
+  end
+
+  defp browser_opener do
+    executable =
+      case :os.type() do
+        {:unix, :darwin} -> "open"
+        {:unix, _name} -> "xdg-open"
+        _other -> nil
+      end
+
+    if executable, do: System.find_executable(executable), else: nil
+  end
+
+  defp run_opener(opener, url) do
+    task = Task.async(fn -> System.cmd(opener, [url], stderr_to_stdout: true) end)
+
+    case Task.yield(task, 2_000) do
+      {:ok, _result} -> :ok
+      {:exit, _reason} -> :ok
+      nil -> Task.shutdown(task, :brutal_kill)
+    end
+
     :ok
+  rescue
+    _exception -> :ok
+  catch
+    _kind, _reason -> :ok
   end
 
   defp start_bandit_guard(owner, bandit) do

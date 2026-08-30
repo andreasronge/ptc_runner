@@ -34,8 +34,10 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Eval
+  alias PtcRunner.Lisp.Formatter
   alias PtcRunner.Lisp.Parser
   alias PtcRunner.Lisp.Prelude
+  alias PtcRunner.Lisp.Prelude.Description
   alias PtcRunner.Lisp.Prelude.ErrorSpan
   alias PtcRunner.Lisp.Prelude.Export
   alias PtcRunner.Lisp.Prelude.Spec
@@ -91,38 +93,135 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     do: compile_source(source, opts)
 
   defp compile_source(source, opts) do
+    with {:ok, description} <- describe_unlocated(source),
+         do: compile_description(description, opts)
+  end
+
+  @doc false
+  @spec describe_unlocated(String.t()) ::
+          {:ok, Description.t()} | {:error, ValidationError.t()}
+  def describe_unlocated(source) when is_binary(source) do
     with {:ok, {:program, forms}} <- parse(source),
          {:ok, specs, ns_meta} <- collect_specs(forms),
-         :ok <- validate_spec_effects(specs),
+         :ok <- validate_spec_effects(specs) do
+      {:ok,
+       %Description{
+         source: source,
+         specs: specs,
+         namespace_metadata: ns_meta,
+         namespaces: ns_meta |> Map.keys() |> Enum.sort()
+       }}
+    end
+  catch
+    {:unrecognized_prelude_node, tag} -> unrecognized_node_error(tag)
+  end
+
+  @doc false
+  @spec compile_description(Description.t(), keyword()) ::
+          {:ok, Prelude.t()} | {:error, ValidationError.t()}
+  def compile_description(%Description{} = description, opts \\ []) when is_list(opts) do
+    compile_description_unchecked(description, opts)
+  catch
+    {:unrecognized_prelude_node, tag} -> unrecognized_node_error(tag)
+  end
+
+  defp compile_description_unchecked(
+         %Description{
+           source: source,
+           specs: specs,
+           namespace_metadata: ns_meta,
+           namespaces: namespaces
+         },
+         opts
+       ) do
+    with :ok <- validate_spec_effects(specs),
          {:ok, dep_ctx} <- build_dep_context(ns_meta, opts),
          :ok <- reject_dep_refs_in_defs(specs, dep_ctx),
          form_graph = build_form_graph(specs, dep_ctx),
          {:ok, exports} <- build_exports(specs, ns_meta, form_graph, dep_ctx),
          {:ok, private_env} <- build_runtime(specs, exports, dep_ctx),
          :ok <- validate_constant_contracts(exports, private_env) do
-      namespaces = ns_meta |> Map.keys() |> Enum.sort()
-
       {:ok,
        %Prelude{
          namespaces: namespaces,
          exports: exports,
          private_env: private_env,
          source_hash: source_hash(source),
+         source_index: build_source_index(specs, exports),
          form_graph: form_graph,
          metadata: %{namespaces: ns_meta}
        }}
     end
-  catch
-    # The raw-AST walkers fail CLOSED on an unrecognized node (see
-    # `leaf_or_reject/2`). Convert that throw into the prelude's normal error
-    # channel — the contract is "compile failures are RETURNED, never raised".
-    {:unrecognized_prelude_node, tag} ->
-      {:error,
-       ValidationError.new(
-         :unrecognized_node,
-         "prelude body contains an unrecognized syntax node `#{inspect(tag)}`; refusing to " <>
-           "compile because its tool requirements cannot be safely determined (fail-closed)"
-       )}
+  end
+
+  # The raw-AST walkers fail CLOSED on an unrecognized node (see
+  # `leaf_or_reject/2`). Convert that throw into the prelude's normal error
+  # channel — the contract is "compile failures are RETURNED, never raised".
+  defp unrecognized_node_error(tag) do
+    {:error,
+     ValidationError.new(
+       :unrecognized_node,
+       "prelude body contains an unrecognized syntax node `#{inspect(tag)}`; refusing to " <>
+         "compile because its tool requirements cannot be safely determined (fail-closed)"
+     )}
+  end
+
+  @doc false
+  @spec compose([Prelude.t()], String.t(), [map()]) ::
+          {:ok, Prelude.t()} | {:error, ValidationError.t()}
+  def compose(preludes, aggregate_source, components)
+      when is_list(preludes) and is_binary(aggregate_source) and is_list(components) do
+    with :ok <- unique_composed_namespaces(preludes) do
+      {:ok,
+       %Prelude{
+         namespaces: preludes |> Enum.flat_map(& &1.namespaces) |> Enum.sort(),
+         exports: Enum.flat_map(preludes, & &1.exports),
+         private_env: merge_prelude_map(preludes, :private_env),
+         source_hash: source_hash(aggregate_source),
+         form_graph: merge_prelude_map(preludes, :form_graph),
+         metadata: %{
+           namespaces: merge_namespace_metadata(preludes),
+           components: components
+         }
+       }}
+    end
+  end
+
+  defp unique_composed_namespaces(preludes) do
+    preludes
+    |> Enum.reduce_while(MapSet.new(), fn
+      %Prelude{namespaces: namespaces}, seen ->
+        case Enum.find(namespaces, &MapSet.member?(seen, &1)) do
+          nil ->
+            {:cont, Enum.reduce(namespaces, seen, &MapSet.put(&2, &1))}
+
+          namespace ->
+            {:halt,
+             {:error,
+              ValidationError.new(
+                :invalid_namespace,
+                "namespace `#{namespace}` is declared by more than one component",
+                namespace: namespace
+              )}}
+        end
+
+      _invalid, _seen ->
+        {:halt, {:error, ValidationError.new(:compile_error, "invalid compiled prelude")}}
+    end)
+    |> case do
+      %MapSet{} -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp merge_prelude_map(preludes, field) do
+    Enum.reduce(preludes, %{}, &Map.merge(&2, Map.fetch!(&1, field)))
+  end
+
+  defp merge_namespace_metadata(preludes) do
+    Enum.reduce(preludes, %{}, fn prelude, metadata ->
+      Map.merge(metadata, Map.get(prelude.metadata, :namespaces, %{}))
+    end)
   end
 
   # ============================================================
@@ -1082,18 +1181,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   # contract precisely follows what it itself reaches — it does NOT absorb a
   # sibling export's unrelated requirements or effects.
   defp namespace_form_graph(ns_specs, dep_set) do
-    ns_symbols = Enum.map(ns_specs, & &1.symbol)
-
-    calls =
-      Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
-        refs =
-          body
-          |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
-          |> Enum.uniq()
-          |> Enum.filter(&(&1 in ns_symbols))
-
-        {sym, refs}
-      end)
+    calls = sibling_calls(ns_specs)
 
     direct_tools =
       Map.new(ns_specs, fn %Spec{symbol: sym, body_form: body} ->
@@ -1602,7 +1690,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
       program = {:program, Enum.map(ns_specs, &spec_to_defn_form/1)}
       scope = dep_scope_prelude(ns, exports_by_ns, dep_ctx)
 
-      with {:ok, core} <- analyze(program, scope),
+      with {:ok, core} <- analyze(program, scope, ns_specs),
            :ok <- check_prelude_vars(core, ns_specs),
            {:ok, env} <- eval_runtime(core) do
         {:cont, {:ok, Map.put(env_acc, ns, env)}}
@@ -1658,6 +1746,137 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
     end
   end
 
+  defp build_source_index(specs, exports) do
+    export_by_ref = Map.new(exports, &{&1.ref, &1})
+    reachable = reachable_private_symbols(specs)
+
+    specs
+    |> Enum.filter(fn %Spec{} = spec ->
+      not spec.private? or MapSet.member?(reachable, {spec.namespace, spec.symbol})
+    end)
+    |> Map.new(fn %Spec{} = spec ->
+      ref = ref(spec.namespace, spec.symbol)
+      header = source_header(ref, spec, Map.get(export_by_ref, ref))
+      body = Formatter.format(spec_to_source_form(spec))
+      {ref, header <> "\n" <> body}
+    end)
+  end
+
+  # A single labeled effective-metadata provenance line ahead of the rendered
+  # form (plan D3b). The FORM stays verbatim author metadata (often none); this
+  # HEADER carries the RESOLVED visibility/effect/arity so visibility surfaces
+  # even in the common ns-inherited case where the defn carries no metadata. The
+  # `(effective)` label keeps it from masquerading as author-written source.
+  #
+  # Public ref → resolved `%Export{}`. Private ref → no `%Export{}`, so
+  # `visibility: private` + arity from the `%Spec{}`, effect omitted (effect
+  # resolution lives in the export pipeline; it is not computed for privates).
+  defp source_header(ref, %Spec{}, %Export{} = export) do
+    # Effect is intentionally omitted: only Introspection's bounded projection
+    # is safe to report, and `export-meta` / `doc` already own that answer.
+    parts =
+      ["visibility: #{export.visibility}"] ++
+        arity_part(export)
+
+    ";; #{ref} — #{Enum.join(parts, ", ")} (effective)"
+  end
+
+  defp source_header(ref, %Spec{} = spec, nil) do
+    ";; #{ref} — visibility: private, arity: #{arity_label(spec.arity)} (effective)"
+  end
+
+  defp arity_part(%Export{kind: :constant}), do: []
+  defp arity_part(%Export{arity: arity}), do: ["arity: #{arity_label(arity)}"]
+
+  defp arity_label(:variadic), do: "variadic"
+  defp arity_label(n) when is_integer(n), do: Integer.to_string(n)
+
+  # Reconstructs a Formatter-renderable defining form that PRESERVES what
+  # `spec_to_defn_form/1` deliberately drops for closure construction: the
+  # `defn-`/`defn` head (visibility-for-privates), the docstring, and the raw
+  # author metadata map (`metadata_form`, original key order intact — the
+  # normalized `metadata` map is lossy). Author *structure* is preserved (macros
+  # un-expanded); comments and original whitespace are NOT (the reader discards
+  # them) — see the fidelity disclaimer in the spec.
+
+  # A (def ...) constant: optional docstring and author metadata map.
+  defp spec_to_source_form(%Spec{params_form: nil, body_form: [value_ast]} = spec) do
+    doc_part = if is_binary(spec.doc), do: [{:string, spec.doc}], else: []
+    meta_part = if spec.metadata_form, do: [spec.metadata_form], else: []
+
+    {:list, [{:symbol, :def}, {:symbol, spec.symbol}] ++ doc_part ++ meta_part ++ [value_ast]}
+  end
+
+  # A (defn ...) / (defn- ...) function.
+  defp spec_to_source_form(%Spec{} = spec) do
+    head = if spec.private?, do: :"defn-", else: :defn
+    doc_part = if is_binary(spec.doc), do: [{:string, spec.doc}], else: []
+    meta_part = if spec.metadata_form, do: [spec.metadata_form], else: []
+
+    {:list,
+     [{:symbol, head}, {:symbol, spec.symbol}] ++
+       doc_part ++ meta_part ++ [spec.params_form | spec.body_form]}
+  end
+
+  # `MapSet` of `{namespace, symbol}` for private helpers transitively reachable
+  # from SOME public export (plan D4). Restricting to reachable-only keeps the
+  # property that every indexed private is named in some public chain — a private
+  # is discoverable only by reading a body that mentions it — instead of turning
+  # `(source ns/guessed)` into an existence oracle over all private names.
+  #
+  # Reuses the same same-namespace call graph `transitive_backing/1` builds
+  # internally (`collect_refs` over each body filtered to sibling symbols) but
+  # accumulates reachable SYMBOLS, which `transitive_backing/1` discards. Scoped
+  # PER NAMESPACE and keyed by `{namespace, symbol}` so distinct namespaces can
+  # reuse a helper name without colliding.
+  defp reachable_private_symbols(specs) do
+    specs
+    |> Enum.group_by(& &1.namespace)
+    |> Enum.flat_map(fn {ns, ns_specs} ->
+      calls = sibling_calls(ns_specs)
+
+      private_syms =
+        ns_specs |> Enum.filter(& &1.private?) |> Enum.map(& &1.symbol) |> MapSet.new()
+
+      ns_specs
+      |> Enum.reject(& &1.private?)
+      |> Enum.flat_map(&reachable_symbols(&1.symbol, calls, []))
+      |> Enum.filter(&MapSet.member?(private_syms, &1))
+      |> Enum.map(fn sym -> {ns, sym} end)
+    end)
+    |> MapSet.new()
+  end
+
+  # Direct same-namespace reference edges for one namespace's specs.
+  defp sibling_calls(ns_specs) do
+    ns_symbols = Enum.map(ns_specs, & &1.symbol)
+
+    Map.new(ns_specs, fn %Spec{symbol: sym, params_form: params, body_form: body} ->
+      refs =
+        body
+        |> Enum.reduce([], &collect_refs(&1, param_names(params), &2))
+        |> Enum.uniq()
+        |> Enum.filter(&(&1 in ns_symbols))
+
+      {sym, refs}
+    end)
+  end
+
+  # Same-namespace symbols transitively called from `sym` (EXCLUDING `sym`
+  # itself). `visited` guards mutual-recursion cycles, mirroring `reachable_ids`.
+  defp reachable_symbols(sym, calls, visited) do
+    if sym in visited do
+      []
+    else
+      visited = [sym | visited]
+      callees = Map.get(calls, sym, [])
+
+      Enum.reduce(callees, callees, fn callee, acc ->
+        acc ++ reachable_symbols(callee, calls, visited)
+      end)
+    end
+  end
+
   # A (def ...) constant: params_form is nil.
   defp spec_to_defn_form(%Spec{params_form: nil, body_form: [value_ast]} = spec) do
     {:list, [{:symbol, :def}, {:symbol, spec.symbol}, value_ast]}
@@ -1670,10 +1889,34 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   end
 
   # ============================================================
-  defp analyze(program, scope) do
+  defp analyze(program, scope, specs) do
     case Analyze.analyze(program, scope) do
       {:ok, core} ->
         {:ok, core}
+
+      {:error,
+       {:invalid_form, message,
+        %{
+          kind: :unknown_namespace,
+          rejected_namespace: rejected_namespace,
+          available_namespaces: available_namespaces
+        } = details}}
+      when map_size(details) == 3 ->
+        locator = unknown_namespace_locator(specs, rejected_namespace)
+
+        {:error,
+         ValidationError.new(
+           :unknown_namespace,
+           "prelude analysis failed: #{message} " <>
+             "(if this names another prelude, declare it as a dependency via requires_preludes)",
+           details: %{
+             rejected_namespace: rejected_namespace,
+             available_namespaces: available_namespaces
+           },
+           form_index: locator[:form_index],
+           ref: locator[:ref],
+           namespace: locator[:namespace]
+         )}
 
       {:error, reason} ->
         message = "prelude analysis failed: #{inspect(reason, limit: 6)}"
@@ -1688,6 +1931,36 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
         {:error, ValidationError.new(:compile_error, message <> hint)}
     end
   end
+
+  defp unknown_namespace_locator(specs, rejected_namespace) do
+    specs
+    |> Enum.filter(&references_namespace?(&1, rejected_namespace))
+    |> case do
+      [%Spec{} = spec] ->
+        %{
+          form_index: spec.form_index,
+          ref: ref(spec.namespace, spec.symbol),
+          namespace: spec.namespace
+        }
+
+      _ambiguous_or_missing ->
+        %{}
+    end
+  end
+
+  defp references_namespace?(%Spec{} = spec, rejected_namespace),
+    do: references_namespace?(spec_to_defn_form(spec), rejected_namespace)
+
+  defp references_namespace?({:ns_symbol, namespace, _member}, rejected_namespace),
+    do: to_string(namespace) == rejected_namespace
+
+  defp references_namespace?(tuple, rejected_namespace) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> references_namespace?(rejected_namespace)
+
+  defp references_namespace?(items, rejected_namespace) when is_list(items),
+    do: Enum.any?(items, &references_namespace?(&1, rejected_namespace))
+
+  defp references_namespace?(_node, _rejected_namespace), do: false
 
   defp eval_runtime(core) do
     # Stateless prelude compilation: a no-op tool executor. `defn` bodies only

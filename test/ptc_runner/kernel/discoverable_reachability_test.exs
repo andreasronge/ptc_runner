@@ -61,14 +61,14 @@ defmodule PtcRunner.Kernel.DiscoverableReachabilityTest do
     end
 
     test "documentation for a withheld export is readable" do
-      assert [printed] = run!(~S|(doc "cap/collect-pages")|, cap_bundle()).prints
+      assert [printed] = run!(~S|(doc "cap/fold-pages")|, cap_bundle()).prints
 
-      assert printed =~ "cap/collect-pages"
+      assert printed =~ "cap/fold-pages"
       assert printed =~ "cursor"
     end
 
     test "apropos finds a withheld export by its docstring" do
-      assert "cap/with-cursor" in run!(~S|(apropos "pagination")|, cap_bundle()).return
+      assert "cap/fold-pages" in run!(~S|(apropos "pagination")|, cap_bundle()).return
     end
   end
 

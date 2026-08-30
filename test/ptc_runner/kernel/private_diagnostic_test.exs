@@ -43,10 +43,103 @@ defmodule PtcRunner.Kernel.PrivateDiagnosticTest do
              PrivateDiagnostic.project(:unbound_var, %{unbound_names: ["leaked"]}, "(g 1)")
   end
 
-  test "redacts evaluator-produced diagnostics of every other kind" do
-    for kind <- [:not_callable, :type_error, :capability_error, :memory_exceeded, nil] do
+  test "admits a bounded pre-execution message when no capability has run" do
+    message = "Analysis error: expected (defn name [params] body)"
+
+    assert {^message, false} =
+             PrivateDiagnostic.project(
+               :invalid_arity,
+               %{message: message, capability_activity?: false},
+               "(defn foo)"
+             )
+  end
+
+  test "pre-execution admission covers the compile and tool-resolution kinds" do
+    message = "fixed pre-execution diagnostic"
+
+    for kind <- [
+          :parse_error,
+          :invalid_arity,
+          :invalid_form,
+          :symbol_limit_exceeded,
+          :compile_timeout,
+          :compile_memory_exceeded,
+          :unknown_tool,
+          :private_tool_unauthorized,
+          :unknown_namespace
+        ] do
+      assert {^message, false} =
+               PrivateDiagnostic.project(
+                 kind,
+                 %{message: message, capability_activity?: false},
+                 "(g 1)"
+               )
+    end
+  end
+
+  test "still redacts a pre-execution kind once a capability has run" do
+    assert {@redacted, true} =
+             PrivateDiagnostic.project(
+               :invalid_arity,
+               %{
+                 message: "expected (defn name [params] body)",
+                 capability_activity?: true
+               },
+               "(defn foo)"
+             )
+  end
+
+  test "redacts a pre-execution kind when capability activity was never measured" do
+    assert {@redacted, true} =
+             PrivateDiagnostic.project(
+               :invalid_arity,
+               %{message: "expected (defn name [params] body)"},
+               "(defn foo)"
+             )
+  end
+
+  test "redacts blank or invalid pre-execution messages" do
+    for message <- ["", "   ", <<0xFF>>] do
       assert {@redacted, true} =
-               PrivateDiagnostic.project(kind, %{message: "quotes a private record"}, "(g 1)")
+               PrivateDiagnostic.project(
+                 :parse_error,
+                 %{message: message, capability_activity?: false},
+                 "("
+               )
+    end
+  end
+
+  test "clips an oversized pre-execution message and says so" do
+    message = String.duplicate("a", 5_000)
+
+    assert {admitted, true} =
+             PrivateDiagnostic.project(
+               :parse_error,
+               %{message: message, capability_activity?: false},
+               "("
+             )
+
+    assert byte_size(admitted) <= 4_096
+    assert String.valid?(admitted)
+    assert admitted =~ "further text withheld by the private result policy"
+    refute admitted == message
+  end
+
+  test "redacts evaluator-produced diagnostics of every other kind" do
+    for kind <- [
+          :not_callable,
+          :type_error,
+          :capability_error,
+          :memory_exceeded,
+          :arity_error,
+          nil
+        ] do
+      assert {@redacted, true} =
+               PrivateDiagnostic.project(
+                 kind,
+                 %{message: "quotes a private record", capability_activity?: false},
+                 "(g 1)"
+               )
     end
   end
 

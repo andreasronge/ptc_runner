@@ -83,6 +83,19 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
 
   def new(_opts), do: {:error, :invalid_publication_authority}
 
+  @doc """
+  Whether a run under `event_policy` and `provider_class` produces a private
+  result.
+
+  A command that publishes a result consults this before authorizing, because a
+  private result has no publishable destination unless one was requested.
+  """
+  @spec private_result?(:normal | :private, :normal | :private_inspection) :: boolean()
+  def private_result?(event_policy, provider_class)
+      when event_policy in [:normal, :private] and
+             provider_class in [:normal, :private_inspection],
+      do: event_policy == :private or provider_class == :private_inspection
+
   @doc "Authorizes all requested artifact destinations during phase 6."
   @spec authorize(binary(), keyword(), :normal | :private, :normal | :private_inspection) ::
           {:ok, t()} | {:error, authorization_error()}
@@ -91,7 +104,7 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
              provider_class in [:normal, :private_inspection] do
     with true <- valid_run_ref?(run_ref, true),
          true <- Keyword.keyword?(opts),
-         private? <- event_policy == :private or provider_class == :private_inspection,
+         private? <- private_result?(event_policy, provider_class),
          trace_mode <- if(Keyword.has_key?(opts, :trace_dir), do: :exclusive, else: :append),
          :ok <- validate_option_keys(opts),
          {:ok, targets} <- targets(run_ref, opts, private?),
@@ -229,6 +242,17 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
     do: authorized?(authority) and not is_nil(authority.inspect)
 
   def inspection_requested?(_authority), do: false
+
+  @doc false
+  @spec inspection_handle(t()) :: PublicationHandle.t() | nil
+  def inspection_handle(%__MODULE__{} = authority) do
+    if authorized?(authority) do
+      case authority.inspect do
+        %PublicationHandle{kind: :inspection} = handle -> handle
+        _other -> nil
+      end
+    end
+  end
 
   @doc false
   @spec destination_options(t()) :: keyword()
@@ -680,7 +704,12 @@ defmodule PtcRunner.Kernel.PublicationAuthority do
   defp reserve_optional(nil, _kind, _mode, _claim_owner), do: {:ok, nil}
 
   defp reserve_optional(path, kind, mode, claim_owner) do
-    case PublicationHandle.reserve_for(path, kind, mode, claim_owner) do
+    reserve =
+      if kind == :inspection,
+        do: PublicationHandle.reserve_stream_for(path, kind, mode, claim_owner),
+        else: PublicationHandle.reserve_for(path, kind, mode, claim_owner)
+
+    case reserve do
       {:ok, handle} -> register_handle(claim_owner, handle)
       {:error, :destination_exists} -> {:error, :destination_exists}
       {:error, reason} -> {:error, reason}

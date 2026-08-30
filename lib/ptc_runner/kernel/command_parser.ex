@@ -11,8 +11,12 @@ defmodule PtcRunner.Kernel.CommandParser do
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandRejection
+  alias PtcRunner.Kernel.DocumentationLibrary
+  alias PtcRunner.Kernel.ExampleLibrary
+  alias PtcRunner.Kernel.ViewerBinding
 
   @type frontend :: CommandDeclaration.frontend()
+  @private_output_profiles ~w(private-run-analysis-v1 private-run-catalog-v1)
 
   @spec parse([binary()], frontend()) ::
           {:ok, CommandArguments.t()} | {:error, CommandRejection.t()}
@@ -35,11 +39,6 @@ defmodule PtcRunner.Kernel.CommandParser do
       dispatch_argv(argv, frontend)
     end
   end
-
-  defp dispatch_argv(["version"], _frontend), do: arguments(:version)
-
-  defp dispatch_argv(["version" | rest], frontend),
-    do: reject_closed_command(:version, rest, frontend)
 
   defp dispatch_argv(["--help"], frontend), do: help(:root, frontend)
   defp dispatch_argv(["--help" | _rest], _frontend), do: reject(:help, :invalid_arguments)
@@ -158,10 +157,66 @@ defmodule PtcRunner.Kernel.CommandParser do
        do:
          arguments(:init,
            directory: directory,
+           options: %{},
            ordered_options: ordered,
            frontend_options: frontend_options,
            frontend: frontend
          )
+
+  defp validate_command(:version, [], options, ordered, frontend_options, frontend)
+       when map_size(options) == 0,
+       do:
+         arguments(:version,
+           options: options,
+           ordered_options: ordered,
+           frontend_options: frontend_options,
+           frontend: frontend
+         )
+
+  defp validate_command(
+         :init,
+         [directory],
+         %{example: example} = options,
+         ordered,
+         frontend_options,
+         frontend
+       )
+       when map_size(options) == 1 do
+    if example in ExampleLibrary.names() do
+      arguments(:init,
+        directory: directory,
+        options: options,
+        ordered_options: ordered,
+        frontend_options: frontend_options,
+        frontend: frontend
+      )
+    else
+      {:error, CommandRejection.example_unknown()}
+    end
+  end
+
+  defp validate_command(:docs, [], options, ordered, frontend_options, frontend)
+       when map_size(options) == 0,
+       do:
+         arguments(:docs,
+           options: %{page: nil},
+           ordered_options: ordered,
+           frontend_options: frontend_options,
+           frontend: frontend
+         )
+
+  defp validate_command(:docs, [page], options, ordered, frontend_options, frontend)
+       when map_size(options) == 0 do
+    if page in DocumentationLibrary.names(),
+      do:
+        arguments(:docs,
+          options: %{page: page},
+          ordered_options: ordered,
+          frontend_options: frontend_options,
+          frontend: frontend
+        ),
+      else: {:error, CommandRejection.docs_page_unknown()}
+  end
 
   defp validate_command(:validate, [application], options, ordered, frontend_options, frontend) do
     if allowed?(:validate, options, frontend),
@@ -191,7 +246,8 @@ defmodule PtcRunner.Kernel.CommandParser do
 
   defp validate_command(:doctor, positional, options, ordered, frontend_options, frontend)
        when length(positional) <= 1 do
-    if allowed?(:doctor, options, frontend) and enabled_if_present?(options, :connect) do
+    if allowed?(:doctor, options, frontend) and enabled_if_present?(options, :connect) and
+         env_file_active_doctor?(options, frontend_options) do
       application = List.first(positional)
 
       if Map.get(options, :connect, false) and
@@ -229,10 +285,39 @@ defmodule PtcRunner.Kernel.CommandParser do
       else: reject(:models, :invalid_arguments)
   end
 
-  defp validate_command(:repl, positional, options, ordered, [], frontend)
+  defp validate_command(
+         :transcript,
+         [run_id],
+         %{
+           traces: traces,
+           inspection: inspection,
+           private_unattended: true,
+           private_output: private_output
+         } = options,
+         ordered,
+         [],
+         frontend
+       )
+       when map_size(options) == 4 do
+    if Enum.all?([run_id, traces, inspection, private_output], &valid_nonempty_string?/1) do
+      arguments(:transcript,
+        application: run_id,
+        options: options,
+        ordered_options: ordered,
+        frontend: frontend
+      )
+    else
+      reject(:transcript, :invalid_arguments)
+    end
+  end
+
+  defp validate_command(:repl, positional, options, ordered, frontend_options, frontend)
        when length(positional) <= 1 do
     cond do
       not allowed?(:repl, options, frontend) ->
+        reject(:repl, :invalid_arguments)
+
+      not env_file_manifest_repl?(options, frontend_options) ->
         reject(:repl, :invalid_arguments)
 
       Map.get(options, :private_terminal, false) and
@@ -250,13 +335,47 @@ defmodule PtcRunner.Kernel.CommandParser do
           application: List.first(positional),
           options: options,
           ordered_options: ordered,
+          frontend_options: frontend_options,
           frontend: frontend
         )
     end
   end
 
+  defp validate_command(:viewer, [project], options, ordered, frontend_options, frontend) do
+    if allowed?(:viewer, options, frontend) and valid_nonempty_string?(project) and
+         viewer_port_valid?(options) and viewer_listen_valid?(options) do
+      arguments(:viewer,
+        application: project,
+        options: options,
+        ordered_options: ordered,
+        frontend_options: frontend_options,
+        frontend: frontend
+      )
+    else
+      reject(:viewer, :invalid_arguments)
+    end
+  end
+
+  defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend)
+       when command in [:init, :validate, :run, :viewer],
+       do: {:error, CommandRejection.positional_arity(command)}
+
   defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend),
     do: reject(command, :invalid_arguments)
+
+  defp viewer_port_valid?(options) do
+    case Map.fetch(options, :port) do
+      :error -> true
+      {:ok, port} -> ViewerBinding.port(port) != :error
+    end
+  end
+
+  defp viewer_listen_valid?(options) do
+    case Map.fetch(options, :listen) do
+      :error -> true
+      {:ok, listen} -> ViewerBinding.address(listen) != :error
+    end
+  end
 
   defp validate_help_alias(command, [], [help: true], frontend), do: help(command, frontend)
 
@@ -277,7 +396,7 @@ defmodule PtcRunner.Kernel.CommandParser do
 
       Map.has_key?(options, :describe_profile) ->
         positional == [] and
-          Map.keys(options) -- [:describe_profile, :format] == []
+          Map.keys(options) -- [:describe_profile, :format, :mission] == []
 
       Map.has_key?(options, :profile) ->
         profile_arguments_valid?(options, positional, evals, resources, format)
@@ -294,18 +413,55 @@ defmodule PtcRunner.Kernel.CommandParser do
     not Enum.any?([:manifest, :host_config, :trace], &Map.has_key?(options, &1)) and
       resources != [] and
       not (format == "jsonl" and evals == [] and positional == []) and
-      not (Map.get(options, :continue_on_error, false) and length(evals) < 2)
+      not (Map.get(options, :continue_on_error, false) and length(evals) < 2) and
+      profile_output_arguments_valid?(options, positional, evals)
+  end
+
+  defp profile_output_arguments_valid?(options, positional, evals) do
+    output? = Map.has_key?(options, :output)
+    private_output? = Map.has_key?(options, :private_output)
+
+    if output? or private_output? do
+      positional == [] and length(evals) == 1 and not Map.has_key?(options, :load) and
+        not Map.get(options, :continue_on_error, false) and
+        ((output? and options[:profile] == "run-analysis-v1" and
+            not Map.get(options, :private_unattended, false)) or
+           (private_output? and options[:profile] in @private_output_profiles and
+              Map.get(options, :private_unattended, false)))
+    else
+      true
+    end
   end
 
   defp manifest_arguments_valid?(options, resources, format) do
-    allowed = [:eval, :load, :manifest, :host_config, :trace, :format, :private_terminal]
+    allowed = [
+      :eval,
+      :load,
+      :manifest,
+      :mission,
+      :host_config,
+      :trace,
+      :format,
+      :preview_chars,
+      :private_terminal
+    ]
 
-    resources == [] and format == "clojure" and Map.keys(options) -- allowed == []
+    resources == [] and format == "clojure" and Map.keys(options) -- allowed == [] and
+      valid_optional_nonempty_string?(options, :mission)
   end
 
   defp direct_arguments_valid?(options, format) do
-    allowed = [:eval, :load, :trace, :format]
-    format == "clojure" and Map.keys(options) -- allowed == []
+    allowed = [:eval, :load, :trace, :format, :mission, :preview_chars]
+
+    format == "clojure" and Map.keys(options) -- allowed == [] and
+      valid_optional_nonempty_string?(options, :mission)
+  end
+
+  defp valid_optional_nonempty_string?(options, key) do
+    case Map.fetch(options, key) do
+      :error -> true
+      {:ok, value} -> valid_nonempty_string?(value)
+    end
   end
 
   defp arguments(command, fields \\ []) do
@@ -363,12 +519,28 @@ defmodule PtcRunner.Kernel.CommandParser do
   defp enabled_if_present?(options, name),
     do: not Map.has_key?(options, name) or Map.fetch!(options, name) == true
 
+  defp env_file_active_doctor?(options, frontend_options),
+    do: not Keyword.has_key?(frontend_options, :env_file) or Map.get(options, :connect) == true
+
+  defp env_file_manifest_repl?(options, frontend_options),
+    do: not Keyword.has_key?(frontend_options, :env_file) or Map.has_key?(options, :manifest)
+
   defp frontend_options_valid?(options) do
     authorizations = Keyword.get_values(options, :authorize_mcp)
 
     length(authorizations) <= 128 and authorizations == Enum.uniq(authorizations) and
-      Enum.all?(authorizations, &valid_authorization_name?/1)
+      Enum.all?(authorizations, &valid_authorization_name?/1) and env_file_valid?(options)
   end
+
+  defp env_file_valid?(options) do
+    case Keyword.fetch(options, :env_file) do
+      :error -> true
+      {:ok, path} -> valid_nonempty_string?(path)
+    end
+  end
+
+  defp valid_nonempty_string?(value),
+    do: is_binary(value) and byte_size(value) in 1..4_096 and String.valid?(value)
 
   defp valid_authorization_name?(name),
     do:
@@ -377,28 +549,21 @@ defmodule PtcRunner.Kernel.CommandParser do
 
   defp reject_invalid_switch(command, invalid, frontend) do
     accepted = CommandDeclaration.accepted_switches(command, frontend)
-
-    Enum.find_value(invalid, fn {raw, _value} ->
-      switch = raw
-
-      case CommandDeclaration.retired_switch(command, switch) do
-        {:ok, replacement} ->
-          CommandRejection.retired_switch(command, switch, replacement, frontend)
-
-        :error ->
-          false
-      end
-    end)
-    |> case do
-      %CommandRejection{} = rejection -> {:error, rejection}
-      nil -> reject_unknown_or_generic(command, invalid, accepted, frontend)
-    end
+    reject_unknown_or_generic(command, invalid, accepted, frontend)
   end
 
   defp reject_unknown_or_generic(command, invalid, accepted, frontend) do
-    if Enum.any?(invalid, fn {raw, _value} -> raw not in accepted end),
-      do: {:error, CommandRejection.unknown_switch(command, frontend)},
-      else: reject(command, :invalid_arguments)
+    cond do
+      Enum.any?(invalid, fn {raw, _value} -> raw not in accepted end) ->
+        {:error, CommandRejection.unknown_switch(command, frontend)}
+
+      missing = Enum.find(invalid, fn {_raw, value} -> is_nil(value) end) ->
+        {raw, nil} = missing
+        {:error, CommandRejection.missing_switch_value(command, raw, frontend)}
+
+      true ->
+        reject(command, :invalid_arguments)
+    end
   end
 
   defp reject_closed_command(command, arguments, frontend) do

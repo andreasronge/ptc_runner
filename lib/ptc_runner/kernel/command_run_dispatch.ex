@@ -7,6 +7,7 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.PublicationAuthority
@@ -157,23 +158,68 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
       )
 
   defp maybe_setup_environment(%{environment_setup_required: true}, runtime),
-    do: CommandRuntime.setup_environment(runtime)
+    do: CommandRuntime.setup_environment_diagnostic(runtime)
 
   defp maybe_setup_environment(_preparation, _runtime), do: :ok
 
-  defp provider_execution(
+  defp provider_execution(preparation, runtime) do
+    case authorization_rejection(preparation, runtime.authorization_targets) do
+      nil -> requested_execution(preparation, runtime)
+      diagnostic -> {:error, diagnostic}
+    end
+  end
+
+  # `ProviderExecution.new/3` answers one reason for every unusable execution,
+  # which leaves an argument mistake indistinguishable from a broken catalog.
+  # The two mistakes an operator actually makes with `--authorize-mcp` are
+  # decided here, against the same selection the execution would be bound to.
+  defp authorization_rejection(_preparation, []), do: nil
+
+  defp authorization_rejection(%CommandPreparation{} = preparation, targets) do
+    selected = MapSet.new(preparation.prepared_run.provider_declarations, & &1.name)
+    descriptors = preparation.catalog.descriptors
+
+    Enum.find_value(targets, fn name ->
+      cond do
+        not MapSet.member?(selected, name) ->
+          authorization_diagnostic(:authorization_target_unknown, name)
+
+        not match?(%{authorization_mode: :oauth}, descriptors[name]) ->
+          authorization_diagnostic(:authorization_not_applicable, name)
+
+        true ->
+          nil
+      end
+    end)
+  end
+
+  # The subject names the alias the operator typed, which is the whole value of
+  # classifying this at all. The parser already admits only alias-shaped names,
+  # so a name the subject grammar refuses cannot be reached from the CLI; it
+  # declines to reject rather than build a diagnostic it cannot name.
+  defp authorization_diagnostic(code, name) do
+    case CommandSubject.provider(name, :local) do
+      {:ok, subject} ->
+        CommandDiagnostic.new!(:local_preflight, code, subject: subject, provider_activity: false)
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  defp requested_execution(
          %CommandPreparation{prepared_run: %{provider_declarations: []}},
          %CommandRuntime{authorization_targets: []}
        ),
        do: {:ok, nil}
 
-  defp provider_execution(
+  defp requested_execution(
          %CommandPreparation{prepared_run: %{provider_declarations: []}},
          _runtime
        ),
        do: {:error, :invalid_provider_execution}
 
-  defp provider_execution(preparation, runtime),
+  defp requested_execution(preparation, runtime),
     do:
       ProviderExecution.new(
         preparation.catalog,
@@ -181,8 +227,8 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
         runtime.authorization_targets
       )
 
-  defp execute_run(preparation, authority, nil, _runtime),
-    do: RunCoordinator.execute(preparation.prepared_run, authority)
+  defp execute_run(preparation, authority, nil, runtime),
+    do: RunCoordinator.execute(preparation.prepared_run, authority, runtime.live_status)
 
   defp execute_run(preparation, authority, execution, runtime),
     do:
@@ -190,7 +236,8 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
         preparation.prepared_run,
         authority,
         execution,
-        runtime.authorization_notifier
+        runtime.authorization_notifier,
+        runtime.live_status
       )
 
   defp operation_failure(

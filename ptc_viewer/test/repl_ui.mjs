@@ -11,6 +11,7 @@ import {
   templatePayloadMatches
 } from '../priv/static/js/repl.js';
 import { createRunCatalog } from '../priv/static/js/run-catalog.js';
+import { commitCurrentLoad } from '../priv/static/js/current-load.js';
 
 class FakeElement {
   constructor(tag = 'div') {
@@ -78,9 +79,9 @@ const envelope = (instance, generation, revision, lifecycle = 'open') => ({
   transcript: [],
   transcript_omitted_count: 0,
   session: {
-    profile_id: 'log-analysis-v2',
+    profile_id: 'run-analysis-v1',
     profile_digest: 'digest',
-    namespaces: ['cap', 'log', 'log.analysis'],
+    namespaces: ['analysis', 'cap'],
     snapshot: { capture_id: `capture-${generation}`, captured_at: '2026-07-19T12:00:00Z', run_count: 2 },
     usage: { evaluations: { remaining: 10 }, remaining_ms: 30_000, trace_calls: {} },
     trace: { persistence: 'pending', event_count: 0 }
@@ -101,10 +102,16 @@ assert.equal(templatePayloadMatches(current, { ...envelope('server-b', 2, 7), se
 
 assert.match(continuationExplanation('committed_with_history'), /\*1/);
 assert.match(continuationExplanation('preserved'), /preserved/);
-assert.equal(nextTabName('runs', 'ArrowLeft'), 'repl');
-assert.equal(nextTabName('repl', 'ArrowRight'), 'runs');
+assert.equal(nextTabName('runs', 'ArrowLeft'), 'live');
+assert.equal(nextTabName('repl', 'ArrowRight'), 'live');
+assert.equal(nextTabName('live', 'ArrowRight'), 'runs');
 assert.equal(nextTabName('repl', 'Home'), 'runs');
-assert.equal(nextTabName('runs', 'End'), 'repl');
+assert.equal(nextTabName('runs', 'End'), 'live');
+assert.equal(nextTabName('runs', 'ArrowRight', ['runs', 'live']), 'live');
+assert.equal(nextTabName('live', 'ArrowLeft', ['runs', 'live']), 'runs');
+assert.equal(nextTabName('runs', 'ArrowRight', ['runs', 'repl']), 'repl');
+assert.equal(nextTabName('repl', 'ArrowRight', ['runs', 'repl']), 'runs');
+assert.equal(nextTabName('runs', 'ArrowRight', []), 'runs');
 
 const fakeDialog = { returnValue: 'confirm', opened: false, showModal() { this.opened = true; } };
 openResetDialog(fakeDialog);
@@ -115,8 +122,14 @@ const config = { repl_enabled: true, page_bootstrap_nonce: 'nonce' };
 const encoded = Buffer.from(JSON.stringify(config)).toString('base64url');
 const fakeDocument = { querySelector: () => ({ content: encoded }) };
 assert.deepEqual(readViewerConfig(fakeDocument), config);
-assert.deepEqual(readViewerConfig({ querySelector: () => null }), { repl_enabled: false });
-assert.deepEqual(readViewerConfig({ querySelector: () => ({ content: 'not-json' }) }), { repl_enabled: false });
+assert.deepEqual(readViewerConfig({ querySelector: () => null }), {
+  repl_enabled: false,
+  live_enabled: false
+});
+assert.deepEqual(readViewerConfig({ querySelector: () => ({ content: 'not-json' }) }), {
+  repl_enabled: false,
+  live_enabled: false
+});
 
 const ids = [
   'repl-status', 'repl-lifecycle', 'repl-captured-at', 'repl-run-count',
@@ -156,6 +169,40 @@ const deferred = () => {
 const flush = async () => {
   for (let index = 0; index < 12; index += 1) await Promise.resolve();
 };
+
+let currentLoadGeneration = 1;
+const olderRunBody = deferred();
+const newerRunBody = deferred();
+const committedLoads = [];
+const olderSameRunLoad = commitCurrentLoad(1, {
+  isCurrent: generation => currentLoadGeneration === generation,
+  load: () => olderRunBody.promise,
+  commit: value => committedLoads.push(value)
+});
+currentLoadGeneration = 2;
+const newerSameRunLoad = commitCurrentLoad(2, {
+  isCurrent: generation => currentLoadGeneration === generation,
+  load: () => newerRunBody.promise,
+  commit: value => committedLoads.push(value)
+});
+newerRunBody.resolve({ run_id: 'run-a', snapshot: 'newer' });
+assert.equal(await newerSameRunLoad, true);
+olderRunBody.resolve({ run_id: 'run-a', snapshot: 'older' });
+assert.equal(await olderSameRunLoad, false);
+assert.deepEqual(committedLoads, [{ run_id: 'run-a', snapshot: 'newer' }]);
+
+let continuationGeneration = 1;
+const staleContinuationBody = deferred();
+const continuationRenders = [];
+const staleContinuation = commitCurrentLoad(1, {
+  isCurrent: generation => continuationGeneration === generation,
+  load: () => staleContinuationBody.promise,
+  commit: value => continuationRenders.push(value)
+});
+continuationGeneration = 2;
+staleContinuationBody.resolve({ run_id: 'run-a', page: 2 });
+assert.equal(await staleContinuation, false);
+assert.deepEqual(continuationRenders, []);
 
 // Fresh catalog generations own rendering. Slow older responses and stale
 // load-more controls cannot replace a newer post-persistence catalog, while a
@@ -317,11 +364,11 @@ assert.equal(templateRequests.length, 1);
 templateRequests[0].pending.resolve(response({
   ...authoritative,
   projection_revision: 2,
-  template: { source: '(log/run "run-1")' }
+  template: { source: '(analysis/open "run-1")' }
 }));
 authoritative = { ...authoritative, projection_revision: 2 };
 await flush();
-assert.equal(editor.value, '(log/run "run-1")');
+assert.equal(editor.value, '(analysis/open "run-1")');
 assert.equal(runsRefreshCount, 1);
 templateRequests.shift();
 
@@ -340,7 +387,7 @@ controller.setActive(true);
 assert.equal(controllerDocument.getElementById('repl-evaluate').disabled, false);
 
 // The keyboard shortcut executes rather than reporting that it could not.
-editor.value = '(log/runs {})';
+editor.value = '(analysis/runs {})';
 controllerDocument.getElementById('repl-editor').dispatch('keydown', { key: 'Enter', ctrlKey: true });
 assert.doesNotMatch(controllerDocument.getElementById('repl-status').textContent, /refreshing/);
 await flush();
@@ -363,7 +410,7 @@ assert.equal(templateCount, templatesBeforeBusyExample + 1);
 assert.equal(controllerDocument.getElementById('repl-evaluate').disabled, true);
 templateRequests[0].pending.resolve(response({
   ...authoritative,
-  template: { source: '(log/run "run-1")' }
+  template: { source: '(analysis/open "run-1")' }
 }));
 await flush();
 templateRequests.shift();
@@ -372,7 +419,7 @@ assert.equal(controllerDocument.getElementById('repl-evaluate').disabled, false)
 // A 409 converges through an authoritative read and replaces the obsolete
 // warning with visible recovered state.
 conflictNextEvaluation = true;
-editor.value = '(log/runs {})';
+editor.value = '(analysis/runs {})';
 controllerDocument.getElementById('repl-evaluate').dispatch('click');
 await flush();
 assert.match(controllerDocument.getElementById('repl-status').textContent, /synchronized/);
@@ -381,7 +428,7 @@ assert.equal(availability, true);
 // A lost mutation response blocks replay until polling has reconciled, then
 // replaces the failure with explicit transcript-check guidance.
 uncertainNextEvaluation = true;
-editor.value = '(log/counters {})';
+editor.value = '(analysis/read "run-id" {"collection" "execution_errors"})';
 controllerDocument.getElementById('repl-evaluate').dispatch('click');
 await flush();
 assert.match(controllerDocument.getElementById('repl-status').textContent, /uncertain request/);
@@ -398,7 +445,7 @@ editor.dispatch('input');
 templateRequests[0].pending.resolve(response({
   ...authoritative,
   projection_revision: authoritative.projection_revision + 1,
-  template: { source: '(log/run "run-1")' }
+  template: { source: '(analysis/open "run-1")' }
 }));
 authoritative = { ...authoritative, projection_revision: authoritative.projection_revision + 1 };
 await firstTemplate;
@@ -411,14 +458,14 @@ assert.equal(controllerDocument.getElementById('repl-template-ready').hidden, tr
 templateRequests[1].pending.resolve(response({
   ...authoritative,
   projection_revision: authoritative.projection_revision + 1,
-  template: { source: '(log/turns "run-1" {})' }
+  template: { source: '(analysis/read "run-1" {"collection" "activity"})' }
 }));
 authoritative = { ...authoritative, projection_revision: authoritative.projection_revision + 1 };
 await secondTemplate;
 await flush();
-assert.equal(editor.value, '(log/turns "run-1" {})');
+assert.equal(editor.value, '(analysis/read "run-1" {"collection" "activity"})');
 controllerDocument.getElementById('repl-template-replace').dispatch('click');
-assert.equal(editor.value, '(log/turns "run-1" {})');
+assert.equal(editor.value, '(analysis/read "run-1" {"collection" "activity"})');
 
 // Reset confirmation is consumed once. A later Escape-style close has an
 // empty returnValue and cannot repeat the mutation.
@@ -565,7 +612,7 @@ globalThis.fetch = async (path, options = {}) => {
     retryTemplateCount += 1;
     return response({
       ...envelope('server-retry', 1, 2),
-      template: { source: '(log/run "retry-run")' }
+      template: { source: '(analysis/open "retry-run")' }
     });
   }
   throw new Error(`unexpected retry request ${method} ${path}`);
@@ -593,7 +640,7 @@ assert.equal(retryDocument.getElementById('repl-retry').hidden, false);
 retryDocument.getElementById('repl-retry').dispatch('click');
 await flush();
 assert.equal(retryTemplateCount, 1);
-assert.equal(retryDocument.getElementById('repl-editor').value, '(log/run "retry-run")');
+assert.equal(retryDocument.getElementById('repl-editor').value, '(analysis/open "retry-run")');
 
 // Initial bootstrap status follows the authoritative lifecycle instead of
 // describing a closed session as ready.
@@ -620,7 +667,16 @@ assert.doesNotMatch(appSource, /dataset\.runId/);
 assert.match(appSource, /onClick=\$\{\(\) => selectRun\(run\.run_id\)\}/);
 assert.match(appSource, /location\.hash = runId \? `#\/run\/\$\{encodeURIComponent\(runId\)\}`/);
 assert.match(appSource, /decodeURIComponent\(match\[1\]\)/);
-assert.match(appSource, /loadRun\(route\.runId\)/);
+assert.match(appSource, /loadRun\(route\.runId, routeGeneration\)/);
 assert.match(appSource, /encodeURIComponent\(runId\)\}`\),/);
+assert.match(appSource, /run\.workflow_prelude\?\.hash/);
+assert.match(appSource, /run\.evaluations \?\? 0/);
+assert.match(appSource, /renderSemanticConversation\(container, null\)/);
+assert.match(appSource, /commitCurrentLoad\(routeGeneration,/);
+const loadMoreSource = appSource.slice(
+  appSource.indexOf('onLoadMore:'),
+  appSource.indexOf('function activateTab')
+);
+assert.match(loadMoreSource, /commitCurrentLoad\(routeGeneration,/);
 
 process.stdout.write('ok');

@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
 
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.TestSupport.TestHelpers
 
   defp start_state(limit_overrides \\ []) do
     {:ok, limits} = Limits.new(limit_overrides)
@@ -25,42 +26,55 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
 
     pid =
       spawn(fn ->
-        worker_loop(state, parent)
+        worker_loop(state, parent, nil)
       end)
 
     pid
   end
 
-  defp worker_loop(state, parent) do
+  defp worker_loop(state, parent, reservation_id) do
     receive do
       {:reserve, mode} ->
-        send(parent, {:reserved, self(), RunState.reserve_evaluation(state, mode)})
-        worker_loop(state, parent)
+        send(parent, {:reserved, self(), RunState.reserve_evaluation(state, "default", mode)})
+        worker_loop(state, parent, reservation_id)
 
       {:release, lease} ->
         send(parent, {:released, self(), RunState.release_evaluation(state, lease)})
-        worker_loop(state, parent)
+        worker_loop(state, parent, reservation_id)
 
       {:release_status, lease} ->
         send(parent, {:release_status, self(), RunState.release_evaluation_status(state, lease)})
-        worker_loop(state, parent)
+        worker_loop(state, parent, reservation_id)
 
       {:reserve_capability, environment, name, lease} ->
-        send(
-          parent,
-          {:capability_reserved, self(),
-           RunState.reserve_capability(state, environment, name, lease)}
-        )
+        case RunState.reserve_capability(state, environment, name, lease) do
+          {:ok, next_reservation_id} ->
+            send(parent, {:capability_reserved, self(), :ok})
+            worker_loop(state, parent, next_reservation_id)
 
-        worker_loop(state, parent)
+          {:error, _reason} = error ->
+            send(parent, {:capability_reserved, self(), error})
+            worker_loop(state, parent, reservation_id)
+        end
 
       {:attach_provider, provider} ->
-        send(parent, {:provider_attached, self(), RunState.attach_provider(state, provider)})
-        worker_loop(state, parent)
+        result = RunState.attach_provider(state, reservation_id, provider)
+        send(parent, {:provider_attached, self(), result})
+        worker_loop(state, parent, reservation_id)
 
       :finish_provider ->
-        send(parent, {:provider_finished, self(), RunState.finish_provider(state)})
-        worker_loop(state, parent)
+        result =
+          case RunState.finish_provider(
+                 state,
+                 reservation_id,
+                 {:adapter_success, :missing}
+               ) do
+            {:ok, :settled} -> :ok
+            other -> other
+          end
+
+        send(parent, {:provider_finished, self(), result})
+        worker_loop(state, parent, nil)
 
       :stop ->
         :ok
@@ -89,6 +103,29 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     after
       timeout -> flunk("worker #{inspect(worker)} received no admission reply")
     end
+  end
+
+  test "an actual limit refusal issues a caller-bound one-shot proof" do
+    state = start_state(subordinate_evaluations: 1)
+
+    assert {:ok, %{}, [], lease} =
+             RunState.reserve_evaluation_with_limit_proof(state, "default", :fail_fast)
+
+    assert :ok = RunState.release_evaluation(state, lease)
+
+    assert {:error, {:limit_exceeded, proof}} =
+             RunState.reserve_evaluation_with_limit_proof(state, "default", :fail_fast)
+
+    assert is_binary(proof)
+
+    assert {:error, :invalid_evaluation_limit_proof} =
+             Task.async(fn -> RunState.consume_evaluation_limit_proof(state, proof) end)
+             |> Task.await()
+
+    assert :ok = RunState.consume_evaluation_limit_proof(state, proof)
+
+    assert {:error, :invalid_evaluation_limit_proof} =
+             RunState.consume_evaluation_limit_proof(state, proof)
   end
 
   defp release!(worker, lease) do
@@ -387,25 +424,33 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     # Invalid arguments from the dead evaluation are turned away before
     # validation can classify them as a protocol error of the current run.
     assert %{status: :error, kind: :capability_denied, reason: :stale_evaluation} =
-             Dispatcher.dispatch_with_lease(
+             Dispatcher.dispatch(
                state,
                :mission,
                environment,
                "strict",
                %{},
-               100,
-               {nil, nil, stale_lease}
+               TestHelpers.dispatch_context(state, :mission, 100,
+                 lease: stale_lease,
+                 mission_name: "default"
+               ),
+               nil,
+               nil
              )
 
     assert %{status: :error, kind: :capability_denied, reason: :stale_evaluation} =
-             Dispatcher.dispatch_with_lease(
+             Dispatcher.dispatch(
                state,
                :mission,
                environment,
                "strict",
                %AmbiguousArguments{},
-               100,
-               {nil, nil, stale_lease}
+               TestHelpers.dispatch_context(state, :mission, 100,
+                 lease: stale_lease,
+                 mission_name: "default"
+               ),
+               nil,
+               nil
              )
 
     usage_after = RunState.usage(state)
@@ -421,8 +466,8 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     assert :ok = RunState.protocol_error(state, :mission, next_lease)
     assert RunState.usage(state).protocol_errors == usage_before.protocol_errors + 1
 
-    # Legacy mission dispatch without a lease is fail-closed for ambiguity
-    # too: no protocol-error accounting for an unauthenticated caller.
+    # A mission context without a lease is fail-closed for ambiguity too: no
+    # protocol-error accounting for an unauthenticated caller.
     assert %{status: :error, kind: :capability_denied, reason: :stale_evaluation} =
              Dispatcher.dispatch(
                state,
@@ -430,7 +475,9 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
                environment,
                "strict",
                %AmbiguousArguments{},
-               100
+               TestHelpers.dispatch_context(state, :mission, 100, mission_name: "default"),
+               nil,
+               nil
              )
 
     assert RunState.usage(state).protocol_errors == usage_before.protocol_errors + 1
@@ -449,8 +496,16 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     {:ok, mission} = MissionEnvironment.new(capabilities: [])
 
     stale_tools =
-      ToolGrant.capability_callbacks(state, :mission, mission, 1_000, nil, nil,
-        lease: stale_lease
+      ToolGrant.capability_callbacks(
+        state,
+        :mission,
+        mission,
+        TestHelpers.dispatch_context(state, :mission, 1_000,
+          lease: stale_lease,
+          mission_name: "default"
+        ),
+        nil,
+        nil
       )
 
     holder_monitor = Process.monitor(holder)
@@ -511,7 +566,7 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
 
     direct = start_worker(state)
     assert {:error, :busy} = reserve!(direct)
-    assert {:error, :busy} = RunState.reserve_source_check(state)
+    assert {:error, :busy} = RunState.reserve_source_check(state, "default")
   end
 
   test "a parked release-status caller is replied to when its reservations drain" do
@@ -601,7 +656,9 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     # the commit's clear resolves the parked waiter instead of dropping it.
     holder =
       spawn(fn ->
-        {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, :fail_fast)
+        {:ok, _memory, _history, lease} =
+          RunState.reserve_evaluation(state, "default", :fail_fast)
+
         send(parent, {:leased, self(), lease})
 
         receive do
@@ -655,7 +712,9 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
 
     holder =
       spawn(fn ->
-        {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, :fail_fast)
+        {:ok, _memory, _history, lease} =
+          RunState.reserve_evaluation(state, "default", :fail_fast)
+
         send(parent, {:leased, self(), lease})
 
         receive do
@@ -741,13 +800,14 @@ defmodule PtcRunner.Kernel.EvaluationAdmissionTest do
     Process.exit(provider, :kill)
 
     await_owner_state(state, fn owner ->
-      match?(
-        %{
-          evaluation_release_waiter: {_from, _lease},
-          reservations: %{^dispatcher => %{provider: nil, provider_ref: nil}}
-        },
-        owner
-      )
+      match?(%{evaluation_release_waiter: {_from, _lease}}, owner) and
+        Enum.any?(owner.reservations, fn
+          {_reservation_id, %{caller: ^dispatcher, provider: nil, provider_ref: nil}} ->
+            true
+
+          _reservation ->
+            false
+        end)
     end)
 
     refute_receive {:release_status, ^holder, _result}, 50

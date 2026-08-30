@@ -8,20 +8,22 @@ provider occurrences.
 
 ## Setup and execution
 
-The repository includes the built read-only filesystem MCP sample and the
-example includes a small write-only MCP server implemented with the same
-Elixir/OTP toolchain as PtcRunner. Export an OpenRouter key:
+Both missions install the published
+[`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp) package: one
+installation maps only `read_text_file`, the other only `write_text_file`, each
+with its own confined root. The first run may download that package. Node.js
+and `npx` are required. Export an OpenRouter key:
 
 ```console
 export OPENROUTER_API_KEY=...
 ```
 
-Run from the repository root (host transport paths are resolved relative to
-the host configuration):
+Run from the repository root. The project document remembers the host
+installation (transport paths resolve relative to that host file):
 
 ```console
-mix ptc run examples/named-mission-reader-writer/ptc.json \
-  --host-config examples/named-mission-reader-writer/ptc-host.json
+mix ptc run examples/named-mission-reader-writer/ptc-project.json
+mix ptc viewer examples/named-mission-reader-writer/ptc-project.json
 ```
 
 The reader returns the exact contents of `reader-state/brief.txt`. The workflow
@@ -36,8 +38,8 @@ one mission's authority to the other. `reader_workspace` exposes only
 `workspace.read` and is granted only to `reader`; `writer_workspace` exposes
 only `workspace.write` and is granted only to `writer`. A generated reader
 program cannot resolve the write tool, and a writer program cannot resolve the
-read tool. The two filesystem servers also have different confined roots, so
+read tool. The two installations also have different confined roots, so
 provider state remains separate even if public tool names or model behavior
-change. The writer server accepts only one-segment lowercase relative names,
-caps content at 65,536 bytes, and refuses to replace non-regular files; it is a
-focused runnable example, not a production filesystem service.
+change. `write_text_file` accepts only one lowercase basename, caps content,
+and refuses to replace non-regular files; the package is a focused runnable
+example, not a production filesystem service.

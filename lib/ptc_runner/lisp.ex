@@ -49,8 +49,8 @@ defmodule PtcRunner.Lisp do
     SymbolCounter
   }
 
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.Program
-  alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Effects
   alias PtcRunner.Lisp.Eval.Helpers
@@ -70,6 +70,7 @@ defmodule PtcRunner.Lisp do
   @default_max_parallel_workers 8
   alias PtcRunner.Lisp.AmbiguousArguments
   alias PtcRunner.Lisp.Env.Builtin, as: EnvBuiltin
+  alias PtcRunner.Lisp.EvaluatorError
   alias PtcRunner.Lisp.Format.Var
   alias PtcRunner.Lisp.Java.Project, as: JavaProject
   alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
@@ -77,6 +78,7 @@ defmodule PtcRunner.Lisp do
   alias PtcRunner.Lisp.Result, as: Step
   alias PtcRunner.Lisp.Signature
   alias PtcRunner.Lisp.Tool
+  alias PtcRunner.Lisp.TrustedError
   alias PtcRunner.Lisp.UntrustedRenderer
 
   @valid_callers [:direct, :kernel, :repl]
@@ -89,6 +91,7 @@ defmodule PtcRunner.Lisp do
     name: nil,
     field_descriptions: nil,
     failure_origin: nil,
+    return_origin: nil,
     prints: [],
     tool_calls: [],
     pmap_calls: [],
@@ -99,6 +102,7 @@ defmodule PtcRunner.Lisp do
     original_prompt: nil,
     tools: nil,
     prelude_trace: nil,
+    prelude_calls: nil,
     prelude_call_counts: %{}
   ]
 
@@ -240,7 +244,8 @@ defmodule PtcRunner.Lisp do
     - `:tools` - Map of tool names to functions (default: %{})
     - `:signature` - Optional signature string for return value validation
     - `:float_precision` - Number of decimal places for floats in result (default: nil = full precision)
-    - `:timeout` - Timeout in milliseconds for entire sandbox execution (default: 1000)
+    - `:timeout` - Timeout in milliseconds for entire sandbox execution (default:
+      1000, configurable via `config :ptc_runner, :default_timeout`)
     - `:compile_timeout` - Timeout in milliseconds for the compile phase (parse + analyze) (default: 5000)
     - `:compile_max_heap` - Compile-worker heap ceiling in words (default: the
       `:max_heap` value). No ambient application default is consulted, so a
@@ -254,7 +259,8 @@ defmodule PtcRunner.Lisp do
       operation started late in a run therefore cannot outlive the run.
     - `:pmap_max_concurrency` - Local pmap/pcalls scheduling window — max tasks one call keeps in flight (default: the build-time `System.schedulers_online() * 2`, frozen into the semantic revision). Reduce to avoid overflowing connection pools. The HARD aggregate cap is `:max_parallel_workers`.
     - `:max_heap` - Program heap budget in words ABOVE the measured
-      environment baseline (default: 1_250_000). Host-provided data
+      environment baseline (default: 1_250_000, configurable via
+      `config :ptc_runner, :default_max_heap`). Host-provided data
       (context, `:memory`, tool closures, the parsed program) is measured
       after spawn and excluded from this budget — see
       `PtcRunner.Sandbox` for the re-baseline semantics.
@@ -268,7 +274,27 @@ defmodule PtcRunner.Lisp do
     - `:max_symbols` - Max unique symbols/keywords allowed (default: 10_000)
     - `:max_program_bytes` - Max source code size in bytes (default: 1_000_000)
     - `:max_print_length` - Max characters per `println` call (default: 2000)
+    - `:loop_limit` - Optional positive integer bound on one `loop` or
+      tail-`recur` function activation. Omitted or `nil` disables the counter
+      (default: `nil`). Sequential loops, nested loops, and separate higher-order
+      callback invocations are separate activations. Ordinary non-tail recursion
+      and host collection traversal (`map`, `reduce`, and similar) are not
+      counted. Invalid values return `:invalid_config`. Heap and elapsed-time
+      limits remain the containment boundaries.
     - `:filter_context` - Filter context to only include accessed data keys (default: true)
+    - `:strict_data` - When true, a missing `data/<name>` is a runtime error
+      instead of `nil` (default: false). The Kernel enables this at every one of
+      its boundaries -- the workflow entry, a mission evaluation, and both REPL
+      session kinds; `run/2` stays permissive.
+    - `:data_grants` - Optional sorted `data/<name>` forms included in the
+      missing-grant diagnostic under `:strict_data`. The Kernel passes the list
+      `PtcRunner.Lisp.DataKeys.source_referenceable_forms/1` derives from the
+      granted data, the same one the mission inventory publishes, rather than
+      deriving it from context keys. When omitted, the diagnostic names the
+      missing key without a grant list.
+    - `:missing_data_params_message` - Optional diagnostic used when `data/params`
+      is missing under `:strict_data`. The Kernel sets this so a no-params
+      evaluation is not reported as a missing grant.
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
       SOURCE string, or a list of source-bearing selection maps accepted by
       `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code.
@@ -477,6 +503,8 @@ defmodule PtcRunner.Lisp do
       program_bytes: program_bytes,
       signature_supplied?: signature_supplied?
     }
+
+    metadata = maybe_put_live_run(metadata, Keyword.get(opts, :telemetry_run))
 
     started_at = System.monotonic_time()
 
@@ -745,7 +773,7 @@ defmodule PtcRunner.Lisp do
 
   # Bundle the per-run options map consumed by the rest of the run pipeline.
   defp run_params(opts) do
-    max_heap = Keyword.get(opts, :max_heap, 1_250_000)
+    max_heap = Keyword.get(opts, :max_heap, PtcRunner.Sandbox.default_max_heap())
 
     %{
       ctx: Keyword.get(opts, :context, %{}),
@@ -754,7 +782,7 @@ defmodule PtcRunner.Lisp do
       signature_str: Keyword.get(opts, :signature),
       float_precision: Keyword.get(opts, :float_precision),
       preserve_runtime_callables: Keyword.get(opts, :preserve_runtime_callables, false),
-      timeout: Keyword.get(opts, :timeout, 1000),
+      timeout: Keyword.get(opts, :timeout, PtcRunner.Sandbox.default_timeout()),
       max_heap: max_heap,
       setup_max_heap: Keyword.get(opts, :setup_max_heap),
       # Security H1: every pmap/pcalls worker runs under this FIXED heap cap
@@ -777,6 +805,7 @@ defmodule PtcRunner.Lisp do
         Keyword.get(opts, :parallel_deadline_cap, Keyword.get(opts, :run_deadline_ms)),
       turn_history: Keyword.get(opts, :turn_history, []),
       max_print_length: Keyword.get(opts, :max_print_length),
+      loop_limit: Keyword.get(opts, :loop_limit),
       filter_context: Keyword.get(opts, :filter_context, true),
       pmap_timeout: Keyword.get(opts, :pmap_timeout),
       pmap_max_concurrency: Keyword.get(opts, :pmap_max_concurrency),
@@ -784,12 +813,15 @@ defmodule PtcRunner.Lisp do
       max_tool_call_result_bytes: Keyword.get(opts, :max_tool_call_result_bytes),
       turn_history_mode: Keyword.fetch!(opts, :turn_history_mode),
       strict_data: Keyword.get(opts, :strict_data, false),
+      data_grants: Keyword.get(opts, :data_grants),
+      missing_data_params_message: Keyword.get(opts, :missing_data_params_message),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
       prelude_export_mask: Keyword.get(opts, :prelude_export_mask),
       prelude_filtered_exports: Keyword.get(opts, :prelude_filtered_exports, []),
-      link: Keyword.get(opts, :link, false)
+      link: Keyword.get(opts, :link, false),
+      telemetry_run: Keyword.get(opts, :telemetry_run)
     }
   end
 
@@ -814,6 +846,7 @@ defmodule PtcRunner.Lisp do
 
     # Normalize tools to Tool structs
     with :ok <- validate_parallel_config(params.worker_max_heap, params.max_parallel_workers),
+         :ok <- validate_loop_limit(params.loop_limit),
          {:ok, normalized_tools} <- normalize_tools(raw_tools),
          {:ok, parsed_signature} <- parse_signature(signature_str) do
       tool_failure_token = make_ref()
@@ -834,6 +867,9 @@ defmodule PtcRunner.Lisp do
            }}
         end)
 
+      private_tool_authority? =
+        Enum.any?(normalized_tools, fn {_name, tool} -> Tool.private?(tool) end)
+
       opts =
         Map.merge(params, %{
           normalized_tools: normalized_tools,
@@ -841,7 +877,8 @@ defmodule PtcRunner.Lisp do
           parsed_signature: parsed_signature,
           signature_str: signature_str,
           tool_failure_token: tool_failure_token,
-          tools_meta: tools_meta
+          tools_meta: tools_meta,
+          private_tool_authority?: private_tool_authority?
         })
 
       execute_program(source, opts)
@@ -885,6 +922,15 @@ defmodule PtcRunner.Lisp do
       true ->
         :ok
     end
+  end
+
+  defp validate_loop_limit(nil), do: :ok
+
+  defp validate_loop_limit(limit) when is_integer(limit) and limit > 0, do: :ok
+
+  defp validate_loop_limit(limit) do
+    {:error,
+     {:invalid_config, ":loop_limit must be a positive integer or nil, got " <> inspect(limit)}}
   end
 
   @doc """
@@ -981,7 +1027,7 @@ defmodule PtcRunner.Lisp do
           })
 
         case compile_program(source, compile_opts) do
-          {:ok, _core_ast} -> :ok
+          {:ok, _core_ast, _prelude_calls} -> :ok
           {:error, %Step{} = step} -> {:error, step}
         end
       else
@@ -1000,8 +1046,10 @@ defmodule PtcRunner.Lisp do
 
   defp execute_program(source, opts) do
     case compile_program(source, Map.put(opts, :check_tool_resolution, true)) do
-      {:ok, core_ast} ->
-        execute_eval(core_ast, apply_run_deadline(opts))
+      {:ok, core_ast, prelude_calls} ->
+        core_ast
+        |> execute_eval(apply_run_deadline(opts))
+        |> put_prelude_calls(prelude_calls)
 
       {:error, %Step{}} = compile_error ->
         prepare_pre_setup_error(compile_error, opts)
@@ -1045,7 +1093,8 @@ defmodule PtcRunner.Lisp do
             do: check_undefined_tools(core_ast, public_tool_names, tool_names, prelude),
             else: :ok
 
-        {:ok, core_ast, undefined_vars, tool_check}
+        prelude_calls = static_prelude_calls(core_ast, prelude)
+        {:ok, core_ast, undefined_vars, tool_check, prelude_calls}
       end
     end
 
@@ -1056,10 +1105,10 @@ defmodule PtcRunner.Lisp do
     ]
 
     case PtcRunner.Sandbox.run_bounded(compile_fn, compile_opts) do
-      {:ok, {:ok, core_ast, undefined_vars, tool_check}} ->
+      {:ok, {:ok, core_ast, undefined_vars, tool_check, prelude_calls}} ->
         with :ok <- check_undefined_var_candidates(undefined_vars, memory),
              :ok <- tool_check do
-          {:ok, core_ast}
+          {:ok, core_ast, prelude_calls}
         else
           {:error, _} = compile_error ->
             handle_compile_error(compile_error, memory)
@@ -1099,6 +1148,10 @@ defmodule PtcRunner.Lisp do
     %{opts | timeout: min(timeout, remaining_ms)}
   end
 
+  defp put_prelude_calls({status, %Step{} = step}, prelude_calls)
+       when status in [:ok, :error] and is_list(prelude_calls),
+       do: {status, %{step | prelude_calls: prelude_calls}}
+
   defp handle_compile_error({:error, {:parse_error, msg}}, memory) do
     {:error, Step.error(:parse_error, msg, memory, %{})}
   end
@@ -1128,7 +1181,8 @@ defmodule PtcRunner.Lisp do
         max_heap: opts.max_heap,
         prepare_context: &internalize_public_input(&1, :memory),
         eval_fn: fn _ast, prepared_memory -> {:ok, prepared_memory, %{}} end,
-        link: Map.get(opts, :link, false)
+        link: Map.get(opts, :link, false),
+        telemetry_run: Map.get(opts, :telemetry_run)
       ]
       |> put_setup_max_heap(opts.setup_max_heap)
 
@@ -1164,6 +1218,7 @@ defmodule PtcRunner.Lisp do
       max_parallel_workers: max_parallel_workers,
       turn_history: turn_history,
       max_print_length: max_print_length,
+      loop_limit: loop_limit,
       filter_context: filter_context,
       pmap_timeout: pmap_timeout,
       pmap_max_concurrency: pmap_max_concurrency,
@@ -1172,7 +1227,10 @@ defmodule PtcRunner.Lisp do
       max_tool_call_result_bytes: max_tool_call_result_bytes,
       turn_history_mode: turn_history_mode,
       strict_data: strict_data,
+      data_grants: data_grants,
+      missing_data_params_message: missing_data_params_message,
       strict_transitive_calls: strict_transitive_calls,
+      private_tool_authority?: private_tool_authority?,
       direct_namespaces: direct_namespaces,
       transitive_namespace_requirers: transitive_namespace_requirers,
       prelude_export_mask: prelude_export_mask
@@ -1191,9 +1249,16 @@ defmodule PtcRunner.Lisp do
 
     parallel_budget = ParallelBudget.new(max_parallel_workers)
 
+    :telemetry.execute(
+      [:ptc_runner, :parallel, :budget],
+      %{capacity: max_parallel_workers},
+      maybe_put_live_run(%{budget: parallel_budget}, Map.get(opts, :telemetry_run))
+    )
+
     eval_opts =
       [
         max_print_length: max_print_length,
+        loop_limit: loop_limit,
         max_heap: max_heap,
         worker_max_heap: worker_max_heap,
         parallel_budget: parallel_budget,
@@ -1205,7 +1270,10 @@ defmodule PtcRunner.Lisp do
         max_tool_calls: max_tool_calls,
         max_tool_call_result_bytes: max_tool_call_result_bytes,
         strict_data: strict_data,
+        data_grants: data_grants,
+        missing_data_params_message: missing_data_params_message,
         strict_transitive_calls: strict_transitive_calls,
+        private_tool_authority?: private_tool_authority?,
         direct_namespaces: direct_namespaces,
         transitive_namespace_requirers: transitive_namespace_requirers,
         prelude_export_mask: prelude_export_mask,
@@ -1256,7 +1324,8 @@ defmodule PtcRunner.Lisp do
             filter_context?
           ),
         eval_fn: eval_fn,
-        link: Map.get(opts, :link, false)
+        link: Map.get(opts, :link, false),
+        telemetry_run: Map.get(opts, :telemetry_run)
       ]
       |> put_failure_snapshot(turn_history_mode)
       |> put_setup_max_heap(setup_max_heap)
@@ -1265,6 +1334,11 @@ defmodule PtcRunner.Lisp do
     |> PtcRunner.Sandbox.execute(context, sandbox_opts)
     |> handle_execute_result(opts)
   end
+
+  defp maybe_put_live_run(metadata, live_run) when is_pid(live_run),
+    do: Map.put(metadata, :live_run, live_run)
+
+  defp maybe_put_live_run(metadata, _live_run), do: metadata
 
   defp unexpected_eval_error(:error, exception, _stacktrace) when is_exception(exception),
     do: {:runtime_error, Exception.message(exception)}
@@ -1481,14 +1555,42 @@ defmodule PtcRunner.Lisp do
     {:error, step}
   end
 
+  defp error_details({:arithmetic_error, token})
+       when token in [:division_by_zero, :integer_overflow, :bad_argument],
+       do: %{token: token}
+
+  defp error_details({:arity_error, details}) when is_map(details), do: details
+
+  defp error_details({:not_callable, {:data_ref, symbol}}) when is_binary(symbol),
+    do: %{name: symbol}
+
+  defp error_details({:not_callable, details}) when is_map(details), do: details
+
+  defp error_details({:loop_limit_exceeded, n}) when is_integer(n), do: %{limit: n}
+
   defp error_details({:prelude_contract_error, _message, details}) when is_map(details),
     do: details
 
   defp error_details({:pmap_error, _message, taxonomy}) when is_map(taxonomy),
-    do: SafeMetadata.retain_failure_taxonomy(taxonomy)
+    do: retain_parallel_failure_metadata(taxonomy)
 
   defp error_details({:pcalls_error, _index, _message, taxonomy}) when is_map(taxonomy),
-    do: SafeMetadata.retain_failure_taxonomy(taxonomy)
+    do: retain_parallel_failure_metadata(taxonomy)
+
+  defp error_details({:runtime_limit_exceeded, _message, details}) when is_map(details),
+    do: details
+
+  defp error_details({:model_output_truncated, _message, details}) when is_map(details),
+    do: details
+
+  defp error_details({:invalid_agent_config, _message, details}) when is_map(details),
+    do: details
+
+  defp error_details({:result_contract_failed, _message, details}) when is_map(details),
+    do: details
+
+  defp error_details({:llm_provider_failed, _message, details}) when is_map(details),
+    do: details
 
   defp error_details({category, _message, details})
        when category in [
@@ -1503,6 +1605,10 @@ defmodule PtcRunner.Lisp do
        do: details
 
   defp error_details(_reason), do: %{}
+
+  defp retain_parallel_failure_metadata(metadata) do
+    LLMReplayDiagnostic.retain_parallel_failure_metadata(metadata)
+  end
 
   @doc """
   Format an error tuple into a human-readable string.
@@ -1540,8 +1646,12 @@ defmodule PtcRunner.Lisp do
              :java_domain_error,
              :invalid_java_string,
              :java_handler_contract_error
-           ] and is_binary(message) and is_map(details),
-      do: "Java interop error: #{message}"
+           ] and is_binary(message) and is_map(details) do
+    case EvaluatorError.lisp_message(category, details) do
+      {:ok, public_message} -> public_message
+      :error -> "Java interop error"
+    end
+  end
 
   # Handle Analyze errors: {:invalid_arity, atom, message}
   def format_error({:invalid_arity, _atom, msg}) when is_binary(msg), do: "Analysis error: #{msg}"
@@ -1565,8 +1675,55 @@ defmodule PtcRunner.Lisp do
     <<String.downcase(<<first::utf8>>)::binary, rest::binary>>
   end
 
-  def format_error({:not_callable, value}), do: "not callable: #{inspect(value, limit: 3)}"
-  def format_error({:arity_error, msg}), do: "arity error: #{msg}"
+  def format_error({:not_callable, {:data_ref, symbol}}) when is_binary(symbol),
+    do: "not callable: #{symbol}"
+
+  def format_error({:not_callable, details}) when is_map(details) do
+    case EvaluatorError.lisp_message(:not_callable, details) do
+      {:ok, message} -> message
+      :error -> "not callable: value"
+    end
+  end
+
+  def format_error({:not_callable, _value}) do
+    case EvaluatorError.lisp_message(:not_callable, %{}) do
+      {:ok, message} -> message
+      :error -> "not callable: value"
+    end
+  end
+
+  def format_error({:arity_error, details}) when is_map(details) do
+    case EvaluatorError.lisp_message(:arity_error, details) do
+      {:ok, message} -> message
+      :error -> "arity error"
+    end
+  end
+
+  def format_error({:arity_error, msg}) when is_binary(msg), do: "arity error: #{msg}"
+
+  def format_error({:arithmetic_error, token})
+      when token in [:division_by_zero, :integer_overflow, :bad_argument] do
+    case EvaluatorError.lisp_message(:arithmetic_error, %{token: token}) do
+      {:ok, message} -> message
+      :error -> "arithmetic error"
+    end
+  end
+
+  def format_error({:arithmetic_error, msg}) when is_binary(msg) do
+    token =
+      cond do
+        msg == "division by zero" or String.contains?(msg, "division by zero") ->
+          :division_by_zero
+
+        msg == "integer overflow" or String.contains?(msg, "integer overflow") ->
+          :integer_overflow
+
+        true ->
+          :bad_argument
+      end
+
+    format_error({:arithmetic_error, token})
+  end
 
   # Issue #878: dedicated formatter for unsupported interop methods.
   # Avoids the `:unbound_var` path which would treat the message as a
@@ -1575,11 +1732,14 @@ defmodule PtcRunner.Lisp do
     "Unsupported method '#{name}'. Supported interop methods: #{available}. Use (.method obj) syntax."
   end
 
-  # Issue #884: friendly message for the loop iteration cap (DIV-01).
-  # Without this clause, the raw Elixir tuple {:loop_limit_exceeded, 1000}
+  # Issue #884/#1710: friendly message for an opt-in loop iteration cap (DIV-01).
+  # Without this clause, the raw Elixir tuple {:loop_limit_exceeded, n}
   # leaks to the LLM via the generic inspect-based fallback.
   def format_error({:loop_limit_exceeded, n}) do
-    "Loop iteration limit exceeded (#{n} iterations). Use reduce/map over a finite sequence instead, or split work across smaller loops."
+    case EvaluatorError.lisp_message(:loop_limit_exceeded, %{limit: n}) do
+      {:ok, message} -> message
+      :error -> "loop limit exceeded"
+    end
   end
 
   # Handle tool errors
@@ -1629,9 +1789,17 @@ defmodule PtcRunner.Lisp do
     do: UntrustedRenderer.tool_failure(name, reason)
 
   # Handle other 3-tuple error formats from Eval: {type, message, data}
-  def format_error({type, msg, _}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
-  def format_error({type, msg}) when is_atom(type) and is_binary(msg), do: "#{type}: #{msg}"
+  def format_error({type, msg, _}) when is_atom(type) and is_binary(msg),
+    do: "#{type}: #{strip_typed_prefix(msg, type)}"
+
+  def format_error({type, msg}) when is_atom(type) and is_binary(msg),
+    do: "#{type}: #{strip_typed_prefix(msg, type)}"
+
   def format_error(other), do: "Error: #{inspect(other, limit: 5)}"
+
+  defp strip_typed_prefix(message, type) when is_atom(type) and is_binary(message) do
+    String.replace_prefix(message, Atom.to_string(type) <> ": ", "")
+  end
 
   defp grant_filter_reason(:ptc_tool_denied), do: "ptc_tool_denied"
   defp grant_filter_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
@@ -1639,7 +1807,7 @@ defmodule PtcRunner.Lisp do
 
   # Human-readable kill message from `PtcRunner.Sandbox.memory_exceeded_info/0`
   # diagnostics (setup-phase kills are a grant problem, not a program
-  # problem) or the legacy integer byte limit (`run_bounded/2`).
+  # problem) or the integer byte limit reported by `Sandbox.run_bounded/2`.
   defp memory_exceeded_message(%{phase: :setup} = info) do
     "killed during environment setup: granted context/memory/tools exceeded " <>
       "the #{info.limit_bytes}-byte setup ceiling (raise :setup_max_heap or shrink the grant)"
@@ -1750,6 +1918,7 @@ defmodule PtcRunner.Lisp do
       usage: nil,
       turns: nil,
       failure_origin: ctx.failure_origin,
+      return_origin: ctx.return_origin,
       prints: effects.prints,
       tool_calls: cleaned_tool_calls,
       pmap_calls: cleaned_pmap_calls,
@@ -2144,10 +2313,9 @@ defmodule PtcRunner.Lisp do
     length(identities) != MapSet.size(MapSet.new(identities))
   end
 
-  # Memory keys are `def`-bound variable names. Externalize them through the
-  # same bounded vocabulary as parsed symbols: builtin names remain atoms,
-  # user-defined names remain binaries, and unrelated VM atom-table state is
-  # ignored.
+  # Memory keys are `def`-bound variable names. The evaluator stores their
+  # canonical binary spelling regardless of the parser's bounded internal atom
+  # representation.
   defp externalize_memory_entries(entries) do
     pairs =
       Enum.map(entries, fn {key, item} ->
@@ -2178,7 +2346,7 @@ defmodule PtcRunner.Lisp do
   defp externalize_memory_key(%{__struct__: LispKeyword} = keyword),
     do: externalize_lisp_values(keyword)
 
-  defp externalize_memory_key(name) when is_binary(name), do: SourceAtoms.intern(name)
+  defp externalize_memory_key(name) when is_binary(name), do: name
   defp externalize_memory_key(other), do: externalize_lisp_values(other)
 
   # Check if symbol count exceeds limit
@@ -2214,11 +2382,7 @@ defmodule PtcRunner.Lisp do
   end
 
   defp memory_binding?(memory, name) when is_binary(name) do
-    Map.has_key?(memory, name) or
-      case safe_to_existing_atom(name) do
-        {:ok, atom} -> Map.has_key?(memory, atom)
-        :error -> false
-      end
+    Map.has_key?(memory, name)
   end
 
   # Pre-execution check: reject programs that reference tools not in the provided
@@ -2410,6 +2574,44 @@ defmodule PtcRunner.Lisp do
 
   defp collect_prelude_refs(_other, acc), do: acc
 
+  defp static_prelude_calls(_core_ast, nil), do: []
+
+  defp static_prelude_calls(core_ast, %Prelude{} = prelude) do
+    callable_refs =
+      prelude.exports
+      |> Enum.filter(&(&1.kind == :function))
+      |> MapSet.new(& &1.ref)
+
+    core_ast
+    |> collect_static_prelude_calls(callable_refs, MapSet.new())
+    |> MapSet.to_list()
+    |> Enum.sort()
+  end
+
+  defp collect_static_prelude_calls({:prelude_call, ref, args}, callable_refs, acc) do
+    Enum.reduce(args, MapSet.put(acc, ref), &collect_static_prelude_calls(&1, callable_refs, &2))
+  end
+
+  defp collect_static_prelude_calls({:prelude_ref, ref}, callable_refs, acc) do
+    if MapSet.member?(callable_refs, ref), do: MapSet.put(acc, ref), else: acc
+  end
+
+  defp collect_static_prelude_calls(tuple, callable_refs, acc) when is_tuple(tuple),
+    do:
+      Enum.reduce(
+        Tuple.to_list(tuple),
+        acc,
+        &collect_static_prelude_calls(&1, callable_refs, &2)
+      )
+
+  defp collect_static_prelude_calls(list, callable_refs, acc) when is_list(list),
+    do: Enum.reduce(list, acc, &collect_static_prelude_calls(&1, callable_refs, &2))
+
+  defp collect_static_prelude_calls(map, callable_refs, acc) when is_map(map),
+    do: Enum.reduce(Map.values(map), acc, &collect_static_prelude_calls(&1, callable_refs, &2))
+
+  defp collect_static_prelude_calls(_other, _callable_refs, acc), do: acc
+
   defp execute_tool(normalized_tools, name, args, origin, failure_token) do
     case Map.fetch(normalized_tools, name) do
       {:ok, %Tool{} = tool} ->
@@ -2439,6 +2641,10 @@ defmodule PtcRunner.Lisp do
 
   defp execute_tool_function(%Tool{name: name, function: fun}, args, failure_token) do
     case HostContext.without_context(fn -> fun.(args) end) do
+      %TrustedError{reason: reason, message: message, details: details}
+      when is_atom(reason) and is_binary(message) and is_map(details) ->
+        tool_failure(failure_token, reason, message, details)
+
       {:ok, value} ->
         value
 
@@ -2453,16 +2659,21 @@ defmodule PtcRunner.Lisp do
   defp authorize_tool_call(%Tool{visibility: :public}, _origin, _failure_token), do: :ok
 
   defp authorize_tool_call(
-         %Tool{name: name, visibility: :private},
+         %Tool{
+           name: name,
+           visibility: :private,
+           prelude_namespaces: prelude_namespaces
+         },
          %{
            type: :prelude_export,
            ref: ref,
+           namespace: namespace,
            tool_refs: tool_refs
          },
          failure_token
        )
        when is_list(tool_refs) do
-    if name in tool_refs do
+    if name in tool_refs and authorized_prelude_namespace?(prelude_namespaces, namespace) do
       :ok
     else
       tool_failure(failure_token, :private_tool_unauthorized, name, %{
@@ -2479,6 +2690,11 @@ defmodule PtcRunner.Lisp do
        ) do
     tool_failure(failure_token, :private_tool_unauthorized, name, %{origin: nil})
   end
+
+  defp authorized_prelude_namespace?(:any, _namespace), do: true
+
+  defp authorized_prelude_namespace?(namespaces, namespace) when is_list(namespaces),
+    do: namespace in namespaces
 
   defp validate_private_tool_args(%Tool{visibility: :public}, _args, _failure_token), do: :ok
   defp validate_private_tool_args(%Tool{signature: nil}, _args, _failure_token), do: :ok
@@ -2867,16 +3083,6 @@ defmodule PtcRunner.Lisp do
 
   defp pattern_vars(_other), do: []
 
-  defp safe_to_existing_atom(name) do
-    {:ok, String.to_existing_atom(name)}
-  rescue
-    ArgumentError -> :error
-  end
-
-  # Not Surface.class_spellings/0: that flat-maps every class in the manifest,
-  # including inventory-only entries with no admitted reference, and carries
-  # constructor spellings such as "java.util.Date.". Neither is a name the model
-  # can call, and a suggestion has to be resolvable before it is printed.
   defp admitted_java_class_names do
     JavaSurface.references()
     |> Enum.map(& &1.class_id)
@@ -2890,9 +3096,6 @@ defmodule PtcRunner.Lisp do
     |> Enum.sort()
   end
 
-  # A field reference reaches the call path with no admitted arity at all
-  # (`analyze.ex` builds `expected: []` for it). Naming the type problem is the
-  # whole correction; there is no alternative name to offer.
   defp java_arity_error_message(reference_id, %{expected: []}) do
     spelling = java_reference_spelling(reference_id)
 
@@ -2907,11 +3110,6 @@ defmodule PtcRunner.Lisp do
       "got #{details.actual}"
   end
 
-  # A reference may carry several admitted spellings and `fetch_reference/1`
-  # chooses none, so the message names the first the manifest lists rather than
-  # claiming to echo what was typed — short and fully qualified spellings
-  # collapse to one reference ID. Direct-dot failures carry a member-family ID
-  # that `fetch_reference/1` does not resolve at all.
   defp java_reference_spelling(reference_id) do
     with :error <- java_reference_spelling_from_reference(reference_id),
          :error <- JavaSurface.member_family_source(reference_id) do

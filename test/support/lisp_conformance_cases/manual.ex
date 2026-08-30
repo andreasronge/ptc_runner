@@ -1007,6 +1007,14 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         [:destructuring]
       ),
       regression_case(
+        "regression/gap-f03-dormant-defn-recur-arity-001",
+        "clojure.core",
+        ["defn", "loop", "recur"],
+        "(defn bad [] (loop [x 1 y 2] (recur 1 2 3)))",
+        ["GAP-F03"],
+        []
+      ),
+      regression_case(
         "regression/gap-c01-int-predicate-001",
         "clojure.core",
         ["int?"],
@@ -1848,7 +1856,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S121",
         "Clojure int coercion returns the tab code point for a character literal; PTC-Lisp currently raises."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/format-zero-padding-bug-001",
         "clojure.core",
         ["format"],
@@ -1856,7 +1864,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S65",
         "Clojure format honors width and zero-padding flags; PTC-Lisp currently ignores them."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/format-left-width-bug-001",
         "clojure.core",
         ["format"],
@@ -1864,7 +1872,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S65",
         "Clojure format honors left-aligned field width; PTC-Lisp currently ignores it."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/format-string-width-bug-001",
         "clojure.core",
         ["format"],
@@ -1872,7 +1880,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S65",
         "Clojure format honors right-aligned field width; PTC-Lisp currently ignores it."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/format-float-zero-padding-bug-001",
         "clojure.core",
         ["format"],
@@ -1896,7 +1904,7 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         "GAP-S65",
         "Clojure format supports the leading-space sign flag; PTC-Lisp currently rejects the format string."
       ),
-      bug_case(
+      fixed_bug_case(
         "core/format-hex-zero-padding-bug-001",
         "clojure.core",
         ["format"],
@@ -6760,8 +6768,8 @@ defmodule PtcRunner.TestSupport.LispConformanceCases.Manual do
         ["loop", "recur"],
         "(loop [i 0] (if (< i 1001) (recur (inc i)) i))",
         "DIV-01",
-        {:error, :loop_limit_exceeded},
-        "Loop/recur execution is bounded for sandbox safety."
+        1001,
+        "By default loop/recur execution is unbounded like Clojure; an optional activation-local limit may be configured. Heap and elapsed time remain the containment."
       ),
       unsupported_case(
         "div/lazy-range-unsupported-001",

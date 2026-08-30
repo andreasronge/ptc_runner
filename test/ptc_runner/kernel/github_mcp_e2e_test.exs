@@ -4,16 +4,25 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Ptc
+  alias PtcRunner.TestSupport.TestHelpers
 
   @moduletag :e2e
   @repository_commit "1f5361d24a72a822633e650a28159058f17c815b"
+
+  if reason =
+       TestHelpers.environment_skip_reason([
+         "PTC_TEST_GITHUB_MCP_BINARY",
+         "PTC_TEST_GITHUB_TOKEN"
+       ]) do
+    @moduletag skip: reason
+  end
 
   @tag :tmp_dir
   test "host JSON checks and calls the pinned GitHub MCP server without leaking credentials", %{
     tmp_dir: dir
   } do
-    binary = required_environment!("PTC_TEST_GITHUB_MCP_BINARY")
-    token = required_environment!("PTC_TEST_GITHUB_TOKEN")
+    binary = System.fetch_env!("PTC_TEST_GITHUB_MCP_BINARY")
+    token = System.fetch_env!("PTC_TEST_GITHUB_TOKEN")
     paths = write_application(dir, binary)
 
     envelope_path = Path.join(dir, "command-envelope.json")
@@ -60,7 +69,7 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
   defp write_application(dir, binary) do
     File.write!(
       Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"kind" :source "source" (get input "program")})))|
+      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"mission" "default" "kind" :source "source" (get input "program")})))|
     )
 
     program = """
@@ -78,6 +87,13 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
       "workflow" => %{
         "components" => [%{"id" => "app", "path" => "workflow.clj"}],
         "entry" => "app/run"
+      },
+      "missions" => %{
+        "default" => %{
+          "components" => [],
+          "data" => %{},
+          "providers" => ["github"]
+        }
       },
       "input" => %{"value" => %{"program" => program}},
       "providers" => %{
@@ -146,13 +162,6 @@ defmodule PtcRunner.Kernel.GitHubMCPE2ETest do
     File.write!(host_path, Jason.encode!(host))
 
     %{manifest: manifest_path, host: host_path, trace: trace_path}
-  end
-
-  defp required_environment!(name) do
-    case System.fetch_env(name) do
-      {:ok, value} when byte_size(value) > 0 -> value
-      _missing -> flunk("#{name} is required for the GitHub MCP E2E")
-    end
   end
 
   defp refute_server_process(binary) do

@@ -8,8 +8,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   profile module, component, capability set, mission data, label, limit, or
   sink policy.
 
-  `inspection-analysis-v3` requires one authorized private destination before
-  either source is captured, alongside physical separation of its trace,
+  Private profiles require one authorized private destination before either
+  source is captured, alongside physical separation of their trace,
   inspection, and analysis-trace directories.
 
   Exactly one of two destinations must be supplied. `private_terminal: true`
@@ -23,7 +23,9 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   human's terminal from a pseudo-terminal allocated by `script(1)`, `tmux`, or
   `ssh -t`, and because a same-UID caller can already read the inspection
   artifact directly. `private_unattended` makes deliberate non-interactive use
-  explicit and greppable instead of requiring that workaround.
+  explicit and greppable instead of requiring that workaround. Tests and
+  trusted embedding frontends may inject the detected state with
+  `terminal_attached:`; ordinary callers omit it and use the real terminal.
   """
 
   alias PtcRunner.Kernel.AnalysisAssembly
@@ -34,6 +36,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   alias PtcRunner.Kernel.AnalysisTerminal
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.SelectedCanonicalSource
   alias PtcRunner.Kernel.SessionTrace
 
   @type resources :: %{required(binary()) => binary()}
@@ -41,11 +44,10 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   @type retained_limit_error ::
           {:source_retained_limit_exceeded,
            %{
-             source: :ptc_trace_snapshot | :ptc_inspection_snapshot,
+             source: :ptc_trace_snapshot | :ptc_private_trace_snapshot | :ptc_inspection_snapshot,
              measured_bytes: pos_integer(),
              limit_bytes: pos_integer()
            }}
-
   @common_options [
     :persistence_fault_hook,
     :capture_hook,
@@ -54,14 +56,17 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
     :evaluation_hook,
     :builder_fault_hook,
     :resource_cleanup_hook,
-    :expected_destination_identity
+    :expected_destination_identity,
+    :preview_chars
   ]
   @inspection_options [
     :inspection_capture_hook,
     :inspection_listing_hook,
     :private_terminal,
-    :private_unattended
+    :private_unattended,
+    :terminal_attached
   ]
+  @private_analysis_profile "private-run-analysis-v1"
 
   @doc """
   Starts one fixed analysis profile over immutable source captures.
@@ -73,7 +78,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   including through symlinks and ancestor aliases.
   """
   @spec start(binary(), resources(), destination()) ::
-          {:ok, AnalysisSession.t(), map()} | {:error, atom() | retained_limit_error()}
+          {:ok, AnalysisSession.t(), map()}
+          | {:error, atom() | retained_limit_error()}
   def start(profile_id, resources, destination),
     do: start(profile_id, resources, destination, [])
 
@@ -119,11 +125,18 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
         do: @common_options ++ @inspection_options,
         else: @common_options
 
-    if Keyword.keys(opts) -- allowed == [] and valid_builder_hooks?(opts) and
-         valid_capture_hooks?(opts) and valid_private_terminal?(opts) do
-      :ok
-    else
-      {:error, recipe.invalid_source_error()}
+    allowed =
+      if recipe.id() == @private_analysis_profile,
+        do: [:selected_run_refs | allowed],
+        else: allowed
+
+    with :ok <- validate_selected_runs(recipe, opts) do
+      if Keyword.keys(opts) -- allowed == [] and valid_builder_hooks?(opts) and
+           valid_capture_hooks?(opts) and valid_private_terminal?(opts) and valid_preview?(opts) do
+        :ok
+      else
+        {:error, recipe.invalid_source_error()}
+      end
     end
   end
 
@@ -144,14 +157,35 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
   defp valid_private_terminal?(opts),
     do:
       Keyword.get(opts, :private_terminal, false) in [true, false] and
-        Keyword.get(opts, :private_unattended, false) in [true, false]
+        Keyword.get(opts, :private_unattended, false) in [true, false] and
+        Keyword.get(opts, :terminal_attached, false) in [true, false]
 
   defp valid_optional_hook?(nil, _arity), do: true
   defp valid_optional_hook?(hook, arity), do: is_function(hook, arity)
 
+  defp valid_preview?(opts), do: Keyword.get(opts, :preview_chars, 2_048) in 64..65_536
+
+  defp validate_selected_runs(recipe, opts) do
+    case Keyword.fetch(opts, :selected_run_refs) do
+      :error ->
+        :ok
+
+      {:ok, run_refs} ->
+        if recipe.id() == @private_analysis_profile do
+          case SelectedCanonicalSource.validate_run_refs(run_refs) do
+            {:ok, _validated} -> :ok
+            {:error, _reason} = error -> error
+          end
+        else
+          {:error, recipe.invalid_source_error()}
+        end
+    end
+  end
+
   defp authorize_private_profile(recipe, opts) do
     terminal? = Keyword.get(opts, :private_terminal, false)
     unattended? = Keyword.get(opts, :private_unattended, false)
+    terminal_attached? = Keyword.get_lazy(opts, :terminal_attached, &AnalysisTerminal.attached?/0)
 
     case recipe.frontend().private_terminal do
       :required ->
@@ -159,7 +193,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
           terminal? and unattended? -> {:error, :private_destination_conflict}
           unattended? -> :ok
           not terminal? -> {:error, :private_terminal_required}
-          not AnalysisTerminal.attached?() -> {:error, :interactive_terminal_required}
+          not terminal_attached? -> {:error, :interactive_terminal_required}
           true -> :ok
         end
 
@@ -384,7 +418,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
          {:ok, session} <-
            AnalysisSession.start(assembly,
              evaluation_hook: Keyword.get(opts, :evaluation_hook),
-             initialization_hook: Keyword.get(opts, :builder_fault_hook)
+             initialization_hook: Keyword.get(opts, :builder_fault_hook),
+             preview_chars: Keyword.get(opts, :preview_chars, 2_048)
            ) do
       finish_session_start(
         recipe,
@@ -458,7 +493,8 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
     %{
       resources: resources,
       snapshot: AnalysisResources.handle(resources, :traces),
-      inspection_snapshot: AnalysisResources.handle(resources, :inspection)
+      inspection_snapshot: AnalysisResources.handle(resources, :inspection),
+      catalog_snapshot: AnalysisResources.handle(resources, :catalog)
     }
   end
 
@@ -523,7 +559,11 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
          _recipe
        )
        when map_size(details) == 3 and
-              source in [:ptc_trace_snapshot, :ptc_inspection_snapshot] and
+              source in [
+                :ptc_trace_snapshot,
+                :ptc_private_trace_snapshot,
+                :ptc_inspection_snapshot
+              ] and
               is_integer(measured_bytes) and measured_bytes > 0 and
               is_integer(limit_bytes) and limit_bytes > 0,
        do: reason

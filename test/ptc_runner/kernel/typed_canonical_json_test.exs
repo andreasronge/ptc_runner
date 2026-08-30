@@ -44,6 +44,12 @@ defmodule PtcRunner.Kernel.TypedCanonicalJSONTest do
     end
   end
 
+  test "classified decode separates invalid JSON from worker unavailability" do
+    assert {:ok, %{"ok" => true}} = StrictJSON.decode_classified(~s({"ok":true}))
+    assert {:invalid, :invalid_json} = StrictJSON.decode_classified("not-json")
+    assert {:invalid, :duplicate_json_key} = StrictJSON.decode_classified(~S({"a":1,"a":2}))
+  end
+
   test "shared structural admission rejects duplicates, depth excess, and node excess" do
     assert {:error, :duplicate_json_key} = StrictJSON.decode(~S({"a":1,"a":2}))
 
@@ -52,6 +58,39 @@ defmodule PtcRunner.Kernel.TypedCanonicalJSONTest do
 
     assert {:error, :json_node_limit_exceeded} =
              StrictJSON.admit([1, 2], max_nodes: 2)
+  end
+
+  test "a document at the node limit decodes under the default heap budget" do
+    # Issue #1676: the decode worker's heap budget must cover the worst
+    # admissible document, or the declared node limit is unreachable and
+    # legal inputs die as `:invalid_json`. A flat object at the node limit
+    # is the most heap-expensive admissible shape.
+    source = "{" <> Enum.map_join(1..49_900, ",", &~s("k#{&1}":1)) <> "}"
+
+    assert {:ok, decoded} = StrictJSON.decode(source)
+    assert map_size(decoded) == 49_900
+  end
+
+  test "root string inspection requires one unique root property" do
+    assert {:ok, "ptc-project"} =
+             StrictJSON.unique_root_string(
+               ~S({"kind":"ptc-project","nested":{"key":1,"key":2}}),
+               "kind"
+             )
+
+    assert :error =
+             StrictJSON.unique_root_string(
+               ~S({"kind":"ptc-project","kind":"other"}),
+               "kind"
+             )
+
+    assert :error = StrictJSON.unique_root_string(~S({"kind":1}), "kind")
+  end
+
+  test "root string prefix inspection stops after the requested member" do
+    prefix = ~S({"nested":{"quoted":"}"},"kind":"ptc-\u0070roject","unfinished":)
+    assert {:ok, "ptc-project"} = StrictJSON.root_string_prefix(prefix, "kind")
+    assert :error = StrictJSON.root_string_prefix(~S({"kind":1,"unfinished":), "kind")
   end
 
   test "structural admission rejects unknown and duplicate limit options" do

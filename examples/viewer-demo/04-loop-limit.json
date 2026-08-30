@@ -21,6 +21,9 @@
       "max_turns": 2
     }
   },
+  "limits": {
+    "evaluation_loop_iterations": 1000
+  },
   "providers": {
     "workflow": [
       {
@@ -50,7 +53,10 @@
         }
       ],
       "data": {
-      }
+      },
+      "providers": [
+        "workspace"
+      ]
     }
   }
 }

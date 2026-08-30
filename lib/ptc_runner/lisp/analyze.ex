@@ -22,6 +22,7 @@ defmodule PtcRunner.Lisp.Analyze do
   alias PtcRunner.Lisp.Env
   alias PtcRunner.Lisp.Formatter
   alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
+  alias PtcRunner.Lisp.NamespaceDiagnostic
 
   # Special form names that can be shadowed by local bindings.
   # These correspond to Clojure macros (not true special forms like if/def/recur/do).
@@ -60,11 +61,27 @@ defmodule PtcRunner.Lisp.Analyze do
                       :comment,
                       :doseq,
                       :for,
-                      :quote
+                      :quote,
+                      # Discovery forms are env specials the analyzer rewrites
+                      # for macro-like refs; keep them rebindable so a local
+                      # `doc`/`dir`/`export-meta`/`source` evaluates args normally.
+                      :dir,
+                      :doc,
+                      :"export-meta",
+                      :source
                     ])
+
+  @bindings_key :__ptc_analyze_bindings__
+  @recur_arity_key :__ptc_analyze_recur_arity__
 
   @type error_reason ::
           {:invalid_form, String.t()}
+          | {:invalid_form, String.t(),
+             %{
+               required(:kind) => :unknown_namespace,
+               required(:rejected_namespace) => String.t(),
+               required(:available_namespaces) => [String.t()]
+             }}
           | {:grant_filtered_prelude_export, String.t(), atom() | nil}
           | {:invalid_arity, atom(), String.t()}
           | {:invalid_cond_form, String.t()}
@@ -424,9 +441,39 @@ defmodule PtcRunner.Lisp.Analyze do
      {:invalid_arity, :quote, "(quote symbol) requires exactly 1 symbol, got #{length(args)}"}}
   end
 
+  # Discovery forms (`doc`/`dir`/`export-meta`/`source`) are ordinary env
+  # specials, but their *ref* argument is macro-like (clojure.repl/doc style,
+  # issue #1094): a bare or namespaced symbol is auto-quoted to a
+  # `{:symbol_ref, _}` instead of being evaluated to a closure/builtin first.
+  # `dir` with no args stays an ordinary zero-arity call. When the head is
+  # rebound as a local (`@shadowable_forms` + `mark_shadowed` / `with_bindings`),
+  # skip the rewrite so arguments evaluate normally.
+  defp dispatch_list_form({:symbol, head}, args, list, tail?)
+       when head in [:doc, :"export-meta", :source] do
+    if bound_local?(head) do
+      analyze_call(list, tail?)
+    else
+      analyze_discovery_call(head, args, tail?)
+    end
+  end
+
+  defp dispatch_list_form({:symbol, :dir}, [_ | _] = args, list, tail?) do
+    if bound_local?(:dir) do
+      analyze_call(list, tail?)
+    else
+      analyze_discovery_call(:dir, args, tail?)
+    end
+  end
+
   # Tool invocation via tool/ namespace: (tool/name args...)
   defp dispatch_list_form({:ns_symbol, :tool, tool_name}, rest, _list, tail?),
     do: analyze_tool_call(tool_name, rest, tail?)
+
+  # Data values in call position: `(data/tickets)` is a call of the granted
+  # value, not a namespaced function lookup. The evaluator resolves the grant
+  # first, then reports `not_callable` naming the symbol.
+  defp dispatch_list_form({:ns_symbol, :data, _key} = head, rest, _list, tail?),
+    do: analyze_call({:list, [head | rest]}, tail?)
 
   # Clojure-style namespaces in call position: (clojure.string/join "," items)
   defp dispatch_list_form({:ns_symbol, ns, func}, rest, list, tail?) do
@@ -460,10 +507,13 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_let([bindings_ast | body_asts], tail?) do
     with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast) do
       body_asts = mark_shadowed_asts(body_asts, shadowed)
+      bound = Enum.flat_map(bindings, fn {:binding, pattern, _} -> pattern_names(pattern) end)
 
-      with {:ok, body} <- wrap_body(body_asts, tail?) do
-        {:ok, {:let, bindings, body}}
-      end
+      with_bindings(bound, fn ->
+        with {:ok, body} <- wrap_body(body_asts, tail?) do
+          {:ok, {:let, bindings, body}}
+        end
+      end)
     end
   end
 
@@ -477,20 +527,9 @@ defmodule PtcRunner.Lisp.Analyze do
     else
       elems
       |> Enum.chunk_every(2)
-      |> Enum.reduce_while({:ok, [], MapSet.new()}, fn [pattern_ast, value_ast],
-                                                       {:ok, acc, shadowed} ->
-        marked_value = mark_shadowed_calls(value_ast, shadowed)
-
-        with {:ok, pattern} <- analyze_pattern(pattern_ast),
-             {:ok, value} <- do_analyze(marked_value, false) do
-          new_shadows = MapSet.union(shadowed, compute_shadowed_names(pattern))
-          {:cont, {:ok, [{:binding, pattern, value} | acc], new_shadows}}
-        else
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
+      |> Enum.reduce_while({:ok, [], MapSet.new(), []}, &analyze_binding_pair/2)
       |> case do
-        {:ok, rev, shadows} -> {:ok, Enum.reverse(rev), shadows}
+        {:ok, rev, shadows, _bound} -> {:ok, Enum.reverse(rev), shadows}
         {:error, _} = err -> err
       end
     end
@@ -500,22 +539,50 @@ defmodule PtcRunner.Lisp.Analyze do
     {:error, {:invalid_form, "let bindings must be a vector"}}
   end
 
+  defp analyze_binding_pair([pattern_ast, value_ast], {:ok, acc, shadowed, bound}) do
+    marked_value = mark_shadowed_calls(value_ast, shadowed)
+
+    case analyze_pattern(pattern_ast) do
+      {:ok, pattern} ->
+        case with_bindings(bound, fn -> do_analyze(marked_value, false) end) do
+          {:ok, value} ->
+            new_shadows = MapSet.union(shadowed, compute_shadowed_names(pattern))
+            new_bound = bound ++ pattern_names(pattern)
+            {:cont, {:ok, [{:binding, pattern, value} | acc], new_shadows, new_bound}}
+
+          {:error, reason} ->
+            {:halt, {:error, reason}}
+        end
+
+      {:error, reason} ->
+        {:halt, {:error, reason}}
+    end
+  end
+
   # ============================================================
   # Special form: loop
   # ============================================================
 
   defp analyze_loop([bindings_ast | body_asts], _tail?) do
-    with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast) do
-      body_asts = mark_shadowed_asts(body_asts, shadowed)
-
-      with {:ok, body} <- wrap_body(body_asts, true) do
-        {:ok, {:loop, bindings, body}}
-      end
+    with {:ok, bindings, shadowed} <- analyze_bindings(bindings_ast),
+         {:ok, body} <- analyze_loop_body(bindings, shadowed, body_asts) do
+      {:ok, {:loop, bindings, body}}
     end
   end
 
   defp analyze_loop(_, _tail?) do
     {:error, {:invalid_arity, :loop, "expected (loop [bindings] body ...)"}}
+  end
+
+  defp analyze_loop_body(bindings, shadowed, body_asts) do
+    body_asts = mark_shadowed_asts(body_asts, shadowed)
+    bound = Enum.flat_map(bindings, fn {:binding, pattern, _} -> pattern_names(pattern) end)
+
+    with_bindings(bound, fn ->
+      with_recur_arity(length(bindings), fn ->
+        wrap_body(body_asts, true)
+      end)
+    end)
   end
 
   # ============================================================
@@ -524,7 +591,7 @@ defmodule PtcRunner.Lisp.Analyze do
 
   defp analyze_recur(args, true) do
     with {:ok, analyzed_args} <- analyze_list(args) do
-      {:ok, {:recur, analyzed_args}}
+      analyzed_recur(analyzed_args)
     end
   end
 
@@ -566,10 +633,10 @@ defmodule PtcRunner.Lisp.Analyze do
     do: Conditionals.analyze_when_not(args, tail?, &do_analyze/2, &wrap_body/2)
 
   defp analyze_if_let(args, tail?),
-    do: Conditionals.analyze_if_let(args, tail?, &do_analyze/2, &wrap_body/2)
+    do: Conditionals.analyze_if_let(args, tail?, &do_analyze/2, &wrap_body/2, &with_bindings/2)
 
   defp analyze_when_let(args, tail?),
-    do: Conditionals.analyze_when_let(args, tail?, &do_analyze/2, &wrap_body/2)
+    do: Conditionals.analyze_when_let(args, tail?, &do_analyze/2, &wrap_body/2, &with_bindings/2)
 
   defp analyze_if_some(args, tail?),
     do:
@@ -578,7 +645,8 @@ defmodule PtcRunner.Lisp.Analyze do
         tail?,
         &do_analyze/2,
         &wrap_body/2,
-        &mark_shadow_for_binding/2
+        &mark_shadow_for_binding/2,
+        &with_bindings/2
       )
 
   defp analyze_when_some(args, tail?),
@@ -588,7 +656,8 @@ defmodule PtcRunner.Lisp.Analyze do
         tail?,
         &do_analyze/2,
         &wrap_body/2,
-        &mark_shadow_for_binding/2
+        &mark_shadow_for_binding/2,
+        &with_bindings/2
       )
 
   defp analyze_when_first(args, tail?),
@@ -598,7 +667,8 @@ defmodule PtcRunner.Lisp.Analyze do
         tail?,
         &do_analyze/2,
         &wrap_body/2,
-        &mark_shadow_for_binding/2
+        &mark_shadow_for_binding/2,
+        &with_bindings/2
       )
 
   defp analyze_cond(args, tail?),
@@ -618,25 +688,17 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_fn([{:symbol, name}, params_ast | body_asts])
        when is_atom(name) or is_binary(name) do
     with :ok <- Patterns.validate_binding_name(name),
-         {:ok, params} <- analyze_fn_params(params_ast) do
-      shadowed = compute_shadowed_names(params)
-      body_asts = mark_shadowed_asts(body_asts, shadowed)
-
-      with {:ok, body} <- wrap_body(body_asts, true) do
-        {:ok, {:fn, name, params, body}}
-      end
+         {:ok, params} <- analyze_fn_params(params_ast),
+         {:ok, body} <- analyze_scoped_body(body_asts, true, params) do
+      {:ok, {:fn, name, params, body}}
     end
   end
 
   # Anonymous fn: (fn [params] body ...)
   defp analyze_fn([params_ast | body_asts]) do
-    with {:ok, params} <- analyze_fn_params(params_ast) do
-      shadowed = compute_shadowed_names(params)
-      body_asts = mark_shadowed_asts(body_asts, shadowed)
-
-      with {:ok, body} <- wrap_body(body_asts, true) do
-        {:ok, {:fn, params, body}}
-      end
+    with {:ok, params} <- analyze_fn_params(params_ast),
+         {:ok, body} <- analyze_scoped_body(body_asts, true, params) do
+      {:ok, {:fn, params, body}}
     end
   end
 
@@ -672,6 +734,106 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_quote(other) do
     {:error, {:invalid_form, "quote only supports symbols in this phase, got #{inspect(other)}"}}
   end
+
+  # Macro-like ref analysis for discovery forms (issue #1094). Bare symbols,
+  # namespaced symbols, and reader-quoted symbols become `{:symbol_ref, _}` so
+  # `(doc paged/profile)` looks the symbol up instead of evaluating it. Locals
+  # (including short-fn params after `#(doc %)` desugars to `(doc p1)`) and any
+  # computed expression keep evaluating normally.
+  defp analyze_discovery_call(head, args, tail?) do
+    with {:ok, analyzed_args} <- Patterns.collect_results(args, &analyze_discovery_ref/1) do
+      analyze_call(
+        {:list, [{:symbol, head} | Enum.map(analyzed_args, &{:analyzed, &1})]},
+        tail?
+      )
+    end
+  end
+
+  defp analyze_discovery_ref({:symbol, name}) do
+    if bound_local?(name) do
+      do_analyze({:symbol, name}, false)
+    else
+      {:ok, {:symbol_ref, to_string(name)}}
+    end
+  end
+
+  defp analyze_discovery_ref({:ns_symbol, ns, name}), do: {:ok, {:symbol_ref, "#{ns}/#{name}"}}
+
+  defp analyze_discovery_ref({:quoted_symbol, name}) when is_binary(name),
+    do: {:ok, {:symbol_ref, name}}
+
+  defp analyze_discovery_ref({:shadowed_local, _} = local), do: do_analyze(local, false)
+  defp analyze_discovery_ref(other), do: do_analyze(other, false)
+
+  defp with_bindings(names, fun) when is_list(names) and is_function(fun, 0) do
+    previous = Process.get(@bindings_key, MapSet.new())
+    added = names |> Enum.map(&normalize_binding_name/1) |> MapSet.new()
+    Process.put(@bindings_key, MapSet.union(previous, added))
+
+    try do
+      fun.()
+    after
+      Process.put(@bindings_key, previous)
+    end
+  end
+
+  defp with_recur_arity(arity, fun)
+       when is_integer(arity) and arity >= 0 and is_function(fun, 0) do
+    previous = Process.get(@recur_arity_key, [])
+    Process.put(@recur_arity_key, [arity | previous])
+
+    try do
+      fun.()
+    after
+      case previous do
+        [] -> Process.delete(@recur_arity_key)
+        stack -> Process.put(@recur_arity_key, stack)
+      end
+    end
+  end
+
+  defp analyze_scoped_body(body_asts, tail?, params) do
+    shadowed = compute_shadowed_names(params)
+    body_asts = mark_shadowed_asts(body_asts, shadowed)
+
+    with_bindings(param_names(params), fn ->
+      with_recur_arity(recur_arity(params), fn ->
+        wrap_body(body_asts, tail?)
+      end)
+    end)
+  end
+
+  defp recur_arity({:variadic, leading, _rest_pattern}) when is_list(leading),
+    do: length(leading) + 1
+
+  defp recur_arity(params) when is_list(params), do: length(params)
+
+  defp analyzed_recur(args) when is_list(args) do
+    with :ok <- validate_recur_arity(length(args)) do
+      {:ok, {:recur, args}}
+    end
+  end
+
+  defp validate_recur_arity(actual) when is_integer(actual) do
+    case Process.get(@recur_arity_key, []) do
+      [expected | _] when expected == actual ->
+        :ok
+
+      [expected | _] ->
+        {:error,
+         {:invalid_arity, :recur,
+          "Mismatched argument count to recur, expected: #{expected} args, got: #{actual}"}}
+
+      [] ->
+        :ok
+    end
+  end
+
+  defp bound_local?(name) do
+    MapSet.member?(Process.get(@bindings_key, MapSet.new()), normalize_binding_name(name))
+  end
+
+  defp normalize_binding_name(name), do: to_string(name)
 
   defp analyze_list_of_patterns(patterns),
     do: Patterns.collect_results(patterns, &analyze_pattern/1)
@@ -806,7 +968,7 @@ defmodule PtcRunner.Lisp.Analyze do
     shadowed = compute_shadowed_names({:var, name})
     form = mark_shadowed_calls(form, shadowed)
 
-    with {:ok, form_core} <- do_analyze(form, step_tail?) do
+    with {:ok, form_core} <- with_bindings([name], fn -> do_analyze(form, step_tail?) end) do
       if is_last? do
         {:ok, {:let, [{:binding, {:var, name}, acc}], form_core}}
       else
@@ -900,7 +1062,7 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp resolve_call_or_recur({:var, :recur}, args, true), do: {:ok, {:recur, args}}
+  defp resolve_call_or_recur({:var, :recur}, args, true), do: analyzed_recur(args)
 
   defp resolve_call_or_recur({:var, :recur}, _args, false),
     do: {:error, {:invalid_form, "recur must be in tail position"}}
@@ -937,8 +1099,14 @@ defmodule PtcRunner.Lisp.Analyze do
     end
   end
 
-  defp analyze_pmap(_, _tail?) do
-    {:error, {:invalid_arity, :pmap, "expected (pmap f coll) or (pmap f c1 c2 ...)"}}
+  # A persisted user definition may shadow `pmap` with a different arity. For
+  # arities that cannot use the optimized builtin node, retain an ordinary
+  # call so runtime namespace resolution gets the final say. If no shadow is
+  # present, the builtin value reports the same recoverable arity error.
+  defp analyze_pmap(args, _tail?) do
+    with {:ok, analyzed_args} <- analyze_list(args) do
+      {:ok, {:call, {:var, :pmap}, analyzed_args}}
+    end
   end
 
   # ============================================================
@@ -1030,11 +1198,7 @@ defmodule PtcRunner.Lisp.Analyze do
   defp analyze_defn(args, _tail?), do: do_analyze_defn(args)
 
   defp do_analyze_defn(args) do
-    Definitions.analyze_defn(args, &analyze_fn_params/1, fn body_asts, tail?, params ->
-      shadowed = compute_shadowed_names(params)
-      body_asts = mark_shadowed_asts(body_asts, shadowed)
-      wrap_body(body_asts, tail?)
-    end)
+    Definitions.analyze_defn(args, &analyze_fn_params/1, &analyze_scoped_body/3)
   end
 
   defp analyze_value(ast), do: do_analyze(ast, false)
@@ -1188,12 +1352,22 @@ defmodule PtcRunner.Lisp.Analyze do
 
       :error ->
         case qualified_namespace_lookup(ns, key) do
-          {:ok, qualified} -> {:ok, {:var, qualified}}
-          :not_qualified -> prelude_or_clojure_namespace(ns, key, fn -> {:ok, {:var, key}} end)
-          :unknown_member -> namespaced_unknown_member_error(ns, key)
+          {:ok, qualified} ->
+            {:ok, {:var, qualified}}
+
+          :not_qualified ->
+            prelude_or_clojure_namespace(ns, key, fn -> analyze_clojure_value(key) end)
+
+          :unknown_member ->
+            namespaced_unknown_member_error(ns, key)
         end
     end
   end
+
+  defp analyze_clojure_value(key) when key in [:pmap, :pcalls],
+    do: {:ok, {:literal, {:special, key}}}
+
+  defp analyze_clojure_value(key), do: {:ok, {:var, key}}
 
   defp analyze_namespaced_call(ns, func, rest, list, tail?) do
     case PreludeScope.fetch_export(ns, func) do
@@ -1207,7 +1381,7 @@ defmodule PtcRunner.Lisp.Analyze do
 
           :not_qualified ->
             prelude_or_clojure_namespace(ns, func, fn ->
-              dispatch_list_form({:symbol, func}, rest, list, tail?)
+              analyze_clojure_call(func, rest, list, tail?)
             end)
 
           :unknown_member ->
@@ -1215,6 +1389,28 @@ defmodule PtcRunner.Lisp.Analyze do
         end
     end
   end
+
+  # A qualified Clojure builtin is already resolved and must bypass locals and
+  # user namespace definitions. Parallel calls use their callable value path;
+  # qualified pmap keeps strict builtin arity validation at analysis time.
+  defp analyze_clojure_call(:pmap, [function, collection | collections], _list, _tail?) do
+    with {:ok, arguments} <- analyze_list([function, collection | collections]) do
+      {:ok, {:call, {:literal, {:special, :pmap}}, arguments}}
+    end
+  end
+
+  defp analyze_clojure_call(:pmap, _arguments, _list, _tail?) do
+    {:error, {:invalid_arity, :pmap, "expected (pmap f coll) or (pmap f c1 c2 ...)"}}
+  end
+
+  defp analyze_clojure_call(:pcalls, functions, _list, _tail?) do
+    with {:ok, arguments} <- analyze_list(functions) do
+      {:ok, {:call, {:literal, {:special, :pcalls}}, arguments}}
+    end
+  end
+
+  defp analyze_clojure_call(func, rest, list, tail?),
+    do: dispatch_list_form({:symbol, func}, rest, list, tail?)
 
   # ============================================================
   # Helper functions
@@ -1390,7 +1586,7 @@ defmodule PtcRunner.Lisp.Analyze do
   # Returns:
   #   - `{:ok, qualified_atom}` when `<ns>/<func>` resolves to an env entry
   #   - `:not_qualified` when `<ns>` is not in the qualified namespace set
-  #     (caller falls through to the legacy `normalize_clojure_namespace/3` path)
+  #     (caller falls through to Clojure namespace handling)
   defp qualified_namespace_lookup(ns, func) do
     case Map.get(@qualified_namespace_tables, ns) do
       nil ->
@@ -1540,36 +1736,17 @@ defmodule PtcRunner.Lisp.Analyze do
          {:invalid_form, "#{func} is not available. #{category_name} functions: #{available}"}}
 
       true ->
+        namespace = to_string(ns)
+        details = NamespaceDiagnostic.details(namespace)
+
         {:error,
-         {:invalid_form,
-          "unknown namespace #{ns}/. Available namespaces: #{available_namespaces()}. " <>
-            "For JSON parsing use json/parse-string (not cheshire.core/...)."}}
+         {:invalid_form, NamespaceDiagnostic.message(namespace),
+          Map.put(details, :kind, :unknown_namespace)}}
     end
   end
 
   defp namespace_builtin?(ns, func) do
     Env.clojure_namespace?(ns) and func in Env.builtins_by_namespace(ns)
-  end
-
-  defp available_namespaces do
-    ([
-       "data/",
-       "tool/",
-       "json/",
-       "clojure.core/",
-       "core/",
-       "clojure.string/",
-       "str/",
-       "string/",
-       "clojure.set/",
-       "set/",
-       "clojure.walk/",
-       "walk/",
-       "regex/"
-     ] ++
-       JavaSurface.available_namespace_labels() ++ ["java.util.Date."])
-    |> Enum.uniq()
-    |> Enum.join(", ")
   end
 
   # ============================================================

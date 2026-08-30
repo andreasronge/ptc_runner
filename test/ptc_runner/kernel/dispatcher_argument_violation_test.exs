@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.CoreToSource
+  alias PtcRunner.TestSupport.TestHelpers
 
   test "schema rejection names the argument, violated keyword, and declared bound" do
     result =
@@ -40,6 +41,77 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
 
     assert feedback =~ "limit violates maximum 50"
     refute feedback =~ "700"
+  end
+
+  test "object property count and name length fail before callback dispatch" do
+    schema = %{
+      "type" => "object",
+      "properties" => %{
+        "tags" => %{
+          "type" => "object",
+          "additionalProperties" => true,
+          "maxProperties" => 16,
+          "propertyNames" => %{"type" => "string", "maxLength" => 256}
+        }
+      }
+    }
+
+    seventeen = Map.new(1..17, &{"tag-#{&1}", "value-#{&1}"})
+    overflow_key = String.duplicate("k", 257)
+
+    parent = self()
+
+    {:ok, capability} =
+      Capability.new(
+        name: "schema_checked",
+        effect: :read,
+        input_schema: schema,
+        callback: fn submitted ->
+          send(parent, {:unexpected_callback, submitted})
+          {:ok, nil}
+        end
+      )
+
+    {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    too_many =
+      Dispatcher.dispatch(
+        state,
+        :workflow,
+        environment,
+        capability.name,
+        %{"tags" => seventeen},
+        TestHelpers.dispatch_context(state, :workflow, 100),
+        nil,
+        nil
+      )
+
+    assert %{
+             status: :error,
+             kind: :protocol_error,
+             reason: :invalid_arguments,
+             details: [
+               %{argument: "tags", constraint: "maxProperties", expected: 16}
+             ]
+           } = too_many
+
+    assert RunState.usage(state).capability_calls.workflow == %{}
+    refute inspect(too_many) =~ "tag-17"
+    refute_received {:unexpected_callback, _submitted}
+
+    too_long = dispatch(schema, %{"tags" => %{overflow_key => "ok"}})
+
+    assert %{
+             status: :error,
+             kind: :protocol_error,
+             reason: :invalid_arguments,
+             details: [
+               %{argument: "tags", constraint: "maxLength", expected: 256}
+             ]
+           } = too_long
+
+    refute inspect(too_long) =~ overflow_key
   end
 
   test "rejection details never repeat undeclared keys or submitted values" do
@@ -366,8 +438,14 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
     canonical = File.read!(path)
     refute canonical =~ enum_literal
     refute canonical =~ submitted
-    refute canonical =~ "invalid_arguments"
     refute canonical =~ ~s|"details":|
+
+    # The closed class is public on usage; argument values and schema details are not.
+    [stopped] = Enum.filter(events, &(&1.type == "run-stopped"))
+
+    assert stopped.data.usage.capability_refusals == %{
+             "workflow/protocol_error/invalid_arguments" => 1
+           }
   end
 
   defp dispatch(schema, arguments, semantic_validator \\ nil) do
@@ -388,7 +466,18 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
     {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
     {:ok, state} = RunState.start(Limits.defaults())
 
-    result = Dispatcher.dispatch(state, :workflow, environment, capability.name, arguments, 100)
+    result =
+      Dispatcher.dispatch(
+        state,
+        :workflow,
+        environment,
+        capability.name,
+        arguments,
+        TestHelpers.dispatch_context(state, :workflow, 100),
+        nil,
+        nil
+      )
+
     refute_received {:unexpected_callback, _submitted}
     result
   end
@@ -423,7 +512,7 @@ defmodule PtcRunner.Kernel.DispatcherArgumentViolationTest do
         environment,
         capability.name,
         arguments,
-        100,
+        TestHelpers.dispatch_context(state, :workflow, 100),
         sink,
         nil
       )

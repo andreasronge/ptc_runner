@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.CommandDiagnosticRenderer
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandFrontend
@@ -12,10 +13,11 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.DiagnosticCatalog
+  import PtcRunner.TestSupport.CommandEngineFixtures, only: [validate_success_result: 0]
 
   @run_ref "cmd-00000000000000000000000001"
 
-  @human_fixtures Path.expand("../../fixtures/command-human-v2.json", __DIR__)
+  @human_fixtures Path.expand("../../fixtures/command-human-v4.json", __DIR__)
                   |> File.read!()
                   |> Jason.decode!()
 
@@ -42,7 +44,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     presentation =
       CommandRouter.execute(
-        ["repl", "--describe-profile", "log-analysis-v2", "--load", "caller-value"],
+        ["repl", "--describe-profile", "run-analysis-v1", "--load", "caller-value"],
         :standalone,
         fn _arguments ->
           send(parent, :unexpected_bootstrap)
@@ -60,6 +62,74 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     refute presentation.stderr =~ "caller-value"
     refute_received :unexpected_bootstrap
     refute_received :unexpected_repl
+  end
+
+  test "missing switch values and fixed positional arity render declaration-owned guidance" do
+    cases = [
+      {[
+         "run",
+         "ptc.json",
+         "--envelope"
+       ], :missing_switch_value, "; --envelope requires a value"},
+      {[
+         "run",
+         "ptc.json",
+         "--output"
+       ], :missing_switch_value, "; --output requires a value"},
+      {["run"], :positional_arity, "; usage: ptc run MANIFEST.json|PROJECT.json [OPTIONS]"},
+      {[
+         "run",
+         "ptc.json",
+         "extra.json"
+       ], :positional_arity, "; usage: ptc run MANIFEST.json|PROJECT.json [OPTIONS]"}
+    ]
+
+    for {argv, kind, guidance} <- cases do
+      assert {:error, entry} = CommandEntry.open_with_ref(argv, :standalone, @run_ref)
+      assert entry.rejection.code == :invalid_arguments
+      assert entry.rejection.kind == kind
+      assert CommandRenderer.rejection(@run_ref, entry.rejection) =~ guidance
+    end
+  end
+
+  @tag :tmp_dir
+  test "transcript startup and internal failures retain transcript diagnostics", %{tmp_dir: dir} do
+    argv = [
+      "transcript",
+      "run-1",
+      "--traces",
+      Path.join(dir, "traces"),
+      "--inspection",
+      Path.join(dir, "inspection"),
+      "--private-unattended",
+      "--private-output",
+      Path.join(dir, "transcript.private.json")
+    ]
+
+    startup =
+      CommandRouter.execute(
+        argv,
+        :standalone,
+        fn _arguments -> {:error, :command_bootstrap_failed} end,
+        fn _arguments, _runtime -> :ok end
+      )
+
+    assert startup.exit_status == 70
+    assert startup.stderr =~ "error: transcript/startup_failed:"
+    refute startup.stderr =~ "repl/"
+
+    internal =
+      CommandRouter.execute(
+        argv,
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end,
+        fn _arguments, _runtime -> raise "private detail" end
+      )
+
+    assert internal.exit_status == 70
+    assert internal.stderr =~ "error: transcript/internal_error:"
+    refute internal.stderr =~ "private detail"
+    refute internal.stderr =~ "repl/"
   end
 
   test "the one-shot frontend rejects repl without invoking bootstrap" do
@@ -81,6 +151,38 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
       assert presentation.outcome.envelope["error"]["phase"] == "arguments"
       assert presentation.outcome.envelope["error"]["code"] == code
     end
+
+    refute_received :unexpected_bootstrap
+  end
+
+  test "the one-shot frontend rejects transcript without invoking bootstrap" do
+    parent = self()
+
+    presentation =
+      CommandFrontend.execute(
+        [
+          "transcript",
+          "run-1",
+          "--traces",
+          "traces",
+          "--inspection",
+          "inspection",
+          "--private-unattended",
+          "--private-output",
+          "transcript.json"
+        ],
+        :standalone,
+        fn _arguments ->
+          send(parent, :unexpected_bootstrap)
+          {:ok, CommandRuntime.standalone()}
+        end
+      )
+
+    assert presentation.exit_status == 2
+    assert presentation.outcome.command_mode == :unknown
+
+    assert %{"code" => "invalid_command", "phase" => "arguments"} =
+             presentation.outcome.envelope["error"]
 
     refute_received :unexpected_bootstrap
   end
@@ -131,6 +233,35 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   end
 
   @tag :tmp_dir
+  test "an existing envelope destination is refused before the run executes", %{tmp_dir: dir} do
+    parent = self()
+    application = write_application(dir)
+    path = Path.join(dir, "command-envelope.json")
+    File.write!(path, "{\"stale\":true}")
+
+    presentation =
+      CommandFrontend.execute(
+        ["run", application, "--envelope", path],
+        :standalone,
+        fn _arguments ->
+          send(parent, :unexpected_bootstrap)
+          {:ok, CommandRuntime.standalone()}
+        end
+      )
+
+    assert presentation.exit_status == 2
+    assert presentation.stdout == ""
+    assert presentation.stderr =~ "arguments/envelope_destination_exists"
+
+    assert presentation.stderr =~ "remove it or point --envelope at another path"
+
+    refute presentation.stderr =~ path
+    assert presentation.envelope_path == nil
+    assert File.read!(path) == "{\"stale\":true}"
+    refute_received :unexpected_bootstrap
+  end
+
+  @tag :tmp_dir
   test "an envelope request preserves an artifact destination diagnosis", %{tmp_dir: dir} do
     application = write_application(dir)
     envelope_path = Path.join(dir, "command-envelope.json")
@@ -152,10 +283,197 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     assert presentation.exit_status == 7
     assert presentation.stdout == ""
-    assert presentation.stderr =~ "destination/result_destination_unavailable"
+    # The parent directory does not exist, which is the one destination cause
+    # with an obvious remedy, so it is named without echoing the path itself.
+    assert presentation.stderr =~ "destination/result_directory_missing"
     assert presentation.envelope_path == envelope_path
     assert File.regular?(envelope_path)
     refute presentation.stderr =~ output_path
+  end
+
+  @tag :tmp_dir
+  test "a manifest schema rejection renders its safe document path", %{tmp_dir: dir} do
+    application = write_application(dir)
+    manifest = application |> File.read!() |> Jason.decode!()
+
+    invalid_manifest =
+      put_in(
+        manifest,
+        ["workflow", "components", Access.at(0), "path"],
+        "../shared/main.clj"
+      )
+
+    File.write!(application, Jason.encode!(invalid_manifest))
+
+    presentation =
+      CommandFrontend.execute(["validate", application], :standalone, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == 3
+    assert presentation.outcome.envelope["error"]["path"] == "/workflow/components/0/path"
+
+    assert presentation.stderr ==
+             "error: application/schema_violation: " <>
+               "the application manifest violates the pattern schema rule " <>
+               "at /workflow/components/0/path (run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+
+    refute presentation.stderr =~ "../shared/main.clj"
+  end
+
+  @tag :tmp_dir
+  test "a host schema rejection renders its bounded rule and safe path", %{tmp_dir: dir} do
+    application = write_application(dir)
+    host = Path.join(dir, "host-schema-rule.json")
+
+    document = %{
+      "install" => %{
+        "model" => %{
+          "source" => "mcp",
+          "installation_revision" => "model-v1",
+          "transport" => %{"type" => "stdio", "command" => "node"},
+          "tools" => %{"read" => %{"as" => "model.read", "effect" => "read"}}
+        }
+      }
+    }
+
+    invalid = put_in(document, ["install", "model", "ceilings"], %{"timeout_ms" => 999_999})
+
+    File.write!(host, Jason.encode!(invalid))
+
+    presentation =
+      CommandFrontend.execute(
+        ["validate", application, "--host-config", host],
+        :standalone,
+        fn _arguments -> {:ok, CommandRuntime.standalone()} end
+      )
+
+    assert presentation.exit_status == 3
+    assert presentation.outcome.envelope["error"]["path"] == "/install/*/ceilings/timeout_ms"
+
+    assert presentation.stderr ==
+             "error: host/host_schema_invalid: " <>
+               "the host configuration violates the maximum schema rule " <>
+               "at /install/*/ceilings/timeout_ms " <>
+               "(run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+
+    refute presentation.stderr =~ "model"
+    refute presentation.stderr =~ "999999"
+  end
+
+  @tag :tmp_dir
+  test "an input contract rejection renders its safe declared path", %{tmp_dir: dir} do
+    application = write_application(dir)
+    manifest = application |> File.read!() |> Jason.decode!()
+
+    input_schema = %{
+      "type" => "object",
+      "properties" => %{"answer" => %{"type" => "integer"}},
+      "required" => ["answer"]
+    }
+
+    invalid_manifest =
+      manifest
+      |> Map.put("contracts", %{"input_schema" => %{"path" => "input.schema.json"}})
+      |> put_in(["input", "value", "answer"], "wrong")
+
+    File.write!(application, Jason.encode!(invalid_manifest))
+    File.write!(Path.join(dir, "input.schema.json"), Jason.encode!(input_schema))
+
+    presentation =
+      CommandFrontend.execute(["validate", application], :standalone, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == 3
+    assert presentation.outcome.envelope["error"]["path"] == "/answer"
+
+    assert presentation.stderr ==
+             "error: application/input_contract_failed: " <>
+               "the selected input does not satisfy the input contract " <>
+               "at /answer (run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+  end
+
+  @tag :tmp_dir
+  test "a result contract rejection retains and renders its safe declared path", %{tmp_dir: dir} do
+    application = write_application(dir)
+    manifest = application |> File.read!() |> Jason.decode!()
+
+    result_schema = %{
+      "type" => "object",
+      "properties" => %{"answer" => %{"type" => "integer"}},
+      "required" => ["answer"]
+    }
+
+    File.write!(
+      Path.join(dir, "main.clj"),
+      ~S|(ns main) (defn run [_] (return {"answer" "wrong"}))|
+    )
+
+    File.write!(
+      application,
+      manifest
+      |> Map.put("contracts", %{"result_schema" => %{"path" => "result.schema.json"}})
+      |> Jason.encode!()
+    )
+
+    File.write!(Path.join(dir, "result.schema.json"), Jason.encode!(result_schema))
+
+    presentation =
+      CommandFrontend.execute(["run", application], :standalone, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == 7
+
+    assert presentation.outcome.envelope["error"]["source"] == %{
+             "kind" => "result_contract",
+             "name" => "result.schema.json"
+           }
+
+    assert presentation.outcome.envelope["error"]["path"] == "/answer"
+
+    assert presentation.stderr ==
+             "error: result_cleanup/result_contract_failed: " <>
+               "the workflow result does not satisfy its contract " <>
+               "at /answer (run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+  end
+
+  @tag :tmp_dir
+  test "human failures do not render contract-authored control bytes", %{tmp_dir: dir} do
+    application = write_application(dir)
+    manifest = application |> File.read!() |> Jason.decode!()
+    property = "line\n\e[31m"
+
+    input_schema = %{
+      "type" => "object",
+      "properties" => %{property => %{"type" => "integer"}},
+      "required" => [property]
+    }
+
+    invalid_manifest =
+      manifest
+      |> Map.put("contracts", %{"input_schema" => %{"path" => "input.schema.json"}})
+      |> put_in(["input", "value"], %{property => "wrong"})
+
+    File.write!(application, Jason.encode!(invalid_manifest))
+    File.write!(Path.join(dir, "input.schema.json"), Jason.encode!(input_schema))
+
+    presentation =
+      CommandFrontend.execute(["validate", application], :standalone, fn _arguments ->
+        {:ok, CommandRuntime.standalone()}
+      end)
+
+    assert presentation.exit_status == 3
+    assert presentation.outcome.envelope["error"]["path"] == "/" <> property
+
+    assert presentation.stderr ==
+             "error: application/input_contract_failed: " <>
+               "the selected input does not satisfy the input contract " <>
+               ~S|at "/line\n\e[31m" | <>
+               "(run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+
+    refute presentation.stderr =~ property
   end
 
   @tag :tmp_dir
@@ -182,7 +500,9 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   end
 
   @tag :tmp_dir
-  test "an existing envelope destination is not replaced and reports status 74", %{tmp_dir: dir} do
+  test "an existing envelope destination is refused at admission, not overwritten", %{
+    tmp_dir: dir
+  } do
     path = Path.join(dir, "existing.json")
     File.write!(path, "original")
 
@@ -191,12 +511,13 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
         {:error, :command_bootstrap_failed}
       end)
 
-    assert presentation.exit_status == 74
+    assert presentation.exit_status == 2
     assert presentation.stdout == ""
 
     assert presentation.stderr ==
-             "error: envelope/publication_failed: command envelope could not be published " <>
-               "(run_ref: #{presentation.outcome.envelope["run_ref"]})\n"
+             "error: arguments/envelope_destination_exists: the envelope destination already " <>
+               "exists (run_ref: #{presentation.outcome.envelope["run_ref"]}); " <>
+               "remove it or point --envelope at another path\n"
 
     assert File.read!(path) == "original"
   end
@@ -219,7 +540,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     for {switch, name} <- [
           {"--private-output", "private-answer.json"},
-          {"--inspect", "run.inspection.jsonl"}
+          {"--inspect", "run.ptcins"}
         ] do
       path = Path.join(dir, name)
 
@@ -345,7 +666,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     for {name, phase, code, exit_status, collision?} <- [
           {"shared.json", "destination", "invalid_inspection_destination", 7, false},
-          {"shared.inspection.jsonl", "arguments", "conflicting_arguments", 2, true}
+          {"shared.ptcins", "arguments", "conflicting_arguments", 2, true}
         ] do
       destination = Path.join(dir, name)
       argv = ["run", application, "--output", destination, "--inspect", destination]
@@ -520,10 +841,9 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     refute presentation.stderr =~ traces
   end
 
-  test "help and version reject envelope as an undeclared switch" do
+  test "help and the --version shortcut reject envelope as an undeclared switch" do
     for argv <- [
           ["help", "run", "--envelope", "result.json"],
-          ["version", "--envelope", "result.json"],
           ["--version", "--envelope", "result.json"]
         ] do
       presentation =
@@ -546,17 +866,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
 
     private_artifacts = %{artifacts | "result" => "written"}
 
-    usage = %{
-      "remaining_ms" => 0,
-      "capability_calls" => %{},
-      "subordinate_evaluations" => 0,
-      "evaluations_by_mission" => %{},
-      "protocol_errors" => 0,
-      "evaluation_memory_bytes" => 0,
-      "evaluation_history_bytes" => 0,
-      "evaluation_continuation_bytes" => 0,
-      "events_dropped" => %{}
-    }
+    usage = usage_fixture()
 
     memory = %{
       "defined_count" => 0,
@@ -588,26 +898,135 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
           usage,
           memory
         ),
-      "validate" =>
-        CommandOutcome.success(:validate, @run_ref, %{
-          "application_content_digest" => "sha256:" <> String.duplicate("0", 64),
-          "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
-          "workflow_bundle_hash" => String.duplicate("2", 64),
-          "mission_bundle_hashes" => %{},
-          "provider_activity" => false
-        }),
+      "validate" => CommandOutcome.success(:validate, @run_ref, validate_success_result()),
       "doctor_default" => CommandOutcome.success(:doctor, @run_ref, doctor_default),
       "doctor_connect" => CommandOutcome.success({:doctor, :connect}, @run_ref, doctor_connect),
       "models" => CommandOutcome.success(:models, @run_ref, %{"installations" => []}),
-      "init" => CommandOutcome.success(:init, @run_ref, %{"created" => ["main.clj", "ptc.json"]}),
+      "init" =>
+        CommandOutcome.success(:init, @run_ref, %{
+          "created" => ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
+        }),
+      "docs_listing" => CommandOutcome.success(:docs, @run_ref, CommandContract.docs_result(nil)),
       "help_root" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:root)),
-      "help_run" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:run)),
-      "version" => CommandOutcome.success(:version, @run_ref, CommandContract.version_result())
+      "help_init" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:init)),
+      "help_run" => CommandOutcome.success(:help, @run_ref, CommandContract.help_result(:run))
     }
 
     for {name, outcome} <- rows do
       assert CommandRenderer.render(outcome) == {:stdout, @human_fixtures["success"][name]}
     end
+
+    identity = PtcRunner.BuildIdentity.current()
+    state = if identity.source_dirty, do: "dirty", else: "clean"
+    version = CommandOutcome.success(:version, @run_ref, CommandContract.version_result())
+
+    assert CommandRenderer.render(version) ==
+             {:stdout,
+              "#{identity.version} (#{String.slice(identity.source_revision, 0, 8)}, #{state})\n"}
+  end
+
+  test "successful run envelopes reject evaluator failure evidence" do
+    usage = usage_fixture()
+
+    memory = %{
+      "defined_count" => 0,
+      "history_count" => 0,
+      "memory_bytes" => 0,
+      "history_bytes" => 0,
+      "bytes" => 0
+    }
+
+    for {result_class, artifact_state} <- [
+          {:normal,
+           %{
+             "trace" => "not_requested",
+             "inspection" => "not_requested",
+             "result" => "not_requested"
+           }},
+          {:private,
+           %{"trace" => "not_requested", "inspection" => "not_requested", "result" => "written"}}
+        ] do
+      outcome =
+        CommandOutcome.run_success(
+          @run_ref,
+          result_class,
+          nil,
+          artifact_state,
+          usage,
+          memory
+        )
+
+      assert CommandContract.valid_envelope?(outcome.envelope)
+
+      refute CommandContract.valid_envelope?(
+               put_in(outcome.envelope, ["execution", "last_evaluation_error"], %{
+                 "kind" => "arithmetic_error",
+                 "message" => "division by zero"
+               })
+             )
+    end
+  end
+
+  test "private classified errors reject evaluator failure evidence" do
+    diagnostic = CommandDiagnostic.new!(:execution, :workflow_failed)
+
+    artifact_state = %{
+      "trace" => "not_requested",
+      "inspection" => "not_requested",
+      "result" => "not_requested"
+    }
+
+    clean_execution = %{
+      "state" => "incomplete",
+      "usage" => nil,
+      "evaluation_memory" => nil,
+      "last_evaluation_error" => nil
+    }
+
+    private =
+      CommandOutcome.run_classified_error(
+        @run_ref,
+        :private,
+        diagnostic,
+        [],
+        artifact_state,
+        clean_execution
+      )
+
+    evidence_execution = %{
+      clean_execution
+      | "last_evaluation_error" => %{
+          "kind" => "arithmetic_error",
+          "message" => "division by zero"
+        }
+    }
+
+    refute CommandContract.valid_envelope?(
+             put_in(private.envelope, ["execution"], evidence_execution)
+           )
+
+    assert_raise ArgumentError, "invalid closed command outcome", fn ->
+      CommandOutcome.run_classified_error(
+        @run_ref,
+        :private,
+        diagnostic,
+        [],
+        artifact_state,
+        evidence_execution
+      )
+    end
+
+    normal =
+      CommandOutcome.run_classified_error(
+        @run_ref,
+        :normal,
+        diagnostic,
+        [],
+        artifact_state,
+        evidence_execution
+      )
+
+    assert CommandContract.valid_envelope?(normal.envelope)
   end
 
   test "every catalog phase matches its byte-exact failure fixture" do
@@ -620,10 +1039,64 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     end
   end
 
+  test "human failures render the complete provider subject" do
+    {:ok, credential_subject} = CommandSubject.provider("deepseek", :credentials)
+
+    credential_outcome =
+      valid_outcome(
+        CommandDiagnostic.new!(:active_preflight, :credential_unavailable,
+          subject: credential_subject
+        )
+      )
+
+    assert CommandRenderer.render(credential_outcome) ==
+             {:stderr,
+              "error: active_preflight/credential_unavailable: " <>
+                "provider/deepseek/credentials: a required provider credential is unavailable " <>
+                "(run_ref: #{@run_ref}); export it, pass --env-file PATH, or use a host file credential\n"}
+
+    assert CommandDiagnosticRenderer.render(credential_outcome.envelope["error"]) ==
+             {:error, :invalid_command_diagnostic}
+
+    credential_diagnostic =
+      CommandDiagnostic.new!(:active_preflight, :credential_unavailable,
+        subject: credential_subject
+      )
+
+    assert CommandDiagnosticRenderer.render(credential_diagnostic) ==
+             {:ok,
+              "active_preflight/credential_unavailable: " <>
+                "provider/deepseek/credentials: a required provider credential is unavailable; " <>
+                "export it, pass --env-file PATH, or use a host file credential"}
+
+    refute CommandDiagnostic.valid?(%{credential_diagnostic | message: "PRIVATE credential name"})
+
+    assert CommandDiagnosticRenderer.render(%{
+             credential_diagnostic
+             | message: "PRIVATE credential name"
+           }) == {:error, :invalid_command_diagnostic}
+
+    {:ok, selection_subject} =
+      CommandSubject.provider("workspace", :selection, %{destination: :mission, index: 2})
+
+    selection_outcome =
+      valid_outcome(
+        CommandDiagnostic.new!(:provider_declaration, :selection_invalid,
+          subject: selection_subject
+        )
+      )
+
+    assert CommandRenderer.render(selection_outcome) ==
+             {:stderr,
+              "error: provider_declaration/selection_invalid: " <>
+                "provider/workspace/selection at mission[2]: the provider selection is invalid " <>
+                "(run_ref: #{@run_ref})\n"}
+  end
+
   test "structured argument rejections and envelope publication match exact fixtures" do
     for {name, argv} <- [
           {"unknown_switch", ["run", "ptc.json", "--caller-secret", "value"]},
-          {"retired_switch", ["run", "ptc.json", "--trace", "trace.jsonl"]}
+          {"unknown_switch", ["run", "ptc.json", "--trace", "trace.jsonl"]}
         ] do
       assert {:error, entry} = CommandEntry.open_with_ref(argv, :standalone, @run_ref)
 
@@ -646,17 +1119,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
           "inspection" => "not_requested",
           "result" => "not_requested"
         },
-        %{
-          "remaining_ms" => 0,
-          "capability_calls" => %{},
-          "subordinate_evaluations" => 0,
-          "evaluations_by_mission" => %{},
-          "protocol_errors" => 0,
-          "evaluation_memory_bytes" => 0,
-          "evaluation_history_bytes" => 0,
-          "evaluation_continuation_bytes" => 0,
-          "events_dropped" => %{}
-        },
+        usage_fixture(),
         %{
           "defined_count" => 0,
           "history_count" => 0,
@@ -782,9 +1245,36 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
         "inspection" => "not_requested",
         "result" => "not_requested"
       },
-      %{"state" => "incomplete", "usage" => nil, "evaluation_memory" => nil}
+      %{
+        "state" => "incomplete",
+        "usage" => nil,
+        "evaluation_memory" => nil,
+        "last_evaluation_error" => nil
+      }
     )
   rescue
     ArgumentError -> false
+  end
+
+  defp usage_fixture do
+    %{
+      "remaining_ms" => 0,
+      "capability_calls" => %{},
+      "subordinate_evaluations" => 0,
+      "evaluations_by_mission" => %{},
+      "protocol_errors" => 0,
+      "agent_protocol_errors" => 0,
+      "evaluation_memory_bytes" => 0,
+      "evaluation_history_bytes" => 0,
+      "evaluation_continuation_bytes" => 0,
+      "events_dropped" => %{},
+      "capability_refusals" => %{},
+      "llm_budget" => %{"total_tokens" => nil, "cost" => nil},
+      "llm_spend" => %{"state" => "empty"},
+      "llm_usage_state" => "available",
+      "llm_usage" => [],
+      "llm_usage_by_model" => [],
+      "unattributed_model_calls" => 0
+    }
   end
 end

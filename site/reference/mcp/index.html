@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP reference · PtcRunner</title>
+<meta name="description" content="This is the complete MCP installation, mapping, effect, authentication, and
+lifecycle contract.">
+<link rel="canonical" href="https://ptc-runner.dev/reference/mcp/">
+<meta property="og:title" content="MCP reference · PtcRunner">
+<meta property="og:description" content="This is the complete MCP installation, mapping, effect, authentication, and
+lifecycle contract.">
+<meta property="og:url" content="https://ptc-runner.dev/reference/mcp/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/" class="current" aria-current="page">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="mcp-reference">MCP reference</h1><p>This is the complete MCP installation, mapping, effect, authentication, and
+lifecycle contract.</p><p>MCP is the only way to add an external tool to a PtcRunner
+application. <code class="inline">ptc-host.json</code> fixes the server, transport, credentials, public names, and read/write
+effects in the host document. The application manifest may select and narrow
+that installation but cannot invent or widen it.</p><p>Start with <a href="/guides/building-agents/">Building agents</a> if you have not yet run the
+shipped agent loop. This guide adds one file-reading tool to that working path.</p><p>The published <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a>
+package (MIT, <a href="https://github.com/andreasronge/ptc-fs-mcp">source</a>) is a
+confined read/write filesystem server over live bytes. Pin it from a host
+document with <code class="inline">npx</code>; a hermetic spawn that does not inherit <code class="inline">PATH</code> must run
+absolute <code class="inline">node</code> against the installed <code class="inline">dist/cli.js</code>.</p><p>It is a demo server, not a release payload. A separately cloned project should
+install that package at a pinned version; the PtcRunner release does not add
+Node.js.</p><h2 id="protocol-compatibility">Protocol compatibility</h2><p>PtcRunner implements the final MCP <code class="inline">2026-07-28</code> profile. Acquisition starts
+with <code class="inline">server/discover</code>; it does not retry the legacy <code class="inline">initialize</code> handshake or
+downgrade to an older protocol revision. A server must advertise <code class="inline">2026-07-28</code>
+in <code class="inline">supportedVersions</code> and implement the tools surface from that profile.</p><p>An incompatible but responsive endpoint fails with
+<code class="inline">provider_protocol_version_unsupported</code>. This diagnosis is intentionally
+closed: it publishes the required PtcRunner-owned revision, but not the remote
+error message, response data, endpoint, process stderr, or launch arguments.
+A correlated JSON-RPC <code class="inline">-32601</code> response to <code class="inline">server/discover</code> reports that the
+endpoint rejected the required method. A valid discovery result whose
+<code class="inline">supportedVersions</code> omits <code class="inline">2026-07-28</code> instead reports that the endpoint did not
+advertise support for the revision. Other JSON-RPC errors do not become version
+diagnostics. Upgrade or replace the MCP server rather than adding a fallback
+handshake.</p><p>As of 2026-08-17, the official
+<code class="inline">@modelcontextprotocol/server-filesystem@2026.7.10</code> package negotiates
+<code class="inline">2025-11-25</code> through <code class="inline">initialize</code> and answers <code class="inline">server/discover</code> with JSON-RPC
+<code class="inline">-32601 Method not found</code>. It is therefore not compatible with this PtcRunner
+profile, despite starting and serving legacy clients normally.
+<a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a> implements the
+required profile and is the deterministic baseline for this reference.</p><h3 id="implement-the-wire-profile">Implement the wire profile</h3><p>The executable serves the pinned protocol definitions offline as
+<code class="inline">ptc docs schema-mcp</code>. The same bytes are published as
+<a href="https://ptc-runner.dev/schemas/mcp-2026-07-28.schema.json"><code class="inline">mcp-2026-07-28.schema.json</code></a>.
+That document is the final upstream 2026-07-28 schema plus the two corrections
+PtcRunner maintains and upstream does not publish: <code class="inline">JSONValue</code> accepts JSON
+numbers and nulls, which the generated upstream document drops, and
+<code class="inline">PtcRunnerJSONRPCErrorResponse</code> is the failure envelope described below. A
+tools server needs these definitions:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Exchange</th><th style="text-align: left;">Request definition</th><th style="text-align: left;">Success-response definition</th></tr></thead><tbody><tr><td style="text-align: left;">Negotiate the profile</td><td style="text-align: left;"><code class="inline">DiscoverRequest</code></td><td style="text-align: left;"><code class="inline">DiscoverResultResponse</code></td></tr><tr><td style="text-align: left;">Publish the tool catalog</td><td style="text-align: left;"><code class="inline">ListToolsRequest</code></td><td style="text-align: left;"><code class="inline">ListToolsResultResponse</code></td></tr><tr><td style="text-align: left;">Invoke one tool</td><td style="text-align: left;"><code class="inline">CallToolRequest</code></td><td style="text-align: left;"><code class="inline">CallToolResultResponse</code></td></tr></tbody></table></div><p><code class="inline">PtcRunnerJSONRPCErrorResponse</code> is the failure envelope for all three. Resolve
+each as <code class="inline">#/$defs/NAME</code> inside the served document. Its <code class="inline">id</code> is the same positive
+integer sent with the request. Its closed <code class="inline">error</code> object requires an integer
+<code class="inline">code</code> and a UTF-8 <code class="inline">message</code> of at most 4,096 bytes, with optional JSON <code class="inline">data</code>;
+no other envelope or error fields are accepted. Requests carry
+<code class="inline">io.modelcontextprotocol/protocolVersion</code>, <code class="inline">io.modelcontextprotocol/clientInfo</code>,
+and an empty <code class="inline">io.modelcontextprotocol/clientCapabilities</code> object under
+<code class="inline">params._meta</code>.</p><p>PtcRunner deliberately implements a narrower client policy than the complete
+schema surface. Every successful result includes <code class="inline">resultType: &quot;complete&quot;</code>.
+Discovery advertises <code class="inline">2026-07-28</code> in <code class="inline">supportedVersions</code> and a <code class="inline">tools</code>
+capability. Discovery and tool-list pages include a non-negative <code class="inline">ttlMs</code> and a
+<code class="inline">cacheScope</code> of <code class="inline">public</code> or <code class="inline">private</code>; all pages in one catalog traversal keep
+the same scope. Tool names are unique, and a selected tool has an object
+<code class="inline">inputSchema</code>. A tool call returns text blocks or embedded text resources;
+<code class="inline">structuredContent</code> is accepted only when the selected tool published an
+object <code class="inline">outputSchema</code>. Binary resources, image and audio blocks, task results,
+and server requests for sampling, elicitation, or roots are unsupported.
+Schema-valid <code class="inline">input_required</code> results are refused rather than fulfilled because
+the client advertises none of those capabilities.</p><p>The schema defines wire shape. The bounds and closed-result rules above remain
+runtime policy, so passing the schema alone is necessary but not sufficient.</p><p>A cold <code class="inline">npx</code> launch can spend more than the default budget before that protocol
+response arrives. Acquisition derives one per-operation budget and then applies
+it to each step separately: once to starting the transport, which for stdio
+covers launcher staging and the child spawn, and again to each discovery request,
+beginning with <code class="inline">server/discover</code>. It is not a single budget for the whole
+sequence, so a slow start and a slow answer can add up past any one of them.</p><p>That per-operation value is the lowest of:</p><ul><li>the installation's <code class="inline">ceilings.timeout_ms</code> in <code class="inline">ptc-host.json</code>, default <code class="inline">5000</code>;</li><li>for a mission provider, the manifest's <code class="inline">limits.evaluation_timeout_ms</code>,
+default <code class="inline">1000</code>; and</li><li>the provider entry's own <code class="inline">config.timeout_ms</code> under the manifest's <code class="inline">providers</code>,
+when it sets one. It may only narrow the two above, never widen them — a
+larger value is refused as an invalid selection.</li></ul><p>Every one of them must be wide enough, because the lowest wins. Raising one
+while another stays at its default changes nothing. In <code class="inline">ptc.json</code>:</p><pre><code class="json language-json">{&quot;limits&quot;: {&quot;evaluation_timeout_ms&quot;: 20000}}</code></pre><p>and in <code class="inline">ptc-host.json</code>, beside the installation's <code class="inline">transport</code>:</p><pre><code class="json language-json">{&quot;ceilings&quot;: {&quot;timeout_ms&quot;: 20000}}</code></pre><p><code class="inline">start_timeout_ms</code> inside the stdio transport bounds one step: the launcher
+handshake that spawns the child. The runtime applies it as
+<code class="inline">min(start_timeout_ms, remaining transport-start budget)</code>, so it can only narrow,
+never widen, the values above — but once those are raised past its <code class="inline">5000</code>
+default, that default becomes the narrower cap on the handshake. Raise it too if
+the step that expires is the spawn rather than the answer:</p><pre><code class="json language-json">{&quot;start_timeout_ms&quot;: 15000}</code></pre><p>When a budget expires, the closed result is <code class="inline">provider_acquisition_timeout</code>,
+which is retryable and distinct from <code class="inline">provider_unavailable</code>. It reports only
+that the clock ran out: the step that expired may have been the spawn or the
+discovery answer, so PtcRunner cannot say the server was reached, only that it
+never received the response needed to prove a protocol mismatch. Raise the
+budgets and run it again. A first launch on a cold npm cache, or any launch on a
+loaded machine, is the usual cause.</p><h2 id="run-the-checked-in-file-agent">Run the checked-in file agent</h2><p>The tutorial launches <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp@0.1.0</code></a>
+through <code class="inline">npx</code>. It requires Node.js 22 or newer and <code class="inline">npx</code>; the first run may
+download that package.</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
+ptc doctor kernel-tutorial/03-file-agent.ptc-project.json</code></pre><p>Passive doctor validates the application, resolves <code class="inline">npx</code>, and checks the
+selected installation without loading the model credential or starting the
+server. After completing the <a href="/guides/quickstart/#run-a-model-authored-program">model-authored Quickstart</a>,
+run the agent:</p><pre><code class="console language-console">ptc run kernel-tutorial/03-file-agent.ptc-project.json</code></pre><p>The model sees one prompt-visible <code class="inline">tutorial.files/read-page</code> function. It does
+not see an unrestricted filesystem or the server command.</p><h2 id="install-and-rename-a-server-tool">Install and rename a server tool</h2><p>An MCP installation belongs in <code class="inline">ptc-host.json</code>:</p><pre><code class="json language-json">&quot;workspace&quot;: {
+  &quot;source&quot;: &quot;mcp&quot;,
+  &quot;installation_revision&quot;: &quot;workspace-v1&quot;,
+  &quot;transport&quot;: {
+    &quot;type&quot;: &quot;stdio&quot;,
+    &quot;command&quot;: &quot;node&quot;,
+    &quot;args&quot;: [&quot;server.js&quot;]
+  },
+  &quot;tools&quot;: {
+    &quot;read_text_file&quot;: {
+      &quot;as&quot;: &quot;workspace.read&quot;,
+      &quot;effect&quot;: &quot;read&quot;,
+      &quot;description&quot;: &quot;Read one UTF-8 file beneath the granted root.&quot;,
+      &quot;model_visible&quot;: true,
+      &quot;error_feedback&quot;: &quot;closed&quot;,
+      &quot;inspection_capture&quot;: &quot;full&quot;
+    }
+  }
+}</code></pre><p><code class="inline">read_text_file</code> is the upstream name. <code class="inline">workspace.read</code> is the stable public
+capability name exposed by PtcRunner. Change <code class="inline">installation_revision</code> whenever
+the transport, mapping, effect, snapshot policy, or server behavior changes.</p><p>The required <code class="inline">effect</code> declaration in <code class="inline">ptc-host.json</code> is authoritative; server
+annotations cannot change it. <code class="inline">model_visible</code> on a host mapping is the default
+for prompt discovery, not a ceiling: a selecting manifest may still list that
+name in <code class="inline">config.model_visible</code>. Visibility never grants or denies call
+authority. <code class="inline">error_feedback: &quot;bounded&quot;</code> may expose up to 1,024 bytes of
+validated server error text as untrusted model feedback, so enable it only when
+the server cannot return secrets, paths, or stack traces.</p><p><code class="inline">inspection_capture</code> is the closed host-only enum <code class="inline">&quot;full&quot;</code> (the default) or
+<code class="inline">&quot;digest_results&quot;</code>. The latter is accepted only for read mappings. Private
+inspection then keeps arguments and requests but stores deterministic JSON
+identity metadata in place of responses and results the transport accepted. A
+response the transport rejects -- an MCP error, an <code class="inline">isError</code> result, or one
+that is oversized or malformed -- keeps its body, as do capability error
+envelopes, capability exceptions, and MCP stderr within <code class="inline">stderr_bytes</code>. A
+result rejected after that point -- tool-result normalization, retained-size
+admission, output validation -- keeps its full error envelope while the wire
+body remains an identity; the mapping is a read, so rerunning with full
+capture recovers the value and the identity confirms it is the same one.
+Digests of guessable values are not confidential. Select provider page sizes
+and configured call, event, and clock limits suitable for the source volume.</p><h2 id="select-less-authority-in-the-manifest">Select less authority in the manifest</h2><p>The application selects the installed alias in its mission provider list:</p><pre><code class="json language-json">&quot;providers&quot;: {
+  &quot;mission&quot;: [
+    {&quot;name&quot;: &quot;workspace&quot;, &quot;config&quot;: {&quot;allow&quot;: [&quot;workspace.read&quot;]}}
+  ]
+}</code></pre><p>If an installation maps any write tool, every selecting manifest must provide a
+non-empty <code class="inline">allow</code> list, even when it selects only reads. <code class="inline">model_visible</code> may
+list any authorized <code class="inline">allow</code> names, including mappings the host left hidden from
+prompt discovery. A timed-out or
+transport-failed write is never retried automatically and may report
+<code class="inline">mutation_state: &quot;indeterminate&quot;</code>; the external mutation may already have
+happened. A complete decoded refusal (<code class="inline">isError: true</code>) or JSON-RPC error is
+not indeterminate: the server answered, so the caller can treat that outcome
+as known.</p><p>The
+<a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer"><code class="inline">named-mission-reader-writer</code></a>
+example shows the complete installation: two occurrences of <code class="inline">ptc-fs-mcp@0.1.0</code>
+with different roots, a mandatory <code class="inline">allow</code> list on the write mapping, basename
+confinement, and the rule that the caller must reconcile an indeterminate
+result rather than repeat the mutation blindly.</p><p>A prompt-visible PTC-Lisp wrapper can present a smaller domain API than the raw
+tool:</p><pre><code class="clojure language-clojure">(ns my.files &quot;Mission access to the granted file root.&quot; {:visibility :prompt})
+
+(defn read-page
+  &quot;Read one bounded UTF-8 page. Pass nil first, then next_cursor.&quot;
+  {:signature &quot;(path :string, cursor :string?) -&gt; :any&quot;}
+  [path cursor]
+  (let [args (if cursor {&quot;path&quot; path &quot;cursor&quot; cursor} {&quot;path&quot; path})
+        response (tool/workspace.read args)]
+    (if (= :ok (get response :status))
+      (get response :value)
+      (fail response))))</code></pre><p>When prompt-visible wrappers exist, the model sees them instead of the raw
+<code class="inline">tool/...</code> entries. The underlying capability still enforces its schema, byte
+ceiling, timeout, quota, and manifest grant.</p><p>The value handed to <code class="inline">fail</code> is application data, so it never reaches the envelope
+or the trace. A workflow entry that ends this way reports
+<code class="inline">execution/explicit_failure</code> — unless the value re-raises a Kernel refusal, which
+keeps its own class — and that diagnostic says where the value went: it
+is retained in the run's private inspection record when the run publishes one
+and the value fits under <code class="inline">terminal_result_bytes</code>, and the diagnostic names the
+reason when it is not. See
+<a href="/reference/ptc-lisp-specification/#5-20-fail-signal-failure">§5.20</a> for how to read a
+retained value back.</p><h2 id="choose-a-transport">Choose a transport</h2><p>Stdio launches one local process. Relative working directories resolve against
+the host document, and credentials enter through named bindings rather than
+literal environment values:</p><pre><code class="json language-json">&quot;transport&quot;: {
+  &quot;type&quot;: &quot;stdio&quot;,
+  &quot;command&quot;: &quot;node&quot;,
+  &quot;cwd&quot;: &quot;.&quot;,
+  &quot;args&quot;: [&quot;server.js&quot;],
+  &quot;inherit_environment&quot;: true,
+  &quot;env&quot;: {&quot;VENDOR_TOKEN&quot;: {&quot;binding&quot;: &quot;vendor_token&quot;}}
+}</code></pre><p>Relative entries in <code class="inline">args</code> are interpreted by the child under that resolved
+<code class="inline">cwd</code>. Pin a published package with <code class="inline">npx</code> when the host document lives outside
+this checkout; a relative path into another repository is a deliberate
+cross-tree choice, not a default.</p><p>Plain doctor resolves the executable without launching it. Missing commands
+fail their local provider check as <code class="inline">command_not_found</code>. The optional
+<a href="https://github.com/andreasronge/ptc_runner/tree/main/ptc_runner_launcher">launcher companion</a>
+adds executable identity and stronger stdio containment.</p><p>Streamable HTTP names a remote endpoint and optional static authentication:</p><pre><code class="json language-json">&quot;transport&quot;: {
+  &quot;type&quot;: &quot;streamable_http&quot;,
+  &quot;endpoint&quot;: &quot;https://mcp.example.com/v1&quot;,
+  &quot;auth&quot;: [{&quot;scheme&quot;: &quot;bearer&quot;, &quot;binding&quot;: &quot;vendor_token&quot;}]
+}</code></pre><p>The endpoint must be <code class="inline">https</code>, with one narrow exception for local development
+described below. It is checked when the document loads, not when the server is
+contacted, so a malformed endpoint fails as <code class="inline">installation_endpoint_invalid</code>.
+The rejected plain-HTTP and loopback-allowance combinations use clause-specific
+codes that state whether the allowance, a literal loopback address, removal of
+the allowance, or HTTPS for configured credentials is required. Every form
+names the installation before anything is dialled.</p><p>When direct endpoint acquisition does dial the server, <code class="inline">ptc run</code> and
+<code class="inline">ptc doctor --connect</code> distinguish three closed connection failures:</p><ul><li><code class="inline">provider_endpoint_connection_refused</code> means the endpoint rejected the TCP
+connection and is marked retryable;</li><li><code class="inline">provider_endpoint_name_unresolved</code> means the endpoint hostname did not
+resolve; and</li><li><code class="inline">provider_endpoint_tls_failed</code> means an admitted TLS configuration or
+protocol alert prevented the handshake.</li></ul><p>These diagnostics name only the installed provider occurrence. They never
+include the endpoint, DNS response, certificate, TLS alert text, Mint value, or
+operating-system error. OTP may still write the handshake alert on stderr;
+stdout of <code class="inline">ptc doctor</code> remains one JSON document. Other connection failures retain the generic
+<code class="inline">provider_unavailable</code> code. OAuth discovery and token traffic retain their
+existing closed authorization transport errors rather than exposing endpoint
+causes through grant state.</p><p>Supported static schemes are <code class="inline">bearer</code>, <code class="inline">basic</code>, and header-named <code class="inline">api_key</code>.
+Protocol headers such as <code class="inline">authorization</code>, <code class="inline">content-type</code>, <code class="inline">host</code>, and <code class="inline">mcp-*</code>
+cannot be supplied as API-key headers. Upstream tool names are the server's own,
+so they are held to the MCP protocol rule rather than PtcRunner's; only the
+public <code class="inline">as</code> name must be lowercase-dotted. The generated host schema contains
+the complete transport shape and bounds.</p><h2 id="reach-a-local-server-over-plain-http">Reach a local server over plain HTTP</h2><p>TLS against a development server is usually more trouble than it is worth, so a
+transport may opt out for loopback only:</p><pre><code class="json language-json">&quot;transport&quot;: {
+  &quot;type&quot;: &quot;streamable_http&quot;,
+  &quot;endpoint&quot;: &quot;http://127.0.0.1:8055&quot;,
+  &quot;allow_insecure_loopback&quot;: true
+}</code></pre><p>The rule is deliberately narrow. Plain <code class="inline">http</code> is admitted only when</p><ul><li><code class="inline">allow_insecure_loopback</code> is <code class="inline">true</code>,</li><li>the host is the literal <code class="inline">127.0.0.1</code> or <code class="inline">[::1]</code> — <code class="inline">localhost</code> is a name that
+resolves wherever the resolver says, so it is not a loopback address here,</li><li>the transport declares no <code class="inline">auth</code> entries, and</li><li>the transport declares no <code class="inline">oauth</code> block.</li></ul><p>The last two make the allowance credential-free: <strong>no configured host credential
+crosses a plaintext socket.</strong> That is a guarantee about <code class="inline">auth</code> bindings and
+OAuth tokens, and nothing more — tool arguments and results still travel over
+that socket in the clear, so do not point this at data you would not want a
+local process to read.</p><p>Setting the flag against an <code class="inline">https</code> endpoint is refused rather than ignored, so
+moving a server to TLS without removing the allowance fails loudly.</p><h3 id="a-complete-local-example">A complete local example</h3><p>The repository ships a server to check this against, so remote MCP has a
+baseline that runs before you debug one that does not. From a source checkout:</p><pre><code class="console language-console">go -C test/support/mcp_go_stateless build -o /tmp/ptc-mcp-http-server .
+/tmp/ptc-mcp-http-server -host 127.0.0.1 -port 8055 &amp;</code></pre><p>It exposes one read tool, <code class="inline">cityTime</code>. Four files reach it, with no credential
+anywhere. The host document installs it:</p><pre><code class="json language-json">{
+  &quot;install&quot;: {
+    &quot;workspace&quot;: {
+      &quot;source&quot;: &quot;mcp&quot;,
+      &quot;installation_revision&quot;: &quot;workspace-v1&quot;,
+      &quot;transport&quot;: {
+        &quot;type&quot;: &quot;streamable_http&quot;,
+        &quot;endpoint&quot;: &quot;http://127.0.0.1:8055&quot;,
+        &quot;allow_insecure_loopback&quot;: true
+      },
+      &quot;tools&quot;: {
+        &quot;cityTime&quot;: {
+          &quot;as&quot;: &quot;workspace.city_time&quot;,
+          &quot;effect&quot;: &quot;read&quot;,
+          &quot;description&quot;: &quot;Get the current time in nyc, sf, or boston.&quot;
+        }
+      }
+    }
+  }
+}</code></pre><p><code class="inline">cityTime</code> is the server's own name and is written exactly as the server spells
+it; only the public <code class="inline">as</code> name follows PtcRunner's lowercase-dotted rule.</p><p>The manifest selects the installation into a mission, because <strong>MCP providers
+are mission-only</strong> — a workflow component that calls <code class="inline">tool/workspace.city_time</code>
+directly fails with <code class="inline">capability_requirement_missing</code>:</p><pre><code class="json language-json">{
+  &quot;version&quot;: 1,
+  &quot;workflow&quot;: {
+    &quot;components&quot;: [
+      {&quot;id&quot;: &quot;main&quot;, &quot;path&quot;: &quot;main.clj&quot;, &quot;dependencies&quot;: [&quot;kernel&quot;]},
+      {&quot;library&quot;: &quot;kernel&quot;}
+    ],
+    &quot;entry&quot;: &quot;main/run&quot;
+  },
+  &quot;input&quot;: {&quot;value&quot;: {&quot;city&quot;: &quot;nyc&quot;}},
+  &quot;providers&quot;: {
+    &quot;mission&quot;: [{&quot;name&quot;: &quot;workspace&quot;, &quot;config&quot;: {&quot;allow&quot;: [&quot;workspace.city_time&quot;]}}]
+  },
+  &quot;missions&quot;: {
+    &quot;default&quot;: {
+      &quot;components&quot;: [{&quot;id&quot;: &quot;clock&quot;, &quot;path&quot;: &quot;clock.clj&quot;}],
+      &quot;providers&quot;: [&quot;workspace&quot;]
+    }
+  }
+}</code></pre><p>The mission component owns the tool call, and the workflow drives the mission
+through <code class="inline">kernel/eval-source</code>, so this example needs no model:</p><pre><code class="clojure language-clojure">;; clock.clj — mission-only access to the installed server
+(ns clock &quot;Mission-only access to the installed MCP server.&quot; {:visibility :prompt})
+
+(defn city-time
+  &quot;Return the current time in one named city.&quot;
+  {:signature &quot;(city :string) -&gt; :any&quot;}
+  [city]
+  (let [response (tool/workspace.city_time {&quot;city&quot; city})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      (fail response))))</code></pre><pre><code class="clojure language-clojure">;; main.clj — workflow entry
+(ns main &quot;Workflow entry: drive the mission without a model.&quot; {:visibility :prompt})
+
+(defn run
+  &quot;Ask the mission for one city's time.&quot;
+  {:signature &quot;(input :map) -&gt; :any&quot;}
+  [input]
+  (return (kernel/eval-source &quot;default&quot;
+            (str &quot;(clock/city-time \&quot;&quot; (get input &quot;city&quot;) &quot;\&quot;)&quot;))))</code></pre><p><code class="inline">doctor --connect</code> proves the installation is reachable:</p><pre><code class="console language-console">$ ptc doctor ptc.json --host-config ptc-host.json --connect
+{&quot;checks&quot;:[…,{&quot;code&quot;:&quot;available&quot;,&quot;name&quot;:&quot;provider/workspace/connectivity&quot;,&quot;status&quot;:&quot;pass&quot;}],
+ &quot;readiness&quot;:&quot;ready&quot;}</code></pre><p>That check answers for the transport only. A configuration can pass it and
+still fail at run time — a mission the manifest never grants the provider to,
+for instance — so run the thing as well:</p><pre><code class="console language-console">$ ptc run ptc.json --host-config ptc-host.json
+{&quot;outcome&quot;:&quot;continued&quot;,&quot;duration_ms&quot;:19,
+ &quot;value&quot;:{&quot;text&quot;:[&quot;The current time in New York City is 2026-08-16T07:07:52-04:00&quot;]}}</code></pre><p>That is the baseline to diff a real host document against when a remote
+installation will not connect.</p><h2 id="authorize-oauth-protected-http-explicitly">Authorize OAuth-protected HTTP explicitly</h2><p>OAuth replaces static <code class="inline">auth</code> with host-owned policy that pins the resource,
+issuer, client, scope ceiling, refresh policy, loopback authority, and permitted
+network origins. The application and server cannot widen them.</p><p>This is a complete pre-registered installation. Replace the endpoint, issuer,
+resource, client ID, scopes, and tool mapping with values issued for your
+server:</p><pre><code class="json language-json">{
+  &quot;install&quot;: {
+    &quot;workspace&quot;: {
+      &quot;source&quot;: &quot;mcp&quot;,
+      &quot;installation_revision&quot;: &quot;workspace-oauth-v1&quot;,
+      &quot;transport&quot;: {
+        &quot;type&quot;: &quot;streamable_http&quot;,
+        &quot;endpoint&quot;: &quot;https://mcp.example.com/mcp&quot;,
+        &quot;oauth&quot;: {
+          &quot;installation_id&quot;: &quot;workspace-oauth&quot;,
+          &quot;issuer&quot;: &quot;https://auth.example.com&quot;,
+          &quot;resource&quot;: &quot;https://mcp.example.com/mcp&quot;,
+          &quot;scope_ceiling&quot;: [&quot;tools.read&quot;, &quot;offline_access&quot;],
+          &quot;default_scopes&quot;: [&quot;tools.read&quot;],
+          &quot;refresh_access&quot;: &quot;when_supported&quot;,
+          &quot;network&quot;: {
+            &quot;additional_origins&quot;: [],
+            &quot;private_network_origins&quot;: []
+          },
+          &quot;client&quot;: {
+            &quot;registration&quot;: &quot;pre_registered&quot;,
+            &quot;client_id&quot;: &quot;ptc-workspace&quot;,
+            &quot;token_endpoint_auth_method&quot;: &quot;none&quot;,
+            &quot;grant_types&quot;: [&quot;authorization_code&quot;, &quot;refresh_token&quot;],
+            &quot;loopback_redirect&quot;: {
+              &quot;host&quot;: &quot;127.0.0.1&quot;,
+              &quot;path&quot;: &quot;/callback&quot;
+            }
+          }
+        }
+      },
+      &quot;ceilings&quot;: {&quot;timeout_ms&quot;: 30000},
+      &quot;tools&quot;: {
+        &quot;cityTime&quot;: {&quot;as&quot;: &quot;workspace.city_time&quot;, &quot;effect&quot;: &quot;read&quot;}
+      }
+    }
+  }
+}</code></pre><p>OAuth MCP endpoints must use <code class="inline">https</code>. The plaintext-loopback allowance is
+credential-free and cannot be combined with an <code class="inline">oauth</code> block. PtcRunner also
+does not accept a custom CA path in the host document: use a certificate trusted
+by the runtime's operating-system trust store. The repository E2E harness is a
+test-only exception; it loads an ephemeral CA directly into the test VM before
+exercising this exact host-document and command path.</p><p>Interactive authorization is currently available only from a source checkout:</p><pre><code class="console language-console">ptc run ptc.json --host-config ptc-host.json \
+  --authorize-mcp workspace</code></pre><p>The command prints a URL and waits on an operating-system-selected loopback
+port. The shipped CLI store is process-local, so a later invocation must
+authorize again; embedding hosts may provide a secure principal-scoped store.
+The runtime-included <code class="inline">ptc</code> frontend does not currently initiate this flow.</p><p>Normal execution never starts authorization. Missing authority fails closed,
+and PtcRunner never retries the original call after <code class="inline">401</code> or <code class="inline">403</code> because the
+request may have performed a write. Dynamic Client Registration, DPoP, and
+signed authorization metadata are unsupported.</p><h2 id="publish-immutable-content-identity">Publish immutable content identity</h2><p>For immutable content, <code class="inline">snapshot_identity</code> may name an installed read tool and
+a result field containing a lowercase <code class="inline">sha256:</code> digest:</p><pre><code class="json language-json">&quot;snapshot_identity&quot;: {&quot;tool&quot;: &quot;snapshot_info&quot;, &quot;field&quot;: &quot;snapshot_hash&quot;}</code></pre><p>PtcRunner calls that tool once during assembly and publishes the digest as
+<code class="inline">content_snapshot_hash</code>. It validates the shape, not the server's immutability
+claim. Install the field when the server actually publishes a whole-corpus
+digest; <a href="https://www.npmjs.com/package/ptc-fs-mcp"><code class="inline">ptc-fs-mcp</code></a> does not,
+because it serves live bytes and reports a per-call <code class="inline">content_hash</code> instead.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/application-manifest/">Manifests and capabilities</a> covers mission
+selection, narrowing, and prompt-visible facades.</li><li><a href="/reference/host-installation/">Host configuration</a> covers credentials, provider
+aliases, data classes, and installed policy shared by every source type.</li><li><a href="/guides/building-agents/">Building agents</a>
+explains effect-aware correction and retry behavior.</li></ul>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/component-contracts/">&larr; Components-and-preludes reference</a><a class="pager-next" href="/reference/cli/">Command-line reference &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/mcp.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

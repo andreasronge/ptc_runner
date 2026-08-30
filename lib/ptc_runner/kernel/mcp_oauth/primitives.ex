@@ -8,6 +8,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.Primitives do
   pre-existing parameters before appending PtcRunner-owned form values.
   """
 
+  alias PtcRunner.Kernel.MCPEndpoint
+
   @authorization_parameters MapSet.new(~w(
     response_type response_mode client_id redirect_uri scope resource
     code_challenge code_challenge_method state request request_uri
@@ -157,14 +159,10 @@ defmodule PtcRunner.Kernel.MCPOAuth.Primitives do
     allow_insecure_loopback = Keyword.get(opts, :allow_insecure_loopback, false)
 
     with true <- byte_size(endpoint) in 1..16_384 and String.valid?(endpoint),
-         true <- safe_endpoint_characters?(endpoint),
+         true <- MCPEndpoint.safe_characters?(endpoint),
          %URI{scheme: scheme, host: host, userinfo: nil, fragment: nil} <-
            URI.parse(endpoint),
-         true <- is_binary(host) and host != "",
-         true <-
-           scheme == "https" or
-             (allow_insecure_loopback and scheme == "http" and
-                host in ["127.0.0.1", "::1"]),
+         true <- MCPEndpoint.origin_allowed?(scheme, host, allow_insecure_loopback),
          true <- Keyword.keys(opts) -- [:allow_insecure_loopback] == [],
          {:ok, query} <- raw_query(endpoint),
          :ok <- validate_existing_query(query, owned) do
@@ -175,14 +173,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.Primitives do
   end
 
   defp validated_query(_endpoint, _owned, _opts), do: {:error, :invalid_endpoint}
-
-  defp safe_endpoint_characters?(endpoint) do
-    endpoint
-    |> String.to_charlist()
-    |> Enum.all?(fn codepoint ->
-      codepoint > 0x20 and codepoint not in 0x7F..0x9F
-    end)
-  end
 
   defp raw_query(endpoint) do
     case :binary.match(endpoint, "?") do

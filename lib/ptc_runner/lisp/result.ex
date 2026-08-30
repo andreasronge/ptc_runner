@@ -20,6 +20,7 @@ defmodule PtcRunner.Lisp.Result do
     :name,
     :field_descriptions,
     :failure_origin,
+    :return_origin,
     :prints,
     :tool_calls,
     :pmap_calls,
@@ -30,6 +31,7 @@ defmodule PtcRunner.Lisp.Result do
     :original_prompt,
     :tools,
     :prelude_trace,
+    :prelude_calls,
     prelude_call_counts: %{}
   ]
 
@@ -44,6 +46,7 @@ defmodule PtcRunner.Lisp.Result do
           parent_trace_id: String.t() | nil,
           field_descriptions: map() | nil,
           failure_origin: :capability | nil,
+          return_origin: :direct_tool_call | nil,
           prints: [String.t()],
           tool_calls: [map()],
           pmap_calls: [map()],
@@ -53,6 +56,7 @@ defmodule PtcRunner.Lisp.Result do
           prompt: String.t() | nil,
           tools: map() | nil,
           prelude_trace: PtcRunner.Lisp.Prelude.trace_summary() | nil,
+          prelude_calls: [String.t()] | nil,
           prelude_call_counts: %{optional(String.t()) => non_neg_integer()}
         }
 
@@ -75,6 +79,11 @@ defmodule PtcRunner.Lisp.Result do
       child_steps: []
     }
   end
+
+  @doc false
+  @spec unwrap_return(term()) :: term()
+  def unwrap_return({:__ptc_return__, value}), do: value
+  def unwrap_return(value), do: value
 
   @spec error(atom(), String.t(), map()) :: t()
   def error(reason, message, memory), do: error(reason, message, memory, %{})

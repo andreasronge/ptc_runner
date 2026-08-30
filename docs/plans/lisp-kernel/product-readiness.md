@@ -1,6 +1,6 @@
 # Lisp Kernel product readiness
 
-**Status:** active roadmap; reviewed 2026-07-29.
+**Status:** active roadmap; reviewed 2026-08-12.
 
 The bounded Kernel, manifest-authored application path, host-installed MCP
 sources with explicit read/write tool effects, host-installed LLM sources,
@@ -16,66 +16,30 @@ expertise.
 
 | Priority | Area | Current limitation | Consequence |
 | --- | --- | --- | --- |
-| P0 | CLI diagnostics | Checkpoint E closed the inspected-term failures, but `mix ptc.run` still raises the raw JSON envelope as its error message, so a human reads a several-hundred-character line to find one diagnostic. Checkpoint F replaces this with a rendered phase, code, message, and run reference. | A failing command is hard to read at a terminal, though its phase and code are now closed and reliable. |
-| P1 | Command-line workflow | Checkpoint E delivered `init`, `validate`, `models`, and `doctor` in the shared engine and retired `--mission`, but only `run` has a Mix task, so the others are reachable in a source checkout solely through `CommandEngine.dispatch/1`. Checkpoint F adds a generic `mix ptc <command>` task. | First-time users cannot reach most commands without calling an Elixir API directly. |
 | P1 | Model protocol | Host-installed LLMs freeze bounded sampling options, but structured-output schema, reasoning controls, an explicit provider timeout, and enforceable token or cost ceilings remain outside the public configuration surface. | Deployments cannot yet express richer model contracts or complete operational budgets. |
 | P1 | Trace operation | A malformed, duplicate, or oversized trace can make a directory source fail as a whole, and trace persistence remains post-run. | One damaged file can hide healthy runs and a crash can lose buffered events. |
-| P1 | Distribution | The user workflow assumes a source checkout, Erlang/Elixir, and Mix; the Viewer is a development path dependency. | Installation and deployment remain too heavy for the intended non-Elixir audience. |
+| P1 | Distribution | macOS ARM64 is published and Linux AMD64/ARM64 publication is automated, but the first public container release and macOS x86_64 evidence remain. | Container users still need the next root release tag; Intel Mac users have no artifact. |
 | P1 | End-to-end evidence | Packaged-install, private-sink/loss, real multi-page Viewer, and complete shell-driven application journeys remain absent. | Large-artifact, packaging, and cross-command regressions can escape normal gates. |
 | P2 | Viewer pagination | Cursor APIs, accumulation, and partial labeling have focused tests, but no valid run above 100 events has been exercised through repeated browser pagination. | Ordering, duplication, or final-cursor defects can remain despite API coverage. |
 | P2 | Source diagnostics | Parser, compiler, and runtime failures do not consistently retain precise source spans across every boundary. | Larger bundles take longer to repair. |
 | P2 | Language expectations | PTC-Lisp is Clojure-oriented rather than a full Clojure implementation. | Familiar-looking programs can encounter unsupported functions or intentional recoverable-signal differences. |
 | P2 | Reference quality | Some generated function-reference entries still have minimal descriptions, and the implemented MCP-era application journey is spread across several guides and examples. | First-time authors must assemble more context than necessary. |
 
-## 1. Stabilize the command-line contract
+## 1. Distribute the standalone command
 
-The detailed, implementation-ordered work is tracked in
-[Stable CLI and application-source contract](stable-cli-contract.md).
+The remaining target and acceptance work is tracked in
+[Standalone CLI distribution](stable-cli-contract.md).
 
-Successful and failed standalone invocations need one stable JSON envelope at a
-caller-named destination and documented exit statuses. The process streams carry
-best-effort human rendering rather than the envelope and are explicitly
-non-contractual in both content and secrecy, so no outer framing process and no
-evidence gate for one is required. A failure should identify at least:
+The shared parser, command engine, Mix frontend, standalone release, REPL,
+human rendering, caller-named V2 envelope publication, exit statuses, and
+package verification are implemented. Retain one contract across those
+frontends while adding the remaining macOS x86_64 target evidence. macOS ARM64
+and the native Linux AMD64/ARM64 container gates are implemented; the first
+container tag still has to prove the public-registry boundary.
 
-- phase and stable code;
-- JSON path and safe logical source when applicable;
-- bounded human-readable message and notes; and
-- whether any provider activity occurred.
-
-Add focused command-line entry points equivalent to:
-
-```console
-ptc init my-app
-ptc validate ptc.json
-ptc run ptc.json --host-config ptc-host.json --input input.json --trace-dir traces/
-ptc models --host-config ptc-host.json
-ptc doctor ptc.json --host-config ptc-host.json
-```
-
-Because this is a 0.x library, rename `--mission` to `--input` without a
-compatibility alias. Default `ptc doctor` should verify runtime versions,
-credential declarations, model configuration, manifest-relative files,
-launcher availability, and optional Viewer availability through the same
-audited-local checks used by `run` when an application supplies their final
-selection context; host-only doctor reports those checks as requiring an
-application. It does not look up credential sources, use decoded inline
-literals, start provider applications, or expose secret values. Inline
-literals are necessarily parsed as part of the bounded host document.
-`ptc doctor --connect` performs bounded credential availability and
-provider-connectivity checks after marking provider activity.
-
-The existing interactive Mix REPL remains supported. A standalone REPL needs a
-separate streaming protocol and is not part of the single-document CLI
-contract.
-
-Keep the entropy-based default run identifiers and add a real subprocess
-regression proving that repeated CLI processes can publish into one trace
-directory without collisions.
-
-**Exit gate:** common invalid manifests have asserted JSON diagnostics and exit
-statuses; validation and doctor commands fail before provider activity where
-possible; repeated subprocess runs persist and load independently.
+**Exit gate:** all four architectures build and run the packaged verification
+journey, documentation states the unsigned macOS limitation, and no packaging
+wrapper introduces alternate options or output.
 
 ## 2. Complete the model boundary
 
@@ -117,19 +81,31 @@ large run passes the complete trace-to-browser path.
 
 ## 4. Package the user journey
 
-Publish a breaking 0.x release representing the current Kernel product. Supply
-at least one standalone installation path through the smallest BEAM packaging
-that carries the real dependency surface, initially an OTP release unless an
-escript spike proves simpler. Do not make root-owned/fs-verity or signed-sealed
-installation policy a prerequisite for the local CLI; those controls belong to
-a deployment threat model that needs them. Use a minimal command boot profile,
-disable implicit dotenv loading, and start optional provider applications only
-inside the marked activity boundary. Document supported OTP versions,
-configuration, upgrades, trace storage, and complete removal.
+Publish a breaking 0.x release representing the current Kernel product. The
+verified OTP release already carries the real dependency surface, uses a
+minimal command boot profile, disables implicit dotenv loading, and starts
+optional provider applications only inside the marked activity boundary.
+Publish it for the target matrix retained in the standalone distribution plan.
+Do not make root-owned/fs-verity or signed-sealed installation policy a
+prerequisite for the local CLI; those controls belong to a deployment threat
+model that needs them. Document supported OTP versions, configuration,
+upgrades, trace storage, and complete removal.
 
-Package the Viewer as a production artifact rather than depending on the
-sibling project through development-only wiring. Add operational health checks
-for the packaged runtime and its optional launcher.
+The Viewer is packaged as a production artifact: `ptc viewer PROJECT.json`
+ships in the assembled release and the container image, and the packaged
+command is verified serving a trace by the standalone release gate. Remaining
+here: operational health checks for the packaged runtime and its optional
+launcher.
+
+Complete the one-command installer: select a supported artifact, verify its
+adjacent checksum, fail clearly on unsupported targets, document upgrades and
+removal, and exercise that exact installation path on a clean runner.
+
+Add a self-contained first-agent scaffold that uses the shipped agent library,
+needs no external MCP process or language runtime, records a trace and command
+envelope, keeps private inspection disabled by default, and asks for only one
+credential or model choice. Cover it with deterministic command tests and a
+scheduled real-model probe.
 
 A service frontend may add job submission, cancellation, concurrency control,
 tenant isolation, and durable results only when deployments require it; it is
@@ -182,16 +158,15 @@ The Kernel is ready for its intended non-Elixir product boundary when:
 Streaming responses, multi-model routing, chat lifecycle management,
 concurrent mission evaluation, live bundle mutation, broad Clojure coverage,
 MCP Tasks, shared catalog caching, authenticated host IAM, and inbound service
-frontends require demonstrated demand and separate plans. Remote MCP OAuth has
-demonstrated demand and is tracked in the
-[MCP OAuth authorization plan](../mcp-oauth.md).
+frontends require demonstrated demand and separate plans. Remote MCP OAuth is
+implemented; its current installation and authorization contract lives in the
+[host installation reference](../../reference/host-installation.md).
 
 ## Related documents
 
-- [Stable CLI and application-source contract](stable-cli-contract.md) —
-  implementation plan for the machine protocol, validation order, commands,
-  and filesystem-independent application packages.
-- [Kernel maintainer guide](../../guides/kernel-maintainer.md) — implemented
+- [Standalone CLI distribution](stable-cli-contract.md) — remaining target
+  packaging, distribution evidence, and final acceptance work.
+- [Kernel maintainer guide](../../maintainers/kernel.md) — implemented
   authority, lifecycle, ownership, and code map.
 - [Manifests and capabilities](../../guides/manifests-and-capabilities.md) —
   current host installation, manifest, classification, and contract behavior.
@@ -200,7 +175,7 @@ demonstrated demand and is tracked in the
 - [Building agents](../../guides/building-agents.md) — current agent and model
   composition guidance.
 - [Getting started](../../guides/getting-started.md) — runnable examples.
-- [TraceLog contract](../../trace-log-contract.md) — canonical event and source
+- [TraceLog and run-analysis reference](../../maintainers/trace-log-contract.md) — canonical event and source
   contract.
 - [PTC-Lisp conformance](../../conformance/index.md) — audited language
   coverage and known gaps.

@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
   resource metadata URL is authoritative and never falls through.
   """
 
+  alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPHTTPAdapter
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.BearerChallenge
@@ -128,24 +129,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
   defp optional_metadata_url(nil, _authority), do: {:ok, nil}
 
   defp optional_metadata_url(value, authority) when is_binary(value) do
-    allow_insecure_loopback =
-      match?(
-        %URI{scheme: "http", host: host} when host in ["127.0.0.1", "::1"],
-        URI.parse(authority.resource)
-      )
+    allow_insecure_loopback = loopback_http?(authority.resource)
 
     case URI.parse(value) do
-      %URI{
-        scheme: scheme,
-        host: host,
-        userinfo: nil,
-        fragment: nil
-      }
-      when is_binary(host) and host != "" and
-             (scheme == "https" or
-                (allow_insecure_loopback and scheme == "http" and
-                   host in ["127.0.0.1", "::1"])) ->
-        {:ok, value}
+      %URI{scheme: scheme, host: host, userinfo: nil, fragment: nil} ->
+        if MCPEndpoint.origin_allowed?(scheme, host, allow_insecure_loopback),
+          do: {:ok, value},
+          else: {:error, :invalid_resource_metadata_url}
 
       _invalid ->
         {:error, :invalid_resource_metadata_url}
@@ -154,6 +144,15 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
 
   defp optional_metadata_url(_value, _authority),
     do: {:error, :invalid_resource_metadata_url}
+
+  # A metadata URL inherits the allowance from the resource it describes: only a
+  # resource already admitted over plain-HTTP loopback can point at one.
+  defp loopback_http?(resource) do
+    case URI.parse(resource) do
+      %URI{scheme: "http", host: host} -> MCPEndpoint.loopback_host?(host)
+      _uri -> false
+    end
+  end
 
   defp protected_resource(authority, %{resource_metadata: source}, request, deadline_ms) do
     case fetch_json(source, :metadata, request, deadline_ms) do
@@ -400,7 +399,11 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
   defp request_function(opts, authority) do
     case Keyword.get(opts, :request) do
       function when is_function(function, 5) ->
-        {:ok, function}
+        {:ok,
+         fn method, url, headers, body, timeout_ms ->
+           function.(method, url, headers, body, timeout_ms)
+           |> normalize_request_result()
+         end}
 
       nil ->
         resolver = Keyword.get(opts, :resolver)
@@ -414,6 +417,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
         {:error, :invalid_request_adapter}
     end
   end
+
+  defp normalize_request_result({:error, reason})
+       when reason in [:connection_refused, :name_not_resolved, :tls_handshake_failed],
+       do: {:error, :transport_error}
+
+  defp normalize_request_result(result), do: result
 
   defp network_request(authority, resolver, method, url, headers, body, timeout_ms) do
     deadline_ms = System.monotonic_time(:millisecond) + timeout_ms
@@ -432,16 +441,20 @@ defmodule PtcRunner.Kernel.MCPOAuth.Discovery do
         body: body,
         timeout_ms: remaining_ms,
         max_body_bytes: @max_metadata_bytes,
-        address: hd(target.addresses),
+        address: target.addresses,
         connected_peer: NetworkPolicy.peer_verifier(target.addresses)
       )
       |> case do
         {:ok, response} -> {:ok, response}
-        {:error, reason, _provenance} -> {:error, reason}
+        {:error, :timeout, _provenance} -> {:error, :timeout}
+        {:error, _reason, _provenance} -> {:error, :transport_error}
       end
     else
       remaining_ms when is_integer(remaining_ms) and remaining_ms <= 0 ->
         {:error, :timeout}
+
+      {:error, :name_not_resolved} ->
+        {:error, :transport_error}
 
       error ->
         error

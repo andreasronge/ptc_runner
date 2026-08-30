@@ -5,15 +5,20 @@ defmodule PtcRunner.Kernel.HostConfig do
   The host document is operator-owned and separate from an application
   manifest. It fixes provider sources, credentials, data classes, and outer
   ceilings. MCP installations additionally fix transports, tool mappings, and
-  effects; live LLM installations fix the model, cache policy, and optional
-  sampling parameters. A manifest may later select an installed alias and
-  narrow its authority; it cannot introduce or replace any field decoded here.
+  effects; live LLM installations fix the model, structured-output mode, usage
+  guarantees, cache policy, and optional inference controls. A manifest may
+  later select an installed alias and narrow its authority; it cannot introduce
+  or replace any field decoded here. Changing `structured_output_mode`, a usage
+  guarantee, an inference control, or an installation
+  `ceilings.request_timeout_ms` requires a new `installation_revision`.
 
   An optional `limits` block replaces cataloged installed ceilings, so an
   operator can permit work measured in hours rather than in one bounded run.
   Omitted names keep their installed default. A manifest requests only
   manifest-narrowable values at or below whatever is installed here;
-  installed-only operational limits remain host-owned.
+  installed-only operational limits remain host-owned. `install` is required
+  and may be empty: a limits-only host document raises ceilings for a
+  provider-free application without fabricating a provider.
 
   Loading is bounded, path-confined, duplicate-key rejecting, and side-effect
   free. In particular, credential declarations are validated but environment
@@ -22,7 +27,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   belong to the later preflight and acquisition phases.
 
   The closed V1 source identifiers are `mcp`, `llm`, `llm_replay`,
-  `ptc_trace_snapshot`, and `ptc_inspection_snapshot`. LLM credentials are explicit bindings passed to
+  `ptc_trace_snapshot`, `ptc_private_trace_snapshot`, and `ptc_inspection_snapshot`. LLM credentials are explicit bindings passed to
   the adapter per request rather than ambient provider-specific environment
   lookup. The native snapshot sources fix host-relative directories and
   expose only PtcRunner's canonical or private inspection query vocabularies.
@@ -31,6 +36,17 @@ defmodule PtcRunner.Kernel.HostConfig do
   absence before generic schema failure, including for unselected aliases.
   Stdio MCP transports always run with the runtime-owned `LC_ALL=C.UTF-8`;
   credential environment bindings cannot replace that protocol locale.
+
+  A `streamable_http` endpoint is settled here rather than at acquisition, so a
+  malformed or inadmissible URL is a host fault naming its installation instead
+  of the connectivity failure of an unreachable server. It requires `https`.
+  Plain `http` is admitted only against the literal loopback addresses
+  `127.0.0.1` and `::1`, only with `allow_insecure_loopback`, and only when the
+  transport declares neither `auth` nor `oauth`, so no configured credential
+  crosses a plaintext socket. The allowance is refused against an `https`
+  endpoint rather than ignored. Upstream MCP tool names are the installed
+  server's, so they follow `PtcRunner.Kernel.MCPProtocol.valid_tool_name?/1`;
+  only the public `as` name uses PtcRunner's own naming rule.
 
   `schema/0` is the canonical structural description shipped for editor and
   human feedback. Runtime decoding remains authoritative for semantic checks
@@ -41,11 +57,17 @@ defmodule PtcRunner.Kernel.HostConfig do
   """
 
   alias PtcRunner.Kernel.ConfinedFile
+  alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPOAuth.Authority
+  alias PtcRunner.Kernel.MCPProtocol
+  alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.SchemaPath
+  alias PtcRunner.Kernel.SchemaViolation
   alias PtcRunner.Kernel.StrictJSON
+  alias PtcRunner.Lisp.RetainedSize
 
   @max_config_bytes 1_000_000
   @max_credentials 128
@@ -56,14 +78,22 @@ defmodule PtcRunner.Kernel.HostConfig do
   @max_secret_bytes 65_536
   @max_result_bytes 1_048_576
   @max_trace_source_bytes 8_000_000
-  @max_inspection_source_bytes 64_000_000
+  @max_inspection_source_bytes 536_871_120
   @max_inspection_files 1_024
   @max_replay_entries 10_000
-  # Native snapshot queries reserve the encoded algorithm-qualified content
-  # hash before delegating to their bounded query engines. This covers that
-  # reservation plus the smallest encoded empty page, so the accepted minimum
-  # can return at least one successful result.
-  @minimum_snapshot_result_bytes 158
+  # The accepted minimum must fit the complete smallest snapshot result under
+  # both the encoded and retained-size measurements enforced at the boundary.
+  @minimum_snapshot_result %{
+    "items" => [],
+    "next_cursor" => nil,
+    "omitted_count" => 0,
+    "snapshot_hash" => "sha256:" <> String.duplicate("0", 64),
+    "truncated" => false
+  }
+  @minimum_snapshot_result_bytes max(
+                                   byte_size(Jason.encode!(@minimum_snapshot_result)),
+                                   RetainedSize.bytes(@minimum_snapshot_result)
+                                 )
   @max_timeout_ms 300_000
   @max_llm_tokens 1_000_000
   @max_llm_seed 2_147_483_647
@@ -116,6 +146,7 @@ defmodule PtcRunner.Kernel.HostConfig do
           | %{
               type: :streamable_http,
               endpoint: binary(),
+              allow_insecure_loopback: boolean(),
               auth: [map()],
               oauth: Authority.t() | nil
             }
@@ -127,6 +158,7 @@ defmodule PtcRunner.Kernel.HostConfig do
             tools: %{binary() => tool()},
             snapshot_identity: %{tool: binary(), field: binary()} | nil,
             installation_revision: binary(),
+            installation_config_digest: binary(),
             ceilings: %{
               timeout_ms: pos_integer(),
               max_catalog_tools: pos_integer(),
@@ -143,12 +175,22 @@ defmodule PtcRunner.Kernel.HostConfig do
               params: %{
                 optional(:temperature) => float(),
                 optional(:seed) => non_neg_integer(),
-                optional(:max_tokens) => pos_integer()
+                optional(:max_tokens) => pos_integer(),
+                optional(:top_p) => float(),
+                optional(:presence_penalty) => float(),
+                optional(:frequency_penalty) => float(),
+                optional(:reasoning_effort) => :none | :minimal | :low | :medium | :high
               },
+              structured_output_mode: :json_schema | :json_object | :unsupported,
+              usage_guarantees: %{tokens: boolean(), cost_currency: String.t() | nil},
+              reservation_tariff: %{currency: String.t(), id: binary()} | nil,
               installation_revision: binary(),
+              installation_config_digest: binary(),
               ceilings: %{
                 max_request_bytes: pos_integer(),
-                max_response_bytes: pos_integer()
+                max_response_bytes: pos_integer(),
+                max_calls: pos_integer(),
+                request_timeout_ms: pos_integer()
               },
               data_class: :normal | :private_inspection,
               accepts_data: [:normal | :private_inspection]
@@ -157,7 +199,12 @@ defmodule PtcRunner.Kernel.HostConfig do
               source: :llm_replay,
               fixtures: binary(),
               installation_revision: binary(),
-              ceilings: %{max_entries: pos_integer(), max_result_bytes: pos_integer()},
+              installation_config_digest: binary(),
+              ceilings: %{
+                max_entries: pos_integer(),
+                max_result_bytes: pos_integer(),
+                max_calls: pos_integer()
+              },
               data_class: :normal | :private_inspection,
               accepts_data: [:normal | :private_inspection]
             }
@@ -165,6 +212,17 @@ defmodule PtcRunner.Kernel.HostConfig do
               source: :ptc_trace_snapshot,
               directory: binary(),
               installation_revision: binary(),
+              installation_config_digest: binary(),
+              ceilings: %{
+                max_source_bytes: pos_integer(),
+                max_result_bytes: pos_integer()
+              }
+            }
+          | %{
+              source: :ptc_private_trace_snapshot,
+              directory: binary(),
+              installation_revision: binary(),
+              installation_config_digest: binary(),
               ceilings: %{
                 max_source_bytes: pos_integer(),
                 max_result_bytes: pos_integer()
@@ -174,6 +232,7 @@ defmodule PtcRunner.Kernel.HostConfig do
               source: :ptc_inspection_snapshot,
               directory: binary(),
               installation_revision: binary(),
+              installation_config_digest: binary(),
               ceilings: %{
                 max_files: pos_integer(),
                 max_source_bytes: pos_integer(),
@@ -227,8 +286,11 @@ defmodule PtcRunner.Kernel.HostConfig do
              :host_unavailable
              | :host_invalid
              | {:installation_revision_missing, binary()}
-             | {:host_schema_invalid, [PtcRunner.Kernel.CommandPath.segment()]}
-             | {:installed_limit_invalid, [PtcRunner.Kernel.CommandPath.segment()]}}
+             | {:installation_endpoint_invalid, binary(), atom()}
+             | {:schema_validation_unavailable, SchemaViolation.unavailable_reason()}
+             | {:host_schema_invalid, SchemaViolation.t()}
+             | {:installed_limit_invalid, [PtcRunner.Kernel.CommandPath.segment()]}
+             | {:optional_budget_prerequisite, binary(), atom(), atom()}}
   def load_command(path) when is_binary(path) do
     with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
          directory = Path.dirname(canonical),
@@ -247,7 +309,8 @@ defmodule PtcRunner.Kernel.HostConfig do
        )}
     else
       {:error, {:duplicate_json_key, path}} ->
-        {:error, {:host_schema_invalid, safe_host_path(path)}}
+        {:error,
+         {:host_schema_invalid, SchemaViolation.new(:duplicate_property, safe_host_path(path))}}
 
       {:error, reason}
       when reason in [
@@ -269,9 +332,16 @@ defmodule PtcRunner.Kernel.HostConfig do
       {:error, {code, _detail}} = error
       when code in [
              :installation_revision_missing,
+             :schema_validation_unavailable,
              :host_schema_invalid,
              :installed_limit_invalid
            ] ->
+        error
+
+      {:error, {:installation_endpoint_invalid, _name, _reason}} = error ->
+        error
+
+      {:error, {:optional_budget_prerequisite, _name, _limit, _prerequisite}} = error ->
         error
 
       {:error, _reason} ->
@@ -299,7 +369,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          {:ok, runtime} <- runtime(Map.get(value, "runtime", %{})),
          {:ok, limits} <- limits(Map.get(value, "limits", %{})),
          {:ok, credentials} <- credentials(Map.get(value, "credentials", %{})),
-         {:ok, install} <- installations(value["install"], credentials) do
+         {:ok, install} <- installations(value["install"], credentials, limits) do
       {:ok, %{runtime: runtime, limits: limits, credentials: credentials, install: install}}
     else
       _reason -> {:error, :invalid_host_config}
@@ -311,42 +381,27 @@ defmodule PtcRunner.Kernel.HostConfig do
   @doc false
   def decode_command(value, directory) when is_map(value) and is_binary(directory) do
     with :ok <- require_installation_revisions(value),
+         :ok <- require_admissible_endpoints(value),
          :ok <- validate_command_schema(value),
          :ok <-
            schema_result(
              exact_keys(value, ~w($schema runtime limits credentials install), ~w(install)),
              []
            ),
-         :ok <-
-           command_schema_result(
-             optional_schema(value["$schema"]),
-             [{:property, "$schema"}],
-             value
-           ),
+         :ok <- command_semantic_result(optional_schema(value["$schema"])),
          {:ok, runtime} <-
-           command_schema_result(
-             runtime(Map.get(value, "runtime", %{})),
-             [{:property, "runtime"}],
-             value
-           ),
+           command_semantic_result(runtime(Map.get(value, "runtime", %{}))),
          {:ok, limits} <- command_limits(Map.get(value, "limits", %{})),
          {:ok, credentials} <-
-           command_schema_result(
-             credentials(Map.get(value, "credentials", %{})),
-             [{:property, "credentials"}],
-             value
-           ),
+           command_semantic_result(credentials(Map.get(value, "credentials", %{}))),
          {:ok, install} <-
-           command_schema_result(
-             installations(value["install"], credentials),
-             [{:property, "install"}],
-             value
-           ) do
+           command_semantic_result(installations(value["install"], credentials, limits)) do
       {:ok, %{runtime: runtime, limits: limits, credentials: credentials, install: install}}
     end
   end
 
-  def decode_command(_value, _directory), do: {:error, {:host_schema_invalid, []}}
+  def decode_command(_value, _directory),
+    do: {:error, {:host_schema_invalid, SchemaViolation.new(:type, [])}}
 
   defp require_installation_revisions(%{"install" => installations})
        when is_map(installations) do
@@ -370,19 +425,73 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp require_installation_revisions(_value), do: :ok
 
+  # An inadmissible endpoint is a static fact about the document, so it is
+  # reported here rather than as the connectivity failure it used to become at
+  # acquisition. It names the installation through a subject, not through the
+  # path: `SchemaPath` deliberately stops at `install` rather than echoing an
+  # operator-chosen alias, and the alias is safe here only because it is
+  # matched against `@name` first.
+  #
+  # This runs ahead of the generic schema pass so the refusal says which rule
+  # was broken. Anything structurally unfit for the check is left to that pass.
+  defp require_admissible_endpoints(%{"install" => installations})
+       when is_map(installations) do
+    installations
+    |> Map.keys()
+    |> Enum.sort()
+    |> Enum.find_value(fn name ->
+      if valid_name?(name) do
+        case endpoint_rejection(Map.get(installations, name)) do
+          {:error, reason} -> {name, reason}
+          :ok -> nil
+        end
+      end
+    end)
+    |> case do
+      nil -> :ok
+      {name, reason} -> {:error, {:installation_endpoint_invalid, name, reason}}
+    end
+  end
+
+  defp require_admissible_endpoints(_value), do: :ok
+
+  defp endpoint_rejection(%{
+         "source" => "mcp",
+         "transport" => %{"type" => "streamable_http"} = transport
+       })
+       when is_map(transport) do
+    endpoint = Map.get(transport, "endpoint")
+    insecure_loopback = Map.get(transport, "allow_insecure_loopback", false)
+    auth = Map.get(transport, "auth", [])
+    oauth = Map.get(transport, "oauth")
+
+    if is_binary(endpoint) and is_boolean(insecure_loopback) and is_list(auth),
+      do: installed_endpoint(endpoint, insecure_loopback, auth, oauth),
+      else: :ok
+  end
+
+  defp endpoint_rejection(_installation), do: :ok
+
   defp schema_result(:ok, _segments), do: :ok
 
   defp schema_result({:error, _reason}, segments),
-    do: {:error, {:host_schema_invalid, segments}}
+    do: {:error, {:host_schema_invalid, SchemaViolation.new(:schema, segments)}}
 
-  defp command_schema_result(:ok, _segments, _value), do: :ok
-  defp command_schema_result({:ok, decoded}, _segments, _value), do: {:ok, decoded}
+  # `validate_command_schema/1` has already proved the whole document under a
+  # bounded worker. Failures after that boundary are semantic host failures;
+  # do not repeat schema validation outside the worker to distinguish them.
+  defp command_semantic_result(:ok), do: :ok
+  defp command_semantic_result({:ok, decoded}), do: {:ok, decoded}
 
-  defp command_schema_result({:error, _reason}, segments, value) do
-    if schema_valid?(value),
-      do: {:error, :host_invalid},
-      else: {:error, {:host_schema_invalid, segments}}
+  defp command_semantic_result(
+         {:error, {:optional_budget_prerequisite, name, limit, prerequisite}} = error
+       ) do
+    if valid_name?(name) and OptionalBudgetDiagnostic.valid_prerequisite?(limit, prerequisite),
+      do: error,
+      else: {:error, :host_invalid}
   end
+
+  defp command_semantic_result({:error, _reason}), do: {:error, :host_invalid}
 
   defp schema_valid?(value) do
     with {:ok, root} <- JSV.build(schema(), atoms: false, warnings: :silent),
@@ -396,21 +505,13 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp validate_command_schema(value) do
-    case JSV.build(schema(), atoms: false, warnings: :silent) do
-      {:ok, root} ->
-        case JSV.validate(command_schema_value(value), root, cast: false) do
-          {:ok, _validated} ->
-            :ok
+    schema = schema()
 
-          {:error, %JSV.ValidationError{errors: errors}} ->
-            {:error, {:host_schema_invalid, command_validation_path(errors)}}
-        end
-
-      {:error, _reason} ->
-        {:error, {:host_schema_invalid, []}}
+    case SchemaViolation.validate(command_schema_value(value), schema) do
+      :ok -> :ok
+      {:error, violation} -> {:error, {:host_schema_invalid, violation}}
+      {:unavailable, reason} -> {:error, {:schema_validation_unavailable, reason}}
     end
-  rescue
-    _exception -> {:error, {:host_schema_invalid, []}}
   end
 
   # Installed-limit values have their own closed diagnostic and exact path
@@ -422,9 +523,14 @@ defmodule PtcRunner.Kernel.HostConfig do
       installed = Map.from_struct(Limits.installed_defaults())
 
       schema_limits =
-        Map.new(limits, fn {name, _value} ->
-          {:ok, field} = Limits.name(name)
-          {name, Map.fetch!(installed, field)}
+        Map.new(limits, fn {name, value} ->
+          if schema_minimum_violation?(name, value) do
+            {name, value}
+          else
+            {:ok, field} = Limits.name(name)
+            {:ok, row} = LimitCatalog.fetch(field)
+            {name, Map.fetch!(installed, field) || row.minimum}
+          end
         end)
 
       Map.put(value, "limits", schema_limits)
@@ -435,18 +541,18 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp command_schema_value(value), do: value
 
-  defp command_validation_path(errors) do
-    paths =
-      Enum.map(errors, fn
-        %{data_path: path} when is_list(path) -> path |> Enum.reverse() |> safe_host_path()
-        _error -> []
-      end)
-
-    case Enum.sort_by(paths, fn path -> {-length(path), path} end) do
-      [path | _rest] -> path
-      [] -> []
-    end
+  # The two normal-trace floors exist because a trace that cannot record its own
+  # terminal events is not a trace, and both are published as schema minimums.
+  # A host value below one of them is pointed at the rule that states it; every
+  # other range failure keeps the closed installed-limit diagnostic.
+  defp schema_minimum_violation?(name, value)
+       when name in ["event_payload_bytes", "normal_event_count"] and is_integer(value) do
+    {:ok, field} = Limits.name(name)
+    {:ok, row} = LimitCatalog.fetch(field)
+    value < row.minimum
   end
+
+  defp schema_minimum_violation?(_name, _value), do: false
 
   defp safe_host_path(path), do: SchemaPath.explained_prefix(path, schema())
 
@@ -457,12 +563,13 @@ defmodule PtcRunner.Kernel.HostConfig do
         {:error, _reason} -> {:error, {:installed_limit_invalid, invalid_limit_path(value)}}
       end
     else
-      {:error, {:host_schema_invalid, [{:property, "limits"}]}}
+      {:error,
+       {:host_schema_invalid, SchemaViolation.new(:unknown_property, [{:property, "limits"}])}}
     end
   end
 
   defp command_limits(_value),
-    do: {:error, {:host_schema_invalid, [{:property, "limits"}]}}
+    do: {:error, {:host_schema_invalid, SchemaViolation.new(:type, [{:property, "limits"}])}}
 
   defp invalid_limit_path(value) when is_map(value) do
     invalid_name =
@@ -564,11 +671,14 @@ defmodule PtcRunner.Kernel.HostConfig do
     end
   end
 
-  defp installations(value, credentials)
+  defp installations(value, _credentials, _limits) when is_map(value) and map_size(value) == 0,
+    do: {:ok, %{}}
+
+  defp installations(value, credentials, limits)
        when is_map(value) and map_size(value) in 1..@max_installations do
     with {:ok, installations} <-
-           reduce_named_map(value, fn name, installation ->
-             installation(name, installation, credentials)
+           reduce_sorted_named_map(value, fn name, installation ->
+             installation(name, installation, credentials, limits)
            end),
          ids =
            for(
@@ -576,25 +686,50 @@ defmodule PtcRunner.Kernel.HostConfig do
                installations,
              do: oauth.installation_id
            ),
-         true <- ids == Enum.uniq(ids) do
+         true <- ids == Enum.uniq(ids),
+         {:ok, installations} <- InstallationConfigDigest.attach_all(installations) do
       {:ok, installations}
     else
-      _invalid -> {:error, :invalid_installations}
+      {:error, {:optional_budget_prerequisite, _name, _limit, _prerequisite}} = error ->
+        error
+
+      _invalid ->
+        {:error, :invalid_installations}
     end
   end
 
-  defp installations(_value, _credentials), do: {:error, :invalid_installations}
+  defp installations(_value, _credentials, _limits), do: {:error, :invalid_installations}
 
-  defp installation(name, value, credentials) do
+  defp installation(name, value, credentials, limits) do
     with true <- valid_name?(name),
          true <- is_map(value) do
       case value["source"] do
-        "mcp" -> mcp_installation(value, credentials)
-        "llm" -> llm_installation(value, credentials)
-        "ptc_trace_snapshot" -> trace_snapshot_installation(value)
-        "ptc_inspection_snapshot" -> inspection_snapshot_installation(value)
-        "llm_replay" -> llm_replay_installation(value)
-        _unknown -> {:error, :invalid_installation}
+        "mcp" ->
+          mcp_installation(value, credentials)
+
+        "llm" ->
+          case llm_installation(value, credentials, limits) do
+            {:error, {:optional_budget_prerequisite, limit, prerequisite}} ->
+              {:error, {:optional_budget_prerequisite, name, limit, prerequisite}}
+
+            result ->
+              result
+          end
+
+        "ptc_trace_snapshot" ->
+          trace_snapshot_installation(value, :ptc_trace_snapshot)
+
+        "ptc_private_trace_snapshot" ->
+          trace_snapshot_installation(value, :ptc_private_trace_snapshot)
+
+        "ptc_inspection_snapshot" ->
+          inspection_snapshot_installation(value)
+
+        "llm_replay" ->
+          llm_replay_installation(value)
+
+        _unknown ->
+          {:error, :invalid_installation}
       end
     else
       _reason -> {:error, :invalid_installation}
@@ -637,15 +772,15 @@ defmodule PtcRunner.Kernel.HostConfig do
     end
   end
 
-  defp llm_installation(value, credentials) do
+  defp llm_installation(value, credentials, limits) do
     allowed =
-      ~w(source model credential cache params installation_revision ceilings data_class accepts_data)
+      ~w(source model credential cache params structured_output_mode usage_guarantees reservation_tariff installation_revision ceilings data_class accepts_data)
 
     with :ok <-
            exact_keys(
              value,
              allowed,
-             ~w(source model credential installation_revision)
+             ~w(source model credential structured_output_mode usage_guarantees installation_revision)
            ),
          model when is_binary(model) <- value["model"],
          true <- valid_string?(model, 256),
@@ -653,9 +788,15 @@ defmodule PtcRunner.Kernel.HostConfig do
          true <- Map.has_key?(credentials, credential),
          cache when is_boolean(cache) <- Map.get(value, "cache", false),
          {:ok, params} <- llm_params(Map.get(value, "params", %{})),
+         {:ok, structured_output_mode} <-
+           structured_output_mode(value["structured_output_mode"]),
+         {:ok, usage_guarantees} <- usage_guarantees(value["usage_guarantees"]),
+         :ok <- usage_guarantee_requirements(usage_guarantees, limits),
+         {:ok, reservation_tariff} <- reservation_tariff(Map.get(value, "reservation_tariff")),
+         :ok <- reservation_tariff_requirement(reservation_tariff, limits),
          {:ok, installation_revision} <-
            revision(value["installation_revision"]),
-         {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{})),
+         {:ok, ceilings} <- llm_ceilings(Map.get(value, "ceilings", %{}), limits),
          {:ok, data_class} <- data_class(Map.get(value, "data_class", "normal")),
          {:ok, accepts_data} <-
            accepts_data(Map.get(value, "accepts_data", ["normal"])) do
@@ -666,29 +807,62 @@ defmodule PtcRunner.Kernel.HostConfig do
          credential: credential,
          cache: cache,
          params: params,
+         structured_output_mode: structured_output_mode,
+         usage_guarantees: usage_guarantees,
+         reservation_tariff: reservation_tariff,
          installation_revision: installation_revision,
          ceilings: ceilings,
          data_class: data_class,
          accepts_data: accepts_data
        }}
     else
+      {:error, {:optional_budget_prerequisite, _limit, _prerequisite}} = error -> error
       _reason -> {:error, :invalid_installation}
     end
   end
 
   defp llm_params(value) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(temperature seed max_tokens), []),
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(temperature seed max_tokens top_p presence_penalty frequency_penalty reasoning_effort),
+             []
+           ),
          temperature when is_number(temperature) and temperature >= 0 and temperature <= 2 <-
            Map.get(value, "temperature", 0.0),
          seed when is_integer(seed) and seed in 0..@max_llm_seed <-
            Map.get(value, "seed", 0),
          max_tokens when is_integer(max_tokens) and max_tokens in 1..@max_llm_tokens <-
-           Map.get(value, "max_tokens", 1) do
+           Map.get(value, "max_tokens", 1),
+         top_p when is_number(top_p) and top_p > 0 and top_p <= 1 <-
+           Map.get(value, "top_p", 1.0),
+         presence_penalty
+         when is_number(presence_penalty) and presence_penalty >= -2 and presence_penalty <= 2 <-
+           Map.get(value, "presence_penalty", 0.0),
+         frequency_penalty
+         when is_number(frequency_penalty) and frequency_penalty >= -2 and frequency_penalty <= 2 <-
+           Map.get(value, "frequency_penalty", 0.0),
+         {:ok, reasoning_effort} <-
+           llm_reasoning_effort(Map.get(value, "reasoning_effort", :omitted)) do
       params =
         %{}
         |> maybe_put_param(:temperature, value, "temperature", temperature * 1.0)
         |> maybe_put_param(:seed, value, "seed", seed)
         |> maybe_put_param(:max_tokens, value, "max_tokens", max_tokens)
+        |> maybe_put_param(:top_p, value, "top_p", top_p * 1.0)
+        |> maybe_put_param(
+          :presence_penalty,
+          value,
+          "presence_penalty",
+          presence_penalty * 1.0
+        )
+        |> maybe_put_param(
+          :frequency_penalty,
+          value,
+          "frequency_penalty",
+          frequency_penalty * 1.0
+        )
+        |> maybe_put_param(:reasoning_effort, value, "reasoning_effort", reasoning_effort)
 
       {:ok, params}
     else
@@ -698,11 +872,81 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp llm_params(_value), do: {:error, :invalid_llm_params}
 
+  defp llm_reasoning_effort(:omitted), do: {:ok, nil}
+  defp llm_reasoning_effort("none"), do: {:ok, :none}
+  defp llm_reasoning_effort("minimal"), do: {:ok, :minimal}
+  defp llm_reasoning_effort("low"), do: {:ok, :low}
+  defp llm_reasoning_effort("medium"), do: {:ok, :medium}
+  defp llm_reasoning_effort("high"), do: {:ok, :high}
+  defp llm_reasoning_effort(_value), do: {:error, :invalid_reasoning_effort}
+
+  defp structured_output_mode("json_schema"), do: {:ok, :json_schema}
+  defp structured_output_mode("json_object"), do: {:ok, :json_object}
+  defp structured_output_mode("unsupported"), do: {:ok, :unsupported}
+  defp structured_output_mode(_value), do: {:error, :invalid_structured_output_mode}
+
+  defp usage_guarantees(%{"tokens" => tokens, "cost_currency" => currency} = guarantees)
+       when map_size(guarantees) == 2 and is_boolean(tokens) and currency in ["USD", nil],
+       do: {:ok, %{tokens: tokens, cost_currency: currency}}
+
+  defp usage_guarantees(_value), do: {:error, :invalid_usage_guarantees}
+
+  defp usage_guarantee_requirements(guarantees, %Limits{} = limits) do
+    with :ok <-
+           optional_budget_requirement(
+             limits.llm_cost_microusd,
+             guarantees.tokens,
+             :llm_cost_microusd,
+             :usage_tokens
+           ),
+         :ok <-
+           optional_budget_requirement(
+             limits.llm_cost_microusd,
+             guarantees.cost_currency == "USD",
+             :llm_cost_microusd,
+             :usage_cost_currency
+           ) do
+      optional_budget_requirement(
+        limits.llm_total_tokens,
+        guarantees.tokens,
+        :llm_total_tokens,
+        :usage_tokens
+      )
+    end
+  end
+
+  defp reservation_tariff(nil), do: {:ok, nil}
+
+  defp reservation_tariff(%{"currency" => "USD", "id" => id} = tariff)
+       when map_size(tariff) == 2 and is_binary(id) and byte_size(id) in 1..128 do
+    if String.valid?(id),
+      do: {:ok, %{currency: "USD", id: id}},
+      else: {:error, :invalid_reservation_tariff}
+  end
+
+  defp reservation_tariff(_value), do: {:error, :invalid_reservation_tariff}
+
+  defp reservation_tariff_requirement(tariff, %Limits{} = limits),
+    do:
+      optional_budget_requirement(
+        limits.llm_cost_microusd,
+        is_map(tariff),
+        :llm_cost_microusd,
+        :reservation_tariff
+      )
+
+  defp optional_budget_requirement(nil, _satisfied?, _limit, _prerequisite), do: :ok
+  defp optional_budget_requirement(_enabled, true, _limit, _prerequisite), do: :ok
+
+  defp optional_budget_requirement(_enabled, false, limit, prerequisite),
+    do: {:error, {:optional_budget_prerequisite, limit, prerequisite}}
+
   defp maybe_put_param(params, atom_key, value, string_key, normalized) do
     if Map.has_key?(value, string_key), do: Map.put(params, atom_key, normalized), else: params
   end
 
-  defp trace_snapshot_installation(value) do
+  defp trace_snapshot_installation(value, source)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] do
     with :ok <-
            exact_keys(
              value,
@@ -715,7 +959,7 @@ defmodule PtcRunner.Kernel.HostConfig do
          {:ok, ceilings} <- trace_snapshot_ceilings(Map.get(value, "ceilings", %{})) do
       {:ok,
        %{
-         source: :ptc_trace_snapshot,
+         source: source,
          directory: directory,
          installation_revision: installation_revision,
          ceilings: ceilings
@@ -774,14 +1018,15 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp llm_replay_ceilings(value) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(max_entries max_result_bytes), []),
+    with :ok <- exact_keys(value, ~w(max_entries max_result_bytes max_calls), []),
          max_entries when is_integer(max_entries) and max_entries > 0 <-
            Map.get(value, "max_entries", @max_replay_entries),
          true <- max_entries <= @max_replay_entries,
          max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
            Map.get(value, "max_result_bytes", @max_result_bytes),
-         true <- max_result_bytes <= @max_result_bytes do
-      {:ok, %{max_entries: max_entries, max_result_bytes: max_result_bytes}}
+         true <- max_result_bytes <= @max_result_bytes,
+         {:ok, max_calls} <- optional_max_calls(value) do
+      {:ok, %{max_entries: max_entries, max_result_bytes: max_result_bytes, max_calls: max_calls}}
     else
       _reason -> {:error, :invalid_ceilings}
     end
@@ -884,23 +1129,60 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp http_transport(value, credentials) do
-    with :ok <- exact_keys(value, ~w(type endpoint auth oauth), ~w(type endpoint)),
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(type endpoint allow_insecure_loopback auth oauth),
+             ~w(type endpoint)
+           ),
          endpoint when is_binary(endpoint) <- value["endpoint"],
          true <- valid_string?(endpoint, 4_096),
+         insecure_loopback when is_boolean(insecure_loopback) <-
+           Map.get(value, "allow_insecure_loopback", false),
          {:ok, auth} <- auth(Map.get(value, "auth", []), credentials),
-         {:ok, oauth} <-
-           oauth_authority(Map.get(value, "oauth"), endpoint, credentials),
-         true <- auth == [] or is_nil(oauth) do
-      {:ok, %{type: :streamable_http, endpoint: endpoint, auth: auth, oauth: oauth}}
+         {:ok, oauth} <- optional_oauth(value, endpoint, credentials),
+         true <- auth == [] or is_nil(oauth),
+         :ok <- installed_endpoint(endpoint, insecure_loopback, auth, oauth) do
+      {:ok,
+       %{
+         type: :streamable_http,
+         endpoint: endpoint,
+         allow_insecure_loopback: insecure_loopback,
+         auth: auth,
+         oauth: oauth
+       }}
     else
       _reason -> {:error, :invalid_transport}
     end
   end
 
-  defp oauth_authority(nil, _endpoint, _credentials), do: {:ok, nil}
+  # Runtime decoding owns this rule; `http_schema/0` mirrors it so an editor can
+  # report the same refusal, and `admissible_endpoints/1` reports it as its own
+  # diagnostic before the generic schema failure.
+  #
+  # The allowance is credential-free: an installed `auth` binding or an OAuth
+  # authority must never cross a plaintext socket. That is a guarantee about
+  # configured host credentials and nothing more — tool arguments and results
+  # travelling over a loopback socket are still plaintext.
+  defp installed_endpoint(endpoint, insecure_loopback, auth, oauth)
+       when auth != [] or not is_nil(oauth) do
+    if String.starts_with?(endpoint, "http://"),
+      do: {:error, :credentials_require_https},
+      else: MCPEndpoint.diagnose(endpoint, insecure_loopback)
+  end
 
-  defp oauth_authority(value, endpoint, credentials) do
-    Authority.from_host(value, endpoint, credentials |> Map.keys() |> MapSet.new())
+  defp installed_endpoint(endpoint, insecure_loopback, _auth, _oauth),
+    do: MCPEndpoint.diagnose(endpoint, insecure_loopback)
+
+  # An explicit `"oauth": null` is a key the schema counts as present and
+  # refuses, so reading it as absent would accept a document the mirror rejects.
+  # A transport declares an authority or omits the key.
+  defp optional_oauth(value, endpoint, credentials) do
+    case Map.fetch(value, "oauth") do
+      :error -> {:ok, nil}
+      {:ok, nil} -> {:error, :invalid_oauth}
+      {:ok, oauth} -> Authority.from_host(oauth, endpoint, MapSet.new(Map.keys(credentials)))
+    end
   end
 
   defp environment_bindings(value, credentials)
@@ -980,15 +1262,21 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp tools(_value), do: {:error, :invalid_tools}
 
+  # The upstream key is the server's own tool name, so it is held to the MCP
+  # protocol rule rather than to PtcRunner's naming rule. Only `as` crosses the
+  # capability boundary, and that one stays lowercase-dotted.
   defp tool(upstream, value) do
-    allowed = ~w(as effect description error_feedback model_visible)
+    allowed = ~w(as effect description error_feedback inspection_capture model_visible)
 
-    with true <- valid_name?(upstream),
+    with true <- MCPProtocol.valid_tool_name?(upstream),
          true <- is_map(value),
          :ok <- exact_keys(value, allowed, ~w(as effect)),
          as when is_binary(as) <- value["as"],
          true <- valid_name?(as),
          effect when effect in ["read", "write"] <- value["effect"],
+         capture when capture in ["full", "digest_results"] <-
+           Map.get(value, "inspection_capture", "full"),
+         true <- capture == "full" or effect == "read",
          {:ok, description} <- optional_description(Map.get(value, "description")),
          feedback when feedback in ["closed", "bounded"] <-
            Map.get(value, "error_feedback", "closed"),
@@ -1000,7 +1288,8 @@ defmodule PtcRunner.Kernel.HostConfig do
          effect: tool_effect(effect),
          description: description,
          error_feedback: error_feedback(feedback),
-         model_visible: model_visible
+         model_visible: model_visible,
+         inspection_capture: inspection_capture(capture)
        }}
     else
       _reason -> {:error, :invalid_tool}
@@ -1055,25 +1344,68 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp ceilings(_value), do: {:error, :invalid_ceilings}
 
-  defp llm_ceilings(value) when is_map(value) do
-    with :ok <- exact_keys(value, ~w(max_request_bytes max_response_bytes), []),
+  defp llm_ceilings(value, %Limits{} = limits) when is_map(value) do
+    {:ok, row} = LimitCatalog.fetch(:llm_request_timeout_ms)
+    host_ceiling = limits.llm_request_timeout_ms
+    default_timeout_ms = min(row.compiled_default, host_ceiling)
+
+    with :ok <-
+           exact_keys(
+             value,
+             ~w(max_request_bytes max_response_bytes max_calls request_timeout_ms),
+             []
+           ),
          max_request_bytes
          when is_integer(max_request_bytes) and max_request_bytes in 1..@max_result_bytes <-
            Map.get(value, "max_request_bytes", 1_000_000),
          max_response_bytes
          when is_integer(max_response_bytes) and max_response_bytes in 1..@max_result_bytes <-
-           Map.get(value, "max_response_bytes", 1_000_000) do
+           Map.get(value, "max_response_bytes", 1_000_000),
+         {:ok, max_calls} <- optional_max_calls(value),
+         {:ok, request_timeout_ms} <-
+           optional_request_timeout_ms(value, default_timeout_ms, host_ceiling, row) do
       {:ok,
        %{
          max_request_bytes: max_request_bytes,
-         max_response_bytes: max_response_bytes
+         max_response_bytes: max_response_bytes,
+         max_calls: max_calls,
+         request_timeout_ms: request_timeout_ms
        }}
     else
       _reason -> {:error, :invalid_ceilings}
     end
   end
 
-  defp llm_ceilings(_value), do: {:error, :invalid_ceilings}
+  defp llm_ceilings(_value, _limits), do: {:error, :invalid_ceilings}
+
+  defp optional_request_timeout_ms(value, default_timeout_ms, host_ceiling, row) do
+    case Map.get(value, "request_timeout_ms", default_timeout_ms) do
+      request_timeout_ms
+      when is_integer(request_timeout_ms) and request_timeout_ms >= row.minimum and
+             request_timeout_ms <= host_ceiling ->
+        {:ok, request_timeout_ms}
+
+      _invalid ->
+        :error
+    end
+  end
+
+  # A ceiling above the per-name installed ceiling can never bind, because the
+  # alias cap applies only when stricter than the run's per-name quota. Refuse
+  # the unreachable value at load instead of installing a silent no-op.
+  defp optional_max_calls(value) do
+    {:ok, row} = LimitCatalog.fetch(:workflow_capability_calls_per_name)
+
+    case Map.get(value, "max_calls", row.installed_default) do
+      max_calls
+      when is_integer(max_calls) and max_calls >= row.minimum and
+             max_calls <= row.installed_default ->
+        {:ok, max_calls}
+
+      _invalid ->
+        :error
+    end
+  end
 
   # Every enumerated string this decoder accepts maps to an atom through an
   # explicit clause, so the atom is a literal in this module and exists as soon
@@ -1090,6 +1422,9 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp error_feedback("closed"), do: :closed
   defp error_feedback("bounded"), do: :bounded
+
+  defp inspection_capture("full"), do: :full
+  defp inspection_capture("digest_results"), do: :digest_results
 
   defp accepts_data_class("normal"), do: :normal
   defp accepts_data_class("private_inspection"), do: :private_inspection
@@ -1121,8 +1456,16 @@ defmodule PtcRunner.Kernel.HostConfig do
       else: {:error, :invalid_description}
   end
 
-  defp reduce_named_map(value, decoder) do
-    Enum.reduce_while(value, {:ok, %{}}, fn {name, item}, {:ok, normalized} ->
+  defp reduce_named_map(value, decoder), do: reduce_named_entries(value, decoder)
+
+  defp reduce_sorted_named_map(value, decoder) do
+    value
+    |> Enum.sort_by(&elem(&1, 0))
+    |> reduce_named_entries(decoder)
+  end
+
+  defp reduce_named_entries(entries, decoder) do
+    Enum.reduce_while(entries, {:ok, %{}}, fn {name, item}, {:ok, normalized} ->
       case decoder.(name, item) do
         {:ok, decoded} -> {:cont, {:ok, Map.put(normalized, name, decoded)}}
         {:error, _reason} = error -> {:halt, error}
@@ -1163,7 +1506,7 @@ defmodule PtcRunner.Kernel.HostConfig do
       "$id" => "https://ptc-runner.dev/schemas/ptc-host-config.schema.json",
       "title" => "PtcRunner host configuration",
       "description" =>
-        "Operator-owned provider installation. Runtime loading remains authoritative.",
+        "Installed provider configuration and ceilings. An empty install map is valid. Runtime loading remains authoritative.",
       "type" => "object",
       "additionalProperties" => false,
       "required" => ["install"],
@@ -1187,6 +1530,9 @@ defmodule PtcRunner.Kernel.HostConfig do
             :manifest_narrowable ->
               "Installed ceiling for #{row.name}; a manifest may only request less."
 
+            :optional_manifest_narrowable ->
+              optional_limit_schema_description(row)
+
             :installed_only ->
               "Installed-only operational limit for #{row.name}; applications cannot declare it."
           end
@@ -1199,8 +1545,17 @@ defmodule PtcRunner.Kernel.HostConfig do
     |> closed_object()
     |> Map.put(
       "description",
-      "Optional operator-owned installed ceilings. Omitted limits keep their cataloged installed defaults."
+      "Optional installed ceilings. Omitted limits keep their cataloged installed defaults."
     )
+  end
+
+  defp optional_limit_schema_description(%{name: name, prerequisite_description: description})
+       when is_binary(description) and description != "" do
+    "Optional limit for #{name}; omission disables it. " <> description
+  end
+
+  defp optional_limit_schema_description(%{name: name}) do
+    "Optional limit for #{name}; omission disables it. A positive value enables it and becomes the inherited manifest default and installed ceiling."
   end
 
   defp runtime_schema do
@@ -1233,7 +1588,7 @@ defmodule PtcRunner.Kernel.HostConfig do
   defp installations_schema do
     %{
       "type" => "object",
-      "minProperties" => 1,
+      "minProperties" => 0,
       "maxProperties" => @max_installations,
       "propertyNames" => name_schema(),
       "additionalProperties" => installation_schema()
@@ -1245,7 +1600,8 @@ defmodule PtcRunner.Kernel.HostConfig do
       "oneOf" => [
         mcp_installation_schema(),
         llm_installation_schema(),
-        trace_snapshot_installation_schema(),
+        trace_snapshot_installation_schema("ptc_trace_snapshot"),
+        trace_snapshot_installation_schema("ptc_private_trace_snapshot"),
         inspection_snapshot_installation_schema(),
         llm_replay_installation_schema()
       ]
@@ -1295,21 +1651,67 @@ defmodule PtcRunner.Kernel.HostConfig do
               "type" => "integer",
               "minimum" => 1,
               "maximum" => @max_llm_tokens
+            },
+            "top_p" => %{
+              "type" => "number",
+              "exclusiveMinimum" => 0,
+              "maximum" => 1
+            },
+            "presence_penalty" => %{
+              "type" => "number",
+              "minimum" => -2,
+              "maximum" => 2
+            },
+            "frequency_penalty" => %{
+              "type" => "number",
+              "minimum" => -2,
+              "maximum" => 2
+            },
+            "reasoning_effort" => %{
+              "type" => "string",
+              "enum" => ["none", "minimal", "low", "medium", "high"]
             }
           }),
+        "structured_output_mode" => %{
+          "type" => "string",
+          "enum" => ["json_schema", "json_object", "unsupported"]
+        },
+        "usage_guarantees" =>
+          required_object(
+            %{
+              "tokens" => %{"type" => "boolean"},
+              "cost_currency" => %{"type" => ["string", "null"], "enum" => ["USD", nil]}
+            },
+            ["tokens", "cost_currency"]
+          ),
+        "reservation_tariff" =>
+          required_object(
+            %{
+              "currency" => %{"const" => "USD"},
+              "id" => %{"type" => "string", "minLength" => 1, "maxLength" => 128}
+            },
+            ["currency", "id"]
+          ),
         "installation_revision" => installation_revision_schema(),
         "ceilings" => llm_ceilings_schema(),
         "data_class" => data_class_schema(),
         "accepts_data" => accepts_data_schema()
       },
-      ["source", "model", "credential", "installation_revision"]
+      [
+        "source",
+        "model",
+        "credential",
+        "structured_output_mode",
+        "usage_guarantees",
+        "installation_revision"
+      ]
     )
   end
 
-  defp trace_snapshot_installation_schema do
+  defp trace_snapshot_installation_schema(source) do
     required_object(
       %{
-        "source" => %{"const" => "ptc_trace_snapshot"},
+        "source" => %{"const" => source},
         "directory" => path_schema(),
         "installation_revision" => installation_revision_schema(),
         "ceilings" =>
@@ -1351,7 +1753,8 @@ defmodule PtcRunner.Kernel.HostConfig do
               "minimum" => 1,
               "maximum" => @max_result_bytes,
               "default" => @max_result_bytes
-            }
+            },
+            "max_calls" => llm_max_calls_schema()
           }),
         "data_class" => data_class_schema(),
         "accepts_data" => accepts_data_schema()
@@ -1447,6 +1850,7 @@ defmodule PtcRunner.Kernel.HostConfig do
     %{
       "type" => %{"const" => "streamable_http"},
       "endpoint" => bounded_string(4_096),
+      "allow_insecure_loopback" => %{"type" => "boolean", "default" => false},
       "auth" => %{
         "type" => "array",
         "maxItems" => 8,
@@ -1460,6 +1864,39 @@ defmodule PtcRunner.Kernel.HostConfig do
       "required" => ["auth", "oauth"],
       "properties" => %{"auth" => %{"minItems" => 1}}
     })
+    |> Map.put("oneOf", [secure_endpoint_schema(), loopback_endpoint_schema()])
+  end
+
+  # Mirrors `installed_endpoint/4`, which stays authoritative. An HTTPS endpoint
+  # carries no allowance; a plain-HTTP endpoint requires one, reaches a literal
+  # loopback address only, and admits no configured host credential.
+  #
+  # The mirror is deliberately one-directional: it must never reject an endpoint
+  # decoding accepts, or a valid document would fail as a generic schema fault.
+  # The reverse is harmless, and does happen — a regex `$` also matches before a
+  # trailing newline, which `MCPEndpoint.safe_characters?/1` refuses outright.
+  defp secure_endpoint_schema do
+    %{
+      "properties" => %{
+        "endpoint" => %{"pattern" => "^https://[^\\s\\x00-\\x1f\\x7f-\\x9f]*$"},
+        "allow_insecure_loopback" => %{"const" => false}
+      }
+    }
+  end
+
+  defp loopback_endpoint_schema do
+    %{
+      "properties" => %{
+        "endpoint" => %{
+          "pattern" =>
+            "^http://(127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?([/?][^\\s\\x00-\\x1f\\x7f-\\x9f]*)?$"
+        },
+        "allow_insecure_loopback" => %{"const" => true},
+        "auth" => %{"maxItems" => 0}
+      },
+      "required" => ["allow_insecure_loopback"],
+      "not" => %{"required" => ["oauth"]}
+    }
   end
 
   defp oauth_schema do
@@ -1623,21 +2060,30 @@ defmodule PtcRunner.Kernel.HostConfig do
       "type" => "object",
       "minProperties" => 1,
       "maxProperties" => @max_tools,
-      "propertyNames" => name_schema(),
+      "propertyNames" => upstream_tool_name_schema(),
       "additionalProperties" =>
-        required_object(
-          %{
-            "as" => name_schema(),
-            "effect" => %{"enum" => ["read", "write"]},
-            "description" => bounded_string(4_096),
-            "error_feedback" => %{
-              "enum" => ["closed", "bounded"],
-              "default" => "closed"
-            },
-            "model_visible" => %{"type" => "boolean", "default" => false}
+        %{
+          "as" => name_schema(),
+          "effect" => %{"enum" => ["read", "write"]},
+          "description" => bounded_string(4_096),
+          "error_feedback" => %{
+            "enum" => ["closed", "bounded"],
+            "default" => "closed"
           },
-          ["as", "effect"]
-        )
+          "inspection_capture" => %{
+            "enum" => ["full", "digest_results"],
+            "default" => "full"
+          },
+          "model_visible" => %{"type" => "boolean", "default" => false}
+        }
+        |> required_object(["as", "effect"])
+        |> Map.merge(%{
+          "if" => %{
+            "properties" => %{"inspection_capture" => %{"const" => "digest_results"}},
+            "required" => ["inspection_capture"]
+          },
+          "then" => %{"properties" => %{"effect" => %{"const" => "read"}}}
+        })
     }
   end
 
@@ -1650,10 +2096,19 @@ defmodule PtcRunner.Kernel.HostConfig do
   end
 
   defp llm_ceilings_schema do
+    {:ok, row} = LimitCatalog.fetch(:llm_request_timeout_ms)
+
     closed_object(%{
       "max_request_bytes" => integer_schema(1, @max_result_bytes, 1_000_000),
-      "max_response_bytes" => integer_schema(1, @max_result_bytes, 1_000_000)
+      "max_response_bytes" => integer_schema(1, @max_result_bytes, 1_000_000),
+      "max_calls" => llm_max_calls_schema(),
+      "request_timeout_ms" => integer_schema(row.minimum, row.maximum, row.compiled_default)
     })
+  end
+
+  defp llm_max_calls_schema do
+    {:ok, row} = LimitCatalog.fetch(:workflow_capability_calls_per_name)
+    integer_schema(row.minimum, row.installed_default, row.installed_default)
   end
 
   defp required_object(properties, required) do
@@ -1672,6 +2127,11 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp name_schema,
     do: %{"type" => "string", "pattern" => "^[a-z][a-z0-9._-]{0,127}$"}
+
+  # Mirrors `PtcRunner.Kernel.MCPProtocol.valid_tool_name?/1`: an upstream name
+  # is whatever the installed server advertises.
+  defp upstream_tool_name_schema,
+    do: %{"type" => "string", "pattern" => "^[^\\s\\x00-\\x1f\\x7f]{1,128}$"}
 
   defp installation_revision_schema, do: name_schema()
 

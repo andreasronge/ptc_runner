@@ -57,22 +57,41 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   # — fails closed as an internal error. Translations are added with their
   # producers rather than in advance, so no branch here claims to classify a
   # failure nothing can currently return.
+  #
+  # ## Usage
+  #
+  # A probe that reached a metered provider may report what its request spent.
+  # The payload is the callback's own and is closed here through
+  # `LLMUsage.normalize/1` before it becomes evidence, so an unrecognised shape
+  # fails the occurrence rather than travelling on: a probe whose account cannot
+  # be read is not a probe whose account is zero. One entry is produced per
+  # probed occurrence, in the order the occurrences were probed, and a callback
+  # answering a bare `:ok` produces an entry whose usage is absent.
 
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
 
   @unavailable_reasons [:llm_connectivity_unavailable]
 
+  @type usage_entry :: %{
+          name: binary(),
+          destination: :workflow | :mission,
+          index: non_neg_integer(),
+          usage: map() | nil
+        }
+
   @doc """
   Probes every occurrence whose sealed descriptor declares `:probe`.
 
-  Returns the cumulative activity value when every applicable probe succeeds.
-  When none applies, the supplied earlier activity is returned unchanged.
+  Returns the cumulative activity value and one usage entry per probed
+  occurrence when every applicable probe succeeds. When none applies, the
+  supplied earlier activity is returned unchanged beside no entries.
   """
   @spec run(
           PreparedRun.t(),
@@ -81,7 +100,7 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
           Deadline.t(),
           %{binary() => binary()},
           boolean()
-        ) :: {:ok, boolean()} | {:error, CommandDiagnostic.t()}
+        ) :: {:ok, boolean(), [usage_entry()]} | {:error, CommandDiagnostic.t()}
   def run(prepared, catalog, services, deadline, credentials, provider_activity) do
     with true <- bound?(prepared, catalog, services),
          true <- Deadline.valid?(deadline),
@@ -126,7 +145,7 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
          _credentials,
          provider_activity
        ),
-       do: {:ok, provider_activity}
+       do: {:ok, provider_activity, []}
 
   defp probe_each(
          occurrences,
@@ -137,13 +156,29 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
          credentials,
          provider_activity
        ) do
-    Enum.reduce_while(occurrences, {:ok, provider_activity}, fn occurrence, {:ok, activity} ->
+    occurrences
+    |> Enum.reduce_while({:ok, provider_activity, []}, fn occurrence, {:ok, activity, entries} ->
       case probe(occurrence, prepared, catalog, services, deadline, credentials, activity) do
-        {:ok, activity} -> {:cont, {:ok, activity}}
-        {:error, _diagnostic} = error -> {:halt, error}
+        {:ok, activity, usage} ->
+          {:cont, {:ok, activity, [usage_entry(occurrence, usage) | entries]}}
+
+        {:error, _diagnostic} = error ->
+          {:halt, error}
       end
     end)
+    |> case do
+      {:ok, activity, entries} -> {:ok, activity, Enum.reverse(entries)}
+      {:error, _diagnostic} = error -> error
+    end
   end
+
+  defp usage_entry(occurrence, usage),
+    do: %{
+      name: occurrence.name,
+      destination: occurrence.destination,
+      index: occurrence.index,
+      usage: usage
+    }
 
   defp probe(
          occurrence,
@@ -166,10 +201,21 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
     with {:ok, callback} <- callback(catalog, occurrence.name, provider_activity),
          {:ok, timeout_ms} <- remaining(deadline, provider_activity) do
       case invoke(callback, occurrence.config, context, services, timeout_ms, limits) do
-        :ok -> settled(deadline)
+        :ok -> settled(deadline, nil)
+        {:ok, payload} -> settled_with_usage(deadline, payload)
         :timed_out -> {:error, timeout_diagnostic(true)}
         {:error, reason} -> {:error, diagnostic(reason, occurrence)}
       end
+    end
+  end
+
+  # The payload is whatever the callback handed back. A shape this module cannot
+  # close is not admitted as an account of what was spent, and the probe fails
+  # closed rather than reporting an occurrence as reached with no usable record.
+  defp settled_with_usage(deadline, payload) do
+    case LLMUsage.normalize(payload) do
+      {:ok, usage} -> settled(deadline, usage)
+      {:error, :invalid_llm_usage} -> {:error, internal_diagnostic(true)}
     end
   end
 
@@ -177,10 +223,10 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   # remained, so scheduling delay between the two can let a success arrive past
   # the anchored cutoff. Accepting it would let the step outrun the deadline it
   # promises to spend, so success is confirmed against the absolute deadline.
-  defp settled(deadline) do
+  defp settled(deadline, usage) do
     if Deadline.expired?(deadline),
       do: {:error, timeout_diagnostic(true)},
-      else: {:ok, true}
+      else: {:ok, true, usage}
   end
 
   # Least privilege, and a fail-closed empty map rather than the whole union if
@@ -215,7 +261,7 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
         cancel_with_caller: true
       )
 
-    BoundedWorker.classify_callback(result)
+    BoundedWorker.classify_payload_callback(result)
   end
 
   defp diagnostic(reason, occurrence) when reason in @unavailable_reasons do

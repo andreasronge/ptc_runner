@@ -1,0 +1,70 @@
+# Choose a workflow shape
+
+Choose how to split a task between missions, agent loops, and trusted workflow
+code. The shapes compose — a real design usually combines two or three.
+
+| Shape | Reach for it when | Runnable form |
+| --- | --- | --- |
+| [One bounded question](#one-bounded-question) | a single read-only question over data you already hold | [`support-triage`](https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage) |
+| [Domain rules as mission code](#domain-rules-as-mission-code) | the policy is deterministic — thresholds, scoring, routing | [tutorial step 2](designing-agent-workflows.md#step-2-move-the-rules-into-mission-code) |
+| [Specialists as missions](#specialists-as-missions) | stages need different data, tools, or rules | [`support-triage/03-specialists`](https://github.com/andreasronge/ptc_runner/tree/main/examples/support-triage) (data) and [`named-mission-reader-writer`](https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer) (tools) |
+| [Plan, then act](#plan-then-act) | the task ends in an effect | [agent library reference](../agent-library-reference.md) |
+| [Parallel fan-out](#parallel-fan-out) | items are independent — one call per document or ticket | [kernel limits reference](../kernel-limits-reference.md) |
+| [Contracts instead of parsing](#contracts-instead-of-parsing) | anything downstream consumes the answer | [Configure an application](../reference/application-manifest.md#validate-inputs-and-results) |
+| [Effects at the edge](#effects-at-the-edge) | the workflow writes somewhere | [Connect an MCP tool](connecting-tools-with-mcp.md) |
+
+## One bounded question
+
+One mission, one `agent.core/run`, no tools. Reach for this first: connecting
+tools or adding stages only adds surface.
+
+## Domain rules as mission code
+
+Ship deterministic policy as a prompt-visible mission component, not as prompt
+text or one-call-per-rule tools. The model composes the functions in one
+program and the rules stay reviewable. Prompt-stated rules drift; tool-relayed
+rules drag every intermediate value through the model's context.
+[Customize agent components](components-and-preludes.md) has the contract.
+
+## Specialists as missions
+
+Give each stage a named mission and let one trusted workflow drive a loop per
+stage. The mission decides what a specialist can see; the workflow decides what
+crosses between stages. Use `agent.core/run-outcome` to handle a specialist's
+failure as data — choosing another alias starts a new loop rather than resuming
+the transcript.
+
+## Plan, then act
+
+`agent.core/run-phased-result-value` runs ordered phases in different missions
+on one transcript. The planning phase's mission simply has no write tool, so the
+plan cannot execute early.
+
+## Parallel fan-out
+
+Fan out with `pmap` or `pcalls` from the trusted workflow instead of looping
+turn by turn. Bounded parallelism is a limits decision: every branch draws from
+the same admission queue, so size the shared limits for the whole fan-out. Use
+sequential stages whenever one stage's output feeds the next.
+
+## Contracts instead of parsing
+
+Declare the shape as a manifest `result_schema` and produce the value with
+`agent.core/run`. Invalid candidates get bounded correction
+feedback while turns remain, and the run fails honestly rather than shipping a
+malformed report.
+
+## Effects at the edge
+
+Keep writes in the last possible stage, behind an explicitly allowed effect
+tool. Never automatically retry an indeterminate write — a timeout may mean the
+effect happened, so reconcile first. Read tools are retry-safe by comparison,
+but still deserve least privilege: every readable source is data the model can
+observe, leak into a later stage, or spend budget on.
+
+## Going further
+
+The [Design an agent workflow](designing-agent-workflows.md) tutorial walks the
+first three shapes on one scenario. For a chapter-by-chapter course that grows a
+multi-specialist agent, see the
+[PtcRunner tutorial series](https://github.com/andreasronge/ptc_runner_tutorial).

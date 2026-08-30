@@ -1,7 +1,8 @@
 defmodule PtcRunner.MixCommandRuntime do
   @moduledoc false
 
-  alias PtcRunner.Dotenv
+  @root_project :"Elixir.PtcRunner.MixProject"
+
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandRuntime
 
@@ -17,7 +18,7 @@ defmodule PtcRunner.MixCommandRuntime do
   @doc false
   @spec bootstrap() :: :ok | {:error, :command_bootstrap_failed}
   def bootstrap do
-    Mix.Task.run("app.config")
+    Mix.Task.run("app.config", app_config_args())
 
     case Application.ensure_all_started(:ptc_runner) do
       {:ok, _started} -> :ok
@@ -30,13 +31,13 @@ defmodule PtcRunner.MixCommandRuntime do
   end
 
   @doc false
-  @spec options() :: keyword()
-  def options do
-    [
-      provider_application_mode: provider_application_mode(),
-      environment_setup: &load_dotenv/0
-    ]
-  end
+  @spec app_config_args() :: [binary()]
+  def app_config_args, do: app_config_args(Mix.Project.get())
+
+  @doc false
+  @spec app_config_args(module() | nil) :: [binary()]
+  def app_config_args(@root_project), do: ["--no-deps-check"]
+  def app_config_args(_project), do: []
 
   @doc false
   @spec runtime(CommandArguments.t()) ::
@@ -44,13 +45,15 @@ defmodule PtcRunner.MixCommandRuntime do
   def runtime(%CommandArguments{} = arguments) do
     targets = Keyword.get_values(arguments.frontend_options, :authorize_mcp)
 
+    options = [provider_application_mode: provider_application_mode()]
+
     runtime_options =
       case targets do
         [] ->
-          options()
+          options
 
         [_target | _rest] ->
-          options() ++
+          options ++
             [authorization_targets: targets, authorization_notifier: &notify_authorization_url/1]
       end
 
@@ -65,14 +68,6 @@ defmodule PtcRunner.MixCommandRuntime do
   defp provider_application_mode do
     applications = Application.started_applications() |> Enum.map(&elem(&1, 0))
     if :req_llm in applications, do: :host_owned, else: :command_vm
-  end
-
-  defp load_dotenv do
-    Dotenv.load()
-  rescue
-    _exception -> {:error, :dotenv_unavailable}
-  catch
-    _kind, _reason -> {:error, :dotenv_unavailable}
   end
 
   defp notify_authorization_url(url) do

@@ -55,7 +55,7 @@ defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
   @moduletag timeout: @runs * (@run_duration_ms + 30_000)
 
   setup_all do
-    :ok = PtcRunner.Dotenv.load()
+    :ok = LLMSupport.load_dotenv()
     :ok = LLMSupport.admit_provider_application!()
     assert Application.get_env(:req_llm, :stream_pool_count) == 1
     assert Application.get_env(:req_llm, :stream_pool_size) == 8
@@ -119,7 +119,7 @@ defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
     {:ok, %{capabilities: [capability], close: close}} = build_live_llm(limits)
 
     names =
-      ~w(agent.core agent.feedback agent.native agent.prompt agent.retry
+      ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry
          kernel llm result workflow.event)
 
     {:ok, components} = Library.components(names)
@@ -206,7 +206,7 @@ defmodule PtcRunner.Kernel.ConcurrentAgentContentionLiveE2ETest do
       update_in(host.install["deepseek"], fn installation ->
         %{
           installation
-          | model: LLMSupport.resolve_model("deepseek"),
+          | model: LLMSupport.model(),
             params: %{temperature: 0.0, max_tokens: 1_024}
         }
       end)

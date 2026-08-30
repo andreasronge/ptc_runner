@@ -3,43 +3,12 @@ defmodule PtcRunner.Kernel.Limits do
   Normalized positive hard ceilings for one Kernel run.
 
   Every field, default, accepted range, scope, and identity rule comes from
-  `PtcRunner.Kernel.LimitCatalog`. There is no disabled or infinite form.
+  `PtcRunner.Kernel.LimitCatalog`. Ordinary rows have no disabled or infinite
+  form. Optional rows are `nil` until the host enables them.
   `new/1` accepts only cataloged fields and overlays them on `defaults/0`.
 
-  Time fields are milliseconds and heap fields are BEAM words:
-
-  - `run_duration_ms` bounds the complete ordinary run after optional provider
-    application admission, including active preflight and Kernel execution;
-  - `workflow_timeout_ms` and `evaluation_timeout_ms` bound individual
-    workflow and subordinate evaluations;
-  - `evaluation_admission_timeout_ms` bounds how long a blocking
-    `kernel-eval` caller may wait behind the single evaluation lease;
-  - `parallel_timeout_ms` bounds one `pmap`/`pcalls` operation, clamped by
-    the run deadline;
-  - `workflow_heap_words`, `evaluation_heap_words`, and
-    `provider_heap_words` are per-process heap ceilings;
-  - `live_provider_tasks` bounds concurrent provider callback processes and is
-    passed to Kernel-owned Lisp evaluations as their global `pmap`/`pcalls`
-    worker capacity;
-  - `workflow_capability_calls` and `mission_capability_calls` are total call
-    quotas, with matching `*_per_name` quotas;
-  - `subordinate_evaluations`, `subordinate_source_checks`, and
-    `protocol_errors` bound those operations;
-  - `entry_source_bytes` and `subordinate_source_bytes` bound code;
-  - `evaluation_memory_bytes` and `evaluation_history_bytes` independently
-    bound retained mission definitions and exact three-value turn history;
-  - `capability_argument_bytes`, `capability_result_bytes`, and
-    `terminal_result_bytes` bound values crossing runtime boundaries;
-  - `event_payload_bytes`, `normal_event_count`, and `normal_event_bytes` bound
-    canonical event collection.
-  - `provider_cleanup_timeout_ms` is sealed for bounded provider cleanup;
-  - `local_preflight_timeout_ms` is sealed for the whole audited-local phase-7
-    step, which spends one anchored deadline across every applicable
-    occurrence;
-  - `selection_validation_timeout_ms` is sealed for active selection
-    validation;
-  - `doctor_connectivity_timeout_ms` is sealed for `doctor --connect` health
-    checks.
+  The generated [Kernel limits reference](kernel-limits-reference.md) lists the
+  meaning, unit, defaults, installed ceilings, range, and scope of every row.
 
   The installed-only timeouts are cataloged and sealed in this boundary before
   the later provider-lifecycle and doctor phases begin consuming them. Merely
@@ -49,8 +18,18 @@ defmodule PtcRunner.Kernel.Limits do
   narrower values. `installed_defaults/0` are the larger host-controlled
   ceilings used by manifest-backed frontends. A host may supply another
   complete `Limits` value as its installation ceiling. Manifests can narrow
-  only catalog rows scoped `:manifest_narrowable`; installed-only values are
-  copied from the host unchanged.
+  only catalog rows scoped `:manifest_narrowable` or
+  `:optional_manifest_narrowable`; installed-only values are copied from the
+  host unchanged.
+
+  Catalog validation covers each field independently, including the minimum
+  event payload needed by bounded terminal events. Manifest loading also
+  validates the normal trace fields together after host/application resolution:
+  the effective count must retain one ordinary event plus the two terminal
+  events, and the byte budget must retain one complete maximum-size
+  `run-started` event in addition to `PtcRunner.Kernel.EventSink`'s measured
+  terminal reserve. Private trace policy keeps its zero-reserve fail-closed
+  behavior.
   """
 
   alias PtcRunner.Kernel.LimitCatalog
@@ -65,13 +44,19 @@ defmodule PtcRunner.Kernel.Limits do
   @type t :: %__MODULE__{
           run_duration_ms: pos_integer(),
           workflow_timeout_ms: pos_integer(),
+          workflow_loop_iterations: pos_integer() | nil,
           evaluation_timeout_ms: pos_integer(),
+          evaluation_loop_iterations: pos_integer() | nil,
           evaluation_admission_timeout_ms: pos_integer(),
           parallel_timeout_ms: pos_integer(),
           workflow_heap_words: pos_integer(),
           evaluation_heap_words: pos_integer(),
           provider_heap_words: pos_integer(),
           live_provider_tasks: pos_integer(),
+          llm_request_output_tokens: pos_integer(),
+          llm_request_timeout_ms: pos_integer(),
+          llm_total_tokens: pos_integer() | nil,
+          llm_cost_microusd: pos_integer() | nil,
           workflow_capability_calls: pos_integer(),
           workflow_capability_calls_per_name: pos_integer(),
           mission_capability_calls: pos_integer(),
@@ -126,7 +111,7 @@ defmodule PtcRunner.Kernel.Limits do
     end
   end
 
-  @spec fetch(t(), binary() | atom()) :: {:ok, pos_integer()} | :error
+  @spec fetch(t(), binary() | atom()) :: {:ok, pos_integer() | nil} | :error
   @doc "Reads one cataloged field from a valid limits value."
   def fetch(%__MODULE__{} = limits, name) do
     with true <- valid?(limits),

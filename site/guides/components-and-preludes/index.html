@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Customize agent components · PtcRunner</title>
+<meta name="description" content="Replace shipped prompts, policies, libraries, or complete agent loops when the
+shipped behavior no longer fits.">
+<link rel="canonical" href="https://ptc-runner.dev/guides/components-and-preludes/">
+<meta property="og:title" content="Customize agent components · PtcRunner">
+<meta property="og:description" content="Replace shipped prompts, policies, libraries, or complete agent loops when the
+shipped behavior no longer fits.">
+<meta property="og:url" content="https://ptc-runner.dev/guides/components-and-preludes/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/" class="current" aria-current="page">Customize agent components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="customize-agent-components">Customize agent components</h1><p>Replace shipped prompts, policies, libraries, or complete agent loops when the
+shipped behavior no longer fits.</p><p>Most applications select shipped libraries
+and do not copy their source:</p><pre><code class="json language-json">{
+  &quot;workflow&quot;: {
+    &quot;components&quot;: [
+      {&quot;id&quot;: &quot;app.agent&quot;, &quot;path&quot;: &quot;agent.clj&quot;, &quot;dependencies&quot;: [&quot;agent.core&quot;]},
+      {&quot;library&quot;: &quot;agent.core&quot;}
+    ],
+    &quot;entry&quot;: &quot;app.agent/run&quot;
+  }
+}</code></pre><p>The shipped <code class="inline">agent.core</code> loop is a replaceable library, not Kernel behavior.
+Start with it, then introduce a custom component under a new ID when the
+application needs different prompts, feedback, retry policy, continuation, or
+completion rules.</p><h2 id="trial-a-replacement-safely">Trial a replacement safely</h2><p>Selecting <code class="inline">agent.core</code> also selects its <code class="inline">agent.prompt</code> dependency. A verified
+component override can trial another prompt for one invocation without changing
+<code class="inline">ptc.json</code>. The active bundle remains immutable throughout the run; a later
+invocation compiles and checks the candidate before it can become active.</p><p>The standalone executable can run a prepared override descriptor but does not
+create one. Candidate creation is currently a source-checkout workflow. Use
+<a href="/guides/evaluating-with-replay/#evaluate-the-candidate-without-installing-it">Evaluate changes with replay</a>
+to compare a prepared candidate, and use the repository's
+<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/embedding.md#materialize-candidate-source">embedding guide</a>
+when creating the descriptor.</p><p>Each component declares its direct namespace dependencies. Selecting a library
+installs its immutable dependency closure, but does not add tools. Mission tools
+still come only from providers installed in <code class="inline">ptc-host.json</code> and selected for
+that mission in <code class="inline">ptc.json</code>.</p><p>Keep reusable components narrow:</p><ul><li>expose a small documented public surface;</li><li>declare signatures where model-written calls benefit from validation;</li><li>keep prompt-visible helpers focused on the task contract;</li><li>separate workflow policy from mission-only task functions; and</li><li>use a new component ID for a permanently customized prompt or loop.</li></ul><p>Use the <a href="/reference/component-contracts/">components-and-preludes reference</a>
+for namespaces, dependency rules, visibility, signatures, shipped library
+selection, compilation, and provider-selection boundaries. The
+<a href="/reference/agent-library-reference/">agent library reference</a> documents the exact
+shipped loop entries and options.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/building-agents/">&larr; Customize an agent</a><a class="pager-next" href="/guides/designing-agent-workflows/">Design an agent workflow &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/components-and-preludes.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

@@ -145,7 +145,7 @@ defmodule PtcViewer.ReplRouterTest do
       |> call_router(opts)
       |> response_body()
 
-    assert template["template"]["source"] == ~s[(log/turns "run-1" {})]
+    assert template["template"]["source"] == ~s[(analysis/read "run-1" {"collection" "activity"})]
 
     reset = mutation(:post, "/api/repl/reset", %{}, session_id, nonce) |> call_router(opts)
     reset_body = response_body(reset)
@@ -184,11 +184,11 @@ defmodule PtcViewer.ReplRouterTest do
 
   test "enabled entry documents contain only the public bootstrap configuration" do
     %{opts: opts} = start_repl()
-    html = conn(:get, "/anything") |> call_router(opts)
+    html = conn(:get, "/") |> call_router(opts)
 
     assert html.status == 200
     assert html.resp_body =~ "ptc-viewer-config"
-    refute html.resp_body =~ "log-analysis-v2"
+    refute html.resp_body =~ "run-analysis-v1"
     refute html.resp_body =~ "source_limit_bytes"
     refute html.resp_body =~ "test_pid"
 
@@ -198,7 +198,12 @@ defmodule PtcViewer.ReplRouterTest do
       )
 
     config = encoded |> Base.url_decode64!(padding: false) |> Jason.decode!()
-    assert config == %{"repl_enabled" => true, "page_bootstrap_nonce" => @page_nonce}
+
+    assert config == %{
+             "repl_enabled" => true,
+             "page_bootstrap_nonce" => @page_nonce,
+             "live_enabled" => false
+           }
   end
 
   defp start_repl do

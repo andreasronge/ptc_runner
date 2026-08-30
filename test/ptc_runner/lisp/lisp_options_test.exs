@@ -1,6 +1,8 @@
 defmodule PtcRunner.Lisp.OptionsTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.Component
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.TrustedTool
 
@@ -326,6 +328,37 @@ defmodule PtcRunner.Lisp.OptionsTest do
 
       assert_receive {:arguments, %{"secret" => "evidence-42"}}
       assert [%{args: %{"redacted" => true}}] = step.tool_calls
+    end
+
+    test "private trusted tools honor their explicit ledger projection" do
+      {:ok, component} =
+        Component.new(
+          id: "secret.bridge",
+          origin: "test",
+          source: ~S|(ns secret.bridge) (defn capture [value] (tool/capture {"secret" value}))|
+        )
+
+      {:ok, bundle} = Kernel.compile_bundle([component])
+
+      tools = %{
+        "capture" => %TrustedTool{
+          function: fn _arguments -> :ok end,
+          ledger_arguments: fn _arguments -> %{"redacted" => true} end,
+          prelude_namespaces: ["secret.bridge"],
+          visibility: :private
+        }
+      }
+
+      assert {:ok, step} =
+               Lisp.run_native(~S|(secret.bridge/capture "candidate-secret")|,
+                 prelude: bundle.prelude,
+                 tools: tools,
+                 filter_context: false,
+                 caller: :kernel
+               )
+
+      assert [%{args: %{"redacted" => true}, private: true}] = step.tool_calls
+      refute inspect(step.tool_calls) =~ "candidate-secret"
     end
 
     test "tool results work in map literals" do

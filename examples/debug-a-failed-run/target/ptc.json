@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {"id": "main", "path": "main.clj", "dependencies": ["kernel"]},
+      {"library": "kernel"}
+    ],
+    "entry": "main/run"
+  },
+  "missions": {
+    "pricing": {
+      "components": [
+        {"id": "orders", "path": "orders.clj", "dependencies": ["pricing.tax"]},
+        {
+          "id": "pricing.tax",
+          "path": "pricing.tax.clj",
+          "dependencies": ["pricing.base", "pricing.rule"]
+        },
+        {"id": "pricing.base", "path": "pricing.base.clj"},
+        {"id": "pricing.rule", "path": "pricing.rule.clj"},
+        {"id": "pricing.discount", "path": "pricing.discount.clj"}
+      ]
+    }
+  },
+  "input": {"value": {"subtotal": 100, "required_total": 120}},
+  "events": {"policy": "private"},
+  "labels": {
+    "name": "debug-a-failed-run-target",
+    "tags": {"mode": "deterministic"}
+  }
+}

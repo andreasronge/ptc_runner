@@ -5,9 +5,9 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   # the occurrence that produced it is still in scope.
   #
   # A prepare, preflight, or acquire callback answers `{:error, reason}` with an
-  # atom and nothing else. Every `provider_acquisition` code requires a subject
-  # bearing an occurrence, so a bare reason cannot be classified once it has left
-  # the loop that knows which occurrence produced it: it reaches the command
+  # atom and nothing else. Every acquisition diagnostic produced here requires
+  # a subject bearing an occurrence, so a bare reason cannot be classified once
+  # it has left the loop that knows which occurrence produced it: it reaches the command
   # boundary carrying no subject and fails closed as `internal_error`, reporting
   # an unreachable MCP server as an implementation defect. This module is called
   # from the three sites in `PtcRunner.Kernel.ProviderAcquisition` that still
@@ -29,15 +29,29 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   #
   # ## How a reason is placed
   #
-  # The catalog offers three acquisition codes, so the grouping follows one rule
-  # rather than a judgement per atom:
+  # The catalog offers occurrence-attributed acquisition codes, so the
+  # grouping follows one rule rather than a judgement per atom:
   #
   #   * `:provider_unavailable` — the provider could not be reached or started.
   #     A transport that would not open, a stdio child that would not spawn, a
   #     callback that raised or exited.
+  #   * `:provider_acquisition_timeout` — a budget expired before acquisition
+  #     finished. Deliberately not `:provider_unavailable`, which asserts a
+  #     failure to reach or start the provider; this asserts only that the clock
+  #     ran out, which is the weaker and — because `:mcp_timeout` also carries
+  #     launcher staging and spawn expiry, not just an unanswered discovery — the
+  #     only claim that holds for every producer. What the operator can act on is
+  #     the same either way: raise the budget. A cold first launch is the common
+  #     cause, which is why the row is retryable.
   #   * `:provider_protocol_error` — the provider answered and the answer was
   #     unusable: an invalid catalog or tool schema, a response past its ceiling,
   #     or a preparation/preflight/build that failed normalization.
+  #   * `:provider_protocol_version_unsupported` — discovery definitively showed
+  #     that the installed endpoint does not implement the pinned MCP profile.
+  #     A method-not-found response and a valid result missing the revision keep
+  #     separate fixed messages under that one public code.
+  #   * `:provider_tool_missing` — the provider returned a valid tool catalog,
+  #     but it did not contain one tool named by the sealed host declaration.
   #   * `:provider_policy_changed` — the preparation contradicted the sealed
   #     declaration that authorised it.
   #
@@ -64,10 +78,17 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   # `:credential_unavailable` is the one reachable-looking reason deliberately
   # absent: it cannot arrive on a command path now that phase-8 step 5 resolves
   # the sealed union up front and acquisition refuses a preparation the map does
-  # not cover.
+  # not cover. It was defeated once, by the header renderer answering a CR or LF
+  # with this reason at acquisition time: it reached here, found no branch, and
+  # a credential written with an ordinary `echo` reported an internal error.
+  # That sink now answers `:mcp_authentication_failed`, which is the translation
+  # the comment above prescribes for a rejected credential. A sink that can
+  # reject a credential must pick a reason with a branch here.
 
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
+  alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
 
   # `:mcp_remote_error` is an answered case — a JSON-RPC error at discovery — and
   # sits here rather than with the protocol reasons because a refused discovery
@@ -78,11 +99,11 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   # before a builder can return them: `:mcp_stdio_spawn_failed`,
   # `:mcp_stdio_spawn_timeout`, `:mcp_stdio_owner_down`,
   # `:invalid_mcp_stdio_launch`, and `:mcp_transport_closed` all normalize into
-  # `:mcp_transport_error` or `:mcp_timeout` first.
+  # `:mcp_transport_error` or `:mcp_timeout` first, and `:mcp_timeout` has its own
+  # code below.
   @unavailable_reasons [
     :mcp_transport_error,
     :mcp_transport_busy,
-    :mcp_timeout,
     :mcp_remote_error,
     :invalid_mcp_transport,
     :resource_registrar_unavailable,
@@ -91,12 +112,17 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
     :provider_acquisition_failed
   ]
 
+  @endpoint_reasons %{
+    mcp_endpoint_connection_refused: :provider_endpoint_connection_refused,
+    mcp_endpoint_name_unresolved: :provider_endpoint_name_unresolved,
+    mcp_endpoint_tls_failed: :provider_endpoint_tls_failed
+  }
+
   @protocol_reasons [
     :mcp_protocol_error,
     :mcp_capability_negotiation_error,
     :mcp_invalid_catalog,
     :mcp_invalid_tool_schema,
-    :mcp_mapped_tool_missing,
     :mcp_unsupported_result,
     :mcp_response_exceeded,
     :mcp_catalog_exceeded,
@@ -113,19 +139,24 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   @environment_reasons [
     :invalid_compatibility_environment,
     :invalid_mcp_working_directory,
+    :mcp_command_not_found,
     :invalid_mcp_executable,
     :invalid_trace_snapshot_directory,
     :invalid_inspection_snapshot_directory,
-    :invalid_replay_fixtures,
-    :replay_fixtures_too_large,
-    :replay_entry_limit_exceeded,
-    :duplicate_replay_entry,
+    :replay_owner_unavailable,
     :source_unavailable,
     :invalid_snapshot
   ]
 
+  @fixture_file_reasons [
+    :replay_fixtures_unreadable,
+    :replay_fixtures_empty,
+    :replay_fixtures_too_large
+  ]
+
   @launcher_reasons [:mcp_stdio_launcher_unavailable, :unsupported_mcp_stdio_platform]
   @adapter_reasons [:invalid_llm_model]
+  @model_contract_reasons [:unsupported_model_option]
 
   @selection_reasons [
     :provider_destination_denied,
@@ -148,8 +179,32 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   Classifies one callback reason against the occurrence that produced it.
   """
   @spec diagnostic(term(), occurrence()) :: CommandDiagnostic.t()
+  def diagnostic(reason, occurrence) when is_map_key(@endpoint_reasons, reason),
+    do: acquisition_diagnostic(Map.fetch!(@endpoint_reasons, reason), occurrence)
+
   def diagnostic(reason, occurrence) when reason in @unavailable_reasons,
     do: acquisition_diagnostic(:provider_unavailable, occurrence)
+
+  def diagnostic(:mcp_timeout, occurrence),
+    do: acquisition_diagnostic(:provider_acquisition_timeout, occurrence)
+
+  def diagnostic(:mcp_discovery_method_unsupported, occurrence),
+    do:
+      acquisition_diagnostic(
+        :provider_protocol_version_unsupported,
+        occurrence,
+        MCPAcquisitionDiagnostic.discovery_method_unsupported_message()
+      )
+
+  def diagnostic(:mcp_protocol_version_unsupported, occurrence),
+    do: acquisition_diagnostic(:provider_protocol_version_unsupported, occurrence)
+
+  def diagnostic({:mcp_mapped_tool_missing, name}, occurrence) do
+    case MCPAcquisitionDiagnostic.missing_tool_message(name) do
+      {:ok, message} -> acquisition_diagnostic(:provider_tool_missing, occurrence, message)
+      :error -> internal_diagnostic()
+    end
+  end
 
   def diagnostic(reason, occurrence) when reason in @protocol_reasons,
     do: acquisition_diagnostic(:provider_protocol_error, occurrence)
@@ -176,26 +231,59 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   def diagnostic(reason, occurrence) when reason in @environment_reasons,
     do: subject_diagnostic(:local_preflight, :environment_unavailable, :local, occurrence)
 
+  # A refused fixture file names the rule it broke, and a line-level rejection
+  # names the line. Acquisition sees the same reasons phase 7 does, so it must
+  # not report them one way and the local step another. The tuple heads above
+  # match first, so nothing else with this shape reaches here; anything this
+  # module cannot render still falls through to the internal error.
+  def diagnostic(reason, occurrence) when reason in @fixture_file_reasons,
+    do: fixture_diagnostic(reason, occurrence)
+
+  def diagnostic({entry_reason, line}, occurrence)
+      when is_atom(entry_reason) and is_integer(line) and line > 0,
+      do: fixture_diagnostic({entry_reason, line}, occurrence)
+
   def diagnostic(reason, occurrence) when reason in @launcher_reasons,
     do: subject_diagnostic(:local_preflight, :launcher_unavailable, :local, occurrence)
 
   def diagnostic(reason, occurrence) when reason in @adapter_reasons,
     do: subject_diagnostic(:local_preflight, :adapter_unavailable, :local, occurrence)
 
+  def diagnostic(reason, occurrence) when reason in @model_contract_reasons,
+    do: subject_diagnostic(:local_preflight, :model_contract_unsupported, :local, occurrence)
+
   def diagnostic(reason, occurrence) when reason in @selection_reasons,
     do: subject_diagnostic(:active_preflight, :selection_rejected, :selection, occurrence)
 
   def diagnostic(_reason, _occurrence), do: internal_diagnostic()
 
-  defp acquisition_diagnostic(code, occurrence),
-    do: subject_diagnostic(:provider_acquisition, code, :acquisition, occurrence)
+  defp fixture_diagnostic(reason, occurrence) do
+    case LLMReplayFixtureDiagnostic.message(reason) do
+      {:ok, message} ->
+        subject_diagnostic(
+          :local_preflight,
+          :environment_unavailable,
+          :local,
+          occurrence,
+          message
+        )
 
-  defp subject_diagnostic(phase, code, operation, occurrence) do
+      :error ->
+        internal_diagnostic()
+    end
+  end
+
+  defp acquisition_diagnostic(code, occurrence, message \\ nil),
+    do: subject_diagnostic(:provider_acquisition, code, :acquisition, occurrence, message)
+
+  defp subject_diagnostic(phase, code, operation, occurrence, message \\ nil) do
     site = %{destination: occurrence.destination, index: occurrence.index}
 
     case CommandSubject.provider(occurrence.provider, operation, site) do
       {:ok, subject} ->
-        CommandDiagnostic.new!(phase, code, subject: subject, provider_activity: true)
+        opts = [subject: subject, provider_activity: true]
+        opts = if is_binary(message), do: Keyword.put(opts, :message, message), else: opts
+        CommandDiagnostic.new!(phase, code, opts)
 
       {:error, _reason} ->
         internal_diagnostic()

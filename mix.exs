@@ -1,10 +1,12 @@
 defmodule PtcRunner.MixProject do
   use Mix.Project
 
+  @app :ptc_runner
+
   def project do
     [
-      app: :ptc_runner,
-      version: "0.13.0",
+      app: @app,
+      version: "0.14.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
@@ -39,7 +41,7 @@ defmodule PtcRunner.MixProject do
       dialyzer: [
         plt_core_path: dialyzer_plt_core_path(),
         plt_file: {:no_warn, "priv/plts/project.plt"},
-        plt_add_apps: [:ex_unit, :mix, :req, :req_llm, :llm_db, :recon],
+        plt_add_apps: [:earmark_parser, :ex_unit, :mix, :req, :req_llm, :llm_db, :recon],
         ignore_warnings: ".dialyzer_ignore.exs",
         list_unused_filters: true
       ]
@@ -70,14 +72,91 @@ defmodule PtcRunner.MixProject do
 
   # Run "mix help compile.app" to learn about applications.
   def application do
-    [
+    application = [
       mod: {PtcRunner.Application, []},
       extra_applications: [:crypto, :logger, :public_key, :ssl],
       env: [
-        model_registry: PtcRunner.LLM.DefaultRegistry,
         llm_adapter: PtcRunner.LLM.ReqLLMAdapter
       ]
     ]
+
+    case source_identity() do
+      nil -> application
+      identity -> [{:id, ~c"ptc_runner:#{identity.revision}:#{identity.dirty}"} | application]
+    end
+  end
+
+  defp source_identity do
+    revision = System.get_env("PTC_SOURCE_REVISION") || packaged_or_git_revision()
+
+    if revision do
+      dirty = source_dirty_state()
+
+      unless Regex.match?(~r/\A[0-9a-f]{40}\z/, revision) do
+        Mix.raise("PTC source revision must be a lowercase, full 40-character Git SHA")
+      end
+
+      %{revision: revision, dirty: dirty}
+    end
+  end
+
+  # Dependency updaters load only the fetched Mix files in a scratch directory.
+  # That is project inspection, not a build, so let configuration load without
+  # application identity metadata. Supported no-Git builds carry the packaged
+  # revision or provide the explicit hermetic-build inputs documented below.
+  defp packaged_or_git_revision do
+    packaged = Path.join(__DIR__, "priv/source_revision")
+
+    cond do
+      File.exists?(Path.join(__DIR__, ".git")) -> git!(~w(rev-parse HEAD))
+      File.regular?(packaged) -> packaged |> File.read!() |> String.trim()
+      true -> nil
+    end
+  end
+
+  defp source_dirty_state do
+    case explicit_dirty_state() do
+      nil -> packaged_or_git_dirty_state!()
+      explicit -> explicit
+    end
+  end
+
+  defp explicit_dirty_state do
+    case System.get_env("PTC_SOURCE_DIRTY") do
+      nil -> nil
+      "true" -> true
+      "false" -> false
+      _invalid -> Mix.raise("PTC_SOURCE_DIRTY must be true or false")
+    end
+  end
+
+  defp packaged_or_git_dirty_state! do
+    packaged = Path.join(__DIR__, "priv/source_dirty")
+
+    cond do
+      File.exists?(Path.join(__DIR__, ".git")) ->
+        git!(~w(status --porcelain --untracked-files=normal)) != ""
+
+      File.regular?(packaged) ->
+        case packaged |> File.read!() |> String.trim() do
+          "true" -> true
+          "false" -> false
+          _invalid -> Mix.raise("packaged PTC source dirty state must be true or false")
+        end
+
+      true ->
+        Mix.raise("source dirty state unavailable; set PTC_SOURCE_DIRTY")
+    end
+  end
+
+  defp git!(arguments) do
+    case System.cmd("git", arguments, cd: __DIR__, stderr_to_stdout: true) do
+      {output, 0} ->
+        String.trim(output)
+
+      {output, _status} ->
+        Mix.raise("cannot determine PTC source identity: #{String.trim(output)}")
+    end
   end
 
   def cli do
@@ -92,16 +171,19 @@ defmodule PtcRunner.MixProject do
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(:test), do: ["lib", "dev", "test/support"]
+  defp elixirc_paths(:dev), do: ["lib", "dev"]
   defp elixirc_paths(_), do: ["lib"]
 
-  # Generated dependency rules in AGENTS.md. Link bulky rules rather than
-  # inlining them so the repo's own instructions stay readable.
+  # Generated dependency rules in AGENTS.md. Inline the short instructions
+  # that tell agents how to consult dependency documentation, but link the
+  # bulky language and runtime rules so the repository instructions stay
+  # readable.
   defp usage_rules do
     [
       file: "AGENTS.md",
       usage_rules: [
-        {:usage_rules, link: :markdown, sub_rules: []},
+        {:usage_rules, sub_rules: []},
         {"usage_rules:elixir", link: :markdown, main: false},
         {"usage_rules:otp", link: :markdown, main: false}
       ]
@@ -115,7 +197,7 @@ defmodule PtcRunner.MixProject do
       {:jsv, "~> 0.22.0"},
       {:nimble_parsec, "~> 1.4"},
       {:mint, "~> 1.9"},
-      {:req, "~> 0.6.3"},
+      {:req, "~> 0.7.3"},
       {:telemetry, "~> 1.0"},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
@@ -123,13 +205,14 @@ defmodule PtcRunner.MixProject do
       ex_dna_dep(),
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
-      {:req_llm, "~> 1.19", optional: true, runtime: false},
+      {:earmark_parser, "~> 1.4.44", only: [:dev, :test], runtime: false},
+      {:req_llm, "~> 1.20", optional: true, runtime: false},
+      {:ptc_llm_http, "== 0.1.0", only: [:dev, :test], runtime: false},
       launcher_dep(),
-      {:ptc_viewer, path: "ptc_viewer", only: [:test, :dev]},
       {:usage_rules, "~> 1.2", only: :dev, runtime: false},
       {:recon, "~> 2.5", only: [:dev, :test], runtime: false},
       {:benchee, "~> 1.3", only: [:dev, :test], runtime: false}
-    ]
+    ] ++ viewer_dep()
   end
 
   # Keep published and ordinary development builds on Hex while allowing an
@@ -174,58 +257,65 @@ defmodule PtcRunner.MixProject do
       (Mix.env() in [:dev, :test] or Enum.any?(System.argv(), &(&1 == "release")))
   end
 
+  # The Viewer ships inside the assembled release and the container image, and
+  # is absent from the Hex package. The activation rule is the launcher's --
+  # development, tests, and a release built from this checkout -- because
+  # `mix hex.build` must never see a path dependency and the Dockerfile's
+  # single `mix do deps.get --only prod + release ...` must.
+  #
+  # Unlike the launcher, the inactive branch declares nothing at all rather
+  # than an optional Hex requirement. The launcher is published to Hex; this
+  # companion is not, and a requirement naming a package absent from the
+  # registry would fail the next `mix hex.publish`. Declaring nothing is also
+  # what is true: a Hex-only install has no Viewer, which is exactly what
+  # `PtcRunner.Kernel.DoctorEnvironment` already reports.
+  #
+  # `runtime: false` is load-bearing. `bandit`, `plug`, and `plug_crypto` all
+  # declare application modules, so an ordinary runtime dependency would enter
+  # `ptc_runner.app` and every command's `ensure_all_started(:ptc_runner)`
+  # would start three supervision trees that only `ptc viewer` needs.
+  # `PtcViewer.start/1` starts its own applications instead.
+  defp viewer_dep do
+    viewer_path = Path.expand("ptc_viewer", __DIR__)
+
+    if File.regular?(Path.join(viewer_path, "mix.exs")) and
+         (Mix.env() in [:dev, :test] or Enum.any?(System.argv(), &(&1 == "release"))) do
+      [{:ptc_viewer, path: "ptc_viewer", runtime: false}]
+    else
+      []
+    end
+  end
+
   defp aliases do
     [
+      ptc: &run_ptc/1,
+      # Nested fetch then quality. The suite, Viewer, launcher package, and
+      # release belong to the pre-push hook and GitHub Actions, so an agent
+      # that runs this before commit does not pay for them again on push.
       precommit: [
-        "format --check-formatted",
-        "compile --warnings-as-errors",
-        "run --no-start scripts/check_stable_cli_transition.exs",
-        "xref graph --format cycles --label compile-connected --fail-above 0",
-        "credo --strict",
-        "cmd bash scripts/duplication_gate.sh check",
-        "ptc.validate_spec",
-        "ptc.gen_docs --check",
-        "ptc.conformance_report --check-inventory",
-        "test --warnings-as-errors",
-        "cmd --cd ptc_viewer mix test --color",
-        "cmd --cd ptc_runner_launcher mix precommit",
-        "cmd bash scripts/verify_core_package.sh",
-        "cmd bash scripts/verify_standalone_release.sh"
+        "cmd scripts/ci/preflight.sh",
+        "cmd scripts/ci/core-quality.sh"
       ],
-      # Slower checks kept out of the per-commit loop; run before pushing.
-      # PR CI runs these as individual steps. The upstream audit attests all
-      # exact Java descriptors when Java 11 or newer is available.
-      #
-      # The two staleness checks are also in `precommit`, and are repeated
-      # here on purpose. A generated artifact goes stale from an ordinary edit
-      # to the sources it projects, `AGENTS.md` tells you not to run `precommit`
-      # before an ordinary push because the hook already gates it, and the hook
-      # runs the suite and this alias rather than `precommit`. Without them a
-      # push that touches `lib/` clears every local gate and still fails CI on
-      # an artifact the author never had a chance to regenerate. They cost a few
-      # seconds inside a run that already spends minutes.
+      # Slower static and Dialyzer checks kept out of the per-commit loop.
+      # This diagnostic alias delegates to the same repository-owned scripts
+      # as the pre-push hook and GitHub Actions; it is not a second gate
+      # implementation.
       #
       # `ptc.gen_semantic_revision --check` is deliberately absent from both:
       # it is a release gate, not a per-commit one. See `.gitattributes`.
       prepush: [
-        # Credo is repeated here for the same reason as the staleness checks
-        # below: the hook runs this alias, not `precommit`, so without it a
-        # lint the CI Credo step rejects only surfaces after the push.
-        "credo --strict",
-        "ptc.gen_docs --check",
-        "ptc.conformance_report --check-inventory",
-        "ptc.audit_upstream",
-        "dialyzer",
-        "deps.unlock --check-unused"
+        "cmd scripts/ci/core-static.sh",
+        "cmd scripts/ci/core-dialyzer.sh"
       ],
       coverage: [
         "test --cover"
       ],
-      # Tests costing tens of seconds each. Excluded from `mix test` by default
-      # (test/test_helper.exs); the `Nightly` workflow runs them. `--trace` is
-      # retained here and only here: these tests exceed the default 60 s
-      # per-test timeout, and trace mode sets the timeout to `:infinity`.
-      # Everywhere else `--trace` is a bug -- it pins `--max-cases` to 1.
+      # Tests that spawn Mix/OS processes or wait on multi-second deadlines.
+      # Excluded from `mix test` by default (test/test_helper.exs); the
+      # `Nightly` workflow runs them. `--trace` is retained here and only
+      # here: the downstream-consumer case exceeds the default 60 s per-test
+      # timeout, and trace mode sets the timeout to `:infinity`. Everywhere
+      # else `--trace` is a bug -- it pins `--max-cases` to 1.
       nightly: [
         "test --only nightly --trace"
       ],
@@ -248,14 +338,62 @@ defmodule PtcRunner.MixProject do
     ]
   end
 
+  defp run_ptc(args) do
+    Mix.Task.run(ptc_prepare_task(args), ptc_prepare_args(Mix.Project.app_path()))
+    Mix.Task.run("ptc", args)
+  end
+
+  @doc false
+  @spec ptc_prepare_args(binary()) :: [binary()]
+  def ptc_prepare_args(app_path) when is_binary(app_path) do
+    # The app compiler runs after the language compilers, so this artifact is
+    # an O(1) signal that the initial dependency-aware build completed. Calling
+    # Mix.Dep.cached/0 here would restore much of the warm-start cost this path
+    # deliberately avoids.
+    app_file = Path.join([app_path, "ebin", Atom.to_string(@app) <> ".app"])
+
+    if File.regular?(app_file), do: ["--no-deps-check"], else: []
+  end
+
+  # These raw forms are only preparation hints; the shared parser remains the
+  # authority for acceptance and rendering. They cover the common commands
+  # whose frontend deliberately never starts the application runtime.
+  defp ptc_prepare_task([]), do: "compile"
+
+  defp ptc_prepare_task([command | _rest])
+       when command in ["help", "version", "--version", "repl", "viewer"],
+       do: "compile"
+
+  defp ptc_prepare_task(_args), do: "app.config"
+
   defp releases do
     [
       ptc_runner: [
         include_erts: true,
-        applications: [req_llm: :load],
-        overlays: ["rel/overlays"]
+        # Both are `runtime: false`, so they are named here to travel with the
+        # release at all. `:load` keeps them out of the boot start phase; the
+        # provider activity boundary and `ptc viewer` start them explicitly.
+        applications: [req_llm: :load, ptc_viewer: :load],
+        overlays: ["rel/overlays"],
+        steps: [:assemble, &copy_release_notices/1]
       ]
     ]
+  end
+
+  defp copy_release_notices(%Mix.Release{path: release_path} = release) do
+    licenses_path = Path.join(release_path, "LICENSES")
+    File.mkdir_p!(licenses_path)
+
+    File.cp!(
+      Path.join(__DIR__, "THIRD_PARTY_NOTICES.md"),
+      Path.join(release_path, "THIRD_PARTY_NOTICES.md")
+    )
+
+    for license <- ["Apache-2.0.txt", "MIT.txt"] do
+      File.cp!(Path.join([__DIR__, "LICENSES", license]), Path.join(licenses_path, license))
+    end
+
+    release
   end
 
   # Mermaid renders natively on GitHub. HexDocs needs the renderer injected;
@@ -300,7 +438,7 @@ defmodule PtcRunner.MixProject do
   defp docs do
     [
       main: "readme",
-      assets: %{"docs/guides/assets" => "assets"},
+      assets: %{"docs/maintainers/assets" => "assets"},
       before_closing_body_tag: &before_closing_body_tag/1,
       groups_for_modules: [
         Kernel: [
@@ -324,12 +462,13 @@ defmodule PtcRunner.MixProject do
           PtcRunner.Kernel.MissionEnvironment,
           PtcRunner.Kernel.ProviderError,
           PtcRunner.Kernel.ProviderRegistry,
+          PtcRunner.Kernel.ProjectConfig,
           PtcRunner.Kernel.ReplSession,
           PtcRunner.Kernel.Result,
           PtcRunner.Kernel.RunBuilder,
           PtcRunner.Kernel.RunConfig,
           PtcRunner.Kernel.RunRequest,
-          PtcRunner.Kernel.TraceCapability,
+          PtcRunner.Kernel.RunAnalysis,
           PtcRunner.Kernel.TraceLog,
           PtcRunner.Kernel.WorkflowEnvironment
         ],
@@ -370,8 +509,9 @@ defmodule PtcRunner.MixProject do
         ],
         LLM: [
           PtcRunner.LLM,
-          PtcRunner.LLM.Registry,
-          PtcRunner.LLM.DefaultRegistry,
+          PtcRunner.LLM.Invocation,
+          PtcRunner.LLM.PreparedModel,
+          PtcRunner.LLM.Requirements,
           PtcRunner.LLM.ReqLLMAdapter
         ]
       ],
@@ -380,41 +520,119 @@ defmodule PtcRunner.MixProject do
           "README.md",
           "LICENSE",
           "docs/ptc-lisp-specification.md",
+          "docs/agent-library-reference.md",
           "docs/clojure-conformance-gaps.md",
           "docs/function-reference.md",
           "docs/java-interop.md",
+          "docs/kernel-limits-reference.md",
+          "docs/prelude-reference.md",
           "docs/signature-syntax.md",
-          "docs/trace-log-contract.md",
           "docs/conformance/index.md",
           "docs/guides/quickstart.md",
           "docs/guides/getting-started.md",
+          "docs/guides/concepts.md",
+          "docs/guides/agent-cli-usage.md",
+          "docs/guides/ptc-lisp-basics.md",
+          "docs/guides/project-configuration.md",
           "docs/guides/manifests-and-capabilities.md",
           "docs/guides/host-configuration.md",
+          "docs/guides/using-models.md",
+          "docs/guides/connecting-tools-with-mcp.md",
           "docs/guides/building-agents.md",
+          "docs/guides/components-and-preludes.md",
+          "docs/guides/designing-agent-workflows.md",
+          "docs/guides/agent-workflow-patterns.md",
           "docs/guides/running-and-debugging.md",
           "docs/guides/kernel-repl.md",
-          "docs/guides/components-and-preludes.md",
-          "docs/guides/embedding-in-elixir.md",
-          "docs/guides/coding-agent-review-workflow.md",
-          "docs/guides/duplication-gate.md",
-          "docs/guides/documentation-guidelines.md",
-          "docs/guides/kernel-maintainer.md"
+          "docs/guides/debugging-a-failed-run.md",
+          "docs/guides/evaluating-with-replay.md",
+          "docs/installation/standalone.md",
+          "docs/installation/docker.md",
+          "docs/installation/source.md",
+          "docs/reference/application-manifest.md",
+          "docs/reference/host-installation.md",
+          "docs/reference/project-files.md",
+          "docs/reference/component-contracts.md",
+          "docs/reference/mcp.md",
+          "docs/reference/cli.md",
+          "docs/reference/repl.md",
+          "docs/reference/debug-navigation.md",
+          "docs/maintainers/embedding.md",
+          "docs/maintainers/coding-agent-review.md",
+          "docs/maintainers/duplication-gate.md",
+          "docs/maintainers/guide-budget.md",
+          "docs/maintainers/documentation.md",
+          "docs/maintainers/signature-integration.md",
+          "docs/maintainers/kernel.md",
+          "docs/maintainers/trace-log-contract.md"
         ] ++ Path.wildcard("docs/conformance/*-audit.md"),
       groups_for_extras: [
+        Start: [
+          "docs/guides/quickstart.md",
+          "docs/guides/getting-started.md",
+          "docs/guides/concepts.md",
+          "docs/guides/agent-cli-usage.md"
+        ],
+        Language: [
+          "docs/guides/ptc-lisp-basics.md"
+        ],
+        Configure: [
+          "docs/guides/project-configuration.md",
+          "docs/guides/manifests-and-capabilities.md",
+          "docs/guides/host-configuration.md"
+        ],
+        Build: [
+          "docs/guides/using-models.md",
+          "docs/guides/connecting-tools-with-mcp.md",
+          "docs/guides/building-agents.md",
+          "docs/guides/components-and-preludes.md"
+        ],
+        Design: [
+          "docs/guides/designing-agent-workflows.md",
+          "docs/guides/agent-workflow-patterns.md"
+        ],
+        "Run and debug": [
+          "docs/guides/running-and-debugging.md",
+          "docs/guides/kernel-repl.md",
+          "docs/guides/debugging-a-failed-run.md",
+          "docs/guides/evaluating-with-replay.md"
+        ],
+        Installation: ~r/docs\/installation\/.+\.md/,
+        Reference:
+          ~r/docs\/(?:reference\/.+|(?:agent-library|ptc-lisp|clojure|function-reference|java-|kernel-limits|prelude-|signature-).+)\.md/,
+        Conformance: ~r/docs\/conformance\/.+\.md/,
         Maintainers:
-          ~r/docs\/guides\/(coding-agent-review-workflow|documentation-guidelines|duplication-gate|kernel-maintainer)\.md/,
-        Contracts: ~r/docs\/trace-log-contract\.md/,
-        Guides: ~r/docs\/guides\/.+\.md/,
-        Reference: ~r/docs\/(ptc-lisp|clojure|function-reference|java-|signature-).+\.md/,
-        Conformance: ~r/docs\/conformance\/.+\.md/
+          ~r/docs\/maintainers\/(coding-agent-review|documentation|duplication-gate|embedding|guide-budget|kernel|signature-integration|trace-log-contract)\.md/
       ]
     ]
   end
 
+  # Hex consumers compile without this checkout's Git metadata. Materialize the
+  # publication revision immediately before Hex collects the declared files;
+  # ordinary source builds continue to read Git directly.
+  defp ensure_package_source_identity! do
+    case source_identity() do
+      %{revision: revision, dirty: dirty} ->
+        File.write!(Path.join(__DIR__, "priv/source_revision"), revision <> "\n")
+        File.write!(Path.join(__DIR__, "priv/source_dirty"), "#{dirty}\n")
+
+      nil ->
+        :ok
+    end
+  end
+
   defp package do
+    ensure_package_source_identity!()
+
     [
       files:
-        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab .formatter.exs mix.exs README.md LICENSE CHANGELOG.md priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+        ~w(lib rel docs examples/kernel-tutorial examples/kernel-inspection-lab examples/llm-replay examples/debug-a-failed-run examples/support-triage site/schemas/mcp-2026-07-28.schema.json .formatter.exs mix.exs README.md usage-rules.md LICENSE LICENSES THIRD_PARTY_NOTICES.md CHANGELOG.md priv/source_revision priv/source_dirty priv/function_audit.exs priv/functions.exs priv/java_interop.exs priv/java_interop_oracle_cases.exs priv/java_interop_oracle_baseline.json priv/java_oracle_versions.exs priv/preludes priv/schemas priv/spec priv/semantic_build_inventory.exs priv/semantic_build_projection.json),
+      # Hex expands the directories above from the working tree, not from
+      # git, so anything ignored but present -- a `.ptc` run directory left by
+      # a tutorial walk, a `.env` beside an example -- is published. Ship no
+      # dot-entry the list does not name outright: run traces and private
+      # inspection records are local evidence, and a credential file is worse.
+      exclude_patterns: [~r{(^|/)\.(?!formatter\.exs$)}],
       licenses: ["MIT"],
       links: %{
         "GitHub" => "https://github.com/andreasronge/ptc_runner",

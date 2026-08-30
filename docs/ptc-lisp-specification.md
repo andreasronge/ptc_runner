@@ -1,5 +1,8 @@
 # PTC-Lisp Language Specification
 
+PTC-Lisp is a bounded Clojure-like language for data processing and tool
+calling through explicitly granted capabilities.
+
 **Related docs:**
 - [Clojure Conformance Gaps](clojure-conformance-gaps.md) — tracked deviations from Clojure (bugs, missing features, intentional divergences)
 - [Function Reference](function-reference.md) — supported PTC-Lisp functions and special forms
@@ -398,7 +401,7 @@ Key-value associations:
   its name string before either native or JSON result handling. The Kernel
   rejects projection collisions rather than silently choosing between a
   keyword and string with the same name. Native projection can retain other
-  non-JSON values; JSON projection rejects them. `mix ptc run` always selects
+  non-JSON values; JSON projection rejects them. `ptc run` always selects
   JSON projection, whether or not it publishes a result artifact.
 - **Tool-call arguments:** keys are recursively normalized to strings (e.g.
   `1` → `"1"`, `[:a :b]` → its inspected form). A projection collision or an
@@ -1160,6 +1163,11 @@ Syntactic sugar for defining named functions in the user namespace:
 **Semantics:**
 - `loop` establishes bindings just like `let`.
 - `recur` can only appear in a **tail position** of a `loop` or `fn`.
+- The number of `recur` arguments must match the nearest recursion point, checked while analyzing that `loop`, `fn`, or `defn` — including a dormant definition that is never called:
+  - `loop`: the number of binding pairs, not the number of names introduced by destructuring
+  - fixed-arity `fn`/`defn`: the number of parameter slots
+  - variadic `fn`/`defn`: the number of leading parameter slots plus one slot for the rest parameter (so `[x & xs]` expects `(recur new-x new-xs)`)
+- A nested `loop` or function shadows the outer recursion point for its body; leaving that body restores the outer target.
 - When `recur` is evaluated, it re-binds the arguments and jumps back to the start of the `loop` or `fn` body.
 - Evaluation is **stack-safe** (no stack growth).
 - An iteration check is enforced to prevent infinite loops (default limit: 1000 iterations).
@@ -1191,7 +1199,7 @@ Syntactic sugar for defining named functions in the user namespace:
 ```
 
 **Safety Mechanism:**
-PTC-Lisp enforces an iteration limit on `loop`/`recur` jumps. If a `loop` or tail-recursive function using `recur` exceeds the allowed number of iterations (default 1000), execution is terminated with a `loop_limit_exceeded` error. Ordinary non-tail function recursion is not counted by this limit; it remains bounded by the sandbox timeout and memory limit.
+PTC-Lisp does not count `loop`/`recur` jumps by default. Direct embedders may pass `:loop_limit`, and Kernel hosts may enable `workflow_loop_iterations` or `evaluation_loop_iterations`. When a positive limit is configured, it applies to one `loop` or tail-recursive function activation: entering the loop or calling the function starts the counter at zero, and each `recur` jump to that head consumes one iteration. Sequential loops, nested loops, and separate higher-order callback invocations are separate activations. If that activation exceeds the configured limit, execution is terminated with a `loop_limit_exceeded` error. Ordinary non-tail function recursion and host collection traversal (`map`, `reduce`, and similar) are not counted. Heap and elapsed-time limits remain the containment boundaries.
 
 ### 5.17 `for` — Eager Comprehension
 
@@ -1350,8 +1358,54 @@ is distinct from an evaluator error returned under the outer `:error` tag.
   `{:__ptc_fail__, value}`
 - Cannot be used inside `pmap` or `pcalls` (raises an error)
 
+**What a `ptc run` caller observes.** A workflow entry that ends in `fail`
+exits 5 and reports `execution/explicit_failure`, whose message names where the
+failure value went:
+
+```console
+$ ptc run ptc-project.json
+error: execution/explicit_failure: the workflow signalled an explicit failure;
+its value is retained in the run's private inspection record
+```
+
+The value itself never reaches the envelope or the trace. Both are payload-free
+by construction — every caller-supplied label on a trace event is reduced to a
+one-way fingerprint — and a `fail` value is arbitrary application data. It is
+written instead to the run's private inspection artifact as an
+`explicit-failure-value` record. Retention is not unconditional, and the
+diagnostic's message distinguishes every outcome: the value is retained, or it
+was dropped because the run published no inspection artifact (enable
+`artifacts.inspection`, or pass `--inspect`), because that artifact did not
+reach its destination, because the value exceeded `terminal_result_bytes`, or
+because it cannot be represented as JSON. Read a retained value back with the
+analysis profile:
+
+```console
+ptc repl --profile private-run-analysis-v1 \
+  --resource traces=.ptc/traces --resource inspection=.ptc/inspection \
+  --session-trace-dir analysis-traces --private-unattended --format jsonl \
+  -e '(analysis/read "RUN_REF" {"collection" "explicit_failure_values"})'
+```
+
+A CI script separates a deliberate failure from an infrastructure one on
+`error.code`; distinguishing one deliberate failure from another is what the
+inspection record is for. See the
+[REPL reference](reference/repl.md#private-analysis-without-a-terminal).
+
+One `fail` does not always report `explicit_failure`. When the value is a
+capability refusal the Kernel itself issued — a quota or budget ceiling the run
+actually reached, or an authenticated provider failure — the run reports that
+class instead, so re-raising a refusal with `fail` does not disguise it as an
+application decision. A value the workflow authored keeps `explicit_failure`
+even when it imitates one of those shapes.
+
 ```clojure
-;; Signal failure when a required condition isn't met
+;; Signal failure when a required condition isn't met.
+;; This tests whether the granted value is `nil`, which is a different question
+;; from whether the name was granted at all. Under the Kernel -- a workflow
+;; entry, a mission run, or either REPL -- an ungranted `data/<name>` is a
+;; runtime error, not `nil`, so `nil?` cannot be used to probe for one.
+;; `PtcRunner.Lisp.run/2` stays permissive and answers `nil` for both.
 (if (nil? data/input)
   (fail "No input data provided")
   (process data/input))
@@ -1578,7 +1632,7 @@ Keyword accessors (`(:status m)`, `(get m :status)`, `(get-in m [:a :b])`) and t
 - As a final fallback, hyphens in the key name are normalized to underscores and retried (so `:turn-summaries` matches a `:turn_summaries` or `"turn_summaries"` key)
 
 ```clojure
-;; Atom keys (preferred Elixir style)
+;; Atom keys (host-map style)
 (filter (fn [u] (= (:status u) "active")) users)
 
 ;; Works with string-keyed data from JSON APIs
@@ -1739,7 +1793,18 @@ as a `[key value]` pair passed to the predicate. They return a **vector** of
 ;; Closures work - captures outer scope at evaluation time
 (let [factor 10]
   (pmap #(* % factor) [1 2 3]))    ; => [10 20 30]
+
+;; pmap is also a callable value
+(apply pmap [inc [1 2 3]])         ; => [2 3 4]
+((partial pmap inc) [1 2 3])       ; => [2 3 4]
+(map pmap [inc dec] [[1 2] [3 4]]) ; => [[2 3] [2 3]]
 ```
+
+`pmap` resolves in value position like an ordinary function. It may be stored,
+passed to higher-order functions, composed with `partial` or `fnil`, and
+invoked with `apply`. A direct `(pmap ...)` call retains the analyzer-optimized
+path; direct and indirect invocation share the same evaluator, limits,
+effects, and failure semantics.
 
 **pmap semantics:**
 - Order is preserved - results match input order
@@ -1773,7 +1838,17 @@ as a `[key value]` pair passed to the predicate. They return a **vector** of
 
 ;; Simple parallel computations
 (pcalls #(+ 1 1) #(* 2 3) #(- 10 5))    ; => [2 6 5]
+
+;; pcalls is also a variadic callable value
+(apply pcalls [#(+ 1 1) #(* 2 3)])       ; => [2 6]
 ```
+
+`pcalls` may likewise be stored, passed to higher-order functions, composed,
+and invoked with `apply`. It accepts zero thunks, so using `pcalls` itself as a
+`pcalls` thunk is valid; `pmap` is rejected during zero-arity preflight before
+any worker starts. Saved parallel callables resolve evaluator authority and
+limits from the evaluation that invokes them, not the evaluation that stored
+them.
 
 **pcalls semantics:**
 - Order is preserved - results match argument order
@@ -2332,7 +2407,7 @@ out-of-bounds vector indices.
 | `index-of` | `(index-of s value from-index)` | Index of first occurrence from position |
 | `last-index-of` | `(last-index-of s value)` | Index of last occurrence, or `nil` if not found |
 | `last-index-of` | `(last-index-of s value from-index)` | Index of last occurrence up to position |
-| `format` | `(format fmt-string & args)` | Java-style format string |
+| `format` | `(format fmt-string & args)` | Java-style `%s`/`%d`/`%f`/`%e`/`%x`/`%o` formatting with bounded width, `-` left alignment, `0` numeric padding, and numeric precision |
 | `name` | `(name x)` | Returns name string of keyword or string |
 
 **Type coercion:** `str` converts values to strings using these rules:
@@ -2629,7 +2704,7 @@ Integer-only bit manipulation, mirroring `clojure.core`. All arguments must be i
 | `ifn?` | Is directly invokable? (functions, keywords, maps, and sets; not vectors). Higher-order argument validation also accepts sets, but currently rejects maps; wrap a map lookup in a closure. |
 | `map-entry?` | Always false — no MapEntry type on BEAM |
 | `type` | Returns the type as a keyword: `:boolean`, `:number`, `:string`, `:vector`, `:map`, `:set`, `:keyword`, `:regex`, `:function`, `:java_object` for a validated native Java wrapper, or `:unknown` for an unclassified value such as an inert quoted-symbol reference. For `nil`, returns `nil` (not `:nil`). |
-| `describe` | Returns a bounded map summary for data shape, type histograms, key coverage, examples, and optional nested paths. Forms: `(describe x)`, `(describe x opts)`. Options: `{:paths true :depth 2 :sample 3}`. |
+| `describe` | Returns a bounded map summary for data shape, type histograms, key coverage, structurally bounded examples, and optional nested paths. Forms: `(describe x)`, `(describe x opts)`. Options: `{:paths true :depth 2 :sample 3}`. |
 
 ```clojure
 ;; coll? returns true for vectors, maps, and sets
@@ -3035,10 +3110,17 @@ write to stdout or to a canonical execution trace; a host or frontend must
 render or retain the returned entries explicitly.
 
 **Behavior:**
-- Arguments are converted to Clojure syntax strings.
+- String arguments remain plain text. Other arguments use the same bounded
+  structural renderer as REPL and model-observation previews.
 - Multiple arguments are separated by single spaces.
 - Each `println` call appends one entry to the `prints` list.
 - Returns `nil`.
+
+Structural rendering bounds collection items, depth, nodes, strings,
+characters, and UTF-8 bytes while traversing. A clipped diagnostic includes an
+explicit preview marker instead of cutting a nested value at an arbitrary byte.
+This does not change `pr-str`: explicit `pr-str` remains exact and may allocate
+in proportion to its input.
 
 ```clojure
 (def results (tool/search {:q "test"}))
@@ -3051,7 +3133,7 @@ results
 Programs evaluated through `PtcRunner.Lisp.run/2` return captured `println`
 output in the result's `prints` list:
 
-```elixir
+```text
 # Result of Lisp.run(...)
 {:ok, %PtcRunner.Lisp.Result{
   return: [...],
@@ -3104,7 +3186,7 @@ Native execution and continuation memory retain validated wrappers:
 - Date stores one signed Java long epoch-millisecond value.
 
 The runtime str function emits Java-compatible canonical text. Diagnostic
-formatting uses inert class-labelled forms rather than exposing Elixir struct
+formatting uses inert class-labelled forms rather than exposing host struct
 fields. Public and Kernel results recursively project the wrappers to strings:
 ISO local date, Java Instant text, Java Duration text, and a UTC instant derived
 from exact Date milliseconds.
@@ -3272,6 +3354,24 @@ Context is **per-request** data passed by the host. It does not persist across t
      (sum-by :amount))
 ```
 
+Every Kernel boundary looks up `data/<name>` strictly — a workflow entry, a
+normal mission run, and both `ptc repl` session kinds. A missing grant is a
+`:runtime_error` that names the rejected symbol and lists the granted
+`data/<name>` forms available at that boundary. Calling a granted data value,
+as in `(data/tickets)`, is `:not_callable` and names the symbol rather than
+rendering the value. Only the generic `PtcRunner.Lisp.run/2` embedding API is
+permissive, where a missing `data/<name>` still evaluates to `nil`.
+
+A manifest binds exactly one workflow name, `data/input`, from its `input`
+declaration, so a misspelled workflow reference is rejected against that single
+granted form.
+
+`data/params` is injected only by `kernel/eval-with` and
+`kernel/eval-source-with`. Referencing it when this evaluation supplied no
+params is a distinct error, not a missing-grant diagnostic. Discover granted
+names from the mission inventory (`:context` in a mission REPL), not from
+`apropos` or `doc`.
+
 ### 9.4 Turn History — `*1`, `*2`, `*3`
 
 Access results from previous turns using the turn history symbols:
@@ -3345,13 +3445,13 @@ Invoke registered tools using the `tool/` namespace:
 ```
 
 **Tool boundary contract:**
-- PTC-Lisp keywords (`:foo`) become **string keys** at the Elixir boundary
+- PTC-Lisp keywords (`:foo`) become **string keys** at the host boundary
 - Tools always receive string-keyed maps: `%{"key" => value}`
 - This matches JSON conventions and prevents atom memory leaks
 - Tool authors pattern match on string keys: `def run(%{"query" => q}, _ctx)`
 
 **Tool behavior:**
-- Tools are Elixir functions registered by the host
+- Tools are registered host callbacks
 - Tools may have side effects (external API calls, database queries)
 - Tool errors propagate as execution errors
 - Tool calls are logged for auditing
@@ -3510,21 +3610,30 @@ hyphen-to-underscore normalization, as must object keys nested in input
 `const`/`enum` values; the host rejects incompatible schemas rather than
 publishing an exact call that runtime validation cannot accept.
 
-### 9.9 Prelude Introspection
+### 9.9 Introspection
 
-Four builtins read the attached prelude's public exports. They answer
+Five builtins provide one language-level discovery interface. They answer
 identically in the REPL, in generated workflow or mission source, and inside a
-prelude export reading another prelude's documentation.
+prelude export reading another prelude's documentation. `dir`, `export-meta`,
+and `source` describe the attached prelude API; `apropos` and `doc` also cover
+fixed built-ins and the bounded Java surface.
 
 | Form | Result |
 |------|--------|
 | `(dir)` | Sorted vector of namespace names holding public exports |
 | `(dir "ns")` | Sorted vector of export refs in `ns` |
-| `(apropos "term")` | Sorted vector of export refs matching `term` |
-| `(doc "ns/name")` | Prints documentation, returns `nil` |
+| `(apropos "term")` | Sorted vector of matching prelude refs and canonical fixed-function names |
+| `(doc "name")` | Prints prelude or fixed-function documentation, returns `nil` |
 | `(export-meta "ns/name")` | Metadata map, or `nil` when unknown |
+| `(source "ns/name")` | Prints the attached prelude defining form, or a miss notice; returns `nil` |
 
-References are strings, not symbols:
+For `dir`/`doc`/`export-meta`/`source`, references accept a string, a quoted
+symbol, or an unquoted symbol (the analyzer auto-quotes bare and namespaced
+symbols in those call positions, matching `clojure.repl/doc`). `apropos`
+accepts a string or a quoted symbol; an unquoted query evaluates normally.
+Computed arguments still evaluate normally, so `(doc (str "ns/" "name"))` and
+`#(doc %)` over string refs keep working. `clojure.core/meta` is unchanged and
+is not part of this family.
 
 Answers depend on the prelude a given run attaches, so the results below are
 illustrative:
@@ -3540,8 +3649,9 @@ The last line is the point of these being ordinary function values rather than
 special forms: they compose in any position a function is accepted.
 
 `doc` prints and returns `nil` so documentation is charged to the print budget
-rather than the result channel; a program that needs the same information as
-data calls `export-meta`.
+rather than the result channel. For an attached prelude export, a program that
+needs the same information as data calls `export-meta`; registry metadata is
+reader-facing documentation only.
 
 `export-meta` reports the full calling contract: `:ref`, `:namespace`,
 `:symbol`, `:kind`, `:call`, `:doc`, `:visibility`, `:effect`, plus
@@ -3560,21 +3670,38 @@ reported as `:write` when its chain declares `:write` and `:unknown` otherwise.
 It is never reported as `:read`, so no answer here presents an unresolved effect
 as safe.
 
-Scope is the attached prelude only. These forms do not search `clojure.core`,
-the Java interop surface, or host capabilities; built-in functions are
-documented in this specification and in `docs/function-reference.md`, and
-granted capabilities appear in the mission inventory.
+`apropos` performs a case-insensitive literal substring search. For attached
+prelude exports it searches refs and docstrings. For the fixed registry it
+searches canonical names, signatures, descriptions, notes, divergences, and
+sections; aliases present in signatures, including fully qualified Java names,
+remain searchable, while results use canonical names. Results are sorted and
+deduplicated.
 
-Both `:prompt` and `:discoverable` exports are visible, which is how a
-`:discoverable` export is found at all. Private `defn-` helpers have no export
-record and never appear, and a namespace holding only private helpers is absent
-from `(dir)`.
+`doc` resolves an exact attached prelude export before consulting the fixed
+registry. Visibility is applied after that occupancy check, so a hidden
+attached export cannot reveal registry documentation through the same
+spelling. `apropos` similarly suppresses a colliding registry name when its
+attached export is hidden. This preserves the invariant that attached API
+discovery never advertises something the running program cannot call.
 
-Results are filtered to what the running program may actually call, so an
-export these forms return is an export it can invoke. A miss — unknown ref,
-malformed ref, or no attached prelude — is not a failure: `export-meta` returns
-`nil`, `doc` prints a not-found line, and the listing forms return `[]`. A blank
-`apropos` query returns `[]` rather than every export.
+None of the forms enumerate `data/...` values or `tool/...` capabilities;
+those appear in the mission inventory. `dir`, `export-meta`, and `source`
+remain attached prelude-only: namespace/export records and defining forms have
+no lossless equivalent for fixed registry entries. `source` has no registry
+fallthrough at all.
+
+Both `:prompt` and `:discoverable` exports are visible to `dir`/`doc`/
+`export-meta`/`apropos`, which is how a `:discoverable` export is found at
+all. Private `defn-` helpers have no export record and never appear there, and
+a namespace holding only private helpers is absent from `(dir)`. `source` is
+the exception for implementation inspection: it also reveals private helpers
+that are transitively reachable from a public export.
+
+Attached prelude results for `dir`/`doc`/`apropos`/`export-meta` are filtered
+to what the running program may actually call. A miss is not a failure:
+`export-meta` returns `nil`, `doc` and `source` print a not-found line, and
+`dir` returns `[]`. A blank `apropos` query returns `[]` rather than every
+fixed and attached function.
 
 `export-meta` is not `clojure.core/meta`, which takes an object rather than a
 reference string and is not implemented.
@@ -3880,7 +4007,7 @@ and complete in any order, while their result vectors retain input order.
 `{:error, %PtcRunner.Lisp.Result{}}` on failure. The public failure is in the
 result's `fail` field:
 
-```elixir
+```text
 {:error,
  %PtcRunner.Lisp.Result{
    return: nil,
@@ -3921,7 +4048,7 @@ identify the phase as `:setup`; evaluation-phase failures identify `:eval`.
 | `:unbound_var` | Unknown symbol/variable |
 | `:not_callable` | Attempt to call a non-callable value |
 | `:runtime_error` | General runtime evaluation error |
-| `:loop_limit_exceeded` | `loop`/`recur` iteration limit exceeded |
+| `:loop_limit_exceeded` | Configured `loop`/`recur` iteration limit exceeded |
 | `:unknown_tool` | Tool not registered |
 | `:tool_error` | Tool execution failed |
 | `:destructure_error` | Destructuring pattern mismatch |
@@ -3929,7 +4056,7 @@ identify the phase as `:setup`; evaluation-phase failures identify `:eval`.
 | `:unsupported_pattern` | Unsupported destructuring/binding pattern |
 | `:unsupported_method` | Unknown Java-interop method |
 | `:invalid_keyword` | A supplied or returned keyword wrapper is malformed or its name is outside the reader's keyword grammar |
-| `:invalid_lisp_list` | A supplied public value contains an improper Elixir list, which cannot represent a PTC-Lisp vector |
+| `:invalid_lisp_list` | A supplied public value contains an improper host list, which cannot represent a PTC-Lisp vector |
 | `:invalid_symbol_ref` | A supplied or returned symbol-reference wrapper is malformed or its name is outside the reader's symbol grammar |
 | `:symbol_ref_collision` | Distinct public/native symbol-reference values collapse to the same map key or set member |
 | `:timeout` | Setup or execution time exceeded (`fail.details.phase` identifies the phase) |
@@ -3964,7 +4091,7 @@ subset of Java-named methods, constructors, static members, and constants; see
 the [Java Interop Reference](java-interop.md).
 
 **Note:** `println` IS supported — see §8.13. It appends to the evaluation
-result's bounded `prints` list, not stdout or a canonical trace.
+result's bounded `prints` list, not stdout or a trace.
 
 ### 13.1 Anonymous Functions (Supported, With Restrictions)
 
@@ -4222,7 +4349,7 @@ commit.
 
 Direct callers supply the environment through `PtcRunner.Lisp.run/2` options:
 
-```elixir
+```text
 PtcRunner.Lisp.run(source,
   memory: %{high_paid: employees, query_count: 5},
   turn_history: [previous_result],
@@ -4256,19 +4383,22 @@ The shipped workflow `kernel` component exposes two code/value boundaries:
 
 ```clojure
 (kernel/eval-with
+  "default"
   (program (return (get data/params "evidence_id")))
   {"evidence_id" evidence-id})
 
-(kernel/eval-source-with generated-source
+(kernel/eval-source-with "default" generated-source
                          {"evidence_id" evidence-id})
 ```
 
-The first argument remains code: `(program ...)` captures opaque static source,
-while `eval-source-with` accepts bounded source text. The second argument must
-project to a JSON value and is available only for that mission evaluation as
-`data/params`. It replaces any mission data already stored at the `"params"`
-key for that evaluation; the one-argument `kernel/eval` and
-`kernel/eval-source` helpers leave mission data unchanged.
+After the mission name, `(program ...)` supplies opaque static source to
+`eval-with`, while `eval-source-with` accepts bounded source text. The final
+argument must project to a JSON value and is available only for that mission
+evaluation as `data/params`. It replaces any mission data already stored at
+the `"params"` key for that evaluation; `kernel/eval` and `kernel/eval-source`
+leave mission data unchanged. Referencing `data/params` when this evaluation
+supplied none is a runtime error that names those two entry points; it is not
+reported as a missing mission grant.
 
 Use this boundary for evidence identifiers, paths, queries, and other runtime
 values. Building source strings from those values changes the program identity
@@ -4278,20 +4408,19 @@ and SHA-256 identity metadata is retained.
 
 #### Named mission selection
 
-Legacy Kernel helpers select the explicitly declared mission named `default`.
-Named variants take the mission name first:
+Kernel helpers require the mission name as their first argument:
 
 ```clojure
-(kernel/eval-in "reader" (program (return 1)))
-(kernel/eval-source-in "reader" generated-source)
-(kernel/eval-with-in "reader" (program (return data/params)) params)
-(kernel/eval-source-with-in "reader" generated-source params)
-(kernel/check-source-in "reader" generated-source)
-(kernel/mission-inventory-in "reader")
-(kernel/mission-model-context-in "reader")
+(kernel/eval "reader" (program (return 1)))
+(kernel/eval-source "reader" generated-source)
+(kernel/eval-with "reader" (program (return data/params)) params)
+(kernel/eval-source-with "reader" generated-source params)
+(kernel/check-source "reader" generated-source)
+(kernel/mission-inventory "reader")
+(kernel/mission-model-context "reader")
 ```
 
-The reserved request object carries an optional non-null `mission` string.
+The reserved request object requires a non-null `mission` string.
 Unknown names return a bounded protocol error listing the sorted declared
 names, without dispatching an evaluation or provider call. Each mission owns
 its own data, definitions, value history, source revision, frozen API, and
@@ -4302,13 +4431,13 @@ mission selected by each queued caller.
 
 #### Mission-aware source checking
 
-`(kernel/check-source source)` runs the production compiler against the frozen
-mission bundle, granted tool names, and current committed definitions, but does
-not execute the resulting AST. It consumes one `subordinate_source_checks`
-reservation, not a subordinate evaluation or mission capability call. A valid
-result carries the exact source byte count and SHA-256 identity. Compile errors
-return `:invalid` with a diagnostic containing `kind`, a message bounded to
-4,096 UTF-8 bytes, and bounded JSON-safe details.
+`(kernel/check-source mission-name source)` runs the production compiler against
+the selected frozen mission bundle, granted tool names, and current committed
+definitions, but does not execute the resulting AST. It consumes one
+`subordinate_source_checks` reservation, not a subordinate evaluation or mission
+capability call. A valid result carries the exact source byte count and SHA-256
+identity. Compile errors return `:invalid` with a diagnostic containing `kind`,
+a message bounded to 4,096 UTF-8 bytes, and bounded JSON-safe details.
 
 The remaining closed outcomes are `:limit_exceeded` for source size, check
 quota, compiler timeout/heap, deadline, or closure; `:busy` while an evaluation
@@ -4399,6 +4528,9 @@ Values stored via `def` persist across turns. Each `def` sets a single key:
 
 After Turn 2: `a=1, b={:y 20}, c=3`
 
+- Definition-memory keys use the symbol's canonical binary spelling at the
+  host boundary, including names that have a bounded internal atom spelling.
+  Atom-keyed continuation entries are not alternate variable bindings.
 - New symbols are added
 - Existing symbols are replaced (not deep-merged)
 - Symbols not referenced remain unchanged
@@ -4509,7 +4641,7 @@ ceiling.
 `PtcRunner.Lisp.run/2` returns bounded evaluation diagnostics in
 `PtcRunner.Lisp.Result`:
 
-```elixir
+```text
 %PtcRunner.Lisp.Result{
   return: value,
   fail: nil,
@@ -4525,29 +4657,17 @@ Tool results retained in `tool_calls` are bounded by
 `max_tool_call_result_bytes`; oversized entries retain a preview and truncation
 metadata without changing the value delivered to the program.
 
-A Kernel host additionally emits canonical trace events through its configured
+A Kernel host additionally emits trace events through its configured
 event/inspection sinks. Direct `Lisp.run/2` does not create a persistent log by
 itself; persistence and redaction are host responsibilities.
 
 ### 16.8 Resource Limits for Agentic Execution
 
-Kernel hosts apply the following relevant defaults from
-`PtcRunner.Kernel.Limits`:
-
-| Limit | Default | Description |
-|-------|---------|-------------|
-| `evaluation_timeout_ms` | 1,000 | Max execution time per evaluation |
-| `evaluation_heap_words` | 1,250,000 | Evaluator heap ceiling in BEAM words |
-| `subordinate_evaluations` | 16 | Run-wide subordinate execution quota |
-| `subordinate_source_checks` | 16 | Independent run-wide mission compile-check quota |
-| `subordinate_source_bytes` | 131,072 | Source ceiling applied before check hashing or evaluation |
-| `workflow_capability_calls` / `mission_capability_calls` | 64 / 128 | Run-wide capability-call quotas |
-| `workflow_capability_calls_per_name` / `mission_capability_calls_per_name` | 16 / 32 | Per-capability quotas |
-| `capability_argument_bytes` | 262,144 | Capability argument boundary |
-| `capability_result_bytes` | 1,000,000 | Capability result boundary |
-| `terminal_result_bytes` | 1,000,000 | Terminal return boundary |
-| `evaluation_memory_bytes` | 2,000,000 | Run-wide retained definition-memory ceiling |
-| `evaluation_history_bytes` | 1,000,000 | Independent per-value and aggregate ceiling for exact `*1`/`*2`/`*3` history |
+Kernel hosts enforce positive time, heap, count, source, value, retained-memory,
+and event ceilings. The generated
+[Kernel limits reference](kernel-limits-reference.md) lists the meaning, unit,
+effective default, installed default, accepted range, and application scope of
+every limit from the canonical catalog.
 
 Direct `PtcRunner.Lisp.run/2` has its own options. Its defaults include
 `timeout: 1_000`, `max_heap: 1_250_000` words, no tool-call count limit
@@ -4566,7 +4686,7 @@ On limit violation:
 Failures retain a machine-readable reason, bounded message, and structured
 details:
 
-```elixir
+```text
 {:error,
  %PtcRunner.Lisp.Result{
    return: nil,
@@ -4586,7 +4706,7 @@ does not promise a retry.
 | Concern | Mitigation |
 |---------|------------|
 | Memory exhaustion | Max memory size limit |
-| Infinite loops | Timeout + loop iteration limit (default 1000) |
+| Infinite loops | Timeout; optional per-activation loop/tail-recur limit when configured |
 | Unbounded recursion | Timeout + memory limit |
 | Tool abuse | Explicit capability grants; Kernel total/per-name quotas; optional direct `max_tool_calls` |
 | Data exfiltration | Tools are host-controlled, audited |
@@ -4671,7 +4791,7 @@ For examples that cannot be automatically validated, use these markers:
 
 ### Running Validation
 
-```elixir
+```text
 # Validate all examples
 {:ok, results} = PtcRunner.Lisp.SpecValidator.validate_spec()
 

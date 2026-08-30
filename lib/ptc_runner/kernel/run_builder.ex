@@ -51,14 +51,20 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BundleCompiler
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandRunRef
+  alias PtcRunner.Kernel.CommandSource
+  alias PtcRunner.Kernel.CompileDiagnostic
+  alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LimitCapacityDiagnostic
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.ProviderAcquisition
@@ -79,6 +85,70 @@ defmodule PtcRunner.Kernel.RunBuilder do
     :private_output,
     :trace_path
   ]
+
+  @doc false
+  @spec environment_failure_diagnostic(term(), PreparedRun.t(), boolean()) ::
+          {:ok, CommandDiagnostic.t()} | :error
+  def environment_failure_diagnostic(
+        {:missing_capability_requirement, names},
+        %PreparedRun{} = prepared,
+        provider_activity
+      )
+      when is_list(names) and names != [] and is_boolean(provider_activity) do
+    if PreparedRun.sealed?(prepared) and capability_requirements_attested?(names, prepared) do
+      opts =
+        case CompileDiagnostic.capability_requirement_message(names) do
+          {:ok, message} -> [message: message, provider_activity: provider_activity]
+          :error -> [provider_activity: provider_activity]
+        end
+
+      {:ok,
+       CommandDiagnostic.new!(
+         :provider_acquisition,
+         :capability_requirement_missing,
+         opts
+       )}
+    else
+      :error
+    end
+  end
+
+  # A payload ceiling too small for this application's own `run-stopped` event
+  # is first computable here, after provider assembly resolved the capability
+  # and mission inventory it scales with. It is a limits decision the caller
+  # can act on, so it is classified where it is computed rather than collapsing
+  # into the internal catch-all.
+  def environment_failure_diagnostic(
+        {:terminal_payload_capacity_exceeded, payload, required},
+        %PreparedRun{},
+        provider_activity
+      )
+      when is_integer(payload) and is_integer(required) and is_boolean(provider_activity) do
+    opts =
+      case LimitCapacityDiagnostic.message(payload, required) do
+        {:ok, message} -> [message: message, provider_activity: provider_activity]
+        :error -> [provider_activity: provider_activity]
+      end
+
+    {:ok,
+     CommandDiagnostic.new!(
+       :application,
+       :limit_capacity_invalid,
+       [source: CommandSource.fixed(:application)] ++ opts
+     )}
+  end
+
+  def environment_failure_diagnostic(_reason, _prepared, _provider_activity), do: :error
+
+  defp capability_requirements_attested?(names, prepared) do
+    admitted =
+      [prepared.workflow_bundle | Map.values(prepared.mission_bundles)]
+      |> Enum.flat_map(&Environment.capability_requirements/1)
+      |> MapSet.new()
+
+    names == Enum.sort(Enum.uniq(names)) and Enum.all?(names, &MapSet.member?(admitted, &1))
+  end
+
   @artifact_options [:trace_path, :inspect, :output, :private_output]
   @opened_sink_keys [
     :attestation,
@@ -157,6 +227,36 @@ defmodule PtcRunner.Kernel.RunBuilder do
     do: {:error, :invalid_prepared_run}
 
   @doc false
+  @spec open_prepared_sinks(
+          PreparedRun.t(),
+          PublicationAuthority.t(),
+          pid(),
+          MissionReplTarget.t()
+        ) :: {:ok, map()} | {:error, term()} | {:error, term(), map()}
+  def open_prepared_sinks(
+        %PreparedRun{} = prepared,
+        authority,
+        owner,
+        %MissionReplTarget{} = target
+      )
+      when is_pid(owner) do
+    with true <- PreparedRun.valid?(prepared),
+         true <- MissionReplTarget.bound_to_prepared?(target, prepared),
+         true <- PublicationAuthority.authorized?(authority),
+         true <- PublicationAuthority.matches_prepared?(authority, prepared),
+         :ok <- validate_sink_owner(owner),
+         :ok <- PreparedRun.consume(prepared) do
+      do_open_prepared_sinks(prepared, authority, owner, target)
+    else
+      false -> {:error, :invalid_prepared_run}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def open_prepared_sinks(_prepared, _authority, _owner, _target),
+    do: {:error, :invalid_prepared_run}
+
+  @doc false
   @spec build_prepared_owned(
           PreparedRun.t(),
           ProviderRegistry.t(),
@@ -193,6 +293,44 @@ defmodule PtcRunner.Kernel.RunBuilder do
   def build_prepared_owned(_prepared, _registry, _authority, _opened_sinks),
     do: {:error, :invalid_prepared_run}
 
+  @doc false
+  @spec build_mission_repl_owned(
+          PreparedRun.t(),
+          ProviderRegistry.t(),
+          PublicationAuthority.t(),
+          map(),
+          MissionReplTarget.t()
+        ) :: {:ok, map()} | {:error, term()}
+  def build_mission_repl_owned(
+        %PreparedRun{} = prepared,
+        %ProviderRegistry{} = registry,
+        authority,
+        opened_sinks,
+        %MissionReplTarget{} = target
+      ) do
+    with :ok <- validate_registry(registry),
+         true <- PreparedRun.consumed_valid?(prepared),
+         true <- MissionReplTarget.bound_to_prepared?(target, prepared),
+         true <- MissionReplTarget.provider_free?(target),
+         true <- PublicationAuthority.authorized?(authority),
+         true <- PublicationAuthority.matches_prepared?(authority, prepared),
+         :ok <- validate_installed_limits(prepared.request.package, registry, []),
+         :ok <- validate_authority_inspection_selection(prepared.request, authority),
+         :ok <- validate_opened_sinks(opened_sinks, prepared, authority, self(), target),
+         :ok <- PreparedRun.begin_build(prepared) do
+      providers = empty_providers(target.effective_data_class)
+      build_mission_with_opened_sinks(prepared, providers, authority, opened_sinks, target)
+    else
+      false -> {:error, :invalid_prepared_run}
+      {:error, _reason} = error -> error
+    end
+  rescue
+    _exception -> {:error, :invalid_prepared_run}
+  end
+
+  def build_mission_repl_owned(_prepared, _registry, _authority, _opened_sinks, _target),
+    do: {:error, :invalid_prepared_run}
+
   defp validate_sink_owner(owner),
     do: if(owner == self(), do: :ok, else: {:error, :invalid_execution_sinks})
 
@@ -217,7 +355,46 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
+  defp do_open_prepared_sinks(prepared, authority, owner, target) do
+    provider_policy = %{data_class: target.effective_data_class}
+
+    case event_sink(prepared.request, provider_policy, owner) do
+      {:ok, event_sink} ->
+        case inspection_sink_for_authority(
+               event_sink,
+               authority,
+               :return_opened_sinks,
+               owner
+             ) do
+          {:ok, inspection_sink} ->
+            opened_sinks(
+              prepared,
+              authority,
+              event_sink,
+              inspection_sink,
+              target.effective_event_policy
+            )
+
+          {:error, reason, opened_sinks} ->
+            {:error, reason, opened_sinks}
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
   defp opened_sinks(prepared, authority, event_sink, inspection_sink) do
+    opened_sinks(
+      prepared,
+      authority,
+      event_sink,
+      inspection_sink,
+      prepared.effective_event_policy
+    )
+  end
+
+  defp opened_sinks(prepared, authority, event_sink, inspection_sink, effective_event_policy) do
     with {:ok, event_identity} <- EventSink.identity(event_sink),
          {:ok, inspection_identity} <- opened_inspection_identity(inspection_sink) do
       descriptor = %{
@@ -226,7 +403,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
         inspection_sink: inspection_sink,
         event_identity: event_identity,
         inspection_identity: inspection_identity,
-        effective_event_policy: prepared.effective_event_policy,
+        effective_event_policy: effective_event_policy,
         prepared_binding: prepared.attestation,
         publication_binding: PublicationAuthority.binding(authority)
       }
@@ -282,10 +459,89 @@ defmodule PtcRunner.Kernel.RunBuilder do
         authority,
         opened_sinks,
         credentials
+      ),
+      do:
+        do_build_active_owned(
+          prepared,
+          catalog,
+          registry,
+          session,
+          authority,
+          opened_sinks,
+          credentials,
+          :all
+        )
+
+  def build_active_owned(
+        _prepared,
+        _catalog,
+        _registry,
+        _session,
+        _authority,
+        _opened_sinks,
+        _credentials
+      ),
+      do: {:error, :invalid_active_run}
+
+  @doc false
+  @spec build_mission_repl_active_owned(
+          PreparedRun.t(),
+          InstallationCatalog.t(),
+          ProviderRegistry.t(),
+          ProviderSession.t(),
+          PublicationAuthority.t(),
+          map(),
+          %{binary() => binary()},
+          MissionReplTarget.t()
+        ) :: {:ok, map()} | {:error, term()}
+  def build_mission_repl_active_owned(
+        %PreparedRun{} = prepared,
+        %InstallationCatalog{} = catalog,
+        %ProviderRegistry{} = registry,
+        session,
+        authority,
+        opened_sinks,
+        credentials,
+        %MissionReplTarget{} = target
       ) do
+    do_build_active_owned(
+      prepared,
+      catalog,
+      registry,
+      session,
+      authority,
+      opened_sinks,
+      credentials,
+      target
+    )
+  end
+
+  def build_mission_repl_active_owned(
+        _prepared,
+        _catalog,
+        _registry,
+        _session,
+        _authority,
+        _opened_sinks,
+        _credentials,
+        _target
+      ),
+      do: {:error, :invalid_active_run}
+
+  defp do_build_active_owned(
+         prepared,
+         catalog,
+         registry,
+         session,
+         authority,
+         opened_sinks,
+         credentials,
+         target
+       ) do
     lifecycle_owner = ProviderSession.lifecycle_owner(session)
 
     with true <- PreparedRun.active_valid?(prepared),
+         true <- valid_build_target?(target, prepared, catalog),
          true <- is_pid(lifecycle_owner),
          :ok <-
            ProviderSession.claim_operation(
@@ -303,7 +559,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
              opened_sinks,
              prepared,
              authority,
-             lifecycle_owner
+             lifecycle_owner,
+             target
            ) do
       build_active_preflighted_owned(
         prepared,
@@ -312,7 +569,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
         session,
         authority,
         opened_sinks,
-        credentials
+        credentials,
+        target
       )
     else
       {:error, :operation_claimed} ->
@@ -331,17 +589,6 @@ defmodule PtcRunner.Kernel.RunBuilder do
         prefer_cleanup_error(error, close_live_session(session))
     end
   end
-
-  def build_active_owned(
-        _prepared,
-        _catalog,
-        _registry,
-        _session,
-        _authority,
-        _opened_sinks,
-        _credentials
-      ),
-      do: {:error, :invalid_active_run}
 
   defp validate_registry(registry) do
     if ProviderRegistry.valid?(registry),
@@ -482,7 +729,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
          session,
          authority,
          opened_sinks,
-         credentials
+         credentials,
+         target
        ) do
     with {:ok, providers} <-
            providers(
@@ -490,16 +738,49 @@ defmodule PtcRunner.Kernel.RunBuilder do
              registry,
              provider_input_class(prepared.request.input.authority),
              PublicationAuthority.options(authority),
-             {prepared, catalog, session, credentials}
+             acquisition_context(prepared, catalog, session, credentials, target)
            ) do
-      build_with_opened_sinks(
-        prepared.request,
-        {prepared.workflow_bundle, prepared.mission_bundles},
-        prepared.entry_source,
+      case target do
+        :all ->
+          build_with_opened_sinks(
+            prepared.request,
+            {prepared.workflow_bundle, prepared.mission_bundles},
+            prepared.entry_source,
+            providers,
+            authority,
+            opened_sinks
+          )
+
+        %MissionReplTarget{} ->
+          build_mission_with_opened_sinks(prepared, providers, authority, opened_sinks, target)
+      end
+    end
+  end
+
+  defp build_mission_with_opened_sinks(prepared, providers, authority, opened_sinks, target) do
+    package = prepared.request.package
+    spec = Map.fetch!(package.missions, target.mission_name)
+    bundle = Map.fetch!(prepared.mission_bundles, target.mission_name)
+    by_occurrence = Map.get(providers.mission, :by_occurrence, %{})
+
+    capabilities =
+      target.direct_occurrences
+      |> Enum.flat_map(&Map.get(by_occurrence, &1.index, []))
+
+    with {:ok, workflow} <- WorkflowEnvironment.new([]),
+         {:ok, mission} <-
+           MissionEnvironment.new(bundle: bundle, capabilities: capabilities, data: spec.data) do
+      build_config(
+        {prepared.request, prepared.entry_source},
         providers,
+        workflow,
+        %{target.mission_name => mission},
+        {opened_sinks.event_sink, opened_sinks.inspection_sink},
+        package.component_overrides,
         authority,
-        opened_sinks
+        :return_opened_sinks
       )
+      |> discard_opened_sinks()
     end
   end
 
@@ -512,9 +793,17 @@ defmodule PtcRunner.Kernel.RunBuilder do
            mission_bundles(
              request.package.missions,
              deadline,
-             :erlang.external_size(workflow_bundle)
+             :erlang.external_size(workflow_bundle),
+             request.package.workflow_components,
+             workflow_bundle
            ),
-         :ok <- RunCoordinator.validate_entry(workflow_bundle, request.package.entry) do
+         :ok <- RunCoordinator.validate_entry(workflow_bundle, request.package.entry),
+         :ok <-
+           RunCoordinator.validate_entry_missions(
+             workflow_bundle,
+             request.package.entry,
+             request.package.missions
+           ) do
       assemble(
         request,
         {workflow_bundle, mission_bundles},
@@ -574,9 +863,10 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   # One environment per declared mission, each assembled from its already
-  # prepared bundle and granted only the mission providers that mission named. A grant a mission did
-  # not name is simply absent from its environment, so authority is enforced by
-  # assembly rather than by anything the model is asked to respect.
+  # prepared bundle and granted only the mission providers that mission named.
+  # A grant a mission did not name is simply absent from its environment, so
+  # authority is enforced by assembly rather than by anything the model is
+  # asked to respect.
   defp mission_environments(package, mission_bundles, providers) do
     by_occurrence = Map.get(providers.mission, :by_occurrence, %{})
 
@@ -595,13 +885,20 @@ defmodule PtcRunner.Kernel.RunBuilder do
              ) do
         {:cont, {:ok, Map.put(acc, name, environment)}}
       else
+        {:error, {:missing_capability_requirement, _names}} = error -> {:halt, error}
         _error -> {:halt, {:error, :invalid_mission_environment}}
       end
     end)
   end
 
-  defp mission_bundles(missions, deadline, initial_bytes) do
-    case BundleCompiler.compile_named(missions, deadline, initial_bytes, 4_000_000) do
+  defp mission_bundles(missions, deadline, initial_bytes, workflow_components, workflow_bundle) do
+    case BundleCompiler.compile_named(
+           missions,
+           deadline,
+           initial_bytes,
+           4_000_000,
+           [{workflow_components, workflow_bundle}]
+         ) do
       {:ok, bundles} -> {:ok, bundles}
       {:error, {_failure, _components}} -> {:error, :invalid_mission_bundle}
     end
@@ -735,15 +1032,18 @@ defmodule PtcRunner.Kernel.RunBuilder do
   end
 
   defp validate_opened_sinks(opened_sinks, prepared, authority),
-    do: validate_opened_sinks(opened_sinks, prepared, authority, self())
+    do: validate_opened_sinks(opened_sinks, prepared, authority, self(), :all)
 
   defp validate_opened_sinks(
          opened_sinks,
          %PreparedRun{} = prepared,
          authority,
-         expected_owner
+         expected_owner,
+         target
        )
        when is_map(opened_sinks) and map_size(opened_sinks) == 8 do
+    expected_policy = effective_event_policy(prepared, target)
+
     with true <-
            Enum.sort(Map.keys(opened_sinks)) == @opened_sink_keys,
          true <-
@@ -758,9 +1058,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
          true <-
            PreparedRun.consumed_valid?(prepared) or PreparedRun.active_valid?(prepared),
          true <- prepared.attestation == opened_sinks.prepared_binding,
-         true <- prepared.effective_event_policy == opened_sinks.effective_event_policy,
+         true <- expected_policy == opened_sinks.effective_event_policy,
          true <- PublicationAuthority.matches?(authority, opened_sinks.publication_binding),
-         true <- EventSink.policy(event_sink) == opened_sinks.effective_event_policy,
+         true <- EventSink.policy(event_sink) == expected_policy,
          {:ok, event_identity} <- EventSink.identity(event_sink),
          true <- event_identity == opened_sinks.event_identity,
          true <- valid_opened_inspection?(opened_sinks, expected_owner) do
@@ -770,8 +1070,36 @@ defmodule PtcRunner.Kernel.RunBuilder do
     end
   end
 
-  defp validate_opened_sinks(_opened_sinks, _prepared, _authority, _expected_owner),
-    do: {:error, :invalid_execution_sinks}
+  defp validate_opened_sinks(
+         _opened_sinks,
+         _prepared,
+         _authority,
+         _expected_owner,
+         _target
+       ),
+       do: {:error, :invalid_execution_sinks}
+
+  defp effective_event_policy(_prepared, %MissionReplTarget{} = target),
+    do: target.effective_event_policy
+
+  defp effective_event_policy(prepared, :all), do: prepared.effective_event_policy
+
+  defp valid_build_target?(:all, _prepared, _catalog), do: true
+
+  defp valid_build_target?(%MissionReplTarget{} = target, prepared, catalog),
+    do: MissionReplTarget.valid_for?(target, prepared, catalog)
+
+  defp acquisition_context(prepared, catalog, session, credentials, :all),
+    do: {prepared, catalog, session, credentials}
+
+  defp acquisition_context(
+         prepared,
+         catalog,
+         session,
+         credentials,
+         %MissionReplTarget{} = target
+       ),
+       do: {prepared, catalog, session, credentials, target}
 
   defp valid_opened_inspection?(
          %{
@@ -818,10 +1146,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
            limits: package.limits,
            event_sink: sink,
            result_contract: package.contracts.result,
+           result_contract_source:
+             get_in(package.manifest, ["contracts", "result_schema", "path"]),
+           phase_return_contracts: phase_return_contract_bindings(package),
            result_projection: request.policy.result_projection,
            inspection_sink: inspection_sink,
            provider_session: providers.provider_session,
            connector_snapshots: providers.snapshots,
+           provider_warnings: providers.warnings,
            component_overrides: component_overrides,
            labels: package.labels
          ) do
@@ -849,6 +1181,17 @@ defmodule PtcRunner.Kernel.RunBuilder do
       {:error, _reason} = error ->
         failed_build(error, sink, inspection_sink, failure_mode)
     end
+  end
+
+  defp phase_return_contract_bindings(package) do
+    Map.new(package.contracts.phase_returns, fn {name, contract} ->
+      {name,
+       %{
+         contract: contract,
+         source: get_in(package.manifest, ["contracts", "phase_return_schemas", name, "path"]),
+         projection: Map.fetch!(package.contract_prompt_projections.phase_returns, name)
+       }}
+    end)
   end
 
   # When capture is enabled, the exact effective prelude source of every
@@ -981,6 +1324,18 @@ defmodule PtcRunner.Kernel.RunBuilder do
     |> close_failed_acquisition(session)
   end
 
+  defp acquire_providers(
+         _manifest,
+         registry,
+         _input_class,
+         _opts,
+         {prepared, catalog, session, credentials, %MissionReplTarget{} = target}
+       ) do
+    prepared
+    |> ProviderAcquisition.acquire(catalog, registry, session, target, credentials)
+    |> close_failed_acquisition(session)
+  end
+
   defp close_failed_acquisition({:ok, _providers} = success, _session), do: success
 
   defp close_failed_acquisition({:unregistered_provider_close, reason, close}, session) do
@@ -1032,6 +1387,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
       mission: %{capabilities: []},
       provider_session: nil,
       snapshots: [],
+      warnings: [],
       data_class: data_class
     }
   end
@@ -1082,6 +1438,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
           config.event_sink,
           config.inspection_sink,
           config.result_contract,
+          config.result_contract_source,
           authority
         )
       after
@@ -1227,7 +1584,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   # validation (so a bad output path never masks a more useful error) but
   # before provider preflight, credential resolution, acquisition, MCP
   # discovery, or model calls run.
-  # The atomic no-clobber creation in `InspectionArtifact.persist/3` remains
+  # The missing-destination publication in `InspectionArtifact.publish_handle/3` remains
   # authoritative for destinations that appear after this check.
   defp preflight_inspection(opts) do
     case Keyword.get(opts, :inspect) do
@@ -1376,8 +1733,8 @@ defmodule PtcRunner.Kernel.RunBuilder do
           InspectionSink.start(
             run_id: identity.run_id,
             trace_id: identity.trace_id,
-            schema_version: 4,
-            owner: owner
+            owner: owner,
+            publication_handle: PublicationAuthority.inspection_handle(authority)
           )
         end
 

@@ -1,100 +1,90 @@
 # Quickstart
 
-Four commands, from a clone to a program the model wrote and the runtime ran.
-This page only performs the steps; every "why" is a link.
+Install `ptc`, verify it without an API key, then run a model-authored program
+without writing PTC-Lisp yourself.
 
-You need Elixir and Erlang/OTP, and an
-[OpenRouter](https://openrouter.ai/keys) API key for the model step. `mise
-install` installs the pinned toolchain versions; `docs/development-setup.md`
-covers a machine that has neither.
+Download the executable as described under
+[Standalone installation](../installation/standalone.md). Starting with the
+next root release, the [Docker image](../installation/docker.md) provides the
+same command interface; its installation page gives the complete mounted-file
+and ownership form.
 
-## 1. Run a workflow with no credentials
+## Run without a credential
 
+Create and run a project that needs no API key:
+
+The `ptc init` target must not already exist. For an existing repository,
+initialize a new sibling or subdirectory and deliberately copy or move the
+generated files you want into the repository.
+
+<!-- ptc-guide-e2e: id=quickstart-no-api-key frontend=mix scratch=hello-ptc -->
 ```console
-git clone https://github.com/andreasronge/ptc_runner
-cd ptc_runner
-mix deps.get
-mix ptc run examples/kernel-tutorial/01-orders/ptc.json
+ptc init hello-ptc
+ptc run hello-ptc/ptc-project.json
 ```
 
 ```json
-{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}
+{"greeting":"hello world"}
 ```
 
-That is a PTC-Lisp function reading JSON input. No model, no host document, no
-network. The first run compiles the dependencies and the project, which took
-about 90 seconds from a fresh clone; later runs start in a few seconds.
+`init` creates an application, a project document with local artifact settings,
+and ignore rules for public and private run artifacts. The first run contacts no
+model or external tool and records a trace and command envelope under
+`hello-ptc/.ptc`.
 
-## 2. Supply a model credential
+## Run a model-authored program
+
+Materialize the tutorial projects and create their owner-only environment file:
 
 ```console
-cp .env.example .env
-chmod 600 .env
+ptc init kernel-tutorial --example kernel-tutorial
+printf 'OPENROUTER_API_KEY=\n' > kernel-tutorial/.env
+chmod 600 kernel-tutorial/.env
 ```
 
-Set `OPENROUTER_API_KEY` in `.env` to your key. `.env` is Git-ignored, and
-credentials never belong in a manifest, a PTC-Lisp file, or a trace.
-[Host configuration](host-configuration.md#credentials) documents the three
-declaration forms and how to move off `.env` for a real deployment.
-
-## 3. Let the model write the program
+Set `OPENROUTER_API_KEY` in that exact file, then run:
 
 ```console
-mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
-  --host-config examples/kernel-tutorial/ptc-host.json
+ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
 ```json
 {"ok":true,"value":42}
 ```
 
-The model was given a task, wrote PTC-Lisp, and the runtime evaluated that
-program in the confined mission environment over two turns. Two live model
-calls cost a fraction of a cent.
-
-[`ptc-host.json`](../../examples/kernel-tutorial/ptc-host.json) is the operator
-document: it maps the `deepseek` alias to a model and binds it to the
-credential. The manifest selects that alias and may narrow it, but cannot name
-a model, endpoint, or key. That asymmetry is the whole security argument, laid
-out in the [README](../../README.md#why-it-is-safe).
-
-## If step 3 fails
-
-A missing or unreadable key aborts before the run:
-
-```text
-** (Mix) error: active_preflight/credential_unavailable: a required provider
-credential is unavailable
-```
-
-It means `OPENROUTER_API_KEY` was not visible to the command. The message does
-not yet name the variable or the alias
-([#1166](https://github.com/andreasronge/ptc_runner/issues/1166)). Use the active
-doctor operation to identify the failed readiness check:
+The project selects the shipped agent loop. The model receives a task, writes a
+bounded mission program, observes its result, and completes on the second turn.
+You configure the task, model alias, mission, tools, and limits; you do not need
+to read or edit the generated program. To read it anyway, open the Viewer:
 
 ```console
-mix ptc doctor examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
-  --host-config examples/kernel-tutorial/ptc-host.json --connect
+ptc viewer kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
-With no key it exits nonzero and reports
-`provider/deepseek/credentials` as `fail/credential_unavailable`. Checks for
-which the failed operation retained no evidence are
-`skipped/not_verified_due_to_failure`; they are not claims that those checks
-did or did not run. The report's `readiness` is `failed`.
+The tutorial projects record private inspection and grant it to the Viewer, so
+each evaluation shows the PTC-Lisp the model wrote and each prelude component
+shows the source the run loaded.
 
-Once the key is in place, the same command exits successfully, every check
-reports `pass`, including `provider/deepseek/credentials`, and `readiness` is
-`ready`. Plain `ptc doctor` performs no active provider work and therefore
-reports `readiness: "unverified"`.
+Credentials belong in `ptc-host.json`, never in `ptc.json`, a generated
+program, or a trace. `ptc.json` can select the installed model alias but cannot
+name its endpoint or key.
 
-## Next
+## Diagnose readiness
 
-- [Getting started](getting-started.md) — the same ground at walking pace: the
-  manifest, the entry function, results, traces, and the REPL.
-- [Building agents](building-agents.md) — the agent loop, the correction
-  protocol, and giving a model a small mission API.
-- [`examples/kernel-tutorial/`](../../examples/kernel-tutorial/README.md) — the
-  other four examples. `02-deepseek-extract` calls a model without generating
-  code, `03-file-agent` gives the model one MCP tool and needs Node, and
-  `05-signature-feedback` is credential-free.
+Check configuration without contacting the provider:
+
+```console
+ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json
+```
+
+Probe credentials and connectivity only when remote work and possible cost are
+intended:
+
+```console
+ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect
+```
+
+Continue with [Understand a generated project](getting-started.md), [Use a
+model](using-models.md), or [Customize an agent](building-agents.md). The
+[command-line reference](../reference/cli.md) owns the exact command and failure
+contract.

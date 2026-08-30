@@ -54,7 +54,10 @@
         }
       ],
       "data": {
-      }
+      },
+      "providers": [
+        "workspace"
+      ]
     }
   }
 }

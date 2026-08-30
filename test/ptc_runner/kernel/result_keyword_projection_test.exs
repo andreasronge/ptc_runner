@@ -3,14 +3,18 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.EventSink
-  alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.RunAnalysis
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.Lisp.TrustedError
+  alias PtcRunner.TestSupport.StreamingInspection
 
   test "kernel JSON results project atom-backed and struct-backed keywords uniformly" do
     source =
@@ -79,6 +83,61 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
              callback.(%{"value" => %{"state" => :count}, "json_value" => true})
   end
 
+  test "result-contract failure callbacks are fail-only and retain no candidate" do
+    assert {:ok, contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "additionalProperties" => false,
+               "required" => ["sum"],
+               "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+             })
+
+    callback = RuntimeTools.result_contract_failure(contract, "result.schema.json")
+
+    assert %TrustedError{
+             reason: :result_contract_failed,
+             details: %{
+               agent_turns: 4,
+               constraint: :minimum,
+               contract_source: "result.schema.json",
+               violations: [%{kind: :minimum, path: path}]
+             }
+           } =
+             failure =
+             callback.(%{
+               "value" => %{"sum" => 99, "secret" => "candidate-secret"},
+               "agent_turns" => 4
+             })
+
+    assert path.segments == [{:property, "sum"}]
+    refute inspect(failure) =~ "candidate-secret"
+
+    assert %TrustedError{
+             reason: :result_contract_failed,
+             details: %{agent_turns: 4, constraint: :json_value, violations: []}
+           } =
+             callback.(%{
+               "value" => %{:sum => 99, "sum" => 98},
+               "agent_turns" => 4
+             })
+
+    for arguments <- [
+          %{"value" => %{"sum" => 100}, "agent_turns" => 4},
+          %{"value" => %{"sum" => 99}},
+          %{"value" => %{"sum" => 99}, "agent_turns" => 0},
+          %{"value" => %{"sum" => 99}, "agent_turns" => 4, "extra" => true}
+        ] do
+      assert %TrustedError{reason: :invalid_result_contract_failure, details: %{}} =
+               callback.(arguments)
+    end
+
+    assert %TrustedError{reason: :invalid_result_contract_failure, details: %{}} =
+             RuntimeTools.result_contract_failure(nil, nil).(%{
+               "value" => %{"sum" => 99},
+               "agent_turns" => 4
+             })
+  end
+
   test "kernel result validation preserves candidate keys until terminal projection" do
     assert {:ok, contract} =
              ValueContract.compile(%{
@@ -122,10 +181,9 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
 
   test "private inspection names the JSON projection failure without widening the public error" do
     {:ok, inspection} =
-      InspectionSink.start(
+      StreamingInspection.start(
         run_id: "keyword-projection-inspection",
-        trace_id: "keyword-projection-inspection",
-        schema_version: 3
+        trace_id: "keyword-projection-inspection"
       )
 
     assert {:error,
@@ -134,13 +192,123 @@ defmodule PtcRunner.Kernel.ResultKeywordProjectionTest do
               details: %{result_projection: true}
             }} = run(~S|(return #{1 2})|, :json, inspection_sink: inspection)
 
-    assert {:ok, [record]} = InspectionSink.records(inspection)
+    assert {:ok, [record]} = StreamingInspection.records(inspection)
     assert record["record_type"] == "execution-error"
 
     assert record["payload"]["details"] == %{
              "result_projection" => true,
              "projection_error" => "{:invalid_json, [], :unsupported_value}"
            }
+  end
+
+  @tag :tmp_dir
+  test "private inspection proves an unchanged child result produced a boundary failure", %{
+    tmp_dir: root
+  } do
+    {config, inspection} = boundary_failure_config("boundary-producer")
+
+    assert {:error, %{reason: :terminal_result_exceeded}} =
+             Kernel.run(
+               ~S|(return (tool/kernel-eval {"mission" "default" "kind" :source "source" "(return 42)"}))|,
+               config
+             )
+
+    assert {:ok, records} = StreamingInspection.records(inspection)
+    source = Enum.find(records, &(&1["record_type"] == "evaluation-source"))
+    error = Enum.find(records, &(&1["record_type"] == "execution-error"))
+
+    assert error["payload"]["details"]["boundary_producer"] == %{
+             "complete?" => true,
+             "evaluation_ids" => [source["correlation"]["evaluation_id"]]
+           }
+
+    events = EventSink.events(config.event_sink)
+
+    mission_stopped =
+      Enum.find(events, &(&1.type == "evaluation-stopped" and &1.data.environment == :mission))
+
+    assert mission_stopped.data.status == :returned
+
+    trace_dir = Path.join(root, "trace")
+    inspection_dir = Path.join(root, "inspection")
+    File.mkdir!(trace_dir)
+    File.mkdir!(inspection_dir)
+    File.chmod!(trace_dir, 0o700)
+    File.chmod!(inspection_dir, 0o700)
+
+    trace_path = Path.join(trace_dir, "boundary-producer.jsonl")
+    inspection_path = Path.join(inspection_dir, "boundary-producer.ptcins")
+    File.write!(trace_path, Enum.map_join(events, "", &(Jason.encode!(&1) <> "\n")))
+    assert :ok = StreamingInspection.write_path(inspection_path, records)
+
+    assert {:ok, trace} = TraceSnapshot.start({:private_authorized_directory, trace_dir})
+    assert {:ok, snapshot} = InspectionSnapshot.start({:directory, inspection_dir}, trace)
+    on_exit(fn -> InspectionSnapshot.stop(snapshot) end)
+    on_exit(fn -> TraceSnapshot.stop(trace) end)
+    assert {:ok, analysis} = RunAnalysis.new(trace, snapshot)
+
+    assert {:ok, %{"items" => [%{"relationships" => relationships}]}} =
+             RunAnalysis.query(analysis, :read, %{
+               "run_id" => "boundary-producer",
+               "collection" => "execution_errors"
+             })
+
+    producer = Enum.find(relationships, &(&1["rel"] == "direct_boundary_producer"))
+    assert producer["state"] == "complete"
+
+    assert {:ok, %{"items" => [%{"data" => %{"status" => "returned"}}]}} =
+             RunAnalysis.query(
+               analysis,
+               :read,
+               Map.merge(producer["filters"], %{
+                 "run_id" => "boundary-producer",
+                 "collection" => producer["target_collection"]
+               })
+             )
+  end
+
+  test "equal recomputed values are not labeled as boundary producers" do
+    {config, inspection} = boundary_failure_config("equal-not-proven")
+
+    assert {:error, %{reason: :terminal_result_exceeded}} =
+             Kernel.run(
+               ~S|(do (tool/kernel-eval {"mission" "default" "kind" :source "source" "(return 42)"}) (return (+ 40 2)))|,
+               config
+             )
+
+    assert {:ok, records} = StreamingInspection.records(inspection)
+    error = Enum.find(records, &(&1["record_type"] == "execution-error"))
+
+    # The breached ceiling records itself so the failure names its own limit,
+    # but equality between the child result and the boundary value is not
+    # dataflow evidence, so no producer is claimed alongside it.
+    assert error["payload"]["details"] == %{
+             "limit" => "terminal_result_bytes",
+             "limit_value" => 1
+           }
+  end
+
+  defp boundary_failure_config(run_id) do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(terminal_result_bytes: 1)
+    {:ok, events} = EventSink.start(:normal, limits, run_id: run_id)
+
+    {:ok, inspection} =
+      StreamingInspection.start(run_id: run_id, trace_id: run_id)
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: events,
+        inspection_sink: inspection,
+        result_projection: :json
+      )
+
+    {config, inspection}
   end
 
   defp run(source, projection, opts \\ []) do

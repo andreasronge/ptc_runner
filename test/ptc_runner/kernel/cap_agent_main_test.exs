@@ -2,6 +2,8 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.CommandEngine
+  alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Lisp
@@ -30,20 +32,22 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
       assert "agent.main/run" in prompt_refs
     end
 
-    test "agent exports advertise the optional mission selector" do
+    test "agent exports advertise their public configuration" do
       {:ok, components} = Library.components(agent_main_closure())
       {:ok, bundle} = Kernel.compile_bundle(components)
 
       signatures = Map.new(bundle.prelude.exports, &{&1.ref, &1.signature})
 
-      for ref <-
-            ~w(agent.core/run agent.core/run-value agent.core/run-outcome agent.core/run-result-value) do
+      for ref <- ~w(agent.core/run-value agent.core/run-outcome agent.core/run-result-value) do
         assert signatures[ref] ==
-                 "(task :string, cfg {model :string?, mission :string?}) -> :any"
+                 "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"
       end
 
+      assert signatures["agent.core/run"] ==
+               "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, result_envelope :bool?}) -> :any"
+
       assert signatures["agent.main/run"] ==
-               "(input {task :string, agent {model :string?, mission :string?}}) -> :any"
+               "(input {task :string, agent {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}}) -> :any"
     end
   end
 
@@ -66,124 +70,119 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
     end
   end
 
-  describe "cap/with-cursor" do
-    test "adds an opaque cursor to a string-keyed argument map" do
-      assert run(~S|(cap/with-cursor {"limit" 100} "abc")|) ==
-               ~S|{"cursor" "abc" "limit" 100}|
-    end
-
-    test "a nil cursor selects the first page and removes a stale cursor" do
-      assert run(~S|(cap/with-cursor {"path" "lib" "limit" 100} nil)|) ==
-               ~S|{"limit" 100 "path" "lib"}|
-
-      assert run(~S|(cap/with-cursor {"cursor" "stale" "limit" 100} nil)|) ==
-               ~S|{"limit" 100}|
-
-      assert run(~S|(cap/with-cursor {:cursor "stale" :limit 100} nil)|) ==
-               ~S|{:limit 100}|
-    end
-
-    test "does not interpret or transform the cursor" do
-      assert run(~S|(cap/with-cursor {} "opaque:page/2?x=1")|) ==
-               ~S|{"cursor" "opaque:page/2?x=1"}|
-    end
-  end
-
-  describe "cap/collect-pages" do
-    test "follows opaque cursors and reports complete traversal" do
+  describe "cap/fold-pages" do
+    test "reduces pages into bounded caller state and reports completion" do
       source = ~S"""
-      (cap/collect-pages
+      (cap/fold-pages
         (fn [cursor]
           (if cursor
-            {"items" [3] "next_cursor" nil}
-            {"items" [1 2] "next_cursor" "page-2"}))
-        2)
+            {"items" [3] "next_cursor" nil "snapshot_hash" "sha256:same"}
+            {"items" [1 2] "next_cursor" "page-2" "snapshot_hash" "sha256:same"}))
+        +
+        0
+        {"max_pages" 2})
       """
 
       assert run(source) ==
-               ~S|{"complete?" true "items" [1 2 3] "pages" 2}|
+               ~S|{"complete?" true "next_cursor" nil "pages" 2 "snapshot_hash" "sha256:same" "value" 6}|
     end
 
-    test "preserves snapshot provenance and rejects a changed snapshot" do
+    test "preserves a resumable cursor and validates the expected snapshot" do
       source = ~S"""
-      (cap/collect-pages
-        (fn [cursor]
-          (if cursor
-            {"items" [2] "next_cursor" nil "snapshot_hash" "sha256:same"}
-            {"items" [1] "next_cursor" "page-2" "snapshot_hash" "sha256:same"}))
-        2)
+      (cap/fold-pages
+        (fn [_] {"items" [1 2] "next_cursor" "page-2" "snapshot_hash" "sha256:same"})
+        +
+        0
+        {"max_pages" 1})
       """
 
       assert run(source) ==
-               ~S|{"complete?" true "items" [1 2] "pages" 2 "snapshot_hash" "sha256:same"}|
+               ~S|{"complete?" false "next_cursor" "page-2" "pages" 1 "snapshot_hash" "sha256:same" "value" 3}|
 
-      changed = ~S"""
-      (cap/collect-pages
+      resumed = ~S"""
+      (cap/fold-pages
         (fn [cursor]
-          (if cursor
-            {"items" [2] "next_cursor" nil "snapshot_hash" "sha256:changed"}
-            {"items" [1] "next_cursor" "page-2" "snapshot_hash" "sha256:first"}))
-        2)
+          {"items" [(if (= cursor "page-2") 3 99)]
+           "next_cursor" nil
+           "snapshot_hash" "sha256:same"})
+        +
+        0
+        {"max_pages" 1 "cursor" "page-2" "snapshot_hash" "sha256:same"})
       """
+
+      assert run(resumed) ==
+               ~S|{"complete?" true "next_cursor" nil "pages" 1 "snapshot_hash" "sha256:same" "value" 3}|
+
+      changed =
+        String.replace(
+          resumed,
+          ~S|"cursor" "page-2" "snapshot_hash" "sha256:same"|,
+          ~S|"cursor" "page-2" "snapshot_hash" "sha256:other"|
+        )
 
       assert run(changed) =~ ":snapshot-changed"
     end
 
-    test "marks a bounded prefix incomplete and rejects an invalid bound" do
-      source = ~S"""
-      (cap/collect-pages
+    test "rejects missing provenance, invalid bounds, and cursor cycles" do
+      assert run(~S|(cap/fold-pages (fn [_] {"items" [] "next_cursor" nil}) + 0 {"max_pages" 1})|) =~
+               ":missing-snapshot-hash"
+
+      assert run(~S|(cap/fold-pages (fn [_] {}) + 0 {"max_pages" 0})|) =~
+               ":invalid-max-pages"
+
+      cycle = ~S"""
+      (cap/fold-pages
         (fn [cursor]
-          {"items" [(if cursor 2 1)] "next_cursor" "more"})
-        1)
+          {"items" []
+           "next_cursor" (if (= cursor "a") "b" "a")
+           "snapshot_hash" "sha256:same"})
+        +
+        0
+        {"max_pages" 4 "cursor" "a" "snapshot_hash" "sha256:same"})
       """
 
-      assert run(source) ==
-               ~S|{"complete?" false "items" [1] "pages" 1}|
+      assert run(cycle) =~ ":cursor-cycle"
+    end
 
-      assert run(~S|(cap/collect-pages (fn [_] {"items" []}) 0)|) =~
-               ":invalid-max-pages"
+    test "traverses data larger than the old eager collector with constant accumulator state" do
+      payload = String.duplicate("x", 1_100)
+
+      source = """
+      (cap/fold-pages
+        (fn [cursor]
+          (let [page (if cursor (parse-long cursor) 0)]
+            {"items" (mapv (fn [item] (str page ":" item ":" "#{payload}"))
+                            (range 50))
+             "next_cursor" (if (< page 99) (str (inc page)) nil)
+             "snapshot_hash" "sha256:large"}))
+        (fn [count _] (inc count))
+        0
+        {"max_pages" 100})
+      """
+
+      # The 5,000 unique items carry more than 5 MiB in aggregate, but only
+      # one 50-item page and the integer accumulator are live at a time. This
+      # is a heap-safety test, not a deadline test, so tolerate loaded CI hosts.
+      assert run(source, timeout: 30_000) ==
+               ~S|{"complete?" true "next_cursor" nil "pages" 100 "snapshot_hash" "sha256:large" "value" 5000}|
     end
   end
 
   describe "analysis prelude composition" do
-    test "primitive and analysis components declare their direct shared dependencies" do
-      assert {:ok, log_core} = Library.component("log.core")
-      assert {:ok, inspection_core} = Library.component("inspection.core")
-      assert {:ok, log_analysis} = Library.component("log.analysis")
-      assert {:ok, inspection_analysis} = Library.component("inspection.analysis")
+    test "one analysis component declares its shared dependency and four exports" do
+      assert {:ok, analysis} = Library.component("analysis")
+      assert analysis.dependencies == ["cap"]
 
-      assert log_core.dependencies == ["cap"]
-      assert inspection_core.dependencies == ["cap"]
-      assert log_analysis.dependencies == ["cap", "log.core"]
-      assert inspection_analysis.dependencies == ["cap", "inspection.core"]
-
-      assert {:ok, components} =
-               Library.resolve_components([
-                 {:library, "log.analysis"},
-                 {:library, "inspection.analysis"}
-               ])
-
-      assert Enum.map(components, & &1.id) == [
-               "cap",
-               "inspection.analysis",
-               "inspection.core",
-               "log.analysis",
-               "log.core"
-             ]
+      assert {:ok, components} = Library.resolve_components([{:library, "analysis"}])
+      assert Enum.map(components, & &1.id) == ["analysis", "cap"]
 
       assert {:ok, bundle} = Kernel.compile_bundle(components)
 
       for ref <- [
-            "log.analysis/all-runs",
-            "log.analysis/all-turns",
-            "inspection.analysis/all-runs",
-            "inspection.analysis/all-model-exchanges",
-            "inspection.analysis/all-capability-calls",
-            "inspection.analysis/all-generated-sources",
-            "inspection.analysis/all-effective-preludes",
-            "inspection.analysis/all-provider-exchanges",
-            "inspection.analysis/all-execution-prints",
-            "inspection.analysis/all-execution-errors"
+            "analysis/runs",
+            "analysis/open",
+            "analysis/read",
+            "analysis/counters"
           ] do
         assert {:ok, _export} = Prelude.fetch_export(bundle.prelude, ref)
       end
@@ -221,18 +220,9 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
     @tag :tmp_dir
     test "a manifest selects it and reaches agent.core without a local wrapper",
          %{tmp_dir: dir} do
-      manifest = %{
-        "version" => 1,
-        "workflow" => %{
-          "components" => [%{"library" => "agent.main"}],
-          "entry" => "agent.main/run"
-        },
-        # No local component: the point is that an application needs no
-        # hand-written wrapper to reach the agent loop.
-        "input" => %{
-          "value" => %{"task" => "summarize", "agent" => %{"max_turns" => 1}}
-        }
-      }
+      # No local component: the point is that an application needs no
+      # hand-written wrapper to reach the agent loop.
+      manifest = agent_main_manifest()
 
       path = Path.join(dir, "ptc.json")
       File.write!(path, Jason.encode!(manifest))
@@ -251,6 +241,26 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
       assert {:ok, _bundle} = Kernel.compile_bundle(loaded.workflow_components)
     end
 
+    @tag :tmp_dir
+    test "validate refuses it when the manifest declares no mission", %{tmp_dir: dir} do
+      manifest = agent_main_manifest()
+      path = Path.join(dir, "no-missions.ptc.json")
+      File.write!(path, Jason.encode!(manifest))
+
+      # The entry reaches kernel-mission-model-context, which answers
+      # unknown_mission for every name a mission-less manifest could supply, so
+      # this run cannot reach its first model request. Both facts are in the
+      # documents validate already parses.
+      assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["validate", path])
+      assert outcome.envelope["error"]["phase"] == "bundle"
+      assert outcome.envelope["error"]["code"] == "mission_undeclared"
+
+      declared = Path.join(dir, "with-mission.ptc.json")
+      File.write!(declared, Jason.encode!(Map.put(manifest, "missions", %{"default" => %{}})))
+
+      assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["validate", declared])
+    end
+
     # Fetching a component does not pull its dependencies; compilation is what
     # refuses an incomplete set. A partial closure must fail loudly rather than
     # produce a bundle whose entry cannot reach the agent loop.
@@ -262,25 +272,45 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
     end
   end
 
+  defp agent_main_manifest do
+    %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"library" => "agent.main"}],
+        "entry" => "agent.main/run"
+      },
+      "input" => %{"value" => %{"task" => "summarize", "agent" => %{"max_turns" => 1}}}
+    }
+  end
+
   defp agent_main_closure do
-    ~w(agent.main agent.core agent.feedback agent.native agent.prompt agent.retry
+    ~w(agent.main agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry
        kernel llm result workflow.event)
   end
 
-  defp run(source) do
+  defp run(source, opts \\ []) do
     {:ok, components} = Library.components(["cap"])
     {:ok, bundle} = Kernel.compile_bundle(components)
 
-    {:ok, result} =
-      Lisp.run_native(source,
-        prelude: bundle.prelude,
-        tools: discovery_tools(),
-        filter_context: false,
-        caller: :kernel
+    run_opts =
+      Keyword.merge(
+        [
+          prelude: bundle.prelude,
+          tools: discovery_tools(),
+          filter_context: false,
+          caller: :kernel
+        ],
+        opts
       )
 
-    {rendered, _truncated} = Lisp.format_value(result.return)
-    rendered
+    case Lisp.run_native(source, run_opts) do
+      {:ok, result} ->
+        {rendered, _truncated} = Lisp.format_value(result.return)
+        rendered
+
+      {:error, result} ->
+        flunk("unexpected evaluator failure: #{inspect(result.fail, limit: 20)}")
+    end
   end
 
   # `cap` declares the discovery tools it wraps, so the bundle only attaches

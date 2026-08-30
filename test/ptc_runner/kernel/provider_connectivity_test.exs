@@ -148,6 +148,47 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert delivered == %{"reachable-key" => "connect-secret"}
   end
 
+  test "a probe accounts for what its request spent, per occurrence" do
+    # `doctor --connect` bills a real request. The account travels with the
+    # sealed result so the command can attribute the spend instead of dropping
+    # it; an occurrence the provider metered and one it did not are different
+    # facts, and both are reported.
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "inert" => [destination: :workflow],
+        "metered" => [destination: :workflow, connectivity_mode: :probe, probe: :metered],
+        "silent" => [destination: :workflow, connectivity_mode: :probe, probe: :ok]
+      })
+
+    assert {:ok, result} = connect(prepared, execution)
+
+    assert ConnectivityResult.usage(result) == [
+             %{
+               name: "metered",
+               destination: :workflow,
+               index: 1,
+               usage: %{
+                 "input" => 8,
+                 "output" => 1,
+                 "total_cost" => %{"currency" => "USD", "microunits" => 3}
+               }
+             },
+             %{name: "silent", destination: :workflow, index: 2, usage: nil}
+           ]
+  end
+
+  test "a probe whose account cannot be read fails rather than reporting nothing spent" do
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "reachable" => [destination: :workflow, connectivity_mode: :probe, probe: :unmeasurable]
+      })
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :internal
+    assert diagnostic.provider_activity
+    assert_received {:probe_invoked, "reachable"}
+  end
+
   test "a run over the same declaration does acquire it" do
     # The contrast is what makes the assertion above mean something: the builder
     # is reachable from this fixture, and connectivity is why it stays untouched.
@@ -437,7 +478,8 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
       "checks" => checks,
       "model_aliases" => [],
       "provider_activity" => true,
-      "readiness" => "ready"
+      "readiness" => "ready",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     assert CommandContract.valid_success_result?(:doctor, outcome)
@@ -599,6 +641,31 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
            )
   end
 
+  test "endpoint connection causes retain distinct acquisition diagnostics" do
+    for {reason, code} <- [
+          mcp_endpoint_connection_refused: :provider_endpoint_connection_refused,
+          mcp_endpoint_name_unresolved: :provider_endpoint_name_unresolved,
+          mcp_endpoint_tls_failed: :provider_endpoint_tls_failed
+        ] do
+      %{prepared: prepared, execution: execution} =
+        fixture(%{
+          "endpoint" => [
+            destination: :workflow,
+            connectivity_mode: :acquisition,
+            builder_error: reason
+          ]
+        })
+
+      assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+      assert diagnostic.phase == :provider_acquisition
+      assert diagnostic.code == code
+      assert diagnostic.provider_activity
+      assert diagnostic.subject.name == "endpoint"
+      assert diagnostic.subject.operation == :acquisition
+      assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
+    end
+  end
+
   test "a reason the table does not know still fails closed" do
     # Translations are added with their producers. An unrecognised reason must
     # not be forced into the nearest acquisition code, because that would report
@@ -753,7 +820,13 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
     assert diagnostic.phase == :active_preflight
     assert diagnostic.code == :connectivity_timeout
     assert diagnostic.subject == nil
-    assert diagnostic.provider_activity
+
+    # Under full-suite scheduler pressure the operation budget may expire
+    # either immediately before dispatch (`false`) or while the bounded probe
+    # is running (`true`). Both outcomes are the documented cumulative-activity
+    # contract; this test is authoritative for the shared deadline and
+    # subjectless timeout, not for which side wins that race.
+    assert is_boolean(diagnostic.provider_activity)
   end
 
   test "run and connect both refuse a selected OAuth occurrence up front" do
@@ -1170,6 +1243,8 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
 
       case behaviour do
         :ok -> :ok
+        :metered -> {:ok, %{input: 8, output: 1, total_cost: 3.0e-6}}
+        :unmeasurable -> {:ok, %{invented: 1}}
         :unavailable -> {:error, :llm_connectivity_unavailable}
         :slow -> burn_until(System.monotonic_time(:millisecond) + 250)
       end

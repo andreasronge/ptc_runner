@@ -2,6 +2,8 @@ defmodule PtcRunner.Kernel.HostConfigTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.InstallationConfigDigest
+  alias PtcRunner.Lisp.RetainedSize
 
   @tag :tmp_dir
   test "loads one closed stdio MCP installation without resolving credentials", %{tmp_dir: dir} do
@@ -25,7 +27,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              name: "DEFINITELY_MISSING_PTC_TOKEN"
            }
 
-    assert host.install["workspace"] == %{
+    assert without_digest(host.install["workspace"]) == %{
              source: :mcp,
              transport: %{
                type: :stdio,
@@ -44,6 +46,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
                  effect: :read,
                  description: nil,
                  error_feedback: :closed,
+                 inspection_capture: :full,
                  model_visible: false
                }
              },
@@ -57,6 +60,10 @@ defmodule PtcRunner.Kernel.HostConfigTest do
              data_class: :normal,
              accepts_data: [:normal]
            }
+
+    assert InstallationConfigDigest.valid_digest?(
+             host.install["workspace"].installation_config_digest
+           )
   end
 
   @tag :tmp_dir
@@ -66,10 +73,20 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
           "cache" => false,
-          "params" => %{"temperature" => 0.2, "seed" => 42, "max_tokens" => 4_096},
+          "params" => %{
+            "temperature" => 0.2,
+            "seed" => 42,
+            "max_tokens" => 4_096,
+            "top_p" => 0.85,
+            "presence_penalty" => -0.25,
+            "frequency_penalty" => 1.5,
+            "reasoning_effort" => "medium"
+          },
           "installation_revision" => "model-policy-v2",
           "accepts_data" => ["normal", "private_inspection"],
           "ceilings" => %{
@@ -82,17 +99,204 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
 
-    assert host.install["deepseek"] == %{
+    assert without_digest(host.install["deepseek"]) == %{
              source: :llm,
-             model: "openrouter:deepseek/deepseek-v4-flash",
+             model: "openrouter:deepseek/deepseek-v4-flash-0731",
              credential: "openrouter_key",
              cache: false,
-             params: %{temperature: 0.2, seed: 42, max_tokens: 4_096},
+             params: %{
+               temperature: 0.2,
+               seed: 42,
+               max_tokens: 4_096,
+               top_p: 0.85,
+               presence_penalty: -0.25,
+               frequency_penalty: 1.5,
+               reasoning_effort: :medium
+             },
+             structured_output_mode: :unsupported,
+             usage_guarantees: %{tokens: true, cost_currency: "USD"},
+             reservation_tariff: nil,
              installation_revision: "model-policy-v2",
-             ceilings: %{max_request_bytes: 200_000, max_response_bytes: 300_000},
+             ceilings: %{
+               max_request_bytes: 200_000,
+               max_response_bytes: 300_000,
+               max_calls: 2_048,
+               request_timeout_ms: 120_000
+             },
              data_class: :normal,
              accepts_data: [:normal, :private_inspection]
            }
+
+    assert InstallationConfigDigest.valid_digest?(
+             host.install["deepseek"].installation_config_digest
+           )
+  end
+
+  @tag :tmp_dir
+  test "a host cost budget requires a tariff on every live LLM installation", %{tmp_dir: dir} do
+    installation = %{
+      "source" => "llm",
+      "structured_output_mode" => "unsupported",
+      "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
+      "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+      "credential" => "openrouter_key",
+      "installation_revision" => "model-policy-v2"
+    }
+
+    config = %{
+      "limits" => %{"llm_cost_microusd" => 1_000_000},
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{"deepseek" => installation}
+    }
+
+    assert {:error, :invalid_host_config} = dir |> write_config(config) |> HostConfig.load()
+
+    tariff = %{"currency" => "USD", "id" => "openrouter-2026-08"}
+    configured = put_in(config, ["install", "deepseek", "reservation_tariff"], tariff)
+
+    assert {:ok, host} = dir |> write_config(configured) |> HostConfig.load()
+    assert host.install["deepseek"].reservation_tariff == %{currency: "USD", id: tariff["id"]}
+  end
+
+  @tag :tmp_dir
+  test "aggregate LLM budgets require matching usage guarantees", %{tmp_dir: dir} do
+    installation = %{
+      "source" => "llm",
+      "structured_output_mode" => "unsupported",
+      "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+      "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+      "credential" => "openrouter_key",
+      "installation_revision" => "model-policy-v2"
+    }
+
+    base = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{"deepseek" => installation}
+    }
+
+    token_budget = Map.put(base, "limits", %{"llm_total_tokens" => 10_000})
+
+    assert {:error, :invalid_host_config} =
+             dir |> write_config(token_budget) |> HostConfig.load()
+
+    cost_budget =
+      base
+      |> Map.put("limits", %{"llm_cost_microusd" => 1_000_000})
+      |> put_in(
+        ["install", "deepseek", "usage_guarantees"],
+        %{"tokens" => true, "cost_currency" => nil}
+      )
+      |> put_in(
+        ["install", "deepseek", "reservation_tariff"],
+        %{"currency" => "USD", "id" => "openrouter-2026-08"}
+      )
+
+    assert {:error, :invalid_host_config} =
+             dir |> write_config(cost_budget) |> HostConfig.load()
+  end
+
+  @tag :tmp_dir
+  test "loads an explicit live LLM max_calls ceiling", %{tmp_dir: dir} do
+    config = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+          "credential" => "openrouter_key",
+          "installation_revision" => "model-policy-v2",
+          "ceilings" => %{"max_calls" => 4}
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+    assert host.install["deepseek"].ceilings.max_calls == 4
+  end
+
+  @tag :tmp_dir
+  test "refuses a max_calls ceiling that could never bind", %{tmp_dir: dir} do
+    config = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+          "credential" => "openrouter_key",
+          "installation_revision" => "model-policy-v2",
+          "ceilings" => %{"max_calls" => 2_049}
+        }
+      }
+    }
+
+    assert {:error, :invalid_host_config} = dir |> write_config(config) |> HostConfig.load()
+  end
+
+  @tag :tmp_dir
+  test "loads an explicit live LLM request_timeout_ms ceiling", %{tmp_dir: dir} do
+    config = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+          "credential" => "openrouter_key",
+          "installation_revision" => "model-policy-v2",
+          "ceilings" => %{"request_timeout_ms" => 5_000}
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+    assert host.install["deepseek"].ceilings.request_timeout_ms == 5_000
+  end
+
+  @tag :tmp_dir
+  test "refuses a request_timeout_ms ceiling above the host LLM deadline", %{tmp_dir: dir} do
+    config = %{
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+          "credential" => "openrouter_key",
+          "installation_revision" => "model-policy-v2",
+          "ceilings" => %{"request_timeout_ms" => 120_001}
+        }
+      }
+    }
+
+    assert {:error, :invalid_host_config} = dir |> write_config(config) |> HostConfig.load()
+  end
+
+  @tag :tmp_dir
+  test "omitted live LLM request_timeout_ms follows a narrowed host deadline", %{tmp_dir: dir} do
+    config = %{
+      "limits" => %{"llm_request_timeout_ms" => 5_000},
+      "credentials" => %{"openrouter_key" => %{"env" => "OPENROUTER_API_KEY"}},
+      "install" => %{
+        "deepseek" => %{
+          "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+          "credential" => "openrouter_key",
+          "installation_revision" => "model-policy-v2"
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+    assert host.limits.llm_request_timeout_ms == 5_000
+    assert host.install["deepseek"].ceilings.request_timeout_ms == 5_000
   end
 
   test "command decoding rejects explicit nulls that semantic defaults would otherwise accept" do
@@ -107,22 +311,26 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       },
       {
         put_in(valid_config(), ["install", "workspace", "installation_revision"], nil),
-        [{:property, "install"}]
+        [{:property, "install"}, {:property, "*"}, {:property, "installation_revision"}]
       },
       {
+        # The installation alias is elided; the upstream tool name is not,
+        # because `tools` admits a member that would render as the placeholder.
         put_in(
           valid_config(),
           ["install", "workspace", "tools", "read_text", "description"],
           nil
         ),
-        [{:property, "install"}]
+        [{:property, "install"}, {:property, "*"}, {:property, "tools"}]
       }
     ]
 
     for {config, expected_path} <- cases do
       assert {:error, :invalid_host_config} = HostConfig.decode(config, "/tmp")
 
-      assert {:error, {:host_schema_invalid, ^expected_path}} =
+      assert {:error,
+              {:host_schema_invalid,
+               %PtcRunner.Kernel.SchemaViolation{rule: :type, path: ^expected_path}}} =
                HostConfig.decode_command(config, "/tmp")
     end
   end
@@ -133,6 +341,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
           {"llm", "llm"},
           {"replay", "llm_replay"},
           {"trace", "ptc_trace_snapshot"},
+          {"private-trace", "ptc_private_trace_snapshot"},
           {"inspection", "ptc_inspection_snapshot"}
         ] do
       document = %{"install" => %{name => %{"source" => source}}}
@@ -142,11 +351,96 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     end
   end
 
+  test "oneOf branch selection does not mistake nested enum failures for discriminators" do
+    invalid =
+      put_in(valid_config(), ["install", "workspace", "tools"], %{
+        "first" => %{"as" => "workspace.first", "effect" => "execute"},
+        "second" => %{"as" => "workspace.second", "effect" => "execute"}
+      })
+
+    assert {:error,
+            {:host_schema_invalid,
+             %PtcRunner.Kernel.SchemaViolation{
+               rule: :enum,
+               path: [
+                 {:property, "install"},
+                 {:property, "*"},
+                 {:property, "tools"}
+               ]
+             }}} = HostConfig.decode_command(invalid, "/tmp")
+  end
+
+  test "oneOf branch selection does not mistake an immediate shared enum for a discriminator" do
+    invalid = %{
+      "install" => %{
+        "replay" => %{
+          "source" => "llm_replay",
+          "installation_revision" => "replay-v1",
+          "data_class" => "secret"
+        }
+      }
+    }
+
+    assert {:error,
+            {:host_schema_invalid,
+             %PtcRunner.Kernel.SchemaViolation{
+               rule: :enum,
+               path: [
+                 {:property, "install"},
+                 {:property, "*"},
+                 {:property, "data_class"}
+               ]
+             }}} = HostConfig.decode_command(invalid, "/tmp")
+  end
+
+  @tag :tmp_dir
+  test "loads the fixed private-authorized trace snapshot installation", %{tmp_dir: dir} do
+    config = %{
+      "install" => %{
+        "private-history" => %{
+          "source" => "ptc_private_trace_snapshot",
+          "directory" => "traces",
+          "installation_revision" => "private-history-v1"
+        }
+      }
+    }
+
+    assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
+    installation = host.install["private-history"]
+    assert installation.source == :ptc_private_trace_snapshot
+    assert installation.directory == "traces"
+
+    for forbidden <- ["data_class", "accepts_data", "private"] do
+      invalid = put_in(config, ["install", "private-history", forbidden], true)
+      assert {:error, :invalid_host_config} = HostConfig.decode(invalid, dir)
+    end
+  end
+
   test "an invalid installation alias is a schema error even when its revision is absent" do
     document = %{"install" => %{"BAD" => %{"source" => "mcp"}}}
 
     assert {:error, {:host_schema_invalid, _path}} =
              HostConfig.decode_command(document, "/tmp")
+  end
+
+  @tag :tmp_dir
+  test "a limits-only host document admits an empty install map", %{tmp_dir: dir} do
+    document = %{
+      "install" => %{},
+      "limits" => %{"workflow_heap_words" => 16_000_000}
+    }
+
+    assert {:ok, decoded} = HostConfig.decode(document, dir)
+    assert decoded.install == %{}
+    assert decoded.limits.workflow_heap_words == 16_000_000
+
+    assert {:ok, command} = HostConfig.decode_command(document, dir)
+    assert command.install == %{}
+    assert command.limits.workflow_heap_words == 16_000_000
+
+    assert {:ok, loaded} = dir |> write_config(document) |> HostConfig.load()
+    assert loaded.install == %{}
+    assert loaded.limits.workflow_heap_words == 16_000_000
   end
 
   test "installation revisions use the exact portable lowercase identifier grammar" do
@@ -181,7 +475,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
 
-    assert host.install["history"] == %{
+    assert without_digest(host.install["history"]) == %{
              source: :ptc_trace_snapshot,
              directory: "traces",
              installation_revision: "history-v1",
@@ -190,6 +484,10 @@ defmodule PtcRunner.Kernel.HostConfigTest do
                max_result_bytes: 250_000
              }
            }
+
+    assert InstallationConfigDigest.valid_digest?(
+             host.install["history"].installation_config_digest
+           )
   end
 
   @tag :tmp_dir
@@ -202,7 +500,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
           "installation_revision" => "private-history-v1",
           "ceilings" => %{
             "max_files" => 100,
-            "max_source_bytes" => 64_000_000,
+            "max_source_bytes" => 536_871_120,
             "max_result_bytes" => 500_000
           }
         }
@@ -211,16 +509,20 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert {:ok, host} = dir |> write_config(config) |> HostConfig.load()
 
-    assert host.install["private-history"] == %{
+    assert without_digest(host.install["private-history"]) == %{
              source: :ptc_inspection_snapshot,
              directory: "inspection",
              installation_revision: "private-history-v1",
              ceilings: %{
                max_files: 100,
-               max_source_bytes: 64_000_000,
+               max_source_bytes: 536_871_120,
                max_result_bytes: 500_000
              }
            }
+
+    assert InstallationConfigDigest.valid_digest?(
+             host.install["private-history"].installation_config_digest
+           )
   end
 
   @tag :tmp_dir
@@ -310,6 +612,31 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert host.install["workspace"].snapshot_identity == %{tool: "read_text", field: "digest"}
   end
 
+  @tag :tmp_dir
+  test "accepts digest result capture for read tools and rejects it for write tools", %{
+    tmp_dir: dir
+  } do
+    digest_config =
+      valid_config()
+      |> put_in(
+        ["install", "workspace", "tools", "read_text", "inspection_capture"],
+        "digest_results"
+      )
+
+    assert {:ok, host} = dir |> write_config(digest_config) |> HostConfig.load()
+    assert host.install["workspace"].tools["read_text"].inspection_capture == :digest_results
+
+    write_digest =
+      put_in(digest_config, ["install", "workspace", "tools", "write_text"], %{
+        "as" => "workspace.write",
+        "effect" => "write",
+        "inspection_capture" => "digest_results"
+      })
+
+    assert {:error, :invalid_host_config} =
+             dir |> write_config(write_digest, unique_name()) |> HostConfig.load()
+  end
+
   test "every enumerated value decodes to an atom this module owns" do
     # The assertions above check the decoded values but not where the atoms came
     # from. They previously came from `String.to_existing_atom/1`, which only
@@ -328,7 +655,17 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     owned = MapSet.new(atoms, fn {_index, atom} -> atom end)
 
-    for atom <- [:bearer, :basic, :closed, :bounded, :write, :normal, :private_inspection] do
+    for atom <- [
+          :bearer,
+          :basic,
+          :closed,
+          :bounded,
+          :write,
+          :normal,
+          :private_inspection,
+          :full,
+          :digest_results
+        ] do
       assert MapSet.member?(owned, atom),
              "#{inspect(atom)} must be a literal in HostConfig, not borrowed from another module"
     end
@@ -423,8 +760,10 @@ defmodule PtcRunner.Kernel.HostConfigTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
           "installation_revision" => "deepseek-v1",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "key"
         }
       }
@@ -434,17 +773,58 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert {:ok, host} = HostConfig.decode(llm, "/tmp")
     assert host.install["deepseek"].source == :llm
     assert host.install["deepseek"].params == %{}
+    assert host.install["deepseek"].structured_output_mode == :unsupported
+    assert host.install["deepseek"].usage_guarantees == %{tokens: true, cost_currency: "USD"}
+
+    missing_guarantees =
+      update_in(llm, ["install", "deepseek"], &Map.delete(&1, "usage_guarantees"))
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(missing_guarantees, "/tmp")
+    assert {:error, _details} = JSV.validate(missing_guarantees, root, cast: false)
+
+    for invalid_guarantees <- [
+          %{"tokens" => true},
+          %{"cost_currency" => "USD"},
+          %{"tokens" => 1, "cost_currency" => "USD"},
+          %{"tokens" => true, "cost_currency" => "EUR"},
+          %{"tokens" => true, "cost_currency" => nil, "extra" => true}
+        ] do
+      invalid = put_in(llm, ["install", "deepseek", "usage_guarantees"], invalid_guarantees)
+      assert {:error, :invalid_host_config} = HostConfig.decode(invalid, "/tmp")
+      assert {:error, _details} = JSV.validate(invalid, root, cast: false)
+    end
 
     for invalid_params <- [
           %{"temperature" => 2.1},
           %{"seed" => -1},
           %{"max_tokens" => 0},
-          %{"top_p" => 0.9}
+          %{"top_p" => 0},
+          %{"top_p" => 1.1},
+          %{"presence_penalty" => -2.1},
+          %{"frequency_penalty" => 2.1},
+          %{"reasoning_effort" => "xhigh"},
+          %{"reasoning_effort" => nil}
         ] do
       invalid = put_in(llm, ["install", "deepseek", "params"], invalid_params)
       assert {:error, :invalid_host_config} = HostConfig.decode(invalid, "/tmp")
       assert {:error, _details} = JSV.validate(invalid, root, cast: false)
     end
+
+    missing_mode =
+      update_in(llm, ["install", "deepseek"], &Map.delete(&1, "structured_output_mode"))
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(missing_mode, "/tmp")
+    assert {:error, _details} = JSV.validate(missing_mode, root, cast: false)
+
+    for invalid_mode <- ["prompt_and_parse", "json", nil, true] do
+      invalid = put_in(llm, ["install", "deepseek", "structured_output_mode"], invalid_mode)
+      assert {:error, :invalid_host_config} = HostConfig.decode(invalid, "/tmp")
+      assert {:error, _details} = JSV.validate(invalid, root, cast: false)
+    end
+
+    json_schema = put_in(llm, ["install", "deepseek", "structured_output_mode"], "json_schema")
+    assert {:ok, schema_host} = HostConfig.decode(json_schema, "/tmp")
+    assert schema_host.install["deepseek"].structured_output_mode == :json_schema
 
     trace = %{
       "install" => %{
@@ -470,20 +850,17 @@ defmodule PtcRunner.Kernel.HostConfigTest do
     assert {:error, :invalid_host_config} = HostConfig.decode(too_small_trace, "/tmp")
     assert {:error, _details} = JSV.validate(too_small_trace, root, cast: false)
 
-    content_hash = "sha256:" <> String.duplicate("0", 64)
-    metadata_bytes = byte_size(Jason.encode!(%{"snapshot_hash" => content_hash}))
+    empty_page = %{
+      "items" => [],
+      "next_cursor" => nil,
+      "omitted_count" => 0,
+      "snapshot_hash" => "sha256:" <> String.duplicate("0", 64),
+      "truncated" => false
+    }
 
-    empty_page_bytes =
-      byte_size(
-        Jason.encode!(%{
-          "items" => [],
-          "next_cursor" => nil,
-          "omitted_count" => 0,
-          "truncated" => false
-        })
-      )
+    expected_minimum = max(byte_size(Jason.encode!(empty_page)), RetainedSize.bytes(empty_page))
 
-    assert HostConfig.minimum_snapshot_result_bytes() == metadata_bytes + empty_page_bytes
+    assert HostConfig.minimum_snapshot_result_bytes() == expected_minimum
 
     inspection = %{
       "install" => %{
@@ -527,6 +904,7 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert {:ok, _validated} = JSV.validate(dangling_llm, root, cast: false)
     assert {:error, :invalid_host_config} = HostConfig.decode(dangling_llm, "/tmp")
+    assert {:error, :host_invalid} = HostConfig.decode_command(dangling_llm, "/tmp")
   end
 
   test "stdio credential environment reserves the complete compatibility budget" do
@@ -551,6 +929,41 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
     assert {:error, :invalid_host_config} = HostConfig.decode(over_limit, "/tmp")
     assert {:error, _details} = JSV.validate(over_limit, root, cast: false)
+  end
+
+  test "an upstream tool name is the server's, so it is held to the MCP protocol rule" do
+    # #1422: the host layer used to force upstream names to PtcRunner's
+    # lowercase-dotted rule, which no operator controls. The shipped Go harness
+    # advertises `cityTime`, so no host document could install it.
+    {:ok, root} = JSV.build(HostConfig.schema(), atoms: false, warnings: :silent)
+
+    camel =
+      put_in(valid_config(), ["install", "workspace", "tools"], %{
+        "cityTime" => %{"as" => "workspace.city_time", "effect" => "read"}
+      })
+
+    assert {:ok, decoded} = HostConfig.decode(camel, "/tmp")
+    assert Map.has_key?(decoded.install["workspace"].tools, "cityTime")
+    assert {:ok, _validated} = JSV.validate(camel, root, cast: false)
+
+    # Only the public name crosses the capability boundary, so that one keeps
+    # PtcRunner's naming rule.
+    public =
+      put_in(valid_config(), ["install", "workspace", "tools"], %{
+        "cityTime" => %{"as" => "workspace.cityTime", "effect" => "read"}
+      })
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(public, "/tmp")
+    assert {:error, _details} = JSV.validate(public, root, cast: false)
+
+    # An upstream name the protocol itself rejects is still refused.
+    whitespace =
+      put_in(valid_config(), ["install", "workspace", "tools"], %{
+        "city Time" => %{"as" => "workspace.city_time", "effect" => "read"}
+      })
+
+    assert {:error, :invalid_host_config} = HostConfig.decode(whitespace, "/tmp")
+    assert {:error, _details} = JSV.validate(whitespace, root, cast: false)
   end
 
   defp valid_config do
@@ -581,4 +994,6 @@ defmodule PtcRunner.Kernel.HostConfigTest do
 
   defp unique_name,
     do: "host-#{System.unique_integer([:positive, :monotonic])}.json"
+
+  defp without_digest(installation), do: Map.delete(installation, :installation_config_digest)
 end

@@ -1476,7 +1476,8 @@
     },
     %{
       name: "format",
-      description: "Java-style format string",
+      description:
+        "Java-style format string with bounded width, left alignment, zero padding, and numeric precision",
       binding: :collect,
       category: :string,
       dispatch: :env,
@@ -1955,7 +1956,7 @@
         }
       ],
       notes:
-        "Options map supports `:depth` (1-5), `:paths true`, and `:sample` (1-3). Output is capped; `:truncated true` and `:caps_hit` identify traversal caps. For capped root vectors, `:count_capped true` means `:count` is the scanned count. The summary is keyword-keyed, and those keys encode, so `(json/generate-string (describe x))` works for JSON-native data. `:examples` and `:sample` hold values verbatim, so describing data that itself contains keywords or ##Inf/##NaN yields a positioned type_error rather than coercing them and misreporting the type the summary just named.",
+        "Options map supports `:depth` (1-5), `:paths true`, and `:sample` (1-3). Output is capped; `:truncated true` and `:caps_hit` identify traversal caps. For capped root vectors, `:count_capped true` means `:count` is the scanned count. The summary is keyword-keyed, and those keys encode, so `(json/generate-string (describe x))` works for JSON-native data. Scalar `:examples` and `:sample` values remain native; containers, callables, and Java values use inert bounded display strings. A native keyword or ##Inf/##NaN example still yields a positioned type_error when JSON encoding is requested.",
       see_also: ["keys", "type", "json/parse-lines", "json/generate-string"],
       clojure_var: nil,
       divergences: nil
@@ -2840,14 +2841,16 @@
       examples: [],
       notes:
         "Only namespaces holding at least one visible public export are listed; a namespace of " <>
-          "private `defn-` helpers does not appear. An unknown namespace returns an empty vector.",
-      see_also: ["apropos", "doc", "export-meta"],
+          "private `defn-` helpers does not appear. An unknown namespace returns an empty vector. " <>
+          "The one-argument form is macro-like over its namespace ref: unquoted, quoted, or string.",
+      see_also: ["apropos", "doc", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil
     },
     %{
       name: "apropos",
-      description: "Searches the attached prelude's public exports, returning matching refs.",
+      description:
+        "Searches visible prelude exports and fixed function documentation, returning names.",
       binding: :special,
       category: :core,
       dispatch: :env,
@@ -2857,16 +2860,20 @@
       ptc_extension?: true,
       examples: [],
       notes:
-        "Case-insensitive substring match over each export's ref and docstring; an export " <>
-          "without a docstring is matched on its ref alone. A blank query returns an empty " <>
-          "vector rather than every export.",
-      see_also: ["dir", "doc", "export-meta"],
+        "Case-insensitive literal substring match over prelude refs/docstrings and fixed " <>
+          "canonical names, signatures, descriptions, notes, divergences, and sections. " <>
+          "Qualified Java aliases in signatures are searchable; fixed results use canonical " <>
+          "names. Results are sorted and deduplicated. A blank query returns an empty vector. " <>
+          "Accepts a string or a quoted symbol (via symbol-ref normalization). An unquoted " <>
+          "query evaluates normally — `apropos` is not macro-like.",
+      see_also: ["dir", "doc", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil
     },
     %{
       name: "doc",
-      description: "Prints documentation for a public prelude export and returns `nil`.",
+      description:
+        "Prints documentation for a visible prelude export or fixed function and returns `nil`.",
       binding: :special,
       category: :core,
       dispatch: :env,
@@ -2877,9 +2884,12 @@
       examples: [],
       notes:
         "Prints rather than returns, so documentation is charged to the print budget instead " <>
-          "of the result channel and is subject to print truncation. Use `export-meta` for the " <>
-          "same information as data. A miss prints a not-found line and still returns `nil`.",
-      see_also: ["apropos", "dir", "export-meta"],
+          "of the result channel and is subject to print truncation. Exact attached exports " <>
+          "resolve before fixed registry entries; a hidden collision does not fall through. " <>
+          "Macro-like over the ref: accepts an unquoted symbol (`str`, `ns/name`), a quoted " <>
+          "symbol (`'ns/name`), or a string. Use `export-meta` for attached export information " <>
+          "as data. A miss prints a not-found line and still returns `nil`.",
+      see_also: ["apropos", "dir", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil
     },
@@ -2900,10 +2910,33 @@
           "`:doc`, `:visibility`, `:effect`, plus `:arity`/`:params` for functions and " <>
           "`:signature` or `:type` when declared. Capability wiring is not reported, and " <>
           "`:effect` is conservative: an export reaching a capability is never reported as " <>
-          "`:read`, since only the mission inventory can resolve installed effects. This is " <>
-          "not `clojure.core/meta`, which takes an object rather than a reference string and " <>
-          "is not implemented.",
-      see_also: ["apropos", "dir", "doc"],
+          "`:read`, since only the mission inventory can resolve installed effects. Macro-like " <>
+          "over the ref: accepts an unquoted symbol, a quoted symbol, or a string. This is " <>
+          "not `clojure.core/meta`, which takes an object rather than a reference and is not " <>
+          "implemented.",
+      see_also: ["apropos", "dir", "doc", "source"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "source",
+      description: "Prints the defining form of an attached prelude ref and returns `nil`.",
+      binding: :special,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(source ref)"],
+      since: nil,
+      section: "Introspection",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "Like `clojure.repl/source`, prints the rendered defining form and returns nil so " <>
+          "source flows through the print budget. Resolves ONLY against the attached prelude " <>
+          "`source_index` — no registry or filesystem fallthrough; an unknown ref prints " <>
+          "\"no source available\" and still returns nil. Covers public exports plus private " <>
+          "helpers transitively reachable from a public export. Reveals implementation, not " <>
+          "just contract. Macro-like over the ref: unquoted symbol, quoted symbol, or string.",
+      see_also: ["apropos", "dir", "doc", "export-meta"],
       clojure_var: nil,
       divergences: nil
     },
@@ -4337,7 +4370,7 @@
       see_also: [],
       clojure_var: "defn",
       divergences:
-        "DIV-01: self-recursion is subject to the iteration cap (default 1000, configurable up to 10000). DIV-15: no multi-arity head form ([x] x ([x y] ...)). DIV-16: no :pre/:post conditions. See docs/clojure-conformance-gaps.md."
+        "DIV-01: self-recursion has no default iteration cap; an optional per-activation loop/tail-recur limit may be configured. DIV-15: no multi-arity head form ([x] x ([x y] ...)). DIV-16: no :pre/:post conditions. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "defonce",
@@ -4389,17 +4422,18 @@
     },
     %{
       name: "fail",
-      description: "",
+      description: "End the evaluation with an explicit failure",
       binding: nil,
       category: :core,
       dispatch: :analyze,
-      signatures: ["(fail ...)"],
+      signatures: ["(fail error)"],
       since: nil,
       section: "Agent Control",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "Terminates the program immediately; a Kernel host aborts and rolls back the run. `ptc run` reports `execution/explicit_failure` — unless `error` re-raises a Kernel refusal, which keeps its own class — and its message says whether `error` was retained in the private inspection record or dropped. Not allowed inside `pmap` or `pcalls`.",
+      see_also: ["return"],
       clojure_var: "fail",
       divergences: nil
     },
@@ -4548,7 +4582,7 @@
       see_also: [],
       clojure_var: "loop",
       divergences:
-        "DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md."
+        "DIV-01: no default iteration cap; an optional per-activation loop/tail-recur limit may be configured. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "or",
@@ -4569,15 +4603,17 @@
     %{
       name: "pcalls",
       description: "Execute thunks in parallel",
-      binding: nil,
+      binding: :special,
       category: :core,
-      dispatch: :analyze,
+      dispatch: :env,
       signatures: ["(pcalls f1 f2 ...)"],
       since: nil,
       section: "Functional Tools",
       ptc_extension?: true,
       examples: [],
-      notes: nil,
+      notes:
+        "Resolves as a callable value and can be passed to apply, higher-order functions, " <>
+          "and function combinators. Direct calls retain the analyzer-optimized CoreAST path.",
       see_also: [],
       clojure_var: "pcalls",
       divergences: nil
@@ -4585,16 +4621,18 @@
     %{
       name: "pmap",
       description: "Apply f to each (zipped) item in parallel",
-      binding: nil,
+      binding: :special,
       category: :core,
-      dispatch: :analyze,
+      dispatch: :env,
       signatures: ["(pmap f coll)", "(pmap f c1 c2 ...)"],
       since: nil,
       section: "Functional Tools",
       ptc_extension?: true,
       examples: [],
       notes:
-        "Shares map's finite seqable contract: nil -> empty, strings map over graphemes, " <>
+        "Resolves as a callable value and can be passed to apply, higher-order functions, " <>
+          "and function combinators. Direct calls retain the analyzer-optimized CoreAST path. " <>
+          "Shares map's finite seqable contract: nil -> empty, strings map over graphemes, " <>
           "and multiple collections zip element-wise truncating to the shortest. Runs under " <>
           "bounded parallel limits (per-worker heap, worker budget, shared deadline).",
       see_also: ["map", "pcalls"],
@@ -4649,21 +4687,22 @@
       see_also: [],
       clojure_var: "recur",
       divergences:
-        "DIV-01: enforces a 1000-iteration default cap (configurable up to 10000) for sandbox safety. See docs/clojure-conformance-gaps.md."
+        "DIV-01: no default iteration cap; an optional per-activation loop/tail-recur limit may be configured. See docs/clojure-conformance-gaps.md."
     },
     %{
       name: "return",
-      description: "",
+      description: "End the evaluation with an explicit result",
       binding: nil,
       category: :core,
       dispatch: :analyze,
-      signatures: ["(return ...)"],
+      signatures: ["(return value)"],
       since: nil,
       section: "Agent Control",
       ptc_extension?: false,
       examples: [],
-      notes: nil,
-      see_also: [],
+      notes:
+        "Terminates the program immediately and makes `value` the evaluation's result. Not allowed inside `pmap` or `pcalls`.",
+      see_also: ["fail"],
       clojure_var: "return",
       divergences: nil
     },

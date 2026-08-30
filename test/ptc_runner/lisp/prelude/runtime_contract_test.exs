@@ -12,6 +12,34 @@ defmodule PtcRunner.Lisp.Prelude.RuntimeContractTest do
   end
 
   describe "public function contracts" do
+    test "reports static direct and higher-order prelude calls without constants" do
+      prelude =
+        compile!("""
+        (ns api "API" {:visibility :prompt})
+        (def answer 42)
+        (defn double [value] (* value 2))
+        """)
+
+      source = "(defn later [values] (map api/double values)) [api/answer (later [2])]"
+
+      assert {:ok, %Step{} = step} = Lisp.run(source, prelude: prelude)
+      assert step.prelude_calls == ["api/double"]
+    end
+
+    test "retains static prelude calls when execution fails after analysis" do
+      prelude =
+        compile!("""
+        (ns api "API" {:visibility :prompt})
+        (defn stringify
+          {:signature "(value :int) -> :string"}
+          [value]
+          (str value))
+        """)
+
+      assert {:error, %Step{} = step} = Lisp.run(~S|(api/stringify "bad")|, prelude: prelude)
+      assert step.prelude_calls == ["api/stringify"]
+    end
+
     test "Eval.eval returns a contract error tuple instead of leaking the exception" do
       prelude =
         compile!("""

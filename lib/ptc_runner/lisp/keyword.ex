@@ -2,8 +2,9 @@ defmodule PtcRunner.Lisp.Keyword do
   @moduledoc """
   Runtime representation for PTC-Lisp keywords that are not in the bounded atom vocabulary.
 
-  Existing atom-backed keywords remain atoms for compatibility. New source keywords use this
-  struct so user input cannot grow the BEAM atom table while keywords stay distinct from strings.
+  Names in the parser's bounded vocabulary use their fixed atom representation.
+  Other source keywords use this struct so user input cannot grow the BEAM atom
+  table while keywords stay distinct from strings.
   """
 
   defstruct [:name]

@@ -4,6 +4,8 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
   alias PtcRunner.Kernel.JSONSchema
   alias PtcRunner.Kernel.MCPProtocol
 
+  @wire_schema_path Path.expand("../../../site/schemas/mcp-2026-07-28.schema.json", __DIR__)
+
   @input_schema %{
     "type" => "object",
     "properties" => %{"query" => %{"type" => "string"}},
@@ -98,6 +100,32 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
         ] do
       assert {:error, :mcp_protocol_error} = MCPProtocol.decode_message(body)
     end
+  end
+
+  test "decodes an element-dense response within the declared admission limits" do
+    # Issue #1676: decode cost scales with element count, not bytes. A
+    # response under the node limit must decode regardless of how its bytes
+    # distribute across elements.
+    padding = Enum.map_join(1..49_000, ",", &~s("p#{&1}"))
+
+    body =
+      ~s({"jsonrpc":"2.0","id":7,"result":{"structuredContent":{"padding":[) <>
+        padding <> ~s(]}}})
+
+    assert {:ok, {:response, 7, %{"result" => _result}}} = MCPProtocol.decode_message(body)
+  end
+
+  test "a decode that exceeds host processing bounds is response excess, not a protocol fault" do
+    # One million integers materialize past the decode worker's heap budget
+    # before the node limit can be counted. The server violated no protocol;
+    # the host declined to process the response. If the budget ever grows
+    # past this document's needs, it fails as `json_node_limit_exceeded`
+    # (a protocol error) instead and this document must grow with it.
+    array = "[" <> String.duplicate("1,", 999_999) <> "1]"
+    body = ~s({"jsonrpc":"2.0","id":7,"result":{"content":) <> array <> "}}"
+
+    assert {:error, :mcp_response_exceeded} = MCPProtocol.decode_message(body)
+    assert {:error, :mcp_response_exceeded} = MCPProtocol.decode_response(body, 7)
   end
 
   test "rejects inbound JSON above the fixed document depth before decoding" do
@@ -218,6 +246,61 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
                %{"result" => %{"resultType" => "complete", "tools" => []}},
                "tools/list"
              )
+  end
+
+  test "classifies only discovery's correlated method-not-found error specially" do
+    response = %{
+      "error" => %{
+        "code" => -32_601,
+        "message" => "PRIVATE_REMOTE_MESSAGE",
+        "data" => %{"secret" => "PRIVATE_REMOTE_DATA"}
+      }
+    }
+
+    assert {:error, :mcp_discovery_method_unsupported} =
+             MCPProtocol.outcome(response, "server/discover")
+
+    assert {:error, :mcp_remote_error} = MCPProtocol.outcome(response, "tools/list")
+
+    for code <- [-32_602, -32_022, -32_603] do
+      assert {:error, :mcp_remote_error} =
+               MCPProtocol.outcome(
+                 %{"error" => %{"code" => code, "message" => "PRIVATE_REMOTE_MESSAGE"}},
+                 "server/discover"
+               )
+    end
+
+    assert {:error, :mcp_protocol_error} =
+             MCPProtocol.outcome(
+               %{
+                 "error" => %{
+                   "code" => -32_601,
+                   "message" => "Method not found",
+                   "unexpected" => true
+                 }
+               },
+               "server/discover"
+             )
+  end
+
+  test "distinguishes a valid unsupported discovery profile from malformed discovery data" do
+    valid = %{
+      "supportedVersions" => ["2025-11-25"],
+      "capabilities" => %{"tools" => %{}}
+    }
+
+    assert {:error, :mcp_protocol_version_unsupported} =
+             MCPProtocol.discover_result(valid, "2026-07-28")
+
+    for malformed <- [
+          Map.put(valid, "capabilities", []),
+          put_in(valid, ["capabilities", "tools"], []),
+          Map.put(valid, "supportedVersions", ["2025-11-25", 42]),
+          Map.put(valid, "supportedVersions", [])
+        ] do
+      assert {:error, :mcp_protocol_error} =
+               MCPProtocol.discover_result(malformed, "2026-07-28")
+    end
   end
 
   test "classifies input-required outcomes by method, structure, and client policy" do
@@ -1008,5 +1091,144 @@ defmodule PtcRunner.Kernel.MCPProtocolTest do
       assert {:error, :mcp_invalid_result} =
                MCPProtocol.normalize_tool_result(result, output_validator)
     end
+  end
+
+  # The wire schema is both published and embedded in `ptc docs`. This validates
+  # real requests against the one source document used by both distributions.
+  test "published wire schema accepts the exchanges PtcRunner actually sends" do
+    schema = @wire_schema_path |> File.read!() |> Jason.decode!()
+
+    assert schema["$id"] ==
+             "https://ptc-runner.dev/schemas/mcp-2026-07-28.schema.json"
+
+    for definition <- ~w(
+          DiscoverRequest
+          DiscoverResultResponse
+          ListToolsRequest
+          ListToolsResultResponse
+          CallToolRequest
+          CallToolResultResponse
+          PtcRunnerJSONRPCErrorResponse
+        ) do
+      assert is_map(schema["$defs"][definition]), "missing MCP definition #{definition}"
+    end
+
+    metadata = %{
+      "io.modelcontextprotocol/protocolVersion" => "2026-07-28",
+      "io.modelcontextprotocol/clientInfo" => %{"name" => "ptc_runner", "version" => "0.x"},
+      "io.modelcontextprotocol/clientCapabilities" => %{}
+    }
+
+    assert_schema_definition!(
+      schema,
+      "DiscoverRequest",
+      MCPProtocol.request(1, "server/discover", %{}, metadata)
+    )
+
+    assert_schema_definition!(schema, "DiscoverResultResponse", %{
+      "jsonrpc" => "2.0",
+      "id" => 1,
+      "result" => %{
+        "resultType" => "complete",
+        "supportedVersions" => ["2026-07-28"],
+        "capabilities" => %{"tools" => %{}},
+        "ttlMs" => 0,
+        "cacheScope" => "private"
+      }
+    })
+
+    assert_schema_definition!(
+      schema,
+      "ListToolsRequest",
+      MCPProtocol.request(2, "tools/list", %{}, metadata)
+    )
+
+    assert_schema_definition!(schema, "ListToolsResultResponse", %{
+      "jsonrpc" => "2.0",
+      "id" => 2,
+      "result" => %{
+        "resultType" => "complete",
+        "tools" => [
+          %{
+            "name" => "lookup",
+            "description" => "Look up one value.",
+            "inputSchema" => %{
+              "type" => "object",
+              "properties" => %{"query" => %{"type" => "string"}},
+              "required" => ["query"]
+            }
+          }
+        ],
+        "ttlMs" => 0,
+        "cacheScope" => "private"
+      }
+    })
+
+    assert_schema_definition!(
+      schema,
+      "CallToolRequest",
+      MCPProtocol.request(
+        3,
+        "tools/call",
+        %{"name" => "lookup", "arguments" => %{"fraction" => 1.5, "missing" => nil}},
+        metadata
+      )
+    )
+
+    assert_schema_definition!(schema, "CallToolResultResponse", %{
+      "jsonrpc" => "2.0",
+      "id" => 3,
+      "result" => %{
+        "resultType" => "complete",
+        "content" => [%{"type" => "text", "text" => "found"}],
+        "isError" => false
+      }
+    })
+
+    error_response = %{
+      "jsonrpc" => "2.0",
+      "id" => 3,
+      "error" => %{"code" => -32_603, "message" => "Method not found", "data" => nil}
+    }
+
+    assert_schema_definition!(schema, "PtcRunnerJSONRPCErrorResponse", error_response)
+
+    assert {:ok, ^error_response} =
+             error_response |> Jason.encode!() |> MCPProtocol.decode_response(3)
+
+    assert {:error, :mcp_remote_error} = MCPProtocol.outcome(error_response, "tools/call")
+
+    refute_schema_definition!(schema, "PtcRunnerJSONRPCErrorResponse", %{
+      error_response
+      | "id" => "3"
+    })
+
+    oversized = put_in(error_response, ["error", "message"], String.duplicate("€", 1_366))
+    assert_schema_definition!(schema, "PtcRunnerJSONRPCErrorResponse", oversized)
+    assert {:error, :mcp_protocol_error} = MCPProtocol.outcome(oversized, "tools/call")
+  end
+
+  defp assert_schema_definition!(schema, definition, value) do
+    validator = schema_definition_validator(schema, definition)
+
+    assert {:ok, _validated} = JSV.validate(value, validator, cast: false)
+  end
+
+  defp refute_schema_definition!(schema, definition, value) do
+    validator = schema_definition_validator(schema, definition)
+
+    assert {:error, _details} = JSV.validate(value, validator, cast: false)
+  end
+
+  defp schema_definition_validator(schema, definition) do
+    JSV.build!(
+      %{
+        "$schema" => schema["$schema"],
+        "$defs" => schema["$defs"],
+        "$ref" => "#/$defs/#{definition}"
+      },
+      atoms: false,
+      warnings: :silent
+    )
   end
 end

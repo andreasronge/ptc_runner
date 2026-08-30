@@ -5,7 +5,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   alias PtcRunner.Kernel.ArtifactPublisher
   alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.ExecutionOutcome
-  alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.PublicationHandle
@@ -15,11 +15,59 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ViewerAdapter
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.StreamingInspection
+
+  @tag :tmp_dir
+  test "an explicit failure whose inspection artifact never lands does not claim retention", %{
+    tmp_dir: dir
+  } do
+    trace = Path.join(dir, "run.jsonl")
+    inspection = Path.join(dir, "run.ptcins")
+    output = Path.join(dir, "result.json")
+
+    # `fail` throws past the enclosing `return`, so this is the ordinary
+    # explicit-failure outcome with an inspection artifact requested.
+    {built, _registry} =
+      build!(dir, "explicit-fail-publication", :normal, trace, inspection, output, :policy,
+        body: ~S|(fail {"secret" "must-not-escape"})|
+      )
+
+    assert {:ok, outcome} = RunBuilder.execute_built(built)
+    assert {:ok, evidence} = ExecutionOutcome.open(outcome, built.publication_authority)
+
+    fault = fn
+      :before_publish -> {:error, :partial_write}
+      _stage -> :ok
+    end
+
+    assert {:error, report} =
+             settlement =
+             RunBuilder.publish_execution_report(
+               outcome,
+               built.publication_authority,
+               %{inspection: fault}
+             )
+
+    refute report.artifact_state["inspection"] == "written"
+
+    assert {:error, projected} =
+             CommandRunOutcome.project(
+               evidence,
+               settlement,
+               "cmd-00000000000000000000000000",
+               false
+             )
+
+    assert projected.envelope["error"]["code"] == "explicit_failure"
+    assert projected.envelope["error"]["message"] =~ "did not reach its destination"
+    refute projected.envelope["error"]["message"] =~ "is retained"
+    refute Jason.encode!(projected.envelope) =~ "must-not-escape"
+  end
 
   @tag :tmp_dir
   test "normal publication reports partial ordering and path-free failures", %{tmp_dir: dir} do
     trace = Path.join(dir, "run.jsonl")
-    inspection = Path.join(dir, "run.inspection.jsonl")
+    inspection = Path.join(dir, "run.ptcins")
     output = Path.join(dir, "result.json")
     {built, registry} = build!(dir, "normal-publication", :normal, trace, inspection, output)
 
@@ -76,8 +124,8 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   test "trace-proven event loss preserves the partial inspection and successful result", %{
     tmp_dir: dir
   } do
-    trace = Path.join(dir, "partial.jsonl")
-    inspection = Path.join(dir, "partial.inspection.jsonl")
+    trace = Path.join(dir, "partial-publication.jsonl")
+    inspection = Path.join(dir, "partial.ptcins")
     output = Path.join(dir, "result.json")
     run_id = "partial-publication"
     trace_id = "trace-partial-publication"
@@ -89,7 +137,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
 
     records = [
       %{
-        "schema_version" => 1,
+        "schema_version" => 10,
         "run_id" => run_id,
         "trace_id" => trace_id,
         "sequence" => 1,
@@ -98,6 +146,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
         "correlation" => %{"capability_id" => "cap-dropped"},
         "payload" => %{
           "environment" => "mission",
+          "mission_name" => "default",
           "name" => "evidence.get",
           "arguments" => %{"id" => 42}
         }
@@ -105,24 +154,18 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
     ]
 
     events = [
-      trace_event(run_id, trace_id, 1, "run-started", %{}),
+      trace_event(run_id, trace_id, 1, "run-started", %{"missions" => %{"default" => %{}}}),
       trace_event(run_id, trace_id, 2, "events-dropped", %{"counts" => counts}),
       trace_event(run_id, trace_id, 3, "run-stopped", %{
         "outcome" => "ok",
         "reason" => nil,
         "result_hash" => result_hash,
-        "usage" => %{"events_dropped" => counts}
+        "usage" => %{
+          "events_dropped" => counts,
+          "llm_budget" => %{"total_tokens" => nil, "cost" => nil}
+        }
       })
     ]
-
-    evidence = %{
-      result:
-        {:ok, %Result{value: value, usage: %{events_dropped: counts}, evaluation_memory: %{}}},
-      result_class: :normal,
-      result_contract: :ok,
-      terminal_batch: {:ok, events},
-      inspection: {:ok, records}
-    }
 
     assert {:ok, authority} =
              PublicationAuthority.authorize(
@@ -131,6 +174,37 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
                :normal,
                :normal
              )
+
+    handle = PublicationAuthority.inspection_handle(authority)
+
+    assert {:ok, sink} =
+             InspectionSink.start(
+               run_id: run_id,
+               trace_id: trace_id,
+               publication_handle: handle
+             )
+
+    Enum.each(records, fn record ->
+      assert :ok =
+               InspectionSink.emit(
+                 sink,
+                 record["record_type"],
+                 record["correlation"],
+                 record["payload"]
+               )
+    end)
+
+    assert {:ok, seal} = InspectionSink.seal(sink)
+    assert :ok = InspectionSink.stop(sink)
+
+    evidence = %{
+      result:
+        {:ok, %Result{value: value, usage: %{events_dropped: counts}, evaluation_memory: %{}}},
+      result_class: :normal,
+      result_contract: :ok,
+      terminal_batch: {:ok, events},
+      inspection: {:ok, seal}
+    }
 
     assert {:ok, report} = ArtifactPublisher.publish(evidence, authority)
 
@@ -141,7 +215,13 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
            }
 
     assert Jason.decode!(File.read!(output)) == value
-    assert {:ok, ^records} = InspectionArtifact.load(inspection)
+
+    assert {:ok, [published_record]} =
+             StreamingInspection.read_path(inspection)
+
+    assert Map.drop(published_record, ["timestamp"]) ==
+             records |> hd() |> Map.drop(["timestamp"])
+
     assert {:ok, _source} = ViewerAdapter.pin_inspection(inspection, {:file, trace})
 
     trace_types =
@@ -477,7 +557,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   @tag :tmp_dir
   test "normal observations publish before an unencodable result", %{tmp_dir: dir} do
     trace = Path.join(dir, "unencodable.jsonl")
-    inspection = Path.join(dir, "unencodable.inspection.jsonl")
+    inspection = Path.join(dir, "unencodable.ptcins")
     output = Path.join(dir, "unencodable.json")
 
     {built, registry} =
@@ -516,7 +596,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   @tag :tmp_dir
   test "private publication materializes recovery before final requested result", %{tmp_dir: dir} do
     trace = Path.join(dir, "private.private.jsonl")
-    inspection = Path.join(dir, "private.inspection.jsonl")
+    inspection = Path.join(dir, "private.ptcins")
     output = Path.join(dir, "private-result.json")
     {built, registry} = build!(dir, "private-publication", :private, trace, inspection, output)
     recovery = PublicationAuthority.handles(built.publication_authority) |> Map.fetch!(:recovery)
@@ -551,6 +631,7 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
                :after_write,
                :after_sync,
                :before_lock,
+               :before_publish,
                :directory_sync,
                :after_publish
              ]
@@ -1011,20 +1092,22 @@ defmodule PtcRunner.Kernel.ArtifactPublisherTest do
   defp fixture_parts(body), do: {body, nil}
 
   defp trace_event(run_id, sequence, type) do
+    data = if type == "run-started", do: %{"missions" => %{}}, else: %{}
+
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => run_id,
       "trace_id" => "trace-#{run_id}",
       "sequence" => sequence,
       "timestamp" => "2026-07-12T12:00:00Z",
       "type" => type,
-      "data" => %{}
+      "data" => data
     }
   end
 
   defp trace_event(run_id, trace_id, sequence, type, data) do
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => run_id,
       "trace_id" => trace_id,
       "sequence" => sequence,

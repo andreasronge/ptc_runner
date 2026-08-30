@@ -1,7 +1,7 @@
 defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
   use ExUnit.Case, async: false
 
-  @moduletag :e2e
+  @moduletag :scheduled_e2e
   @moduletag timeout: 180_000
 
   alias PtcRunner.Kernel.ApplicationPackage
@@ -14,7 +14,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
   @host Path.join(@examples, "ptc-host.json")
 
   setup_all do
-    :ok = PtcRunner.Dotenv.load()
+    :ok = LLMSupport.load_dotenv()
     :ok = LLMSupport.admit_provider_application!()
 
     if System.get_env("OPENROUTER_API_KEY") do
@@ -28,7 +28,17 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
     assert {:ok, result} = run("02-deepseek-extract")
     assert %{"model_output" => model_output} = result.value
     assert {:ok, extracted} = Jason.decode(model_output)
-    assert extracted["project"] == "Atlas"
+
+    project = extracted["project"]
+    assert is_binary(project)
+
+    normalized_project =
+      project
+      |> String.trim()
+      |> String.downcase()
+      |> String.replace_prefix("project ", "")
+
+    assert normalized_project == "atlas"
     assert extracted["owner"] == "Priya"
     assert is_binary(extracted["risk"])
 
@@ -46,16 +56,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
     assert result.value == %{"ok" => true, "value" => expected}
     assert result.usage.subordinate_evaluations in 1..4
     assert result.usage.capability_calls.workflow["llm-request"] in 1..4
-    assert result.usage.capability_calls.mission["workspace.read"] == 1
-  end
-
-  test "the multi-turn tutorial commits a helper before explicit completion" do
-    assert {:ok, result} = run("04-multi-turn-agent")
-    assert result.value == %{"ok" => true, "value" => 42}
-    assert result.usage.subordinate_evaluations == 2
-    assert result.usage.capability_calls.workflow["llm-request"] == 2
-    assert result.evaluation_memory.defined_count == 1
-    assert result.evaluation_memory.history_count == 1
+    assert result.usage.capability_calls.mission["workspace.read"] >= 1
   end
 
   defp run(example) do

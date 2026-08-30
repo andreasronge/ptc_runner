@@ -337,15 +337,15 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
   end
 
   defp run_with_dispatch_attestation(source, context, opts, reference_id) do
-    owner = self()
-    handler_id = {__MODULE__, owner, make_ref()}
+    table = :ets.new(:ptc_java_dispatch_attestation, [:set, :public])
+    handler_id = {__MODULE__, self(), table, make_ref()}
 
     :ok =
       :telemetry.attach(
         handler_id,
         [:ptc_runner, :lisp, :java, :dispatch],
         &__MODULE__.handle_dispatch_attestation/4,
-        {owner, handler_id, reference_id}
+        {table, reference_id}
       )
 
     try do
@@ -356,16 +356,21 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
           timeout: Keyword.get(opts, :timeout_ms, @timeout_ms)
         )
 
+      # Dispatch attests from the Lisp sandbox. That worker replies on a process
+      # alias, which is unordered with pid mailbox sends, so `receive after 0`
+      # can miss an attestation after `run_native/2` returns. The telemetry
+      # handler writes this table synchronously in the sandbox, so the row is
+      # visible as soon as the sandbox function completes.
       selected =
-        receive do
-          {:java_dispatch_attestation, ^handler_id, overload_id} -> overload_id
-        after
-          0 -> nil
+        case :ets.lookup(table, :overload_id) do
+          [{:overload_id, overload_id}] -> overload_id
+          [] -> nil
         end
 
       {result, selected}
     after
       :telemetry.detach(handler_id)
+      :ets.delete(table)
     end
   end
 
@@ -374,9 +379,9 @@ defmodule PtcRunner.Lisp.Java.Oracle.Runner do
         _event,
         _measurements,
         %{reference_id: reference_id, overload_id: overload_id},
-        {owner, handler_id, reference_id}
+        {table, reference_id}
       ) do
-    send(owner, {:java_dispatch_attestation, handler_id, overload_id})
+    :ets.insert(table, {:overload_id, overload_id})
   end
 
   def handle_dispatch_attestation(_event, _measurements, _metadata, _state), do: :ok

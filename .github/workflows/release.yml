@@ -27,6 +27,15 @@ jobs:
             exit 1
           fi
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      # Without this a mistagged commit publishes a release titled for one
+      # version carrying an artifact named and reporting another.
+      - name: Require the tag to match the project version
+        if: github.ref_type == 'tag'
+        run: |
+          expected_tag="v$(grep -m1 -E '^ +version: "' mix.exs | sed -E 's/.*"(.+)".*/\1/')"
+          test -n "$expected_tag"
+          test "$GITHUB_REF_NAME" = "$expected_tag"
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -34,11 +43,114 @@ jobs:
       - uses: ./.github/actions/setup-elixir
       - run: mix precommit
       - run: mix prepush
+      - name: Check evaluator reduction baselines
+        env:
+          MIX_ENV: dev
+        run: mix bench.check --skip-heap
       # Ordinary branches do not regenerate the semantic build projection, so
       # this is the one gate that enforces it. A failure here means the tagged
       # tree ships a build identity that does not describe its own sources:
       # run `mix regen` on main, then re-tag. See `.gitattributes`.
       - name: Check the semantic build projection is current
         run: mix ptc.gen_semantic_revision --check
-      - run: MIX_ENV=dev mix deps.get && MIX_ENV=dev mix docs --warnings-as-errors
+      - run: scripts/ci/docs.sh
       - run: MIX_ENV=prod mix hex.build
+
+  # The assembled release embeds the Erlang runtime of the machine that built
+  # it, so each target builds and verifies its own artifact. macOS arm64 is the
+  # only published target so far; `docs/plans/lisp-kernel/stable-cli-contract.md`
+  # holds the rest of the matrix.
+  macos-artifact:
+    needs: verify
+    runs-on: macos-15
+    name: Package the standalone macOS artifact
+    timeout-minutes: 45
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    env:
+      MIX_ENV: prod
+      HEX_SPONSOR: false
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-elixir
+        with:
+          cache-plt: 'false'
+          install-babashka: 'false'
+
+      # Builds the release, vendors and re-signs its runtime library closure,
+      # runs the standalone verification against the packaged tree, and emits
+      # the artifact with its checksum.
+      - name: Package and verify
+        run: scripts/package_standalone_release.sh "$RUNNER_TEMP/artifacts"
+
+      - name: Attest the workflow-built artifact
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/artifacts/*.tar.gz
+
+      - name: Retain the attested artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: standalone-macos-arm64
+          path: ${{ runner.temp }}/artifacts/*
+          if-no-files-found: error
+
+  container:
+    needs: verify
+    uses: ./.github/workflows/container-release.yml
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+    with:
+      publish: ${{ github.ref_type == 'tag' }}
+
+  draft-release:
+    needs: [macos-artifact, container]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    name: Attach standalone artifacts to a draft release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Collect attested artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: standalone-*
+          path: ${{ runner.temp }}/artifacts
+          merge-multiple: true
+
+      - name: Create or update the draft release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A rerun may legitimately refresh a draft's assets, but a published
+          # release is a promise already made: replacing its assets changes
+          # what a verified digest refers to.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "release $GITHUB_REF_NAME is already published; refusing to replace its assets" >&2
+              exit 1
+            fi
+
+            gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP"/artifacts/* --clobber
+          else
+            gh release create \
+              "$GITHUB_REF_NAME" \
+              "$RUNNER_TEMP"/artifacts/* \
+              --draft \
+              --generate-notes \
+              --latest=false \
+              --title "PtcRunner ${GITHUB_REF_NAME#v}" \
+              --verify-tag
+          fi

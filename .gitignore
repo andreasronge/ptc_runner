@@ -5,6 +5,9 @@ _build/
 # If you run "mix test --cover", coverage assets end up here.
 /cover/
 
+# Assembled by scripts/build_site.sh; the published site is built in CI.
+/_site/
+
 # The directory Mix downloads your dependencies sources to.
 /deps
 examples/*/deps/
@@ -35,8 +38,17 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 ptc_runner-*.tar
 
+# Materialized immediately before Hex collects package files.
+/priv/source_revision
+/priv/source_dirty
+
 # Environment variables file (contains secrets like API keys).
 .env
+
+# Local artifacts produced by the runnable tutorial project files.
+examples/kernel-tutorial/*/.ptc/
+examples/debug-a-failed-run/*/.ptc/
+examples/support-triage/*/.ptc/
 
 # Temporary commit message files from tooling.
 .commit_msg.txt
@@ -63,9 +75,6 @@ MEMORY/
 
 # Generated viewer-demo data root
 /examples/viewer-demo/files/
-
-# Generated private results for the repo-analyst example application.
-repo-analyst/private/
 
 # Personal Claude Code overrides
 .claude/settings.local.json

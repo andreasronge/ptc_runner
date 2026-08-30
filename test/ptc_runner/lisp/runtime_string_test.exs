@@ -1,5 +1,5 @@
 defmodule PtcRunner.Lisp.RuntimeStringTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Runtime
 

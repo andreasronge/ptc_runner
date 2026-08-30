@@ -5,207 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.14.0] - 2026-08-24
 
-### Added
+### Breaking rewrite
 
-- Added explicit named mission environments: manifests declare a bounded
-  `missions` map with isolated data, continuations, APIs, and provider grants;
-  workflow and agent APIs select missions by name; V2 traces, V4 inspection,
-  Viewer projections, and stable command V2 evidence preserve mission
-  attribution. The reader/writer example demonstrates two least-authority
-  agents orchestrated by one workflow.
+This is a breaking 0.x replacement release. Existing integrations should be
+treated as new integrations against the current guides and references; removed
+APIs and commands have no compatibility facades.
 
-- Added a bounded Java interop oracle baseline with pinned Temurin and JVM
-  Clojure versions, typed fixtures for every admitted overload, exact descriptor
-  attestation for every JVM overload, executable closed-dispatch compatibility
-  cases, a Babashka fast subset, and a dedicated CI conformance job.
-- Added closed manifest dispatch, structured Java failures, native Java
-  callables and primitive provenance, bounded boundary projection, and complete
-  Java CoreAST nodes; migrated `Boolean/parseBoolean` off its legacy Env route.
-  Primitive provenance survives non-numeric Lisp operations, while
-  signature-aware recursive projection prevents Java authority from hiding in
-  tool arguments, tool results, return validation, or struct fields. Numeric
-  arithmetic, numeric index/count, aggregate, and ordering consumers erase
-  primitive provenance consistently, including higher-order invocation, while
-  native formatting preserves distinct primitive kinds without collapsing
-  literal-label map keys or set members. Java callables derive static,
-  constructor, or receiver-first instance invocation from manifest identity.
-  Numeric index/count projection is overload-arity aware, comparator callbacks
-  share callable dispatch and numeric projection, and constructor/direct-dot
-  source spellings resolve through the manifest before closed dispatch.
-  Java and ordinary struct-shaped maps must contain their exact declared fields.
-  Java class spellings are reserved against prelude shadowing, and rejected
-  tool results retain their executed callback ledger entry.
-- Migrated Java numeric parsers and Double special-value fields to closed
-  manifest dispatch. Java-named parsers now preserve exact primitive identity,
-  enforce int/long ranges, use direct IEEE float/double rounding, accept Java
-  decimal and hexadecimal syntax, and return bounded Java parse conditions;
-  unqualified Clojure parsers keep their safe `nil` behavior.
-- Migrated selected `java.lang.Math` methods to closed manifest dispatch with
-  exact primitive overload selection, Java overflow, signed-zero, NaN,
-  infinity, rounding, and saturation behavior. Qualified Math calls are now
-  distinct from the generic bare PTC-Lisp math helpers.
-- Migrated `System/currentTimeMillis` to closed manifest dispatch with native
-  Java `long` identity. The qualified call projects to an ordinary integer at
-  public boundaries, and the bare `(currentTimeMillis)` compatibility alias was
-  removed.
-- Migrated LocalDate, Instant, Duration, and legacy Date to validated native
-  wrappers and class-owned closed dispatch. Temporal precision and Java ranges
-  survive native evaluation; Date integers are exact milliseconds; public,
-  Kernel, formatting, export, retained-size, and signature-aware tool
-  boundaries handle every wrapper explicitly. Removed the bare `parse` alias,
-  Instant `getTime`, Date `isBefore`/`isAfter`, the Date temporal constructor
-  extension, host temporal promotion, and the global temporal dispatcher.
-- Migrated admitted `java.lang.String` methods to closed dispatch with bounded
-  UTF-16 code-unit semantics while ordinary PTC string helpers remain
-  grapheme-based. Oversized or unrepresentable String operations now return the
-  documented bounded condition; locale-sensitive `.toLowerCase` and
-  `.toUpperCase` and all legacy Java String aliases were removed.
-- Added the code-owned `log-analysis-v2` profile to `mix ptc repl`, with
-  bounded multi-turn mission evaluation over an immutable trace capture,
-  explicit whole-result cursor traversal, deterministic JSONL output for
-  coding agents, safe profile discovery, and separate atomic analysis-trace
-  persistence. Rejected log and inspection queries now fail instead of looking
-  like empty results, and both analysis profiles reuse the shipped `cap`
-  envelope and pagination helpers.
-- Added one typed MCP source with equivalent stateless Streamable HTTP and
-  owned stdio transports. Stdio uses the optional precompiled
-  `ptc_runner_launcher` companion, freezes launcher and server digests, and
-  provides bounded process-group cleanup.
-- Added manifest-relative input and result contracts with a bounded object
-  profile and root-only tagged decision unions. Input overrides now validate
-  before provider activity, and successful result values validate after
-  evidence capture but before terminal or artifact publication.
-- Added a host-installed `ptc_trace_snapshot` source that freezes one canonical
-  trace directory and exposes the existing four bounded `TraceLog` queries
-  under alias-derived mission capability names.
-
-### Changed
-
-- Added the runtime-included `bin/ptc` command and replaced the separate
-  `mix ptc.run` and `mix ptc.repl` tasks with the generic
-  `mix ptc <command>` surface. The dotted Mix tasks were removed without
-  compatibility shims.
-- Removed the unreferenced `diagnostic` and `artifact_state` definitions from
-  the published `ptc-command-envelope-v2` schema. Both were emitted but
-  referenced by no envelope branch, and `diagnostic` was a union over the whole
-  diagnostic catalog, so consumers generating types from `$defs` derived a
-  wider diagnostic than any envelope can carry. Validation behaviour is
-  unchanged; an out-of-tree `$ref` pointing at either definition must be
-  repointed at the per-branch definition it needs.
-- The shipped `agent.main/run` entry now validates model-authored terminal
-  candidates against the manifest result contract while the bounded loop can
-  still request a correction. Rejected values remain withheld; other workflow
-  entries retain the final fail-closed publication check.
-- `PtcRunner.Lisp.run/2` now retains only statically referenced context keys
-  when context filtering is enabled, including scalar grants. Set
-  `filter_context: false` when a program requires dynamic or metadata
-  passthrough. Public pre-setup errors validate continuation memory inside the
-  bounded setup worker before returning it.
-- `PtcRunner.Lisp.CoreToSource.serialize_closure/1` and
-  `serialize_namespace/1` now return `{:ok, value}` or `{:error, reason}` and
-  reject closures, including closure entries selected from a namespace, that
-  cannot hydrate losslessly.
-- `PtcRunner.Sandbox.execute/3` timeout failures now include `:setup` or `:eval`
-  phase metadata and may include a third rollback-snapshot element when a
-  configured post-setup failure occurs.
-- MCP provider installation now requires a nested `:transport` tuple; the
-  former top-level HTTP `:endpoint`, `:headers`, and
-  `:allow_insecure_loopback` options were removed.
-- Provider resource close functions must now return exactly `:ok`. Any other
-  return, exception, or exit is a cleanup failure; all closers are still
-  attempted, and a failed cleanup can replace a completed Kernel result with
-  `:provider_cleanup_error`. REPL close and abort results retain the frozen
-  terminal event batch alongside a cleanup error so trace persistence can
-  complete before the frontend reports the failure.
-- Made standalone `PtcRunner.Kernel.ReplSession` values process-affine. Only
-  the process that creates a session may evaluate, close, or abort it; calls
-  from another process now return `:session_owner_mismatch` without mutating
-  the continuation or stopping its owners. Public session values no longer
-  expose continuation values or raw run-state, sink, provider, or configuration
-  capabilities or owner process identifiers. An opaque ID resolves through a
-  creator-private table to one internal owner; closed entries are removed and
-  the owner closes all resources if the creator exits. Evaluation results now
-  use the inert public projection instead of returning native callable
-  continuation authority, preflight errors preserve the committed public memory
-  view, projection failures roll back before commit, owner construction
-  validates the exact run-state/sink/limit binding, and monitor-based watchdogs
-  cancel compile and evaluation workers if the creator exits without changing
-  its trap-exit flag or retaining an unbounded copy of the workload.
-- Redacted `Inspect` output for payload-bearing Lisp results, opaque Kernel
-  programs, and runtime callables. Logger messages explicitly built from these
-  inspected values now retain only bounded outcome/count/byte metadata, program
-  digest identity, and callable bound state instead of source, prompts, memory,
-  tool payloads, child steps, or evaluator context.
-- Ordinary Kernel runs and standalone REPL sessions now reserve terminal event
-  count and measured envelope capacity and atomically freeze one canonical
-  batch for result usage, trace, and inspection persistence. Drop accounting is
-  capped at sixteen event types plus a saturating overflow bucket, each
-  `RunConfig` atomically claims its recorder for one execution, and rejected
-  claimants cannot close resources owned by the winning run or REPL session.
-- Unified direct and Kernel public-value projection. Direct results preserve
-  colliding map keys and set members with inert wrappers, while Kernel JSON
-  boundaries reject ambiguous projections with
-  `:public_projection_collision` instead of silently dropping values.
-- Made tool caching evaluator-local: every PTC-Lisp evaluation starts empty,
-  caller-supplied `:tool_cache` state is rejected, and
-  `PtcRunner.Lisp.Result` no longer exposes internal cache entries.
-- Completed the Java interop migration cleanup. Every admitted overload now
-  uses closed dispatch; the temporary `legacy_env` schema, empty Java binding
-  catalog, Phase-0 attestation snapshot, and non-Java `Math/` namespace aliases
-  were removed. Ordinary PTC functions such as `bit-and` and `trunc` remain
-  available only under their non-Java names.
-- Replaced the legacy SubAgent, MCP, upstream, mutable-prelude, and trace
-  products with the owner-based `PtcRunner.Kernel` runtime.
-- Added immutable component bundles, structurally separate workflow and mission
-  environments, explicit host capabilities, strict JSON manifests, and shared
-  `ptc run` / `ptc repl` construction.
-- Added bounded mission evaluation, LLM/file/trace capability libraries,
-  generic Lisp-authored agent libraries, and canonical Kernel events.
-- Consolidated the Lisp evaluator around neutral contexts and results; removed
-  agent journal/budget/progress forms, MCP/catalog discovery, and upstream
-  inference.
-- Moved canonical trace loading/querying into `Kernel.TraceLog` and updated
-  `ptc_viewer` to use it.
-
-### Fixed
-
-- Command envelope publication no longer suppresses the normal terminal
-  rendering. Help, version, and init now use readable code-owned projections,
-  while workflow result values retain deterministic JSON rendering.
-- Destination failures now preserve their closed trace, inspection, or result
-  identity, and destination collisions consistently report actionable argument
-  conflicts without exposing caller paths.
-- Corrected the debugging and `println` documentation to distinguish dynamic
-  REPL setup files from compiled components and provider-backed inspection
-  records from evaluation-local `prints` entries.
-- Private analysis sessions no longer redact diagnostics built from the
-  operator's own submitted source. An undefined-variable failure now reports
-  its names, each verified to appear verbatim in the submitted source and
-  rebuilt rather than forwarded, so no evaluator text can quote a captured
-  record. Every session error map carries `message_redacted?`, and a withheld
-  message says that it was withheld.
-- `defn-` and `ns` in dynamic source now name their own cause instead of only
-  their consequences ("`'defn-' defines a private helper in component source
-  only; use defn in dynamic source"), and undefined-variable failures carry the
-  names structurally in `details.unbound_names`.
-- `mix ptc repl` profile resources whose artifacts sit one directory level down
-  are refused with a message that states the rule, instead of capturing zero
-  files and answering every query with an empty page. A started session reports
-  the admitted file and run counts per resource.
-- PTC-Lisp namespace export now uses the shortest round-trippable float
-  representation, preventing small finite values such as `1.0e-20` from being
-  serialized as zero.
-- Hardened public, continuation, tool, Kernel JSON, artifact, and namespace
-  export boundaries against malformed wrappers, improper lists, and lossy map
-  or set projection collisions.
-- Centralized sandbox worker teardown around process aliases and phase-aware
-  cleanup so late replies cannot leak into callers and evaluation failures
-  retain bounded rollback state.
-
-This is a 0.x replacement release. The deleted APIs have no compatibility
-facades.
+- The legacy SubAgent, MCP, upstream, mutable-prelude, and trace products have
+  been replaced by the bounded, owner-based `PtcRunner.Kernel`. Applications
+  now use strict manifests, immutable component bundles, separate workflow and
+  named mission environments, and explicitly host-installed capabilities.
+- The command surface is now `ptc` (or `mix ptc` in a source checkout) for
+  initialization, validation, execution, REPL use, diagnostics, transcripts,
+  and the packaged trace Viewer. The former `mix ptc.run` and `mix ptc.repl`
+  entry points and implicit environment discovery were removed.
+- PTC-Lisp now runs through neutral contexts and results with bounded mission
+  evaluation, generic Lisp-authored agent libraries, closed Java interop, and
+  manifest-relative input and result contracts. Legacy agent journal, budget,
+  progress, discovery, and upstream-inference forms were removed.
+- Tool and model access is assembled as explicit host capability sources,
+  including bounded LLM, filesystem, trace, Streamable HTTP MCP, and owned
+  stdio MCP providers. Provider ownership, cleanup, caching, limits, and
+  failure envelopes are enforced by the Kernel.
+- Canonical events, private inspection, run-analysis navigation, transcripts,
+  and the Viewer now share one bounded evidence model. Generated components can
+  be materialized, statically gated, validated against host-owned trials, and
+  supplied to a later run without granting a running program mutation authority.
 
 ## [0.13.0] - 2026-06-24
 
@@ -1012,6 +839,7 @@ facades.
 - Improve LLM schema descriptions and use Haiku 4.5 (#73) ([#73](https://github.com/andreasronge/ptc_runner/pull/73))
 - Store last_result in Agent state to avoid regenerating random data (#79) ([#79](https://github.com/andreasronge/ptc_runner/pull/79))
 - Add test_coverage configuration to exclude test support modules (#89) ([#89](https://github.com/andreasronge/ptc_runner/pull/89))
+[0.14.0]: https://github.com/andreasronge/ptc_runner/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/andreasronge/ptc_runner/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/andreasronge/ptc_runner/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/andreasronge/ptc_runner/compare/v0.10.1...v0.11.0

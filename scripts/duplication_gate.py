@@ -175,7 +175,7 @@ def main():
             "repetition is deliberate — add an `# ex_dna:disable-for-next-line` "
             "comment above one copy explaining why. Re-bless the baseline only "
             "for duplication you are accepting as debt.\n"
-            "See docs/guides/duplication-gate.md."
+            "See docs/maintainers/duplication-gate.md."
         )
         return 1
 

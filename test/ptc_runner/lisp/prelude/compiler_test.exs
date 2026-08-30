@@ -802,7 +802,9 @@ defmodule PtcRunner.Lisp.Prelude.CompilerTest do
       # Without any dep opts, and with deps supplied but NOT declared: both fail.
       for opts <- [[], [deps: [dep_base()]]] do
         assert {:error, error} = Compiler.compile(source, opts)
-        assert error.reason == :compile_error
+        assert error.reason == :unknown_namespace
+        assert error.details.rejected_namespace == "base"
+        assert error.details.available_namespaces == Enum.sort(error.details.available_namespaces)
         assert error.message =~ "unknown namespace"
         assert error.message =~ "requires_preludes"
       end

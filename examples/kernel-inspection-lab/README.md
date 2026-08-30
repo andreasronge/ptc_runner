@@ -1,14 +1,15 @@
 # Kernel inspection lab
 
 This credential-free developer lab runs the shipped `agent.core` loop against
-a scripted model, the TypeScript filesystem MCP sample, one host-native read
-capability, and a protocol-faithful stateless MCP 2026-07-28 server. The remote
-fixture exposes structured, text, and `isError: true` results. The scripted
-model first emits an invalid PTC-Lisp program, receives evaluation feedback,
-then calls every fixture successfully. Each journey produces both a sanitized
-canonical trace and an opt-in `0600` private inspection artifact with two LLM
-calls and the complete recovery dialogue. Node.js is required to launch the
-committed filesystem bundle; no package installation or download occurs.
+a scripted model, the published `ptc-fs-mcp@0.1.0` filesystem MCP server, one
+host-native read capability, and a protocol-faithful stateless MCP 2026-07-28
+server. The remote fixture exposes structured, text, and `isError: true`
+results. The scripted model first emits an invalid PTC-Lisp program, receives
+evaluation feedback, then calls every fixture successfully. Each journey
+produces both a sanitized canonical trace and an opt-in `0600` private
+inspection artifact with two LLM calls and the complete recovery dialogue.
+Node.js and npm are required to install and launch the pinned filesystem
+package.
 
 The same domain-neutral task runs twice. The `direct` journey exposes the five
 capabilities directly in the frozen mission inventory. The `wrapper` journey
@@ -22,13 +23,21 @@ Run it from the repository root:
 mix run examples/kernel-inspection-lab/run.exs
 ```
 
-The command prints its temporary artifact directory and an exact `mix
-ptc.viewer` command. To keep artifacts at a chosen location, pass one new empty
-directory:
+The command prints its temporary artifact directory, writes one project
+document per journey beside it, and prints an exact `mix ptc viewer` command
+for the `direct` journey. Those project documents grant the Viewer the private
+inspection artifacts, so treat the browser tab as a private sink. To keep
+artifacts at a chosen location, pass one new empty directory:
 
 ```console
 mix run examples/kernel-inspection-lab/run.exs /tmp/ptc-inspection-lab
 ```
+
+Each journey writes canonical artifacts under `artifacts/traces/` and private
+artifacts under `artifacts/inspection/`, the conventional owner-only project
+artifact root. Those sibling directories can be passed directly to
+`mix ptc transcript`; create a third directory outside the root for
+`--private-output`.
 
 Inspection artifacts contain full model requests/responses, generated source,
 and capability payloads. They are not sanitized traces and should not be

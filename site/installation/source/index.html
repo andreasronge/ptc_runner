@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Source installation · PtcRunner</title>
+<meta name="description" content="Build PtcRunner from a repository checkout when changing the runtime,
+validating an unreleased revision, or producing a standalone artifact.">
+<link rel="canonical" href="https://ptc-runner.dev/installation/source/">
+<meta property="og:title" content="Source installation · PtcRunner">
+<meta property="og:description" content="Build PtcRunner from a repository checkout when changing the runtime,
+validating an unreleased revision, or producing a standalone artifact.">
+<meta property="og:url" content="https://ptc-runner.dev/installation/source/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/" class="current" aria-current="page">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="source-installation">Source installation</h1><p>Build PtcRunner from a repository checkout when changing the runtime,
+validating an unreleased revision, or producing a standalone artifact.</p><p>The
+ordinary product interface is the installed <code class="inline">ptc</code> executable.</p><p>Tool versions are pinned in <code class="inline">mise.toml</code>:</p><pre><code class="console language-console">mise install
+mix deps.get
+mix compile</code></pre><p>Run the command frontend from the checkout:</p><pre><code class="console language-console">mix ptc init hello-ptc
+mix ptc run hello-ptc/ptc-project.json</code></pre><p>Build the local runtime-included release:</p><pre><code class="console language-console">MIX_ENV=prod mix release ptc_runner --overwrite
+_build/prod/rel/ptc_runner/bin/ptc --version</code></pre><p>Version output includes the application version, the producing checkout's
+short commit SHA, and whether tracked or untracked source changes were present,
+for example <code class="inline">0.14.0 (0a4d062b, clean)</code>. For a machine-readable record, publish
+the version command envelope:</p><pre><code class="console language-console">mix ptc version --envelope version.json
+ptc version --envelope version.json</code></pre><p>Hermetic builds without <code class="inline">.git</code> must set the full lowercase commit SHA in
+<code class="inline">PTC_SOURCE_REVISION</code> and set <code class="inline">PTC_SOURCE_DIRTY</code> to <code class="inline">true</code> or <code class="inline">false</code>.</p><p>That assembled tree is tied to the build host's linked libraries. On macOS,
+build the relocatable archive instead:</p><pre><code class="console language-console">scripts/package_standalone_release.sh</code></pre><p>The packaging script closes the runtime library set, carries required licenses,
+rewrites loader paths, re-signs modified files, verifies the resulting tree,
+and writes the archive and checksum under <code class="inline">_build/artifacts/</code>.</p><p>See the checkout's
+<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/development-setup.md">development setup</a>
+for the complete repository toolchain, worktree seeding, hooks, and local gates. See
+<a href="/installation/standalone/">Standalone installation</a> for the target-machine contract.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/installation/docker/">&larr; Docker installation</a><a class="pager-next" href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/installation/source.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

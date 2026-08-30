@@ -3,9 +3,9 @@ defmodule PtcRunner.Kernel.Library do
   Shipped PTC-Lisp libraries as explicit Kernel components.
 
   Available component IDs are `kernel`, `runtime`, `cap`, `workflow.event`,
-  `llm`, `agent.native`, `agent.core`, `agent.feedback`, `agent.retry`,
-  `agent.prompt`, `agent.main`, `result`, `log.core`, `log.analysis`,
-  `inspection.core`, `inspection.analysis`, and `prompt.audit`.
+  `llm`, `agent.native`, `agent.core`, `agent.failure`, `agent.feedback`,
+  `agent.machine`, `agent.retry`, `agent.prompt`, `agent.main`, `result`,
+  `analysis`, `debug.nav`, and `prompt.audit`.
 
   `agent.main` is a generic entry wrapper: a manifest names `agent.main/run`
   and supplies `task` and `agent` through input, instead of every application
@@ -19,20 +19,40 @@ defmodule PtcRunner.Kernel.Library do
   model-authored value to its PTC-Lisp caller without terminating the outer
   workflow, allowing an evaluator to judge the answer before returning.
 
+  `analysis` and `debug.nav` are the two navigation surfaces over one immutable
+  run-evidence capture, and a mission installs one or the other. `analysis`
+  binds the stable `analysis-runs`/`analysis-open`/`analysis-read`/
+  `analysis-counters` capability names a REPL analysis profile grants.
+  `debug.nav` adds `follow` and binds a manifest-installed snapshot provider,
+  which names its operations `<alias>.runs`/`<alias>.open`/`<alias>.read`/
+  `<alias>.counters`; the mission must therefore select its correlated
+  inspection snapshot provider under the conventional alias `debug.nav`.
+  `counters` is a thin unwrap of the captured canonical trace aggregate;
+  `follow` takes one typed relationship from an evidence item and reads its
+  exact target collection and filters, refusing an unavailable or filterless
+  relationship and any caller filter beyond `limit` and `cursor`. Neither adds
+  host authority or diagnosis policy: `follow` returns the original
+  relationship beside the unchanged native page envelope, so cursors,
+  completeness, and relationship state survive the hop.
+
   `cap` is `:discoverable` rather than `:prompt`. Its envelope and pagination
   helpers compose capabilities for other libraries and stay out of the prompt
   inventory; evaluated code still finds them with `(dir "cap")` and reads them
-  with `(doc "cap/collect-pages")`. `unwrap!` fails the program on an error
-  envelope rather than
-  returning it, `with-cursor` adds one opaque cursor to an argument map, and
-  `collect-pages` follows cursors only up to its explicit page bound.
+  with `(doc "cap/fold-pages")`. `unwrap!` fails the program on an error
+  envelope rather than returning it. `fold-pages` is the one traversal helper:
+  it reduces page items into bounded caller state, preserves a resumable cursor
+  at its explicit page bound, and rejects changed snapshots or cursor cycles
+  observed within one invocation without retaining source-sized resume history.
 
-  `prompt.audit` measures a rendered agent system prompt: it segments the
-  string, sizes each segment, and diffs two versions. It is pure and takes a
-  string, so one implementation serves the REPL reading a recorded run, the
-  tests guarding the committed prompt artifacts, and the size gate built on
-  them. It is `:discoverable` for the same reason `cap` is — a model composing
-  an application has no use for it.
+  `agent.failure` is also `:discoverable`. It is generated from
+  `PtcRunner.Kernel.LLMFailureCatalog` and exports one pure `classify`
+  function over the existing bounded LLM envelope. Classification does not add
+  a field, tool call, or fail-fast evidence; `kernel-llm-provider-failure`
+  remains the consume boundary.
+
+  `agent.machine` is `:discoverable` as well: a pure constructor/advance reducer
+  for the shipped agent loop. Visibility is not an authority boundary; the
+  exports remain callable. It is not an application customization API.
 
   Fetching one component with `component/1` does not expand its dependencies,
   and `PtcRunner.Kernel` refuses to compile an incomplete set. Manifests and
@@ -45,6 +65,7 @@ defmodule PtcRunner.Kernel.Library do
   """
 
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.FrozenBundle
 
   @kernel_path Path.expand("../../../priv/preludes/kernel/kernel.clj", __DIR__)
   @runtime_path Path.expand("../../../priv/preludes/kernel/runtime.clj", __DIR__)
@@ -54,19 +75,15 @@ defmodule PtcRunner.Kernel.Library do
   @agent_native_path Path.expand("../../../priv/preludes/kernel/agent.native.clj", __DIR__)
   @agent_prompt_path Path.expand("../../../priv/preludes/kernel/agent.prompt.clj", __DIR__)
   @agent_core_path Path.expand("../../../priv/preludes/kernel/agent.core.clj", __DIR__)
+  @agent_failure_path Path.expand("../../../priv/preludes/kernel/agent.failure.clj", __DIR__)
+  @agent_machine_path Path.expand("../../../priv/preludes/kernel/agent.machine.clj", __DIR__)
   @agent_main_path Path.expand("../../../priv/preludes/kernel/agent.main.clj", __DIR__)
   @agent_feedback_path Path.expand("../../../priv/preludes/kernel/agent.feedback.clj", __DIR__)
   @agent_retry_path Path.expand("../../../priv/preludes/kernel/agent.retry.clj", __DIR__)
   @result_path Path.expand("../../../priv/preludes/kernel/result.clj", __DIR__)
-  @log_core_path Path.expand("../../../priv/preludes/kernel/log.core.clj", __DIR__)
-  @inspection_core_path Path.expand("../../../priv/preludes/kernel/inspection.core.clj", __DIR__)
-  @log_analysis_path Path.expand("../../../priv/preludes/kernel/log.analysis.clj", __DIR__)
+  @analysis_path Path.expand("../../../priv/preludes/kernel/analysis.clj", __DIR__)
+  @debug_nav_path Path.expand("../../../priv/preludes/kernel/debug.nav.clj", __DIR__)
   @prompt_audit_path Path.expand("../../../priv/preludes/kernel/prompt.audit.clj", __DIR__)
-
-  @inspection_analysis_path Path.expand(
-                              "../../../priv/preludes/kernel/inspection.analysis.clj",
-                              __DIR__
-                            )
   @external_resource @kernel_path
   @external_resource @runtime_path
   @external_resource @cap_path
@@ -75,14 +92,14 @@ defmodule PtcRunner.Kernel.Library do
   @external_resource @agent_native_path
   @external_resource @agent_prompt_path
   @external_resource @agent_core_path
+  @external_resource @agent_failure_path
+  @external_resource @agent_machine_path
   @external_resource @agent_main_path
   @external_resource @agent_feedback_path
   @external_resource @agent_retry_path
   @external_resource @result_path
-  @external_resource @log_core_path
-  @external_resource @inspection_core_path
-  @external_resource @log_analysis_path
-  @external_resource @inspection_analysis_path
+  @external_resource @analysis_path
+  @external_resource @debug_nav_path
   @external_resource @prompt_audit_path
   @sources %{
     "kernel" => File.read!(@kernel_path),
@@ -93,27 +110,31 @@ defmodule PtcRunner.Kernel.Library do
     "agent.native" => File.read!(@agent_native_path),
     "agent.prompt" => File.read!(@agent_prompt_path),
     "agent.core" => File.read!(@agent_core_path),
+    "agent.failure" => File.read!(@agent_failure_path),
+    "agent.machine" => File.read!(@agent_machine_path),
     "agent.main" => File.read!(@agent_main_path),
     "agent.feedback" => File.read!(@agent_feedback_path),
     "agent.retry" => File.read!(@agent_retry_path),
     "result" => File.read!(@result_path),
-    "log.core" => File.read!(@log_core_path),
-    "inspection.core" => File.read!(@inspection_core_path),
-    "log.analysis" => File.read!(@log_analysis_path),
-    "inspection.analysis" => File.read!(@inspection_analysis_path),
+    "analysis" => File.read!(@analysis_path),
+    "debug.nav" => File.read!(@debug_nav_path),
     "prompt.audit" => File.read!(@prompt_audit_path)
   }
   @dependencies %{
-    "inspection.analysis" => ["cap", "inspection.core"],
-    "inspection.core" => ["cap"],
-    "log.analysis" => ["cap", "log.core"],
-    "log.core" => ["cap"],
+    "analysis" => ["cap"],
+    "debug.nav" => ["cap"],
     "agent.prompt" => ["kernel"],
-    "agent.core" => [
+    "agent.machine" => [
+      "agent.failure",
       "agent.feedback",
-      "agent.native",
       "agent.prompt",
       "agent.retry",
+      "result"
+    ],
+    "agent.core" => [
+      "agent.machine",
+      "agent.native",
+      "agent.prompt",
       "kernel",
       "llm",
       "result",
@@ -121,6 +142,11 @@ defmodule PtcRunner.Kernel.Library do
     ],
     "agent.main" => ["agent.core"]
   }
+  @component_ids @sources |> Map.keys() |> Enum.sort()
+
+  @spec component_ids() :: [binary()]
+  @doc "Returns every shipped component ID in lexical order."
+  def component_ids, do: @component_ids
 
   @spec component(binary()) :: {:ok, Component.t()} | {:error, :unknown_library}
   @doc "Returns one shipped component by its stable component ID."
@@ -140,6 +166,23 @@ defmodule PtcRunner.Kernel.Library do
   end
 
   def component(_name), do: {:error, :unknown_library}
+
+  @doc false
+  @spec shipped_component?(FrozenBundle.t() | nil, binary()) :: boolean()
+  def shipped_component?(%FrozenBundle{} = bundle, id) when is_binary(id) do
+    with true <- FrozenBundle.valid?(bundle),
+         {:ok, expected} <- component(id),
+         %{dependencies: dependencies, origin: origin, source_hash: source_hash} <-
+           Enum.find(bundle.components, &(&1.id == id)) do
+      dependencies == expected.dependencies and
+        origin == expected.origin and
+        source_hash == source_hash(expected.source)
+    else
+      _other -> false
+    end
+  end
+
+  def shipped_component?(_bundle, _id), do: false
 
   @spec components([binary()]) :: {:ok, [Component.t()]} | {:error, :unknown_library}
   @doc "Returns shipped components in the requested order."
@@ -277,4 +320,7 @@ defmodule PtcRunner.Kernel.Library do
       do: {:error, :local_library_collision},
       else: :ok
   end
+
+  defp source_hash(source),
+    do: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
 end

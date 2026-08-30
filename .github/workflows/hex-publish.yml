@@ -1,0 +1,214 @@
+name: Publish PtcRunner to Hex
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published PtcRunner GitHub release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hex-publish-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      attestations: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEX_SPONSOR: false
+      RELEASE_TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Checkout trusted publication helpers
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: workflow-source
+          persist-credentials: false
+          sparse-checkout: scripts
+
+      - name: Checkout requested release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21.0.11+10.0.LTS"
+
+      - name: Set up Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20.2"
+          otp-version: "29.0.3"
+
+      - name: Pin the Hex artifact implementation
+        run: mix local.hex 2.3.1 --force
+
+      - name: Require a published immutable release from main
+        working-directory: release-source
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+
+          tag_commit="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          test "$tag_commit" = "$(git rev-parse HEAD)"
+          git merge-base --is-ancestor "$tag_commit" origin/main
+
+          version="$(grep -m1 -E '^ +version: "' mix.exs | sed -E 's/.*"(.+)".*/\1/')"
+          test "$RELEASE_TAG" = "v$version"
+
+          release_state="$(
+            gh release view "$RELEASE_TAG" \
+              --json isDraft,isImmutable \
+              --jq '[.isDraft, .isImmutable] | @tsv'
+          )"
+          test "$release_state" = $'false\ttrue'
+          gh release verify "$RELEASE_TAG"
+
+      - name: Build the Hex package
+        working-directory: release-source
+        run: |
+          artifact_dir="$RUNNER_TEMP/hex-artifacts"
+          mkdir "$artifact_dir"
+
+          MIX_ENV=prod mix deps.get --only prod --check-locked
+          mix_output="$(MIX_ENV=prod mix hex.build)"
+          printf '%s\n' "$mix_output"
+
+          package_checksum="$(
+            sed -n 's/^Package checksum: //p' <<<"$mix_output"
+          )"
+          test -n "$package_checksum"
+
+          version="${RELEASE_TAG#v}"
+          cp "ptc_runner-$version.tar" "$artifact_dir/"
+          printf '%s\n' "$package_checksum" > "$artifact_dir/package-checksum.txt"
+
+      - name: Build the HexDocs artifact
+        working-directory: release-source
+        run: |
+          MIX_ENV=dev mix deps.get --check-locked
+          MIX_ENV=dev mix compile --warnings-as-errors
+          MIX_ENV=dev mix docs --warnings-as-errors
+
+          version="${RELEASE_TAG#v}"
+          MIX_ENV=dev mix run --no-start --no-compile \
+            ../workflow-source/scripts/build_hex_docs.exs -- \
+            "$RUNNER_TEMP/hex-artifacts/ptc_runner-$version-docs.tar.gz"
+
+          cd "$RUNNER_TEMP/hex-artifacts"
+          sha256sum \
+            "ptc_runner-$version.tar" \
+            "ptc_runner-$version-docs.tar.gz" \
+            package-checksum.txt \
+            > SHA256SUMS
+
+      - name: Retain publication artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: ptc-runner-hex-${{ inputs.tag }}
+          path: ${{ runner.temp }}/hex-artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: build
+    runs-on: ubuntu-22.04
+    environment: hex-publish
+    env:
+      HEX_SPONSOR: false
+      RELEASE_TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Checkout the trusted uploader
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: workflow-source
+          persist-credentials: false
+          sparse-checkout: scripts/publish_hex_artifact.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Download publication artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: ptc-runner-hex-${{ inputs.tag }}
+          path: artifacts
+
+      - name: Verify publication artifacts
+        run: |
+          test "$(find artifacts -maxdepth 1 -type f | wc -l)" -eq 4
+          cd artifacts
+          sha256sum --check SHA256SUMS
+
+      - name: Inspect existing Hex release
+        id: package-state
+        run: |
+          version="${RELEASE_TAG#v}"
+          release_json="$RUNNER_TEMP/hex-release.json"
+          status="$(
+            curl --silent --show-error \
+              --output "$release_json" \
+              --write-out '%{http_code}' \
+              "https://hex.pm/api/packages/ptc_runner/releases/$version"
+          )"
+
+          case "$status" in
+            200)
+              remote_checksum="$(jq -r .checksum "$release_json")"
+              test "$remote_checksum" = "$(cat artifacts/package-checksum.txt)"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              ;;
+            404)
+              echo "publish=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Hex release lookup returned HTTP $status" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Publish package artifacts
+        env:
+          HEX_API_KEY: ${{ secrets.HEX_API_KEY }}
+          PUBLISH_PACKAGE: ${{ steps.package-state.outputs.publish }}
+        run: |
+          version="${RELEASE_TAG#v}"
+
+          if [ "$PUBLISH_PACKAGE" = true ]; then
+            bash workflow-source/scripts/publish_hex_artifact.sh \
+              "artifacts/ptc_runner-$version.tar" \
+              "packages/ptc_runner/releases?replace=false"
+          fi
+
+          bash workflow-source/scripts/publish_hex_artifact.sh \
+            "artifacts/ptc_runner-$version-docs.tar.gz" \
+            "packages/ptc_runner/releases/$version/docs"
+
+      - name: Verify the published package and documentation
+        run: |
+          version="${RELEASE_TAG#v}"
+          curl --fail --silent --show-error \
+            "https://hex.pm/api/packages/ptc_runner/releases/$version" \
+            >/dev/null
+          curl --fail --silent --show-error \
+            --location \
+            --retry 12 \
+            --retry-all-errors \
+            --retry-delay 5 \
+            --output "$RUNNER_TEMP/hexdocs-index.html" \
+            "https://hexdocs.pm/ptc_runner/$version/"
+          grep -F "PtcRunner v$version" "$RUNNER_TEMP/hexdocs-index.html"

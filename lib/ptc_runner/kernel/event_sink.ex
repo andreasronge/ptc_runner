@@ -25,14 +25,11 @@ defmodule PtcRunner.Kernel.EventSink do
   """
   use GenServer
 
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.EventSinkState
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.OwnerHandoff
-  alias PtcRunner.Lisp.RetainedSize
 
-  @drop_count_limit 4_294_967_295
-  @max_drop_type String.duplicate("e", 128)
-  @maximum_terminal_reason String.duplicate("r", 1_020)
   @stop_timeout_ms 5_000
 
   @enforce_keys [:pid, :token, :policy]
@@ -142,18 +139,35 @@ defmodule PtcRunner.Kernel.EventSink do
   def begin_capacity?(_sink, _data), do: false
 
   @doc false
-  def terminal_usage_capacity?(
-        %__MODULE__{policy: policy},
-        %Limits{} = limits,
-        usage
-      )
+  def terminal_usage_capacity?(sink, %Limits{} = limits, usage) do
+    case required_terminal_payload_bytes(sink, usage) do
+      bytes when is_integer(bytes) -> limits.event_payload_bytes >= bytes
+      :error -> false
+    end
+  end
+
+  def terminal_usage_capacity?(_sink, _limits, _usage), do: false
+
+  @doc """
+  Returns the `event_payload_bytes` one terminal payload of `usage` needs.
+
+  Admission compares this against the effective limit, and the refusal reports
+  it, so the number a caller is told to raise to is the number that refused
+  them. Normal policy charges the saturated reachable drop map at its
+  conservative bound rather than at whatever the current run happens to hold.
+  """
+  @spec required_terminal_payload_bytes(t(), map()) :: pos_integer() | :error
+  def required_terminal_payload_bytes(%__MODULE__{policy: policy}, usage)
       when policy in [:normal, :private] and is_map(usage) do
-    dropped = if policy == :normal, do: maximum_dropped(), else: %{}
+    {dropped, drop_map_headroom} =
+      if policy == :normal,
+        do: EventBudget.maximum_dropped_with_headroom(),
+        else: {%{}, 0}
 
     usage = Map.put(usage, :events_dropped, dropped)
 
-    [
-      %{outcome: :error, reason: @maximum_terminal_reason, usage: usage},
+    payloads = [
+      %{outcome: :error, reason: EventBudget.maximum_terminal_reason(), usage: usage},
       %{
         outcome: :ok,
         reason: nil,
@@ -161,10 +175,16 @@ defmodule PtcRunner.Kernel.EventSink do
         usage: usage
       }
     ]
-    |> Enum.all?(&EventSinkState.payload_within_limit?(&1, limits.event_payload_bytes))
+
+    Enum.reduce_while(payloads, 1, fn payload, required ->
+      case EventSinkState.payload_bytes(payload) do
+        bytes when is_integer(bytes) -> {:cont, max(required, bytes + drop_map_headroom)}
+        :error -> {:halt, :error}
+      end
+    end)
   end
 
-  def terminal_usage_capacity?(_sink, _limits, _usage), do: false
+  def required_terminal_payload_bytes(_sink, _usage), do: :error
 
   @spec events(t()) :: [map()]
   @doc "Returns retained canonical events in sequence order."
@@ -312,50 +332,10 @@ defmodule PtcRunner.Kernel.EventSink do
   defp terminal_payload_capacity?(:private, _limits, _reserve), do: true
 
   defp terminal_payload_capacity?(:normal, limits, _reserve) do
-    dropped = maximum_dropped()
-
-    terminal_payloads = [
-      %{"counts" => dropped},
-      %{
-        "outcome" => "error",
-        "reason" => @maximum_terminal_reason,
-        "usage" => %{"events_dropped" => dropped}
-      },
-      %{
-        "outcome" => "ok",
-        "reason" => nil,
-        "result_hash" => "sha256:" <> String.duplicate("f", 64),
-        "usage" => %{"events_dropped" => dropped}
-      }
-    ]
-
-    Enum.all?(terminal_payloads, fn payload ->
-      case RetainedSize.bytes_with_cap(payload, limits.event_payload_bytes) do
-        bytes when is_integer(bytes) -> bytes <= limits.event_payload_bytes
-        :oversized -> false
-      end
-    end)
+    EventBudget.normal_terminal_payload_capacity?(limits.event_payload_bytes)
   end
 
-  defp maximum_dropped do
-    1..16
-    |> Map.new(&{"#{@max_drop_type}#{&1}", @drop_count_limit})
-    |> Map.put("$overflow", @drop_count_limit)
-  end
-
-  defp terminal_envelope_bytes(type) do
-    envelope = %{
-      schema_version: 2,
-      run_id: String.duplicate("r", 256),
-      trace_id: String.duplicate("t", 256),
-      sequence: @drop_count_limit,
-      timestamp: ~U[9999-12-31 23:59:59.999999Z],
-      type: type,
-      data: nil
-    }
-
-    RetainedSize.bytes(envelope)
-  end
+  defp terminal_envelope_bytes(type), do: EventBudget.terminal_envelope_bytes(type)
 
   defp valid_id?(value),
     do: is_binary(value) and byte_size(value) in 1..256 and String.valid?(value)
@@ -376,9 +356,9 @@ defmodule PtcRunner.Kernel.EventSink do
 
   # Run identifiers must be unique across separate OS processes: traces from
   # independent CLI invocations commonly land in one directory, and
-  # `Kernel.TraceLog` fail-closes the whole directory source when two files
-  # reuse a run/trace identity with restarted sequences. A per-VM counter
-  # collides almost deterministically there, so the default carries entropy.
+  # `Kernel.TraceLog` isolates every connected file when two files reuse a
+  # run/trace identity with restarted sequences. A per-VM counter collides
+  # almost deterministically there, so the default carries entropy.
   defp default_run_id do
     "run-" <> Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
   end

@@ -1,0 +1,295 @@
+name: PtcRunner Container Release
+
+on:
+  workflow_call:
+    inputs:
+      publish:
+        description: Publish the exact release tag after verification
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-release
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a main commit
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          if [ "$GITHUB_REF_TYPE" = "branch" ] && [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Container release verification may be dispatched only from main." >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - name: Read and verify the release version
+        id: version
+        env:
+          PUBLISH: ${{ inputs.publish || false }}
+        run: |
+          version="$(grep -m1 -E '^ +version: "' mix.exs | sed -E 's/.*"(.+)".*/\1/')"
+          test -n "$version"
+          printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if [ "$PUBLISH" = "true" ]; then
+            test "$GITHUB_REF_TYPE" = "tag"
+            test "$GITHUB_REF_NAME" = "v$version"
+          fi
+
+  verify-targets:
+    needs: preflight
+    name: Verify ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-22.04
+            artifact: linux-amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            artifact: linux-arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        if: inputs.publish
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # This builds the default `released` target, so the standalone release
+      # gate runs inside the image. The script then drives the finished image
+      # on its native runner, including the host-published Viewer boundary.
+      - name: Build and verify the finished image
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          PUBLISH: ${{ inputs.publish || false }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          local_image="ptc:release-$VERSION"
+          build_args=(
+            --builder "${{ steps.buildx.outputs.name }}"
+            --platform "$PLATFORM"
+            --label "org.opencontainers.image.description=Bounded BEAM-native runtime for PTC-Lisp workflows"
+            --label "org.opencontainers.image.licenses=MIT"
+            --label "org.opencontainers.image.revision=$GITHUB_SHA"
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"
+            --label "org.opencontainers.image.version=$VERSION"
+          )
+
+          if [ "$PUBLISH" = "true" ]; then
+            build_args+=(
+              --metadata-file "$RUNNER_TEMP/build-metadata.json"
+              --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true"
+            )
+          fi
+
+          scripts/build_container_image.sh "$local_image" "${build_args[@]}"
+
+          if [ "$PUBLISH" = "true" ]; then
+            digest="$(jq -er '."containerimage.digest"' "$RUNNER_TEMP/build-metadata.json")"
+            printf '%s\n' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+            mkdir -p "$RUNNER_TEMP/digests"
+            touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+          fi
+
+      - name: Retain the verified image digest
+        if: inputs.publish
+        uses: actions/upload-artifact@v6
+        with:
+          name: container-digest-${{ matrix.artifact }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [preflight, verify-targets]
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Reuse or reject an existing version tag
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set +e
+          inspection="$(docker buildx imagetools inspect "$IMAGE:$VERSION" 2>&1)"
+          status=$?
+          set -e
+
+          if [ "$status" -eq 0 ]; then
+            manifest="$(docker buildx imagetools inspect "$IMAGE:$VERSION" \
+              --format '{{json .Manifest}}')"
+            jq -e '
+              [.manifests[].platform
+                | select(.os != "unknown")
+                | {os, architecture}]
+              | sort_by(.architecture)
+              == [
+                {"architecture":"amd64","os":"linux"},
+                {"architecture":"arm64","os":"linux"}
+              ]
+            ' <<< "$manifest" > /dev/null
+
+            gh attestation verify "oci://$IMAGE:$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow \
+                "$GITHUB_REPOSITORY/.github/workflows/container-release.yml" \
+              --source-digest "$GITHUB_SHA" \
+              --source-ref "$GITHUB_REF" \
+              --deny-self-hosted-runners
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          final_line="$(printf '%s\n' "$inspection" | sed '/^[[:space:]]*$/d' | tail -1)"
+          if ! grep -Eqi 'manifest unknown|: not found$' <<< "$final_line"; then
+            printf '%s\n' "$inspection" >&2
+            echo "could not establish that $IMAGE:$VERSION is absent" >&2
+            exit 1
+          fi
+
+      - name: Collect verified image digests
+        if: steps.existing.outputs.published != 'true'
+        uses: actions/download-artifact@v7
+        with:
+          pattern: container-digest-*
+          path: ${{ runner.temp }}/digests
+          merge-multiple: true
+
+      - name: Assemble the verified multi-platform manifest
+        if: steps.existing.outputs.published != 'true'
+        id: manifest
+        run: |
+          mapfile -t digest_files < <(find "$RUNNER_TEMP/digests" -maxdepth 1 -type f -print | sort)
+          test "${#digest_files[@]}" -eq 2
+
+          sources=()
+          for digest_file in "${digest_files[@]}"; do
+            digest="$(basename "$digest_file")"
+            printf '%s\n' "$digest" | grep -Eq '^[0-9a-f]{64}$'
+            sources+=("$IMAGE@sha256:$digest")
+          done
+
+          staging="$IMAGE:staging-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          metadata="$RUNNER_TEMP/manifest-metadata.json"
+          docker buildx imagetools create \
+            --tag "$staging" \
+            --metadata-file "$metadata" \
+            "${sources[@]}"
+          digest="$(jq -er '."containerimage.descriptor".digest' "$metadata")"
+          printf '%s\n' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'
+
+          # Resolve only the content-addressed result captured by the create
+          # operation. The staging tag is mutable registry state and must not
+          # decide which bytes this trusted workflow attests.
+          manifest="$(docker buildx imagetools inspect "$IMAGE@$digest" \
+            --format '{{json .Manifest}}')"
+          jq -e '
+            [.manifests[].platform
+              | select(.os != "unknown")
+              | {os, architecture}]
+            | sort_by(.architecture)
+            == [
+              {"architecture":"amd64","os":"linux"},
+              {"architecture":"arm64","os":"linux"}
+            ]
+          ' <<< "$manifest" > /dev/null
+
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Attest the published image
+        if: steps.existing.outputs.published != 'true'
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.manifest.outputs.digest }}
+          push-to-registry: true
+
+      - name: Verify staged provenance
+        if: steps.existing.outputs.published != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify "oci://$IMAGE@${{ steps.manifest.outputs.digest }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow \
+              "$GITHUB_REPOSITORY/.github/workflows/container-release.yml" \
+            --source-digest "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF" \
+            --deny-self-hosted-runners
+
+      # The exact public name is created only after both native images and the
+      # signed manifest have passed every check above. GHCR tags are mutable;
+      # refusing an existing name is this workflow's non-moving-tag policy.
+      - name: Publish the exact version tag
+        if: steps.existing.outputs.published != 'true'
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          digest="${{ steps.manifest.outputs.digest }}"
+          docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$digest"
+          published="$(docker buildx imagetools inspect "$IMAGE:$VERSION" \
+            --format '{{json .Manifest}}' | jq -er .digest)"
+          test "$published" = "$digest"

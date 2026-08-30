@@ -63,7 +63,7 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
     end
 
     test "truthy nil step raises instead of returning nil" do
-      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: value"}}} =
                Lisp.run("(cond-> 1 true nil)")
     end
 
@@ -83,7 +83,7 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
     end
 
     test "truthy nil step raises instead of returning nil" do
-      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: value"}}} =
                Lisp.run("(cond->> 1 true nil)")
     end
   end
@@ -119,7 +119,7 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
     end
 
     test "nil step raises after non-nil value" do
-      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: value"}}} =
                Lisp.run("(some-> 1 nil)")
     end
 
@@ -142,7 +142,7 @@ defmodule PtcRunner.Lisp.ThreadingExtensionsTest do
     end
 
     test "nil step raises after non-nil value" do
-      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: nil"}}} =
+      assert {:error, %{fail: %{reason: :not_callable, message: "not callable: value"}}} =
                Lisp.run("(some->> 1 nil)")
     end
   end

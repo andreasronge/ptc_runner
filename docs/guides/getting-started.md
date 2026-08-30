@@ -1,234 +1,75 @@
-# Getting started
+# Understand a generated project
 
-This guide runs a complete PtcRunner workflow and reads it line by line. It
-starts credential-free — the first workflow is written in PTC-Lisp, receives
-JSON input, and returns a bounded JSON value plus runtime usage — and ends at a
-live model call.
+Understand the files, result, and trace created by `ptc init` without writing
+an agent loop.
 
-If you would rather see that model call first and read afterwards, the
-[Quickstart](quickstart.md) gets there in four commands.
+Create a project that needs no API key if you do not already have one:
 
-PTC-Lisp is a small, eager, bounded subset of Clojure, with a few additions for
-agent execution such as `return`, `fail`, `tool/...` capability calls, and the
-`*1`/`*2`/`*3` continuation history. Most supported collection and data
-expressions are ordinary Clojure; arbitrary JVM access, macros, lazy or
-infinite sequences, and unsupported Clojure APIs are not part of the language.
-The [language specification](../ptc-lisp-specification.md) is authoritative.
-
-The Kernel product runs from a source checkout through `mix ptc` and from a
-runtime-included release through `bin/ptc`.
-
-## Create a minimal application
-
-`ptc init DIRECTORY` creates an empty application. From a source checkout:
+`ptc init` requires a target directory that does not already exist. It
+assembles the complete scaffold and publishes it atomically without replacing
+anything. To add PtcRunner to an existing repository, initialize a new sibling
+or subdirectory, then deliberately copy or move the generated files the
+repository wants.
 
 ```console
-mix ptc init hello-ptc
+ptc init hello-ptc
 ```
 
-Initialization publishes exactly `main.clj` and `ptc.json`. Their bytes are a
-stable contract:
+It contains four files with different jobs:
 
-```clojure
-(ns main)
+| File | Purpose |
+| --- | --- |
+| `ptc-project.json` | Stable local paths, artifacts, and Viewer preferences |
+| `ptc.json` | Workflow, input, missions, selected providers, and narrower limits |
+| `main.clj` | The generated example component selected by the workflow |
+| `AGENTS.md` | Routing card telling a coding agent which commands answer what |
 
-(defn run [input]
-  (return input))
+The project document is the normal command argument. It points to the other
+files, so commands do not depend on the shell's current directory.
+
+## Run a data workflow
+
+The checked-in orders example is deterministic and needs no credential:
+
+<!-- ptc-guide-e2e: id=generated-orders frontend=mix scratch=tutorial-example -->
+```console
+ptc init tutorial-example --example kernel-tutorial
+ptc run tutorial-example/01-orders.ptc-project.json
 ```
-
 ```json
-{
-  "version": 1,
-  "workflow": {
-    "components": [
-      {
-        "id": "main",
-        "path": "main.clj"
-      }
-    ],
-    "entry": "main/run"
-  },
-  "input": {
-    "value": {}
-  }
-}
+{"order_count":3,"paid_count":2,"paid_total":335.75,"pending_ids":["A-101"]}
 ```
 
-The scaffold is validated before any filesystem access and published with an
-atomic no-replace rename, so an existing directory or symlink is never merged
-or overwritten. [Running and debugging](running-and-debugging.md#commands)
-lists what a refused initialization reports.
+The application reads structured input and returns one bounded JSON value. No
+model or external tool is involved.
 
-## Run the example
+## Inspect the run
 
-From the repository root:
+Open the local Viewer:
 
 ```console
-mix deps.get
-mix ptc run examples/kernel-tutorial/01-orders/ptc.json
+ptc viewer tutorial-example/01-orders.ptc-project.json
 ```
 
-The command prints the compact JSON result value:
+The trace records the command, evaluations, limits, outcome, and
+resource usage. It never contains prompts, model responses, generated source,
+or tool payloads. Those are private evidence, recorded only when
+`artifacts.inspection` is true and served only when `viewer.private` is also
+true.
 
-```json
-{
-  "order_count": 3,
-  "paid_count": 2,
-  "paid_total": 335.75,
-  "pending_ids": ["A-101"]
-}
-```
+The tutorial project documents set both, so the Viewer joins that evidence into
+the transcript: every effective prelude lists a `source` link beside each
+component, and the model-driven steps show each evaluation's generated
+PTC-Lisp under **Program source** along with the model conversation. Set either
+setting back to `false` and the same run shows the trace alone.
 
-The rest of the result reports usage — remaining time, capability calls,
-evaluations, and dropped events — which
-[Running and debugging](running-and-debugging.md#understand-results-and-errors)
-breaks down field by field. Values such as remaining time vary between runs.
-
-## Read the project
-
-The example has three files:
-
-```text
-examples/kernel-tutorial/01-orders/
-├── ptc.json
-├── orders.clj
-└── orders.json
-```
-
-The manifest selects a PTC-Lisp component, its public entry function, and the
-input file:
-
-```json
-{
-  "version": 1,
-  "workflow": {
-    "components": [
-      {"id": "tutorial.orders", "path": "orders.clj"}
-    ],
-    "entry": "tutorial.orders/summarize"
-  },
-  "input": {"path": "orders.json"}
-}
-```
-
-The entry is an ordinary public PTC-Lisp function. `data/input` supplies the
-decoded manifest input:
-
-```clojure
-(ns tutorial.orders "Deterministic order aggregation." {:visibility :prompt})
-
-(defn summarize [input]
-  (let [orders (get input "orders")
-        paid (filter #(= "paid" (get % "status")) orders)]
-    (return
-      {"order_count" (count orders)
-       "paid_count" (count paid)
-       "paid_total" (reduce + 0 (map #(get % "total") paid))
-       "pending_ids" (mapv #(get % "id")
-                           (filter #(= "pending" (get % "status")) orders))})))
-```
-
-`return` marks intentional successful completion. `fail` marks an intentional
-workflow failure. A function that finishes normally without either still
-produces a normal Lisp value, which is useful for intermediate REPL-style
-agent turns.
-
-## Record a trace
-
-Canonical traces contain bounded operational facts rather than prompts,
-capability payloads, or generated source:
+You can also explore the workflow directly:
 
 ```console
-mkdir -p tmp/tutorial-traces
-mix ptc run examples/kernel-tutorial/01-orders/ptc.json \
-  --trace-dir tmp/tutorial-traces
+ptc repl --project tutorial-example/01-orders.ptc-project.json
 ```
 
-The JSON Lines file records the run, workflow evaluation, outcome, usage, and
-limits. Query the captured directory through the fixed log-analysis profile:
-
-```console
-mix ptc repl \
-  --profile log-analysis-v2 \
-  --resource traces=tmp/tutorial-traces \
-  -e '(log.analysis/all-runs {"limit" 50} 10)'
-```
-
-The profile queries one frozen capture of that directory and has no filesystem,
-network, model, private-inspection, or nested-evaluation authority. The final
-argument is a page bound; the
-[Kernel REPL guide](kernel-repl.md#log-analysis-mission-sessions) documents the
-`complete?` and `snapshot_hash` fields the result carries.
-
-## Try the language directly
-
-Use the bounded REPL for small expressions and definitions:
-
-```console
-mix ptc repl \
-  -e '(def tax-rate 0.2)' \
-  -e '(* 100 tax-rate)' \
-  -e '(+ *1 5)'
-```
-
-Successful definitions and the three most recent values persist for one
-session, and a failed form leaves that state untouched. The
-[Kernel REPL guide](kernel-repl.md) covers the other session modes.
-
-## Call a model
-
-Everything above is deterministic. Adding a model takes one credential and one
-extra flag.
-
-Copy `.env.example` to the Git-ignored `.env` and set `OPENROUTER_API_KEY` to
-your [OpenRouter](https://openrouter.ai/keys) key. That is the only setup step;
-[Host configuration](host-configuration.md#credentials) documents the three
-declaration forms and how to move off `.env` for a real deployment.
-
-```console
-mix ptc run examples/kernel-tutorial/02-deepseek-extract/ptc.json \
-  --host-config examples/kernel-tutorial/ptc-host.json
-```
-
-```json
-{"model_output":"{\"project\":\"Atlas\",\"owner\":\"Priya\",\"risk\":\"delayed vendor security approval\"}","note":"model_output is model text; validate or parse it before production use"}
-```
-
-The model's exact wording varies between runs; the result shape does not.
-
-`--host-config` names the operator document that gives the manifest's
-`deepseek` alias a model and a credential. The manifest selects that alias and
-may narrow it, but cannot name a model, endpoint, or key. Here the human wrote
-the request and owns the output policy; the model only returned data, and that
-data is untrusted text until you parse and validate it.
-
-Let the model write the program instead:
-
-```console
-mix ptc run examples/kernel-tutorial/04-multi-turn-agent/ptc.json \
-  --host-config examples/kernel-tutorial/ptc-host.json
-```
-
-```json
-{"ok":true,"value":42}
-```
-
-The model authored PTC-Lisp across two turns and the runtime evaluated it in
-the confined mission environment.
-
-## Next steps
-
-Continue in this order:
-
-1. [Building agents](building-agents.md) explains the agent loop, the
-   correction protocol, and confined model-authored mission programs.
-2. [Manifests and capabilities](manifests-and-capabilities.md) documents the
-   declarative authority boundary — components, input, contracts, providers,
-   limits, and event policy.
-3. [Host configuration](host-configuration.md) is the operator document that
-   installs providers, supplies credentials, and sets ceilings.
-4. [Running and debugging](running-and-debugging.md) covers commands, traces,
-   private inspection, and the development Viewer.
-
-The [PTC-Lisp specification](../ptc-lisp-specification.md) and
-[function reference](../function-reference.md) define the language surface.
+Continue with [Configure an application](manifests-and-capabilities.md) to add
+input, missions, or selected providers. Use the
+[project-configuration reference](../reference/project-files.md) for
+the complete local file and artifact contract.

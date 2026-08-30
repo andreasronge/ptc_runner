@@ -5,6 +5,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   # valid fixture responses to be reported intermittently as `:mcp_timeout`.
   use ExUnit.Case, async: false
 
+  import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
+
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
@@ -12,7 +14,6 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.EventSink
-  alias PtcRunner.Kernel.InspectionArtifact
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
@@ -33,6 +34,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   alias PtcRunner.TestSupport.MCPHTTPFixture
   alias PtcRunner.TestSupport.ProviderSessionFixture
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.StreamingInspection
+  alias PtcRunner.TestSupport.TestHelpers
 
   @owner_lifecycle_timeout_ms 30_000
   @max_logical_result_bytes 1_048_576
@@ -123,31 +126,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       fixture = fixture(self(), tool_http_error: tool_http_error)
       manager = oauth_manager(fixture.endpoint, interceptor)
 
-      builder =
-        MCPSource.builder(
-          transport:
-            {:streamable_http,
-             endpoint: fixture.endpoint, authorization: manager, allow_insecure_loopback: true},
-          tools: %{"structured" => %{as: "remote.structured", effect: :read}},
-          timeout_ms: 2_000
-        )
-
-      {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
-      {:ok, limits} = Limits.new()
+      builder = streamable_oauth_builder(fixture.endpoint, manager, 2_000)
 
       assert {:ok, %{capabilities: [capability], close: close}} =
-               ProviderRegistry.build(
-                 registry,
-                 "fixture-mcp",
-                 %{"allow" => ["remote.structured"]},
-                 %{
-                   application_content_digest: String.duplicate("0", 64),
-                   destination: :mission,
-                   limits: limits,
-                   installed_limits: limits,
-                   owner: self()
-                 }
-               )
+               build_fixture_provider(builder)
 
       result =
         capability.callback.(%{"query" => "x"}, %{
@@ -184,31 +166,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       fixture = fixture(self(), tool_http_error: {403, headers})
       manager = oauth_manager(fixture.endpoint, fn _operation, _timeout -> :delegate end)
 
-      builder =
-        MCPSource.builder(
-          transport:
-            {:streamable_http,
-             endpoint: fixture.endpoint, authorization: manager, allow_insecure_loopback: true},
-          tools: %{"structured" => %{as: "remote.structured", effect: :read}},
-          timeout_ms: 2_000
-        )
-
-      {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
-      {:ok, limits} = Limits.new()
+      builder = streamable_oauth_builder(fixture.endpoint, manager, 2_000)
 
       assert {:ok, %{capabilities: [capability], close: close}} =
-               ProviderRegistry.build(
-                 registry,
-                 "fixture-mcp",
-                 %{"allow" => ["remote.structured"]},
-                 %{
-                   application_content_digest: String.duplicate("0", 64),
-                   destination: :mission,
-                   limits: limits,
-                   installed_limits: limits,
-                   owner: self()
-                 }
-               )
+               build_fixture_provider(builder)
 
       assert {:error,
               %ProviderError{
@@ -273,31 +234,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         end
       end)
 
-    builder =
-      MCPSource.builder(
-        transport:
-          {:streamable_http,
-           endpoint: fixture.endpoint, authorization: manager, allow_insecure_loopback: true},
-        tools: %{"structured" => %{as: "remote.structured", effect: :read}},
-        timeout_ms: 1_000
-      )
-
-    {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
-    {:ok, limits} = Limits.new()
+    builder = streamable_oauth_builder(fixture.endpoint, manager, 1_000)
 
     assert {:ok, %{capabilities: [capability], close: close}} =
-             ProviderRegistry.build(
-               registry,
-               "fixture-mcp",
-               %{"allow" => ["remote.structured"]},
-               %{
-                 application_content_digest: String.duplicate("0", 64),
-                 destination: :mission,
-                 limits: limits,
-                 installed_limits: limits,
-                 owner: self()
-               }
-             )
+             build_fixture_provider(builder)
 
     {:ok, environment} = MissionEnvironment.new(capabilities: [capability])
     authorization_config = :sys.get_state(manager.pid).config
@@ -319,18 +259,22 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         terminal_reserve: EventSink.terminal_reserve(:normal, limits)
       )
 
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
 
     task =
       Task.async(fn ->
-        Dispatcher.dispatch_with_lease(
+        Dispatcher.dispatch(
           state,
           :mission,
           environment,
           capability.name,
           %{"query" => "x"},
-          500,
-          {event_sink, nil, lease}
+          TestHelpers.dispatch_context(state, :mission, 500,
+            lease: lease,
+            mission_name: "default"
+          ),
+          event_sink,
+          nil
         )
       end)
 
@@ -522,11 +466,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     fixture = fixture(self(), capture_body?: true)
     on_exit(fixture.close)
 
-    inspection_path = Path.join(dir, "mcp.inspection.jsonl")
+    inspection_path = Path.join(dir, "mcp.ptcins")
     trace_path = Path.join(dir, "mcp.trace.jsonl")
     manifest_path = manifest(dir, Map.keys(public_mappings()))
 
-    assert {:ok, _result} =
+    assert {:ok, %PtcRunner.Kernel.Result{value: result_value}} =
              manifest_path
              |> directory_request(registry(fixture.endpoint),
                inspect: inspection_path,
@@ -540,17 +484,19 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     assert get_in(request_body, ["params", "_meta", "traceparent"]) =~
              ~r/\A00-[0-9a-f]{32}-[0-9a-f]{16}-01\z/
 
-    assert {:ok, records} = InspectionArtifact.load(inspection_path)
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
 
     requests = Enum.filter(records, &(&1["record_type"] == "mcp-request"))
     responses = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    results = Enum.filter(records, &(&1["record_type"] == "run-result"))
     assert length(requests) == 3
     assert length(responses) == 3
+    assert [%{"payload" => %{"value" => ^result_value}}] = results
 
     assert Enum.map(requests, & &1["correlation"]) |> MapSet.new() ==
              Enum.map(responses, & &1["correlation"]) |> MapSet.new()
 
-    assert Enum.all?(requests ++ responses, &(&1["schema_version"] == 4))
+    assert Enum.all?(records, &(&1["schema_version"] == 10))
     assert Enum.all?(requests ++ responses, &(&1["payload"]["mission_name"] == "default"))
 
     encoded_inspection = File.read!(inspection_path)
@@ -560,6 +506,311 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     refute encoded_trace =~ ~s("arguments")
     refute encoded_trace =~ ~s("structuredContent")
     refute encoded_trace =~ "Bearer fixture-secret"
+  end
+
+  @tag :tmp_dir
+  test "a runtime-rejected result keeps its full error envelope while the wire body stays a digest",
+       %{tmp_dir: dir} do
+    # The provider boundary accepts this response -- well-formed, within
+    # `max_result_bytes`, and its structured content satisfies the output
+    # schema -- and only the dispatcher's retained-size admission rejects it
+    # afterwards: 28,000 small strings retain far more BEAM memory than their
+    # encoded bytes. The digest decision is made at the boundary, so the wire
+    # body remains an identity; the rejection itself is retained in full in
+    # `capability-output`, and because the mapping is a read, rerunning with
+    # full capture recovers the value the identity attests.
+    marker = Path.join(dir, "stdio-padded")
+
+    tools = %{
+      "structured" => %{
+        as: "remote.structured",
+        effect: :read,
+        inspection_capture: :digest_results
+      }
+    }
+
+    inspection_path = Path.join(dir, "admission.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: value}} =
+             dir
+             |> manifest(["remote.structured"],
+               program: single_call_program("remote.structured", "x"),
+               max_result_bytes: 1_000_000,
+               timeout_ms: 5_000,
+               evaluation_timeout_ms: 5_000
+             )
+             |> directory_request(
+               stdio_registry(dir, marker, "structured-padded",
+                 tools: tools,
+                 max_result_bytes: 1_000_000
+               ),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert %{"status" => "error", "reason" => "provider_result_limit"} =
+             get_in(value, ["value", "value"])
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert %{"body_identity" => %{"sha256" => "sha256:" <> _}} = response["payload"]
+    refute Map.has_key?(response["payload"], "body")
+
+    assert [output] = Enum.filter(records, &(&1["record_type"] == "capability-output"))
+
+    assert %{"result" => %{"status" => "error", "reason" => "provider_result_limit"}} =
+             output["payload"]
+
+    refute Map.has_key?(output["payload"], "result_identity")
+  end
+
+  @tag :tmp_dir
+  test "an element-dense stdio result within byte limits reaches admission, not a protocol error",
+       %{tmp_dir: dir} do
+    # Issue #1676: decode cost scales with element count, not bytes. 45,000
+    # small strings (~400 KB) are within every transport bound, so the
+    # response must reach the dispatcher's retained-size admission -- with
+    # the exchange captured -- instead of killing the decode worker,
+    # failing the call as `mcp_protocol_error`, and poisoning transport
+    # cleanup for the whole run. Digest capture, because the full body's
+    # retained size is above the sealed-evidence record cap -- the ceiling
+    # digest mappings exist for.
+    marker = Path.join(dir, "stdio-dense")
+
+    tools = %{
+      "structured" => %{
+        as: "remote.structured",
+        effect: :read,
+        inspection_capture: :digest_results
+      }
+    }
+
+    inspection_path = Path.join(dir, "dense.ptcins")
+
+    # Enough evaluator heap to hold the dense value while the dispatcher
+    # measures it; the retained-size admission stays the binding limit.
+    {:ok, installed_limits} =
+      Limits.installed_defaults()
+      |> Map.from_struct()
+      |> Map.merge(%{evaluation_heap_words: 4_000_000})
+      |> Limits.new()
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: value}} =
+             dir
+             |> manifest(["remote.structured"],
+               program: single_call_program("remote.structured", "x"),
+               max_result_bytes: 1_000_000,
+               timeout_ms: 5_000,
+               evaluation_timeout_ms: 5_000,
+               limits: %{"evaluation_heap_words" => 4_000_000}
+             )
+             |> directory_request(
+               stdio_registry(dir, marker, "structured-padded-dense",
+                 tools: tools,
+                 max_result_bytes: 1_000_000
+               ),
+               inspect: inspection_path,
+               installed_limits: installed_limits
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert %{"status" => "error", "reason" => "provider_result_limit"} =
+             get_in(value, ["value", "value"])
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+    assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert %{"body_identity" => %{"sha256" => "sha256:" <> _}} = response["payload"]
+  end
+
+  @tag :tmp_dir
+  test "a normalization-rejected result keeps its full error envelope while the body digests", %{
+    tmp_dir: dir
+  } do
+    # The transport accepts this body -- well-formed, within the byte bound --
+    # and only tool-result normalization rejects it, after the exchange is
+    # already captured. Like every post-capture rejection, the error envelope
+    # is retained in full while the wire body remains an identity; the read
+    # reproduces under a full-capture rerun.
+    fixture = fixture(self(), structured_value: "wrong")
+    on_exit(fixture.close)
+
+    tools = %{
+      "structured" => %{
+        as: "remote.structured",
+        effect: :read,
+        inspection_capture: :digest_results
+      }
+    }
+
+    inspection_path = Path.join(dir, "invalid.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: value}} =
+             dir
+             |> manifest(["remote.structured"],
+               program: single_call_program("remote.structured", "x")
+             )
+             |> directory_request(registry(fixture.endpoint, tools: tools),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert %{"reason" => "invalid_result", "details" => "mcp_invalid_result"} =
+             get_in(value, ["value", "value"])
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert %{"body_identity" => %{"sha256" => "sha256:" <> _}} = response["payload"]
+    refute Map.has_key?(response["payload"], "body")
+
+    assert [output] = Enum.filter(records, &(&1["record_type"] == "capability-output"))
+    assert %{"result" => %{"status" => "error", "reason" => "invalid_result"}} = output["payload"]
+  end
+
+  @tag :tmp_dir
+  test "digest result capture keeps a body this run rejected as oversized", %{tmp_dir: dir} do
+    # The response looks successful on the wire and is only rejected once the
+    # result is bounded, so capture has to wait for the outcome. Digesting it
+    # would leave no evidence of what the server actually sent.
+    fixture = fixture(self(), large_text?: true)
+    on_exit(fixture.close)
+
+    tools = %{"text" => %{as: "remote.text", effect: :read, inspection_capture: :digest_results}}
+    inspection_path = Path.join(dir, "oversized.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: value}} =
+             dir
+             |> manifest(["remote.text"], program: single_call_program("remote.text", "x"))
+             |> directory_request(registry(fixture.endpoint, tools: tools),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert %{"reason" => "invalid_result", "details" => "mcp_response_exceeded"} =
+             get_in(value, ["value", "value"])
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    assert [response] = Enum.filter(records, &(&1["record_type"] == "mcp-response"))
+    assert %{"body" => %{"result" => _result}} = response["payload"]
+    refute Map.has_key?(response["payload"], "body_identity")
+  end
+
+  @tag :tmp_dir
+  test "digest result capture keeps the record lifecycle a full run produces", %{tmp_dir: dir} do
+    fixture = fixture(self())
+    on_exit(fixture.close)
+
+    # Issue #1670 requires digest capture to add no segmented records: the two
+    # modes must agree on record order, correlation, joins, and counts, and
+    # differ only in which value key each digested record carries.
+    shape = fn tools, name ->
+      path = Path.join(dir, "#{name}.ptcins")
+
+      assert {:ok, %PtcRunner.Kernel.Result{}} =
+               dir
+               |> manifest(Map.keys(public_mappings()))
+               |> directory_request(registry(fixture.endpoint, tools: tools), inspect: path)
+               |> RunLifecycle.build()
+               |> RunLifecycle.execute()
+
+      assert {:ok, records} = StreamingInspection.read_path(path)
+
+      # Capability ids carry run entropy, so compare the join structure rather
+      # than the literal ids: records sharing an id must keep sharing one.
+      ids = records |> Enum.map(& &1["correlation"]["capability_id"]) |> Enum.uniq()
+      slot = Map.new(Enum.with_index(ids), fn {id, index} -> {id, index} end)
+
+      Enum.map(records, fn record ->
+        {record["sequence"], record["record_type"], slot[record["correlation"]["capability_id"]],
+         record["correlation"]["request_id"]}
+      end)
+    end
+
+    digest_tools =
+      Map.new(mappings(), fn {name, m} ->
+        {name, Map.put(m, :inspection_capture, :digest_results)}
+      end)
+
+    assert shape.(digest_tools, "digest-parity") == shape.(mappings(), "full-parity")
+  end
+
+  @tag :tmp_dir
+  test "digest result capture retains identities for successes and bodies for failures", %{
+    tmp_dir: dir
+  } do
+    fixture = fixture(self())
+    on_exit(fixture.close)
+
+    tools =
+      Map.new(mappings(), fn {name, m} ->
+        {name, Map.put(m, :inspection_capture, :digest_results)}
+      end)
+
+    inspection_path = Path.join(dir, "digest.ptcins")
+
+    assert {:ok, %PtcRunner.Kernel.Result{}} =
+             dir
+             |> manifest(Map.keys(public_mappings()))
+             |> directory_request(registry(fixture.endpoint, tools: tools),
+               inspect: inspection_path
+             )
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+
+    by_type = Enum.group_by(records, & &1["record_type"])
+    assert length(by_type["mcp-request"]) == 3
+
+    # `remote.fail` answers with `isError`, so its body survives while the two
+    # successful reads are reduced to identities.
+    {digested, full} =
+      Enum.split_with(by_type["mcp-response"], &Map.has_key?(&1["payload"], "body_identity"))
+
+    assert length(digested) == 2
+    assert [%{"payload" => %{"body" => %{"result" => %{"isError" => true}}}}] = full
+
+    # Arguments are never digested: the traversal the program performed stays
+    # readable even when what came back does not.
+    assert Enum.all?(by_type["capability-input"], &is_map(&1["payload"]["arguments"]))
+    assert Enum.all?(by_type["mcp-request"], &Map.has_key?(&1["payload"], "body"))
+
+    outputs = by_type["capability-output"]
+
+    for record <-
+          digested ++ Enum.filter(outputs, &Map.has_key?(&1["payload"], "result_identity")) do
+      identity = record["payload"]["body_identity"] || record["payload"]["result_identity"]
+
+      assert %{
+               "encoding" => "ptc-deterministic-json-v1",
+               "sha256" => "sha256:" <> hex,
+               "encoded_bytes" => bytes
+             } = identity
+
+      assert byte_size(hex) == 64
+      assert bytes > 0
+    end
+
+    # The workflow result and the failed capability's error envelope are the
+    # records an operator reads after a bad run, so neither is digested.
+    assert Enum.any?(outputs, fn record ->
+             match?(
+               %{"result" => %{"status" => "error", "reason" => "domain_error"}},
+               record["payload"]
+             )
+           end)
+
+    refute Enum.empty?(Enum.filter(outputs, &Map.has_key?(&1["payload"], "result_identity")))
+
+    encoded = File.read!(inspection_path)
+    refute encoded =~ "structuredContent"
+    refute encoded =~ "Bearer fixture-secret"
   end
 
   @tag :tmp_dir
@@ -640,20 +891,24 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     builder =
       MCPSource.builder(
-        transport:
-          {:stdio,
-           launcher: launcher,
-           executable: executable,
-           executable_sha256: executable |> File.read!() |> then(&:crypto.hash(:sha256, &1)),
-           cwd: @root,
-           args: [@unicode_stdio_fixture, marker, "mcp-unicode"],
-           env: inherited_environment()},
+        transport: {
+          :stdio,
+          # Booting an Elixir source fixture and reaching MCP discovery can
+          # exceed five seconds while the full suite is under scheduler load.
+          launcher: launcher,
+          executable: executable,
+          executable_sha256: executable |> File.read!() |> then(&:crypto.hash(:sha256, &1)),
+          cwd: @root,
+          args: ["--erl", "+S 1:1", @unicode_stdio_fixture, marker, "mcp-unicode"],
+          env: inherited_environment(),
+          start_timeout_ms: 20_000
+        },
         tools: %{"unicode" => %{as: "remote.unicode", effect: :read}},
-        timeout_ms: 5_000
+        timeout_ms: 20_000
       )
 
     {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
-    {:ok, limits} = Limits.new()
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 20_000)
 
     assert {:ok, %{capabilities: [capability], close: close}} =
              ProviderRegistry.build(
@@ -704,6 +959,51 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     EventSink.stop(built.config.event_sink)
     assert File.read!(marker) =~ "tools/call"
+  end
+
+  @tag :tmp_dir
+  test "private inspection retains stdio child stderr and a refused write is not indeterminate",
+       %{
+         tmp_dir: dir
+       } do
+    marker = Path.join(dir, "stdio-stderr-methods")
+    inspection_path = Path.join(dir, "stdio.ptcins")
+    tools = mappings_with_effect("fail", :write)
+    registry = stdio_registry(dir, marker, "stderr-warn", tools: tools)
+
+    assert {:ok, %PtcRunner.Kernel.Result{value: result_value, usage: usage}} =
+             dir
+             |> manifest(["remote.fail"],
+               program: single_call_program("remote.fail", "x"),
+               timeout_ms: 5_000,
+               evaluation_timeout_ms: 5_000
+             )
+             |> directory_request(registry, inspect: inspection_path)
+             |> RunLifecycle.build()
+             |> RunLifecycle.execute()
+
+    failure = get_in(result_value, ["value", "value"])
+
+    assert %{
+             "status" => "error",
+             "kind" => "provider_error",
+             "reason" => "domain_error",
+             "details" => "mcp_domain_error",
+             "retryable?" => false
+           } = failure
+
+    assert usage.capability_refusals == %{"mission/provider_error/domain_error" => 1}
+
+    refute Map.has_key?(failure, "mutation_state")
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection_path)
+    stderrs = Enum.filter(records, &(&1["record_type"] == "mcp-stderr"))
+
+    assert Enum.any?(stderrs, fn record ->
+             record["payload"]["transport"] == "stdio" and
+               record["payload"]["text"] =~
+                 "stdio-fixture: write_text_file will refuse every call."
+           end)
   end
 
   @tag :tmp_dir
@@ -900,6 +1200,25 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "classifies the official server's bare -32601 discovery answer over stdio", %{tmp_dir: dir} do
+    marker = Path.join(dir, "unsupported-protocol-bare")
+    registry = stdio_registry(dir, marker, "unsupported-protocol-bare")
+
+    assert {:error, :mcp_discovery_method_unsupported} =
+             dir
+             |> manifest(~w(remote.structured),
+               timeout_ms: 5_000,
+               evaluation_timeout_ms: 5_000
+             )
+             |> directory_request(registry)
+             |> RunLifecycle.build()
+
+    assert File.read!(marker) =~ "server/discover"
+    refute File.read!(marker) =~ "tools/list"
+    assert_eventually(fn -> File.read!(marker) =~ "session-closed" end)
+  end
+
+  @tag :tmp_dir
   test "normalizes a stdio server exit between discovery requests", %{tmp_dir: dir} do
     marker = Path.join(dir, "exit-after-discover")
     registry = stdio_registry(dir, marker, "exit-after-discover")
@@ -1083,13 +1402,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "post-dispatch MCP failures preserve their cause and make writes indeterminate", %{
+  test "a decoded MCP refusal is a complete answer and does not make writes indeterminate", %{
     tmp_dir: dir
   } do
     cases = [
       {"structured", [rpc_error_tool: "structured"], :domain_error, "mcp_remote_error", []},
-      {"structured", [structured_value: "wrong"], :invalid_result, "mcp_invalid_result", []},
-      {"structured", [result_and_error?: true], :invalid_result, "mcp_protocol_error", []},
       {"structured", [structured_result: input_required_state_only()], :denied,
        "mcp_input_required_refused", []},
       {"structured",
@@ -1100,57 +1417,45 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
            "requestState" => "load-shed"
          }
        ], :denied, "mcp_input_required_refused", []},
+      {"structured", [structured_result: input_required_with_requests()], :invalid_result,
+       "mcp_capability_negotiation_error", []},
+      {"fail", [], :domain_error, "mcp_domain_error", []}
+    ]
+
+    for effect <- [:read, :write],
+        {upstream, fixture_opts, reason, details, manifest_opts} <- cases do
+      run_post_dispatch_case(dir, effect, upstream, fixture_opts, reason, details, manifest_opts)
+    end
+  end
+
+  @tag :tmp_dir
+  test "post-dispatch MCP failures with an unknown outcome make writes indeterminate", %{
+    tmp_dir: dir
+  } do
+    cases = [
+      {"structured", [structured_value: "wrong"], :invalid_result, "mcp_invalid_result", []},
+      {"structured", [result_and_error?: true], :invalid_result, "mcp_protocol_error", []},
       {"structured",
        [structured_result: %{"resultType" => "input_required", "inputRequests" => %{}}],
        :invalid_result, "mcp_protocol_error", []},
-      {"structured", [structured_result: input_required_with_requests()], :invalid_result,
-       "mcp_capability_negotiation_error", []},
       {"structured", [structured_result: %{"resultType" => "input_required"}], :invalid_result,
        "mcp_protocol_error", []},
-      {"fail", [], :domain_error, "mcp_domain_error", []},
       {"text", [large_text?: true], :invalid_result, "mcp_response_exceeded",
        [max_result_bytes: 1_000]}
     ]
 
     for effect <- [:read, :write],
         {upstream, fixture_opts, reason, details, manifest_opts} <- cases do
-      fixture = fixture(self(), fixture_opts)
-      on_exit(fixture.close)
-      tools = mappings_with_effect(upstream, effect)
-      public_name = tools[upstream].as
-
-      assert {:ok, built} =
-               dir
-               |> manifest(
-                 [public_name],
-                 [
-                   program: single_call_program(public_name, "x"),
-                   evaluation_timeout_ms: 5_000
-                 ] ++ manifest_opts
-               )
-               |> directory_request(
-                 registry(fixture.endpoint,
-                   tools: tools,
-                   timeout_ms: 5_000
-                 )
-               )
-               |> RunLifecycle.build()
-
-      assert {:ok, result} = Kernel.run(built.entry_source, built.config)
-      failure = get_in(result.value, ["value", "value"])
-
-      assert %{
-               "status" => "error",
-               "kind" => "provider_error",
-               "reason" => expected_reason,
-               "details" => ^details,
-               "retryable?" => false
-             } = failure
-
-      assert expected_reason == Atom.to_string(reason)
-
-      assert_effect_state(failure, effect)
-      EventSink.stop(built.config.event_sink)
+      run_post_dispatch_case(
+        dir,
+        effect,
+        upstream,
+        fixture_opts,
+        reason,
+        details,
+        manifest_opts,
+        :unknown
+      )
     end
   end
 
@@ -1230,8 +1535,10 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         )
 
       {:ok, components} =
-        Library.components(~w(agent.core agent.feedback agent.native agent.prompt agent.retry
-             kernel llm result workflow.event))
+        Library.components(
+          ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry
+             kernel llm result workflow.event)
+        )
 
       {:ok, bundle} = Kernel.compile_bundle(components)
       {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, capabilities: [llm])
@@ -1364,17 +1671,21 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     capability = built.config.missions["default"].environment.capabilities["remote.structured"]
     assert :ok = RunBuilder.close(built)
     {:ok, state} = RunState.start(Limits.defaults())
-    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state)
+    {:ok, _memory, _history, lease} = RunState.reserve_evaluation(state, "default", :fail_fast)
 
     failure =
-      Dispatcher.dispatch_with_lease(
+      Dispatcher.dispatch(
         state,
         :mission,
         %{capabilities: %{capability.name => capability}},
         capability.name,
         %{"query" => "x"},
-        1_000,
-        {nil, nil, lease}
+        TestHelpers.dispatch_context(state, :mission, 1_000,
+          lease: lease,
+          mission_name: "default"
+        ),
+        nil,
+        nil
       )
 
     assert %{
@@ -1395,7 +1706,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     on_exit(fixture.close)
     registry = registry(fixture.endpoint)
 
-    assert {:error, :mcp_mapped_tool_missing} =
+    assert {:error, {:mcp_mapped_tool_missing, "structured"}} =
              dir
              |> manifest(["remote.structured"])
              |> directory_request(registry)
@@ -1496,6 +1807,93 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
               details: "mcp_transport_closed",
               retryable?: false
             }} = capability.callback.(%{"query" => "x"}, nil)
+  end
+
+  test "a refused invocation preserves not-dispatched provenance for reads and writes" do
+    for effect <- [:read, :write] do
+      fixture = fixture(self())
+
+      builder =
+        MCPSource.builder(
+          transport:
+            {:streamable_http, endpoint: fixture.endpoint, allow_insecure_loopback: true},
+          tools: %{"structured" => %{as: "remote.structured", effect: effect}},
+          timeout_ms: 1_000
+        )
+
+      assert {:ok, %{capabilities: [capability], close: close}} =
+               build_fixture_provider(builder)
+
+      assert :ok = fixture.close.()
+
+      assert {:error,
+              %ProviderError{
+                kind: :transport_error,
+                details: "mcp_endpoint_connection_refused",
+                retryable?: true,
+                dispatch_provenance: :not_dispatched,
+                mutation_state: nil
+              }} = capability.callback.(%{"query" => "x"}, nil)
+
+      assert :ok = close.()
+    end
+  end
+
+  test "a refused discovery retains its closed acquisition reason" do
+    {:ok, listener} =
+      :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])
+
+    {:ok, {_address, port}} = :inet.sockname(listener)
+    :ok = :gen_tcp.close(listener)
+
+    builder =
+      MCPSource.builder(
+        transport:
+          {:streamable_http,
+           endpoint: "http://127.0.0.1:#{port}/mcp", allow_insecure_loopback: true},
+        tools: %{"structured" => %{as: "remote.structured", effect: :read}},
+        timeout_ms: 1_000
+      )
+
+    assert {:error, :mcp_endpoint_connection_refused} =
+             build_fixture_provider(builder)
+  end
+
+  test "OAuth-protected resource DNS retains its closed acquisition reason" do
+    endpoint = "https://mcp.example/mcp"
+
+    manager =
+      oauth_manager(endpoint, fn _operation, _timeout -> :delegate end,
+        resolver: fn _hostname -> {:error, :nxdomain} end
+      )
+
+    builder =
+      MCPSource.builder(
+        transport: {:streamable_http, endpoint: endpoint, authorization: manager},
+        tools: %{"structured" => %{as: "remote.structured", effect: :read}},
+        timeout_ms: 1_000
+      )
+
+    assert {:error, :mcp_endpoint_name_unresolved} = build_fixture_provider(builder)
+    Process.exit(manager.pid, :kill)
+  end
+
+  test "OAuth-protected resource falls back across its approved address set" do
+    fixture = fixture(self())
+
+    manager =
+      oauth_manager(fixture.endpoint, fn _operation, _timeout -> :delegate end,
+        resolver: fn _hostname ->
+          {:ok, [{0, 0, 0, 0, 0, 0, 0, 1}, {127, 0, 0, 1}]}
+        end
+      )
+
+    builder = streamable_oauth_builder(fixture.endpoint, manager, 1_000)
+
+    assert {:ok, %{close: close}} = build_fixture_provider(builder)
+    assert :ok = close.()
+    Process.exit(manager.pid, :kill)
+    assert :ok = fixture.close.()
   end
 
   @tag :tmp_dir
@@ -1614,6 +2012,15 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert_raise ArgumentError, fn ->
       MCPSource.builder(
+        transport:
+          {:streamable_http,
+           endpoint: "https://example.com/mcp", request: fn _request -> :fabricated end},
+        tools: mappings()
+      )
+    end
+
+    assert_raise ArgumentError, fn ->
+      MCPSource.builder(
         transport: {:streamable_http, endpoint: "https://example.com/mcp"},
         tools: %{
           "one" => %{as: "same", effect: :read},
@@ -1633,14 +2040,14 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   test "installation enforces transport timeout and shared response ceilings" do
     options = stdio_transport_options("/tmp/unused")
 
-    assert is_function(
+    assert match?(
+             {:staged, prepare, nil} when is_function(prepare, 2),
              MCPSource.builder(
                transport: {:stdio, options},
                tools: mappings(),
                timeout_ms: 300_000,
                max_result_bytes: 1_048_576
-             ),
-             2
+             )
            )
 
     assert_raise ArgumentError, fn ->
@@ -1676,7 +2083,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "stdio acquisition rejects an oversized launcher before spawning", %{tmp_dir: dir} do
+  test "stdio acquisition reports an unusable launcher as a local dependency", %{tmp_dir: dir} do
     launcher = Path.join(dir, "oversized-launcher")
     {:ok, device} = File.open(launcher, [:write, :binary])
     {:ok, _position} = :file.position(device, 16_777_216)
@@ -1701,7 +2108,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
 
-    assert {:error, :mcp_transport_error} =
+    assert {:error, :mcp_stdio_launcher_unavailable} =
              dir
              |> manifest(["remote.structured"])
              |> directory_request(registry)
@@ -1807,19 +2214,63 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "rejects unsupported protocol errors without initialization fallback", %{tmp_dir: dir} do
-    parent = self()
-    legacy = fixture(parent, unsupported_protocol?: true)
-    on_exit(legacy.close)
+  test "classifies only correlated HTTP method-not-found discovery responses specially", %{
+    tmp_dir: dir
+  } do
+    for {status, code, expected} <- [
+          {200, -32_601, :mcp_discovery_method_unsupported},
+          {200, -32_022, :mcp_remote_error},
+          {200, -32_602, :mcp_remote_error},
+          {200, -32_603, :mcp_remote_error},
+          {400, -32_601, :mcp_discovery_method_unsupported},
+          {404, -32_601, :mcp_discovery_method_unsupported},
+          {400, -32_022, :mcp_protocol_error},
+          {404, -32_022, :mcp_protocol_error},
+          {400, -32_602, :mcp_protocol_error},
+          {404, -32_602, :mcp_protocol_error},
+          {400, -32_603, :mcp_protocol_error},
+          {404, -32_603, :mcp_protocol_error}
+        ] do
+      parent = self()
+      legacy = fixture(parent, discover_rpc_error: {status, code})
+      on_exit(legacy.close)
+
+      assert {:error, ^expected} =
+               dir
+               |> manifest(["remote.structured"])
+               |> directory_request(registry(legacy.endpoint))
+               |> RunLifecycle.build()
+
+      assert_receive {:mcp_request, "server/discover", _headers}
+      refute_receive {:mcp_request, "initialize", _headers}
+      refute_receive {:mcp_request, "tools/list", _headers}
+    end
+
+    mismatch = fixture(self(), supported_versions: ["2025-11-25"])
+    on_exit(mismatch.close)
+
+    assert {:error, :mcp_protocol_version_unsupported} =
+             dir
+             |> manifest(["remote.structured"])
+             |> directory_request(registry(mismatch.endpoint))
+             |> RunLifecycle.build()
+
+    assert_receive {:mcp_request, "server/discover", _headers}
+    refute_receive {:mcp_request, "tools/list", _headers}
+
+    deceptive =
+      fixture(self(),
+        discover_rpc_error: {400, -32_603},
+        discover_rpc_message: "-32601 Method not found: UnsupportedProtocolVersion"
+      )
+
+    on_exit(deceptive.close)
 
     assert {:error, :mcp_protocol_error} =
              dir
              |> manifest(["remote.structured"])
-             |> directory_request(registry(legacy.endpoint))
+             |> directory_request(registry(deceptive.endpoint))
              |> RunLifecycle.build()
-
-    assert_receive {:mcp_request, "server/discover", _headers}
-    refute_receive {:mcp_request, "initialize", _headers}
   end
 
   @tag :tmp_dir
@@ -1902,6 +2353,50 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
            } = get_in(result.value, ["value", "value", "structured"])
 
     EventSink.stop(built.config.event_sink)
+  end
+
+  @tag :tmp_dir
+  test "an SSE decode the host cannot process within bounds is response excess", %{tmp_dir: dir} do
+    # Issue #1676: a well-formed SSE body whose decode exceeds the worker
+    # budget must surface as `mcp_response_exceeded`, not crash the SSE
+    # accumulator or masquerade as a protocol or transport fault. Both
+    # deliveries reach `accumulate_sse/4`; chunked also exercises buffer
+    # reassembly across stream chunks.
+    parent = self()
+
+    dense_result = %{
+      "resultType" => "complete",
+      "structuredContent" => %{"value" => 42},
+      "content" => List.duplicate(1, 900_000)
+    }
+
+    for chunked? <- [false, true] do
+      fixture =
+        fixture(parent, sse?: true, sse_chunked?: chunked?, structured_result: dense_result)
+
+      on_exit(fixture.close)
+
+      {:ok, built} =
+        dir
+        |> manifest(["remote.structured"],
+          program: single_call_program("remote.structured", "x"),
+          timeout_ms: 5_000,
+          evaluation_timeout_ms: 5_000
+        )
+        |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000))
+        |> RunLifecycle.build()
+
+      assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+
+      assert %{
+               "status" => "error",
+               "kind" => "provider_error",
+               "reason" => "invalid_result",
+               "details" => "mcp_response_exceeded"
+             } = get_in(result.value, ["value", "value"])
+
+      EventSink.stop(built.config.event_sink)
+    end
   end
 
   @tag :tmp_dir
@@ -2138,6 +2633,60 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
+  test "selection can reveal a host-hidden MCP capability in model discovery", %{tmp_dir: dir} do
+    parent = self()
+    fixture = fixture(parent)
+    on_exit(fixture.close)
+
+    tools =
+      Map.update!(mappings(), "text", &Map.put(&1, :model_visible, false))
+
+    {:ok, revealed} =
+      dir
+      |> manifest(~w(remote.structured remote.text),
+        timeout_ms: 5_000,
+        evaluation_timeout_ms: 5_000,
+        config_extra: %{"model_visible" => ["remote.text"]}
+      )
+      |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000, tools: tools))
+      |> RunLifecycle.build()
+
+    visibility =
+      Map.new(revealed.config.missions["default"].environment.capabilities, fn {_name, capability} ->
+        {capability.name, capability.model_visible}
+      end)
+
+    assert visibility == %{"remote.structured" => false, "remote.text" => true}
+    [revealed_snapshot] = revealed.config.connector_snapshots
+
+    assert [
+             %{"model_visible" => false, "description_hash" => nil},
+             %{"model_visible" => true, "description_hash" => visible_hash}
+           ] = revealed_snapshot["tools"]
+
+    assert is_binary(visible_hash)
+    assert :ok = RunBuilder.close(revealed)
+
+    {:ok, host_default} =
+      dir
+      |> manifest(~w(remote.structured remote.text),
+        timeout_ms: 5_000,
+        evaluation_timeout_ms: 5_000
+      )
+      |> directory_request(registry(fixture.endpoint, timeout_ms: 5_000, tools: tools))
+      |> RunLifecycle.build()
+
+    host_default_visibility =
+      Map.new(host_default.config.missions["default"].environment.capabilities, fn {_name,
+                                                                                    capability} ->
+        {capability.name, capability.model_visible}
+      end)
+
+    assert host_default_visibility == %{"remote.structured" => true, "remote.text" => false}
+    assert :ok = RunBuilder.close(host_default)
+  end
+
+  @tag :tmp_dir
   test "snapshot hashes are stable and owner cleanup remains resource-free", %{
     tmp_dir: dir
   } do
@@ -2371,7 +2920,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     registry
   end
 
-  defp oauth_manager(endpoint, interceptor) do
+  defp oauth_manager(endpoint, interceptor, opts \\ []) do
     uri = URI.parse(endpoint)
     private_origin = "#{uri.scheme}://#{uri.host}:#{uri.port}"
 
@@ -2469,7 +3018,8 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
         owner: self(),
         context: wrapped_context,
         authority: authority,
-        authority_epoch: epoch
+        authority_epoch: epoch,
+        resolver: Keyword.get(opts, :resolver)
       )
 
     manager
@@ -2576,11 +3126,62 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
            } = result_value
   end
 
-  defp assert_effect_state(failure, :read),
+  defp run_post_dispatch_case(
+         dir,
+         effect,
+         upstream,
+         fixture_opts,
+         reason,
+         details,
+         manifest_opts,
+         outcome \\ :answered
+       ) do
+    fixture = fixture(self(), fixture_opts)
+    on_exit(fixture.close)
+    tools = mappings_with_effect(upstream, effect)
+    public_name = tools[upstream].as
+
+    assert {:ok, built} =
+             dir
+             |> manifest(
+               [public_name],
+               [
+                 program: single_call_program(public_name, "x"),
+                 evaluation_timeout_ms: 5_000
+               ] ++ manifest_opts
+             )
+             |> directory_request(
+               registry(fixture.endpoint,
+                 tools: tools,
+                 timeout_ms: 5_000
+               )
+             )
+             |> RunLifecycle.build()
+
+    assert {:ok, result} = Kernel.run(built.entry_source, built.config)
+    failure = get_in(result.value, ["value", "value"])
+
+    assert %{
+             "status" => "error",
+             "kind" => "provider_error",
+             "reason" => expected_reason,
+             "details" => ^details,
+             "retryable?" => false
+           } = failure
+
+    assert expected_reason == Atom.to_string(reason)
+    assert_effect_state(failure, effect, outcome)
+    EventSink.stop(built.config.event_sink)
+  end
+
+  defp assert_effect_state(failure, :read, _outcome),
     do: refute(Map.has_key?(failure, "mutation_state"))
 
-  defp assert_effect_state(failure, :write),
+  defp assert_effect_state(failure, :write, :unknown),
     do: assert(failure["mutation_state"] == "indeterminate")
+
+  defp assert_effect_state(failure, :write, :answered),
+    do: refute(Map.has_key?(failure, "mutation_state"))
 
   defp input_required_state_only do
     %{
@@ -2621,6 +3222,34 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     [snapshot] = built.config.connector_snapshots
     assert :ok = RunBuilder.close(built)
     snapshot
+  end
+
+  defp build_fixture_provider(builder) do
+    {:ok, registry} = ProviderRegistry.new(%{"fixture-mcp" => builder})
+    {:ok, limits} = Limits.new()
+
+    ProviderRegistry.build(
+      registry,
+      "fixture-mcp",
+      %{"allow" => ["remote.structured"]},
+      %{
+        application_content_digest: String.duplicate("0", 64),
+        destination: :mission,
+        limits: limits,
+        installed_limits: limits,
+        owner: self()
+      }
+    )
+  end
+
+  defp streamable_oauth_builder(endpoint, manager, timeout_ms) do
+    MCPSource.builder(
+      transport:
+        {:streamable_http,
+         endpoint: endpoint, authorization: manager, allow_insecure_loopback: true},
+      tools: %{"structured" => %{as: "remote.structured", effect: :read}},
+      timeout_ms: timeout_ms
+    )
   end
 
   defp fixture(parent, opts \\ []) do
@@ -2700,8 +3329,12 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       status = opts[:http_error_status] ->
         {status, [{"content-type", "text/plain"}], String.duplicate("x", 1_100_000)}
 
-      opts[:unsupported_protocol?] ->
-        rpc_error(id, -32_600, "UnsupportedProtocolVersion", status: 400)
+      match?({_status, _code}, opts[:discover_rpc_error]) ->
+        {status, code} = Keyword.fetch!(opts, :discover_rpc_error)
+
+        rpc_error(id, code, Keyword.get(opts, :discover_rpc_message, "PRIVATE_REMOTE_MESSAGE"),
+          status: status
+        )
 
       opts[:discover_error?] ->
         rpc_error(id, -32_603, "discovery rejected")
@@ -3007,7 +3640,7 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   defp manifest(dir, allow, opts \\ []) do
     File.write!(
       Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"kind" :source "source" (get input "program")})))|
+      ~S|(ns app) (defn run [input] (return (tool/kernel-eval {"mission" "default" "kind" :source "source" (get input "program")})))|
     )
 
     program =

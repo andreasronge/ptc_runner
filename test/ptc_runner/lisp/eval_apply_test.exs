@@ -143,7 +143,7 @@ defmodule PtcRunner.Lisp.EvalApplyTest do
       env = Env.initial()
       # (apply 1 [2])
       ast = {:call, {:var, :apply}, [1, {:vector, [2]}]}
-      assert {:error, {:not_callable, 1}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
+      assert {:error, {:not_callable, %{}}} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
     end
 
     test "apply with map as last argument converts to [key, value] pairs" do

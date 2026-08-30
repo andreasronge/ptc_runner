@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.HostInstallationAuthority
+  alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.Store
@@ -52,8 +53,8 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
     :installed_limits,
     :runtime_binding
   ]
-  defstruct @enforce_keys ++ [attestation: nil]
-  @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
+  defstruct @enforce_keys ++ [attestation: nil, installation_config_digests: %{}]
+  @field_keys Enum.sort([:__struct__, :attestation, :installation_config_digests | @enforce_keys])
 
   @type implementation :: %{
           required(:builder) => function(),
@@ -76,6 +77,7 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
           authorities: %{binary() => Authority.t() | :host_runtime | nil},
           installed_limits: Limits.t(),
           runtime_binding: binary() | nil,
+          installation_config_digests: %{binary() => binary()},
           attestation: binary() | nil
         }
 
@@ -86,7 +88,8 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   def new(registrations, opts)
       when is_map(registrations) and not is_struct(registrations) and is_list(opts) do
     if Keyword.keyword?(opts) and
-         Keyword.keys(opts) -- [:installed_limits, :runtime_binding] == [] and
+         Keyword.keys(opts) -- [:installed_limits, :runtime_binding, :installation_config_digests] ==
+           [] and
          length(opts) == MapSet.size(MapSet.new(Keyword.keys(opts))) do
       with {:ok, descriptors, implementations, authorities} <-
              split_registrations(registrations) do
@@ -95,7 +98,8 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
           implementations: implementations,
           authorities: authorities,
           installed_limits: Keyword.get(opts, :installed_limits, Limits.installed_defaults()),
-          runtime_binding: Keyword.get(opts, :runtime_binding)
+          runtime_binding: Keyword.get(opts, :runtime_binding),
+          installation_config_digests: Keyword.get(opts, :installation_config_digests, %{})
         }
 
         if valid_shape?(catalog) do
@@ -227,7 +231,15 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
   defp catalog_maps_valid?(catalog) do
     is_map(catalog.descriptors) and not is_struct(catalog.descriptors) and
       is_map(catalog.implementations) and not is_struct(catalog.implementations) and
-      is_map(catalog.authorities) and not is_struct(catalog.authorities)
+      is_map(catalog.authorities) and not is_struct(catalog.authorities) and
+      catalog_digests_valid?(catalog)
+  end
+
+  defp catalog_digests_valid?(catalog) do
+    InstallationConfigDigest.valid_map?(
+      catalog.installation_config_digests,
+      MapSet.new(Map.keys(catalog.descriptors))
+    )
   end
 
   defp catalog_keys_match?(catalog) do
@@ -640,7 +652,8 @@ defmodule PtcRunner.Kernel.InstallationCatalog do
       catalog.implementations,
       catalog.authorities,
       catalog.installed_limits,
-      catalog.runtime_binding
+      catalog.runtime_binding,
+      catalog.installation_config_digests
     }
   end
 end

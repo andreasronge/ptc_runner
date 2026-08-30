@@ -8,12 +8,14 @@ defmodule PtcRunner.Kernel.AnalysisProfileRegistry do
   sinks, components, capabilities, limits, or cleanup.
   """
 
-  alias PtcRunner.Kernel.InspectionAnalysisProfile
-  alias PtcRunner.Kernel.LogAnalysisProfile
+  alias PtcRunner.Kernel.PrivateRunAnalysisProfile
+  alias PtcRunner.Kernel.PublicRunAnalysisProfile
+  alias PtcRunner.Kernel.RunCatalogProfile
 
   @profiles %{
-    "inspection-analysis-v3" => InspectionAnalysisProfile,
-    "log-analysis-v2" => LogAnalysisProfile
+    "private-run-analysis-v1" => PrivateRunAnalysisProfile,
+    "private-run-catalog-v1" => RunCatalogProfile,
+    "run-analysis-v1" => PublicRunAnalysisProfile
   }
 
   @type recipe :: module()
@@ -92,7 +94,7 @@ defmodule PtcRunner.Kernel.AnalysisProfileRegistry do
   defp reject_destination_conflict(_terminal, _unattended), do: :ok
 
   # An unattended private destination admits only the non-interactive input
-  # modes and the machine-readable output format that log-analysis-v2 already
+  # modes and the machine-readable output format that run-analysis-v1 already
   # has. `:interactive` is deliberately absent: it means waiting on a human at
   # a keyboard, which is the one thing "unattended" rules out. Admitting it let
   # `--private-unattended --format jsonl` with no -e/--load/script/stdin fall
@@ -112,7 +114,7 @@ defmodule PtcRunner.Kernel.AnalysisProfileRegistry do
   the static declaration. Reading the static list is precisely what let #1220
   through: the "jsonl requires input" guard consulted
   `frontend.output_formats`, which does not contain `:jsonl` for
-  `inspection-analysis-v3`, so the guard skipped the very call that needed it.
+  `private-run-analysis-v1`, so the guard skipped the very call that needed it.
   """
   @spec reachable_frontend(recipe(), boolean()) :: %{
           input_modes: [atom()],

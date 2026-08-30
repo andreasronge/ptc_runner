@@ -50,7 +50,9 @@ defmodule PtcRunner.Kernel.Manifest do
   mapping requires an explicit, nonempty manifest `allow` list; omission is
   accepted only when every installed mapping is read-only. Installed MCP
   providers may accept a `model_visible` subset of their authorized `allow`
-  names. Visibility controls discovery and model context only, never authority.
+  names, including mappings whose host `model_visible` flag is false. Omitted,
+  it defaults to the authorized names the host already marked visible.
+  Visibility controls discovery and model context only, never authority.
   Limit names are the `:manifest_narrowable` rows in
   `PtcRunner.Kernel.LimitCatalog`; version 1 accepts values no greater than the
   host-supplied installed ceilings. Omitted values use the normal runtime
@@ -59,7 +61,8 @@ defmodule PtcRunner.Kernel.Manifest do
   IDs. Labels use the closed `name`, `model`, `provider`, and flat `tags`
   safe-metadata profile. Identifier fields become SHA-256 fingerprints and tags
   use finite enumerated values, so arbitrary text and secrets are never copied
-  into traces.
+  into traces. Schema-validation timeouts and heap exhaustion are reported as
+  unavailable work rather than as manifest violations.
 
   The loader resolves paths relative to the canonical manifest directory and
   rejects absolute paths, traversal, devices, non-regular files, and symlink
@@ -68,12 +71,15 @@ defmodule PtcRunner.Kernel.Manifest do
 
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SchemaPath
+  alias PtcRunner.Kernel.SchemaViolation
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Kernel.ValueContract
 
@@ -118,8 +124,16 @@ defmodule PtcRunner.Kernel.Manifest do
           entry: binary(),
           input_declaration: map(),
           input: map() | nil,
-          contracts: %{input: ValueContract.t() | nil, result: ValueContract.t() | nil},
-          contract_sources: %{input: binary() | nil, result: binary() | nil},
+          contracts: %{
+            input: ValueContract.t() | nil,
+            result: ValueContract.t() | nil,
+            phase_returns: %{binary() => ValueContract.t()}
+          },
+          contract_sources: %{
+            input: binary() | nil,
+            result: binary() | nil,
+            phase_returns: %{binary() => binary()}
+          },
           missions: %{
             binary() => %{
               components: [Component.t()],
@@ -204,6 +218,7 @@ defmodule PtcRunner.Kernel.Manifest do
          {:ok, raw} <- ApplicationSource.manifest(source),
          true <- byte_size(raw) <= @max_manifest_bytes,
          {:ok, manifest} <- decode_manifest(raw),
+         :ok <- validate_manifest_schema(manifest),
          true <- is_map(manifest) and not is_struct(manifest),
          :ok <- root_keys(manifest, @top_keys, ~w(version workflow input)),
          :ok <- optional_schema(manifest),
@@ -261,6 +276,16 @@ defmodule PtcRunner.Kernel.Manifest do
 
       result ->
         result
+    end
+  end
+
+  defp validate_manifest_schema(manifest) do
+    schema = schema()
+
+    case SchemaViolation.validate(manifest, schema) do
+      :ok -> :ok
+      {:error, violation} -> {:error, {:manifest_schema_invalid, violation}}
+      {:unavailable, reason} -> {:error, {:schema_validation_unavailable, reason}}
     end
   end
 
@@ -430,6 +455,7 @@ defmodule PtcRunner.Kernel.Manifest do
          :ok <- mission_declarations(Map.get(manifest, "missions", %{}), providers),
          {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
+         :ok <- LimitConfiguration.validate_effective(limits, events.policy),
          {:ok, labels} <- labels(Map.get(manifest, "labels", %{})) do
       {:ok,
        %{
@@ -454,22 +480,54 @@ defmodule PtcRunner.Kernel.Manifest do
     do: manifest_value_error([{:property, "workflow"}], :invalid_workflow_manifest)
 
   defp contract_declarations(value) when is_map(value) and not is_struct(value) do
-    with :ok <- section_keys(value, "contracts", ~w(input_schema result_schema), []) do
-      Enum.reduce_while(
-        [{"input_schema", :input_contract}, {"result_schema", :result_contract}],
-        :ok,
-        fn {name, role}, :ok ->
-          case optional_contract_declaration(value, name, role) do
-            :ok -> {:cont, :ok}
-            {:error, _reason} = error -> {:halt, error}
-          end
-        end
-      )
+    with :ok <-
+           section_keys(
+             value,
+             "contracts",
+             ~w(input_schema result_schema phase_return_schemas),
+             []
+           ),
+         :ok <-
+           Enum.reduce_while(
+             [{"input_schema", :input_contract}, {"result_schema", :result_contract}],
+             :ok,
+             fn {name, role}, :ok ->
+               case optional_contract_declaration(value, name, role) do
+                 :ok -> {:cont, :ok}
+                 {:error, _reason} = error -> {:halt, error}
+               end
+             end
+           ) do
+      phase_return_contract_declarations(Map.get(value, "phase_return_schemas", %{}))
     end
   end
 
   defp contract_declarations(_value),
     do: {:error, {:manifest_path, [{:property, "contracts"}], :invalid_contracts_section}}
+
+  defp phase_return_contract_declarations(value) when is_map(value) and map_size(value) <= 16 do
+    Enum.reduce_while(value, :ok, fn {name, reference}, :ok ->
+      if valid_phase_contract_name?(name) do
+        case contract_declaration(reference, {:phase_return_contract, name}) do
+          :ok -> {:cont, :ok}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      else
+        {:halt,
+         manifest_value_error(
+           [{:property, "contracts"}, {:property, "phase_return_schemas"}],
+           :invalid_contract_name
+         )}
+      end
+    end)
+  end
+
+  defp phase_return_contract_declarations(_value),
+    do:
+      manifest_value_error(
+        [{:property, "contracts"}, {:property, "phase_return_schemas"}],
+        :invalid_phase_return_contracts
+      )
 
   defp optional_contract_declaration(value, name, role) do
     case Map.fetch(value, name) do
@@ -859,15 +917,27 @@ defmodule PtcRunner.Kernel.Manifest do
   defp materialize_input(_input, _source), do: {:error, :invalid_input}
 
   defp contracts(value, source) when is_map(value) do
-    with :ok <- section_keys(value, "contracts", ~w(input_schema result_schema), []),
+    with :ok <-
+           section_keys(
+             value,
+             "contracts",
+             ~w(input_schema result_schema phase_return_schemas),
+             []
+           ),
          {:ok, input, input_source} <-
            optional_contract(value, "input_schema", source, :input_contract),
          {:ok, result, result_source} <-
-           optional_contract(value, "result_schema", source, :result_contract) do
+           optional_contract(value, "result_schema", source, :result_contract),
+         {:ok, phase_returns, phase_return_sources} <-
+           phase_return_contracts(Map.get(value, "phase_return_schemas", %{}), source) do
       {:ok,
        %{
-         contracts: %{input: input, result: result},
-         sources: %{input: input_source, result: result_source}
+         contracts: %{input: input, result: result, phase_returns: phase_returns},
+         sources: %{
+           input: input_source,
+           result: result_source,
+           phase_returns: phase_return_sources
+         }
        }}
     else
       {:error, {:source_role, _role, _name, _reason}} = error ->
@@ -880,6 +950,53 @@ defmodule PtcRunner.Kernel.Manifest do
 
   defp contracts(_value, _source),
     do: {:error, {:manifest_path, [{:property, "contracts"}], :invalid_contracts_section}}
+
+  defp phase_return_contracts(value, source) when is_map(value) and map_size(value) <= 16 do
+    value
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.reduce_while({:ok, %{}, %{}, 0}, fn {name, reference},
+                                                {:ok, contracts, sources, bytes} ->
+      role = {:phase_return_contract, name}
+
+      if valid_phase_contract_name?(name) do
+        case contract(reference, source, role) do
+          {:ok, contract, raw} when bytes + byte_size(raw) <= 1_048_576 ->
+            {:cont,
+             {:ok, Map.put(contracts, name, contract), Map.put(sources, name, raw),
+              bytes + byte_size(raw)}}
+
+          {:ok, _contract, _raw} ->
+            {:halt,
+             {:error,
+              {:source_role, :phase_return_contract, name,
+               :aggregate_contract_source_limit_exceeded}}}
+
+          {:error, _reason} = error ->
+            {:halt, error}
+        end
+      else
+        {:halt,
+         {:error,
+          {:manifest_path, [{:property, "contracts"}, {:property, "phase_return_schemas"}],
+           :invalid_contract_name}}}
+      end
+    end)
+    |> case do
+      {:ok, contracts, sources, _bytes} -> {:ok, contracts, sources}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp phase_return_contracts(_value, _source),
+    do:
+      {:error,
+       {:manifest_path, [{:property, "contracts"}, {:property, "phase_return_schemas"}],
+        :invalid_phase_return_contracts}}
+
+  defp valid_phase_contract_name?(name) when is_binary(name),
+    do: byte_size(name) <= 128 and Regex.match?(@component_id, name)
+
+  defp valid_phase_contract_name?(_name), do: false
 
   defp optional_contract(contracts, name, source, role) do
     case Map.fetch(contracts, name) do
@@ -921,24 +1038,39 @@ defmodule PtcRunner.Kernel.Manifest do
   defp contract_reference_path(:result_contract),
     do: [{:property, "contracts"}, {:property, "result_schema"}]
 
+  defp contract_reference_path({:phase_return_contract, name}),
+    do: [{:property, "contracts"}, {:property, "phase_return_schemas"}, {:property, name}]
+
   defp load_contract(source, role, path) do
-    result =
-      with {:ok, raw} <- ApplicationSource.read_reference(source, path, @max_contract_bytes),
-           {:ok, schema} <- StrictJSON.decode(raw),
-           true <- is_map(schema) and not is_struct(schema),
-           {:ok, contract} <- ValueContract.compile(schema) do
+    case read_contract(source, path) do
+      {:ok, schema, raw} -> compile_contract(schema, raw, role, path)
+      {:error, reason} -> {:error, {:source_role, role, path, reason}}
+    end
+  end
+
+  # Any decoded JSON value is handed to the compiler, including arrays and
+  # scalars. Filtering non-objects here would refuse them without a rule and
+  # leave the commonest "I wrote the wrong thing entirely" mistake reporting
+  # the same blind message the rules exist to replace.
+  defp read_contract(source, path) do
+    with {:ok, raw} <- ApplicationSource.read_reference(source, path, @max_contract_bytes),
+         {:ok, schema} <- StrictJSON.decode(raw) do
+      {:ok, schema, raw}
+    end
+  end
+
+  # The rejected document stays in scope so the fault can be located inside it.
+  # A contract that fails to compile has no compiled path schema, so the
+  # submitted document, named by the reference that loaded it, is the only
+  # authority for the pointer.
+  defp compile_contract(schema, raw, role, path) do
+    case ValueContract.compile(schema) do
+      {:ok, contract} ->
         {:ok, contract, raw}
-      end
 
-    case result do
-      {:ok, _contract, _raw} = success ->
-        success
-
-      {:error, reason} ->
-        {:error, {:source_role, role, path, reason}}
-
-      _invalid ->
-        {:error, {:source_role, role, path, :invalid_contracts}}
+      {:error, {:invalid_value_contract, rejection}} ->
+        detail = ContractSchemaDiagnostic.detail(path, schema, rejection)
+        {:error, {:source_role, role, path, {:contract_schema_invalid, detail}}}
     end
   end
 
@@ -1043,7 +1175,10 @@ defmodule PtcRunner.Kernel.Manifest do
   defp limits(value, %Limits{} = installed_limits) when is_map(value) do
     ceilings = Map.from_struct(installed_limits)
     defaults = Limits.defaults() |> Map.from_struct()
-    manifest_rows = LimitCatalog.rows(:manifest_narrowable)
+
+    manifest_rows =
+      LimitCatalog.rows(:manifest_narrowable) ++
+        LimitCatalog.rows(:optional_manifest_narrowable)
 
     bounds_by_name =
       Map.new(manifest_rows, fn row ->
@@ -1057,6 +1192,9 @@ defmodule PtcRunner.Kernel.Manifest do
             :manifest_narrowable ->
               min(Map.fetch!(defaults, row.field), Map.fetch!(ceilings, row.field))
 
+            :optional_manifest_narrowable ->
+              Map.fetch!(ceilings, row.field)
+
             :installed_only ->
               Map.fetch!(ceilings, row.field)
           end
@@ -1064,7 +1202,14 @@ defmodule PtcRunner.Kernel.Manifest do
         {row.field, value}
       end)
 
-    with :ok <- section_keys(value, "limits", LimitCatalog.names(:manifest_narrowable), []) do
+    with :ok <-
+           section_keys(
+             value,
+             "limits",
+             LimitCatalog.names(:manifest_narrowable) ++
+               LimitCatalog.names(:optional_manifest_narrowable),
+             []
+           ) do
       value
       |> Map.to_list()
       |> Enum.sort_by(&elem(&1, 0))
@@ -1075,10 +1220,18 @@ defmodule PtcRunner.Kernel.Manifest do
   defp limits(_value, _installed_limits),
     do: manifest_value_error([{:property, "limits"}], :invalid_limits)
 
-  defp normalize_limits([], _bounds, normalized), do: Limits.new(normalized)
+  defp normalize_limits([], _bounds, normalized) do
+    Limits.new(normalized)
+  end
 
   defp normalize_limits([{key, number} | rest], bounds, normalized) do
     case {Map.fetch(bounds, key), number} do
+      {{:ok, {_name, nil, _maximum}}, number} when is_integer(number) and number > 0 ->
+        manifest_value_error(
+          [{:property, "limits"}, {:property, key}],
+          {:limit_unavailable, key, number}
+        )
+
       {{:ok, {name, ceiling, _maximum}}, number}
       when is_integer(number) and number > 0 and number <= ceiling ->
         normalize_limits(rest, bounds, Map.put(normalized, name, number))
@@ -1087,7 +1240,7 @@ defmodule PtcRunner.Kernel.Manifest do
       when is_integer(number) and number > ceiling and number <= maximum ->
         manifest_value_error(
           [{:property, "limits"}, {:property, key}],
-          {:installed_limit_exceeded, number, ceiling}
+          {:installed_limit_exceeded, key, number, ceiling}
         )
 
       _invalid ->
@@ -1372,7 +1525,13 @@ defmodule PtcRunner.Kernel.Manifest do
 
     closed_object(%{
       "input_schema" => reference,
-      "result_schema" => reference
+      "result_schema" => reference,
+      "phase_return_schemas" => %{
+        "type" => "object",
+        "maxProperties" => 16,
+        "propertyNames" => component_id_schema(),
+        "additionalProperties" => reference
+      }
     })
   end
 

@@ -1,5 +1,5 @@
 defmodule PtcRunner.Lisp.RuntimeBitwiseTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   # Bitwise operations (#825). Values chosen to match Clojure/JVM exactly
   # (BEAM integers are arbitrary-precision two's-complement, which agrees

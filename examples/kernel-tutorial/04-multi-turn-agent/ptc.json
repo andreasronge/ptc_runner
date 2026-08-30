@@ -12,6 +12,10 @@
       "task": "Complete this task in exactly two run_ptc_lisp calls. First call run_ptc_lisp with the program (defn answer [] 42) and do not call return or fail. After the success observation, call run_ptc_lisp with the program (return (answer))."
     }
   },
+  "limits": {
+    "run_duration_ms": 120000,
+    "workflow_timeout_ms": 120000
+  },
   "providers": {
     "workflow": [
       {"name": "deepseek"}

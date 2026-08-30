@@ -19,13 +19,10 @@ application that consumes it.
 
 The 2026-07-29 audit rejected the slice:
 
-- `repo-analyst` needs dynamic directory, filename, text-search, and line-range
-  operations over a frozen workspace. A finite set of exact resource URIs
-  cannot replace that discovery flow.
-- `examples/viewer-demo` reads known files, but the mapped
+- `examples/viewer-demo` reads known files, but the mapped, cursor-paginated
   `read_text_file` tool already supplies every behavior the demo uses.
 - `examples/kernel-tutorial/03-file-agent` reads one known `brief.txt`, and its
-  mapped `read_text_file` tool already supplies the complete application
+  mapped, cursor-paginated `read_text_file` tool supplies the application
   behavior.
 - `examples/kernel-inspection-lab` exercises varied MCP tool/result exchanges;
   it has no resource-native requirement.

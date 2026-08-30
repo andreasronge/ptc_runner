@@ -36,7 +36,7 @@ defmodule PtcRunner.Lisp.EffectOutcomeRegressionTest do
       """
 
       assert {:error, step} = Lisp.run(source, tools: tools, timeout: 5_000)
-      assert step.fail.reason == :type_error
+      assert step.fail.reason == :arithmetic_error
       assert step.prints == ["1", "2"]
       assert Enum.map(step.tool_calls, & &1.args["x"]) == [1, 2]
     end

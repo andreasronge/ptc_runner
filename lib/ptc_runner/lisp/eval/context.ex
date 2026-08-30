@@ -13,7 +13,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   | Field | Default | Hard Cap | Purpose |
   |-------|---------|----------|---------|
-  | `loop_limit` | 1,000 | 10,000 | Max loop/recur jumps |
+  | `loop_limit` | `nil` | — | Optional per-activation `loop`/`recur` bound |
   | `max_print_length` | 2,000 | — | Max chars per `println` call |
   | `max_tool_call_result_bytes` | 16,384 | — | Per-entry cap on the `:result` retained in the in-eval tool ledger |
   | `pmap_max_concurrency` | build-time `schedulers * 2` | — | Max concurrent pmap/pcalls tasks |
@@ -37,6 +37,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   alias PtcRunner.Lisp.Eval.Capture
   alias PtcRunner.Lisp.Eval.Effects
+  alias PtcRunner.Lisp.Eval.RunResources
   alias PtcRunner.Lisp.RetainedSize
 
   @default_print_length 2000
@@ -52,11 +53,11 @@ defmodule PtcRunner.Lisp.Eval.Context do
     :tool_exec,
     :tool_failure_token,
     :failure_origin,
+    :return_origin,
     :origin_stack,
     :prelude_caller_user_ns_stack,
     :turn_history,
-    iteration_count: 0,
-    loop_limit: 1000,
+    loop_limit: nil,
     max_print_length: @default_print_length,
     max_tool_calls: nil,
     # Shared atomic reservation counter for uncached tool invocations. Every
@@ -105,10 +106,20 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # in the context raises a runtime error naming the binding instead of
     # returning `nil`. It is off by default for permissive embedded execution.
     strict_data: false,
+    # Sorted `data/<name>` forms supplied by the Kernel mission boundary for
+    # missing-grant diagnostics. `nil` means the caller did not pass a list;
+    # Eval must not derive one from `ctx`.
+    data_grants: nil,
+    # Kernel-supplied diagnostic used when `data/params` is missing under
+    # strict data. `nil` treats `params` as an ordinary missing key.
+    missing_data_params_message: nil,
     # When true, session-authored code may only name prelude namespaces that
     # were directly attached. Prelude-internal calls remain allowed because the
     # compiler already validated their declared namespace deps.
     strict_transitive_calls: false,
+    # Whether any tool in this run is private. Raw/no-prelude runs use this
+    # once-computed flag to avoid authority bookkeeping on every closure.
+    private_tool_authority?: false,
     direct_namespaces: MapSet.new(),
     transitive_namespace_requirers: %{},
     prelude_export_mask: nil,
@@ -181,11 +192,11 @@ defmodule PtcRunner.Lisp.Eval.Context do
           tool_exec: (String.t(), map(), map() | nil -> term()),
           tool_failure_token: reference() | nil,
           failure_origin: :capability | nil,
+          return_origin: :direct_tool_call | nil,
           origin_stack: [map()],
           prelude_caller_user_ns_stack: [map()],
           turn_history: list(),
-          iteration_count: integer(),
-          loop_limit: integer(),
+          loop_limit: pos_integer() | nil,
           max_tool_calls: pos_integer() | nil,
           tool_call_budget: :atomics.atomics_ref(),
           max_tool_call_result_bytes: pos_integer(),
@@ -201,7 +212,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
           effects: Effects.t(),
           tools_meta: %{String.t() => %{optional(atom()) => term()}},
           strict_data: boolean(),
+          data_grants: [String.t()] | nil,
+          missing_data_params_message: String.t() | nil,
           strict_transitive_calls: boolean(),
+          private_tool_authority?: boolean(),
           direct_namespaces: MapSet.t(String.t()),
           transitive_namespace_requirers: %{String.t() => [String.t()]},
           prelude_export_mask: %{String.t() => MapSet.t(String.t())} | nil,
@@ -218,6 +232,10 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   ## Options
 
+  - `:loop_limit` - Optional positive integer bound on one `loop` or
+    tail-`recur` function activation (default: nil = disabled). Sequential
+    loops, nested loops, and separate HOF callback invocations are separate
+    activations.
   - `:max_print_length` - Max characters per `println` call (default: #{@default_print_length})
   - `:pmap_timeout` - Shared absolute deadline in ms for each pmap/pcalls
     operation, including nested parallel calls (default: 5000). Increase for
@@ -259,11 +277,13 @@ defmodule PtcRunner.Lisp.Eval.Context do
       tool_exec: tool_exec,
       tool_failure_token: Keyword.get(opts, :tool_failure_token),
       failure_origin: Keyword.get(opts, :failure_origin),
+      return_origin: Keyword.get(opts, :return_origin),
       origin_stack: Keyword.get(opts, :origin_stack, []),
       prelude_caller_user_ns_stack: Keyword.get(opts, :prelude_caller_user_ns_stack, []),
       turn_history: turn_history,
+      loop_limit: Keyword.get(opts, :loop_limit),
       max_tool_calls: Keyword.get(opts, :max_tool_calls),
-      tool_call_budget: Keyword.get_lazy(opts, :tool_call_budget, fn -> :atomics.new(1, []) end),
+      tool_call_budget: Keyword.get_lazy(opts, :tool_call_budget, &RunResources.new_counter/0),
       max_tool_call_result_bytes:
         Keyword.get(opts, :max_tool_call_result_bytes, @default_tool_call_result_bytes),
       max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
@@ -274,11 +294,15 @@ defmodule PtcRunner.Lisp.Eval.Context do
       max_heap: Keyword.get(opts, :max_heap),
       worker_max_heap: Keyword.get(opts, :worker_max_heap, Keyword.get(opts, :max_heap)),
       parallel_budget: Keyword.get(opts, :parallel_budget),
-      tool_activity: Keyword.get_lazy(opts, :tool_activity, fn -> :atomics.new(1, []) end),
+      tool_activity: Keyword.get_lazy(opts, :tool_activity, &RunResources.new_counter/0),
       effects: Effects.empty(),
       tools_meta: Keyword.get(opts, :tools_meta, %{}),
       strict_data: Keyword.get(opts, :strict_data, false),
+      data_grants: normalize_data_grants(Keyword.get(opts, :data_grants)),
+      missing_data_params_message:
+        normalize_missing_params_message(Keyword.get(opts, :missing_data_params_message)),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
+      private_tool_authority?: Keyword.get(opts, :private_tool_authority?, false),
       direct_namespaces: namespace_set(Keyword.get(opts, :direct_namespaces, [])),
       transitive_namespace_requirers:
         normalize_namespace_requirers(Keyword.get(opts, :transitive_namespace_requirers, %{})),
@@ -286,6 +310,20 @@ defmodule PtcRunner.Lisp.Eval.Context do
       prelude_exports: prelude_exports(Keyword.get(opts, :prelude)),
       prelude: prelude_artifact(Keyword.get(opts, :prelude))
     }
+  end
+
+  @doc false
+  @spec new_child(t(), map(), map(), keyword()) :: t()
+  def new_child(%__MODULE__{} = parent, user_ns, env, opts \\ []) do
+    opts =
+      [
+        tool_call_budget: parent.tool_call_budget,
+        tool_activity: parent.tool_activity
+      ] ++ opts
+
+    parent.ctx
+    |> new(user_ns, env, parent.tool_exec, parent.turn_history, opts)
+    |> inherit_prelude(parent)
   end
 
   @doc false
@@ -318,6 +356,14 @@ defmodule PtcRunner.Lisp.Eval.Context do
 
   defp namespace_set(%MapSet{} = namespaces), do: namespaces
   defp namespace_set(_namespaces), do: MapSet.new()
+
+  defp normalize_data_grants(names) when is_list(names), do: Enum.filter(names, &is_binary/1)
+  defp normalize_data_grants(_names), do: nil
+
+  defp normalize_missing_params_message(message) when is_binary(message) and message != "",
+    do: message
+
+  defp normalize_missing_params_message(_message), do: nil
 
   defp normalize_namespace_requirers(requirers) when is_map(requirers) do
     Map.new(requirers, fn
@@ -560,16 +606,22 @@ defmodule PtcRunner.Lisp.Eval.Context do
       | prelude_exports: source.prelude_exports,
         prelude: source.prelude,
         strict_transitive_calls: source.strict_transitive_calls,
+        private_tool_authority?: source.private_tool_authority?,
         direct_namespaces: source.direct_namespaces,
         transitive_namespace_requirers: source.transitive_namespace_requirers,
         prelude_export_mask: source.prelude_export_mask,
         max_tool_calls: source.max_tool_calls,
+        loop_limit: source.loop_limit,
         tool_call_budget: source.tool_call_budget,
         tool_activity: source.tool_activity,
         tool_failure_token: source.tool_failure_token,
         failure_origin: source.failure_origin,
+        return_origin: source.return_origin,
         origin_stack: source.origin_stack,
-        prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack
+        prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack,
+        strict_data: source.strict_data,
+        data_grants: source.data_grants,
+        missing_data_params_message: source.missing_data_params_message
     }
   end
 
@@ -698,15 +750,26 @@ defmodule PtcRunner.Lisp.Eval.Context do
   def mark_capability_failure(%__MODULE__{} = context),
     do: %{context | failure_origin: :capability}
 
+  @doc false
+  @spec mark_direct_tool_return(t()) :: t()
+  def mark_direct_tool_return(%__MODULE__{} = context),
+    do: %{context | return_origin: :direct_tool_call}
+
   @doc """
-  Increments the iteration count and checks against the limit.
+  Consumes one `recur` jump against an activation-local iteration counter.
+
+  `nil` disables the bound. A positive limit applies to one `loop` or
+  tail-`recur` function activation, not to the whole evaluation.
   """
-  @spec increment_iteration(t()) :: {:ok, t()} | {:error, :loop_limit_exceeded}
-  def increment_iteration(%__MODULE__{iteration_count: count, loop_limit: limit} = context) do
+  @spec consume_loop_iteration(non_neg_integer(), pos_integer() | nil) ::
+          {:ok, non_neg_integer()} | {:error, :loop_limit_exceeded}
+  def consume_loop_iteration(_count, nil), do: {:ok, 0}
+
+  def consume_loop_iteration(count, limit) when is_integer(limit) and limit > 0 do
     if count >= limit do
       {:error, :loop_limit_exceeded}
     else
-      {:ok, %{context | iteration_count: count + 1}}
+      {:ok, count + 1}
     end
   end
 

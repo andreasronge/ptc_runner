@@ -244,6 +244,49 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   end
 
   @tag :tmp_dir
+  test "a private result refuses a normal destination and an absent one alike", %{tmp_dir: dir} do
+    # A private result publishes to a file or not at all, so naming a normal
+    # destination and naming none are the same mistake. Only the first was
+    # refused: the second authorized the run, spent the provider activity, and
+    # failed internally at publication with nothing to act on.
+    application = application!(dir, "private-result", %{"events" => %{"policy" => "private"}})
+
+    for destination_args <- [["--output", Path.join(dir, "normal.json")], []] do
+      assert {:ok, preparation} =
+               CommandEngine.prepare(["run", application | destination_args])
+
+      assert {:error, outcome} = CommandEngine.preflight(preparation)
+      assert outcome.envelope["error"]["phase"] == "destination"
+      assert outcome.envelope["error"]["code"] == "private_destination_required"
+      assert outcome.envelope["error"]["provider_activity"] == false
+      assert outcome.envelope["execution"] == %{"state" => "not_started"}
+      refute Jason.encode!(outcome.envelope) =~ dir
+    end
+
+    assert {:ok, preparation} =
+             CommandEngine.prepare([
+               "run",
+               application,
+               "--private-output",
+               Path.join(dir, "private.json")
+             ])
+
+    assert {:ok, authority} = CommandEngine.preflight(preparation)
+    assert :ok = PublicationAuthority.abort(authority)
+    assert :ok = CommandPreparation.close(preparation)
+  end
+
+  test "an active doctor authorizes no result destination under a private policy" do
+    # `doctor --connect` publishes no result, so the requirement above must not
+    # reach it; it authorizes with no destinations at all.
+    assert {:ok, authority} =
+             PublicationAuthority.authorize("private-doctor", [], :private, :private_inspection)
+
+    assert PublicationAuthority.authorized?(authority)
+    assert :ok = PublicationAuthority.abort(authority)
+  end
+
+  @tag :tmp_dir
   test "independent authorities cannot reserve the same requested name", %{tmp_dir: dir} do
     target = Path.join(dir, "same-target.jsonl")
 
@@ -443,7 +486,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   @tag :tmp_dir
   test "a later reservation failure releases earlier exclusive handles", %{tmp_dir: dir} do
     trace = Path.join(dir, "run.jsonl")
-    inspection = Path.join(dir, "run.inspection.jsonl")
+    inspection = Path.join(dir, "run.ptcins")
     File.write!(inspection, "occupied")
 
     assert {:error, :destination_exists} =
@@ -455,15 +498,15 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
              )
 
     assert File.lstat(trace) == {:error, :enoent}
-    assert File.ls!(dir) == ["run.inspection.jsonl"]
+    assert File.ls!(dir) == ["run.ptcins"]
   end
 
   @tag :tmp_dir
   test "a target-specific reservation failure releases earlier exclusive handles", %{tmp_dir: dir} do
     trace = Path.join(dir, "run.jsonl")
-    inspection = Path.join([dir, "missing", "run.inspection.jsonl"])
+    inspection = Path.join([dir, "missing", "run.ptcins"])
 
-    assert {:error, {:private_directory_parent_unavailable, :inspection}} =
+    assert {:error, {:destination_directory_missing, :inspection}} =
              PublicationAuthority.authorize(
                "reservation-target-rollback",
                [trace: trace, inspect: inspection],
@@ -510,16 +553,18 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
        "the trace destination is invalid"},
       {[
          "--inspect",
-         Path.join([dir, "missing-inspection-parent", "run.inspection.jsonl"])
-       ], "inspection_destination_unavailable", "the inspection destination is unavailable"},
+         Path.join([dir, "missing-inspection-parent", "run.ptcins"])
+       ], "inspection_directory_missing", "--inspect must name a file in an existing directory"},
       {[
          "--output",
          Path.join([dir, "missing-result-parent", "result.json"])
-       ], "result_destination_unavailable", "the result destination is unavailable"},
+       ], "result_directory_missing",
+       "--output and --private-output must name a file in an existing directory"},
       {[
          "--private-output",
          Path.join([dir, "missing-private-result-parent", "result.json"])
-       ], "result_destination_unavailable", "the result destination is unavailable"}
+       ], "result_directory_missing",
+       "--output and --private-output must name a file in an existing directory"}
     ]
 
     for {destination_args, code, message} <- cases do
@@ -561,7 +606,7 @@ defmodule PtcRunner.Kernel.PublicationAuthorityTest do
   @tag :tmp_dir
   test "artifact destination collisions are conflicting arguments", %{tmp_dir: dir} do
     application = application!(dir, "artifact-destination-collision")
-    destination = Path.join(dir, "shared.inspection.jsonl")
+    destination = Path.join(dir, "shared.ptcins")
 
     assert {:ok, preparation} =
              CommandEngine.prepare([

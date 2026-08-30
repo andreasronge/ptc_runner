@@ -1,6 +1,52 @@
 defmodule PtcRunner.Kernel.HostInstallationTest do
   use ExUnit.Case, async: false
 
+  defmodule PreparingHostLLMAdapter do
+    @behaviour PtcRunner.LLM
+
+    alias PtcRunner.LLM.Invocation
+
+    @impl true
+    def prepare_model(model, requirements) do
+      send(Application.fetch_env!(:ptc_runner, :host_preparing_llm_owner), {:prepared, model})
+      {:ok, {:prepared, model, requirements.exact_options}, :uncataloged, requirements}
+    end
+
+    @impl true
+    def call({:prepared, model, _exact_options}, %Invocation{} = invocation) do
+      send(Application.fetch_env!(:ptc_runner, :host_preparing_llm_owner), {
+        :prepared_request,
+        model,
+        invocation.request
+      })
+
+      {:ok, %{content: "ok", tokens: %{}}}
+    end
+  end
+
+  defmodule UnsupportedContractAdapter do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def prepare_model(_model, _requirements), do: {:error, :unsupported_model_option}
+
+    @impl true
+    def call(_target, _invocation), do: raise("an unsupported contract must not reach call/2")
+  end
+
+  defmodule MismatchedContractAdapter do
+    @behaviour PtcRunner.LLM
+
+    @impl true
+    def prepare_model(model, requirements) do
+      {:ok, %{selector: model}, :unavailable,
+       %{requirements | structured_output_mode: :json_schema}}
+    end
+
+    @impl true
+    def call(_target, _invocation), do: raise("a mismatched contract must not reach call/2")
+  end
+
   @stdio_fixture Path.expand("../../support/mcp_stdio_fixture.exs", __DIR__)
 
   import PtcRunner.TestSupport.Eventually, only: [assert_eventually: 1]
@@ -20,8 +66,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
+  alias PtcRunner.Kernel.ProviderSnapshot
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.SelectionRules
+  alias PtcRunner.TestSupport.LLMSupport
   alias PtcRunner.TestSupport.RunLifecycle
 
   @tag :tmp_dir
@@ -250,6 +298,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     caller_ref = Process.monitor(caller)
 
     try do
+      assert_receive {:trace, ^authority_owner, :spawn, _callback_guard, _spawned}
       assert_receive {:trace, ^authority_owner, :spawn, callback_worker, _spawned}
       callback_ref = Process.monitor(callback_worker)
       assert true = :erlang.suspend_process(callback_worker)
@@ -620,8 +669,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "live" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "installation_revision" => "live-v1",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "key"
         }
       }
@@ -748,6 +799,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "invalid-model" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "installation_revision" => "invalid-model-v1",
           "model" => "definitely-not-a-model",
           "credential" => "missing_key"
@@ -766,6 +819,35 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
+  test "normalizes an unsupported ReqLLM provider for active host diagnostics", %{tmp_dir: dir} do
+    LLMSupport.admit_provider_application!()
+
+    host =
+      load_host(dir, %{
+        "credentials" => %{"key" => %{"literal" => "not-read"}},
+        "install" => %{
+          "live" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "installation_revision" => "live-v1",
+            "model" => "logger:future-model",
+            "credential" => "key"
+          }
+        }
+      })
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(registry, "live", %{}, context(dir, :workflow))
+
+    assert {:error, :invalid_llm_model} = ProviderRegistry.preflight(prepared)
+    assert :ok = ProviderRegistry.close(registry)
+  end
+
+  @tag :tmp_dir
   test "audited local preflight matches missing LLM adapters and stdio runtime files", %{
     tmp_dir: dir
   } do
@@ -780,8 +862,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "install" => %{
           "live" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
             "installation_revision" => "live-v1",
-            "model" => "openrouter:deepseek/deepseek-v4-flash",
+            "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
             "credential" => "key"
           }
         }
@@ -798,7 +882,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       missing_executable_host,
       "workspace",
       :mission,
-      {:error, :invalid_mcp_executable}
+      {:error, :mcp_command_not_found}
     )
 
     missing_launcher_host =
@@ -815,17 +899,29 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
-  test "installs live LLM aliases only in workflow with explicit credential and safe identity", %{
+  test "installs live LLM aliases with adapter-attested model identity", %{
     tmp_dir: dir
   } do
     previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
     previous_owner = Application.get_env(:ptc_runner, :host_llm_test_owner)
+    previous_public_model = Application.get_env(:ptc_runner, :host_llm_test_public_model)
+    previous_public_model_owner = Application.get_env(:ptc_runner, :host_llm_public_model_owner)
+
+    previous_provider_application_owner =
+      Application.get_env(:ptc_runner, :host_llm_provider_application_owner)
+
     Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
     Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+    Application.put_env(:ptc_runner, :host_llm_test_public_model, true)
+    Application.put_env(:ptc_runner, :host_llm_public_model_owner, self())
+    Application.put_env(:ptc_runner, :host_llm_provider_application_owner, self())
 
     on_exit(fn ->
       restore_env(:llm_adapter, previous_adapter)
       restore_env(:host_llm_test_owner, previous_owner)
+      restore_env(:host_llm_test_public_model, previous_public_model)
+      restore_env(:host_llm_public_model_owner, previous_public_model_owner)
+      restore_env(:host_llm_provider_application_owner, previous_provider_application_owner)
     end)
 
     config = %{
@@ -833,9 +929,19 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "openrouter_key",
-          "params" => %{"temperature" => 0.15, "seed" => 73, "max_tokens" => 2_048},
+          "params" => %{
+            "temperature" => 0.15,
+            "seed" => 73,
+            "max_tokens" => 2_048,
+            "top_p" => 0.9,
+            "presence_penalty" => -0.5,
+            "frequency_penalty" => 0.75,
+            "reasoning_effort" => "medium"
+          },
           "installation_revision" => "model-policy-v2",
           "accepts_data" => ["normal", "private_inspection"],
           "ceilings" => %{
@@ -878,7 +984,12 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert prepared.workflow_llm_route == %{
              source: "llm",
              installation_revision: "model-policy-v2",
-             default: false
+             default: false,
+             max_calls: 128,
+             structured_output_mode: :unsupported,
+             usage_guarantees: %{tokens: false, cost_currency: nil},
+             reservation_tariff: nil,
+             request_timeout_ms: 120_000
            }
 
     assert {:error, :provider_destination_denied} =
@@ -903,6 +1014,14 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
                workflow
              )
 
+    assert {:error, :invalid_llm_selection} =
+             ProviderRegistry.prepare(
+               registry,
+               "deepseek",
+               %{"max_calls" => 2_049},
+               workflow
+             )
+
     assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
 
     assert {:ok, credentials} =
@@ -911,11 +1030,17 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert credentials == %{"openrouter_key" => "test-llm-secret"}
     assert {:ok, built} = ProviderRegistry.acquire(preflighted, credentials)
 
+    assert_receive {:host_llm_public_model, "openrouter:deepseek/deepseek-v4-flash-0731"}
+
     assert [%{name: "llm-request"} = capability] = built.capabilities
     assert built.accepts_data == [:normal, :private_inspection]
     assert built.data_class == :normal
     assert built.snapshot["provider"] == "deepseek"
-    assert built.snapshot["acquisition"] == %{"source" => "llm"}
+
+    assert built.snapshot["acquisition"] == %{
+             "source" => "llm",
+             "resolved_model" => "openrouter:deepseek/deepseek-v4-flash-0731"
+           }
 
     assert built.snapshot["declaration"] == %{
              "name" => "deepseek",
@@ -927,29 +1052,341 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              "config" => %{
                "default" => false,
                "max_request_bytes" => 100_000,
-               "max_response_bytes" => 300_000
+               "max_response_bytes" => 300_000,
+               "max_calls" => 128
              }
            }
 
     assert built.snapshot["acquisition_identity_hash"] =~ ~r/\A[0-9a-f]{64}\z/
     assert built.snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
-    refute inspect(built.snapshot) =~ "openrouter"
+
+    assert built.snapshot["installation_config_digest"] ==
+             host.install["deepseek"].installation_config_digest
+
     refute inspect(built.snapshot) =~ "test-llm-secret"
 
+    assert {:ok,
+            %{
+              alias: "deepseek",
+              installation_revision: "model-policy-v2",
+              resolved_model: "openrouter:deepseek/deepseek-v4-flash-0731"
+            }} = ProviderSnapshot.llm_identity(built.snapshot)
+
     assert {:ok, response} =
-             capability.callback.(%{
-               "messages" => [%{"role" => "user", "content" => "hello"}],
-               "cache" => true
-             })
+             capability.callback.(
+               %{
+                 "messages" => [%{"role" => "user", "content" => "hello"}],
+                 "cache" => true
+               },
+               LLMSupport.llm_context()
+             )
 
     assert response["content"] == "ok"
 
-    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", request}
-    assert request.api_key == "test-llm-secret"
+    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", request}
+    assert_receive {:host_llm_provider_application, "openrouter:deepseek/deepseek-v4-flash-0731"}
+    assert request.credential == "test-llm-secret"
     assert request.cache == false
-    assert request.temperature == 0.15
-    assert request.seed == 73
-    assert request.max_tokens == 2_048
+    assert request.exact_options.temperature == 0.15
+    assert request.exact_options.seed == 73
+    assert request.exact_options.max_tokens == 2_048
+    assert request.exact_options.top_p == 0.9
+    assert request.exact_options.presence_penalty == -0.5
+    assert request.exact_options.frequency_penalty == 0.75
+    assert request.exact_options.reasoning_effort == :medium
+    assert request.llm_request_deadline_ms == nil
+
+    Application.put_env(:ptc_runner, :host_llm_test_public_model, false)
+    private_host = load_host(Path.join(dir, "private"), config)
+    assert {:ok, private_catalog} = HostInstallation.catalog(private_host)
+
+    assert {:ok, private_registry} =
+             HostInstallation.runtime_registry(private_host, private_catalog)
+
+    assert {:ok, private_prepared} =
+             ProviderRegistry.prepare(private_registry, "deepseek", %{}, context(dir, :workflow))
+
+    assert {:ok, private_preflighted} = ProviderRegistry.preflight(private_prepared)
+
+    assert {:ok, private_credentials} =
+             ProviderRegistry.resolve_credentials(
+               private_registry,
+               private_prepared.credential_names
+             )
+
+    assert {:ok, private_built} =
+             ProviderRegistry.acquire(private_preflighted, private_credentials)
+
+    assert_receive {:host_llm_public_model, "openrouter:deepseek/deepseek-v4-flash-0731"}
+    assert private_built.snapshot["acquisition"] == %{"source" => "llm"}
+    refute Map.has_key?(private_built.snapshot["acquisition"], "resolved_model")
+    assert :error = ProviderSnapshot.llm_identity(private_built.snapshot)
+  end
+
+  @tag :tmp_dir
+  test "live LLM preparation seals the authorized output-token minimum", %{tmp_dir: dir} do
+    previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
+    previous_owner = Application.get_env(:ptc_runner, :host_llm_test_owner)
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+
+    on_exit(fn ->
+      restore_env(:llm_adapter, previous_adapter)
+      restore_env(:host_llm_test_owner, previous_owner)
+    end)
+
+    host =
+      load_host(dir, %{
+        "credentials" => %{"openrouter_key" => %{"literal" => "test-llm-secret"}},
+        "install" => %{
+          "deepseek" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+            "credential" => "openrouter_key",
+            "params" => %{"max_tokens" => 2_048},
+            "installation_revision" => "model-policy-v2"
+          }
+        }
+      })
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+    {:ok, narrowed} = Limits.new(%{llm_request_output_tokens: 100})
+    workflow = context(dir, :workflow) |> Map.put(:limits, narrowed)
+
+    assert {:ok, prepared} = ProviderRegistry.prepare(registry, "deepseek", %{}, workflow)
+    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
+
+    assert {:ok, credentials} =
+             ProviderRegistry.resolve_credentials(registry, prepared.credential_names)
+
+    assert {:ok, built} = ProviderRegistry.acquire(preflighted, credentials)
+    assert [%{callback: requester}] = built.capabilities
+
+    assert {:ok, %{"content" => "ok"}} =
+             requester.(
+               %{"messages" => [%{"role" => "user", "content" => "hello"}]},
+               LLMSupport.llm_context()
+             )
+
+    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", request}
+    assert request.exact_options.max_tokens == 100
+    refute inspect(built.snapshot) =~ "max_tokens"
+    refute inspect(built.snapshot) =~ "exact_options"
+  end
+
+  @tag :tmp_dir
+  test "an unsupported model contract fails local preflight before credentials", %{tmp_dir: dir} do
+    previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
+    Application.put_env(:ptc_runner, :llm_adapter, UnsupportedContractAdapter)
+
+    on_exit(fn -> restore_env(:llm_adapter, previous_adapter) end)
+
+    host =
+      load_host(dir, %{
+        "credentials" => %{"openrouter_key" => %{"literal" => "test-llm-secret"}},
+        "install" => %{
+          "deepseek" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+            "credential" => "openrouter_key",
+            "installation_revision" => "model-policy-v2"
+          }
+        }
+      })
+
+    assert_local_preflight_parity(
+      host,
+      "deepseek",
+      :workflow,
+      {:error, :unsupported_model_option}
+    )
+  end
+
+  @tag :tmp_dir
+  test "openai_codex fails local preflight before credentials", %{tmp_dir: dir} do
+    host =
+      load_host(dir, %{
+        "credentials" => %{"key" => %{"literal" => "test-llm-secret"}},
+        "install" => %{
+          "codex" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "model" => "openai_codex:future-chat-1408",
+            "credential" => "key",
+            "installation_revision" => "codex-v1"
+          }
+        }
+      })
+
+    assert_local_preflight_parity(
+      host,
+      "codex",
+      :workflow,
+      {:error, :unsupported_model_option}
+    )
+  end
+
+  @tag :tmp_dir
+  test "a mismatched adapter attestation fails local preflight before credentials", %{
+    tmp_dir: dir
+  } do
+    previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
+    Application.put_env(:ptc_runner, :llm_adapter, MismatchedContractAdapter)
+
+    on_exit(fn -> restore_env(:llm_adapter, previous_adapter) end)
+
+    host =
+      load_host(dir, %{
+        "credentials" => %{"key" => %{"literal" => "test-llm-secret"}},
+        "install" => %{
+          "live" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "model" => "openrouter:test/model",
+            "credential" => "key",
+            "installation_revision" => "mismatch-v1"
+          }
+        }
+      })
+
+    assert_local_preflight_parity(
+      host,
+      "live",
+      :workflow,
+      {:error, :unsupported_model_option}
+    )
+  end
+
+  @tag :tmp_dir
+  test "LLM max_calls uses the host ceiling when it sits below per-name", %{tmp_dir: dir} do
+    host =
+      load_host(dir, %{
+        "credentials" => %{"openrouter_key" => %{"literal" => "test-llm-secret"}},
+        "install" => %{
+          "deepseek" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+            "credential" => "openrouter_key",
+            "installation_revision" => "max-calls-v1",
+            "ceilings" => %{"max_calls" => 4}
+          }
+        }
+      })
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+    workflow = context(dir, :workflow)
+
+    assert {:ok, prepared} = ProviderRegistry.prepare(registry, "deepseek", %{}, workflow)
+    assert prepared.workflow_llm_route.max_calls == 4
+
+    assert {:ok, narrowed} =
+             ProviderRegistry.prepare(registry, "deepseek", %{"max_calls" => 2}, workflow)
+
+    assert narrowed.workflow_llm_route.max_calls == 2
+
+    assert {:error, :invalid_llm_selection} =
+             ProviderRegistry.prepare(registry, "deepseek", %{"max_calls" => 8}, workflow)
+  end
+
+  @tag :tmp_dir
+  test "live structured_output_mode is copied onto the workflow LLM route", %{tmp_dir: dir} do
+    host =
+      load_host(dir, %{
+        "credentials" => %{"openrouter_key" => %{"literal" => "test-llm-secret"}},
+        "install" => %{
+          "deepseek" => %{
+            "source" => "llm",
+            "structured_output_mode" => "json_schema",
+            "usage_guarantees" => %{"tokens" => true, "cost_currency" => nil},
+            "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
+            "credential" => "openrouter_key",
+            "installation_revision" => "model-policy-v3"
+          }
+        }
+      })
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+
+    assert catalog.descriptors["deepseek"].structured_output_mode == :json_schema
+
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(registry, "deepseek", %{}, context(dir, :workflow))
+
+    assert prepared.workflow_llm_route.structured_output_mode == :json_schema
+  end
+
+  @tag :tmp_dir
+  test "a live LLM requester binds one prepared target across turns", %{tmp_dir: dir} do
+    previous_adapter = Application.get_env(:ptc_runner, :llm_adapter)
+    previous_owner = Application.get_env(:ptc_runner, :host_preparing_llm_owner)
+    Application.put_env(:ptc_runner, :llm_adapter, PreparingHostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_preparing_llm_owner, self())
+
+    on_exit(fn ->
+      restore_env(:llm_adapter, previous_adapter)
+      restore_env(:host_preparing_llm_owner, previous_owner)
+    end)
+
+    host =
+      load_host(dir, %{
+        "credentials" => %{"key" => %{"literal" => "test-secret"}},
+        "install" => %{
+          "live" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "installation_revision" => "live-v1",
+            "model" => "provider:future-model",
+            "credential" => "key"
+          }
+        }
+      })
+
+    assert {:ok, catalog} = HostInstallation.catalog(host)
+    assert {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+
+    assert {:ok, prepared} =
+             ProviderRegistry.prepare(registry, "live", %{}, context(dir, :workflow))
+
+    assert {:ok, preflighted} = ProviderRegistry.preflight(prepared)
+    assert_receive {:prepared, "provider:future-model"}
+    refute_receive {:prepared, _model}
+    assert {:ok, credentials} = ProviderRegistry.resolve_credentials(registry, ["key"])
+
+    warning =
+      ExUnit.CaptureIO.capture_io(:stderr, fn ->
+        assert {:ok, built} = ProviderRegistry.acquire(preflighted, credentials)
+        assert [%{callback: requester}] = built.capabilities
+
+        for content <- ["first", "second"] do
+          assert {:ok, %{"content" => "ok"}} =
+                   requester.(
+                     %{
+                       "messages" => [%{"role" => "user", "content" => content}]
+                     },
+                     LLMSupport.llm_context()
+                   )
+        end
+      end)
+
+    assert length(Regex.scan(~r/model_uncataloged/, warning)) == 1
+    refute warning =~ "provider:future-model"
+    refute warning =~ "ReqLLM"
+    refute_receive {:prepared, _model}
+    assert_receive {:prepared_request, "provider:future-model", _request}
+    assert_receive {:prepared_request, "provider:future-model", _request}
+    assert :ok = InstallationCatalog.close(catalog)
   end
 
   @tag :tmp_dir
@@ -964,6 +1401,16 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     Application.put_env(:ptc_runner, :host_llm_test_owner, self())
     Application.put_env(:ptc_runner, :host_llm_test_warm_words, 100_000)
 
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:ok,
+       %{
+         content: "ok",
+         tokens: %{input: 8, output: 1, total_cost: %{currency: "USD", microunits: 3}}
+       }}
+    )
+
     on_exit(fn ->
       restore_env(:llm_adapter, previous_adapter)
       restore_env(:host_llm_test_owner, previous_owner)
@@ -977,8 +1424,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         "install" => %{
           "live" => %{
             "source" => "llm",
+            "structured_output_mode" => "json_schema",
+            "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
             "installation_revision" => "live-v1",
-            "model" => "openrouter:deepseek/deepseek-v4-flash",
+            "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
             "credential" => "key",
             "params" => %{"max_tokens" => 99}
           }
@@ -1001,6 +1450,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       |> Map.put(:credentials, %{"key" => "pre-resolved-secret"})
 
     assert is_binary(catalog.runtime_binding)
+    assert descriptor.structured_output_mode == :json_schema
+    assert descriptor.usage_guarantees == %{tokens: true, cost_currency: "USD"}
     assert descriptor.local_preflight == :audited_local
     assert descriptor.connectivity_mode == :probe
     assert descriptor.probe_effect == :completion
@@ -1013,18 +1464,38 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert :ok =
              implementation.local_preflight.(selection, probe_context, runtime_services)
 
-    assert :ok = implementation.connectivity_probe.(selection, probe_context, runtime_services)
+    # The probe bills a real request, so what the provider reported it spent
+    # travels back with the success rather than being discarded.
+    assert {:ok,
+            %{
+              "input" => 8,
+              "output" => 1,
+              "total_cost" => %{"currency" => "USD", "microunits" => 3}
+            }} =
+             implementation.connectivity_probe.(selection, probe_context, runtime_services)
 
     assert_receive {:host_llm_ensure_ready, warmup_pid}
-    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", request}
+    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", request}
     request_pid = Map.fetch!(request, :probe_pid)
     refute warmup_pid == request_pid
-    assert request.api_key == "pre-resolved-secret"
+    assert request.credential == "pre-resolved-secret"
     assert request.cache == false
-    assert request.max_tokens == 1
-    assert request.max_retries == 0
-    assert request.req_http_options == [retry: false, redirect: false, max_retries: 0]
+    assert request.exact_options.max_tokens == 1
+    assert request.llm_request_deadline_ms == nil
     assert [%{role: :user, content: "Health check."}] = request.messages
+    refute Map.has_key?(request, :schema)
+    refute_receive {:host_llm_request, _, _}
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:ok, %{content: "ok"}}
+    )
+
+    assert {:error, :llm_connectivity_unavailable} =
+             implementation.connectivity_probe.(selection, probe_context, runtime_services)
+
+    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", _request}
     refute_receive {:host_llm_request, _, _}
 
     Application.put_env(:ptc_runner, :host_llm_test_result, {:error, :unavailable})
@@ -1032,7 +1503,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert {:error, :llm_connectivity_unavailable} =
              implementation.connectivity_probe.(selection, probe_context, runtime_services)
 
-    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash", _request}
+    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", _request}
     refute_receive {:host_llm_request, _, _}
 
     # No fallback: the credential this installation declares is resolvable from
@@ -1091,12 +1562,19 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
         marker,
         "mcp-unicode"
       ])
+      # This test exercises locale propagation, not the default startup
+      # deadline. Booting an Elixir source fixture can exceed five seconds
+      # while the full CI suite is under load.
+      |> put_in(["install", "workspace", "ceilings"], %{"timeout_ms" => 20_000})
+      |> put_in(["install", "workspace", "transport", "start_timeout_ms"], 20_000)
       |> put_in(["install", "workspace", "transport", "inherit_environment"], true)
       |> put_in(["install", "workspace", "tools"], %{
         "unicode" => %{"as" => "workspace.unicode", "effect" => "read"}
       })
 
     host = load_host(dir, config)
+    {:ok, limits} = Limits.new(evaluation_timeout_ms: 20_000)
+    build_context = %{context(dir, :mission) | limits: limits, installed_limits: limits}
 
     assert {:ok, registry} =
              HostInstallation.catalog(host)
@@ -1105,7 +1583,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              end)
 
     assert {:ok, %{capabilities: [capability], close: close}} =
-             ProviderRegistry.build(registry, "workspace", %{}, context(dir, :mission))
+             ProviderRegistry.build(registry, "workspace", %{}, build_context)
 
     on_exit(fn -> close.() end)
 
@@ -1114,7 +1592,8 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   end
 
   @tag :tmp_dir
-  test "selection can only narrow installed visibility and ceilings", %{tmp_dir: dir} do
+  test "selection can grant host-hidden visibility and must stay within installed names and ceilings",
+       %{tmp_dir: dir} do
     host = load_host(dir, http_config())
 
     assert {:ok, registry} =
@@ -1133,11 +1612,19 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
                context
              )
 
-    assert {:error, :invalid_mcp_selection} =
+    assert {:ok, _hidden_visible} =
              ProviderRegistry.prepare(
                registry,
                "remote",
                %{"model_visible" => ["remote.hidden"]},
+               context
+             )
+
+    assert {:error, :invalid_mcp_selection} =
+             ProviderRegistry.prepare(
+               registry,
+               "remote",
+               %{"model_visible" => ["remote.missing"]},
                context
              )
 
@@ -1237,7 +1724,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     File.mkdir_p!(trace_directory)
 
     File.write!(
-      Path.join(trace_directory, "run.jsonl"),
+      Path.join(trace_directory, "captured.jsonl"),
       Jason.encode!(trace_event("captured", 1, "run-started")) <>
         "\n" <>
         Jason.encode!(trace_event("captured", 2, "run-stopped")) <> "\n"
@@ -1298,9 +1785,9 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
              )
 
     assert Enum.map(built.capabilities, & &1.name) == [
-             "history.list-runs",
-             "history.get-run",
-             "history.list-turns",
+             "history.runs",
+             "history.open",
+             "history.read",
              "history.counters"
            ]
 
@@ -1310,10 +1797,10 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
             %{
               "items" => [%{"run_id" => "captured"}],
               "snapshot_hash" => content_snapshot_hash
-            }} = callbacks["history.list-runs"].(%{})
+            }} = callbacks["history.runs"].(%{})
 
     File.write!(
-      Path.join(trace_directory, "run.jsonl"),
+      Path.join(trace_directory, "captured.jsonl"),
       Jason.encode!(trace_event("changed", 1, "run-started")) <> "\n"
     )
 
@@ -1321,7 +1808,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
             %{
               "items" => [%{"run_id" => "captured"}],
               "snapshot_hash" => ^content_snapshot_hash
-            }} = callbacks["history.list-runs"].(%{})
+            }} = callbacks["history.runs"].(%{})
 
     assert built.data_class == :normal
     assert built.accepts_data == [:normal, :private_inspection]
@@ -1332,6 +1819,47 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     assert built.snapshot["snapshot_hash"] =~ ~r/\A[0-9a-f]{64}\z/
     assert built.snapshot["content_snapshot_hash"] == content_snapshot_hash
     refute inspect(built.snapshot) =~ dir
+    assert :ok = built.close.()
+  end
+
+  @tag :tmp_dir
+  test "installs a private-authorized trace snapshot with private data policy", %{tmp_dir: dir} do
+    trace_directory = Path.join(dir, "traces")
+    File.mkdir_p!(trace_directory)
+
+    File.write!(
+      Path.join(trace_directory, "private-run.private.jsonl"),
+      Jason.encode!(trace_event("private-run", 1, "run-started")) <>
+        "\n" <> Jason.encode!(trace_event("private-run", 2, "run-stopped")) <> "\n"
+    )
+
+    host =
+      load_host(dir, %{
+        "install" => %{
+          "history" => %{
+            "source" => "ptc_private_trace_snapshot",
+            "installation_revision" => "private-trace-v1",
+            "directory" => "traces"
+          }
+        }
+      })
+
+    assert {:ok, registry} =
+             HostInstallation.catalog(host)
+             |> then(fn {:ok, catalog} ->
+               HostInstallation.runtime_registry(host, catalog)
+             end)
+
+    assert {:ok, built} = ProviderRegistry.build(registry, "history", %{}, context(dir, :mission))
+    list_runs = Enum.find(built.capabilities, &(&1.name == "history.runs"))
+
+    assert {:ok, %{"items" => [%{"run_id" => "private-run", "source" => "private"}]}} =
+             list_runs.callback.(%{"view" => "full"})
+
+    assert built.data_class == :private_inspection
+    assert built.accepts_data == [:normal, :private_inspection]
+    assert built.snapshot["declaration"]["source"] == "ptc_private_trace_snapshot"
+    assert built.snapshot["acquisition"]["source"] == "ptc_private_trace_snapshot"
     assert :ok = built.close.()
   end
 
@@ -1396,7 +1924,9 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
       "install" => %{
         "deepseek" => %{
           "source" => "llm",
-          "model" => "openrouter:deepseek/deepseek-v4-flash",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+          "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
           "credential" => "key",
           "installation_revision" => "unstarted-v1"
         }
@@ -1424,10 +1954,11 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     )
 
     assert {:error, %PtcRunner.Kernel.ProviderError{} = stopped} =
-             build_capability.().callback.(request)
+             build_capability.().callback.(request, LLMSupport.llm_context())
 
     assert stopped.kind == :internal
     assert stopped.retryable? == false
+    assert stopped.dispatch_provenance == :not_dispatched
     assert stopped.details =~ "req_llm"
 
     # A route declaring no backing application keeps the retryable transport
@@ -1435,7 +1966,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     Application.put_env(:ptc_runner, :host_llm_test_provider_application, nil)
 
     assert {:error, %PtcRunner.Kernel.ProviderError{} = running} =
-             build_capability.().callback.(request)
+             build_capability.().callback.(request, LLMSupport.llm_context())
 
     assert running.kind == :unavailable
     assert running.retryable? == true
@@ -1465,10 +1996,11 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     )
 
     assert {:error, %PtcRunner.Kernel.ProviderError{} = raised} =
-             build_capability.().callback.(request)
+             build_capability.().callback.(request, LLMSupport.llm_context())
 
     assert raised.kind == :internal
     assert raised.retryable? == false
+    assert raised.dispatch_provenance == :not_dispatched
     refute_receive {:host_llm_request, _model, _request}
   end
 
@@ -1610,14 +2142,26 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   defp restore_env(key, value), do: Application.put_env(:ptc_runner, key, value)
 
   defp trace_event(run_id, sequence, type) do
+    data =
+      case type do
+        "run-started" ->
+          %{"missions" => %{}}
+
+        "run-stopped" ->
+          %{
+            "outcome" => "ok",
+            "usage" => %{"llm_budget" => %{"total_tokens" => nil, "cost" => nil}}
+          }
+      end
+
     %{
-      "schema_version" => 1,
+      "schema_version" => 2,
       "run_id" => run_id,
       "trace_id" => "trace-#{run_id}",
       "sequence" => sequence,
       "timestamp" => "2026-07-26T12:00:00Z",
       "type" => type,
-      "data" => if(type == "run-stopped", do: %{"outcome" => "ok"}, else: %{})
+      "data" => data
     }
   end
 end

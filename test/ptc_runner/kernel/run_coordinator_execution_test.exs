@@ -7,11 +7,14 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CommandDiagnostic
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LimitCapacityDiagnostic
+  alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.OwnerFailure
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
@@ -149,7 +152,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     {prepared, catalog} = prepared_run("(return 42)")
 
     assert {:ok, authority} =
-             PublicationAuthority.new(inspect: Path.join(dir, "unreserved.inspection.jsonl"))
+             PublicationAuthority.new(inspect: Path.join(dir, "unreserved.ptcins"))
 
     assert {:error, :invalid_publication_authority} =
              RunCoordinator.execute(prepared, authority)
@@ -262,8 +265,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
 
   @tag :tmp_dir
   test "owned sink authority and inspection path cannot be replaced", %{tmp_dir: directory} do
-    original_path = Path.join(directory, "original.inspection.jsonl")
-    replacement_path = Path.join(directory, "occupied.inspection.jsonl")
+    original_path = Path.join(directory, "original.ptcins")
+    replacement_path = Path.join(directory, "occupied.ptcins")
     {prepared, catalog} = prepared_run("(return 1)", inspection_capture: true)
 
     assert {:ok, original_authority} =
@@ -348,22 +351,9 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert :ok = InstallationCatalog.close(catalog)
   end
 
-  test "sink-open failure releases the consumed prepared activity" do
-    {prepared, catalog} = prepared_run("(return 1)", normal_event_bytes: 1)
-    activity = prepared.provider_activity.owner
-    activity_ref = Process.monitor(activity)
-    assert {:ok, authority} = PublicationAuthority.new([])
-
-    assert {:error, %OwnerFailure{} = failure} = RunCoordinator.execute(prepared, authority)
-    assert {:ok, :invalid_event_sink, false, :not_started} = OwnerFailure.evidence(failure)
-    assert_receive {:DOWN, ^activity_ref, :process, ^activity, :normal}, 5_000
-
-    assert :ok = InstallationCatalog.close(catalog)
-  end
-
   @tag :tmp_dir
   test "owned execution preserves inspection and cross-artifact preflight", %{tmp_dir: directory} do
-    occupied = Path.join(directory, "occupied.inspection.jsonl")
+    occupied = Path.join(directory, "occupied.ptcins")
     File.write!(occupied, "occupied")
     {prepared, catalog} = prepared_run("(return 1)", inspection_capture: true)
 
@@ -379,7 +369,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert :ok = PreparedRun.close(prepared)
     assert :ok = InstallationCatalog.close(catalog)
 
-    shared = Path.join(directory, "shared.inspection.jsonl")
+    shared = Path.join(directory, "shared.ptcins")
     {prepared, catalog} = prepared_run("(return 1)", inspection_capture: true)
 
     assert {:error, {:conflicting_destinations, [:inspect, :output]}} =
@@ -395,12 +385,37 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     assert :ok = InstallationCatalog.close(catalog)
   end
 
+  # The refusal is computed after provider assembly, so the active path reports
+  # it with provider activity. A code whose catalog policy forbids that value
+  # cannot be constructed there, and the run falls back to exit 70.
+  test "a terminal capacity refusal is classified on both the provider-free and active paths" do
+    {prepared, catalog} = oversized_metadata_prepared_run()
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    reason = {:terminal_payload_capacity_exceeded, payload_bytes, payload_bytes * 2}
+
+    for provider_activity <- [false, true] do
+      assert {:ok, diagnostic} =
+               RunBuilder.environment_failure_diagnostic(reason, prepared, provider_activity)
+
+      assert diagnostic.phase == :application
+      assert diagnostic.code == :limit_capacity_invalid
+      assert diagnostic.exit_status == 3
+      assert diagnostic.provider_activity == provider_activity
+
+      assert diagnostic.message ==
+               elem(LimitCapacityDiagnostic.message(payload_bytes, payload_bytes * 2), 1)
+    end
+
+    assert :ok = PreparedRun.close(prepared)
+    assert :ok = InstallationCatalog.close(catalog)
+  end
+
   @tag :tmp_dir
   test "failed opening finalizes and stops both sinks from the execution owner", %{
     tmp_dir: directory
   } do
     {prepared, catalog} = oversized_metadata_prepared_run()
-    inspection_path = Path.join(directory, "failed.inspection.jsonl")
+    inspection_path = Path.join(directory, "failed.ptcins")
 
     assert {:ok, authority} =
              PublicationAuthority.authorize(
@@ -488,7 +503,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     # `workflow_timeout_ms` (a 30s default, unrelated to this loop's budget).
     {prepared, catalog} = prepared_run(long_running_body(), inspection_capture: true)
 
-    inspection_path = Path.join(directory, "run.inspection.jsonl")
+    inspection_path = Path.join(directory, "run.ptcins")
 
     assert {:ok, authority} =
              PublicationAuthority.authorize(
@@ -550,8 +565,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
     activity_ref = Process.monitor(prepared.provider_activity.owner)
 
     try do
-      # `owner_pid` is running a loop built to take ~6s to reach its
-      # 1_000-iteration cap (see the comment above this test's
+      # `owner_pid` is running a loop built to take ~6s across 1_000 heavy
+      # iterations (see the comment above this test's
       # `prepared_run/2` call), so it must still be alive here. If it is
       # not, something ended the run far earlier than that -- fail with
       # that distinction instead of the opaque ArgumentError
@@ -574,6 +589,10 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
                        [^event_sink, %{outcome: :error, reason: :session_owner_failed} = stopped]}}
 
       assert is_map(stopped.usage)
+
+      assert {:ok, _projection} =
+               LLMBudget.validate_terminal_projection(stopped.usage.llm_budget)
+
       assert_receive {:DOWN, ^worker_ref, :process, _worker, :killed}, 5_000
       assert_receive {:DOWN, ^inspection_sink_ref, :process, _pid, :normal}, 5_000
       assert_receive {:DOWN, ^event_sink_ref, :process, _pid, :normal}, 5_000
@@ -675,8 +694,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       "input" => %{"value" => %{}}
     }
 
-    {limit_opts, request_opts} =
-      Keyword.split(opts, [:normal_event_bytes, :evaluation_timeout_ms])
+    {limit_opts, request_opts} = Keyword.split(opts, [:evaluation_timeout_ms])
 
     limits =
       Map.new(limit_opts, fn {name, value} -> {Atom.to_string(name), value} end)
@@ -729,7 +747,9 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       {:ok,
        %{
          credential_names: [],
-         preflight: fn -> {:ok, fn %{} -> {:ok, capability} end} end
+         preflight: fn ->
+           {:ok, fn %{} -> {:ok, %{capabilities: [capability]}} end}
+         end
        }}
     end
 
@@ -811,7 +831,9 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
       {:ok,
        %{
          credential_names: [],
-         preflight: fn -> {:ok, fn %{} -> {:ok, capability} end} end
+         preflight: fn ->
+           {:ok, fn %{} -> {:ok, %{capabilities: [capability]}} end}
+         end
        }}
     end
 
@@ -857,7 +879,8 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
   end
 
   defp oversized_metadata_prepared_run do
-    component_ids = Enum.map(1..96, &"component#{&1}")
+    padding = String.duplicate("a", 40)
+    component_ids = Enum.map(1..96, &"component#{padding}#{&1}")
 
     manifest = %{
       "version" => 1,
@@ -868,7 +891,7 @@ defmodule PtcRunner.Kernel.RunCoordinatorExecutionTest do
         "entry" => "app/run"
       },
       "input" => %{"value" => %{}},
-      "limits" => %{"event_payload_bytes" => 5_000}
+      "limits" => %{"event_payload_bytes" => EventBudget.minimum_normal_payload_bytes()}
     }
 
     documents =

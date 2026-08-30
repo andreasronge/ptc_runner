@@ -1,10 +1,13 @@
 defmodule PtcRunner.Kernel.CommandEngineTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
+
+  import PtcRunner.TestSupport.CommandEngineFixtures
 
   alias PtcRunner.Kernel.ApplicationPackage
-  alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.CommandApplicationDiagnostic
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandContractAuthority
+  alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
@@ -13,6 +16,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRejection
+  alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRunOutcome
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
@@ -21,11 +25,18 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.Error
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LimitCapacityDiagnostic
+  alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.LimitConfiguration
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderRegistry
@@ -33,13 +44,26 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractClassification
-  alias PtcRunner.TestSupport.LLMSupport
+  alias PtcRunner.StandaloneCLI
+  alias PtcRunner.TestSupport.MCPHTTPFixture
+  alias PtcRunner.TestSupport.StreamingInspection
+  alias PtcRunner.TestSupport.TestHelpers
 
   @zero_entropy <<0::128>>
-  @stdio_root Path.expand("../../..", __DIR__)
-  @stdio_fixture Path.expand("../../support/mcp_stdio_source_fixture.sh", __DIR__)
+
+  test "contract projection overflow has a stable source-free application diagnostic" do
+    diagnostic =
+      CommandApplicationDiagnostic.project(:validate, :contract_projection_limit_exceeded)
+
+    assert diagnostic.phase == :application
+    assert diagnostic.code == :contract_projection_limit_exceeded
+    assert diagnostic.exit_status == 3
+    assert diagnostic.source == nil
+    assert diagnostic.path == nil
+  end
 
   test "run references use the fixed Crockford encoding" do
     assert CommandRunRef.encode(@zero_entropy) == "cmd-" <> String.duplicate("0", 26)
@@ -76,7 +100,23 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert runtime.authorization_targets == ["workspace"]
   end
 
+  test "the envelope schema compiles once per VM" do
+    assert {:ok, root} = CommandContract.envelope_schema_root()
+    assert {:ok, ^root} = CommandContract.envelope_schema_root()
+  end
+
   test "help and version are exact phase-1 successes" do
+    assert {:ok, %CommandOutcome{} = init_help} =
+             CommandEngine.prepare(["help", "init"])
+
+    assert init_help.envelope["result"]["notices"] == [
+             "DIRECTORY must not already exist",
+             "init assembles the complete scaffold or selected example tree and publishes it atomically without replacing anything",
+             "to add PtcRunner to an existing repository, initialize a new sibling or subdirectory and deliberately copy or move the generated files the repository wants"
+           ]
+
+    assert_schema_valid(init_help.envelope)
+
     assert {:ok, %CommandOutcome{} = help} =
              CommandEngine.prepare(["doctor", "--help"])
 
@@ -90,11 +130,29 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert_schema_valid(help.envelope)
 
+    assert {:ok, %CommandOutcome{} = transcript_help} =
+             CommandEngine.prepare(["help", "transcript"])
+
+    private_output =
+      Enum.find(transcript_help.envelope["result"]["options"], fn option ->
+        "--private-output TRANSCRIPT.json" in option["switches"]
+      end)
+
+    assert private_output["description"] =~ "symlink"
+    assert private_output["description"] =~ "physically separate"
+    assert private_output["description"] =~ "/tmp"
+
+    assert {:stdout, text} = CommandRenderer.render(transcript_help)
+    assert text =~ "--private-output TRANSCRIPT.json"
+    assert text =~ "symlink"
+    assert text =~ "physically separate"
+    assert_schema_valid(transcript_help.envelope)
+
     assert {:ok, %CommandOutcome{} = version} =
              CommandEngine.prepare(["--version"])
 
     assert version.envelope["command"] == "version"
-    assert version.envelope["result"]["version"] == "0.13.0"
+    assert version.envelope["result"]["version"] == "0.14.0"
     assert_schema_valid(version.envelope)
   end
 
@@ -110,7 +168,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         get_in(branch, ["properties", "topic", "const"])
       end)
 
-    assert topics == ~w(doctor init models repl root run run validate)
+    assert topics ==
+             ~w(docs doctor init models repl root run run transcript validate version viewer)
 
     run_options =
       help_branch
@@ -142,11 +201,23 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
-  test "the one-shot engine APIs reject accepted and malformed repl requests as sealed outcomes" do
+  test "the one-shot engine APIs reject accepted and malformed requests as sealed outcomes" do
     for {argv, code} <- [
           {["repl"], "invalid_command"},
           {["repl", "--caller-secret", "value"], "invalid_arguments"},
-          {["repl", "-e", "expr", "script.clj"], "invalid_arguments"}
+          {["repl", "-e", "expr", "script.clj"], "invalid_arguments"},
+          {[
+             "transcript",
+             "run-1",
+             "--traces",
+             "traces",
+             "--inspection",
+             "inspection",
+             "--private-unattended",
+             "--private-output",
+             "transcript.json"
+           ], "invalid_command"},
+          {["transcript", "run-1"], "invalid_arguments"}
         ],
         operation <- [&CommandEngine.prepare/1, &CommandEngine.dispatch/1] do
       assert {:error, %CommandOutcome{} = outcome} = operation.(argv)
@@ -199,7 +270,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:error, %CommandOutcome{} = outcome} =
              CommandEngine.dispatch(["run", application], runtime)
 
-    assert outcome.envelope["error"]["phase"] == "internal"
+    # An application selecting no provider selects no authorization target
+    # either, so this is the unknown-target case and names the alias asked for.
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "authorization_target_unknown"
+    assert outcome.envelope["error"]["subject"]["name"] == "workspace"
     assert outcome.envelope["error"]["provider_activity"] == false
     assert outcome.envelope["execution"] == %{"state" => "not_started"}
     assert_schema_valid(outcome.envelope)
@@ -253,6 +328,140 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "run publishes an unsupported MCP profile without remote details and closes stdio", %{
+    tmp_dir: directory
+  } do
+    marker = Path.join(directory, "unsupported-run-methods")
+
+    host_path =
+      write_host_config(
+        directory,
+        "unsupported-run",
+        connect_host_config(marker, "unsupported-protocol")
+      )
+
+    application =
+      doctor_application(directory, "run-unsupported-profile",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    encoded = Jason.encode!(outcome.envelope)
+    assert outcome.exit_status == 4
+    assert outcome.envelope["error"]["code"] == "provider_protocol_version_unsupported"
+
+    assert outcome.envelope["error"]["message"] ==
+             "the endpoint rejected the required server/discover method and does not support MCP protocol 2026-07-28"
+
+    assert outcome.envelope["error"]["retryable"] == false
+    refute encoded =~ "PRIVATE_REMOTE_MESSAGE"
+    refute encoded =~ "PRIVATE_REMOTE_DATA"
+    refute encoded =~ "PRIVATE_STDERR_DETAIL"
+    refute encoded =~ "PRIVATE_LAUNCH_ARGUMENT"
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+    assert rendered =~ "provider_protocol_version_unsupported"
+    refute rendered =~ "PRIVATE_REMOTE_MESSAGE"
+    refute rendered =~ "PRIVATE_REMOTE_DATA"
+    refute rendered =~ "PRIVATE_STDERR_DETAIL"
+    refute rendered =~ "PRIVATE_LAUNCH_ARGUMENT"
+
+    assert File.read!(marker) =~ "server/discover"
+    refute File.read!(marker) =~ "tools/list"
+    assert File.read!(marker) =~ "session-closed"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "run distinguishes a valid discovery result missing the required revision", %{
+    tmp_dir: directory
+  } do
+    marker = Path.join(directory, "unsupported-version-methods")
+
+    host_path =
+      write_host_config(
+        directory,
+        "unsupported-version-run",
+        connect_host_config(marker, "unsupported-version")
+      )
+
+    application =
+      doctor_application(directory, "run-unsupported-version",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["code"] == "provider_protocol_version_unsupported"
+
+    assert outcome.envelope["error"]["message"] ==
+             "the endpoint did not advertise support for MCP protocol 2026-07-28"
+
+    encoded = Jason.encode!(outcome.envelope)
+    refute encoded =~ "PRIVATE_ADVERTISED_VERSION"
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+    refute rendered =~ "PRIVATE_ADVERTISED_VERSION"
+    refute File.read!(marker) =~ "tools/list"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "HTTP method rejection withholds the endpoint URL and remote error payload", %{
+    tmp_dir: directory
+  } do
+    parent = self()
+
+    fixture =
+      MCPHTTPFixture.start(fn request ->
+        send(parent, {:mcp_request, request.body["method"]})
+
+        response = %{
+          "jsonrpc" => "2.0",
+          "id" => request.body["id"],
+          "error" => %{
+            "code" => -32_601,
+            "message" => "PRIVATE_REMOTE_MESSAGE",
+            "data" => %{"secret" => "PRIVATE_REMOTE_DATA"}
+          }
+        }
+
+        {404, [{"content-type", "application/json"}], Jason.encode!(response)}
+      end)
+
+    on_exit(fixture.close)
+    endpoint = fixture.endpoint <> "/PRIVATE_ENDPOINT_URL"
+    host_path = write_host_config(directory, "private-http-endpoint", http_mcp_host(endpoint))
+
+    application =
+      doctor_application(directory, "http-unsupported-profile",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["message"] ==
+             "the endpoint rejected the required server/discover method and does not support MCP protocol 2026-07-28"
+
+    for secret <- ["PRIVATE_ENDPOINT_URL", "PRIVATE_REMOTE_MESSAGE", "PRIVATE_REMOTE_DATA"] do
+      refute Jason.encode!(outcome.envelope) =~ secret
+      assert {:stderr, rendered} = CommandRenderer.render(outcome)
+      refute rendered =~ secret
+    end
+
+    assert_receive {:mcp_request, "server/discover"}
+    refute_receive {:mcp_request, "initialize"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
   test "shared dispatch keeps audited-local rejection before execution and provider activity", %{
     tmp_dir: directory
   } do
@@ -296,16 +505,329 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.envelope["artifact_class"] == "normal"
     assert outcome.envelope["error"]["phase"] == "execution"
-    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+
+    # No inspection artifact was requested, so the diagnostic says the value
+    # was dropped and names the switch that would have retained it.
+    assert outcome.envelope["error"]["message"] =~ "published no inspection artifact"
     assert outcome.envelope["error"]["provider_activity"] == false
     assert outcome.envelope["execution"]["state"] == "incomplete"
     assert is_map(outcome.envelope["execution"]["usage"])
     refute Jason.encode!(outcome.envelope) =~ "must-not-escape"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    assert_schema_valid(outcome.envelope)
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+    assert rendered =~ "error: execution/explicit_failure:"
+    refute rendered =~ "evaluation:"
+  end
+
+  @tag :tmp_dir
+  test "an arithmetic evaluator failure publishes evaluation_failed with typed evidence", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "arithmetic-dispatch", valid_manifest())
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return (/ 1 0)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["phase"] == "execution"
+    assert outcome.envelope["error"]["code"] == "evaluation_failed"
+    assert outcome.envelope["error"]["retryable"] == false
+    assert outcome.exit_status == 5
+
+    assert outcome.envelope["execution"]["last_evaluation_error"] == %{
+             "kind" => "arithmetic_error",
+             "message" => "division by zero"
+           }
+
+    assert_schema_valid(outcome.envelope)
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+    assert rendered =~ "error: execution/evaluation_failed: the evaluation failed"
+    assert rendered =~ "evaluation: arithmetic_error: division by zero"
+    refute rendered =~ "PtcRunner.Lisp"
+  end
+
+  @tag :tmp_dir
+  test "arity, not_callable, and loop evaluator failures publish exact public kinds", %{
+    tmp_dir: directory
+  } do
+    cases = [
+      {~S|(ns app) (defn run [_input] (return (count)))|, "arity_error", []},
+      {~S|(ns app) (defn run [_input] (return (1 2 3)))|, "not_callable", []},
+      {~S|(ns app) (defn run [_input] (return (Math/round 1)))|, "java_type_error", []}
+    ]
+
+    Enum.with_index(cases, fn {source, kind, extra}, index ->
+      application = write_application(directory, "evaluator-kind-#{index}", valid_manifest())
+      File.write!(Path.join(Path.dirname(application), "main.clj"), source)
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.dispatch(["run", application] ++ extra)
+
+      assert outcome.envelope["error"]["code"] == "evaluation_failed"
+      assert outcome.envelope["execution"]["last_evaluation_error"]["kind"] == kind
+      refute Jason.encode!(outcome.envelope) =~ "PtcRunner.Lisp"
+      assert_schema_valid(outcome.envelope)
+    end)
+
+    host_path =
+      write_host_config(directory, "evaluator-loop-limit", %{
+        "install" => %{},
+        "limits" => %{"workflow_loop_iterations" => 50}
+      })
+
+    application = write_application(directory, "evaluator-kind-loop", valid_manifest())
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (loop [i 0] (if (< i 999999) (recur (inc i)) i)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["code"] == "evaluation_failed"
+    assert outcome.envelope["execution"]["last_evaluation_error"]["kind"] == "loop_limit_exceeded"
+    refute Jason.encode!(outcome.envelope) =~ "PtcRunner.Lisp"
     assert_schema_valid(outcome.envelope)
   end
 
   @tag :tmp_dir
-  test "V2 success and error envelopes retain evaluations by mission", %{tmp_dir: directory} do
+  test "a private evaluator failure keeps last_evaluation_error null", %{tmp_dir: directory} do
+    application = write_application(directory, "private-arithmetic", valid_manifest())
+    input = Path.join(Path.dirname(application), "private-input.json")
+    output = Path.join(directory, "private-result.json")
+    File.write!(input, ~s({}))
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return (/ 1 0)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--private-input",
+               "private-input.json",
+               "--private-output",
+               output
+             ])
+
+    assert outcome.envelope["artifact_class"] == "private"
+    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    refute Jason.encode!(outcome.envelope) =~ "arithmetic_error"
+    refute Jason.encode!(outcome.envelope) =~ "division by zero"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "an explicit fail value the boundary cannot project is not reported as oversized", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "explicit-fail-unprojectable", valid_manifest())
+    inspection = Path.join(directory, "run.ptcins")
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (fail (fn [x] x)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "cannot be represented as JSON"
+    refute outcome.envelope["error"]["message"] =~ "terminal result ceiling"
+    assert_schema_valid(outcome.envelope)
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
+    assert Enum.find(records, &(&1["record_type"] == "explicit-failure-value")) == nil
+  end
+
+  @tag :tmp_dir
+  test "an explicit fail value over terminal_result_bytes reports that it was not retained", %{
+    tmp_dir: directory
+  } do
+    manifest = narrow_terminal_result_manifest(100)
+
+    inspection = Path.join(directory, "run.ptcins")
+
+    application =
+      write_application(directory, "explicit-fail-oversized", manifest, [
+        {"wide.clj", ~s|(ns wide) (defn run [input] (fail "#{String.duplicate("x", 200)}"))|}
+      ])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "exceeded the terminal result ceiling"
+    assert_schema_valid(outcome.envelope)
+
+    # The artifact was published, so "not retained" has to mean the value
+    # itself is absent rather than the artifact being missing.
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
+    assert Enum.find(records, &(&1["record_type"] == "explicit-failure-value")) == nil
+    assert Enum.find(records, &(&1["record_type"] == "execution-error"))
+  end
+
+  @tag :tmp_dir
+  test "an explicit fail value is retained only as a dedicated inspection record", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "explicit-fail-inspect", valid_manifest())
+    inspection = Path.join(directory, "run.ptcins")
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (fail {"secret" "must-not-escape"}))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "private inspection record"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    refute Jason.encode!(outcome.envelope) =~ "must-not-escape"
+    assert_schema_valid(outcome.envelope)
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
+    error_record = Enum.find(records, &(&1["record_type"] == "execution-error"))
+    fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
+
+    refute Jason.encode!(error_record) =~ "must-not-escape"
+    assert fail_record["payload"]["environment"] == "workflow"
+    assert fail_record["payload"]["value"] == %{"secret" => "must-not-escape"}
+
+    assert fail_record["correlation"]["evaluation_id"] ==
+             error_record["correlation"]["evaluation_id"]
+  end
+
+  @tag :tmp_dir
+  test "a higher-order callback arithmetic failure publishes evaluation_failed", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "hof-arithmetic", valid_manifest())
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return (map (fn [x] (/ 1 x)) [1 0])))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["code"] == "evaluation_failed"
+
+    assert outcome.envelope["execution"]["last_evaluation_error"] == %{
+             "kind" => "arithmetic_error",
+             "message" => "division by zero"
+           }
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a private not-callable failure still writes an execution-error record", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "private-not-callable", valid_manifest())
+    input = Path.join(Path.dirname(application), "private-input.json")
+    output = Path.join(directory, "private-result.json")
+    inspection = Path.join(directory, "run.ptcins")
+    File.write!(input, ~s({}))
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return (1 2 3)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--private-input",
+               "private-input.json",
+               "--private-output",
+               output,
+               "--inspect",
+               inspection
+             ])
+
+    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    assert_schema_valid(outcome.envelope)
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
+    error_record = Enum.find(records, &(&1["record_type"] == "execution-error"))
+    assert error_record["payload"]["kind"] == "workflow_failed"
+    assert error_record["payload"]["reason"] == "not_callable"
+    assert is_map(error_record["payload"]["details"])
+  end
+
+  @tag :tmp_dir
+  test "fail nil retains a dedicated inspection record", %{tmp_dir: directory} do
+    application = write_application(directory, "explicit-fail-nil", valid_manifest())
+    inspection = Path.join(directory, "run.ptcins")
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (fail nil))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "private inspection record"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    assert_schema_valid(outcome.envelope)
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
+    fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
+    assert fail_record["payload"]["environment"] == "workflow"
+    assert fail_record["payload"]["value"] == nil
+  end
+
+  @tag :tmp_dir
+  test "fail of the former presence sentinel still writes a dedicated inspection record", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "explicit-fail-sentinel", valid_manifest())
+    inspection = Path.join(directory, "run.ptcins")
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (fail :__ptc_no_explicit_failure__))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--inspect", inspection])
+
+    assert outcome.envelope["error"]["code"] == "explicit_failure"
+    assert outcome.envelope["error"]["message"] =~ "private inspection record"
+    assert outcome.envelope["execution"]["last_evaluation_error"] == nil
+    refute Jason.encode!(outcome.envelope) =~ "__ptc_no_explicit_failure__"
+    assert_schema_valid(outcome.envelope)
+
+    assert {:ok, records} = StreamingInspection.read_path(inspection)
+    fail_record = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
+    assert fail_record["payload"]["environment"] == "workflow"
+    assert fail_record["payload"]["value"] == "__ptc_no_explicit_failure__"
+  end
+
+  @tag :tmp_dir
+  test "V4 success and error envelopes retain evaluations by mission", %{tmp_dir: directory} do
     manifest =
       valid_manifest(%{
         "workflow" => %{
@@ -322,7 +844,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     File.write!(
       Path.join(Path.dirname(success), "main.clj"),
-      ~S|(ns app) (defn run [_input] (return (get (kernel/eval-source-in "reader" "(return 1)") :value)))|
+      ~S|(ns app) (defn run [_input] (return (get (kernel/eval-source "reader" "(return 1)") :value)))|
     )
 
     assert {:ok, %CommandOutcome{} = success_outcome} = CommandEngine.dispatch(["run", success])
@@ -330,11 +852,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert get_in(success_outcome.envelope, ["execution", "usage", "evaluations_by_mission"]) ==
              %{"reader" => 1}
 
+    assert get_in(success_outcome.envelope, ["execution", "usage", "capability_refusals"]) == %{}
+
     failed = write_application(directory, "mission-usage-error", manifest)
 
     File.write!(
       Path.join(Path.dirname(failed), "main.clj"),
-      ~S|(ns app) (defn run [_input] (do (kernel/eval-source-in "reader" "(return 1)") (fail :nope)))|
+      ~S|(ns app) (defn run [_input] (do (kernel/eval-source "reader" "(return 1)") (fail :nope)))|
     )
 
     assert {:error, %CommandOutcome{} = failed_outcome} = CommandEngine.dispatch(["run", failed])
@@ -344,6 +868,101 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert_schema_valid(success_outcome.envelope)
     assert_schema_valid(failed_outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "usage counts quota refusals and replay misses without failing the run", %{
+    tmp_dir: directory
+  } do
+    File.write!(
+      Path.join(directory, "replay.jsonl"),
+      Jason.encode!(%{
+        "schema_version" => 1,
+        "request_hash" => "sha256:" <> String.duplicate("0", 64),
+        "response" => %{"content" => "frozen"}
+      }) <> "\n"
+    )
+
+    host_path =
+      write_host_config(directory, "quota-replay", %{
+        "install" => %{
+          "frozen-model" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "quota-replay-v1",
+            "fixtures" => "replay.jsonl"
+          }
+        }
+      })
+
+    application =
+      write_application(
+        directory,
+        "quota-replay",
+        valid_manifest(%{
+          "providers" => %{"workflow" => [%{"name" => "frozen-model"}]},
+          "limits" => %{"workflow_capability_calls_per_name" => 2}
+        }),
+        %{
+          "main.clj" => """
+          (ns app)
+          (defn ask [i]
+            (tool/llm-request {"messages" [{"role" "user" "content" (str "n" i)}]}))
+          (defn run [_input]
+            (return {"answers" (mapv ask (range 1 6))}))
+          """
+        }
+      )
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.envelope["status"] == "ok"
+    assert outcome.envelope["execution"]["diagnostic"] == nil
+
+    assert get_in(outcome.envelope, ["execution", "usage", "capability_refusals"]) == %{
+             "workflow/provider_error/not_found" => 2,
+             "workflow/limit_exceeded/capability_quota" => 3
+           }
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "usage counts a refused workflow annotation without failing the run", %{
+    tmp_dir: directory
+  } do
+    application =
+      write_application(
+        directory,
+        "refused-annotation",
+        valid_manifest(%{
+          "workflow" => %{
+            "components" => [
+              %{"library" => "workflow.event"},
+              %{"id" => "app", "path" => "main.clj", "dependencies" => ["workflow.event"]}
+            ],
+            "entry" => "app/run"
+          }
+        }),
+        %{
+          "main.clj" => """
+          (ns app)
+          (defn run [_input]
+            (do
+              (workflow.event/annotate "my_custom_type" {"n" 1})
+              (return {"ok" true})))
+          """
+        }
+      )
+
+    assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["run", application])
+    assert outcome.envelope["status"] == "ok"
+
+    assert get_in(outcome.envelope, ["execution", "usage", "capability_refusals"]) == %{
+             "workflow/invalid_annotation/invalid_workflow_annotation" => 1
+           }
+
+    assert_schema_valid(outcome.envelope)
   end
 
   @tag :tmp_dir
@@ -412,7 +1031,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["execution"] == %{
              "state" => "incomplete",
              "usage" => nil,
-             "evaluation_memory" => nil
+             "evaluation_memory" => nil,
+             "last_evaluation_error" => nil
            }
 
     assert outcome.envelope["error"]["provider_activity"] == true
@@ -429,30 +1049,912 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert fallback.envelope["execution"] == %{
              "state" => "incomplete",
              "usage" => nil,
-             "evaluation_memory" => nil
+             "evaluation_memory" => nil,
+             "last_evaluation_error" => nil
            }
 
     assert fallback.envelope["error"]["provider_activity"] == true
     assert_schema_valid(fallback.envelope)
   end
 
+  test "subordinate evaluation exhaustion names the limit and configured ceiling" do
+    usage = %{
+      remaining_ms: 0,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 4,
+      evaluations_by_mission: %{"default" => 4},
+      protocol_errors: 0,
+      agent_protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{},
+      llm_budget: %{"total_tokens" => nil, "cost" => nil},
+      llm_spend: %{"state" => "empty"}
+    }
+
+    evidence = %{
+      result:
+        {:error,
+         %Error{
+           kind: :workflow_failed,
+           reason: :runtime_limit_exceeded,
+           details: %{
+             limit: :subordinate_evaluations,
+             limit_value: 4
+           },
+           usage: usage
+         }}
+    }
+
+    artifact_state = %{
+      "trace" => "not_requested",
+      "inspection" => "not_requested",
+      "result" => "not_requested"
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: artifact_state,
+         error: nil,
+         secondary_errors: []
+       }}
+
+    run_ref = CommandRunRef.encode(@zero_entropy)
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandRunOutcome.project(evidence, settlement, run_ref, true)
+
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.envelope["execution"]["usage"]["llm_usage_state"] == "unavailable"
+    assert outcome.envelope["execution"]["usage"]["llm_usage"] == nil
+
+    assert outcome.envelope["error"]["message"] ==
+             "subordinate_evaluations limit 4 was exceeded; raise limits.subordinate_evaluations in the manifest, and the installed host ceiling if it is lower, or reduce total subordinate evaluations or agent turns"
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+
+    assert rendered ==
+             "error: execution/runtime_limit_exceeded: subordinate_evaluations limit 4 was exceeded; raise limits.subordinate_evaluations in the manifest, and the installed host ceiling if it is lower, or reduce total subordinate evaluations or agent turns (run_ref: #{run_ref})\n"
+
+    assert_schema_valid(outcome.envelope)
+
+    runtime_source = CommandSource.fixed(:runtime)
+
+    for invalid_message <- [
+          "subordinate_evaluations limit 0 was exceeded; raise limits.subordinate_evaluations in the manifest, and the installed host ceiling if it is lower, or reduce total subordinate evaluations or agent turns",
+          "subordinate_evaluations limit 04 was exceeded; raise limits.subordinate_evaluations in the manifest, and the installed host ceiling if it is lower, or reduce total subordinate evaluations or agent turns",
+          "subordinate_evaluations limit 2592000001 was exceeded; raise limits.subordinate_evaluations in the manifest, and the installed host ceiling if it is lower, or reduce total subordinate evaluations or agent turns",
+          "subordinate_evaluations limit 4 was exceeded; expose private details"
+        ] do
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: invalid_message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+
+      assert_schema_invalid(put_in(outcome.envelope, ["error", "message"], invalid_message))
+    end
+  end
+
+  test "missing or malformed sealed LLM spend invalidates the command outcome" do
+    base_usage = %{
+      remaining_ms: 0,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 0,
+      evaluations_by_mission: %{},
+      protocol_errors: 0,
+      agent_protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{},
+      llm_budget: %{"total_tokens" => nil, "cost" => nil}
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: %{
+           "trace" => "not_requested",
+           "inspection" => "not_requested",
+           "result" => "not_requested"
+         },
+         error: nil,
+         secondary_errors: []
+       }}
+
+    for usage <- [base_usage, Map.put(base_usage, :llm_spend, %{"state" => "available"})] do
+      evidence = %{
+        result:
+          {:error,
+           %Error{
+             kind: :workflow_failed,
+             reason: :explicit_failure,
+             details: %{},
+             usage: usage
+           }}
+      }
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandRunOutcome.project(
+                 evidence,
+                 settlement,
+                 CommandRunRef.encode(@zero_entropy),
+                 true
+               )
+
+      assert outcome.envelope["error"]["code"] == "internal_error"
+      assert outcome.envelope["execution"]["state"] == "incomplete"
+      assert outcome.envelope["execution"]["usage"] == nil
+      assert_schema_valid(outcome.envelope)
+    end
+  end
+
+  test "missing or malformed sealed LLM budget invalidates the command outcome" do
+    base_usage = %{
+      remaining_ms: 0,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 0,
+      evaluations_by_mission: %{},
+      protocol_errors: 0,
+      agent_protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{},
+      llm_spend: %{"state" => "empty"}
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: %{
+           "trace" => "not_requested",
+           "inspection" => "not_requested",
+           "result" => "not_requested"
+         },
+         error: nil,
+         secondary_errors: []
+       }}
+
+    malformed = %{
+      "total_tokens" => %{
+        "state" => "available",
+        "limit" => 100,
+        "reserved" => 1,
+        "charged" => 0,
+        "remaining" => 99,
+        "refused" => 0
+      },
+      "cost" => nil
+    }
+
+    for usage <- [base_usage, Map.put(base_usage, :llm_budget, malformed)] do
+      evidence = %{
+        result:
+          {:error,
+           %Error{
+             kind: :workflow_failed,
+             reason: :explicit_failure,
+             details: %{},
+             usage: usage
+           }}
+      }
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandRunOutcome.project(
+                 evidence,
+                 settlement,
+                 CommandRunRef.encode(@zero_entropy),
+                 true
+               )
+
+      assert outcome.envelope["error"]["code"] == "internal_error"
+      assert outcome.envelope["execution"]["state"] == "incomplete"
+      assert outcome.envelope["execution"]["usage"] == nil
+      assert_schema_valid(outcome.envelope)
+    end
+  end
+
+  test "workflow timeout diagnostics name the binding limit and duration" do
+    assert {:error, %CommandOutcome{} = outcome} =
+             project_limit_exceeded(:timeout, %{
+               limit: :parallel_timeout_ms,
+               limit_ms: 60_000,
+               phase: :execution
+             })
+
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+
+    assert outcome.envelope["error"]["message"] ==
+             "parallel_timeout_ms limit 60000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower"
+
+    assert_schema_valid(outcome.envelope)
+
+    runtime_source = CommandSource.fixed(:runtime)
+
+    for invalid_message <- [
+          "parallel_timeout_ms limit 0 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower",
+          "parallel_timeout_ms limit 060000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower",
+          "run_duration_ms limit 60000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower",
+          "parallel_timeout_ms limit 60000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower; private"
+        ] do
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: invalid_message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+
+      assert_schema_invalid(put_in(outcome.envelope, ["error", "message"], invalid_message))
+    end
+  end
+
+  test "workflow heap diagnostics name the limit and bind the runtime source" do
+    assert {:error, %CommandOutcome{} = outcome} =
+             project_limit_exceeded(:memory_exceeded, %{
+               limit: :workflow_heap_words,
+               limit_value: 8_000_000
+             })
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.heap_words_message(8_000_000)
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert outcome.envelope["error"]["subject"] == nil
+    assert outcome.envelope["error"]["provider_activity"] == true
+    assert_schema_valid(outcome.envelope)
+
+    runtime_source = CommandSource.fixed(:runtime)
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: expected,
+               provider_activity: true
+             )
+
+    assert {:ok, %CommandDiagnostic{source: ^runtime_source}} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: expected,
+               source: runtime_source,
+               provider_activity: true
+             )
+  end
+
+  test "max_calls diagnostics name the alias and bind the runtime source" do
+    assert {:error, %CommandOutcome{} = outcome} =
+             project_limit_exceeded(:capability_quota, %{
+               limit: :max_calls,
+               alias: "deepseek",
+               limit_value: 4
+             })
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.max_calls_message("deepseek", 4)
+    assert outcome.envelope["error"]["code"] == "capability_quota_exceeded"
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert outcome.envelope["error"]["subject"] == nil
+    assert outcome.envelope["error"]["provider_activity"] == true
+    assert_schema_valid(outcome.envelope)
+
+    runtime_source = CommandSource.fixed(:runtime)
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :capability_quota_exceeded,
+               message: expected,
+               provider_activity: true
+             )
+
+    assert {:ok, %CommandDiagnostic{source: ^runtime_source}} =
+             CommandDiagnostic.new(:execution, :capability_quota_exceeded,
+               message: expected,
+               source: runtime_source,
+               provider_activity: true
+             )
+  end
+
+  test "public quota diagnostics name the capability and bind the runtime source" do
+    assert {:error, %CommandOutcome{} = outcome} =
+             project_limit_exceeded(:capability_quota, %{
+               limit: :workflow_capability_calls_per_name,
+               name: "llm-request",
+               limit_value: 2
+             })
+
+    assert {:ok, expected} =
+             RuntimeLimitDiagnostic.capability_quota_message(
+               :workflow_capability_calls_per_name,
+               "llm-request",
+               2
+             )
+
+    assert outcome.envelope["error"]["code"] == "capability_quota_exceeded"
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert outcome.envelope["error"]["subject"] == nil
+    assert outcome.envelope["error"]["provider_activity"] == true
+    assert_schema_valid(outcome.envelope)
+  end
+
+  test "protocol_errors diagnostics name the limit and bind the runtime source" do
+    assert {:error, %CommandOutcome{} = outcome} =
+             project_limit_exceeded(:protocol_errors, %{
+               limit: :protocol_errors,
+               limit_value: 3
+             })
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.protocol_errors_message(3)
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  test "aggregate budget diagnostics name the reservation and bind the runtime source" do
+    assert {:error, %CommandOutcome{} = token_outcome} =
+             project_limit_exceeded(:llm_total_tokens, %{
+               limit: :llm_total_tokens,
+               limit_value: 1,
+               requested: 4_096,
+               remaining: 1
+             })
+
+    assert {:ok, token_expected} =
+             RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
+
+    assert token_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert token_outcome.envelope["error"]["message"] == token_expected
+
+    assert token_outcome.envelope["error"]["source"] == %{
+             "kind" => "runtime",
+             "name" => "ptc-runtime"
+           }
+
+    assert token_outcome.exit_status == 6
+    assert_schema_valid(token_outcome.envelope)
+
+    assert {:error, %CommandOutcome{} = cost_outcome} =
+             project_limit_exceeded(:llm_cost_microusd, %{
+               limit: :llm_cost_microusd,
+               limit_value: 2_400,
+               requested: 2_419,
+               remaining: 2_338
+             })
+
+    assert {:ok, cost_expected} =
+             RuntimeLimitDiagnostic.budget_message(:llm_cost_microusd, 2_400, 2_419, 2_338)
+
+    assert cost_outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert cost_outcome.envelope["error"]["message"] == cost_expected
+    assert cost_outcome.exit_status == 6
+    assert_schema_valid(cost_outcome.envelope)
+
+    runtime_source = CommandSource.fixed(:runtime)
+
+    assert {:ok, token_expected} =
+             RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, 1, 4_096, 1)
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: token_expected,
+               provider_activity: true
+             )
+
+    assert {:ok, %CommandDiagnostic{source: ^runtime_source, exit_status: 6}} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: token_expected,
+               source: runtime_source,
+               provider_activity: true
+             )
+
+    maximum = 9_007_199_254_740_991
+
+    assert {:ok, max_message} =
+             RuntimeLimitDiagnostic.budget_message(:llm_total_tokens, maximum, maximum, 0)
+
+    assert RuntimeLimitDiagnostic.budget_message?(max_message)
+
+    assert {:ok, %CommandDiagnostic{}} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: max_message,
+               source: runtime_source,
+               provider_activity: true
+             )
+
+    inconsistent = [
+      "llm_total_tokens limit 1 tokens would be exceeded: the next call requires a 1 tokens reservation with 1 remaining; raise limits.llm_total_tokens in the manifest, and the installed host ceiling if it is lower",
+      "llm_cost_microusd limit 2400 microUSD would be exceeded: the next call requires a 2338 microUSD reservation with 2419 remaining; raise limits.llm_cost_microusd in the manifest, and the installed host ceiling if it is lower",
+      "llm_total_tokens limit 1 tokens would be exceeded: the next call requires a 0 tokens reservation with 0 remaining; raise limits.llm_total_tokens in the manifest, and the installed host ceiling if it is lower"
+    ]
+
+    for message <- inconsistent do
+      refute RuntimeLimitDiagnostic.budget_message?(message)
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+    end
+
+    malformed = [
+      "llm_total_tokens limit 01 tokens would be exceeded: the next call requires a 4096 tokens reservation with 1 remaining; raise limits.llm_total_tokens in the manifest, and the installed host ceiling if it is lower",
+      token_expected <> "; private"
+    ]
+
+    for message <- malformed do
+      refute RuntimeLimitDiagnostic.budget_message?(message)
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+
+      assert_schema_invalid(put_in(token_outcome.envelope, ["error", "message"], message))
+    end
+  end
+
+  test "application-authored turn-limit fields cannot claim an agent runtime limit" do
+    usage = %{
+      remaining_ms: 0,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 2,
+      evaluations_by_mission: %{},
+      protocol_errors: 2,
+      agent_protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{},
+      llm_budget: %{"total_tokens" => nil, "cost" => nil},
+      llm_spend: %{"state" => "empty"}
+    }
+
+    evidence = %{
+      result:
+        {:error,
+         %Error{
+           kind: :workflow_failed,
+           reason: :explicit_failure,
+           details: %{
+             failure_kind: "turn-limit",
+             limit: :agent_turns,
+             limit_value: 2
+           },
+           usage: usage
+         }}
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: %{
+           "trace" => "not_requested",
+           "inspection" => "not_requested",
+           "result" => "not_requested"
+         },
+         error: nil,
+         secondary_errors: []
+       }}
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandRunOutcome.project(
+               evidence,
+               settlement,
+               CommandRunRef.encode(@zero_entropy),
+               true
+             )
+
+    assert outcome.envelope["error"]["code"] == "workflow_failed"
+    assert outcome.envelope["error"]["message"] == "the workflow failed"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  test "agent turn-limit diagnostics bind their bounded message to a null source" do
+    runtime_source = CommandSource.fixed(:runtime)
+
+    for limit <- [1, 128],
+        reason <- RuntimeLimitDiagnostic.agent_turns_reasons() do
+      assert {:ok, message} = RuntimeLimitDiagnostic.agent_turns_message(limit, reason)
+
+      assert {:ok, %CommandDiagnostic{source: nil}} =
+               CommandDiagnostic.new(:execution, :turn_limit_exceeded,
+                 message: message,
+                 provider_activity: true
+               )
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :turn_limit_exceeded,
+                 message: message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+    end
+
+    for invalid_message <- [
+          "agent turn limit 0 was exceeded; raise max_turns in the agent configuration, or reduce the work per turn",
+          "agent turn limit 02 was exceeded; raise max_turns in the agent configuration, or reduce the work per turn",
+          "agent turn limit 129 was exceeded; raise max_turns in the agent configuration, or reduce the work per turn",
+          "agent turn limit 2 was exceeded; expose private details",
+          "the model produced no valid tool call in 0 turns; raising max_turns repeats it. Check that the model supports tool calling and that any configured max_tokens leaves room for a complete call",
+          "the model produced no valid tool call in 2 turns; raise max_turns"
+        ] do
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :turn_limit_exceeded,
+                 message: invalid_message,
+                 provider_activity: true
+               )
+    end
+
+    assert {:ok, subordinate_message} =
+             RuntimeLimitDiagnostic.subordinate_evaluations_message(4)
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: subordinate_message,
+               provider_activity: true
+             )
+  end
+
+  @tag :tmp_dir
+  test "a compilation heap kill names the workflow heap limit", %{tmp_dir: directory} do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "tiny", "path" => "tiny.clj"}],
+        "entry" => "tiny/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"workflow_heap_words" => 1_000},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
+
+    application =
+      write_application(directory, "compile-heap-exhausted", manifest, [
+        {"tiny.clj", "(ns tiny) (defn run [input] (return input))"}
+      ])
+
+    trace_dir = Path.join(directory, "compile-heap-traces")
+    File.mkdir_p!(trace_dir)
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--trace-dir", trace_dir])
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.heap_words_message(1_000)
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.exit_status == 6
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+
+    assert [trace_path] = Path.wildcard(Path.join(trace_dir, "*.jsonl"))
+
+    limit_event =
+      trace_path
+      |> File.stream!()
+      |> Stream.map(&Jason.decode!/1)
+      |> Enum.find(&(&1["type"] == "limit-exceeded"))
+
+    assert limit_event["data"]["reason"] == "compile_memory_exceeded"
+    assert limit_event["data"]["limit"] == "workflow_heap_words"
+    assert limit_event["data"]["limit_value"] == 1_000
+    assert limit_event["data"]["phase"] == "compilation"
+  end
+
+  @tag :tmp_dir
+  test "a run that exhausts run_duration_ms reports the limit and its value", %{
+    tmp_dir: directory
+  } do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "slow", "path" => "slow.clj"}],
+        "entry" => "slow/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"run_duration_ms" => 1},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
+
+    application =
+      write_application(directory, "run-duration-exhausted", manifest, [
+        {"slow.clj", "(ns slow) (defn run [input] (return (count (vec (range 2000000)))))"}
+      ])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["code"] == "run_timeout"
+    assert outcome.exit_status == 6
+
+    assert outcome.envelope["error"]["message"] =~
+             ~r/^run_duration_ms limit 1 ms was exceeded during (compilation|execution); raise limits\.run_duration_ms in the manifest, and the installed host ceiling if it is lower$/
+
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a workflow heap kill names the limit, its value, and the runtime source", %{
+    tmp_dir: directory
+  } do
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" => [%{"id" => "hungry", "path" => "hungry.clj"}],
+        "entry" => "hungry/run"
+      },
+      "input" => %{"value" => %{}},
+      "limits" => %{"workflow_heap_words" => 400_000},
+      "providers" => %{"workflow" => [], "mission" => []}
+    }
+
+    application =
+      write_application(directory, "heap-exhausted", manifest, [
+        {"hungry.clj", "(ns hungry) (defn run [input] (return (count (vec (range 2000000)))))"}
+      ])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.heap_words_message(400_000)
+    assert outcome.envelope["error"]["code"] == "runtime_limit_exceeded"
+    assert outcome.exit_status == 6
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a limits-only host document raises a protected heap ceiling", %{tmp_dir: directory} do
+    application =
+      write_application(
+        directory,
+        "heap-raised",
+        valid_manifest(%{"limits" => %{"workflow_heap_words" => 16_000_000}})
+      )
+
+    host_path =
+      write_host_config(directory, "limits-only", %{
+        "install" => %{},
+        "limits" => %{"workflow_heap_words" => 16_000_000}
+      })
+
+    assert {:ok, %CommandOutcome{} = validated} =
+             CommandEngine.prepare(["validate", application, "--host-config", host_path])
+
+    assert validated.exit_status == 0
+    assert_schema_valid(validated.envelope)
+
+    limit =
+      assert_error(["validate", application], "application", "installed_limit_exceeded")
+
+    assert {:ok, expected} =
+             RuntimeLimitDiagnostic.installed_ceiling_message(
+               "workflow_heap_words",
+               16_000_000,
+               8_000_000
+             )
+
+    assert limit.envelope["error"]["message"] == expected
+  end
+
+  @tag :tmp_dir
+  test "a result over terminal_result_bytes names the limit, its value, and the manifest key", %{
+    tmp_dir: directory
+  } do
+    manifest = narrow_terminal_result_manifest(100)
+
+    application =
+      write_application(directory, "result-limit-exceeded", manifest, [
+        {"wide.clj", ~s|(ns wide) (defn run [input] (return "#{String.duplicate("x", 200)}"))|}
+      ])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["code"] == "result_limit_exceeded"
+    assert outcome.exit_status == 7
+
+    assert {:ok, expected} = RuntimeLimitDiagnostic.result_limit_message(100)
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["message"] =~ "raise limits.terminal_result_bytes"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  test "an out-of-range agent option names the option, range, and rejected integer" do
+    usage = %{
+      remaining_ms: 0,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 0,
+      evaluations_by_mission: %{"default" => 0},
+      protocol_errors: 0,
+      agent_protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{},
+      llm_budget: %{"total_tokens" => nil, "cost" => nil},
+      llm_spend: %{"state" => "empty"}
+    }
+
+    evidence = %{
+      result:
+        {:error,
+         %Error{
+           kind: :workflow_failed,
+           reason: :invalid_agent_config,
+           details: %{option: "max_turns", min: 1, max: 128, value: 129},
+           usage: usage
+         }}
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: %{
+           "trace" => "not_requested",
+           "inspection" => "not_requested",
+           "result" => "not_requested"
+         },
+         error: nil,
+         secondary_errors: []
+       }}
+
+    run_ref = CommandRunRef.encode(@zero_entropy)
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandRunOutcome.project(evidence, settlement, run_ref, true)
+
+    assert outcome.envelope["error"]["code"] == "invalid_agent_config"
+    assert outcome.envelope["error"]["source"] == nil
+
+    assert outcome.envelope["error"]["message"] ==
+             "max_turns 129 is outside the supported range 1–128 for agent.core/run; lower it"
+
+    assert_schema_valid(outcome.envelope)
+
+    string_evidence = %{
+      evidence
+      | result:
+          {:error,
+           %Error{
+             kind: :workflow_failed,
+             reason: :invalid_agent_config,
+             details: %{option: "max_turns", min: 1, max: 128, type: :string},
+             usage: usage
+           }}
+    }
+
+    assert {:error, %CommandOutcome{} = typed} =
+             CommandRunOutcome.project(string_evidence, settlement, run_ref, true)
+
+    assert typed.envelope["error"]["message"] ==
+             "max_turns must be an integer in 1–128 for agent.core/run; received a string"
+
+    assert_schema_valid(typed.envelope)
+
+    int64_min = -9_223_372_036_854_775_808
+
+    min_evidence = %{
+      evidence
+      | result:
+          {:error,
+           %Error{
+             kind: :workflow_failed,
+             reason: :invalid_agent_config,
+             details: %{option: "max_turns", min: 1, max: 128, value: int64_min},
+             usage: usage
+           }}
+    }
+
+    assert {:error, %CommandOutcome{} = minimum} =
+             CommandRunOutcome.project(min_evidence, settlement, run_ref, true)
+
+    assert minimum.envelope["error"]["code"] == "invalid_agent_config"
+
+    assert minimum.envelope["error"]["message"] ==
+             "max_turns #{int64_min} is outside the supported range 1–128 for agent.core/run; lower it"
+
+    assert_schema_valid(minimum.envelope)
+
+    drifted = %{
+      evidence
+      | result:
+          {:error,
+           %Error{
+             kind: :workflow_failed,
+             reason: :invalid_agent_config,
+             details: %{option: "max_turns", min: 1, max: 4096, value: 129},
+             usage: usage
+           }}
+    }
+
+    assert {:error, %CommandOutcome{} = fallback} =
+             CommandRunOutcome.project(drifted, settlement, run_ref, true)
+
+    assert fallback.envelope["error"]["message"] ==
+             "an agent configuration option is outside its supported range"
+  end
+
+  test "transcript-ceiling diagnostics bind their bounded message to a null source" do
+    runtime_source = CommandSource.fixed(:runtime)
+
+    for limit <- [1, 262_144, 1_000_000] do
+      assert {:ok, message} = RuntimeLimitDiagnostic.transcript_chars_message(limit)
+
+      assert {:ok, %CommandDiagnostic{source: nil, exit_status: 6}} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: message,
+                 provider_activity: true
+               )
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+                 message: message,
+                 source: runtime_source,
+                 provider_activity: true
+               )
+    end
+
+    for invalid_limit <- [0, 1_000_001, "6000"] do
+      assert :error = RuntimeLimitDiagnostic.transcript_chars_message(invalid_limit)
+    end
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :runtime_limit_exceeded,
+               message: "transcript limit 0 characters was exceeded",
+               provider_activity: true
+             )
+  end
+
+  test "a run timeout names the configured run_duration_ms rather than only timing out" do
+    assert {:ok, message} =
+             RuntimeLimitDiagnostic.live_timeout_message(:run_duration_ms, 3_000, :execution)
+
+    assert message ==
+             "run_duration_ms limit 3000 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower"
+
+    # The wall-clock stop keeps its own code and status, so a script can still
+    # separate it from a turn limit on more than the exit code.
+    assert {:ok, %CommandDiagnostic{code: :run_timeout, exit_status: 6}} =
+             CommandDiagnostic.new(:execution, :run_timeout,
+               message: message,
+               source: CommandSource.fixed(:runtime),
+               provider_activity: true
+             )
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :run_timeout,
+               message: message,
+               provider_activity: true
+             )
+
+    assert {:error, :invalid_command_diagnostic} =
+             CommandDiagnostic.new(:execution, :run_timeout,
+               message:
+                 "run_duration_ms limit 0 ms was exceeded during execution; raise limits.run_duration_ms in the manifest, and the installed host ceiling if it is lower",
+               source: CommandSource.fixed(:runtime),
+               provider_activity: true
+             )
+  end
+
   @tag :tmp_dir
   test "frontend environment setup fails before the execution owner and activity marker", %{
     tmp_dir: directory
   } do
-    host = %{
-      "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
-      "install" => %{
-        "model" => %{
-          "source" => "llm",
-          "installation_revision" => "model-v1",
-          "model" => "openrouter:test/model",
-          "credential" => "key"
-        }
-      }
-    }
-
-    host_path = write_host_config(directory, "environment-setup", host)
+    host_path = write_host_config(directory, "environment-setup", env_credential_host())
     trace_directory = Path.join(directory, "traces")
     File.mkdir!(trace_directory)
 
@@ -490,6 +1992,126 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["execution"] == %{"state" => "not_started"}
     assert outcome.envelope["artifact_state"]["trace"] == "not_written"
     assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a missing named environment file reports the concrete cause", %{
+    tmp_dir: directory
+  } do
+    # The file the operator names by hand is the likeliest first-run mistake, so
+    # it must not answer with the code reserved for a broken runtime. An
+    # embedding host's own failing setup callback stays internal; only the named
+    # dotenv file is user input this layer can classify.
+    host_path = write_host_config(directory, "env-file-missing", env_credential_host())
+    application = doctor_application(directory, "env-file-missing", workflow: ["model"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--host-config",
+               host_path,
+               "--env-file",
+               Path.join(directory, "absent.env")
+             ])
+
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "environment_file_not_found"
+    assert outcome.envelope["error"]["message"] == "the named environment file does not exist"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.envelope["execution"] == %{"state" => "not_started"}
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "an artifact destination under a missing directory names that cause", %{
+    tmp_dir: directory
+  } do
+    # `--trace-dir` already names this exact condition. The result and inspection
+    # destinations computed the same cause and discarded it, so a missing parent
+    # directory was indistinguishable from every other unavailable destination.
+    application = write_application(directory, "destination-parent", valid_manifest())
+    absent = Path.join(directory, "absent")
+
+    for {switch, destination, code} <- [
+          {"--output", Path.join(absent, "result.json"), "result_directory_missing"},
+          {"--private-output", Path.join(absent, "result.json"), "result_directory_missing"},
+          {"--inspect", Path.join(absent, "run.ptcins"), "inspection_directory_missing"}
+        ] do
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.dispatch(["run", application, switch, destination])
+
+      assert outcome.envelope["error"]["code"] == code
+      assert outcome.envelope["error"]["message"] =~ "existing"
+      assert_schema_valid(outcome.envelope)
+    end
+  end
+
+  @tag :tmp_dir
+  test "doctor answers an unreadable environment file the same way run does", %{
+    tmp_dir: directory
+  } do
+    host_path = write_host_config(directory, "doctor-env-file", env_credential_host())
+    application = doctor_application(directory, "doctor-env-file", workflow: ["model"])
+    absent = Path.join(directory, "absent.env")
+
+    for argv <- [
+          ["doctor", application, "--host-config", host_path, "--env-file", absent, "--connect"],
+          ["run", application, "--host-config", host_path, "--env-file", absent]
+        ] do
+      assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(argv)
+
+      assert outcome.envelope["error"]["phase"] == "local_preflight"
+      assert outcome.envelope["error"]["code"] == "environment_file_not_found"
+      assert_schema_valid(outcome.envelope)
+    end
+  end
+
+  test "an embedding host's own setup failure stays undifferentiated" do
+    # Only the dotenv attachment knows the operator named a file. A caller
+    # supplying its own callback must not have an arbitrary failure relabelled
+    # as a bad --env-file.
+    assert {:ok, runtime} =
+             CommandRuntime.new(environment_setup: fn -> {:error, :environment_file_invalid} end)
+
+    assert CommandRuntime.setup_environment(runtime) == {:error, :environment_setup_failed}
+
+    assert CommandRuntime.setup_environment_diagnostic(runtime) ==
+             {:error, :environment_setup_failed}
+  end
+
+  test "invocation-scoped local-preflight codes assert no provider activity" do
+    # Every other local-preflight row spans the activity marker and admits either
+    # value. These three are decided before any provider runs, so a `true` must
+    # be unconstructible rather than merely unused by their producers.
+    for code <- [
+          :environment_file_not_found,
+          :authorization_target_unknown,
+          :authorization_not_applicable
+        ] do
+      assert DiagnosticCatalog.provider_activity_policy(:local_preflight, code) == false
+
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(:local_preflight, code,
+                 subject: authorization_subject(code),
+                 provider_activity: true
+               )
+    end
+  end
+
+  test "run-only authorization codes are not doctor findings" do
+    # `doctor` accepts no --authorize-mcp, so it can never produce these. They
+    # are subject-bearing local-preflight rows and would otherwise be attributed
+    # to a doctor check that cannot report them.
+    doctor_codes = Enum.map(DiagnosticCatalog.doctor_attributable_rows(), & &1.code)
+    local_codes = Map.get(DiagnosticCatalog.doctor_failure_codes_by_operation(), :local, [])
+
+    for code <- [:authorization_target_unknown, :authorization_not_applicable] do
+      refute code in doctor_codes
+      refute code in local_codes
+    end
+
+    assert :environment_unavailable in local_codes
   end
 
   test "malformed phase-1 forms retain their recognized command" do
@@ -644,6 +2266,109 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(missing_host.envelope)
   end
 
+  @tag :tmp_dir
+  test "models names the configured selector and withholds an endpoint-bearing one", %{
+    tmp_dir: directory
+  } do
+    host_path =
+      write_host_config(directory, "selector-models", %{
+        "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
+        "install" => %{
+          "cataloged" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "installation_revision" => "cataloged-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          },
+          "endpoint" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "installation_revision" => "endpoint-v1",
+            "model" => "openai-compat:https://private.example/v1|deployment",
+            "credential" => "key"
+          },
+          "tooling" => inert_stdio_installation("tooling-v1")
+        }
+      })
+
+    assert {:ok, %CommandOutcome{} = modeled} =
+             CommandEngine.prepare(["models", "--host-config", host_path])
+
+    assert [cataloged, endpoint, tooling] = modeled.envelope["result"]["installations"]
+    assert cataloged["alias"] == "cataloged"
+    assert cataloged["model_selector"] == "openrouter:test/model"
+    assert endpoint["alias"] == "endpoint"
+    refute Map.has_key?(endpoint, "model_selector")
+    assert tooling["alias"] == "tooling"
+    refute Map.has_key?(tooling, "model_selector")
+    assert_schema_valid(modeled.envelope)
+  end
+
+  @tag :tmp_dir
+  test "doctor --show-model-selectors applies the same disclosure rule as models", %{
+    tmp_dir: directory
+  } do
+    application =
+      write_application(
+        directory,
+        "selector-doctor",
+        valid_manifest(%{
+          "providers" => %{
+            "workflow" => [
+              %{"name" => "cataloged", "config" => %{}},
+              %{"name" => "endpoint", "config" => %{}}
+            ],
+            "mission" => []
+          }
+        })
+      )
+
+    host_path =
+      write_host_config(directory, "selector-doctor", %{
+        "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
+        "install" => %{
+          "cataloged" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "installation_revision" => "cataloged-v1",
+            "model" => "openrouter:test/model",
+            "credential" => "key"
+          },
+          "endpoint" => %{
+            "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
+            "installation_revision" => "endpoint-v1",
+            "model" => "openai-compat:https://private.example/v1|deployment",
+            "credential" => "key"
+          }
+        }
+      })
+
+    argv = ["doctor", application, "--host-config", host_path]
+
+    assert {:ok, %CommandOutcome{} = plain} = CommandEngine.prepare(argv)
+
+    assert Enum.all?(
+             plain.envelope["result"]["model_aliases"],
+             &(not Map.has_key?(&1, "model_selector"))
+           )
+
+    assert {:ok, %CommandOutcome{} = shown} =
+             CommandEngine.prepare(argv ++ ["--show-model-selectors"])
+
+    assert [cataloged, endpoint] = shown.envelope["result"]["model_aliases"]
+    assert cataloged["alias"] == "cataloged"
+    assert cataloged["model_selector"] == "openrouter:test/model"
+    assert endpoint["alias"] == "endpoint"
+    refute Map.has_key?(endpoint, "model_selector")
+    assert_schema_valid(shown.envelope)
+  end
+
   test "default doctor reports the environment without an application or host" do
     assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.prepare(["doctor"])
 
@@ -659,6 +2384,71 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert_schema_valid(outcome.envelope)
     assert CommandContract.valid_success_semantics?(:doctor, outcome.envelope["result"])
+  end
+
+  @tag :tmp_dir
+  test "doctor reports an invalid application as a failed readiness check", %{
+    tmp_dir: directory
+  } do
+    manifest =
+      valid_manifest()
+      |> put_in(["workflow", "components", Access.at(0), "path"], "../main.clj")
+
+    application = write_application(directory, "invalid-doctor-application", manifest)
+    host_path = write_host_config(directory, "invalid-doctor-application", valid_host_config())
+
+    for {mode, suffix} <- [{:doctor, []}, {{:doctor, :connect}, ["--connect"]}] do
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.prepare(
+                 ["doctor", application, "--host-config", host_path] ++ suffix
+               )
+
+      assert outcome.command_mode == mode
+      assert outcome.exit_status == 3
+
+      assert outcome.envelope["error"] == %{
+               "phase" => "application",
+               "code" => "schema_violation",
+               "message" => "the application manifest violates the pattern schema rule",
+               "source" => %{"kind" => "application", "name" => "ptc.json"},
+               "path" => "/workflow/components/0/path",
+               "span" => nil,
+               "subject" => nil,
+               "notes" => [],
+               "retryable" => false,
+               "provider_activity" => false
+             }
+
+      assert outcome.envelope["secondary_errors"] == []
+
+      assert outcome.envelope["result"] == %{
+               "checks" => [
+                 %{"name" => "runtime", "status" => "pass", "code" => "supported"},
+                 %{
+                   "name" => "application",
+                   "status" => "fail",
+                   "code" => "schema_violation"
+                 },
+                 %{"name" => "viewer", "status" => "pass", "code" => "available"},
+                 %{
+                   "name" => "provider/workspace/local",
+                   "status" => "skipped",
+                   "code" => "not_verified_due_to_failure"
+                 },
+                 %{
+                   "name" => "provider/workspace/connectivity",
+                   "status" => "skipped",
+                   "code" => "not_verified_due_to_failure"
+                 }
+               ],
+               "model_aliases" => [],
+               "provider_activity" => false,
+               "readiness" => "failed",
+               "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
+             }
+
+      assert_schema_valid(outcome.envelope)
+    end
   end
 
   @tag :tmp_dir
@@ -713,24 +2503,242 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "a failing audited-local check fails the command instead of the row", %{
+  test "default doctor reports a missing stdio command as a failed local check", %{
     tmp_dir: directory
   } do
-    # Default doctor has no failing-row form, so a local check that fails
-    # surfaces as the command's own diagnostic. Connect has the separate
-    # finding result exercised below.
     host_path =
-      write_host_config(directory, "doctor-local-fail", %{
-        "credentials" => %{"key" => %{"literal" => "not-read"}},
+      write_host_config(directory, "doctor-missing-command", %{
         "install" => %{
-          "model" => %{
-            "source" => "llm",
-            "installation_revision" => "model-v1",
-            "model" => "definitely-not-a-model",
-            "credential" => "key"
+          "workspace" => inert_stdio_installation("missing-command-v1")
+        }
+      })
+
+    application = doctor_application(directory, "selects-missing-command", mission: ["workspace"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert outcome.command_mode == :doctor
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "command_not_found"
+    assert outcome.envelope["result"]["readiness"] == "failed"
+    assert outcome.envelope["result"]["provider_activity"] == false
+
+    assert %{"status" => "fail", "code" => "command_not_found"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/local")
+             )
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "default doctor distinguishes an unusable stdio executable from a missing command", %{
+    tmp_dir: directory
+  } do
+    executable = Path.join(directory, "not-executable")
+    File.write!(executable, "#!/bin/sh\nexit 0\n")
+    File.chmod!(executable, 0o644)
+
+    host_path =
+      write_host_config(
+        directory,
+        "doctor-unusable-command",
+        stdio_host_config(executable, System.find_executable("sh"), directory)
+      )
+
+    application =
+      doctor_application(directory, "selects-unusable-command", mission: ["workspace"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "executable_unavailable"
+
+    assert %{"status" => "fail", "code" => "executable_unavailable"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/local")
+             )
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "default doctor reports unreadable replay fixtures as a failed local check", %{
+    tmp_dir: directory
+  } do
+    host_path =
+      write_host_config(directory, "doctor-missing-replay", %{
+        "install" => %{
+          "frozen-model" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "missing-replay-v1",
+            "fixtures" => "missing-replay.jsonl"
           }
         }
       })
+
+    application =
+      doctor_application(directory, "selects-missing-replay", workflow: ["frozen-model"])
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert outcome.command_mode == :doctor
+    assert outcome.envelope["error"]["phase"] == "local_preflight"
+    assert outcome.envelope["error"]["code"] == "fixtures_unreadable"
+    assert outcome.envelope["result"]["readiness"] == "failed"
+    assert outcome.envelope["result"]["provider_activity"] == false
+
+    assert %{"status" => "fail", "code" => "fixtures_unreadable"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/frozen-model/local")
+             )
+
+    assert_schema_valid(outcome.envelope)
+
+    assert {:error, %CommandOutcome{} = run_outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert run_outcome.envelope["error"]["phase"] == "local_preflight"
+    assert run_outcome.envelope["error"]["code"] == "environment_unavailable"
+    assert run_outcome.envelope["error"]["subject"]["name"] == "frozen-model"
+    assert run_outcome.envelope["error"]["subject"]["operation"] == "local"
+    assert_schema_valid(run_outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "default doctor parses a valid replay fixture as an available local check", %{
+    tmp_dir: directory
+  } do
+    File.write!(
+      Path.join(directory, "replay.jsonl"),
+      Jason.encode!(%{
+        "schema_version" => 1,
+        "request_hash" => "sha256:" <> String.duplicate("0", 64),
+        "response" => %{"content" => "frozen"}
+      }) <> "\n"
+    )
+
+    host_path =
+      write_host_config(directory, "doctor-valid-replay", %{
+        "install" => %{
+          "frozen-model" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "valid-replay-v1",
+            "fixtures" => "replay.jsonl"
+          }
+        }
+      })
+
+    application =
+      doctor_application(directory, "selects-valid-replay", workflow: ["frozen-model"])
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert %{"status" => "pass", "code" => "available"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/frozen-model/local")
+             )
+
+    assert outcome.envelope["result"]["readiness"] == "unverified"
+    assert outcome.envelope["result"]["provider_activity"] == false
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "default doctor admits a valid replay response near its configured ceiling", %{
+    tmp_dir: directory
+  } do
+    File.write!(
+      Path.join(directory, "large-replay.jsonl"),
+      Jason.encode!(%{
+        "schema_version" => 1,
+        "request_hash" => "sha256:" <> String.duplicate("1", 64),
+        "response" => %{"content" => String.duplicate("x", 900_000)}
+      }) <> "\n"
+    )
+
+    host_path =
+      write_host_config(directory, "doctor-large-replay", %{
+        "install" => %{
+          "frozen-model" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "large-replay-v1",
+            "fixtures" => "large-replay.jsonl"
+          }
+        }
+      })
+
+    application =
+      doctor_application(directory, "selects-large-replay", workflow: ["frozen-model"])
+
+    assert {:ok, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    assert %{"status" => "pass", "code" => "available"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/frozen-model/local")
+             )
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "default doctor completes every local check after an ordinary failure", %{
+    tmp_dir: directory
+  } do
+    host_path =
+      write_host_config(directory, "doctor-multiple-local-failures", %{
+        "install" => %{
+          "frozen-model" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "missing-replay-v1",
+            "fixtures" => "missing-replay.jsonl"
+          },
+          "workspace" => inert_stdio_installation("missing-command-v1")
+        }
+      })
+
+    application =
+      doctor_application(directory, "selects-two-broken-providers",
+        workflow: ["frozen-model"],
+        mission: ["workspace"]
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["doctor", application, "--host-config", host_path])
+
+    checks = outcome.envelope["result"]["checks"]
+
+    assert %{"status" => "fail", "code" => "fixtures_unreadable"} =
+             Enum.find(checks, &(&1["name"] == "provider/frozen-model/local"))
+
+    assert %{"status" => "fail", "code" => "command_not_found"} =
+             Enum.find(checks, &(&1["name"] == "provider/workspace/local"))
+
+    assert outcome.envelope["result"]["readiness"] == "failed"
+    assert outcome.envelope["result"]["provider_activity"] == false
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a failing audited-local check fails its row without provider activity", %{
+    tmp_dir: directory
+  } do
+    host_path =
+      write_host_config(
+        directory,
+        "doctor-local-fail",
+        literal_credential_host("not-read", "definitely-not-a-model")
+      )
 
     application = doctor_application(directory, "selects-model", workflow: ["model"])
 
@@ -743,6 +2751,19 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["subject"]["name"] == "model"
     assert outcome.envelope["error"]["subject"]["operation"] == "local"
     assert outcome.envelope["error"]["provider_activity"] == false
+
+    assert %{
+             "readiness" => "failed",
+             "provider_activity" => false,
+             "checks" => checks
+           } = outcome.envelope["result"]
+
+    assert %{"status" => "fail", "code" => "adapter_unavailable"} =
+             Enum.find(checks, &(&1["name"] == "provider/model/local"))
+
+    assert %{"status" => "skipped", "code" => "requires_connect"} =
+             Enum.find(checks, &(&1["name"] == "provider/model/credentials"))
+
     assert_schema_valid(outcome.envelope)
   end
 
@@ -766,87 +2787,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert outcome.envelope["error"]["code"] == "invalid_arguments"
       assert_schema_valid(outcome.envelope)
     end
-  end
-
-  @tag :tmp_dir
-  test "doctor --connect sets up selected environment credentials before active work", %{
-    tmp_dir: directory
-  } do
-    environment_name = "PTC_TEST_DOCTOR_CONNECT_TOKEN"
-    previous_environment = System.get_env(environment_name)
-    System.delete_env(environment_name)
-
-    provider_applications = LLMSupport.snapshot_provider_applications()
-
-    previous =
-      for key <- [
-            :llm_adapter,
-            :host_llm_test_owner,
-            :host_llm_test_provider_application,
-            :host_llm_test_result
-          ],
-          into: %{},
-          do: {key, Application.fetch_env(:ptc_runner, key)}
-
-    :ok = LLMSupport.stop_provider_applications()
-
-    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
-    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
-    Application.put_env(:ptc_runner, :host_llm_test_provider_application, :req_llm)
-    Application.put_env(:ptc_runner, :host_llm_test_result, {:ok, %{content: "ok", tokens: %{}}})
-    Application.put_env(:req_llm, :load_dotenv, false, persistent: true)
-    Application.put_env(:llm_db, :load_dotenv, false, persistent: true)
-
-    on_exit(fn ->
-      if previous_environment,
-        do: System.put_env(environment_name, previous_environment),
-        else: System.delete_env(environment_name)
-
-      Enum.each(previous, fn
-        {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
-        {key, :error} -> Application.delete_env(:ptc_runner, key)
-      end)
-
-      LLMSupport.restore_provider_applications(provider_applications)
-    end)
-
-    host_path =
-      write_host_config(directory, "command-owned-model", %{
-        "credentials" => %{"key" => %{"env" => environment_name}},
-        "install" => %{
-          "model" => %{
-            "source" => "llm",
-            "installation_revision" => "model-v1",
-            "model" => "openrouter:test/model",
-            "credential" => "key"
-          }
-        }
-      })
-
-    application = doctor_application(directory, "command-owned-model", workflow: ["model"])
-    caller = self()
-
-    assert {:ok, runtime} =
-             CommandRuntime.new(
-               provider_application_mode: :command_vm,
-               environment_setup: fn ->
-                 System.put_env(environment_name, "test-secret")
-                 send(caller, :doctor_environment_setup)
-                 :ok
-               end
-             )
-
-    assert {:ok, %CommandOutcome{} = outcome} =
-             CommandEngine.dispatch(
-               ["doctor", application, "--host-config", host_path, "--connect"],
-               runtime
-             )
-
-    assert outcome.exit_status == 0
-    assert outcome.envelope["result"]["provider_activity"] == true
-    assert_received :doctor_environment_setup
-    assert_received {:host_llm_ensure_ready, _pid}
-    assert_received {:host_llm_request, "openrouter:test/model", _request}
   end
 
   @tag :tmp_dir
@@ -967,6 +2907,175 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "doctor --connect distinguishes a declared MCP tool missing from the server", %{
+    tmp_dir: directory
+  } do
+    marker = Path.join(directory, "missing-tool-methods")
+
+    missing_tool_host =
+      marker
+      |> connect_host_config()
+      |> put_in(
+        ["install", "workspace", "tools"],
+        %{
+          "structuredMissing" => %{
+            "as" => "workspace.structured",
+            "effect" => "write",
+            "model_visible" => true
+          }
+        }
+      )
+
+    host_path = write_host_config(directory, "missing-tool", missing_tool_host)
+
+    application =
+      doctor_application(directory, "selects-missing-tool",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.envelope["error"]["phase"] == "provider_acquisition"
+    assert outcome.envelope["error"]["code"] == "provider_tool_missing"
+
+    assert outcome.envelope["error"]["message"] ==
+             ~s(the installed endpoint does not expose declared tool "structuredMissing")
+
+    assert %{"status" => "fail", "code" => "provider_tool_missing"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/connectivity")
+             )
+
+    assert File.read!(marker) =~ "tools/list"
+    refute outcome.envelope["error"]["message"] =~ "it exposes"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "doctor --connect reports an unsupported MCP profile and closes stdio", %{
+    tmp_dir: directory
+  } do
+    marker = Path.join(directory, "unsupported-doctor-methods")
+
+    host_path =
+      write_host_config(
+        directory,
+        "unsupported-doctor",
+        connect_host_config(marker, "unsupported-protocol")
+      )
+
+    application =
+      doctor_application(directory, "doctor-unsupported-profile",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
+        limits: %{"evaluation_timeout_ms" => 5_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.envelope["error"]["code"] == "provider_protocol_version_unsupported"
+    assert outcome.exit_status == 4
+    assert outcome.envelope["error"]["retryable"] == false
+
+    assert outcome.envelope["error"]["message"] ==
+             "the endpoint rejected the required server/discover method and does not support MCP protocol 2026-07-28"
+
+    assert %{"status" => "fail", "code" => "provider_protocol_version_unsupported"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/connectivity")
+             )
+
+    encoded = Jason.encode!(outcome.envelope)
+    refute encoded =~ "PRIVATE_REMOTE_MESSAGE"
+    refute encoded =~ "PRIVATE_REMOTE_DATA"
+    refute encoded =~ "PRIVATE_STDERR_DETAIL"
+    refute encoded =~ "PRIVATE_LAUNCH_ARGUMENT"
+
+    assert {:stdout, rendered} = CommandRenderer.render(outcome)
+    assert rendered =~ "provider_protocol_version_unsupported"
+    refute rendered =~ "PRIVATE_REMOTE_MESSAGE"
+    refute rendered =~ "PRIVATE_REMOTE_DATA"
+    refute rendered =~ "PRIVATE_STDERR_DETAIL"
+    refute rendered =~ "PRIVATE_LAUNCH_ARGUMENT"
+
+    assert File.read!(marker) =~ "server/discover"
+    refute File.read!(marker) =~ "tools/list"
+    assert File.read!(marker) =~ "session-closed"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "doctor --connect separates an acquisition timeout from an unreachable provider", %{
+    tmp_dir: directory
+  } do
+    # Issue #1453. The server here is healthy and would answer `server/discover`
+    # with the same `-32601` the test above classifies; it is only slower than
+    # the budget. Reporting that as `provider_unavailable` sent three separate
+    # investigations after the transport, because the one fact that ends it —
+    # nothing was wrong except the clock — was the fact being withheld. A cold
+    # `npx` launch and a loaded machine both land here.
+    marker = Path.join(directory, "slow-doctor-methods")
+
+    host_config =
+      update_in(
+        connect_host_config(marker, "slow-unsupported-protocol"),
+        ["install", "workspace", "ceilings", "timeout_ms"],
+        fn _default -> 1_000 end
+      )
+
+    host_path = write_host_config(directory, "slow-doctor", host_config)
+
+    application =
+      doctor_application(directory, "doctor-slow-profile",
+        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 1_000}}],
+        limits: %{"evaluation_timeout_ms" => 1_000}
+      )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.envelope["error"]["code"] == "provider_acquisition_timeout"
+    assert outcome.exit_status == 4
+    # Retryable, because the same launch usually answers once the cache is warm.
+    assert outcome.envelope["error"]["retryable"] == true
+
+    assert %{"status" => "fail", "code" => "provider_acquisition_timeout"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/workspace/connectivity")
+             )
+
+    # The marker proves which step ran out of clock. `:mcp_timeout` also carries
+    # launcher staging and spawn expiry, so without this the test would pass on a
+    # slow spawn and stop covering the case it is named for: discovery was
+    # reached, and the answer was merely late.
+    assert File.read!(marker) =~ "server/discover"
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
   test "doctor --connect preserves a provider-bearing no-op result", %{tmp_dir: directory} do
     trace_directory = Path.join(directory, "traces")
     File.mkdir_p!(trace_directory)
@@ -1005,15 +3114,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "an internal failure before the marker reports no provider activity", %{
+  test "an impossible trace budget fails doctor admission before the activity marker", %{
     tmp_dir: directory
   } do
-    # The mirror of the case below, and the reason the answer is asked rather
-    # than assumed. The execution owner opens its sinks before any provider
-    # work, and a manifest may narrow `normal_event_bytes` below the reserve
-    # that opening requires, so the operation can fail with a bare reason having
-    # contacted nothing. Reporting `provider_activity: true` for it would claim
-    # a cost the command never incurred.
     marker = Path.join(directory, "pre-marker-methods")
     host_path = write_host_config(directory, "connect-pre-marker", connect_host_config(marker))
 
@@ -1033,15 +3136,15 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              ])
 
     assert outcome.command_mode == {:doctor, :connect}
-    assert outcome.envelope["error"]["phase"] == "internal"
-    assert outcome.envelope["error"]["code"] == "internal_error"
+    assert outcome.envelope["error"]["phase"] == "application"
+    assert outcome.envelope["error"]["code"] == "limit_configuration_invalid"
     assert outcome.envelope["error"]["provider_activity"] == false
     refute File.exists?(marker)
     assert_schema_valid(outcome.envelope)
   end
 
   @tag :tmp_dir
-  test "run sink-opening failures preserve not-started activity evidence", %{
+  test "run rejects impossible trace budgets with not-started activity evidence", %{
     tmp_dir: directory
   } do
     limits = %{"evaluation_timeout_ms" => 5_000, "normal_event_bytes" => 1}
@@ -1069,8 +3172,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ["run", provider_backed, "--host-config", host_path]
         ] do
       assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(argv)
-      assert outcome.envelope["error"]["phase"] == "internal"
-      assert outcome.envelope["error"]["code"] == "internal_error"
+      assert outcome.envelope["error"]["phase"] == "application"
+      assert outcome.envelope["error"]["code"] == "limit_configuration_invalid"
       assert outcome.envelope["error"]["provider_activity"] == false
       assert outcome.envelope["execution"] == %{"state" => "not_started"}
       assert_schema_valid(outcome.envelope)
@@ -1080,58 +3183,98 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "an internal failure after the marker still reports provider activity", %{
+  test "a stale mission capability requirement remains actionable after acquisition", %{
     tmp_dir: directory
   } do
-    # The counterpart to the audited-local case below, on the other side of the
-    # marker. Sealing the operation's own result is made to raise, so the
-    # command fails after it has already contacted the server. Reporting
-    # `provider_activity: false` here would tell the caller nothing was spent
-    # when something was.
-    #
-    # The diagnostic itself is minted by `ProviderExecution`'s own boundary, so
-    # what this pins at the command boundary is narrower than it looks: that no
-    # answer the engine gives from the operation onward loses the flag. It fails
-    # if the engine mints its own activity-free internal error there, and it
-    # does not discriminate between rendering the operation's diagnostic and
-    # replacing it with an equivalent one — the case below does that.
-    marker = Path.join(directory, "post-marker-methods")
-    host_path = write_host_config(directory, "connect-post-marker", connect_host_config(marker))
+    trace_directory = Path.join(directory, "legacy-capability-traces")
+    File.mkdir_p!(trace_directory)
+
+    host_path =
+      write_host_config(directory, "legacy-capability", %{
+        "install" => %{
+          "history" => %{
+            "source" => "ptc_trace_snapshot",
+            "installation_revision" => "history-v1",
+            "directory" => trace_directory,
+            "ceilings" => %{
+              "max_source_bytes" => 2_000_000,
+              "max_result_bytes" => 250_000
+            }
+          }
+        }
+      })
 
     application =
-      doctor_application(directory, "selects-post-marker",
-        mission: [{"workspace", %{"allow" => ["workspace.structured"], "timeout_ms" => 5_000}}],
-        limits: %{"evaluation_timeout_ms" => 5_000}
+      write_application(
+        directory,
+        "legacy-capability",
+        valid_manifest(%{
+          "missions" => %{
+            "default" => %{
+              "components" => [%{"id" => "legacy", "path" => "legacy.clj"}],
+              "data" => %{},
+              "providers" => ["history"]
+            }
+          },
+          "providers" => %{
+            "workflow" => [],
+            "mission" => [%{"name" => "history", "config" => %{}}]
+          }
+        }),
+        %{
+          "legacy.clj" =>
+            "(ns legacy) (defn inspect [input] (tool/history.list-runs {\"limit\" 1}))"
+        }
       )
 
-    storage_key = {Attestation, PtcRunner.Kernel.ConnectivityResult}
-    previous_key = :persistent_term.get(storage_key, :missing)
-
-    on_exit(fn ->
-      case previous_key do
-        :missing -> :persistent_term.erase(storage_key)
-        key -> :persistent_term.put(storage_key, key)
-      end
-    end)
-
-    :persistent_term.put(storage_key, :invalid_hmac_key)
-
     assert {:error, %CommandOutcome{} = outcome} =
-             CommandEngine.prepare([
-               "doctor",
-               application,
-               "--host-config",
-               host_path,
-               "--connect"
-             ])
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
 
-    assert outcome.command_mode == {:doctor, :connect}
-    assert outcome.envelope["error"]["phase"] == "internal"
-    assert outcome.envelope["error"]["code"] == "internal_error"
+    assert outcome.envelope["error"]["phase"] == "provider_acquisition"
+    assert outcome.envelope["error"]["code"] == "capability_requirement_missing"
+
+    assert outcome.envelope["error"]["message"] ==
+             "Missing capability requirement: history.list-runs"
+
     assert outcome.envelope["error"]["provider_activity"] == true
 
-    # The failure is genuinely past the marker: the server was reached first.
-    assert File.read!(marker) =~ "tools/list"
+    assert outcome.envelope["execution"] == %{
+             "state" => "incomplete",
+             "usage" => nil,
+             "evaluation_memory" => nil,
+             "last_evaluation_error" => nil
+           }
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a provider-free capability requirement remains actionable without activity", %{
+    tmp_dir: directory
+  } do
+    application =
+      write_application(directory, "provider-free-capability", valid_manifest(), %{
+        "main.clj" => "(ns app) (defn run [input] (tool/history.list-runs {\"limit\" 1}))"
+      })
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"] == %{
+             "phase" => "provider_acquisition",
+             "code" => "capability_requirement_missing",
+             "message" => "Missing capability requirement: history.list-runs",
+             "provider_activity" => false,
+             "retryable" => false,
+             "source" => nil,
+             "span" => nil,
+             "subject" => nil,
+             "path" => nil,
+             "notes" => []
+           }
+
+    assert outcome.envelope["execution"] == %{"state" => "not_started"}
+
     assert_schema_valid(outcome.envelope)
   end
 
@@ -1144,17 +3287,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     # retains the diagnostic as the error authority while projecting its
     # attributable local check as a finding.
     host_path =
-      write_host_config(directory, "connect-local-fail", %{
-        "credentials" => %{"key" => %{"literal" => "not-read"}},
-        "install" => %{
-          "model" => %{
-            "source" => "llm",
-            "installation_revision" => "model-v1",
-            "model" => "definitely-not-a-model",
-            "credential" => "key"
-          }
-        }
-      })
+      write_host_config(
+        directory,
+        "connect-local-fail",
+        literal_credential_host("not-read", "definitely-not-a-model")
+      )
 
     application = doctor_application(directory, "connect-selects-model", workflow: ["model"])
 
@@ -1192,40 +3329,59 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "doctor --connect turns a missing credential into a failed check", %{
+  test "a credential written by an ordinary shell redirect is usable, not internal", %{
     tmp_dir: directory
   } do
-    environment_name = "PTC_TEST_DOCTOR_MISSING_CREDENTIAL"
-    previous_environment = System.get_env(environment_name)
-    System.delete_env(environment_name)
-
-    on_exit(fn ->
-      if previous_environment,
-        do: System.put_env(environment_name, previous_environment),
-        else: System.delete_env(environment_name)
-    end)
+    # `printf '%s\\n' "$TOKEN" > tok.txt`, `echo`, an editor save, and
+    # `gh auth token > file` all produce the trailing newline, and the host
+    # reference recommends `file:` for secrets. It reached the one phase that
+    # tells the reader the fault is not theirs.
+    File.write!(Path.join(directory, "tok.txt"), "ptc-not-a-real-token\n")
 
     host_path =
-      write_host_config(directory, "connect-missing-credential", %{
-        "credentials" => %{"key" => %{"env" => environment_name}},
-        "install" => %{
-          "workspace" => %{
-            "source" => "mcp",
-            "installation_revision" => "workspace-v1",
-            "transport" => %{
-              "type" => "stdio",
-              "command" => System.find_executable("sh"),
-              "env" => %{"TOKEN" => %{"binding" => "key"}}
-            },
-            "tools" => %{
-              "read" => %{"as" => "workspace.read", "effect" => "read"}
-            }
-          }
-        }
-      })
+      write_host_config(directory, "credential-newline", bearer_credential_host("tok.txt"))
+
+    application = doctor_application(directory, "credential-newline", mission: ["remote"])
+
+    presentation =
+      StandaloneCLI.execute([
+        "doctor",
+        application,
+        "--host-config",
+        host_path,
+        "--connect"
+      ])
+
+    error = presentation.outcome.envelope["error"]
+    refute error["phase"] == "internal"
+    refute error["code"] == "internal_error"
+    refute presentation.exit_status == 70
+
+    # Surrounding whitespace is not part of a secret, so the credential is the
+    # same one the clean file would have supplied and the run reaches the
+    # endpoint it was configured for.
+    assert error["phase"] == "active_preflight"
+  end
+
+  @tag :tmp_dir
+  test "a credential that cannot be carried reports authentication, not an internal fault", %{
+    tmp_dir: directory
+  } do
+    # An interior newline survives trimming and cannot go into a header, so this
+    # credential cannot authenticate the request. It reports the class the
+    # endpoint's own refusal reports, rather than escaping unclassified and
+    # falling closed as an internal error.
+    File.write!(Path.join(directory, "tok.txt"), "ptc-not\na-real-token")
+
+    host_path =
+      write_host_config(
+        directory,
+        "credential-interior-newline",
+        bearer_credential_host("tok.txt")
+      )
 
     application =
-      doctor_application(directory, "connect-missing-credential", mission: ["workspace"])
+      doctor_application(directory, "credential-interior-newline", mission: ["remote"])
 
     assert {:error, %CommandOutcome{} = outcome} =
              CommandEngine.prepare([
@@ -1238,22 +3394,53 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert outcome.exit_status == 4
     assert outcome.envelope["error"]["phase"] == "active_preflight"
-    assert outcome.envelope["error"]["code"] == "credential_unavailable"
-    assert outcome.envelope["error"]["subject"]["operation"] == "credentials"
+    assert outcome.envelope["error"]["code"] == "authentication_rejected"
+    refute outcome.envelope["error"]["phase"] == "internal"
 
-    result = outcome.envelope["result"]
-    assert result["readiness"] == "failed"
-
-    assert result["provider_activity"] ==
-             outcome.envelope["error"]["provider_activity"]
-
-    assert %{"status" => "fail", "code" => "credential_unavailable"} =
-             Enum.find(result["checks"], &(&1["name"] == "provider/workspace/credentials"))
-
-    assert %{"status" => "skipped", "code" => "not_verified_due_to_failure"} =
-             Enum.find(result["checks"], &(&1["name"] == "provider/workspace/connectivity"))
+    assert %{"status" => "fail", "code" => "authentication_rejected"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/remote/connectivity")
+             )
 
     assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a whole multi-line credential still reaches a child process environment", %{
+    tmp_dir: directory
+  } do
+    # A PEM block or a JSON service-account key is one credential with interior
+    # newlines, and `transport.env` exists to hand exactly that to the child.
+    # Only the header sink cannot carry them.
+    pem = "-----BEGIN PRIVATE KEY-----\nMIIBVgIBADAN\n-----END PRIVATE KEY-----\n"
+    File.write!(Path.join(directory, "key.pem"), pem)
+
+    host_path =
+      write_host_config(directory, "multiline-credential", %{
+        "credentials" => %{"key" => %{"file" => "key.pem"}},
+        "install" => %{
+          "workspace" => %{
+            "source" => "mcp",
+            "installation_revision" => "workspace-v1",
+            "transport" => %{
+              "type" => "stdio",
+              "command" => System.find_executable("sh"),
+              "env" => %{"SERVICE_KEY" => %{"binding" => "key"}}
+            },
+            "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
+          }
+        }
+      })
+
+    {:ok, host} = HostConfig.load(host_path)
+
+    # Trailing whitespace is not part of the secret; the interior structure is.
+    assert {:ok, %{"key" => resolved}} =
+             HostInstallation.resolve_runtime_credentials(host, ["key"])
+
+    assert resolved == String.trim(pem)
+    assert String.contains?(resolved, "\n")
   end
 
   test "undeclared options are rejected before cross-command conflict rules" do
@@ -1342,7 +3529,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert validate_help.envelope["result"] == %{
              "topic" => "validate",
-             "usage" => ["ptc validate ptc.json [--host-config HOST.json]"],
+             "usage" => [
+               "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json]"
+             ],
              "options" => [
                %{
                  "switches" => ["--host-config HOST.json"],
@@ -1350,7 +3539,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                },
                %{
                  "switches" => ["--envelope ENVELOPE.json"],
-                 "description" => "atomically publish the V2 command envelope"
+                 "description" => "atomically publish the V4 command envelope"
                },
                %{
                  "switches" => ["--help"],
@@ -1406,6 +3595,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "--private-output",
              "--inspect",
              "--component-override-descriptor",
+             "--env-file",
              "--envelope",
              "--help"
            ]
@@ -1414,15 +3604,63 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     refute inspect(second) =~ "secret-second"
   end
 
-  test "retired switches are command-specific and carry fixed replacements" do
+  @tag :tmp_dir
+  test "environment files are explicit frontend-owned inputs", %{tmp_dir: dir} do
+    env_file = Path.join(dir, "local.env")
+
+    for frontend <- [:standalone, :mix],
+        argv <- [
+          ["run", "ptc.json", "--env-file", env_file],
+          [
+            "doctor",
+            "ptc.json",
+            "--host-config",
+            "host.json",
+            "--connect",
+            "--env-file",
+            env_file
+          ],
+          [
+            "repl",
+            "--manifest",
+            "ptc.json",
+            "--host-config",
+            "host.json",
+            "--env-file",
+            env_file
+          ],
+          ["viewer", "ptc-project.json", "--env-file", env_file]
+        ] do
+      assert {:ok, entry} = CommandEntry.open(argv, frontend)
+      assert entry.arguments.frontend_options == [env_file: env_file]
+      refute Map.has_key?(entry.arguments.options, :env_file)
+    end
+
+    assert {:error, rejection} =
+             CommandParser.parse(["validate", "ptc.json", "--env-file", env_file])
+
+    assert rejection.kind == :unknown_switch
+
+    for argv <- [
+          ["doctor", "--env-file", env_file],
+          ["repl", "--env-file", env_file],
+          ["repl", "--profile", "run-analysis-v1", "--env-file", env_file]
+        ] do
+      assert {:error, rejection} = CommandParser.parse(argv)
+      assert rejection.code == :invalid_arguments
+    end
+  end
+
+  test "removed switches are ordinary unknown input" do
     assert {:error, rejection} =
              CommandParser.parse(["run", "ptc.json", "--trace", "run.jsonl"])
 
     assert rejection.command == :run
     assert rejection.code == :invalid_arguments
-    assert rejection.kind == :retired_switch
-    assert rejection.retired == "--trace"
-    assert rejection.replacement == "--trace-dir"
+    assert rejection.kind == :unknown_switch
+
+    assert rejection.accepted ==
+             CommandDeclaration.accepted_switches(:run, :standalone)
   end
 
   test "undeclared raw spellings are unknown rather than normalized by OptionParser" do
@@ -1437,8 +3675,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         ] do
       assert {:error, rejection} = CommandParser.parse(argv)
       assert rejection.kind == :unknown_switch
-      assert rejection.retired == nil
-      assert rejection.replacement == nil
       assert rejection.accepted != []
     end
   end
@@ -1448,18 +3684,40 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert arguments.ordered_options == [eval: "-10"]
   end
 
+  test "repl preserves repeated selected-run flags in argument order" do
+    first = CommandRunRef.encode(<<1::128>>)
+    second = CommandRunRef.encode(<<2::128>>)
+
+    assert {:ok, arguments} =
+             CommandParser.parse([
+               "repl",
+               "--profile",
+               "private-run-analysis-v1",
+               "--run",
+               second,
+               "--run",
+               first,
+               "--resource",
+               "traces=traces",
+               "--resource",
+               "inspection=inspection"
+             ])
+
+    assert Keyword.get_values(arguments.ordered_options, :run) == [second, first]
+  end
+
   test "repl structural combinations are rejected by the shared parser" do
     for argv <- [
           ["repl", "--format", "yaml"],
-          ["repl", "--describe-profile", "log-analysis-v2", "--load", "caller-value"],
-          ["repl", "--profile", "log-analysis-v2", "--manifest", "ptc.json"],
-          ["repl", "--profile", "log-analysis-v2", "--host-config", "host.json"],
-          ["repl", "--profile", "log-analysis-v2", "--trace", "trace.jsonl"],
-          ["repl", "--profile", "log-analysis-v2"],
+          ["repl", "--describe-profile", "run-analysis-v1", "--load", "caller-value"],
+          ["repl", "--profile", "run-analysis-v1", "--manifest", "ptc.json"],
+          ["repl", "--profile", "run-analysis-v1", "--host-config", "host.json"],
+          ["repl", "--profile", "run-analysis-v1", "--trace", "trace.jsonl"],
+          ["repl", "--profile", "run-analysis-v1"],
           [
             "repl",
             "--profile",
-            "inspection-analysis-v3",
+            "private-run-analysis-v1",
             "--resource",
             "traces=traces",
             "--private-unattended",
@@ -1469,7 +3727,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           [
             "repl",
             "--profile",
-            "log-analysis-v2",
+            "run-analysis-v1",
             "--resource",
             "traces=traces",
             "--continue-on-error",
@@ -1491,6 +3749,55 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       assert {:error, rejection} = CommandParser.parse(argv)
       assert rejection.command == :repl
       assert rejection.code == :invalid_arguments
+    end
+  end
+
+  test "viewer accepts one project and the closed listener vocabulary" do
+    assert {:ok, arguments} = CommandParser.parse(["viewer", "ptc-project.json"])
+    assert arguments.command == :viewer
+    assert arguments.application == "ptc-project.json"
+    assert arguments.options == %{}
+
+    for {argv, options} <- [
+          {["viewer", "p.json", "--listen", "127.0.0.1"], %{listen: "127.0.0.1"}},
+          {["viewer", "p.json", "--listen", "0.0.0.0"], %{listen: "0.0.0.0"}},
+          {["viewer", "p.json", "--port", "0"], %{port: "0"}},
+          {["viewer", "p.json", "--port", "65535"], %{port: "65535"}},
+          {["viewer", "p.json", "--port", "4123", "--listen", "0.0.0.0"],
+           %{port: "4123", listen: "0.0.0.0"}}
+        ] do
+      assert {:ok, arguments} = CommandParser.parse(argv)
+      assert arguments.options == options
+    end
+  end
+
+  test "viewer rejects every listener value outside its closed vocabulary" do
+    for value <- ["", "::", "::1", "localhost", "10.0.0.1", "0.0.0.1", "127.0.0.2", "0"] do
+      assert {:error, rejection} = CommandParser.parse(["viewer", "p.json", "--listen", value])
+      assert rejection.command == :viewer
+      assert rejection.code == :invalid_arguments
+    end
+  end
+
+  test "viewer rejects a port outside the representable range" do
+    for value <- ["", "-1", "65536", "abc", "1.5", "4123 ", " 4123", "0x10"] do
+      assert {:error, rejection} = CommandParser.parse(["viewer", "p.json", "--port", value])
+      assert rejection.command == :viewer
+      assert rejection.code == :invalid_arguments
+    end
+  end
+
+  test "viewer takes exactly one project and publishes nothing" do
+    for argv <- [
+          ["viewer"],
+          ["viewer", "a.json", "b.json"],
+          ["viewer", "p.json", "--envelope", "envelope.json"],
+          ["viewer", "p.json", "--host-config", "host.json"],
+          ["viewer", "p.json", "--output", "value.json"],
+          ["viewer", "p.json", "--trace-dir", "traces"]
+        ] do
+      assert {:error, rejection} = CommandParser.parse(argv)
+      assert rejection.command == :viewer
     end
   end
 
@@ -1739,6 +4046,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "install" => %{
         "model" => %{
           "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
           "model" => "provider:model",
           "credential" => "key",
           "installation_revision" => host_revision
@@ -1753,6 +4062,22 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert %CommandOutcome{} =
              CommandOutcome.success(:models, run_ref, %{"installations" => [model]})
+
+    # `ModelSelectorDisclosure` withholds endpoint-bearing selectors. The closed
+    # envelope refuses one outright, so a future producer that read the host
+    # installation directly could not publish what these commands refuse.
+    assert %CommandOutcome{} =
+             CommandOutcome.success(:models, run_ref, %{
+               "installations" => [Map.put(model, "model_selector", "openrouter:test/model")]
+             })
+
+    assert_raise ArgumentError, fn ->
+      CommandOutcome.success(:models, run_ref, %{
+        "installations" => [
+          Map.put(model, "model_selector", "openai-compat:https://private.example/v1|deployment")
+        ]
+      })
+    end
 
     for invalid_revision <- [
           String.duplicate("a", 129),
@@ -1774,7 +4099,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end
     end
 
-    for result <- [%{}, %{"version" => self()}, %{version: "0.13.0"}, %{"version" => "9.9.9"}] do
+    for result <- [%{}, %{"version" => self()}, %{version: "0.14.0"}, %{"version" => "9.9.9"}] do
       assert_raise ArgumentError, fn ->
         CommandOutcome.success(:version, run_ref, result)
       end
@@ -1839,7 +4164,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "checks" => fixed_doctor_checks,
              "model_aliases" => [],
              "provider_activity" => true,
-             "readiness" => "unverified"
+             "readiness" => "unverified",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     doctor_without_local = %{
@@ -1854,7 +4180,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ],
       "model_aliases" => [],
       "provider_activity" => true,
-      "readiness" => "ready"
+      "readiness" => "ready",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     refute CommandContract.valid_success_semantics?(:doctor, doctor_without_local)
@@ -1871,7 +4198,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ],
       "model_aliases" => [],
       "provider_activity" => false,
-      "readiness" => "unverified"
+      "readiness" => "unverified",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     refute CommandContract.valid_success_semantics?(:doctor, local_only_application_doctor)
@@ -1894,7 +4222,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
             ],
         "model_aliases" => [],
         "provider_activity" => false,
-        "readiness" => "unverified"
+        "readiness" => "unverified",
+        "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
       })
 
     active_doctor_result = %{
@@ -1916,7 +4245,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       ],
       "model_aliases" => [],
       "provider_activity" => true,
-      "readiness" => "ready"
+      "readiness" => "ready",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     assert_raise ArgumentError, fn ->
@@ -1926,6 +4256,19 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert %CommandOutcome{command_mode: {:doctor, :connect}} =
              CommandOutcome.success({:doctor, :connect}, run_ref, active_doctor_result)
 
+    assert_schema_invalid(
+      valid_doctor.envelope
+      |> Map.put("warnings", [
+        %{
+          "code" => "model_uncataloged",
+          "message" =>
+            "the configured model is not an exact catalog entry; pricing, limits, token estimation, and capability detection may be incomplete",
+          "provider" => "alpha",
+          "model" => "openrouter:future/model"
+        }
+      ])
+    )
+
     provider_free_connect_result = %{
       "checks" => [
         %{"name" => "runtime", "status" => "pass", "code" => "supported"},
@@ -1934,7 +4277,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       ],
       "model_aliases" => [],
       "provider_activity" => false,
-      "readiness" => "ready"
+      "readiness" => "ready",
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     assert %CommandOutcome{command_mode: {:doctor, :connect}} =
@@ -2005,7 +4349,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "checks" => valid_doctor.envelope["result"]["checks"],
              "model_aliases" => [],
              "provider_activity" => true,
-             "readiness" => "ready"
+             "readiness" => "ready",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     refute CommandContract.valid_success_semantics?(:doctor, %{
@@ -2025,7 +4370,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  ],
              "model_aliases" => [],
              "provider_activity" => false,
-             "readiness" => "ready"
+             "readiness" => "ready",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     refute CommandContract.valid_success_semantics?(:doctor, %{
@@ -2045,7 +4391,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  ],
              "model_aliases" => [],
              "provider_activity" => true,
-             "readiness" => "unverified"
+             "readiness" => "unverified",
+             "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
     assert_schema_invalid(
@@ -2740,16 +5087,18 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       "outcome" => "ok",
       "diagnostic" => nil,
       "usage" => usage_fixture(),
-      "evaluation_memory" => evaluation_memory_fixture()
+      "evaluation_memory" => evaluation_memory_fixture(),
+      "last_evaluation_error" => nil
     }
 
     classified = %{
-      "schema_version" => 2,
+      "schema_version" => 4,
       "command" => "run",
       "status" => "error",
       "run_ref" => run_ref,
       "error" => CommandDiagnostic.to_map(top_level),
       "secondary_errors" => [],
+      "warnings" => [],
       "artifact_state" => %{
         "trace" => "not_requested",
         "inspection" => "not_requested",
@@ -2760,6 +5109,76 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     }
 
     assert_schema_valid(classified)
+
+    for spend <- [
+          %{"state" => "empty"},
+          %{"state" => "incomplete"},
+          %{"state" => "overflow"},
+          %{"state" => "unpriced", "input" => 1, "output" => 2},
+          %{
+            "state" => "available",
+            "input" => 1,
+            "output" => 2,
+            "total_cost" => %{"currency" => "USD", "microunits" => 0}
+          }
+        ] do
+      assert_schema_valid(put_in(classified, ["execution", "usage", "llm_spend"], spend))
+    end
+
+    for invalid_spend <- [
+          nil,
+          %{"state" => "empty", "total_cost" => 0},
+          %{"state" => "unpriced", "input" => 1},
+          %{"state" => "unpriced", "input" => 1, "output" => 2, "total_cost" => 0},
+          %{"state" => "available", "input" => 1, "output" => 2}
+        ] do
+      assert_schema_invalid(
+        put_in(classified, ["execution", "usage", "llm_spend"], invalid_spend)
+      )
+    end
+
+    assert_schema_invalid(
+      update_in(classified, ["execution", "usage"], &Map.delete(&1, "llm_spend"))
+    )
+
+    enabled_budget = %{
+      "total_tokens" => %{
+        "state" => "available",
+        "limit" => 100,
+        "reserved" => 0,
+        "charged" => 18,
+        "remaining" => 82,
+        "refused" => 0
+      },
+      "cost" => %{
+        "state" => "incomplete",
+        "currency" => "USD",
+        "limit_microusd" => 500,
+        "reserved_microusd" => 0,
+        "charged_microusd" => 200,
+        "remaining_microusd" => 300,
+        "refused" => 1
+      }
+    }
+
+    assert_schema_valid(put_in(classified, ["execution", "usage", "llm_budget"], enabled_budget))
+
+    for invalid_budget <- [
+          nil,
+          %{"total_tokens" => nil},
+          put_in(enabled_budget, ["total_tokens", "state"], "unknown"),
+          put_in(enabled_budget, ["total_tokens", "reserved"], 1),
+          put_in(enabled_budget, ["cost", "currency"], "EUR"),
+          put_in(enabled_budget, ["cost", "charged_microusd"], -1)
+        ] do
+      assert_schema_invalid(
+        put_in(classified, ["execution", "usage", "llm_budget"], invalid_budget)
+      )
+    end
+
+    assert_schema_invalid(
+      update_in(classified, ["execution", "usage"], &Map.delete(&1, "llm_budget"))
+    )
 
     preclassification = CommandDiagnostic.new!(:arguments, :invalid_arguments)
 
@@ -2786,6 +5205,58 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert_schema_valid(
       put_in(classified, ["execution", "usage", "events_dropped"], %{"$overflow" => 1})
     )
+
+    llm_row = %{
+      "alias" => "writer",
+      "installation_revision" => "stable-v1",
+      "calls" => 1,
+      "successful_calls" => 1,
+      "usage_calls" => 1,
+      "missing_usage_calls" => 0,
+      "usage_overflow" => false,
+      "usage" => %{"input" => 4}
+    }
+
+    unmatched_row = %{
+      "alias" => "writer",
+      "installation_revision" => "stable-v1",
+      "calls" => 1,
+      "successful_calls" => 0,
+      "usage_calls" => 0,
+      "missing_usage_calls" => 1,
+      "usage_overflow" => false,
+      "usage" => %{}
+    }
+
+    with_llm =
+      classified
+      |> put_in(["execution", "usage", "llm_usage"], [llm_row])
+      |> put_in(["execution", "usage", "unattributed_model_calls"], 1)
+
+    assert_schema_valid(with_llm)
+    assert_schema_valid(put_in(with_llm, ["execution", "usage", "llm_usage"], [unmatched_row]))
+
+    for invalid <- [
+          put_in(with_llm, ["execution", "usage", "llm_usage", Access.at(0), "extra"], true),
+          put_in(
+            with_llm,
+            ["execution", "usage", "llm_usage", Access.at(0), "alias"],
+            "Bad Alias"
+          ),
+          put_in(
+            with_llm,
+            ["execution", "usage", "llm_usage", Access.at(0), "usage", "total_cost"],
+            "unknown"
+          ),
+          put_in(
+            with_llm,
+            ["execution", "usage", "llm_usage"],
+            List.duplicate(llm_row, 129)
+          ),
+          put_in(with_llm, ["execution", "usage", "llm_usage_state"], "unavailable")
+        ] do
+      assert_schema_invalid(invalid)
+    end
 
     assert_schema_invalid(
       put_in(classified, ["execution"], %{
@@ -2845,12 +5316,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     result_publication = CommandDiagnostic.new!(:publication, :result_publication_failed)
 
     envelope = %{
-      "schema_version" => 2,
+      "schema_version" => 4,
       "command" => "run",
       "status" => "error",
       "run_ref" => run_ref,
       "error" => CommandDiagnostic.to_map(execution),
       "secondary_errors" => [],
+      "warnings" => [],
       "artifact_state" => %{
         "trace" => "not_requested",
         "inspection" => "not_requested",
@@ -2899,13 +5371,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert_schema_invalid(put_in(provider.envelope, ["error", "subject", "name"], "safe\n"))
 
-    result = %{
-      "application_content_digest" => "sha256:" <> String.duplicate("0", 64),
-      "effective_application_digest" => "sha256:" <> String.duplicate("1", 64),
-      "workflow_bundle_hash" => String.duplicate("2", 64),
-      "mission_bundle_hashes" => %{},
-      "provider_activity" => false
-    }
+    result = validate_success_result()
 
     validate = CommandOutcome.success(:validate, run_ref, result)
 
@@ -2916,6 +5382,50 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         ] do
       assert_schema_invalid(put_in(validate.envelope, ["result", field], result[field] <> "\n"))
     end
+
+    assert CommandContract.valid_success_result?(:validate, result)
+
+    newline_alias =
+      validate_success_result(%{
+        "installation_config_digests" => %{
+          "safe\n" => "sha256:" <> String.duplicate("3", 64)
+        }
+      })
+
+    refute CommandContract.valid_success_result?(:validate, newline_alias)
+    assert_schema_invalid(%{validate.envelope | "result" => newline_alias})
+  end
+
+  test "validate mission_grants schema admits producer-scale data and export refs" do
+    run_ref = CommandRunRef.encode(@zero_entropy)
+
+    data = Enum.map(1..257, fn index -> "data/k#{index}" end)
+    long_export = String.duplicate("n", 200) <> "/" <> String.duplicate("s", 200)
+    long_data_form = "data/" <> String.duplicate("k", 70_000)
+
+    result =
+      validate_success_result(%{
+        "mission_bundle_hashes" => %{"intake" => String.duplicate("3", 64)},
+        "mission_grants" => %{
+          "intake" => %{
+            "data" => [long_data_form | data],
+            "exports" => [long_export],
+            "providers" => ["workspace.read"]
+          }
+        }
+      })
+
+    outcome = CommandOutcome.success(:validate, run_ref, result)
+    assert_schema_valid(outcome.envelope)
+
+    assert length(outcome.envelope["result"]["mission_grants"]["intake"]["data"]) == 258
+
+    assert hd(outcome.envelope["result"]["mission_grants"]["intake"]["data"]) ==
+             long_data_form
+
+    assert outcome.envelope["result"]["mission_grants"]["intake"]["exports"] == [
+             long_export
+           ]
   end
 
   test "an unknown command has one exact schema-valid phase-1 outcome" do
@@ -2925,7 +5435,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.exit_status == 2
 
     assert outcome.envelope == %{
-             "schema_version" => 2,
+             "schema_version" => 4,
              "command" => "unknown",
              "status" => "error",
              "run_ref" => outcome.envelope["run_ref"],
@@ -2941,7 +5451,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                "retryable" => false,
                "provider_activity" => false
              },
-             "secondary_errors" => []
+             "secondary_errors" => [],
+             "warnings" => []
            }
 
     assert_schema_valid(outcome.envelope)
@@ -2975,7 +5486,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       write_application(
         directory,
         "over-installed-limit",
-        valid_manifest(%{"limits" => %{"mission_capability_calls" => 512}})
+        valid_manifest(%{"limits" => %{"mission_capability_calls" => 8_192}})
       )
 
     limit =
@@ -2985,9 +5496,16 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "installed_limit_exceeded"
       )
 
-    assert limit.envelope["error"]["message"] ==
-             "an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling"
+    # The refusal is the one message that says how to raise a limit, so it names
+    # the limit, what the manifest asked for, and the ceiling that refused it.
+    assert {:ok, expected} =
+             RuntimeLimitDiagnostic.installed_ceiling_message(
+               "mission_capability_calls",
+               8_192,
+               4_096
+             )
 
+    assert limit.envelope["error"]["message"] == expected
     assert limit.envelope["error"]["path"] == "/limits/mission_capability_calls"
 
     missing_required =
@@ -3028,16 +5546,18 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     refute Jason.encode!(unknown.envelope) =~ "caller-secret"
     refute Jason.encode!(unknown.envelope) =~ "must-not-escape"
 
-    for {name, input, expected_path} <- [
-          {"invalid-input-value", %{"value" => []}, [{:property, "input"}, {:property, "value"}]},
-          {"invalid-input-path", %{"path" => 42}, [{:property, "input"}, {:property, "path"}]},
-          {"empty-input", %{}, [{:property, "input"}]}
+    for {name, input, code, expected_path} <- [
+          {"invalid-input-value", %{"value" => []}, "schema_violation",
+           [{:property, "input"}, {:property, "value"}]},
+          {"invalid-input-path", %{"path" => 42}, "schema_violation",
+           [{:property, "input"}, {:property, "path"}]},
+          {"empty-input", %{}, "required_property_missing",
+           [{:property, "input"}, {:property, "value"}]}
         ] do
       manifest = valid_manifest(%{"input" => input})
       malformed_input = write_application(directory, name, manifest)
 
-      outcome =
-        assert_error(["validate", malformed_input], "application", "schema_violation")
+      outcome = assert_error(["validate", malformed_input], "application", code)
 
       expected_pointer =
         Enum.map_join(expected_path, "", fn {:property, property} -> "/#{property}" end)
@@ -3049,12 +5569,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "main.clj" => "(ns app) (defn run [input] (return input))"
       }
 
-      assert {:error, {:manifest_path, ^expected_path, :invalid_input_declaration}} =
-               ApplicationPackage.request_memory(
-                 "ptc.json",
-                 documents,
-                 result_projection: :json
-               )
+      assert {:error, reason} =
+               ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+
+      assert manifest_error_path(reason) == expected_path
     end
 
     missing_component_path =
@@ -3123,7 +5641,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       {:error, :should_not_run}
     end
 
-    assert {:ok, provider_registry} = ProviderRegistry.new(%{"probe" => builder})
+    assert {:ok, provider_registry} =
+             ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
 
     provider_manifest =
       valid_manifest(%{
@@ -3150,10 +5669,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert {:error, :invalid_execution_policy} =
              RunBuilder.build(request, registry,
-               inspect: Path.join(directory, "unexpected-inspection.jsonl")
+               inspect: Path.join(directory, "unexpected.ptcins")
              )
 
-    occupied = Path.join(directory, "occupied-inspection.jsonl")
+    occupied = Path.join(directory, "occupied.ptcins")
     File.write!(occupied, "occupied")
 
     assert {:ok, inspection_request} =
@@ -3187,6 +5706,370 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       encoded = Jason.encode!(outcome.envelope)
       refute encoded =~ directory
       assert outcome.envelope["error"]["provider_activity"] == false
+      assert_schema_valid(outcome.envelope)
+    end
+  end
+
+  @tag :tmp_dir
+  test "impossible normal trace budgets are rejected identically before execution", %{
+    tmp_dir: directory
+  } do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, base_limits} = Limits.new(event_payload_bytes: payload_bytes)
+    required_bytes = LimitConfiguration.required_normal_event_bytes(base_limits)
+    configured_bytes = required_bytes - 1
+
+    application =
+      write_application(
+        directory,
+        "invalid-normal-trace-budget",
+        valid_manifest(%{
+          "limits" => %{
+            "event_payload_bytes" => payload_bytes,
+            "normal_event_bytes" => configured_bytes,
+            "normal_event_count" => 3
+          }
+        })
+      )
+
+    expected_message =
+      "normal_event_bytes effective limit #{configured_bytes} is below the required " <>
+        "#{required_bytes} bytes for event_payload_bytes #{payload_bytes}; raise " <>
+        "limits.normal_event_bytes, and its installed host ceiling if it is lower, or " <>
+        "lower limits.event_payload_bytes"
+
+    errors =
+      for argv <- [
+            ["validate", application],
+            ["run", application],
+            ["doctor", application]
+          ] do
+        outcome = assert_error(argv, "application", "limit_configuration_invalid")
+
+        if hd(argv) == "run",
+          do: assert(outcome.envelope["execution"] == %{"state" => "not_started"})
+
+        assert outcome.envelope["error"]["message"] == expected_message
+        assert outcome.envelope["error"]["path"] == nil
+        outcome.envelope["error"]
+      end
+
+    assert Enum.uniq(errors) |> length() == 1
+
+    admitted =
+      write_application(
+        directory,
+        "valid-minimum-normal-trace-budget",
+        valid_manifest(%{
+          "limits" => %{
+            "event_payload_bytes" => payload_bytes,
+            "normal_event_bytes" => required_bytes,
+            "normal_event_count" => 3
+          }
+        })
+      )
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.prepare(["validate", admitted])
+  end
+
+  # The fixed part of the terminal projection is a catalog minimum; the part
+  # keyed by declared capability and mission names cannot be, because it is only
+  # resolved when the run assembles. That refusal is still a limits decision, so
+  # it must arrive as a configuration diagnostic and not as an internal error.
+  @tag :tmp_dir
+  test "a resolved terminal usage above the payload ceiling is refused as a limits diagnostic",
+       %{tmp_dir: directory} do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    padding = String.duplicate("x", 120)
+
+    missions =
+      Map.new(1..3, fn index ->
+        {"m#{padding}#{String.pad_leading(Integer.to_string(index), 3, "0")}",
+         %{"components" => [], "data" => %{}, "providers" => []}}
+      end)
+
+    application =
+      write_application(
+        directory,
+        "resolved-terminal-usage-too-large",
+        valid_manifest(%{
+          "limits" => %{"event_payload_bytes" => payload_bytes},
+          "missions" => missions
+        })
+      )
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.prepare(["validate", application])
+
+    assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["run", application])
+    assert_schema_valid(outcome.envelope)
+    assert outcome.envelope["error"]["phase"] == "application"
+    assert outcome.envelope["error"]["code"] == "limit_capacity_invalid"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.exit_status == 3
+    assert outcome.envelope["execution"] == %{"state" => "not_started"}
+    assert outcome.envelope["artifact_state"]["trace"] == "not_requested"
+    assert outcome.envelope["error"]["path"] == nil
+
+    assert [_matched, reported, required] =
+             Regex.run(
+               ~r/\Aevent_payload_bytes effective limit (\d+) is below the required (\d+) bytes/,
+               outcome.envelope["error"]["message"]
+             )
+
+    assert String.to_integer(reported) == payload_bytes
+    assert String.to_integer(required) > payload_bytes
+  end
+
+  @tag :tmp_dir
+  test "normal trace count values below three use schema diagnostics", %{tmp_dir: directory} do
+    for count <- [1, 2] do
+      application =
+        write_application(
+          directory,
+          "invalid-normal-event-count-#{count}",
+          valid_manifest(%{"limits" => %{"normal_event_count" => count}})
+        )
+
+      for command <- ["validate", "run", "doctor"] do
+        outcome = assert_error([command, application], "application", "schema_violation")
+        assert outcome.envelope["error"]["path"] == "/limits/normal_event_count"
+        assert outcome.envelope["error"]["message"] =~ "minimum"
+      end
+
+      host =
+        write_host_config(directory, "invalid-normal-event-count-#{count}", %{
+          "install" => %{},
+          "limits" => %{"normal_event_count" => count}
+        })
+
+      outcome =
+        assert_error(
+          ["validate", application, "--host-config", host],
+          "host",
+          "host_schema_invalid"
+        )
+
+      assert outcome.envelope["error"]["path"] == "/limits/normal_event_count"
+      assert outcome.envelope["error"]["message"] =~ "minimum"
+    end
+  end
+
+  # Only a run that already assembled providers can reach this code, so the
+  # commands that stop before assembly must not admit it at all.
+  test "the capacity refusal is admitted only by a run" do
+    for mode <- [:validate, :doctor, {:doctor, :connect}, :run_unclassified] do
+      refute CommandContract.diagnostic_allowed?(mode, :application, :limit_capacity_invalid),
+             "#{inspect(mode)} admits limit_capacity_invalid"
+
+      assert CommandContract.diagnostic_allowed?(
+               mode,
+               :application,
+               :limit_configuration_invalid
+             ),
+             "#{inspect(mode)} lost limit_configuration_invalid"
+    end
+
+    assert CommandContract.diagnostic_allowed?(:run, :application, :limit_capacity_invalid)
+  end
+
+  # The refusal is computed after provider assembly, so it can be reported with
+  # or without provider activity, and the dispatcher calls an active failure
+  # incomplete. Every one of those outcomes has to seal, or the run that raised
+  # this reason exits 70 through the very path the diagnostic exists to replace.
+  test "every reachable capacity refusal outcome seals as a V4 envelope" do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, message} = LimitCapacityDiagnostic.message(payload_bytes, payload_bytes * 2)
+    {:ok, run_ref} = CommandRunRef.generate()
+
+    artifact_state = %{
+      "trace" => "not_written",
+      "inspection" => "not_requested",
+      "result" => "not_requested"
+    }
+
+    for provider_activity <- [false, true],
+        execution_state <- [:not_started, :incomplete],
+        result_class <- [:normal, :private] do
+      assert {:ok, diagnostic} =
+               CommandDiagnostic.new(:application, :limit_capacity_invalid,
+                 source: CommandSource.fixed(:application),
+                 message: message,
+                 provider_activity: provider_activity
+               )
+
+      assert {:error, outcome} =
+               CommandRunOutcome.operation_failure(
+                 run_ref,
+                 diagnostic,
+                 result_class,
+                 artifact_state,
+                 provider_activity,
+                 execution_state
+               )
+
+      assert outcome.exit_status == 3
+      assert outcome.envelope["error"]["code"] == "limit_capacity_invalid"
+      assert outcome.envelope["error"]["provider_activity"] == provider_activity
+      assert CommandContract.valid_envelope?(outcome.envelope)
+    end
+  end
+
+  @tag :tmp_dir
+  test "event payload values below the catalog minimum use schema diagnostics", %{
+    tmp_dir: directory
+  } do
+    minimum = EventBudget.minimum_normal_payload_bytes()
+
+    for payload_bytes <- [1, minimum - 1] do
+      application =
+        write_application(
+          directory,
+          "invalid-event-payload-#{payload_bytes}",
+          valid_manifest(%{"limits" => %{"event_payload_bytes" => payload_bytes}})
+        )
+
+      for command <- ["validate", "run", "doctor"] do
+        outcome = assert_error([command, application], "application", "schema_violation")
+        assert outcome.envelope["error"]["path"] == "/limits/event_payload_bytes"
+        assert outcome.envelope["error"]["message"] =~ "minimum"
+      end
+
+      host =
+        write_host_config(directory, "invalid-event-payload-#{payload_bytes}", %{
+          "install" => %{},
+          "limits" => %{"event_payload_bytes" => payload_bytes}
+        })
+
+      admitted =
+        write_application(
+          directory,
+          "admitted-event-payload-#{payload_bytes}",
+          valid_manifest()
+        )
+
+      outcome =
+        assert_error(
+          ["validate", admitted, "--host-config", host],
+          "host",
+          "host_schema_invalid"
+        )
+
+      assert outcome.envelope["error"]["path"] == "/limits/event_payload_bytes"
+      assert outcome.envelope["error"]["message"] =~ "minimum"
+    end
+  end
+
+  @tag :tmp_dir
+  test "host-schema failures inside an installation are told apart by their pointer", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "host-schema-depth", valid_manifest())
+    base = valid_host_config()
+
+    # Six structurally different mistakes reported one identical pointer,
+    # `/install`, because an installation is a tagged union and the member that
+    # broke is named only inside the rejected branches.
+    cases = [
+      {"wrong-parent",
+       put_in(base, ["install", "workspace", "ceilings"], %{"run_timeout_ms" => 1}),
+       "/install/*/ceilings"},
+      {"ceiling-range",
+       put_in(base, ["install", "workspace", "ceilings"], %{"timeout_ms" => 999_999}),
+       "/install/*/ceilings/timeout_ms"},
+      {"transport-range",
+       put_in(base, ["install", "workspace", "transport", "start_timeout_ms"], 99_999),
+       "/install/*/transport/start_timeout_ms"},
+      {"revision-pattern",
+       put_in(base, ["install", "workspace", "installation_revision"], "WORKSPACE-V1"),
+       "/install/*/installation_revision"},
+      {"tool-effect", put_in(base, ["install", "workspace", "tools", "read", "effect"], "delete"),
+       "/install/*/tools"}
+    ]
+
+    pointers =
+      for {name, host, expected} <- cases do
+        host_path = write_host_config(directory, "depth-#{name}", host)
+
+        outcome =
+          assert_error(
+            ["validate", application, "--host-config", host_path],
+            "host",
+            "host_schema_invalid"
+          )
+
+        assert outcome.envelope["error"]["path"] == expected
+
+        # The installation alias and the upstream tool name are the author's
+        # own words. Neither reaches the pointer.
+        refute outcome.envelope["error"]["path"] =~ "workspace"
+        refute outcome.envelope["error"]["path"] =~ "read"
+        assert_schema_valid(outcome.envelope)
+        outcome.envelope["error"]["path"]
+      end
+
+    assert length(Enum.uniq(pointers)) == 5
+  end
+
+  @tag :tmp_dir
+  test "host and manifest schema failures name the bounded rule that was violated", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "schema-rules", valid_manifest())
+    host = valid_host_config()
+
+    host_cases = [
+      {"unknown-root", Map.put(host, "limitss", %{}), "", "contains an unknown property"},
+      {"unknown-nested",
+       put_in(host, ["install", "workspace", "ceilings"], %{
+         "evaluation_timeout_ms" => 60_000
+       }), "/install/*/ceilings", "contains an unknown property"},
+      {"maximum", put_in(host, ["install", "workspace", "ceilings"], %{"timeout_ms" => 999_999}),
+       "/install/*/ceilings/timeout_ms", "violates the maximum schema rule"},
+      {"pattern", put_in(host, ["install", "workspace", "installation_revision"], "WORKSPACE-V1"),
+       "/install/*/installation_revision", "violates the pattern schema rule"},
+      {"required", update_in(host, ["install", "workspace"], &Map.delete(&1, "tools")),
+       "/install/*/tools", "is missing a required property"}
+    ]
+
+    for {name, document, expected_path, expected_message} <- host_cases do
+      host_path = write_host_config(directory, "rule-#{name}", document)
+
+      outcome =
+        assert_error(
+          ["validate", application, "--host-config", host_path],
+          "host",
+          "host_schema_invalid"
+        )
+
+      assert outcome.envelope["error"]["path"] == expected_path
+      assert outcome.envelope["error"]["message"] =~ expected_message
+      refute Jason.encode!(outcome.envelope) =~ "workspace"
+      refute Jason.encode!(outcome.envelope) =~ "limitss"
+      assert_schema_valid(outcome.envelope)
+    end
+
+    manifest = valid_manifest()
+
+    manifest_cases = [
+      {"unknown-root", Map.put(manifest, "artifactz", %{}), "schema_violation", "",
+       "contains an unknown property"},
+      {"unknown-nested", put_in(manifest, ["workflow", "libraries"], []), "schema_violation",
+       "/workflow", "contains an unknown property"},
+      {"type", put_in(manifest, ["workflow", "entry"], 123), "schema_violation",
+       "/workflow/entry", "violates the type schema rule"},
+      {"pattern", put_in(manifest, ["workflow", "entry"], "Main/Run"), "schema_violation",
+       "/workflow/entry", "violates the pattern schema rule"},
+      {"required", update_in(manifest, ["workflow"], &Map.delete(&1, "entry")),
+       "required_property_missing", "/workflow/entry", "is missing a required property"}
+    ]
+
+    for {name, document, code, expected_path, expected_message} <- manifest_cases do
+      path = write_application(directory, "manifest-rule-#{name}", document)
+      outcome = assert_error(["validate", path], "application", code)
+
+      assert outcome.envelope["error"]["path"] == expected_path
+      assert outcome.envelope["error"]["message"] =~ expected_message
+      refute Jason.encode!(outcome.envelope) =~ "artifactz"
       assert_schema_valid(outcome.envelope)
     end
   end
@@ -3282,6 +6165,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         "install" => %{
           "model" => %{
             "source" => "llm",
+            "structured_output_mode" => "unsupported",
+            "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
             "installation_revision" => "model-v1",
             "model" => "provider:model",
             "credential" => "missing"
@@ -3368,6 +6253,273 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "optional LLM budget prerequisites produce closed host diagnostics", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "budget-prerequisites", valid_manifest())
+
+    cases = [
+      {"tokens", "llm_total_tokens", %{"tokens" => false, "cost_currency" => nil}, nil,
+       "/install/*/usage_guarantees/tokens",
+       "llm_total_tokens requires usage_guarantees.tokens: true on every live LLM installation; set it in the host document"},
+      {"currency", "llm_cost_microusd", %{"tokens" => true, "cost_currency" => nil},
+       %{"currency" => "USD", "id" => "private-tariff-id"},
+       "/install/*/usage_guarantees/cost_currency",
+       "llm_cost_microusd requires usage_guarantees.cost_currency: \"USD\" on every live LLM installation; set it in the host document"},
+      {"tariff", "llm_cost_microusd", %{"tokens" => true, "cost_currency" => "USD"}, nil,
+       "/install/*/reservation_tariff",
+       "llm_cost_microusd requires reservation_tariff on every live LLM installation; add it under each live LLM installation (see ptc docs host)"}
+    ]
+
+    for {name, limit, guarantees, tariff, expected_path, expected_message} <- cases do
+      host =
+        env_credential_host()
+        |> Map.put("limits", %{limit => 1_000})
+        |> put_in(["install", "model", "usage_guarantees"], guarantees)
+        |> then(fn host ->
+          if tariff,
+            do: put_in(host, ["install", "model", "reservation_tariff"], tariff),
+            else: host
+        end)
+
+      host_path = write_host_config(directory, "budget-prerequisite-#{name}", host)
+
+      outcome =
+        assert_error(
+          ["validate", application, "--host-config", host_path],
+          "host",
+          "installed_limit_invalid"
+        )
+
+      error = outcome.envelope["error"]
+      assert outcome.exit_status == 3
+      assert error["message"] == expected_message
+      assert error["path"] == expected_path
+      assert error["notes"] == []
+      assert error["source"] == %{"kind" => "host", "name" => "ptc-host.json"}
+      assert error["provider_activity"] == false
+
+      encoded = Jason.encode!(outcome.envelope)
+      refute encoded =~ "model"
+      refute encoded =~ "private-tariff-id"
+    end
+  end
+
+  @tag :tmp_dir
+  test "optional LLM budget prerequisite selection is deterministic and private", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "budget-alias-order", valid_manifest())
+
+    invalid_installation =
+      env_credential_host()
+      |> get_in(["install", "model"])
+      |> put_in(["usage_guarantees"], %{"tokens" => false, "cost_currency" => nil})
+
+    host = %{
+      "limits" => %{"llm_total_tokens" => 1_000},
+      "credentials" => %{"key" => %{"env" => "PTC_TEST_ABSENT_KEY"}},
+      "install" => %{
+        "zeta-private" => invalid_installation,
+        "alpha-private" => invalid_installation
+      }
+    }
+
+    host_path = write_host_config(directory, "budget-alias-order", host)
+
+    for _iteration <- 1..5 do
+      outcome =
+        assert_error(
+          ["validate", application, "--host-config", host_path],
+          "host",
+          "installed_limit_invalid"
+        )
+
+      error = outcome.envelope["error"]
+      assert error["path"] == "/install/*/usage_guarantees/tokens"
+
+      assert error["message"] ==
+               "llm_total_tokens requires usage_guarantees.tokens: true on every live LLM installation; set it in the host document"
+
+      encoded = Jason.encode!(outcome.envelope)
+      refute encoded =~ "alpha-private"
+      refute encoded =~ "zeta-private"
+    end
+  end
+
+  @tag :tmp_dir
+  test "host budget diagnostics preserve structural and unrelated semantic precedence", %{
+    tmp_dir: directory
+  } do
+    application = write_application(directory, "budget-precedence", valid_manifest())
+
+    malformed_tariff =
+      env_credential_host()
+      |> Map.put("limits", %{"llm_cost_microusd" => 1_000})
+      |> put_in(
+        ["install", "model", "usage_guarantees"],
+        %{"tokens" => true, "cost_currency" => "USD"}
+      )
+      |> put_in(["install", "model", "reservation_tariff"], %{"currency" => "USD"})
+
+    malformed_path = write_host_config(directory, "malformed-tariff", malformed_tariff)
+
+    malformed =
+      assert_error(
+        ["validate", application, "--host-config", malformed_path],
+        "host",
+        "host_schema_invalid"
+      )
+
+    assert malformed.envelope["error"]["path"] == "/install/*/reservation_tariff/id"
+
+    dangling_credential =
+      env_credential_host()
+      |> put_in(["install", "model", "credential"], "private-missing-credential")
+
+    dangling_path = write_host_config(directory, "budget-unrelated-semantic", dangling_credential)
+
+    dangling =
+      assert_error(
+        ["validate", application, "--host-config", dangling_path],
+        "host",
+        "host_invalid"
+      )
+
+    assert dangling.envelope["error"]["path"] == nil
+    refute Jason.encode!(dangling.envelope) =~ "private-missing-credential"
+  end
+
+  @tag :tmp_dir
+  test "host-disabled optional budgets name the unavailable limit and remedy", %{
+    tmp_dir: directory
+  } do
+    for row <- LimitCatalog.rows(:optional_manifest_narrowable),
+        requested <- [row.minimum, row.maximum] do
+      name = row.name
+
+      application =
+        write_application(
+          directory,
+          "disabled-#{name}-#{requested}",
+          valid_manifest(%{"limits" => %{name => requested}})
+        )
+
+      outcome = assert_error(["validate", application], "application", "limit_unavailable")
+      error = outcome.envelope["error"]
+
+      assert outcome.exit_status == 3
+      assert error["path"] == "/limits/#{name}"
+
+      assert error["message"] ==
+               "#{name} #{requested} is unavailable because the host has not enabled it; enable #{name} in the host document before declaring it in the manifest"
+
+      assert error["notes"] == []
+      assert error["source"] == %{"kind" => "application", "name" => "ptc.json"}
+      assert error["provider_activity"] == false
+    end
+  end
+
+  @tag :tmp_dir
+  test "enabled optional budgets inherit, narrow, and distinguish an exceeded ceiling", %{
+    tmp_dir: directory
+  } do
+    host =
+      env_credential_host()
+      |> Map.put("limits", %{"llm_total_tokens" => 1_000})
+      |> put_in(
+        ["install", "model", "usage_guarantees"],
+        %{"tokens" => true, "cost_currency" => nil}
+      )
+
+    host_path = write_host_config(directory, "enabled-token-budget", host)
+
+    inherited = write_application(directory, "inherited-token-budget", valid_manifest())
+
+    assert {:ok, %CommandOutcome{} = inherited_outcome} =
+             CommandEngine.prepare(["validate", inherited, "--host-config", host_path])
+
+    assert inherited_outcome.exit_status == 0
+
+    narrowed =
+      write_application(
+        directory,
+        "narrowed-token-budget",
+        valid_manifest(%{"limits" => %{"llm_total_tokens" => 500}})
+      )
+
+    assert {:ok, %CommandOutcome{} = narrowed_outcome} =
+             CommandEngine.prepare(["validate", narrowed, "--host-config", host_path])
+
+    assert narrowed_outcome.exit_status == 0
+
+    exceeded =
+      write_application(
+        directory,
+        "exceeded-token-budget",
+        valid_manifest(%{"limits" => %{"llm_total_tokens" => 1_001}})
+      )
+
+    outcome =
+      assert_error(
+        ["validate", exceeded, "--host-config", host_path],
+        "application",
+        "installed_limit_exceeded"
+      )
+
+    assert outcome.envelope["error"]["path"] == "/limits/llm_total_tokens"
+  end
+
+  @tag :tmp_dir
+  test "enabled optional non-LLM limits inherit, narrow, and distinguish an exceeded ceiling", %{
+    tmp_dir: directory
+  } do
+    for row <- LimitCatalog.rows(:optional_manifest_narrowable),
+        row.prerequisites == [] do
+      host_path =
+        write_host_config(directory, "enabled-#{row.name}", %{
+          "install" => %{},
+          "limits" => %{row.name => 1_000}
+        })
+
+      inherited = write_application(directory, "inherited-#{row.name}", valid_manifest())
+
+      assert {:ok, %CommandOutcome{} = inherited_outcome} =
+               CommandEngine.prepare(["validate", inherited, "--host-config", host_path])
+
+      assert inherited_outcome.exit_status == 0
+
+      narrowed =
+        write_application(
+          directory,
+          "narrowed-#{row.name}",
+          valid_manifest(%{"limits" => %{row.name => 500}})
+        )
+
+      assert {:ok, %CommandOutcome{} = narrowed_outcome} =
+               CommandEngine.prepare(["validate", narrowed, "--host-config", host_path])
+
+      assert narrowed_outcome.exit_status == 0
+
+      exceeded =
+        write_application(
+          directory,
+          "exceeded-#{row.name}",
+          valid_manifest(%{"limits" => %{row.name => 1_001}})
+        )
+
+      outcome =
+        assert_error(
+          ["validate", exceeded, "--host-config", host_path],
+          "application",
+          "installed_limit_exceeded"
+        )
+
+      assert outcome.envelope["error"]["path"] == "/limits/#{row.name}"
+    end
+  end
+
+  @tag :tmp_dir
   test "host duplicate properties retain their schema-authorized parent", %{tmp_dir: directory} do
     application = write_application(directory, "host-duplicate-paths", valid_manifest())
 
@@ -3421,10 +6573,20 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       directory_path =
         write_application(directory, "nested-#{length(path)}-#{hd(path)}", manifest)
 
-      outcome = assert_error(["validate", directory_path], "application", "schema_violation")
+      input_without_variant? =
+        path == ["input"] and Map.has_key?(override["input"], "caller-secret")
 
+      code = if input_without_variant?, do: "required_property_missing", else: "schema_violation"
+      outcome = assert_error(["validate", directory_path], "application", code)
+
+      # A mission name is the author's own, so it is elided rather than named;
+      # the closed schema beneath it stays addressable.
       expected_pointer =
-        if hd(path) == "missions", do: "/missions", else: Enum.map_join(path, "", &"/#{&1}")
+        cond do
+          input_without_variant? -> "/input/value"
+          hd(path) == "missions" -> "/missions/*"
+          true -> Enum.map_join(path, "", &"/#{&1}")
+        end
 
       assert outcome.envelope["error"]["path"] == expected_pointer
       refute Jason.encode!(outcome.envelope) =~ "caller-secret"
@@ -3436,12 +6598,24 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       }
 
       typed_path =
-        Enum.map(path, fn
-          segment when is_binary(segment) -> {:property, segment}
-          segment when is_integer(segment) -> {:index, segment}
-        end)
+        if input_without_variant? do
+          [{:property, "input"}, {:property, "value"}]
+        else
+          Enum.map(path, fn
+            "default" -> {:property, "*"}
+            segment when is_binary(segment) -> {:property, segment}
+            segment when is_integer(segment) -> {:index, segment}
+          end)
+        end
 
-      assert {:error, {:manifest_path, ^typed_path, :unknown_properties}} =
+      expected_rule = if input_without_variant?, do: :required, else: :unknown_property
+
+      assert {:error,
+              {:manifest_schema_invalid,
+               %PtcRunner.Kernel.SchemaViolation{
+                 rule: ^expected_rule,
+                 path: ^typed_path
+               }}} =
                ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
     end
   end
@@ -3533,7 +6707,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       outcome = assert_error(["validate", directory_path], "application", "schema_violation")
 
       expected_pointer =
-        if hd(path) == "missions", do: "/missions", else: Enum.map_join(path, "", &"/#{&1}")
+        Enum.map_join(path, "", fn
+          "default" -> "/*"
+          segment -> "/#{segment}"
+        end)
 
       assert outcome.envelope["error"]["path"] == expected_pointer
 
@@ -3544,12 +6721,15 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
       typed_path =
         Enum.map(path, fn
+          "default" -> {:property, "*"}
           segment when is_binary(segment) -> {:property, segment}
           segment when is_integer(segment) -> {:index, segment}
         end)
 
-      assert {:error, {:manifest_path, ^typed_path, _reason}} =
+      assert {:error, reason} =
                ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+
+      assert manifest_error_path(reason) == typed_path
     end
   end
 
@@ -3657,7 +6837,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   } do
     application = write_application(directory, "continuation-state", valid_manifest())
     output = Path.join(directory, "result.json")
-    inspection = Path.join(directory, "inspection.jsonl")
+    inspection = Path.join(directory, "inspection.ptcins")
 
     assert {:ok, preparation} =
              CommandEngine.prepare([
@@ -3682,228 +6862,6 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "command preparation anchors artifact destinations at invocation", %{tmp_dir: directory} do
-    invocation = Path.join(directory, "invocation")
-    later = Path.join(directory, "later")
-    File.mkdir!(invocation)
-    File.mkdir!(later)
-    application = write_application(directory, "anchored-destination", valid_manifest())
-
-    preparation =
-      File.cd!(invocation, fn ->
-        assert {:ok, preparation} =
-                 CommandEngine.prepare(["run", application, "--output", "result.json"])
-
-        preparation
-      end)
-
-    File.cd!(later, fn ->
-      assert preparation.artifact_destinations == %{
-               output: Path.join(invocation, "result.json")
-             }
-    end)
-
-    assert preparation.artifact_destination_failures == []
-    assert :ok = CommandPreparation.close(preparation)
-  end
-
-  @tag :tmp_dir
-  test "artifact anchoring captures cwd before application acquisition", %{tmp_dir: directory} do
-    invocation = Path.join(directory, "invocation-before-acquisition")
-    later = Path.join(directory, "cwd-during-acquisition")
-    File.mkdir!(invocation)
-    File.mkdir!(later)
-    application = write_application(directory, "anchored-before-acquisition", valid_manifest())
-    original = File.cwd!()
-
-    on_exit(fn ->
-      :erlang.trace_pattern({ApplicationPackage, :request_directory, 2}, false, [])
-      File.cd!(original)
-    end)
-
-    File.cd!(invocation)
-    assert {:module, ApplicationPackage} = Code.ensure_loaded(ApplicationPackage)
-    assert 1 = :erlang.trace_pattern({ApplicationPackage, :request_directory, 2}, true, [])
-
-    preparation =
-      Task.async(fn ->
-        receive do
-          :prepare -> CommandEngine.prepare(["run", application, "--output", "result.json"])
-        end
-      end)
-
-    assert 1 = :erlang.trace(preparation.pid, true, [:call])
-    send(preparation.pid, :prepare)
-
-    assert_receive {:trace, preparation_pid, :call,
-                    {ApplicationPackage, :request_directory, _arguments}},
-                   1_000
-
-    assert preparation_pid == preparation.pid
-    File.cd!(later)
-    assert {:ok, preparation} = Task.await(preparation)
-
-    assert preparation.artifact_destinations == %{
-             output: Path.join(invocation, "result.json")
-           }
-
-    assert preparation.artifact_destination_failures == []
-    assert :ok = CommandPreparation.close(preparation)
-  end
-
-  @tag :tmp_dir
-  test "an unavailable cwd preserves failures for ordered destination preflight", %{
-    tmp_dir: directory
-  } do
-    invocation = Path.join(directory, "removed-invocation-cwd")
-    application = write_application(directory, "unavailable-invocation-cwd", valid_manifest())
-    absolute_trace = Path.join(directory, "absolute-trace")
-    original = File.cwd!()
-    File.mkdir!(invocation)
-
-    on_exit(fn -> File.cd!(original) end)
-
-    File.cd!(invocation)
-    File.rmdir!(invocation)
-    assert {:error, :enoent} = File.cwd()
-
-    assert {:ok, preparation} =
-             CommandEngine.prepare([
-               "run",
-               application,
-               "--trace-dir",
-               absolute_trace,
-               "--output",
-               "result.json"
-             ])
-
-    assert preparation.artifact_destinations == %{trace_dir: absolute_trace}
-    assert preparation.artifact_destination_failures == [:output]
-    assert CommandPreparation.valid?(preparation)
-
-    assert {:error, outcome} = CommandEngine.preflight(preparation)
-    assert outcome.exit_status == 7
-    assert outcome.envelope["error"]["phase"] == "destination"
-    assert outcome.envelope["error"]["code"] == "invalid_result_destination"
-    assert outcome.envelope["artifact_state"]["trace"] == "not_written"
-    assert outcome.envelope["artifact_state"]["result"] == "not_written"
-    refute Jason.encode!(outcome.envelope) =~ directory
-  end
-
-  @tag :tmp_dir
-  test "entry still rejects captured envelope collisions when another destination cannot anchor",
-       %{
-         tmp_dir: directory
-       } do
-    invocation = Path.join(directory, "removed-entry-cwd")
-    collision = Path.join(directory, "shared.inspection.jsonl")
-    original = File.cwd!()
-    File.mkdir!(invocation)
-
-    on_exit(fn -> File.cd!(original) end)
-
-    File.cd!(invocation)
-    File.rmdir!(invocation)
-    assert {:error, :enoent} = File.cwd()
-
-    assert {:error, entry} =
-             CommandEntry.open_with_ref(
-               [
-                 "run",
-                 "ptc.json",
-                 "--output",
-                 "relative-result.json",
-                 "--inspect",
-                 collision,
-                 "--envelope",
-                 collision
-               ],
-               :standalone,
-               "cmd-00000000000000000000000001"
-             )
-
-    assert entry.rejection.kind == :destination_collision
-    assert entry.rejection.conflicts == ["--inspect", "--envelope"]
-  end
-
-  @tag :tmp_dir
-  test "command preparation releases its owner when continuation sealing raises", %{
-    tmp_dir: directory
-  } do
-    application = write_application(directory, "sealing-failure", valid_manifest())
-    storage_key = {Attestation, CommandPreparation}
-    previous_key = :persistent_term.get(storage_key, :missing)
-
-    on_exit(fn ->
-      case previous_key do
-        :missing -> :persistent_term.erase(storage_key)
-        key -> :persistent_term.put(storage_key, key)
-      end
-    end)
-
-    :persistent_term.put(storage_key, :invalid_hmac_key)
-    owners_before = host_installation_owners()
-
-    assert {:error, %CommandOutcome{} = outcome} =
-             CommandEngine.prepare(["run", application])
-
-    assert outcome.envelope["error"]["code"] == "internal_error"
-    assert MapSet.difference(host_installation_owners(), owners_before) == MapSet.new()
-  end
-
-  @tag :tmp_dir
-  test "host catalog construction rolls back its authority owner when sealing raises", %{
-    tmp_dir: directory
-  } do
-    application = write_application(directory, "catalog-sealing-failure", valid_manifest())
-    host_path = write_host_config(directory, "catalog-sealing-failure", valid_host_config())
-    storage_key = {Attestation, PtcRunner.Kernel.SelectionRules}
-    previous_key = :persistent_term.get(storage_key, :missing)
-
-    on_exit(fn ->
-      case previous_key do
-        :missing -> :persistent_term.erase(storage_key)
-        key -> :persistent_term.put(storage_key, key)
-      end
-    end)
-
-    :persistent_term.put(storage_key, :invalid_hmac_key)
-    owners_before = host_installation_owners()
-
-    assert {:error, %CommandOutcome{} = outcome} =
-             CommandEngine.prepare(["validate", application, "--host-config", host_path])
-
-    assert outcome.envelope["error"]["code"] == "internal_error"
-    assert MapSet.difference(host_installation_owners(), owners_before) == MapSet.new()
-  end
-
-  @tag :tmp_dir
-  test "host authority rolls back when application request construction raises", %{
-    tmp_dir: directory
-  } do
-    application = write_application(directory, "request-sealing-failure", valid_manifest())
-    host_path = write_host_config(directory, "request-sealing-failure", valid_host_config())
-    storage_key = {Attestation, ApplicationPackage}
-    previous_key = :persistent_term.get(storage_key, :missing)
-
-    on_exit(fn ->
-      case previous_key do
-        :missing -> :persistent_term.erase(storage_key)
-        key -> :persistent_term.put(storage_key, key)
-      end
-    end)
-
-    :persistent_term.put(storage_key, :invalid_hmac_key)
-    owners_before = host_installation_owners()
-
-    assert {:error, %CommandOutcome{} = outcome} =
-             CommandEngine.prepare(["validate", application, "--host-config", host_path])
-
-    assert outcome.envelope["error"]["code"] == "internal_error"
-    assert MapSet.difference(host_installation_owners(), owners_before) == MapSet.new()
-  end
-
-  @tag :tmp_dir
   test "command preparation seals correlated policy, catalog, and destinations", %{
     tmp_dir: directory
   } do
@@ -3922,8 +6880,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                preparation.catalog,
                preparation.runtime_services,
                preparation.environment_setup_required,
-               %{output: "relative-result.json"},
-               []
+               nil,
+               {%{output: "relative-result.json"}, []}
              )
 
     refute CommandPreparation.valid?(Map.put(preparation, :unexpected, :retained))
@@ -3941,7 +6899,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     }
 
     for {catalog, destinations} <- [
-          {preparation.catalog, %{inspect: "inspection.jsonl"}},
+          {preparation.catalog, %{inspect: "inspection.ptcins"}},
           {preparation.catalog, %{trace_dir: "trace"}},
           {preparation.catalog, %{output: "normal.json", private_output: "private.json"}},
           {invalid_catalog, %{}},
@@ -3955,8 +6913,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                  catalog,
                  preparation.runtime_services,
                  preparation.environment_setup_required,
-                 destinations,
-                 []
+                 nil,
+                 {destinations, []}
                )
     end
 
@@ -3973,8 +6931,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                preparation.catalog,
                preparation.runtime_services,
                preparation.environment_setup_required,
-               %{},
-               []
+               nil,
+               {%{}, []}
              )
 
     assert :ok = PreparedRun.close(native_prepared)
@@ -4036,8 +6994,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                preparation.catalog,
                preparation.runtime_services,
                preparation.environment_setup_required,
-               %{},
-               []
+               nil,
+               {%{}, []}
              )
 
     assert :ok = CommandPreparation.close(preparation)
@@ -4327,6 +7285,47 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert :ok = PreparedRun.close(first_prepared)
     assert :ok = PreparedRun.close(second_prepared)
     assert :ok = PreparedRun.close(mission_prepared)
+  end
+
+  @tag :tmp_dir
+  test "preparation reuses a byte-identical workflow bundle for missions", %{tmp_dir: directory} do
+    source = """
+    (ns app)
+    (defn run [input]
+      (return (case (:mode input) :first 1 0)))
+    """
+
+    application =
+      write_application(
+        directory,
+        "prepared-bundle-reuse",
+        valid_manifest(%{
+          "missions" => %{
+            "first" => %{
+              "components" => [%{"id" => "app", "path" => "main.clj"}],
+              "data" => %{}
+            },
+            "second" => %{
+              "components" => [%{"id" => "app", "path" => "main.clj"}],
+              "data" => %{}
+            }
+          }
+        }),
+        %{"main.clj" => source}
+      )
+
+    assert {:ok, request} =
+             ApplicationPackage.request_directory(application, result_projection: :json)
+
+    assert {:ok, registry} = ProviderRegistry.new()
+    assert {:ok, prepared} = RunCoordinator.prepare(request, catalog_for(registry))
+
+    assert prepared.mission_bundles == %{
+             "first" => prepared.workflow_bundle,
+             "second" => prepared.workflow_bundle
+           }
+
+    assert :ok = PreparedRun.close(prepared)
   end
 
   @tag :tmp_dir
@@ -4702,7 +7701,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         {:property, "path"}
       ]
 
-      assert {:error, {:manifest_path, ^typed_path, :invalid_contract_reference}} =
+      assert {:error,
+              {:manifest_schema_invalid, %PtcRunner.Kernel.SchemaViolation{path: ^typed_path}}} =
                ApplicationPackage.request_memory(
                  "ptc.json",
                  %{
@@ -4734,7 +7734,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
       typed_path = [{:property, "contracts"}, {:property, role}]
 
-      assert {:error, {:manifest_path, ^typed_path, :invalid_contract_reference}} =
+      assert {:error,
+              {:manifest_schema_invalid,
+               %PtcRunner.Kernel.SchemaViolation{rule: :type, path: ^typed_path}}} =
                ApplicationPackage.request_memory(
                  "ptc.json",
                  %{
@@ -4753,7 +7755,12 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert invalid_contracts_outcome.envelope["error"]["path"] == "/contracts"
 
-    assert {:error, {:manifest_path, [{:property, "contracts"}], :invalid_contracts_section}} =
+    assert {:error,
+            {:manifest_schema_invalid,
+             %PtcRunner.Kernel.SchemaViolation{
+               rule: :type,
+               path: [{:property, "contracts"}]
+             }}} =
              ApplicationPackage.request_memory(
                "ptc.json",
                %{
@@ -4912,6 +7919,135 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
+  # Six structurally different authoring mistakes used to report the same six
+  # words with a null path, so "I misspelled something" and "this feature does
+  # not exist" were indistinguishable and the profile's edges could only be
+  # found by bisecting the schema one keyword at a time.
+  @tag :tmp_dir
+  test "a rejected contract schema names its rule and its location", %{tmp_dir: directory} do
+    cases = [
+      {"bare-enum", %{"type" => "object", "properties" => %{"sum" => %{"enum" => [1, 2]}}},
+       ~s(contract schema node declares no "type"), "/properties/sum"},
+      {"bare-const", %{"type" => "object", "properties" => %{"sum" => %{"const" => 5}}},
+       ~s(contract schema node declares no "type"), "/properties/sum"},
+      {"misspelled-type",
+       %{"type" => "object", "properties" => %{"sum" => %{"type" => "intger"}}},
+       ~s(contract schema declares an unsupported "type"), "/properties/sum/type"},
+      {"unsupported-keyword",
+       %{
+         "type" => "object",
+         "properties" => %{"sum" => %{"type" => "integer", "multipleOf" => 7}}
+       }, "contract schema uses a keyword outside the supported profile",
+       "/properties/sum/multipleOf"},
+      {"excluded-bound",
+       %{
+         "type" => "object",
+         "properties" => %{"n" => %{"type" => "integer", "exclusiveMinimum" => 0}}
+       }, "contract schema uses a keyword outside the supported profile",
+       "/properties/n/exclusiveMinimum"},
+      {"unsatisfiable-bound",
+       %{
+         "type" => "object",
+         "properties" => %{
+           "sum" => %{"type" => "integer", "minimum" => 100, "maximum" => 99}
+         }
+       }, "contract schema declares a minimum above its maximum", "/properties/sum/minimum"},
+      {"unsupported-format",
+       %{
+         "type" => "object",
+         "properties" => %{"s" => %{"type" => "string", "format" => "date-time"}}
+       }, ~s(contract schema declares an unsupported "format"), "/properties/s/format"},
+      {"undeclared-required",
+       %{
+         "type" => "object",
+         "properties" => %{"a" => %{"type" => "string"}},
+         "required" => ["b"]
+       }, "contract schema requires a property it does not declare", "/required"}
+    ]
+
+    messages =
+      for {name, schema, message, pointer} <- cases do
+        path =
+          write_application(
+            directory,
+            "contract-#{name}",
+            valid_manifest(%{
+              "contracts" => %{"result_schema" => %{"path" => "result.schema.json"}}
+            }),
+            %{"result.schema.json" => Jason.encode!(schema)}
+          )
+
+        outcome = assert_error(["validate", path], "application", "contract_invalid")
+
+        assert outcome.envelope["error"]["message"] == message
+        assert outcome.envelope["error"]["path"] == pointer
+
+        assert outcome.envelope["error"]["source"] == %{
+                 "kind" => "result_contract",
+                 "name" => "result.schema.json"
+               }
+
+        {:stderr, rendered} = CommandRenderer.render(outcome)
+        assert rendered =~ "#{message} at #{pointer} in result.schema.json "
+
+        {message, pointer}
+      end
+
+    # A distinct cause must produce a distinct diagnostic; the bare-enum and
+    # bare-const rows deliberately share one rule at two locations.
+    assert length(Enum.uniq(messages)) == length(cases) - 1
+
+    phase_path =
+      write_application(
+        directory,
+        "invalid-phase-contract",
+        valid_manifest(%{
+          "contracts" => %{
+            "phase_return_schemas" => %{
+              "gathered" => %{"path" => "gather.schema.json"}
+            }
+          }
+        }),
+        %{
+          "gather.schema.json" =>
+            Jason.encode!(%{
+              "type" => "object",
+              "properties" => %{
+                "sum" => %{"type" => "integer", "minimum" => 2, "maximum" => 1}
+              }
+            })
+        }
+      )
+
+    phase_outcome = assert_error(["validate", phase_path], "application", "contract_invalid")
+    assert phase_outcome.envelope["error"]["path"] == "/properties/sum/minimum"
+
+    assert phase_outcome.envelope["error"]["source"] == %{
+             "kind" => "phase_return_contract",
+             "name" => "gather.schema.json"
+           }
+
+    # A contract document that is not an object at all reaches the compiler and
+    # is named as such. Refusing it before compilation would leave the
+    # commonest "wrong thing entirely" mistake on the blind message.
+    for document <- ["[]", "\"result\"", "42", "null"] do
+      path =
+        write_application(
+          directory,
+          "contract-non-object-#{byte_size(document)}",
+          valid_manifest(%{
+            "contracts" => %{"result_schema" => %{"path" => "result.schema.json"}}
+          }),
+          %{"result.schema.json" => document}
+        )
+
+      outcome = assert_error(["validate", path], "application", "contract_invalid")
+
+      assert outcome.envelope["error"]["message"] == "contract schema node is not a JSON object"
+      assert outcome.envelope["error"]["path"] == nil
+    end
+  end
+
   @tag :tmp_dir
   test "compile diagnostics classify safe reasons without exposing compiler details", %{
     tmp_dir: directory
@@ -5000,6 +8136,67 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     # The offsets are only worth emitting if they cut the source at the form a
     # reader has to fix, so slice rather than assert the numbers.
     assert binary_part(source, start_byte, end_byte - start_byte) == "(defn broken)"
+  end
+
+  @tag :tmp_dir
+  test "unknown component namespaces retain safe structured analyzer guidance", %{
+    tmp_dir: directory
+  } do
+    source = """
+    (ns app)
+
+    (defn run [input]
+      (return (kernel/mission-model-context \"reader\")))
+    """
+
+    path =
+      write_application(directory, "unknown-component-namespace", valid_manifest(), %{
+        "main.clj" => source
+      })
+
+    outcome = assert_error(["validate", path], "bundle", "unknown_namespace")
+    diagnostic = outcome.envelope["error"]
+
+    assert diagnostic["message"] =~ "unknown namespace kernel/"
+    assert diagnostic["message"] =~ "Available namespaces:"
+    assert diagnostic["message"] =~ "json/"
+    assert diagnostic["message"] =~ "For JSON parsing use json/parse-string"
+
+    assert %{"start_byte" => start_byte, "end_byte" => end_byte} = diagnostic["span"]
+
+    assert binary_part(source, start_byte, end_byte - start_byte) ==
+             "(defn run [input]\n  (return (kernel/mission-model-context \"reader\")))"
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+
+    assert rendered =~ "bundle/unknown_namespace: #{diagnostic["message"]} "
+    assert rendered =~ "at main.clj bytes [#{start_byte},#{end_byte})"
+  end
+
+  @tag :tmp_dir
+  test "human compile failures render their component byte spans", %{tmp_dir: directory} do
+    source = """
+    (ns app)
+
+    (defn run [input] (return input))
+
+    (defn broken)
+    """
+
+    path =
+      write_application(directory, "human-compile-span", valid_manifest(), %{
+        "main.clj" => source
+      })
+
+    outcome = assert_error(["validate", path], "bundle", "compile_failed")
+    diagnostic = outcome.envelope["error"]
+    %{"start_byte" => start_byte, "end_byte" => end_byte} = diagnostic["span"]
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+
+    assert rendered =~
+             "the component bundle could not be compiled " <>
+               "at main.clj bytes [#{start_byte},#{end_byte}) "
   end
 
   @tag :tmp_dir
@@ -5147,6 +8344,80 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "kind" => "component_override",
              "name" => "component-override.json"
            }
+  end
+
+  @tag :tmp_dir
+  test "CLI --input accepts application-relative and absolute paths and documents resolution", %{
+    tmp_dir: directory
+  } do
+    application =
+      write_application(directory, "orders", valid_manifest(), %{
+        "orders.json" => ~S({"answer":1})
+      })
+
+    alternate = Path.join(directory, "cwd-orders.json")
+    File.write!(alternate, ~S({"answer":2}))
+
+    assert {:ok, %CommandOutcome{} = application_relative} =
+             CommandEngine.dispatch(["run", application, "--input", "orders.json"])
+
+    assert application_relative.envelope["result"]["value"] == %{"answer" => 1}
+
+    assert {:ok, %CommandOutcome{} = absolute} =
+             CommandEngine.dispatch(["run", application, "--input", alternate])
+
+    assert absolute.envelope["result"]["value"] == %{"answer" => 2}
+
+    assert {:ok, %CommandOutcome{} = private_absolute} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--private-input",
+               alternate,
+               "--private-output",
+               Path.join(directory, "private-result.json")
+             ])
+
+    assert private_absolute.envelope["artifact_class"] == "private"
+    assert private_absolute.envelope["result"] == %{"result_class" => "private"}
+
+    assert Jason.decode!(File.read!(Path.join(directory, "private-result.json"))) == %{
+             "answer" => 2
+           }
+
+    missing =
+      assert_error(
+        ["run", application, "--input", "missing-orders.json"],
+        "application",
+        "reference_missing"
+      )
+
+    assert missing.envelope["error"]["source"] == %{
+             "kind" => "external_input",
+             "name" => "input.json"
+           }
+
+    assert missing.envelope["error"]["message"] =~ "working-directory"
+    refute Jason.encode!(missing.envelope) =~ "missing-orders"
+
+    assert {:ok, %CommandOutcome{} = help} = CommandEngine.prepare(["help", "run"])
+
+    assert Enum.any?(help.envelope["result"]["options"], fn option ->
+             "--input INPUT.json" in option["switches"] and
+               option["description"] =~ "absolute/cwd path"
+           end)
+
+    assert {:error, {:source_role, :external_input, :reference_missing}} =
+             ApplicationPackage.request_memory(
+               "ptc.json",
+               %{
+                 "ptc.json" => Jason.encode!(valid_manifest()),
+                 "main.clj" => "(ns app) (defn run [input] (return input))",
+                 "orders.json" => ~S({"answer":1})
+               },
+               input: alternate,
+               result_projection: :json
+             )
   end
 
   @tag :tmp_dir
@@ -5323,177 +8594,112 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     end
   end
 
-  defp assert_error(argv, phase, code) do
-    assert {:error, %CommandOutcome{} = outcome} =
-             CommandEngine.prepare(argv)
+  @tag :tmp_dir
+  test "override verification failures name the field they broke", %{tmp_dir: directory} do
+    base_source = "(ns app) (defn run [input] (return input))"
+    candidate = "(ns app) (defn run [input] (return \"candidate\"))"
+    application = write_application(directory, "override-verification", valid_manifest())
+    File.write!(Path.join(directory, "candidate.clj"), candidate)
 
-    assert outcome.envelope["error"]["phase"] == phase
-    assert outcome.envelope["error"]["code"] == code
-    assert outcome.envelope["error"]["provider_activity"] == false
-    assert_schema_valid(outcome.envelope)
-    outcome
-  end
+    digest = fn bytes -> ComponentOverride.hash(bytes) end
+    wrong = "sha256:" <> String.duplicate("0", 64)
 
-  defp assert_schema_valid(envelope) do
-    assert {:ok, root} =
-             JSV.build(CommandContract.schema(), atoms: false, warnings: :silent)
+    cases = [
+      {"ov-stale-base.json", digest.(candidate), wrong, "app",
+       "base_source_hash does not match the installed source", "/base_source_hash"},
+      {"ov-source-mismatch.json", wrong, digest.(base_source), "app",
+       "source_hash does not match the candidate bytes", "/source_hash"},
+      {"ov-unknown-component.json", digest.(candidate), digest.(base_source), "nosuchcomponent",
+       "component_id is not a selected component", "/component_id"}
+    ]
 
-    assert {:ok, _validated} = JSV.validate(envelope, root, cast: false)
-  end
+    for {name, source_hash, base_hash, component_id, message, pointer} <- cases do
+      descriptor = Path.join(directory, name)
 
-  defp assert_schema_invalid(envelope) do
-    assert {:ok, root} =
-             JSV.build(CommandContract.schema(), atoms: false, warnings: :silent)
+      File.write!(
+        descriptor,
+        Jason.encode!(%{
+          "target" => %{"environment" => "workflow"},
+          "component_id" => component_id,
+          "base_source_hash" => base_hash,
+          "source_hash" => source_hash,
+          "path" => "candidate.clj"
+        })
+      )
 
-    assert {:error, _reason} = JSV.validate(envelope, root, cast: false)
-  end
-
-  defp diagnostic_for_row(row) do
-    case DiagnosticCatalog.subject_policy(row.phase, row.code) do
-      :required ->
-        [operation | _rest] = DiagnosticCatalog.subject_operations(row.phase, row.code)
-
-        occurrence =
-          case DiagnosticCatalog.subject_occurrence_policy(row.phase, row.code, operation) do
-            :forbidden -> nil
-            _allowed -> %{destination: :workflow, index: 0}
-          end
-
-        {:ok, subject} =
-          CommandSubject.provider("safe", operation, occurrence)
-
-        CommandDiagnostic.new!(row.phase, row.code,
-          subject: subject,
-          provider_activity: diagnostic_activity(row.phase, row.code)
+      outcome =
+        assert_error(
+          ["run", application, "--component-override-descriptor", descriptor],
+          "application",
+          "override_invalid"
         )
 
-      _policy ->
-        CommandDiagnostic.new!(row.phase, row.code,
-          provider_activity: diagnostic_activity(row.phase, row.code)
-        )
+      error = outcome.envelope["error"]
+      assert error["message"] == message
+      assert error["path"] == pointer
+      assert error["subject"] == nil
+
+      assert error["source"] == %{
+               "kind" => "component_override",
+               "name" => "component-override.json"
+             }
+
+      encoded = Jason.encode!(outcome.envelope)
+      refute encoded =~ name
+      refute encoded =~ directory
+
+      {:stderr, rendered} = CommandRenderer.render(outcome)
+      assert rendered =~ "#{message} at #{pointer} "
     end
   end
 
-  defp diagnostic_activity(phase, code),
-    do: DiagnosticCatalog.provider_activity_policy(phase, code) == true
+  @tag :tmp_dir
+  test "override source confinement names the path field", %{tmp_dir: directory} do
+    application = write_application(directory, "override-source-path", valid_manifest())
+    digest = "sha256:" <> String.duplicate("0", 64)
+    descriptor = Path.join(directory, "ov-escape.json")
 
-  defp model_result(alias_name) do
-    %{
-      "alias" => alias_name,
-      "source" => "llm",
-      "installation_revision" => "revision",
-      "data_class" => "normal",
-      "accepts_data" => ["normal"],
-      "destinations" => ["workflow"]
-    }
+    File.write!(
+      descriptor,
+      Jason.encode!(%{
+        "target" => %{"environment" => "workflow"},
+        "component_id" => "app",
+        "base_source_hash" => digest,
+        "source_hash" => digest,
+        "path" => "../escape.clj"
+      })
+    )
+
+    outcome =
+      assert_error(
+        ["run", application, "--component-override-descriptor", descriptor],
+        "application",
+        "override_invalid"
+      )
+
+    error = outcome.envelope["error"]
+    assert error["message"] == "path is not a usable candidate source"
+    assert error["path"] == "/path"
+
+    assert error["source"] == %{
+             "kind" => "component_override",
+             "name" => "component-override.json"
+           }
+
+    refute Jason.encode!(outcome.envelope) =~ "ov-escape"
+    refute Jason.encode!(outcome.envelope) =~ "escape.clj"
   end
 
-  defp usage_fixture do
-    %{
-      "remaining_ms" => 0,
-      "capability_calls" => %{"workflow/read-file" => 1},
-      "subordinate_evaluations" => 0,
-      "evaluations_by_mission" => %{"default" => 0},
-      "protocol_errors" => 0,
-      "evaluation_memory_bytes" => 0,
-      "evaluation_history_bytes" => 0,
-      "evaluation_continuation_bytes" => 0,
-      "events_dropped" => %{"provider-call" => 2}
-    }
-  end
-
-  defp run_success_fixture(artifact_class, result) do
-    %{
-      "schema_version" => 2,
-      "command" => "run",
-      "status" => "ok",
-      "run_ref" => CommandRunRef.encode(@zero_entropy),
-      "result" => result,
-      "secondary_errors" => [],
-      "artifact_state" => %{
-        "trace" => "not_requested",
-        "inspection" => "not_requested",
-        "result" => "not_requested"
-      },
-      "artifact_class" => artifact_class,
-      "execution" => %{
-        "state" => "finished",
-        "outcome" => "ok",
-        "diagnostic" => nil,
-        "usage" => usage_fixture(),
-        "evaluation_memory" => evaluation_memory_fixture()
-      }
-    }
-  end
-
-  defp evaluation_memory_fixture do
-    %{
-      "defined_count" => 0,
-      "history_count" => 0,
-      "memory_bytes" => 0,
-      "history_bytes" => 0,
-      "bytes" => 0
-    }
-  end
-
-  defp valid_manifest(overrides \\ %{}) do
-    base = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "main.clj"}],
-        "entry" => "app/run"
-      },
-      "input" => %{"value" => %{}},
-      "providers" => %{"workflow" => [], "mission" => []}
-    }
-
-    Map.merge(base, overrides)
-  end
-
-  defp valid_host_config do
+  defp http_mcp_host(endpoint) do
     %{
       "install" => %{
         "workspace" => %{
           "source" => "mcp",
-          "installation_revision" => "workspace-v1",
-          "transport" => %{"type" => "stdio", "command" => "node"},
-          "tools" => %{
-            "read" => %{"as" => "workspace.read", "effect" => "read"}
-          }
-        }
-      }
-    }
-  end
-
-  defp inert_stdio_installation(revision) do
-    %{
-      "source" => "mcp",
-      "installation_revision" => revision,
-      "transport" => %{
-        "type" => "stdio",
-        "command" => "ptc-nonexistent-executable-9f3a"
-      },
-      "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
-    }
-  end
-
-  # A real MCP stdio server, offline and deterministic. It is the only shipped
-  # recipe whose descriptor carries both an audited-local check and
-  # `connectivity_mode: :acquisition`, which is what lets a connect at this
-  # boundary settle two rows that default doctor cannot settle at all. `marker`
-  # records the JSON-RPC methods the server actually served.
-  defp connect_host_config(marker) do
-    %{
-      "install" => %{
-        "workspace" => %{
-          "source" => "mcp",
-          "installation_revision" => "connect-stdio-v1",
+          "installation_revision" => "private-http-v1",
           "transport" => %{
-            "type" => "stdio",
-            "command" => System.find_executable("sh"),
-            "cwd" => @stdio_root,
-            "args" => [@stdio_fixture, marker],
-            "start_timeout_ms" => 5_000
+            "type" => "streamable_http",
+            "endpoint" => endpoint,
+            "allow_insecure_loopback" => true
           },
           "tools" => %{
             "structured" => %{
@@ -5508,110 +8714,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     }
   end
 
-  defp stdio_host_config(command, launcher, cwd) do
-    %{
-      "runtime" => %{"stdio_launcher" => launcher},
-      "credentials" => %{"token" => %{"literal" => "test-secret"}},
-      "install" => %{
-        "workspace" => %{
-          "source" => "mcp",
-          "installation_revision" => "stdio-v1",
-          "transport" => %{
-            "type" => "stdio",
-            "command" => command,
-            "cwd" => cwd,
-            "inherit_environment" => false,
-            "env" => %{"TOKEN" => %{"binding" => "token"}}
-          },
-          "tools" => %{"read" => %{"as" => "workspace.read", "effect" => "read"}}
-        }
-      }
-    }
-  end
+  defp manifest_error_path({:manifest_path, path, _reason}), do: path
 
-  defp doctor_application(directory, name, providers) do
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "main.clj"}],
-        "entry" => "app/run"
-      },
-      "input" => %{"value" => %{}},
-      "providers" => %{
-        "workflow" => provider_entries(Keyword.get(providers, :workflow, [])),
-        "mission" => provider_entries(Keyword.get(providers, :mission, []))
-      }
-    }
-
-    manifest =
-      case Keyword.get(providers, :limits) do
-        nil -> manifest
-        limits -> Map.put(manifest, "limits", limits)
-      end
-
-    write_application(directory, name, manifest)
-  end
-
-  defp provider_entries(names) do
-    Enum.map(names, fn
-      {name, config} -> %{"name" => name, "config" => config}
-      name -> %{"name" => name, "config" => %{}}
-    end)
-  end
-
-  defp write_host_config(directory, name, bytes) when is_binary(bytes) do
-    path = Path.join(directory, "#{name}.host.json")
-    File.write!(path, bytes)
-    path
-  end
-
-  defp write_host_config(directory, name, config),
-    do: write_host_config(directory, name, Jason.encode!(config))
-
-  defp catalog_for(registry) do
-    {:ok, catalog} =
-      InstallationCatalog.new(%{}, installed_limits: registry.installed_limits)
-
-    catalog
-  end
-
-  defp prepared_metadata(prepared) do
-    Map.take(prepared, [
-      :provider_declarations,
-      :effective_data_class,
-      :effective_flow,
-      :effective_event_policy,
-      :effective_application_projection,
-      :effective_application_digest,
-      :post_selection_context
-    ])
-  end
-
-  defp host_installation_owners do
-    marker = {PtcRunner.Kernel.HostInstallationOwner, :authority}
-
-    Process.list()
-    |> Enum.filter(fn pid ->
-      case Process.info(pid, :dictionary) do
-        {:dictionary, dictionary} -> List.keymember?(dictionary, marker, 0)
-        nil -> false
-      end
-    end)
-    |> MapSet.new()
-  end
-
-  defp write_application(directory, name, manifest, extra_documents \\ []) do
-    root = Path.join(directory, name)
-    File.mkdir_p!(root)
-    File.write!(Path.join(root, "main.clj"), "(ns app) (defn run [input] (return input))")
-
-    Enum.each(extra_documents, fn {logical_name, bytes} ->
-      File.write!(Path.join(root, logical_name), bytes)
-    end)
-
-    bytes = if is_binary(manifest), do: manifest, else: Jason.encode!(manifest)
-    path = Path.join(root, "ptc.json")
-    File.write!(path, bytes)
-    path
-  end
+  defp manifest_error_path(
+         {:manifest_schema_invalid, %PtcRunner.Kernel.SchemaViolation{path: path}}
+       ),
+       do: path
 end

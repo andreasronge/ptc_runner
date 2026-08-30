@@ -600,6 +600,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
 
     assert match?({:ok, _address}, :inet.sockname(state.oauth_listener.socket))
     references = Enum.map(watched, fn {name, pid} -> {name, pid, Process.monitor(pid)} end)
+    cleanup_timeout_ms = ProviderSession.cleanup_timeout(state.provider_session)
 
     # `:kill` is untrappable, so `terminate/2` never runs and nothing here may
     # depend on the owner's own cleanup path. The worker is monitored rather
@@ -609,7 +610,7 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
 
     Enum.each(references, fn {name, pid, reference} ->
       assert_receive {:DOWN, ^reference, :process, ^pid, _reason},
-                     5_000,
+                     cleanup_timeout_ms + 1_000,
                      "#{name} outlived the killed owner"
     end)
 
@@ -771,8 +772,10 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
   defp credentialed_installation_document do
     %{
       "source" => "llm",
+      "structured_output_mode" => "unsupported",
+      "usage_guarantees" => %{"tokens" => false, "cost_currency" => nil},
       "installation_revision" => "credentialed-v1",
-      "model" => "openrouter:deepseek/deepseek-v4-flash",
+      "model" => "openrouter:deepseek/deepseek-v4-flash-0731",
       "credential" => "missing"
     }
   end

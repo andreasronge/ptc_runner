@@ -1,9 +1,37 @@
 defmodule PtcRunner.LLM.ReqLLMAdapterTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.Dispatcher
+  alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ProviderRegistry
+  alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.LLM.ReqLLMPreparedModel
+  alias PtcRunner.LLM.Requirements
+  alias PtcRunner.TestSupport.LLMSupport
+  alias PtcRunner.TestSupport.StreamingInspection
+  alias PtcRunner.TestSupport.TestHelpers
   alias ReqLLM.Message
   alias ReqLLM.ToolCall
+
+  @openrouter_model "openrouter:anthropic/claude-haiku-4.5"
+
+  setup_all do
+    initially_started = Application.started_applications() |> MapSet.new(&elem(&1, 0))
+    {:ok, started} = Application.ensure_all_started(:req_llm)
+    :ok = ReqLLMAdapter.ensure_ready()
+
+    on_exit(fn ->
+      started
+      |> Enum.reverse()
+      |> Enum.reject(&MapSet.member?(initially_started, &1))
+      |> Enum.each(&Application.stop/1)
+    end)
+  end
 
   describe "generate_object/4" do
     test "returns structured_output_not_supported for ollama" do
@@ -44,14 +72,451 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
   end
 
   describe "call/2" do
-    test "routes schema mode to generate_object for ollama" do
+    test "keeps a local adapter tool limitation distinct from model rejection" do
+      assert {:error,
+              %ProviderError{
+                kind: :invalid_request,
+                details: "LLM adapter route does not support tool calling",
+                retryable?: false
+              }} =
+               adapter_call("ollama:model", %{
+                 system: "test",
+                 messages: [],
+                 tools: [%{"type" => "function"}]
+               })
+    end
+
+    test "classifies a permanent ReqLLM HTTP failure and retains its provider message" do
+      provider_message = "Grok 4 Fast is deprecated. xAI recommends switching to Grok 4.3"
+
+      assert {:error,
+              %ProviderError{
+                kind: :not_found,
+                details: details,
+                retryable?: false
+              }} =
+               call_http_failure(404, provider_message)
+
+      assert details =~ "HTTP 404"
+      assert details =~ provider_message
+      refute details =~ "private prompt sentinel"
+    end
+
+    test "classifies OpenRouter's tool-bearing 404 as unsupported tool calling" do
+      provider_message = "No endpoints found that support tool use. Try disabling f."
+
+      plug = fn conn ->
+        conn
+        |> Plug.Conn.put_status(404)
+        |> Req.Test.json(%{"error" => %{"message" => provider_message, "code" => 404}})
+      end
+
+      request =
+        Map.put(request(plug), :tools, [
+          %{
+            "type" => "function",
+            "function" => %{
+              "name" => "f",
+              "description" => "fixture",
+              "parameters" => %{"type" => "object", "properties" => %{}}
+            }
+          }
+        ])
+
+      assert {:error,
+              %ProviderError{
+                kind: :tool_calling_unsupported,
+                details: details,
+                retryable?: false
+              }} = classified_http(@openrouter_model, request)
+
+      assert details =~ provider_message
+    end
+
+    test "derives retryability from the HTTP status when ReqLLM does not classify it" do
+      cases = [
+        {400, :invalid_request, false},
+        {401, :authentication_failed, false},
+        {402, :payment_required, false},
+        {403, :denied, false},
+        {408, :timeout, true},
+        {409, :invalid_request, true},
+        {425, :invalid_request, true},
+        {429, :rate_limited, true},
+        {503, :unavailable, true}
+      ]
+
+      for {status, kind, retryable?} <- cases do
+        assert {:error,
+                %ProviderError{
+                  kind: ^kind,
+                  details: details,
+                  retryable?: ^retryable?
+                }} = call_http_failure(status, "provider failure #{status}")
+
+        assert details =~ "HTTP #{status}"
+        assert details =~ "provider failure #{status}"
+      end
+    end
+
+    test "classifies a wrapped ReqLLM transport timeout as retryable" do
+      plug = fn conn -> Req.Test.transport_error(conn, :timeout) end
+
+      assert {:error,
+              %ProviderError{
+                kind: :timeout,
+                retryable?: true
+              }} = classified_http(@openrouter_model, request(plug))
+    end
+
+    test "refuses both structured modes on the direct ollama HTTP route" do
+      for mode <- [:json_schema, :json_object] do
+        requirements = Requirements.interim(%{max_tokens: 64}, mode)
+
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model("ollama:test", requirements)
+      end
+    end
+
+    test "refuses json_schema preparation for tool-fallback providers" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_schema)
+
+      for selector <- [
+            "groq:openai/gpt-oss-20b",
+            "amazon_bedrock:amazon.nova-pro-v1:0",
+            "google_vertex:zai-org/glm-4.7-maas",
+            "azure:gpt-4o"
+          ] do
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+      end
+    end
+
+    test "refuses json_object preparation for providers without a native JSON-object control" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_object)
+
+      for selector <- [
+            "anthropic:claude-sonnet-4-6",
+            "amazon_bedrock:amazon.nova-pro-v1:0",
+            "google:gemini-2.5-flash",
+            "google_vertex:gemini-2.5-flash",
+            "azure:claude-sonnet-4-6"
+          ] do
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+      end
+    end
+
+    test "attests json_object on OpenAI-compatible native JSON-object providers" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_object)
+
+      for selector <- [
+            "openrouter:deepseek/deepseek-v4-flash-0731",
+            "groq:openai/gpt-oss-20b",
+            "azure:gpt-4o",
+            "google_vertex:zai-org/glm-4.7-maas"
+          ] do
+        assert {:ok, target, _status, attestation} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+
+        assert target.structured_output_mode == :json_object
+        assert attestation.structured_output_mode == :json_object
+      end
+    end
+
+    test "attests json_schema for Vertex Gemini" do
+      requirements = Requirements.interim(%{max_tokens: 64}, :json_schema)
+
+      assert {:ok, target, _status, attestation} =
+               ReqLLMAdapter.prepare_model("google_vertex:gemini-2.5-flash", requirements)
+
+      assert target.structured_output_mode == :json_schema
+      assert attestation.structured_output_mode == :json_schema
+    end
+
+    test "attests json_schema and json_object on a cataloged ReqLLM selector" do
+      selector = "openrouter:deepseek/deepseek-v4-flash-0731"
+
+      for mode <- [:json_schema, :json_object] do
+        max_tokens = if mode == :json_schema, do: 200, else: 64
+        requirements = Requirements.interim(%{max_tokens: max_tokens}, mode)
+
+        assert {:ok, target, _status, attestation} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+
+        assert target.structured_output_mode == mode
+        assert attestation.structured_output_mode == mode
+      end
+    end
+
+    test "attests exact token and USD cost reporting guarantees" do
+      requirements = %{
+        Requirements.interim(%{max_tokens: 64})
+        | usage_guarantees: %{tokens: true, cost_currency: "USD"}
+      }
+
+      assert {:ok, _target, _status, attestation} =
+               ReqLLMAdapter.prepare_model(
+                 "openrouter:deepseek/deepseek-v4-flash-0731",
+                 requirements
+               )
+
+      assert attestation.usage_guarantees == %{tokens: true, cost_currency: "USD"}
+    end
+
+    test "attests conservative request token and fixed-point USD reservation bounds" do
+      model =
+        LLMDB.Model.new!(%{
+          id: "reservation-fixture",
+          provider: :openrouter,
+          cost: %{input: 2.0, output: 4.0, request: 0.25}
+        })
+
+      target = %ReqLLMPreparedModel{
+        selector: "openrouter:reservation-fixture",
+        model: model,
+        exact_options: %{max_tokens: 100}
+      }
+
+      request = %{"messages" => [%{"role" => "user", "content" => "hello"}]}
+      tariff = %{currency: "USD", id: "fixture-v1"}
+      total_tokens = :erlang.external_size(request) + 256 + 100
+
+      assert %{
+               total_tokens: ^total_tokens,
+               cost: %{
+                 currency: "USD",
+                 tariff_id: "fixture-v1",
+                 microunits: microunits
+               }
+             } = ReqLLMAdapter.reservation_bound(target, request, tariff)
+
+      assert microunits == total_tokens * 4 + 250_000
+
+      assert %{total_tokens: ^total_tokens, cost: nil} =
+               ReqLLMAdapter.reservation_bound(target, request, nil)
+    end
+
+    test "uses the complete token component set for a conservative cost bound" do
+      model =
+        LLMDB.Model.new!(%{
+          id: "component-reservation-fixture",
+          provider: :xai,
+          cost: %{input: 1.0, output: 2.0},
+          pricing: %{
+            currency: "USD",
+            components: [
+              %{id: "token.input", kind: "token", unit: "token", per: 1_000_000, rate: 1.0},
+              %{id: "token.output", kind: "token", unit: "token", per: 1_000_000, rate: 2.0},
+              %{
+                id: "token.output.long_context",
+                kind: "token",
+                unit: "token",
+                per: 1_000_000,
+                rate: 4.0
+              }
+            ]
+          }
+        })
+
+      target = %ReqLLMPreparedModel{
+        selector: "xai:component-reservation-fixture",
+        model: model,
+        exact_options: %{max_tokens: 100}
+      }
+
+      request = %{"messages" => []}
+      total_tokens = :erlang.external_size(request) + 256 + 100
+
+      assert %{cost: %{microunits: microunits}} =
+               ReqLLMAdapter.reservation_bound(target, request, %{currency: "USD", id: "v1"})
+
+      assert microunits == total_tokens * 7
+    end
+
+    test "refuses USD reservation attestation for unbounded image-priced output" do
+      requirements = cost_budget_requirements()
+
+      assert {:error, :unsupported_model_option} =
+               ReqLLMAdapter.prepare_model("google:gemini-2.5-flash-image", requirements)
+    end
+
+    test "does not reserve for provider-hosted tools unavailable on this adapter surface" do
+      requirements = cost_budget_requirements()
+
+      assert {:ok, target, _status, ^requirements} =
+               ReqLLMAdapter.prepare_model("openai:gpt-5", requirements)
+
+      request = %{"messages" => [], "tools" => []}
+      total_tokens = :erlang.external_size(request) + 256 + 64
+
+      assert %{cost: %{microunits: microunits}} =
+               ReqLLMAdapter.reservation_bound(
+                 target,
+                 request,
+                 requirements.reservation.cost_tariff
+               )
+
+      assert microunits ==
+               ceil(total_tokens * 1.25) + ceil(total_tokens * 10.0) +
+                 ceil(total_tokens * 0.125)
+    end
+
+    test "prepares a cataloged model for token and cost reservation attestation" do
+      tariff = %{currency: "USD", id: "host-tariff-v1"}
+
+      requirements = %{
+        Requirements.interim(%{max_tokens: 64})
+        | usage_guarantees: %{tokens: true, cost_currency: "USD"},
+          reservation: %{total_tokens?: true, cost_tariff: tariff}
+      }
+
+      assert {:ok, target, _status, ^requirements} =
+               ReqLLMAdapter.prepare_model(
+                 @openrouter_model,
+                 requirements
+               )
+
+      assert %{
+               total_tokens: total_tokens,
+               cost: %{currency: "USD", tariff_id: "host-tariff-v1", microunits: microunits}
+             } = ReqLLMAdapter.reservation_bound(target, %{"messages" => []}, tariff)
+
+      assert total_tokens > 64
+      assert microunits > 0
+    end
+
+    test "attests the complete inference-control set on OpenRouter" do
+      exact_options = %{
+        max_tokens: 64,
+        temperature: 0.25,
+        seed: 7,
+        top_p: 0.9,
+        presence_penalty: -0.5,
+        frequency_penalty: 0.75,
+        reasoning_effort: :medium
+      }
+
+      requirements = Requirements.interim(exact_options)
+
+      assert {:ok, target, _status, attestation} =
+               ReqLLMAdapter.prepare_model(
+                 "openrouter:deepseek/deepseek-v4-flash-0731",
+                 requirements
+               )
+
+      assert target.exact_options == exact_options
+      assert attestation.exact_options == exact_options
+    end
+
+    test "refuses provider paths known to drop, clamp, or substitute exact controls" do
+      cases = [
+        {"ollama:test", %{presence_penalty: 0.5}},
+        {"anthropic:claude-sonnet-4-6", %{presence_penalty: 0.5}},
+        {"anthropic:claude-sonnet-4-6", %{seed: 7}},
+        {"anthropic:claude-sonnet-4-6", %{temperature: 0.5, top_p: 0.9}},
+        {"google:gemini-2.5-flash", %{frequency_penalty: 0.5}},
+        {"google:gemini-2.5-flash", %{seed: 7}},
+        {"google_vertex:gemini-2.5-flash", %{seed: 7}},
+        {"amazon_bedrock:anthropic.claude-sonnet-4-6", %{seed: 7}},
+        {"meta:muse-spark-1.1", %{temperature: 0.5}},
+        {"minimax:MiniMax-M2.1", %{seed: 7}},
+        {"moonshotai:kimi-k3", %{temperature: 0.5}},
+        {"xai:grok-4", %{presence_penalty: 0.5}},
+        {"xai:grok-4", %{frequency_penalty: 0.5}},
+        {"nearai:Qwen/Qwen3-30B-A3B-Instruct-2507", %{reasoning_effort: :low}},
+        {"mistral:mistral-large-latest", %{reasoning_effort: :medium}},
+        {"fireworks_ai:accounts/fireworks/models/test", %{reasoning_effort: :minimal}},
+        {"deepseek:deepseek-reasoner", %{reasoning_effort: :none}},
+        {"deepseek:deepseek-reasoner", %{reasoning_effort: :minimal}},
+        {"deepseek:deepseek-reasoner", %{reasoning_effort: :low}},
+        {"deepseek:deepseek-reasoner", %{reasoning_effort: :medium}},
+        {"cerebras:gpt-oss-120b", %{reasoning_effort: :high}},
+        {"openrouter:deepseek/deepseek-v4-flash-0731", %{seed: 0}}
+      ]
+
+      for {selector, controls} <- cases do
+        requirements = Requirements.interim(Map.put(controls, :max_tokens, 64))
+
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.local_contract_attestation(selector, requirements)
+
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+      end
+    end
+
+    test "refuses model-aware ReqLLM drops during prepared attestation" do
+      for {selector, controls} <- [
+            {"anthropic:claude-sonnet-5", %{temperature: 0.5}},
+            {"openai:gpt-5", %{top_p: 0.9}},
+            {"openai:gpt-4.1", %{temperature: 0.5}},
+            {"openai:gpt-4.1", %{reasoning_effort: :high}},
+            {"mistral:mistral-large-latest", %{reasoning_effort: :high}}
+          ] do
+        requirements = Requirements.interim(Map.put(controls, :max_tokens, 64))
+
+        assert {:error, :unsupported_model_option} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+      end
+    end
+
+    test "keeps lossless direct-route controls and Mistral reasoning values" do
+      for {selector, controls} <- [
+            {"ollama:test", %{top_p: 0.9}},
+            {"openai-compat:https://localhost|model",
+             %{
+               top_p: 0.9,
+               presence_penalty: -0.5,
+               frequency_penalty: 0.5,
+               reasoning_effort: :low
+             }}
+          ] do
+        requirements = Requirements.interim(Map.put(controls, :max_tokens, 64))
+
+        assert :ok = ReqLLMAdapter.local_contract_attestation(selector, requirements)
+
+        assert {:ok, target, _status, attestation} =
+                 ReqLLMAdapter.prepare_model(selector, requirements)
+
+        assert target.exact_options == requirements.exact_options
+        assert attestation == requirements
+      end
+    end
+
+    test "normalizes a lossless ReqLLM token-limit rename for strict dispatch" do
+      requirements = Requirements.interim(%{max_tokens: 64, reasoning_effort: :high})
+
+      assert :ok =
+               ReqLLMAdapter.local_contract_attestation("openai:gpt-5", requirements)
+
+      assert {:ok, target, :cataloged, attestation} =
+               ReqLLMAdapter.prepare_model("openai:gpt-5", requirements)
+
+      assert target.exact_options == %{max_tokens: 64, reasoning_effort: :high}
+      assert target.request_options == %{max_completion_tokens: 64, reasoning_effort: :high}
+      assert attestation == requirements
+
+      max_only = Requirements.interim(%{max_tokens: 64})
+
+      assert {:ok, max_only_target, :cataloged, ^max_only} =
+               ReqLLMAdapter.prepare_model("openai:gpt-5", max_only)
+
+      assert max_only_target.request_options == %{max_completion_tokens: 64}
+    end
+
+    test "does not prompt-and-parse a schema request under unsupported mode" do
       req = %{
         system: "You are helpful",
         messages: [%{role: :user, content: "test"}],
         schema: %{"type" => "object", "properties" => %{"a" => %{"type" => "string"}}}
       }
 
-      assert {:error, :structured_output_not_supported} = ReqLLMAdapter.call("ollama:test", req)
+      assert {:error,
+              %ProviderError{
+                kind: :invalid_result,
+                retryable?: false
+              }} = adapter_call("ollama:test", req)
     end
 
     test "routes text mode to generate_text" do
@@ -61,8 +526,80 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
         cache: false
       }
 
-      # Will fail with connection error for ollama, confirming routing to generate_text
-      assert {:error, _} = ReqLLMAdapter.call("ollama:test", req)
+      # A contained connection failure confirms routing to generate_text and
+      # classification at the adapter boundary.
+      assert {:error, %ProviderError{}} = adapter_call("ollama:test", req)
+    end
+
+    test "does not honor request-authored HTTP plugs on the sealed call path" do
+      plug = fn _conn -> flunk("sealed call must not use request-authored HTTP options") end
+
+      assert {:error, %ProviderError{}} =
+               adapter_call("ollama:test", %{
+                 system: "test",
+                 messages: [%{role: :user, content: "hi"}],
+                 req_http_options: [plug: plug, retry: false]
+               })
+    end
+  end
+
+  describe "private inspection" do
+    test "records the classified provider message instead of the generic fallback" do
+      provider_message = "Grok 4 Fast is deprecated. xAI recommends switching to Grok 4.3"
+
+      plug = fn conn ->
+        conn
+        |> Plug.Conn.put_status(404)
+        |> Req.Test.json(%{"error" => %{"message" => provider_message, "code" => 404}})
+      end
+
+      requester = fn request ->
+        request
+        |> ProviderRegistry.adapter_request()
+        |> Map.merge(provider_options(plug))
+        |> then(&classified_http(@openrouter_model, &1))
+      end
+
+      {:ok, capability} = LLMCapability.new(requester: requester)
+      {:ok, environment} = WorkflowEnvironment.new(capabilities: [capability])
+      {:ok, state} = RunState.start(Limits.defaults())
+
+      {:ok, inspection_sink} =
+        StreamingInspection.start(
+          run_id: "llm-provider-error",
+          trace_id: "llm-provider-error-trace"
+        )
+
+      assert %{
+               status: :error,
+               kind: :provider_error,
+               reason: :not_found,
+               details: details,
+               retryable?: false
+             } =
+               Dispatcher.dispatch(
+                 state,
+                 :workflow,
+                 environment,
+                 capability.name,
+                 %{
+                   "messages" => [
+                     %{"role" => "user", "content" => "private prompt sentinel"}
+                   ]
+                 },
+                 TestHelpers.dispatch_context(state, :workflow, 1_000),
+                 nil,
+                 inspection_sink
+               )
+
+      assert details =~ provider_message
+      assert {:ok, records} = StreamingInspection.records(inspection_sink)
+
+      assert Enum.any?(records, fn record ->
+               record["record_type"] == "capability-output" and
+                 get_in(record, ["payload", "result", "details"]) == details and
+                 get_in(record, ["payload", "result", "retryable?"]) == false
+             end)
     end
   end
 
@@ -93,21 +630,6 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
           ollama_base_url: "http://localhost:1"
         )
       end
-    end
-  end
-
-  describe "stream/2" do
-    test "returns error for ollama" do
-      assert {:error, :streaming_not_supported} =
-               ReqLLMAdapter.stream("ollama:model", %{system: "test", messages: []})
-    end
-
-    test "returns error for openai-compat" do
-      assert {:error, :streaming_not_supported} =
-               ReqLLMAdapter.stream("openai-compat:http://localhost|model", %{
-                 system: "test",
-                 messages: []
-               })
     end
   end
 
@@ -202,23 +724,6 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
     end
   end
 
-  describe "maybe_resolve_inference_profile/1" do
-    test "passes through non-bedrock model strings unchanged" do
-      assert ReqLLMAdapter.maybe_resolve_inference_profile("openrouter:anthropic/claude") ==
-               "openrouter:anthropic/claude"
-
-      assert ReqLLMAdapter.maybe_resolve_inference_profile("anthropic:claude-3-5-sonnet") ==
-               "anthropic:claude-3-5-sonnet"
-    end
-
-    test "passes through bedrock models with no inference-prefix and no required family" do
-      # Not "us./eu./ap./ca./global." and not the "amazon." family -> the
-      # passthrough `true` branch returns the full string unchanged (no registry hit).
-      full = "amazon_bedrock:anthropic.claude-3-haiku"
-      assert ReqLLMAdapter.maybe_resolve_inference_profile(full) == full
-    end
-  end
-
   describe "build_tokens_from_req_llm_response/2" do
     test "reads atom-keyed usage including cache read/creation and cost" do
       usage = %{
@@ -229,7 +734,9 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
         total_cost: 0.5
       }
 
-      assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, %{}) == %{
+      meta = %{ptc_runner_usage_observation: :reported}
+
+      assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, meta) == %{
                input: 100,
                output: 50,
                cache_read: 20,
@@ -241,35 +748,52 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
     test "reads string-keyed usage and falls back to cached_tokens for cache reads" do
       usage = %{"input_tokens" => 7, "output_tokens" => 3, "cached_tokens" => 2}
 
-      assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, %{}) == %{
+      meta = %{ptc_runner_usage_observation: :reported}
+
+      assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, meta) == %{
                input: 7,
                output: 3,
                cache_read: 2,
-               cache_creation: 0,
-               total_cost: 0.0
+               cache_creation: 0
              }
     end
 
     test "derives cache_creation from provider_meta cache_write_tokens when usage omits it" do
       usage = %{input_tokens: 1}
-      meta = %{"usage" => %{"prompt_tokens_details" => %{"cache_write_tokens" => 42}}}
+
+      meta = %{
+        "usage" => %{"prompt_tokens_details" => %{"cache_write_tokens" => 42}},
+        ptc_runner_usage_observation: :reported
+      }
 
       assert ReqLLMAdapter.build_tokens_from_req_llm_response(usage, meta) == %{
                input: 1,
-               output: 0,
                cache_read: 0,
-               cache_creation: 42,
-               total_cost: 0.0
+               cache_creation: 42
              }
     end
 
-    test "defaults all fields to zero for empty usage and meta" do
+    test "does not invent missing input or output usage" do
       assert ReqLLMAdapter.build_tokens_from_req_llm_response(%{}, %{}) == %{
-               input: 0,
-               output: 0,
                cache_read: 0,
-               cache_creation: 0,
-               total_cost: 0.0
+               cache_creation: 0
+             }
+    end
+  end
+
+  describe "build_stream_done_chunk/1" do
+    test "preserves normalized cost and token usage for streamed responses" do
+      usage = %{input_tokens: 12, output_tokens: 4, total_cost: 0.125}
+
+      assert ReqLLMAdapter.build_stream_done_chunk(usage) == %{
+               done: true,
+               tokens: %{
+                 input: 12,
+                 output: 4,
+                 cache_creation: 0,
+                 cache_read: 0,
+                 total_cost: 0.125
+               }
              }
     end
   end
@@ -371,5 +895,81 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                arguments: ~s|{"program":"(return 42)"}|
              }
     end
+  end
+
+  defp call_http_failure(status, message) do
+    plug = fn conn ->
+      conn
+      |> Plug.Conn.put_status(status)
+      |> Req.Test.json(%{"error" => %{"message" => message, "code" => status}})
+    end
+
+    classified_http(@openrouter_model, request(plug))
+  end
+
+  defp cost_budget_requirements do
+    %{
+      Requirements.interim(%{max_tokens: 64})
+      | usage_guarantees: %{tokens: true, cost_currency: "USD"},
+        reservation: %{
+          total_tokens?: true,
+          cost_tariff: %{currency: "USD", id: "fixture-v1"}
+        }
+    }
+  end
+
+  defp classified_http(selector, request) do
+    messages = Map.get(request, :messages, [])
+
+    opts =
+      request
+      |> Map.take([:api_key, :cache, :max_retries, :max_tokens, :req_http_options])
+      |> Keyword.new()
+
+    result =
+      if is_list(Map.get(request, :tools)) and request.tools != [] do
+        ReqLLMAdapter.generate_with_tools(selector, messages, request.tools, opts)
+      else
+        ReqLLMAdapter.generate_text(selector, messages, opts)
+      end
+
+    mode =
+      if is_list(Map.get(request, :tools)) and request.tools != [], do: :tools, else: :ordinary
+
+    ReqLLMAdapter.normalize_provider_call(result, mode)
+  end
+
+  defp adapter_call(selector, request) do
+    max_tokens = Map.get(request, :max_tokens, 4_096)
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(selector, LLMSupport.interim_requirements(max_tokens))
+
+    {:ok, invocation} =
+      Invocation.new(
+        Map.drop(request, [:api_key, :cache, :max_tokens, :seed, :temperature]),
+        Map.get(request, :cache, false),
+        Map.get(request, :api_key),
+        nil
+      )
+
+    ReqLLMAdapter.call(target, invocation)
+  end
+
+  defp request(plug) do
+    Map.put(
+      provider_options(plug),
+      :messages,
+      [%{role: :user, content: "private prompt sentinel"}]
+    )
+  end
+
+  defp provider_options(plug) do
+    %{
+      api_key: "test-openrouter-key",
+      max_retries: 0,
+      max_tokens: 10,
+      req_http_options: [plug: plug, retry: false]
+    }
   end
 end

@@ -126,7 +126,7 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
            member_family_id,
            nil,
            ambiguous_family_message(member_family_id),
-           %{receiver_profile: profile}
+           %{name: member_family_name(member_family_id), receiver_profile: profile}
          )}
     end
   end
@@ -140,6 +140,13 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
     case Surface.member_family_source(member_family_id) do
       {:ok, spelling} -> "Java member #{spelling} does not accept this receiver"
       :error -> "Java member does not accept this receiver"
+    end
+  end
+
+  defp member_family_name(member_family_id) do
+    case Surface.member_family_source(member_family_id) do
+      {:ok, spelling} -> spelling
+      :error -> nil
     end
   end
 

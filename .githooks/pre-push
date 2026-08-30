@@ -5,18 +5,13 @@
 #   1. Documentation routing: disposable plan-only changes skip the gate;
 #      other documentation-only changes run the ExDoc warnings gate.
 #   2. Otherwise: classify the affected contracts, run documentation first,
-#      then run the relevant root, Viewer, and launcher gates. Root changes
-#      invoke the canonical `mix prepush` alias for generated-artifact
-#      staleness, the upstream audit, Dialyzer, and the unused-dependency
-#      check. The staleness checks are shared with `precommit`, which an
-#      ordinary push does not run, so this hook is where a stale generated
-#      artifact is caught before CI rather than by it.
+#      then invoke the same repository-owned root, Viewer, and launcher gate
+#      scripts as GitHub Actions. The hook supplies changed paths; the scripts
+#      own commands and environment.
 #
 # Override:
 #   FORCE_FULL_PRE_PUSH=1 git push  → always run the full gate, even if
 #   the docs-only check would have allowed a skip.
-#   PTC_PRE_PUSH_MAX_CASES=2 git push → retain every gate but cap ExUnit
-#   concurrency on resource-constrained machines.
 #
 # Stdin contract (githooks(5)):
 #   <local-ref> <local-sha> <remote-ref> <remote-sha>\n  (one per ref)
@@ -25,24 +20,14 @@ set -e
 
 HOOK_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Validate before documentation routing so a misspelled option never appears
-# to succeed merely because the selected push has no ExUnit stage.
-if [ -n "${PTC_PRE_PUSH_MAX_CASES:-}" ] &&
-   [[ ! "$PTC_PRE_PUSH_MAX_CASES" =~ ^[1-9][0-9]*$ ]]; then
-  echo "❌ PTC_PRE_PUSH_MAX_CASES must be a positive integer"
-  exit 1
-fi
-
 run_docs_gate() {
   echo ""
   echo "📚 Documentation"
 
-  if ! MIX_ENV=dev mix deps.get --check-locked; then
-    echo "❌ Documentation dependency setup failed. Fix the Mix error above before pushing."
+  if ! "$HOOK_REPO_ROOT/scripts/ci/docs.sh"; then
+    echo "❌ Documentation dependency setup or build failed. Fix the error above before pushing."
     return 1
   fi
-
-  MIX_ENV=dev mix docs --warnings-as-errors
 }
 
 # ----------------------------------------------------------------------
@@ -96,8 +81,45 @@ DOC_PATTERNS = [
 GENERATED_DOC_PATTERNS = [
     re.compile(r"^docs/function-reference\.md$"),
     re.compile(r"^docs/java-interop\.md$"),
+    re.compile(r"^docs/kernel-limits-reference\.md$"),
+    re.compile(r"^docs/prelude-reference\.md$"),
     re.compile(r"^docs/conformance/.*$"),
 ]
+
+REPO_ROOT = os.environ["PTC_PRE_PUSH_REPO_ROOT"]
+EXECUTABLE_GUIDES_PATH = os.path.join(
+    REPO_ROOT, "test", "support", "executable_guides.txt"
+)
+
+def read_executable_doc_paths(path):
+    paths = set()
+
+    with open(path, encoding="utf-8") as registry:
+        for raw_line in registry:
+            line = raw_line.rstrip("\n")
+            entry = line.strip()
+
+            if not entry or entry.startswith("#"):
+                continue
+
+            parts = entry.split("/")
+            if (
+                line != entry
+                or os.path.isabs(entry)
+                or os.path.normpath(entry) != entry
+                or "\\" in entry
+                or any(part in ("", ".", "..") for part in parts)
+            ):
+                raise ValueError(
+                    f"non-canonical executable guide path: {raw_line!r}"
+                )
+
+            paths.add(entry)
+
+    return paths
+
+
+EXECUTABLE_DOC_PATHS = read_executable_doc_paths(EXECUTABLE_GUIDES_PATH)
 
 
 def matches(patterns, path):
@@ -112,6 +134,7 @@ def is_documentation(path):
     return (
         matches(DOC_PATTERNS, path)
         and not matches(GENERATED_DOC_PATTERNS, path)
+        and path not in EXECUTABLE_DOC_PATHS
     )
 
 
@@ -289,7 +312,8 @@ PYEOF
   trap 'rm -f "$PY_TMP" "$PTC_PRE_PUSH_PATHS_FILE"' EXIT
 
   set +e
-  printf '%s' "$REFS_INPUT" | /usr/bin/env python3 "$PY_TMP"
+  printf '%s' "$REFS_INPUT" |
+    PTC_PRE_PUSH_REPO_ROOT="$HOOK_REPO_ROOT" /usr/bin/env python3 "$PY_TMP"
   SHORT_CIRCUIT_RESULT=$?
   set -e
   rm -f "$PY_TMP"
@@ -348,7 +372,8 @@ print_phase_summary() {
 }
 
 SCOPES_FILE="$(mktemp -t pre-push-scopes.XXXXXX)"
-"$HOOK_REPO_ROOT/scripts/classify_changes.sh" "$PTC_PRE_PUSH_PATHS_FILE" > "$SCOPES_FILE"
+"$HOOK_REPO_ROOT/scripts/ci/classify-changes.sh" \
+  "$PTC_PRE_PUSH_PATHS_FILE" > "$SCOPES_FILE"
 # The classifier emits only fixed boolean assignments.
 core=false
 launcher=false
@@ -361,123 +386,262 @@ docs=false
 source "$SCOPES_FILE"
 rm -f "$SCOPES_FILE"
 
-TEST_OPTIONS=()
-if [ -n "${PTC_PRE_PUSH_MAX_CASES:-}" ]; then
-  TEST_OPTIONS=(--max-cases "$PTC_PRE_PUSH_MAX_CASES")
-  echo "🧵 Test concurrency: $PTC_PRE_PUSH_MAX_CASES cases"
+if [ "$core" != true ] && [ "$launcher" != true ] &&
+   [ "$mcp_http" != true ] && [ "$mcp_filesystem" != true ] &&
+   [ "$java" != true ] && [ "$viewer" != true ] && [ "$docs" != true ]; then
+  echo "📝 No product gates selected for these paths (override: FORCE_FULL_PRE_PUSH=1)"
+  exit 0
 fi
 
 # Documentation failures are deterministic and usually cheap to diagnose. Run
 # this gate before long test and Dialyzer stages so a bad reference does not
 # waste the rest of the push cycle.
-if [ "$docs" = true ]; then
+if [ "$docs" = true ] || [ "$core" = true ]; then
   DOCS_START=$SECONDS
   run_docs_gate
   record_phase "documentation (ExDoc)" $((SECONDS - DOCS_START))
 fi
 
-PROJECTS=()
+run_gate() {
+  local label="$1"
+  shift
+  echo ""
+  echo "📦 $label"
+  echo "  ⏳ Running repository CI entry point..."
+
+  local gate_start=$SECONDS
+  if ! "$@"; then
+    echo "  ❌ $label failed. Re-run: $*"
+    exit 1
+  fi
+
+  local gate_secs=$((SECONDS - gate_start))
+  echo "  ✅ $label passed in ${gate_secs}s"
+  record_phase "$label" "$gate_secs"
+}
+
+# ----------------------------------------------------------------------
+# Lanes: the deterministic gates overlap, the test suite never does.
+#
+# The suite is the longest stage and roughly four fifths of it is
+# `async: false` -- legitimately so, because those modules call `File.cd`,
+# `Application.put_env`, and `System.put_env`, which are VM-global. It
+# therefore holds a single core for minutes while the rest of the machine
+# idles, which is what makes the gate look like a chain of half-empty
+# stages. It still runs alone: this repository's timing-sensitive tests
+# fail under unrelated background load, and a gate that flakes costs more
+# than a gate that is slow.
+#
+# What does overlap is the deterministic tail, whose stages own disjoint
+# build trees and have no shared mutable state:
+#
+#   lane A   core-static -> core-Dialyzer   _build/test  (shared: serial)
+#   lane B   core-release                   _build/prod
+#   lane C   Viewer                         ptc_viewer/_build/test
+#
+# Documentation keeps its head start above: it owns `_build/dev` and is
+# the only stage that writes the root `deps/`, so finishing it first also
+# keeps `mix deps.get` off the lanes.
+#
+# The launcher gate stays serial on purpose. Its port-teardown assertions
+# are load-sensitive (`:DOWN` can outrun `Port.info/1` releasing the port),
+# a failure mode this repository has already had to chase down on a loaded
+# CI runner.
+#
+# Lane output is buffered and replayed in lane order, so a concurrent run
+# reads like a serial one. PTC_PRE_PUSH_SERIAL=1 restores serial execution
+# for diagnosis or for a machine too small to share.
+# ----------------------------------------------------------------------
+
+LANE_PIDS=()
+LANE_LABELS=()
+LANE_LOGS=()
+
+start_lane() {
+  local label="$1"
+  shift
+  local log
+  log="$(mktemp -t pre-push-lane.XXXXXX)"
+
+  (
+    # Inherited errexit would abort the subshell on the gate's own failure,
+    # losing both the exit status and the duration this lane is reporting.
+    set +e
+    lane_start=$SECONDS
+    "$@" > "$log" 2>&1
+    lane_rc=$?
+    echo $((SECONDS - lane_start)) > "$log.secs"
+    exit $lane_rc
+  ) &
+
+  LANE_PIDS+=("$!")
+  LANE_LABELS+=("$label")
+  LANE_LOGS+=("$log")
+  echo "  ⏳ $label started"
+}
+
+# Waits for every started lane, replays each lane's output under its own
+# heading, and returns the number that failed. Every lane is awaited even
+# after one fails: they are already running, and reporting all of them
+# beats surfacing one failure per push cycle.
+wait_lanes() {
+  local failures=0
+  local i pid label log secs
+
+  [ "${#LANE_PIDS[@]}" -gt 0 ] || return 0
+
+  for i in "${!LANE_PIDS[@]}"; do
+    pid="${LANE_PIDS[$i]}"
+    label="${LANE_LABELS[$i]}"
+    log="${LANE_LOGS[$i]}"
+
+    local lane_status=0
+    wait "$pid" || lane_status=$?
+
+    # Reaped: drop the PID before replaying output, which can take long enough
+    # for the system to hand that number to an unrelated process. An interrupt
+    # arriving mid-replay must not make cleanup signal a stranger.
+    LANE_PIDS[i]=""
+
+    secs="$(cat "$log.secs" 2>/dev/null || echo '?')"
+    echo ""
+    echo "📦 $label"
+    cat "$log"
+
+    if [ "$lane_status" -eq 0 ]; then
+      echo "  ✅ $label passed in ${secs}s"
+      record_phase "$label" "$secs"
+    else
+      echo "  ❌ $label failed after ${secs}s"
+      record_phase "$label (failed)" "$secs"
+      failures=$((failures + 1))
+    fi
+
+    rm -f "$log" "$log.secs"
+    LANE_LOGS[i]=""
+  done
+
+  LANE_PIDS=()
+  LANE_LABELS=()
+  LANE_LOGS=()
+
+  return "$failures"
+}
+
+# Signalling the lane subshell is not enough: the gate it launched is a
+# grandchild, and killing only the parent reparents a release build or a
+# Dialyzer run to init, where it keeps consuming the machine with nothing left
+# to report to. Descend first so nothing is orphaned on the way down.
+kill_lane_tree() {
+  local pid="$1"
+  local signal="$2"
+  local child
+
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_lane_tree "$child" "$signal"
+  done
+
+  kill "-$signal" "$pid" 2>/dev/null || true
+}
+
+# A lane outlives the shell that started it, so an interrupted push must take
+# its lanes and their logs with it. Entries are blanked as `wait_lanes` reaps
+# them, and a blank entry is skipped: signalling a reaped PID would be
+# signalling whatever the system has since given that number to.
+cleanup_lanes() {
+  local entry
+  local signalled=false
+
+  for entry in ${LANE_PIDS[@]+"${LANE_PIDS[@]}"}; do
+    [ -n "$entry" ] || continue
+    kill_lane_tree "$entry" TERM
+    signalled=true
+  done
+
+  if [ "$signalled" = true ]; then
+    # A gate that forks while the walk is in progress, or that is slow to
+    # honor TERM, survives the first pass. Settle once and take down what is
+    # left. This is an abort path: bounded and blunt beats thorough.
+    sleep 1
+
+    for entry in ${LANE_PIDS[@]+"${LANE_PIDS[@]}"}; do
+      [ -n "$entry" ] || continue
+      kill_lane_tree "$entry" KILL
+    done
+  fi
+
+  for entry in ${LANE_LOGS[@]+"${LANE_LOGS[@]}"}; do
+    [ -n "$entry" ] || continue
+    rm -f "$entry" "$entry.secs"
+  done
+
+  LANE_PIDS=()
+  LANE_LOGS=()
+}
+
+trap 'cleanup_lanes; rm -f "${PTC_PRE_PUSH_PATHS_FILE:-}"' EXIT
+trap 'cleanup_lanes; exit 130' INT
+trap 'cleanup_lanes; exit 143' TERM
+
+# Both stages compile into `_build/test`, so they share Mix's build lock and
+# gain nothing from being separate lanes.
+core_static_and_dialyzer() {
+  "$HOOK_REPO_ROOT/scripts/ci/core-static.sh" &&
+    "$HOOK_REPO_ROOT/scripts/ci/core-dialyzer.sh"
+}
+
+run_core_gates=false
 if [ "$core" = true ] || [ "$mcp_http" = true ] ||
    [ "$mcp_filesystem" = true ] || [ "$java" = true ]; then
-  PROJECTS+=(".")
+  run_core_gates=true
 fi
 
 # Root trace and inspection contracts are consumed by the Viewer, so retain
 # Viewer coverage for core changes as well as Viewer-owned changes.
+run_viewer_gate=false
 if [ "$viewer" = true ] || [ "$core" = true ]; then
-  PROJECTS+=("ptc_viewer")
+  run_viewer_gate=true
+fi
+
+if [ "$run_core_gates" = true ]; then
+  run_gate "core tests" "$HOOK_REPO_ROOT/scripts/ci/core-tests.sh"
+fi
+
+if [ -n "${PTC_PRE_PUSH_SERIAL:-}" ]; then
+  if [ "$run_core_gates" = true ]; then
+    run_gate "core static analysis" "$HOOK_REPO_ROOT/scripts/ci/core-static.sh"
+    run_gate "core Dialyzer" "$HOOK_REPO_ROOT/scripts/ci/core-dialyzer.sh"
+    run_gate "core release verification" "$HOOK_REPO_ROOT/scripts/ci/core-release.sh"
+  fi
+
+  if [ "$run_viewer_gate" = true ]; then
+    run_gate "Viewer validation" "$HOOK_REPO_ROOT/scripts/ci/viewer.sh"
+  fi
+elif [ "$run_core_gates" = true ] || [ "$run_viewer_gate" = true ]; then
+  echo ""
+  echo "📦 Deterministic gates (concurrent lanes)"
+
+  if [ "$run_core_gates" = true ]; then
+    start_lane "core static analysis + Dialyzer" core_static_and_dialyzer
+    start_lane "core release verification" \
+      "$HOOK_REPO_ROOT/scripts/ci/core-release.sh"
+  fi
+
+  if [ "$run_viewer_gate" = true ]; then
+    start_lane "Viewer validation" "$HOOK_REPO_ROOT/scripts/ci/viewer.sh"
+  fi
+
+  if ! wait_lanes; then
+    echo ""
+    echo "❌ A deterministic gate failed. Re-run it on its own, or set"
+    echo "   PTC_PRE_PUSH_SERIAL=1 to run every gate serially."
+    exit 1
+  fi
 fi
 
 if [ "$launcher" = true ]; then
-  PROJECTS+=("ptc_runner_launcher")
+  run_gate "launcher validation" "$HOOK_REPO_ROOT/scripts/ci/launcher.sh"
 fi
-
-project_has_dep() {
-  local proj="$1" dep="$2"
-  grep -qE "\\{:${dep}," "${proj}/mix.exs" 2>/dev/null
-}
-
-run_project_gates() {
-  local proj="$1"
-  local label
-
-  if [ "$proj" = "." ]; then
-    label="root (:ptc_runner)"
-  else
-    label="$proj/"
-    [ -d "$proj" ] || return 0
-  fi
-
-  echo ""
-  echo "📦 Project: $label"
-
-  pushd "$proj" > /dev/null
-
-  if [ "$proj" = "ptc_runner_launcher" ]; then
-    echo "  ⏳ Running launcher package and containment gate..."
-    local launcher_start=$SECONDS
-    if ! mix precommit "${TEST_OPTIONS[@]}"; then
-      echo "  ❌ Launcher checks failed. Re-run: (cd ptc_runner_launcher && mix precommit ${TEST_OPTIONS[*]})"
-      popd > /dev/null
-      exit 1
-    fi
-    local launcher_secs=$((SECONDS - launcher_start))
-    echo "  ✅ Launcher checks passed in ${launcher_secs}s"
-    record_phase "launcher precommit" "$launcher_secs"
-    popd > /dev/null
-    return 0
-  fi
-
-  # "except `:nightly`" is not a hedge: `:nightly` tests cost tens of seconds
-  # each and run in the `Nightly` workflow instead. Every other tag this hook
-  # would otherwise skip still runs here.
-  echo "  ⏳ Running the test suite (all but :nightly)..."
-  local test_start=$SECONDS
-  if ! mix test --exclude clojure "${TEST_OPTIONS[@]}" 2>&1; then
-    echo "  ❌ Tests failed in $label. Re-run: (cd $proj && mix test --exclude clojure ${TEST_OPTIONS[*]})"
-    popd > /dev/null
-    exit 1
-  fi
-  local test_secs=$((SECONDS - test_start))
-  echo "  ✅ Tests passed in ${test_secs}s"
-  record_phase "$label tests" "$test_secs"
-
-  if [ "$proj" = "." ]; then
-    echo "  ⏳ Running canonical pre-push checks..."
-    local prepush_start=$SECONDS
-    if ! mix prepush; then
-      echo "  ❌ Pre-push checks failed in $label. Run: mix prepush"
-      popd > /dev/null
-      exit 1
-    fi
-    local prepush_secs=$((SECONDS - prepush_start))
-    echo "  ✅ Pre-push checks passed in ${prepush_secs}s"
-    record_phase "root mix prepush (incl. dialyzer)" "$prepush_secs"
-  # CWD is the project dir (we are inside `pushd "$proj"`), so check
-  # `./mix.exs` rather than `$proj/mix.exs`. Passing `$proj` here would
-  # resolve to a duplicated project path and silently skip Dialyzer for
-  # non-root projects.
-  elif project_has_dep "." "dialyxir"; then
-    echo "  ⏳ Running dialyzer (this may take a moment)..."
-    local dialyzer_start=$SECONDS
-    if ! mix dialyzer; then
-      echo "  ❌ Dialyzer found errors in $label. Run: (cd $proj && mix dialyzer)"
-      popd > /dev/null
-      exit 1
-    fi
-    local dialyzer_secs=$((SECONDS - dialyzer_start))
-    echo "  ✅ Dialyzer passed in ${dialyzer_secs}s"
-    record_phase "$label dialyzer" "$dialyzer_secs"
-  else
-    echo "  ⏭️  Dialyzer not declared in ${label}mix.exs"
-  fi
-
-  popd > /dev/null
-}
-
-for proj in "${PROJECTS[@]}"; do
-  run_project_gates "$proj"
-done
 
 END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))

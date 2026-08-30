@@ -8,9 +8,9 @@ defmodule PtcRunner.Kernel.Error do
   capability envelopes and become a Kernel error only when workflow policy or
   a hard runtime boundary makes them terminal.
 
-  Outer kinds currently include `:workflow_failed`, `:limit_exceeded`,
-  `:event_sink_error`, `:configuration_error`, `:inspection_sink_error`, and
-  `:provider_cleanup_error`.
+  Outer kinds currently include `:workflow_failed`, `:evaluation_failed`,
+  `:limit_exceeded`, `:event_sink_error`, `:configuration_error`,
+  `:inspection_sink_error`, and `:provider_cleanup_error`.
   """
   @enforce_keys [:kind, :reason, :details, :usage]
   defstruct [:kind, :reason, :details, :usage]

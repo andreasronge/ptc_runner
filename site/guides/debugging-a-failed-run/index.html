@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debug a failed run · PtcRunner</title>
+<meta name="description" content="Follow a failed run from its immutable trace into private inspection only when
+the trace cannot answer the question.">
+<link rel="canonical" href="https://ptc-runner.dev/guides/debugging-a-failed-run/">
+<meta property="og:title" content="Debug a failed run · PtcRunner">
+<meta property="og:description" content="Follow a failed run from its immutable trace into private inspection only when
+the trace cannot answer the question.">
+<meta property="og:url" content="https://ptc-runner.dev/guides/debugging-a-failed-run/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/" class="current" aria-current="page">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="debug-a-failed-run">Debug a failed run</h1><p>Follow a failed run from its immutable trace into private inspection only when
+the trace cannot answer the question.</p><h2 id="what-failed">What failed?</h2><p>Start with the trace:</p><pre><code class="console language-console">ptc viewer ptc-project.json</code></pre><p>Or query it with the fixed analysis profile:</p><pre><code class="console language-console">ptc repl --project ptc-project.json \
+  --profile run-analysis-v1 \
+  -e '(analysis/runs {&quot;status&quot; &quot;error&quot;})'</code></pre><p>Use the run ID to open its activity, terminal reason, evaluations, tool use,
+limits, and completeness flags. Public traces deliberately omit prompts,
+responses, generated source, and tool payloads.</p><p>If the run was configured to retain private inspection, authorize the private
+profile separately and write unattended output to an owner-controlled file.
+Private inspection is for questions that public evidence cannot answer; it is
+not the default debugging path.</p><h2 id="can-another-run-inspect-the-failure">Can another run inspect the failure?</h2><p>The checked-in debugging example demonstrates another useful pattern: one
+ordinary PtcRunner application can navigate a frozen failed capture through the
+shipped <code class="inline">debug.nav</code> library without gaining filesystem, network, model, or
+nested-evaluation access.</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
+ptc run debug-a-failed-run/target.ptc-project.json
+ptc run debug-a-failed-run/debugger.ptc-project.json</code></pre><p>The same example optionally closes the loop: a repair agent proposes a
+complete replacement or abstains, and a later <code class="inline">ptc run</code> can try that
+candidate through <code class="inline">--component-override-descriptor</code> without editing a
+file. The README materialized beside the example walks the path.</p><h2 id="where-is-the-complete-evidence-contract">Where is the complete evidence contract?</h2><p>Use the <a href="/reference/debug-navigation/">debug-navigation reference</a> for the
+complete evidence graph, typed links, collections, resources, pagination,
+private-inspection rules, and model-assisted navigation contract. The
+<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md">TraceLog and run-analysis reference</a> owns
+the event schema.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/kernel-repl/">&larr; Explore a project interactively</a><a class="pager-next" href="/guides/evaluating-with-replay/">Evaluate changes with replay &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/debugging-a-failed-run.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

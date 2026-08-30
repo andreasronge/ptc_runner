@@ -13,8 +13,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
   reading credentials, then render credentials the command already resolved
   while acquiring the provider. An active command reads each declared credential
   exactly once, at phase-8 step 5; acquisition and the live connectivity probe
-  both consume that value rather than resolving one of their own. Live LLM model
-  resolution likewise precedes credential access.
+  both consume that value rather than resolving one of their own. Live LLM
+  validation and optional public-identity attestation likewise precede
+  credential access. Callback construction, provider-application readiness,
+  and the adapter all receive the exact captured model value.
   Native trace acquisition
   exports its opaque frozen handle only to a selected inspection source, so
   private artifacts validate against the exact already-captured canonical
@@ -26,26 +28,34 @@ defmodule PtcRunner.Kernel.HostInstallation do
   of ambient locale and `inherit_environment`, so locale-sensitive servers
   encode protocol frames as UTF-8.
 
+  An LLM or replay install may set `ceilings.max_calls`; the application may
+  narrow it with `config.max_calls`. The Kernel counts those calls per alias
+  behind the public `llm-request` capability.
+
   Every public provider snapshot separates the safe declaration projection
   from bounded runtime-captured acquisition facts. `acquisition_identity_hash`
-  covers the latter and bare-hex `snapshot_hash` covers both. Raw model
-  selectors, endpoints, commands, paths, credentials, and private OAuth
-  authority never enter either projection. A frozen-content provider also
+  covers the latter and bare-hex `snapshot_hash` covers both. An LLM adapter may
+  explicitly attest its exact target as safe public identity; otherwise it is
+  omitted. Unattested or private model targets, endpoints, commands, paths,
+  credentials, and private OAuth authority never enter either projection. A
+  frozen-content provider also
   publishes an algorithm-qualified `content_snapshot_hash`; native query
   results copy that content identity unchanged for citations.
   """
 
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.BoundedWorker
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.ConfinedFile
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.HostRuntimePayload
-  alias PtcRunner.Kernel.InspectionCapability
   alias PtcRunner.Kernel.InspectionSnapshot
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMReplay
+  alias PtcRunner.Kernel.LLMUsage
   alias PtcRunner.Kernel.MCPOAuth.Authority
   alias PtcRunner.Kernel.MCPOAuth.ManagerCleanup
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
@@ -55,9 +65,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSnapshot
+  alias PtcRunner.Kernel.RunAnalysisCapability
   alias PtcRunner.Kernel.SelectionRules
-  alias PtcRunner.Kernel.TraceCapability
   alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.LLM.Requirements
 
   @inherited_compatibility_environment ~w(HOME LOGNAME PATH SHELL TERM USER)
   @stdio_locale_environment %{"LC_ALL" => "C.UTF-8"}
@@ -90,7 +101,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, catalog} <-
            InstallationCatalog.new(registrations,
              installed_limits: host.limits,
-             runtime_binding: binding
+             runtime_binding: binding,
+             installation_config_digests: InstallationConfigDigest.map(host.install)
            ) do
       {:ok, catalog}
     else
@@ -335,7 +347,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
     ProviderDescriptor.new(
       source: installation.source,
       installation_revision: installation.installation_revision,
-      credential_names: descriptor_credential_names(installation),
+      credential_names: installation_credential_names(installation),
       authorization_mode: authorization_mode(installation),
       data_class: descriptor_data_class(installation),
       accepts_data:
@@ -349,22 +361,56 @@ defmodule PtcRunner.Kernel.HostInstallation do
       selection_validation: :declarative,
       selection_rules: rules,
       authority_fingerprint: if(authority, do: authority.fingerprint, else: nil),
-      local_preflight: local_preflight_mode(installation)
+      local_preflight: local_preflight_mode(installation),
+      structured_output_mode: descriptor_structured_output_mode(installation),
+      usage_guarantees: descriptor_usage_guarantees(installation),
+      reservation_tariff: descriptor_reservation_tariff(installation),
+      request_timeout_ms: descriptor_request_timeout_ms(installation)
     )
   end
 
-  defp descriptor_credential_names(%{source: :mcp, transport: transport}) do
+  @doc """
+  Returns the host credential names one installation resolves at runtime.
+
+  An MCP transport binds credentials through `env` or `auth` exactly as an LLM
+  installation binds one through `credential`, so anything that reasons about
+  what an installation needs must ask this rather than the source tag. An
+  OAuth-authorized transport resolves no host credential.
+  """
+  @spec installation_credential_names(map()) :: [binary()]
+  def installation_credential_names(%{source: :mcp, transport: transport}) do
     case authority_from_transport(transport) do
       %Authority{} -> []
       nil -> credential_names(transport)
     end
   end
 
-  defp descriptor_credential_names(%{source: :llm, credential: credential}), do: [credential]
-  defp descriptor_credential_names(_installation), do: []
+  def installation_credential_names(%{source: :llm, credential: credential}), do: [credential]
+  def installation_credential_names(_installation), do: []
 
-  defp descriptor_data_class(%{source: :ptc_inspection_snapshot}),
-    do: :private_inspection
+  defp descriptor_structured_output_mode(%{source: :llm, structured_output_mode: mode})
+       when mode in [:json_schema, :json_object, :unsupported],
+       do: mode
+
+  defp descriptor_structured_output_mode(_installation), do: nil
+
+  defp descriptor_usage_guarantees(%{source: :llm, usage_guarantees: guarantees}),
+    do: guarantees
+
+  defp descriptor_usage_guarantees(_installation), do: nil
+
+  defp descriptor_reservation_tariff(%{source: :llm, reservation_tariff: tariff}), do: tariff
+  defp descriptor_reservation_tariff(_installation), do: nil
+
+  defp descriptor_request_timeout_ms(%{source: :llm, ceilings: %{request_timeout_ms: timeout_ms}})
+       when is_integer(timeout_ms) and timeout_ms > 0,
+       do: timeout_ms
+
+  defp descriptor_request_timeout_ms(_installation), do: nil
+
+  defp descriptor_data_class(%{source: source})
+       when source in [:ptc_private_trace_snapshot, :ptc_inspection_snapshot],
+       do: :private_inspection
 
   defp descriptor_data_class(installation), do: Map.get(installation, :data_class, :normal)
 
@@ -381,7 +427,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp authority_from_transport(_transport), do: nil
 
   defp snapshot_accepts_data(source)
-       when source in [:ptc_trace_snapshot, :ptc_inspection_snapshot],
+       when source in [
+              :ptc_trace_snapshot,
+              :ptc_private_trace_snapshot,
+              :ptc_inspection_snapshot
+            ],
        do: [:normal, :private_inspection]
 
   defp snapshot_accepts_data(_source), do: [:normal]
@@ -389,7 +439,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp descriptor_requires(:ptc_inspection_snapshot), do: [:canonical_trace_snapshot]
   defp descriptor_requires(_source), do: []
 
-  defp descriptor_provides(:ptc_trace_snapshot), do: [:canonical_trace_snapshot]
+  defp descriptor_provides(source)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot],
+       do: [:canonical_trace_snapshot]
+
   defp descriptor_provides(_source), do: []
 
   defp descriptor_destinations(source) when source in [:llm, :llm_replay], do: [:workflow]
@@ -401,6 +454,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp local_preflight_mode(%{source: :llm}), do: :audited_local
   defp local_preflight_mode(%{source: :mcp, transport: %{type: :stdio}}), do: :audited_local
+  defp local_preflight_mode(%{source: :llm_replay}), do: :audited_local
   defp local_preflight_mode(_installation), do: :none
 
   defp selection_rules(%{source: :mcp} = installation) do
@@ -443,7 +497,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
           type: {:unique_list, :string},
           input: true,
           default: {:intersection, "allow", "visible"},
-          members: "visible"
+          members: "all"
         },
         "timeout_ms" => %{
           type: :integer,
@@ -480,6 +534,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
           minimum: 1,
           maximum: installation.ceilings.max_response_bytes
         },
+        "max_calls" => %{
+          type: :integer,
+          input: true,
+          default: installation.ceilings.max_calls,
+          minimum: 1,
+          maximum: installation.ceilings.max_calls
+        },
         "default" => %{
           type: :boolean,
           input: true,
@@ -488,7 +549,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
       },
       cross_rules: [
         {:ceiling_of_context_limit, "max_request_bytes", :capability_argument_bytes},
-        {:ceiling_of_context_limit, "max_response_bytes", :capability_result_bytes}
+        {:ceiling_of_context_limit, "max_response_bytes", :capability_result_bytes},
+        {:ceiling_of_context_limit, "max_calls", :workflow_capability_calls_per_name}
       ],
       named_sets: %{}
     )
@@ -515,16 +577,25 @@ defmodule PtcRunner.Kernel.HostInstallation do
           type: :boolean,
           input: true,
           default: false
+        },
+        "max_calls" => %{
+          type: :integer,
+          input: true,
+          default: installation.ceilings.max_calls,
+          minimum: 1,
+          maximum: installation.ceilings.max_calls
         }
       },
       cross_rules: [
-        {:ceiling_of_context_limit, "max_result_bytes", :capability_result_bytes}
+        {:ceiling_of_context_limit, "max_result_bytes", :capability_result_bytes},
+        {:ceiling_of_context_limit, "max_calls", :workflow_capability_calls_per_name}
       ],
       named_sets: %{}
     )
   end
 
-  defp selection_rules(%{source: :ptc_trace_snapshot} = installation) do
+  defp selection_rules(%{source: source} = installation)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] do
     snapshot_selection_rules(installation, false)
   end
 
@@ -560,7 +631,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
           maximum: installation.ceilings.max_files
         })
       else
-        fields
+        Map.put(fields, "expose", %{type: :boolean, input: true, default: true})
       end
 
     SelectionRules.new(
@@ -624,17 +695,18 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp prepare(
          _host,
-         %{source: :ptc_trace_snapshot} = installation,
+         %{source: source} = installation,
          selection,
          context,
          _oauth_runtime
-       ) do
+       )
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- trace_snapshot_selection(installation, selection, context) do
       {:ok,
        %{
          credential_names: [],
-         data_class: :normal,
+         data_class: descriptor_data_class(installation),
          accepts_data: [:normal, :private_inspection],
          provides: [:canonical_trace_snapshot]
        }}
@@ -660,11 +732,25 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  defp workflow_llm_route(%{source: :llm} = installation, selected) do
+    %{
+      source: "llm",
+      installation_revision: installation.installation_revision,
+      default: selected.default,
+      max_calls: selected.max_calls,
+      structured_output_mode: installation.structured_output_mode,
+      usage_guarantees: installation.usage_guarantees,
+      reservation_tariff: installation.reservation_tariff,
+      request_timeout_ms: installation.ceilings.request_timeout_ms
+    }
+  end
+
   defp workflow_llm_route(installation, selected) do
     %{
       source: Atom.to_string(installation.source),
       installation_revision: installation.installation_revision,
-      default: selected.default
+      default: selected.default,
+      max_calls: selected.max_calls
     }
   end
 
@@ -694,11 +780,24 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp preflight(_host, %{source: :llm} = installation, selection, context, _oauth_runtime) do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- llm_selection(installation, selection, context),
-         {:ok, model, adapter} <- preflight_llm(installation.model) do
+         {:ok, model, adapter} <- preflight_llm(installation.model),
+         {:ok, requirements} <- live_llm_requirements(installation, context),
+         {:ok, prepared_model} <- prepare_llm_model(model, requirements, adapter) do
+      public_model = PtcRunner.LLM.attested_public_model(adapter, model)
+
       {:ok,
        {:private_preflight,
         fn credentials ->
-          acquire_llm(installation, selected, context, model, adapter, credentials)
+          acquire_llm(
+            installation,
+            selected,
+            context,
+            model,
+            prepared_model,
+            public_model,
+            adapter,
+            credentials
+          )
         end}}
     end
   end
@@ -720,11 +819,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp preflight(
          host,
-         %{source: :ptc_trace_snapshot} = installation,
+         %{source: source} = installation,
          selection,
          context,
          _oauth_runtime
-       ) do
+       )
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot] do
     with :ok <- placement(installation, context.destination),
          {:ok, selected} <- trace_snapshot_selection(installation, selection, context),
          {:ok, directory} <-
@@ -760,6 +860,116 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  # Adapter preparation has a deliberately rich direct-embedding error
+  # vocabulary. An installed provider crosses the Kernel's closed diagnostic
+  # boundary instead: an unsupported sealed contract is
+  # `model_contract_unsupported`, and every other invalid or unavailable target
+  # remains adapter-unavailable.
+  defp prepare_llm_model(model, requirements, adapter) do
+    case PtcRunner.LLM.prepare(model, requirements, adapter) do
+      {:ok, prepared_model} -> {:ok, prepared_model}
+      {:error, :unsupported_model_option} -> {:error, :unsupported_model_option}
+      {:error, _reason} -> {:error, :invalid_llm_model}
+    end
+  end
+
+  # Contract attestation must not load a provider catalog or call ensure_ready
+  # inside the audited-local worker. Doctor and other declaration checks still
+  # report adapter availability from the selector/module. Preparing here is only
+  # for a positive unsupported-contract refusal that does not need the catalog:
+  # openai_codex drops max_tokens, and test adapters can attest without warmup.
+  # An adapter that cannot resolve the target yet is not a new local failure.
+  defp maybe_prepare_llm_contract(installation, context, model, adapter) do
+    case live_llm_requirements(installation, context) do
+      {:ok, requirements} -> attest_or_skip_local_contract(requirements, model, adapter)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp attest_or_skip_local_contract(requirements, model, adapter) do
+    if function_exported?(adapter, :local_contract_attestation, 2) do
+      case adapter.local_contract_attestation(model, requirements) do
+        :ok -> :ok
+        {:error, :unsupported_model_option} = error -> error
+      end
+    else
+      adapter_local_prepare(adapter, model, requirements)
+    end
+  end
+
+  defp adapter_local_prepare(adapter, model, requirements) do
+    if function_exported?(adapter, :prepare_model, 2) do
+      finish_adapter_local_prepare(adapter, model, requirements)
+    else
+      :ok
+    end
+  rescue
+    _exception -> {:error, :invalid_llm_model}
+  catch
+    _kind, _reason -> {:error, :invalid_llm_model}
+  end
+
+  defp finish_adapter_local_prepare(adapter, model, requirements) do
+    case Requirements.canonical(requirements) do
+      {:ok, canonical} ->
+        case adapter.prepare_model(model, canonical) do
+          {:ok, _target, _status, attestation} ->
+            match_local_attestation(canonical, attestation)
+
+          {:error, :unsupported_model_option} = error ->
+            error
+
+          {:error, _reason} ->
+            {:error, :invalid_llm_model}
+        end
+
+      :error ->
+        {:error, :invalid_llm_model}
+    end
+  end
+
+  defp match_local_attestation(canonical, attestation) do
+    case Requirements.canonical(attestation) do
+      {:ok, attested} ->
+        if Requirements.equal?(canonical, attested),
+          do: :ok,
+          else: {:error, :unsupported_model_option}
+
+      :error ->
+        {:error, :unsupported_model_option}
+    end
+  end
+
+  defp live_llm_requirements(installation, %{limits: limits}) do
+    case Requirements.live(
+           installation.params,
+           limits.llm_request_output_tokens,
+           installation.structured_output_mode,
+           installation.usage_guarantees,
+           reservation_requirement(installation, limits)
+         ) do
+      {:ok, requirements} -> {:ok, requirements}
+      :error -> {:error, :invalid_llm_model}
+    end
+  end
+
+  defp live_llm_requirements(_installation, _context), do: {:error, :invalid_llm_model}
+
+  defp reservation_requirement(installation, limits) do
+    %{
+      total_tokens?: not is_nil(limits.llm_total_tokens) or not is_nil(limits.llm_cost_microusd),
+      cost_tariff:
+        if(is_nil(limits.llm_cost_microusd), do: nil, else: installation.reservation_tariff)
+    }
+  end
+
+  defp probe_llm_requirements(installation) do
+    case Requirements.probe(installation.params, installation.usage_guarantees) do
+      {:ok, requirements} -> {:ok, requirements}
+      :error -> {:error, :llm_connectivity_unavailable}
+    end
+  end
+
   defp placement(%{source: :mcp}, :mission), do: :ok
   defp placement(%{source: :mcp}, _destination), do: {:error, :provider_destination_denied}
   defp placement(%{source: :llm}, :workflow), do: :ok
@@ -769,10 +979,13 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp placement(%{source: :llm_replay}, _destination),
     do: {:error, :provider_destination_denied}
 
-  defp placement(%{source: :ptc_trace_snapshot}, :mission), do: :ok
+  defp placement(%{source: source}, :mission)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot],
+       do: :ok
 
-  defp placement(%{source: :ptc_trace_snapshot}, _destination),
-    do: {:error, :provider_destination_denied}
+  defp placement(%{source: source}, _destination)
+       when source in [:ptc_trace_snapshot, :ptc_private_trace_snapshot],
+       do: {:error, :provider_destination_denied}
 
   defp placement(%{source: :ptc_inspection_snapshot}, :mission), do: :ok
 
@@ -781,7 +994,14 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   @doc false
   def normalize_selection(%{source: source} = installation, value, %{limits: limits})
-      when source in [:mcp, :llm, :llm_replay, :ptc_trace_snapshot, :ptc_inspection_snapshot] do
+      when source in [
+             :mcp,
+             :llm,
+             :llm_replay,
+             :ptc_trace_snapshot,
+             :ptc_private_trace_snapshot,
+             :ptc_inspection_snapshot
+           ] do
     with {:ok, rules} <- selection_rules(installation),
          {:ok, normalized} <- SelectionRules.normalize_runtime(rules, value, limits) do
       {:ok, normalized}
@@ -815,6 +1035,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp selection_error(:llm), do: :invalid_llm_selection
   defp selection_error(:llm_replay), do: :invalid_llm_replay_selection
   defp selection_error(:ptc_trace_snapshot), do: :invalid_trace_snapshot_selection
+  defp selection_error(:ptc_private_trace_snapshot), do: :invalid_trace_snapshot_selection
   defp selection_error(:ptc_inspection_snapshot), do: :invalid_inspection_snapshot_selection
 
   defp credential_names(%{type: :stdio, env: env}),
@@ -836,7 +1057,19 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp local_preflight(_host, %{source: :llm} = installation, selection, context) do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
-         {:ok, _model, _adapter} <- preflight_llm(installation.model) do
+         {:ok, model, adapter} <- preflight_llm(installation.model) do
+      maybe_prepare_llm_contract(installation, context, model, adapter)
+    end
+  end
+
+  defp local_preflight(host, %{source: :llm_replay} = installation, selection, context) do
+    with :ok <- placement(installation, context.destination),
+         {:ok, selected} <- llm_replay_selection(installation, selection, context),
+         {:ok, _summary} <-
+           LLMReplay.probe(host.directory, installation.fixtures,
+             max_entries: selected.max_entries,
+             max_result_bytes: selected.max_result_bytes
+           ) do
       :ok
     end
   end
@@ -849,15 +1082,18 @@ defmodule PtcRunner.Kernel.HostInstallation do
     with :ok <- placement(installation, context.destination),
          {:ok, _selected} <- llm_selection(installation, selection, context),
          {:ok, model, adapter} <- preflight_llm(installation.model),
+         {:ok, requirements} <- probe_llm_requirements(installation),
+         {:ok, prepared_model} <- prepare_llm_model(model, requirements, adapter),
          {:ok, credential} <-
            Map.fetch(Map.get(context, :credentials, %{}), installation.credential),
          {:ok, timeout_ms, max_heap_words} <- connectivity_probe_bounds(context) do
       {:ok,
        %{
          model: model,
-         adapter: adapter,
+         prepared_model: prepared_model,
          credential: credential,
-         params: installation.params,
+         cache: installation.cache,
+         usage_guarantees: installation.usage_guarantees,
          timeout_ms: timeout_ms,
          max_heap_words: max_heap_words
        }}
@@ -893,44 +1129,74 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp connectivity_probe_bounds(_context), do: {:error, :llm_connectivity_unavailable}
 
+  # The probe bills a real request, so what it spent travels back with the
+  # success rather than being pattern-matched away: `max_tokens: 1` is sealed
+  # into a separate prepared target and bounds the magnitude, not the
+  # attribution. The same installation reporting guarantees apply to the
+  # probe; absent promised usage fails connectivity rather than being invented.
+  # The doctor connectivity deadline remains the outer `BoundedWorker` bound;
+  # the probe does not participate in the ordinary whole-call LLM clock.
   defp run_llm_connectivity_probe(probe) do
-    options =
-      probe.params
-      |> Map.to_list()
-      |> Keyword.merge(
-        adapter: probe.adapter,
-        api_key: probe.credential,
-        cache: false,
-        max_tokens: 1,
-        max_retries: 0,
-        receive_timeout: probe.timeout_ms,
-        req_http_options: [retry: false, redirect: false, max_retries: 0]
-      )
+    binding = %{credential: probe.credential, cache: probe.cache}
 
-    requester = PtcRunner.LLM.callback(probe.model, options)
+    case PtcRunner.LLM.callback(probe.prepared_model, binding) do
+      {:ok, requester} ->
+        result =
+          BoundedWorker.run(
+            fn ->
+              requester.(
+                %{messages: [%{role: :user, content: "Health check."}]},
+                %{llm_request_deadline_ms: nil}
+              )
+            end,
+            timeout_ms: probe.timeout_ms,
+            max_heap_words: probe.max_heap_words,
+            cancel_with_caller: true
+          )
 
-    result =
-      BoundedWorker.run(
-        fn ->
-          requester.(%{
-            messages: [%{role: :user, content: "Health check."}],
-            cache: false
-          })
-        end,
-        timeout_ms: probe.timeout_ms,
-        max_heap_words: probe.max_heap_words,
-        cancel_with_caller: true
-      )
+        case result do
+          {:ok, {:ok, response}} when is_map(response) ->
+            normalize_probe_usage(response, probe.usage_guarantees)
 
-    case result do
-      {:ok, {:ok, response}} when is_map(response) -> :ok
-      _failure -> {:error, :llm_connectivity_unavailable}
+          _failure ->
+            {:error, :llm_connectivity_unavailable}
+        end
+
+      {:error, _reason} ->
+        {:error, :llm_connectivity_unavailable}
     end
   rescue
     _exception -> {:error, :llm_connectivity_unavailable}
   catch
     _kind, _reason -> {:error, :llm_connectivity_unavailable}
   end
+
+  defp normalize_probe_usage(response, guarantees) do
+    case Map.fetch(response, :tokens) do
+      {:ok, tokens} -> normalize_probe_tokens(tokens, guarantees)
+      :error -> normalize_probe_usage_strings(response, guarantees)
+    end
+  end
+
+  defp normalize_probe_usage_strings(response, guarantees) do
+    case Map.fetch(response, "tokens") do
+      {:ok, tokens} ->
+        normalize_probe_tokens(tokens, guarantees)
+
+      :error ->
+        if(usage_required?(guarantees), do: {:error, :llm_connectivity_unavailable}, else: :ok)
+    end
+  end
+
+  defp normalize_probe_tokens(tokens, guarantees) do
+    case LLMUsage.normalize(tokens, guarantees) do
+      {:ok, usage} -> {:ok, usage}
+      {:error, :invalid_llm_usage} -> {:error, :llm_connectivity_unavailable}
+    end
+  end
+
+  defp usage_required?(%{tokens: tokens, cost_currency: currency}),
+    do: tokens or currency == "USD"
 
   defp preflight_transport(_host, %{type: :streamable_http} = transport),
     do: {:ok, transport}
@@ -953,6 +1219,19 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
+  # The decoded loopback allowance travels with the endpoint it was declared
+  # against, so the source re-applies the rule the host document was already
+  # checked with instead of defaulting to a stricter one and rejecting a
+  # transport decoding admitted. An OAuth or `auth`-bearing installation never
+  # carries it: `HostConfig` refuses a credential over plain HTTP.
+  defp http_transport_options(transport, extra) when is_list(extra) do
+    {:streamable_http,
+     [
+       endpoint: transport.endpoint,
+       allow_insecure_loopback: transport.allow_insecure_loopback
+     ] ++ extra}
+  end
+
   defp installed_options(installation, transport, _credential_names) do
     options = [
       tools: installation.tools,
@@ -968,9 +1247,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
         try do
           _builder =
             MCPSource.builder([
-              {:transport,
-               {:streamable_http, endpoint: transport.endpoint, headers: fn -> [] end}}
-              | options
+              {:transport, http_transport_options(transport, headers: fn -> [] end)} | options
             ])
 
           {:ok, options}
@@ -1012,13 +1289,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
        ) do
     with {:ok, headers} <- render_headers(transport.auth, credentials) do
       options =
-        [
-          transport: {:streamable_http, endpoint: transport.endpoint, headers: fn -> headers end}
-        ] ++ options
+        [transport: http_transport_options(transport, headers: fn -> headers end)] ++ options
 
-      options
-      |> MCPSource.builder()
-      |> then(& &1.(selected, context))
+      MCPSource.acquire(options, selected, context)
       |> classify(installation, selected, context.provider)
     end
   end
@@ -1042,14 +1315,10 @@ defmodule PtcRunner.Kernel.HostInstallation do
              authority_epoch: authority_epoch
            ) do
       source_options =
-        [
-          transport: {:streamable_http, endpoint: transport.endpoint, authorization: manager}
-        ] ++ options
+        [transport: http_transport_options(transport, authorization: manager)] ++ options
 
       result =
-        source_options
-        |> MCPSource.builder()
-        |> then(& &1.(selected, context))
+        MCPSource.acquire(source_options, selected, context)
         |> classify(installation, selected, context.provider)
 
       case result do
@@ -1099,19 +1368,29 @@ defmodule PtcRunner.Kernel.HostInstallation do
         start_timeout_ms: transport.start_timeout_ms
       ]
 
-      ([transport: {:stdio, transport_options}] ++ options)
-      |> MCPSource.builder()
-      |> then(& &1.(selected, context))
+      MCPSource.acquire(
+        [transport: {:stdio, transport_options}] ++ options,
+        selected,
+        context
+      )
       |> classify(installation, selected, context.provider)
     end
   end
 
+  # A model is a full provider-qualified identifier such as
+  # "openrouter:deepseek/deepseek-v4-flash". Requiring the provider prefix
+  # here keeps a mistyped host entry a bounded preflight failure instead of a
+  # live provider call that fails after the run clock has started. The adapter
+  # remains the authority on whether the provider and model actually exist.
+  @model_pattern ~r/\A[a-z][a-z0-9_-]*:\S/
+
   defp preflight_llm(model) do
-    with {:ok, resolved} <- PtcRunner.LLM.Registry.resolve(model),
-         true <- is_binary(resolved) and byte_size(resolved) in 1..256,
+    with true <- is_binary(model) and byte_size(model) in 1..256,
+         true <- String.valid?(model),
+         true <- Regex.match?(@model_pattern, model),
          adapter when is_atom(adapter) <- PtcRunner.LLM.adapter!(),
          true <- Code.ensure_loaded?(adapter) do
-      {:ok, resolved, adapter}
+      {:ok, model, adapter}
     else
       _invalid -> {:error, :invalid_llm_model}
     end
@@ -1119,34 +1398,51 @@ defmodule PtcRunner.Kernel.HostInstallation do
     _exception -> {:error, :invalid_llm_model}
   end
 
-  defp acquire_llm(installation, selected, context, model, adapter, credentials) do
+  defp acquire_llm(
+         installation,
+         selected,
+         context,
+         model,
+         prepared_model,
+         public_model,
+         adapter,
+         credentials
+       ) do
     with {:ok, credential} <- Map.fetch(credentials, installation.credential),
-         requester =
-           PtcRunner.LLM.callback(
-             model,
-             [
-               adapter: adapter,
-               cache: installation.cache,
-               api_key: credential
-             ] ++ Map.to_list(installation.params)
-           ),
+         {:ok, requester} <-
+           PtcRunner.LLM.callback(prepared_model, %{
+             credential: credential,
+             cache: installation.cache
+           }),
          {:ok, capability} <-
            LLMCapability.new(
-             requester: fn request ->
+             requester: fn request, context ->
                with :ok <- provider_application_ready(adapter, model) do
                  request
                  |> ProviderRegistry.adapter_request()
-                 |> requester.()
+                 |> requester.(llm_requester_context(context))
                end
              end,
+             llm_reservation: %{
+               source: "llm",
+               output_tokens: prepared_model.requirements.exact_options.max_tokens,
+               tariff: prepared_model.requirements.reservation.cost_tariff,
+               bound: fn request, tariff ->
+                 PtcRunner.LLM.reservation_bound(prepared_model, request, tariff)
+               end
+             },
+             usage_guarantees: installation.usage_guarantees,
              max_request_bytes: selected.max_request_bytes,
              max_response_bytes: selected.max_response_bytes
            ),
-         {:ok, snapshot} <- llm_snapshot(installation, selected, context.provider) do
+         {:ok, snapshot} <-
+           llm_snapshot(installation, selected, context.provider, public_model),
+         {:ok, warnings} <- llm_warnings(prepared_model, context.provider) do
       {:ok,
        %{
          capabilities: [capability],
          snapshot: snapshot,
+         warnings: warnings,
          close: nil,
          data_class: installation.data_class,
          accepts_data: installation.accepts_data
@@ -1157,6 +1453,25 @@ defmodule PtcRunner.Kernel.HostInstallation do
   rescue
     _exception -> {:error, :invalid_llm_provider}
   end
+
+  defp llm_warnings(prepared_model, provider_alias) do
+    case PtcRunner.LLM.catalog_warning(prepared_model) do
+      nil ->
+        {:ok, []}
+
+      {:model_uncataloged, public_model} ->
+        case CommandWarning.model_uncataloged(provider_alias, public_model) do
+          {:ok, warning} -> {:ok, [warning]}
+          :error -> {:error, :invalid_llm_provider}
+        end
+    end
+  end
+
+  defp llm_requester_context(%{llm_request_deadline_ms: deadline})
+       when is_integer(deadline) or is_nil(deadline),
+       do: %{llm_request_deadline_ms: deadline}
+
+  defp llm_requester_context(_context), do: %{llm_request_deadline_ms: nil}
 
   # The core no longer starts an adapter's backing application on a host's
   # behalf; a run admits it through ProviderApplicationGate. An embedding host
@@ -1184,7 +1499,8 @@ defmodule PtcRunner.Kernel.HostInstallation do
              "the #{application} provider application is not started; " <>
                "start it before building this provider, or run through the " <>
                "prepared-run path that admits it",
-             retryable?: false
+             retryable?: false,
+             dispatch_provenance: :not_dispatched
            )}
         end
     end
@@ -1209,6 +1525,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
          {:ok, capability} <-
            LLMCapability.new(
              requester: LLMReplay.requester(replay),
+             llm_reservation: %{source: "llm_replay"},
              max_response_bytes: selected.max_result_bytes
            ),
          {:ok, snapshot} <- llm_replay_snapshot(replay, installation, context.provider) do
@@ -1240,7 +1557,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp acquire_trace_snapshot(directory, installation, selected, context) do
-    case TraceSnapshot.start({:directory, directory},
+    case TraceSnapshot.start(trace_snapshot_source(installation.source, directory),
            owner: context.owner,
            resource_registrar: Map.get(context, :resource_registrar),
            max_source_bytes: selected.max_source_bytes,
@@ -1255,7 +1572,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   end
 
   defp finish_trace_snapshot(snapshot, installation, selected, provider) do
-    with {:ok, capabilities} <- TraceCapability.from_snapshot(snapshot, provider),
+    with {:ok, capabilities} <- trace_analysis_capabilities(snapshot, selected, provider),
          {:ok, info} <- TraceSnapshot.info(snapshot),
          {:ok, provider_snapshot} <-
            trace_provider_snapshot(info, installation, selected, provider) do
@@ -1267,7 +1584,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
            TraceSnapshot.stop(snapshot)
            :ok
          end,
-         data_class: :normal,
+         data_class: descriptor_data_class(installation),
          accepts_data: [:normal, :private_inspection],
          exports: %{canonical_trace_snapshot: snapshot}
        }}
@@ -1277,6 +1594,11 @@ defmodule PtcRunner.Kernel.HostInstallation do
         error
     end
   end
+
+  defp trace_analysis_capabilities(snapshot, %{expose: true}, provider),
+    do: RunAnalysisCapability.from_snapshots(snapshot, nil, provider)
+
+  defp trace_analysis_capabilities(_snapshot, %{expose: false}, _provider), do: {:ok, []}
 
   defp acquire_inspection_snapshot(
          directory,
@@ -1293,15 +1615,22 @@ defmodule PtcRunner.Kernel.HostInstallation do
            max_result_bytes: selected.max_result_bytes
          ) do
       {:ok, snapshot} ->
-        finish_inspection_snapshot(snapshot, installation, selected, context.provider)
+        finish_inspection_snapshot(
+          snapshot,
+          trace_snapshot,
+          installation,
+          selected,
+          context.provider
+        )
 
       {:error, _reason} = error ->
         error
     end
   end
 
-  defp finish_inspection_snapshot(snapshot, installation, selected, provider) do
-    with {:ok, capabilities} <- InspectionCapability.from_snapshot(snapshot, provider),
+  defp finish_inspection_snapshot(snapshot, trace_snapshot, installation, selected, provider) do
+    with {:ok, capabilities} <-
+           RunAnalysisCapability.from_snapshots(trace_snapshot, snapshot, provider),
          {:ok, info} <- InspectionSnapshot.info(snapshot),
          {:ok, provider_snapshot} <-
            inspection_provider_snapshot(info, installation, selected, provider) do
@@ -1345,7 +1674,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp trace_provider_snapshot(info, installation, selected, provider) do
     acquisition = %{
-      "source" => "ptc_trace_snapshot",
+      "source" => Atom.to_string(installation.source),
       "capture_id" => info.capture_id,
       "run_count" => info.run_count,
       "source_bytes" => info.source_bytes,
@@ -1361,15 +1690,29 @@ defmodule PtcRunner.Kernel.HostInstallation do
     )
   end
 
-  defp llm_snapshot(installation, selected, provider) do
+  defp trace_snapshot_source(:ptc_trace_snapshot, directory), do: {:directory, directory}
+
+  defp trace_snapshot_source(:ptc_private_trace_snapshot, directory),
+    do: {:private_authorized_directory, directory}
+
+  defp llm_snapshot(installation, selected, provider, public_model) do
+    acquisition =
+      %{"source" => "llm"}
+      |> maybe_put_resolved_model(public_model)
+
     public_snapshot(
       installation,
       provider,
       selected,
-      %{"source" => "llm"},
+      acquisition,
       nil
     )
   end
+
+  defp maybe_put_resolved_model(acquisition, nil), do: acquisition
+
+  defp maybe_put_resolved_model(acquisition, model),
+    do: Map.put(acquisition, "resolved_model", model)
 
   defp classify({:ok, built}, installation, selected, provider) do
     acquisition =
@@ -1408,13 +1751,15 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp public_snapshot(installation, provider, selected, acquisition, content_snapshot_hash) do
     with {:ok, rules} <- selection_rules(installation),
-         {:ok, descriptor} <- descriptor(installation, rules, authority(installation)) do
+         {:ok, descriptor} <- descriptor(installation, rules, authority(installation)),
+         digest when is_binary(digest) <- Map.get(installation, :installation_config_digest) do
       ProviderSnapshot.build(
         descriptor,
         provider,
         string_keyed(selected),
         acquisition,
-        content_snapshot_hash
+        content_snapshot_hash,
+        digest
       )
     else
       _invalid -> {:error, :invalid_provider_snapshot}
@@ -1489,7 +1834,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
   defp resolve_command(command, environment) do
     case Path.type(command) do
       :absolute ->
-        canonical_executable(command, @max_executable_bytes, :invalid_mcp_executable)
+        canonical_mcp_executable(command)
 
       :relative ->
         if Path.basename(command) == command do
@@ -1500,25 +1845,38 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp resolve_bare_command(_command, nil), do: {:error, :invalid_mcp_executable}
+  defp resolve_bare_command(_command, nil), do: {:error, :mcp_command_not_found}
 
   defp resolve_bare_command(command, path) do
     path
     |> String.split(":", trim: true)
-    |> Enum.reduce_while({:error, :invalid_mcp_executable}, fn directory, _error ->
+    |> Enum.reduce_while({:error, :mcp_command_not_found}, fn directory, previous_error ->
       if Path.type(directory) == :absolute do
-        case canonical_executable(
-               Path.join(directory, command),
-               @max_executable_bytes,
-               :invalid_mcp_executable
-             ) do
+        case canonical_mcp_executable(Path.join(directory, command)) do
           {:ok, _path, _digest} = success -> {:halt, success}
-          {:error, _reason} -> {:cont, {:error, :invalid_mcp_executable}}
+          {:error, :mcp_command_not_found} -> {:cont, previous_error}
+          {:error, :invalid_mcp_executable} = error -> {:cont, error}
         end
       else
-        {:cont, {:error, :invalid_mcp_executable}}
+        {:cont, previous_error}
       end
     end)
+  end
+
+  defp canonical_mcp_executable(path) do
+    case ConfinedFile.resolve_absolute(path) do
+      {:ok, canonical} ->
+        case validate_executable(canonical, @max_executable_bytes) do
+          {:ok, digest} -> {:ok, canonical, digest}
+          {:error, _reason} -> {:error, :invalid_mcp_executable}
+        end
+
+      {:error, :not_found} ->
+        {:error, :mcp_command_not_found}
+
+      {:error, _reason} ->
+        {:error, :invalid_mcp_executable}
+    end
   end
 
   defp resolve_launcher(nil) do
@@ -1555,13 +1913,21 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   defp canonical_executable(path, max_bytes, error) do
     with {:ok, canonical} <- ConfinedFile.resolve_absolute(path),
-         {:ok, stat} <- File.stat(canonical),
-         true <- stat.type == :regular and stat.size in 1..max_bytes,
-         true <- Bitwise.band(stat.mode, 0o111) != 0,
-         {:ok, digest} <- hash_file(canonical, max_bytes) do
+         {:ok, digest} <- validate_executable(canonical, max_bytes) do
       {:ok, canonical, digest}
     else
       _reason -> {:error, error}
+    end
+  end
+
+  defp validate_executable(canonical, max_bytes) do
+    with {:ok, stat} <- File.stat(canonical),
+         true <- stat.type == :regular and stat.size in 1..max_bytes,
+         true <- Bitwise.band(stat.mode, 0o111) != 0,
+         {:ok, digest} <- hash_file(canonical, max_bytes) do
+      {:ok, digest}
+    else
+      _invalid -> {:error, :invalid_executable}
     end
   end
 
@@ -1614,10 +1980,22 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
   def resolve_runtime_credentials(_host, _names), do: {:error, :credential_unavailable}
 
-  defp resolve_credential(_directory, %{source: :env, name: name}),
+  # Surrounding whitespace is never part of a secret, and every ordinary way of
+  # putting one in a file adds it: `echo`, an editor save, `gh auth token >
+  # file`. The host reference recommends `file:` for secrets, so the newline is
+  # on the recommended path. All three sources trim, so the same token supplied
+  # three ways is one value.
+  defp resolve_credential(directory, declaration) do
+    case read_credential(directory, declaration) do
+      {:ok, value} when is_binary(value) -> {:ok, String.trim(value)}
+      other -> other
+    end
+  end
+
+  defp read_credential(_directory, %{source: :env, name: name}),
     do: System.fetch_env(name)
 
-  defp resolve_credential(directory, %{source: :file, path: path}) do
+  defp read_credential(directory, %{source: :file, path: path}) do
     if Path.type(path) == :absolute do
       with {:ok, canonical} <- ConfinedFile.resolve_absolute(path),
            do:
@@ -1631,9 +2009,15 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  defp resolve_credential(_directory, %{source: :literal, value: value}),
+  defp read_credential(_directory, %{source: :literal, value: value}),
     do: {:ok, value}
 
+  # Only NUL disqualifies a credential outright. The two sinks disagree about
+  # the rest: an HTTP header value cannot hold CR or LF, while a child process
+  # environment entry legitimately can — a PEM block or a JSON service-account
+  # key delivered through `transport.env` is a whole credential with interior
+  # newlines. `render_headers/2` owns the stricter rule, because it is the only
+  # sink that needs it.
   defp valid_secret?(value),
     do:
       is_binary(value) and byte_size(value) in 1..@max_credential_bytes and
@@ -1651,10 +2035,17 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end)
   end
 
+  # A header value cannot hold CR or LF, so a credential carrying one cannot
+  # authenticate this request. Reporting that as `:mcp_authentication_failed`
+  # is what `PtcRunner.Kernel.AcquisitionReason` prescribes for a rejected
+  # credential, and it is the same class the endpoint's own refusal produces.
+  # Left as a bare `:credential_unavailable` it escaped `acquire/7` unclassified
+  # and fell closed as an internal error, which told the reader the fault was
+  # not theirs.
   defp render_headers(auth, credentials) do
     Enum.reduce_while(auth, {:ok, []}, fn entry, {:ok, headers} ->
       with {:ok, secret} <- Map.fetch(credentials, entry.binding),
-           false <- String.contains?(secret, ["\r", "\n"]) do
+           false <- carriable_header_value?(secret) do
         header =
           case entry.scheme do
             :bearer -> {"Authorization", "Bearer " <> secret}
@@ -1664,6 +2055,7 @@ defmodule PtcRunner.Kernel.HostInstallation do
 
         {:cont, {:ok, [header | headers]}}
       else
+        true -> {:halt, {:error, :mcp_authentication_failed}}
         _reason -> {:halt, {:error, :credential_unavailable}}
       end
     end)
@@ -1672,4 +2064,6 @@ defmodule PtcRunner.Kernel.HostInstallation do
       {:error, _reason} = error -> error
     end
   end
+
+  defp carriable_header_value?(secret), do: String.contains?(secret, ["\r", "\n"])
 end

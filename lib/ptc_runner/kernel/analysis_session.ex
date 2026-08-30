@@ -12,10 +12,11 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   every host must eventually call `stop/1`.
 
   A session whose profile declares a private result class projects its failure
-  messages through `PtcRunner.Kernel.PrivateDiagnostic`, which rebuilds them
-  from the submitted source instead of forwarding evaluator text. Every error
-  map this module emits carries `message_redacted?` so a withheld diagnostic is
-  distinguishable from one that was never produced.
+  messages through `PtcRunner.Kernel.PrivateDiagnostic`, which rebuilds
+  source-derived names or admits bounded pre-execution diagnostics instead of
+  forwarding arbitrary evaluator text. Every error map this module emits
+  carries `message_redacted?` so a withheld diagnostic is distinguishable from
+  one that was never produced.
   """
   use GenServer
 
@@ -30,9 +31,11 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   alias PtcRunner.Kernel.PrivateDiagnostic
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.SessionTrace
-  alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.ValuePreview
+  alias PtcRunner.Utf8
 
-  @formatted_bytes 65_536
+  @formatted_chars 2_048
+  @formatted_bytes 8_192
   @prints_bytes 65_536
   @prints_count 128
   @json_projection_timeout_ms 1_000
@@ -49,14 +52,19 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   def start(%AnalysisAssembly{} = assembly, opts) when is_list(opts) do
     evaluation_hook = Keyword.get(opts, :evaluation_hook)
     initialization_hook = Keyword.get(opts, :initialization_hook)
+    preview_chars = Keyword.get(opts, :preview_chars, @formatted_chars)
 
-    if Keyword.keys(opts) -- [:evaluation_hook, :initialization_hook] == [] and
+    if Keyword.keys(opts) -- [:evaluation_hook, :initialization_hook, :preview_chars] == [] and
          (is_nil(evaluation_hook) or is_function(evaluation_hook, 1)) and
          (is_nil(initialization_hook) or is_function(initialization_hook, 2)) and
+         preview_chars in 64..65_536 and
          AnalysisAssembly.valid?(assembly) do
       token = make_ref()
 
-      case GenServer.start(__MODULE__, {assembly, token, evaluation_hook, initialization_hook}) do
+      case GenServer.start(
+             __MODULE__,
+             {assembly, token, evaluation_hook, initialization_hook, preview_chars}
+           ) do
         {:ok, pid} -> {:ok, %__MODULE__{pid: pid, token: token}}
         {:error, reason} -> {:error, reason}
       end
@@ -90,7 +98,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   end
 
   @impl GenServer
-  def init({assembly, token, evaluation_hook, initialization_hook}) do
+  def init({assembly, token, evaluation_hook, initialization_hook, preview_chars}) do
     Process.flag(:trap_exit, true)
 
     run_state = assembly.run_state
@@ -118,6 +126,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
                resources: assembly.resources,
                snapshot: AnalysisResources.handle(assembly.resources, :traces),
                inspection_snapshot: AnalysisResources.handle(assembly.resources, :inspection),
+               catalog_snapshot: AnalysisResources.handle(assembly.resources, :catalog),
                session_trace: assembly.session_trace,
                run_state: run_state,
                event_sink: assembly.config.event_sink
@@ -148,6 +157,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
         timer: timer,
         deadline_token: deadline_token,
         evaluation_hook: evaluation_hook,
+        preview_chars: preview_chars,
         lifecycle: :open,
         terminal_reason: nil,
         resources_closed?: false,
@@ -170,8 +180,9 @@ defmodule PtcRunner.Kernel.AnalysisSession do
 
     if state.lifecycle == :open do
       detailed =
-        Evaluation.evaluate_source_detailed(
+        Evaluation.evaluate_source(
           state.run_state,
+          "default",
           state.config.missions["default"].environment,
           source,
           state.config.limits.evaluation_timeout_ms,
@@ -372,29 +383,32 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   end
 
   defp put_value_projection(projection, nil, _state) do
-    Map.merge(projection, %{value: nil, value_available?: true, formatted: "nil"})
+    Map.merge(projection, %{
+      value: nil,
+      value_available?: true,
+      formatted: "nil",
+      formatted_caps_hit: [],
+      formatted_sampled_keys: []
+    })
   end
 
   defp put_value_projection(projection, value, state) do
     limits = state.config.limits
+    preview = bounded_format(value, limits, state.preview_chars)
 
     case bounded_json_value(value, limits) do
       {:ok, normalized} ->
-        {formatted, truncated?} = bounded_format(value, limits)
-
-        Map.merge(projection, %{
-          value: normalized,
-          value_available?: true,
-          formatted: formatted,
-          formatted_truncated?: truncated?
-        })
+        projection
+        |> Map.merge(%{value: normalized, value_available?: true})
+        |> put_preview(preview)
 
       :unavailable ->
-        {formatted, truncated?} = bounded_format(value, limits)
-        unavailable_value(projection, formatted, truncated?)
+        unavailable_value(projection, preview)
 
       :result_exceeded ->
-        result_exceeded_projection(projection, state.profile.id)
+        projection
+        |> result_exceeded_projection(state.profile.id)
+        |> put_preview(preview)
     end
   end
 
@@ -425,30 +439,32 @@ defmodule PtcRunner.Kernel.AnalysisSession do
     end
   end
 
-  defp unavailable_value(projection, formatted, truncated?) do
+  defp unavailable_value(projection, preview),
+    do: projection |> Map.merge(%{value: nil, value_available?: false}) |> put_preview(preview)
+
+  defp put_preview(projection, preview) do
     Map.merge(projection, %{
-      value: nil,
-      value_available?: false,
-      formatted: formatted,
-      formatted_truncated?: truncated?
+      formatted: preview.text,
+      formatted_truncated?: preview.truncated?,
+      formatted_caps_hit: preview.caps_hit,
+      formatted_sampled_keys: preview.sampled_keys
     })
   end
 
-  defp bounded_format(value, limits) do
+  defp bounded_format(value, limits, preview_chars) do
     case BoundedWorker.run(
            fn ->
-             {formatted, intrinsic?} =
-               Format.to_clojure(value, limit: 100, printable_limit: 16_384)
-
-             {bounded, clipped?} = clip_utf8(formatted, @formatted_bytes)
-             {bounded, intrinsic? or clipped?}
+             ValuePreview.render_with_notice(value,
+               max_chars: preview_chars,
+               max_bytes: min(preview_chars * 4, max(@formatted_bytes, preview_chars))
+             )
            end,
            timeout_ms: min(limits.evaluation_timeout_ms, @json_projection_timeout_ms),
            max_heap_words: limits.evaluation_heap_words,
            cancel_with_caller: true
          ) do
       {:ok, result} -> result
-      {:error, _reason} -> {"#<format-unavailable>", true}
+      {:error, reason} -> ValuePreview.fallback(reason)
     end
   end
 
@@ -459,7 +475,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
        do: nil
 
   defp error_projection(result, state, source) do
-    details = Map.get(result, :details, %{})
+    details = private_diagnostic_details(result)
     kind = Map.get(result, :kind, result.outcome)
     {message, redacted?} = error_message(kind, details, state, source)
 
@@ -468,15 +484,34 @@ defmodule PtcRunner.Kernel.AnalysisSession do
       reason: Map.get(result, :reason),
       message: message,
       message_redacted?: redacted?,
-      capability_activity?:
-        Map.get(result, :capability_activity?, Map.get(details, :capability_activity?)),
+      capability_activity?: Map.get(details, :capability_activity?),
       capability_failure?: Map.get(result, :capability_failure?),
       retryable?: Map.get(result, :retryable?)
     }
   end
 
-  # A private session never forwards evaluator message text; it rebuilds what
-  # the operator's own source already says. See `PrivateDiagnostic`.
+  # OR top-level and details flags so either true blocks pre-execution
+  # admission. When neither recorded activity, leave the key absent so
+  # `PrivateDiagnostic` fails closed rather than inventing an idle measurement.
+  defp private_diagnostic_details(result) do
+    details =
+      case Map.get(result, :details, %{}) do
+        map when is_map(map) -> map
+        _other -> %{}
+      end
+
+    case {Map.fetch(result, :capability_activity?), Map.fetch(details, :capability_activity?)} do
+      {:error, :error} ->
+        details
+
+      {top, detail} ->
+        activity? = match?({:ok, true}, top) or match?({:ok, true}, detail)
+        Map.put(details, :capability_activity?, activity?)
+    end
+  end
+
+  # A private session never forwards arbitrary evaluator text; see
+  # `PrivateDiagnostic` for the two admission rules.
   defp error_message(
          kind,
          details,
@@ -489,7 +524,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   defp error_message(_kind, details, _state, _source),
     do: {bounded_message(Map.get(details, :message)), false}
 
-  defp bounded_message(message) when is_binary(message), do: elem(clip_utf8(message, 4_096), 0)
+  defp bounded_message(message) when is_binary(message), do: Utf8.truncate(message, 4_096)
   defp bounded_message(_message), do: nil
 
   defp enforce_result_limit(projection, limit, profile_id) do
@@ -511,6 +546,8 @@ defmodule PtcRunner.Kernel.AnalysisSession do
       value_available?: false,
       formatted: nil,
       formatted_truncated?: true,
+      formatted_caps_hit: [:output],
+      formatted_sampled_keys: [],
       prints: [],
       prints_truncated?: projection.prints_truncated? or projection.prints != [],
       error: %{
@@ -686,19 +723,6 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   defp lifecycle_error(:persistence_failed), do: :persistence_failed
   defp lifecycle_error(:backend_failed), do: :backend_failed
   defp lifecycle_error(_lifecycle), do: :session_closed
-
-  defp clip_utf8(value, max_bytes) when byte_size(value) <= max_bytes, do: {value, false}
-
-  defp clip_utf8(value, max_bytes) do
-    clipped = binary_part(value, 0, max_bytes)
-    {trim_invalid_suffix(clipped), true}
-  end
-
-  defp trim_invalid_suffix(value) do
-    if String.valid?(value),
-      do: value,
-      else: trim_invalid_suffix(binary_part(value, 0, byte_size(value) - 1))
-  end
 
   defp redact_status(status) do
     Map.new(status, fn

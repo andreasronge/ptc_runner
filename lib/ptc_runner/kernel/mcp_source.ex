@@ -14,7 +14,11 @@ defmodule PtcRunner.Kernel.MCPSource do
   Runtime calls propagate a W3C `traceparent` derived from the private Kernel
   trace and capability-attempt identities. When private inspection is
   explicitly enabled, version 2 inspection records retain paired exact decoded
-  JSON-RPC request and response bodies correlated to that attempt. Transport
+  JSON-RPC request and response bodies correlated to that attempt. Stdio
+  sessions also retain bounded child-stderr records on that same correlation;
+  captured stdio exchanges are serialized so those bytes belong to one request.
+  A launcher truncation frame marks the capture `truncated`. Those bytes can
+  name host paths, so they stay owner-only. Transport
   credentials and environment values are never part of those bodies or
   records.
 
@@ -23,7 +27,12 @@ defmodule PtcRunner.Kernel.MCPSource do
   streaming boundary: a completed SSE response, response-size rejection, or
   SSE parser rejection halts and closes the response stream. Deadline expiry,
   caller death, provider close, and source-owner death terminate the request
-  task and likewise close the stream. HTTP never sends
+  task and likewise close the stream. Before dispatch, MCP endpoint HTTP,
+  including an OAuth-protected resource request, preserves closed causes for
+  refused connections, unresolved endpoint names, and allowlisted TLS
+  configuration or protocol failures. Raw dependency,
+  endpoint, certificate, and operating-system details never cross the source
+  boundary. HTTP never sends
   `notifications/cancelled`; that protocol notification remains specific to
   stdio. Both transports support schema-valid structured object results with
   exact text or embedded text-resource companions. Unstructured results expose
@@ -37,6 +46,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONSchema
+  alias PtcRunner.Kernel.MCPEndpoint
   alias PtcRunner.Kernel.MCPHTTPAdapter
   alias PtcRunner.Kernel.MCPLauncherStaging
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -45,7 +55,9 @@ defmodule PtcRunner.Kernel.MCPSource do
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.MCPRequestContext
   alias PtcRunner.Kernel.MCPStdioTransport
+  alias PtcRunner.Kernel.MCPTransportReason
   alias PtcRunner.Kernel.ProviderError
+  alias PtcRunner.Kernel.ProviderRegistry
 
   @protocol "2026-07-28"
   @client_info %{"name" => "ptc_runner", "version" => "0.x"}
@@ -67,8 +79,14 @@ defmodule PtcRunner.Kernel.MCPSource do
   @sha256 ~r/\Asha256:[0-9a-f]{64}\z/
   @name ~r/\A[a-z][a-z0-9._-]{0,127}\z/
   @sse_event_separator ~r/(?:\r\n|\r|\n)(?:\r\n|\r|\n)/
+  @answered_reasons [
+    :mcp_remote_error,
+    :mcp_input_required_refused,
+    :mcp_unsupported_result,
+    :mcp_capability_negotiation_error
+  ]
 
-  @type builder :: PtcRunner.Kernel.ProviderRegistry.builder()
+  @type builder :: PtcRunner.Kernel.ProviderRegistry.staged_builder()
 
   @spec builder(keyword()) :: builder()
   @doc """
@@ -78,8 +96,12 @@ defmodule PtcRunner.Kernel.MCPSource do
 
     * `:transport` - required `{type, options}` tuple. The type is
       `:streamable_http` or `:stdio`. Streamable HTTP requires a fixed HTTPS
-      `:endpoint`; loopback HTTP is accepted only when
-      `:allow_insecure_loopback` is `true` (default `false`), and userinfo and
+      `:endpoint`; plain-HTTP loopback is accepted only when
+      `:allow_insecure_loopback` is `true` (default `false`) and the host is the
+      literal `127.0.0.1` or `::1`. The name `localhost` is not a loopback
+      address for this rule, because it resolves wherever the resolver says.
+      The allowance both permits plain HTTP and requires it: setting it against
+      an HTTPS endpoint is refused rather than ignored. Userinfo and
       fragments are rejected. Its zero-argument `:headers` callback defaults
       to `fn -> [] end`, is evaluated once inside the provider-acquisition
       deadline, and is reused for the built provider. At most 32 valid headers
@@ -149,20 +171,29 @@ defmodule PtcRunner.Kernel.MCPSource do
   Any installation containing a `:write` mapping requires an explicit,
   non-empty `"allow"` list, even when the list selects reads only. It also
   accepts an
-  optional `"model_visible"` subset (defaulting to the selected names whose
-  host mapping is model-visible), and optional lower `"timeout_ms"` and
-  `"max_result_bytes"` values; invalid selections return
-  `{:error, :invalid_mcp_selection}`. MCP sources are mission-only; direct
+  optional `"model_visible"` subset of `"allow"` (defaulting to the selected
+  names whose host mapping is model-visible), and optional lower `"timeout_ms"`
+  and `"max_result_bytes"` values; invalid selections return
+  `{:error, :invalid_mcp_selection}`. An explicit `"model_visible"` list may
+  name any authorized `"allow"` entry, including a mapping whose host
+  `model_visible` flag is false. MCP sources are mission-only; direct
   registry assembly rejects a workflow destination before credentials,
   transport acquisition, discovery, or RPC. Assembly returns
-  `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or a
-  stable atom error: `:mcp_authentication_failed`, `:mcp_timeout`,
-  `:mcp_transport_error`, `:mcp_protocol_error`, `:mcp_remote_error`,
+  `{:ok, %{capabilities: list, snapshot: map, close: zero_arity_function}}` or
+  one of these closed error reasons: `:mcp_authentication_failed`, `:mcp_timeout`,
+  `:mcp_transport_error`, `:mcp_endpoint_connection_refused`,
+  `:mcp_endpoint_name_unresolved`, `:mcp_endpoint_tls_failed`,
+  `:mcp_protocol_error`, `:mcp_discovery_method_unsupported`,
+  `:mcp_protocol_version_unsupported`, `:mcp_remote_error`,
   `:mcp_response_exceeded`, `:mcp_catalog_exceeded`, `:mcp_invalid_catalog`,
   `:mcp_invalid_tool_schema`, `:mcp_capability_negotiation_error`,
   `:mcp_authorization_required`,
   `:mcp_input_required_refused`, `:mcp_unsupported_result`,
-  `:mcp_mapped_tool_missing`, or `:mcp_invalid_snapshot_identity`.
+  `{:mcp_mapped_tool_missing, declared_name}`, or `:mcp_invalid_snapshot_identity`.
+  A stdio installation adds `:mcp_stdio_launcher_unavailable` and
+  `:unsupported_mcp_stdio_platform`: a launcher that cannot be resolved, staged
+  or cleaned up is a local dependency rather than an unreachable provider, and
+  reporting it as one sends the operator to the server they installed.
 
   ## Frozen result and snapshot contracts
 
@@ -183,15 +214,21 @@ defmodule PtcRunner.Kernel.MCPSource do
   results become `mcp_capability_negotiation_error` because this client
   advertises no input capabilities, and malformed or method-inapplicable
   results remain `mcp_protocol_error`.
-  A closed transport reports the terminal `mcp_transport_closed` cause, and a
+  A refused connection, unresolved endpoint name, or admitted TLS handshake
+  failure preserves its stable cause and `:not_dispatched` provenance. Refused
+  connections are retryable; name-resolution and TLS failures are not. A
+  closed transport reports the terminal `mcp_transport_closed` cause, and a
   stdio transport failure is likewise terminal, because neither session can be
   re-established within the run; only an in-flight HTTP transport failure stays
   retryable. Parameter-header projection, outbound-header validation, and a
   closed HTTP request context are trusted `:not_dispatched` failures. Once an HTTP request
   begins or a stdio request may have been written, failures carry internal
-  `:possibly_dispatched` provenance. A possibly dispatched write failure is
+  `:possibly_dispatched` provenance unless the callee returned a complete
+  decoded answer. A possibly dispatched write failure is
   non-retryable and carries `mutation_state: :indeterminate`; the Dispatcher
-  exposes the mutation state but never the transport provenance.
+  exposes the mutation state but never the transport provenance. A complete
+  decoded refusal, JSON-RPC error, or other well-formed answer is
+  `:dispatched` and does not set mutation state.
 
   The safe connector snapshot has top-level fields `provider`, `protocol`,
   `transport`, selected `timeout_ms`, selected `max_result_bytes`,
@@ -217,12 +254,29 @@ defmodule PtcRunner.Kernel.MCPSource do
   """
   def builder(opts) when is_list(opts) do
     case installed_config(opts) do
-      {:ok, installed} -> fn selection, context -> build(installed, selection, context) end
-      {:error, reason} -> raise ArgumentError, "invalid MCP source: #{reason}"
+      {:ok, installed} ->
+        ProviderRegistry.staged(fn selection, context ->
+          {:ok,
+           %{
+             credential_names: [],
+             preflight: fn -> {:ok, fn %{} -> build(installed, selection, context) end} end
+           }}
+        end)
+
+      {:error, reason} ->
+        raise ArgumentError, "invalid MCP source: #{reason}"
     end
   end
 
   def builder(_opts), do: raise(ArgumentError, "invalid MCP source")
+
+  @doc false
+  def acquire(opts, selection, context) when is_list(opts) do
+    case installed_config(opts) do
+      {:ok, installed} -> build(installed, selection, context)
+      {:error, reason} -> raise ArgumentError, "invalid MCP source: #{reason}"
+    end
+  end
 
   defp installed_config(opts) do
     allowed = [
@@ -269,6 +323,16 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
+  # `:allow_insecure_loopback` deliberately does not forbid `:authorization`
+  # here, though `HostConfig` forbids the pair outright. The two answer
+  # different questions. A host document is operator-authored configuration
+  # whose credentials PtcRunner resolves, so it must never be able to send one
+  # over plaintext; this option is an explicit grant by trusted in-process
+  # Elixir code that already holds the token, and the credential-free local
+  # OAuth harness in `mcp_oauth_remote_e2e_test.exs` exists precisely to carry a
+  # bearer across a real loopback MCP protocol boundary. Widening the host rule
+  # to here would delete that coverage without protecting anything the host
+  # layer has not already closed.
   defp installed_transport({:streamable_http, opts}) when is_list(opts) do
     allowed = [:endpoint, :headers, :authorization, :allow_insecure_loopback]
 
@@ -347,19 +411,8 @@ defmodule PtcRunner.Kernel.MCPSource do
        else: {:error, :invalid_transport}
   end
 
-  defp endpoint(endpoint, allow_loopback?) do
-    case URI.parse(endpoint) do
-      %URI{scheme: "https", host: host, userinfo: nil, fragment: nil} when is_binary(host) ->
-        :ok
-
-      %URI{scheme: "http", host: host, userinfo: nil, fragment: nil}
-      when allow_loopback? and host in ["127.0.0.1", "localhost", "::1"] ->
-        :ok
-
-      _uri ->
-        {:error, :invalid_endpoint}
-    end
-  end
+  defp endpoint(endpoint, allow_loopback?),
+    do: MCPEndpoint.validate(endpoint, allow_loopback?)
 
   defp oauth_resource_matches?(endpoint, resource, allow_insecure_loopback) do
     case Authority.resource(endpoint, allow_insecure_loopback: allow_insecure_loopback) do
@@ -375,13 +428,17 @@ defmodule PtcRunner.Kernel.MCPSource do
         description = Map.get(mapping, :description)
         model_visible = Map.get(mapping, :model_visible, true)
         error_feedback = Map.get(mapping, :error_feedback, :closed)
+        inspection_capture = Map.get(mapping, :inspection_capture, :full)
 
-        if Map.keys(mapping) --
-             [:as, :effect, :description, :model_visible, :error_feedback] == [] and
-             MCPProtocol.valid_tool_name?(upstream) and public =~ @name and
-             not MapSet.member?(public_names, public) and
-             (is_nil(description) or valid_string?(description, 4_096)) and
-             is_boolean(model_visible) and error_feedback in [:closed, :bounded] do
+        validation = %{
+          description: description,
+          model_visible: model_visible,
+          error_feedback: error_feedback,
+          inspection_capture: inspection_capture,
+          effect: effect
+        }
+
+        if valid_installed_mapping?(upstream, public, mapping, public_names, validation) do
           {:cont,
            {:ok,
             Map.put(normalized, upstream, %{
@@ -389,7 +446,8 @@ defmodule PtcRunner.Kernel.MCPSource do
               effect: effect,
               description: description,
               model_visible: model_visible,
-              error_feedback: error_feedback
+              error_feedback: error_feedback,
+              inspection_capture: inspection_capture
             }), MapSet.put(public_names, public)}}
         else
           {:halt, {:error, :invalid_tools}}
@@ -405,6 +463,17 @@ defmodule PtcRunner.Kernel.MCPSource do
   end
 
   defp installed_tools(_tools), do: {:error, :invalid_tools}
+
+  defp valid_installed_mapping?(upstream, public, mapping, public_names, validation) do
+    Map.keys(mapping) --
+      [:as, :effect, :description, :model_visible, :error_feedback, :inspection_capture] == [] and
+      MCPProtocol.valid_tool_name?(upstream) and public =~ @name and
+      not MapSet.member?(public_names, public) and
+      (is_nil(validation.description) or valid_string?(validation.description, 4_096)) and
+      is_boolean(validation.model_visible) and validation.error_feedback in [:closed, :bounded] and
+      validation.inspection_capture in [:full, :digest_results] and
+      (validation.inspection_capture == :full or validation.effect == :read)
+  end
 
   defp installed_snapshot_identity(nil, _tools), do: {:ok, nil}
 
@@ -534,6 +603,21 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
+  # Reasons the stdio acquisition path answers that the acquisition catalog
+  # already places on their own terms. A launcher that cannot be resolved,
+  # staged, or cleaned up is a local dependency; a bootstrap the launcher
+  # protocol rejects is a protocol fault; neither is the provider being
+  # unreachable. Everything outside this set collapses, and
+  # `PtcRunner.Kernel.AcquisitionReason` names which reasons that is.
+  @stdio_acquisition_reasons [
+    :mcp_timeout,
+    :mcp_transport_error,
+    :mcp_protocol_error,
+    :mcp_stdio_launcher_unavailable,
+    :unsupported_mcp_stdio_platform,
+    :resource_registrar_unavailable
+  ]
+
   defp normalize_stdio_acquisition(result) do
     case result do
       {:ok, _transport} = success ->
@@ -542,11 +626,11 @@ defmodule PtcRunner.Kernel.MCPSource do
       remaining_ms when is_integer(remaining_ms) and remaining_ms <= 0 ->
         {:error, :mcp_timeout}
 
-      {:error, :mcp_timeout} ->
-        {:error, :mcp_timeout}
-
       {:error, :mcp_stdio_spawn_timeout} ->
         {:error, :mcp_timeout}
+
+      {:error, reason} when reason in @stdio_acquisition_reasons ->
+        {:error, reason}
 
       {:error, _reason} ->
         {:error, :mcp_transport_error}
@@ -749,7 +833,7 @@ defmodule PtcRunner.Kernel.MCPSource do
          true <-
            Enum.all?(model_visible, &is_binary/1) and
              Enum.uniq(model_visible) == model_visible,
-         true <- Enum.all?(model_visible, &(&1 in installed_visible)),
+         true <- Enum.all?(model_visible, &(&1 in allow)),
          timeout_ms when is_integer(timeout_ms) and timeout_ms > 0 <-
            Map.get(
              selection,
@@ -812,6 +896,7 @@ defmodule PtcRunner.Kernel.MCPSource do
       {:ok, capabilities, snapshot}
     else
       {:error, :mcp_transport_closed} -> {:error, :mcp_transport_error}
+      {:error, reason, _provenance} -> {:error, reason}
       {:error, _reason} = error -> error
       _reason -> {:error, :mcp_protocol_error}
     end
@@ -875,8 +960,8 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp capability(_request, _upstream, _mapping, nil, _selected),
-    do: {:error, :mcp_mapped_tool_missing}
+  defp capability(_request, upstream, _mapping, nil, _selected),
+    do: {:error, {:mcp_mapped_tool_missing, upstream}}
 
   defp capability(transport, upstream, mapping, tool, selected) do
     case MCPProtocol.selected_tool(tool) do
@@ -897,6 +982,7 @@ defmodule PtcRunner.Kernel.MCPSource do
              input_schema: contract.input_schema,
              output_schema: contract.output_schema,
              effect: mapping.effect,
+             inspection_capture: mapping.inspection_capture,
              callback: fn _arguments, _context -> {:error, :uninstalled_mcp_callback} end
            ),
          capability = %{
@@ -977,11 +1063,11 @@ defmodule PtcRunner.Kernel.MCPSource do
            "mcp_domain_error",
            false,
            effect,
-           :possibly_dispatched
+           :dispatched
          )}
 
       {:error, {:mcp_domain_error, feedback}} ->
-        {:error, provider_error(:domain_error, feedback, false, effect, :possibly_dispatched)}
+        {:error, provider_error(:domain_error, feedback, false, effect, :dispatched)}
 
       {:error, :mcp_invalid_result} ->
         {:error,
@@ -1205,6 +1291,7 @@ defmodule PtcRunner.Kernel.MCPSource do
        ) do
     case rpc(transport, method, params, max_bytes, header_parameters, context) do
       {:ok, _result} = success -> success
+      {:error, _reason, _provenance} = error -> error
       {:error, reason} -> {:error, reason, :possibly_dispatched}
     end
   end
@@ -1227,13 +1314,16 @@ defmodule PtcRunner.Kernel.MCPSource do
     with {:ok, response} <-
            http(request, headers, payload, @max_transport_response_bytes),
          {:ok, body} <- response_body(response, request.id),
-         :ok <- capture_exchange(context, :streamable_http, payload, body) do
-      bounded_outcome(body, method, max_bytes)
+         outcome = bounded_rpc_outcome(body, method, max_bytes),
+         :ok <- capture_exchange(context, :streamable_http, payload, body, outcome) do
+      outcome
     end
   end
 
   defp mark_possibly_dispatched({:error, reason}),
     do: {:error, reason, :possibly_dispatched}
+
+  defp mark_possibly_dispatched({:error, _reason, _provenance} = error), do: error
 
   defp mark_possibly_dispatched(
          {:authorization_transition, _status, _response, _auth, _deadline} = transition
@@ -1265,10 +1355,12 @@ defmodule PtcRunner.Kernel.MCPSource do
            {:ok, response} <-
              http(request, headers, payload, @max_transport_response_bytes),
            {:ok, body} <- response_body(response, request.id),
-           :ok <- capture_exchange(context, :streamable_http, payload, body) do
-        bounded_outcome(body, method, max_bytes)
+           outcome = bounded_outcome(body, method, max_bytes),
+           :ok <- capture_exchange(context, :streamable_http, payload, body, outcome) do
+        outcome
       end
     end)
+    |> strip_http_provenance()
   end
 
   defp rpc(
@@ -1301,12 +1393,22 @@ defmodule PtcRunner.Kernel.MCPSource do
       end
 
     case request do
-      {:ok, %{request: payload, response: body}} ->
-        with :ok <- capture_exchange(context, :stdio, payload, body),
-             do: bounded_outcome(body, method, max_bytes)
+      {:ok, %{request: payload, response: body} = exchange} ->
+        outcome = bounded_rpc_outcome(body, method, max_bytes)
+
+        with :ok <-
+               capture_exchange(
+                 context,
+                 :stdio,
+                 payload,
+                 body,
+                 stderr_capture(exchange),
+                 outcome
+               ),
+             do: outcome
 
       {:ok, body} ->
-        bounded_outcome(body, method, max_bytes)
+        bounded_rpc_outcome(body, method, max_bytes)
 
       {:error, :closed} ->
         {:error, :mcp_transport_closed}
@@ -1316,13 +1418,18 @@ defmodule PtcRunner.Kernel.MCPSource do
     end
   end
 
-  defp capture_exchange(nil, _transport, _request, _response), do: :ok
+  defp capture_exchange(context, transport, request, response, outcome),
+    do: capture_exchange(context, transport, request, response, nil, outcome)
+
+  defp capture_exchange(nil, _transport, _request, _response, _stderr, _outcome), do: :ok
 
   defp capture_exchange(
          %{inspection_sink: nil},
          _transport,
          _request,
-         _response
+         _response,
+         _stderr,
+         _outcome
        ),
        do: :ok
 
@@ -1330,7 +1437,9 @@ defmodule PtcRunner.Kernel.MCPSource do
          %{capability_id: capability_id, inspection_sink: sink} = context,
          transport,
          %{"id" => request_id} = request,
-         %{"id" => request_id} = response
+         %{"id" => request_id} = response,
+         stderr,
+         outcome
        ) do
     correlation = %{capability_id: capability_id, request_id: request_id}
 
@@ -1344,19 +1453,65 @@ defmodule PtcRunner.Kernel.MCPSource do
       end)
     end
 
-    case InspectionSink.emit(sink, "mcp-request", correlation, payload.(request)) do
-      :ok -> InspectionSink.emit(sink, "mcp-response", correlation, payload.(response))
-      {:error, :inspection_sink_error} = error -> error
-    end
+    InspectionSink.emit_mcp_exchange(
+      sink,
+      correlation,
+      payload.(request),
+      payload.(response),
+      stderr_payload(context, stderr),
+      response_capture(context, response, outcome)
+    )
   end
 
   defp capture_exchange(
          %{inspection_sink: sink},
          _transport,
          _request,
-         _response
+         _response,
+         _stderr,
+         _outcome
        ),
        do: InspectionSink.emit(sink, "mcp-request", %{}, %{})
+
+  # Digest capture removes bulk read output. The decision uses only what the
+  # transport has already computed -- the bounded RPC outcome and the provider's
+  # own error marking -- so digest capture adds no work to this heap-limited
+  # process (the sink computes the identity). A body the provider marked failed
+  # or the transport rejected stays full, because a failed call is what an
+  # operator reads afterwards and may not reproduce on a rerun. A rejection made
+  # after this point -- tool-result normalization, retained-size admission,
+  # bounded output validation -- retains its full error envelope in
+  # `capability-output` while the wire body remains an identity; the mapping is
+  # a read, so a full-capture rerun recovers the value and the identity attests
+  # it is the same one.
+  defp response_capture(context, response, outcome) do
+    if Map.get(context, :inspection_capture, :full) == :digest_results and
+         match?({:ok, _result}, outcome) and not error_response?(response) do
+      [response_capture: :digest_results]
+    else
+      []
+    end
+  end
+
+  defp error_response?(%{"error" => _error}), do: true
+  defp error_response?(%{"result" => %{"isError" => true}}), do: true
+  defp error_response?(_response), do: false
+
+  defp stderr_capture(%{stderr: stderr, stderr_truncated?: truncated?})
+       when is_binary(stderr) and stderr != "" do
+    %{transport: :stdio, text: stderr, truncated: truncated?}
+  end
+
+  defp stderr_capture(_exchange), do: nil
+
+  defp stderr_payload(context, %{text: text} = stderr) when is_binary(text) and text != "" do
+    case Map.get(context, :mission_name) do
+      name when is_binary(name) -> Map.put(stderr, :mission_name, name)
+      _ -> stderr
+    end
+  end
+
+  defp stderr_payload(_context, _stderr), do: nil
 
   defp bounded_outcome(body, method, max_result_bytes) do
     with {:ok, result} <- MCPProtocol.outcome(body, method),
@@ -1370,6 +1525,18 @@ defmodule PtcRunner.Kernel.MCPSource do
       {:error, _reason} = error -> error
     end
   end
+
+  defp bounded_rpc_outcome(body, method, max_result_bytes) do
+    case bounded_outcome(body, method, max_result_bytes) do
+      {:ok, result} -> {:ok, result}
+      {:error, reason} -> invocation_error(reason)
+    end
+  end
+
+  defp invocation_error(reason) when reason in @answered_reasons,
+    do: {:error, reason, :dispatched}
+
+  defp invocation_error(reason), do: {:error, reason, :possibly_dispatched}
 
   defp with_request(request_context, callback) do
     case MCPRequestContext.begin_request(request_context) do
@@ -1526,6 +1693,9 @@ defmodule PtcRunner.Kernel.MCPSource do
       |> MCPHTTPAdapter.request()
       |> classify_http_response(payload, request)
     else
+      {:error, :name_not_resolved} ->
+        {:error, :mcp_endpoint_name_unresolved, :not_dispatched}
+
       {:error, reason} when reason in [:egress_denied, :resolution_failed] ->
         {:error, :mcp_transport_error}
 
@@ -1551,7 +1721,7 @@ defmodule PtcRunner.Kernel.MCPSource do
       {:ok,
        [
          timeout_ms: remaining_ms,
-         address: hd(target.addresses),
+         address: target.addresses,
          connected_peer: NetworkPolicy.peer_verifier(target.addresses)
        ]}
     else
@@ -1565,9 +1735,6 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp oauth_network_options(_request), do: {:ok, []}
 
-  defp classify_http_response({:ok, %{status: 404}}, _payload, _request),
-    do: {:error, :mcp_protocol_error}
-
   defp classify_http_response(
          {:ok, %{authorization_result: result}},
          _payload,
@@ -1575,8 +1742,9 @@ defmodule PtcRunner.Kernel.MCPSource do
        ),
        do: result
 
-  defp classify_http_response({:ok, %{status: 400} = response}, payload, _request),
-    do: http_protocol_error(response, payload)
+  defp classify_http_response({:ok, %{status: status} = response}, payload, _request)
+       when status in [400, 404],
+       do: http_protocol_error(response, payload)
 
   defp classify_http_response(
          {:ok, %{status: status} = response},
@@ -1602,14 +1770,13 @@ defmodule PtcRunner.Kernel.MCPSource do
        when status in 200..299,
        do: {:ok, response}
 
-  defp classify_http_response({:error, :timeout, _provenance}, _payload, _request),
-    do: {:error, :mcp_timeout}
+  defp classify_http_response({:error, reason, provenance}, _payload, _request),
+    do: MCPTransportReason.from_http(reason, provenance)
 
-  defp classify_http_response({:error, :response_exceeded, _provenance}, _payload, _request),
-    do: {:error, :mcp_response_exceeded}
+  defp classify_http_response(_response, _payload, _request), do: {:error, :mcp_transport_error}
 
-  defp classify_http_response(_response, _payload, _request),
-    do: {:error, :mcp_transport_error}
+  defp strip_http_provenance({:error, reason, _provenance}), do: {:error, reason}
+  defp strip_http_provenance(result), do: result
 
   defp finish_authorization_transition(
          {:authorization_transition, status, response, authorization, deadline_ms}
@@ -1699,8 +1866,8 @@ defmodule PtcRunner.Kernel.MCPSource do
           end
         end
 
-      {:error, :mcp_protocol_error} ->
-        {:halt, %{response | body: :mcp_protocol_error}}
+      {:error, reason} when reason in [:mcp_protocol_error, :mcp_response_exceeded] ->
+        {:halt, %{response | body: reason}}
     end
   end
 
@@ -1725,6 +1892,10 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp response_body(%{body: {:mcp_sse_response, response}}, _id), do: {:ok, response}
   defp response_body(%{body: :mcp_protocol_error}, _id), do: {:error, :mcp_protocol_error}
+
+  defp response_body(%{body: :mcp_response_exceeded}, _id),
+    do: {:error, :mcp_response_exceeded}
+
   defp response_body(%{body: {:mcp_sse, _state}}, _id), do: {:error, :mcp_protocol_error}
 
   defp response_body(%{body: body} = response, id) when is_binary(body) do
@@ -1744,9 +1915,10 @@ defmodule PtcRunner.Kernel.MCPSource do
 
   defp http_protocol_error(response, %{"id" => id, "method" => method}) do
     with {:ok, body} <- response_body(response, id),
-         {:error, :mcp_remote_error} <- MCPProtocol.outcome(body, method) do
-      {:error, :mcp_protocol_error}
+         true <- MCPProtocol.discovery_method_unsupported_error?(body, method) do
+      {:error, :mcp_discovery_method_unsupported}
     else
+      {:error, :mcp_response_exceeded} -> {:error, :mcp_response_exceeded}
       _invalid -> {:error, :mcp_protocol_error}
     end
   end
@@ -1768,6 +1940,7 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp decode_sse(body, id) do
     case consume_sse_events(body, nil, id, true) do
       {:ok, _rest, response, _at_start?} when is_map(response) -> {:ok, response}
+      {:error, :mcp_response_exceeded} -> {:error, :mcp_response_exceeded}
       _result -> {:error, :mcp_protocol_error}
     end
   end
@@ -1802,6 +1975,9 @@ defmodule PtcRunner.Kernel.MCPSource do
 
       {:ok, {:response, ^id, decoded}} when is_nil(response) ->
         {:ok, decoded}
+
+      {:error, :mcp_response_exceeded} ->
+        {:error, :mcp_response_exceeded}
 
       _invalid ->
         {:error, :mcp_protocol_error}
@@ -1876,8 +2052,12 @@ defmodule PtcRunner.Kernel.MCPSource do
   defp provider_error(:mcp_transport_error, :stdio, effect, provenance),
     do: provider_error(:transport_error, "mcp_transport_error", false, effect, provenance)
 
-  defp provider_error(_reason, _transport, effect, provenance),
-    do: provider_error(:transport_error, "mcp_transport_error", true, effect, provenance)
+  defp provider_error(reason, _transport, effect, provenance) do
+    case MCPTransportReason.provider_error(reason, effect, provenance) do
+      {:ok, error} -> error
+      :error -> provider_error(:transport_error, "mcp_transport_error", true, effect, provenance)
+    end
+  end
 
   defp provider_error(kind, details, retryable?, effect, provenance) do
     mutation_options =

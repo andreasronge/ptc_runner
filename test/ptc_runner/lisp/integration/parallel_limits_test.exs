@@ -131,6 +131,27 @@ defmodule PtcRunner.Lisp.Integration.ParallelLimitsTest do
     assert step.fail.reason == :parallel_capacity_exceeded
   end
 
+  test "an indirect saved pmap shares the global worker budget" do
+    program = ~S"""
+    (let [parallel-map pmap]
+      (parallel-map
+        (fn [_] (parallel-map inc [1 2]))
+        [0]))
+    """
+
+    assert {:error, step} =
+             Lisp.run(program,
+               max_heap: 200_000,
+               worker_max_heap: 200_000,
+               max_parallel_workers: 1,
+               pmap_max_concurrency: 1,
+               timeout: @timeout
+             )
+
+    assert step.fail.reason == :parallel_capacity_exceeded
+    assert Enum.map(step.pmap_calls, &{&1.type, &1.count}) == [{:pmap, 2}, {:pmap, 1}]
+  end
+
   test "max_parallel_workers of one still permits a single non-nested pmap" do
     assert {:ok, step} =
              Lisp.run("(pmap inc [1 2 3])",
@@ -231,6 +252,21 @@ defmodule PtcRunner.Lisp.Integration.ParallelLimitsTest do
              step.fail.message,
              "the run deadline expired during a parallel operation"
            )
+  end
+
+  test "an apply-invoked pcalls retains the run deadline cap" do
+    tools = %{"park" => fn _ -> receive do: (:never -> :ok), after: (2_000 -> :ok) end}
+
+    assert {:error, step} =
+             Lisp.run("(apply pcalls [(fn [] (tool/park {}))])",
+               tools: tools,
+               timeout: @timeout,
+               pmap_timeout: 60_000,
+               parallel_deadline_cap: System.monotonic_time(:millisecond) + 200
+             )
+
+    assert step.fail.reason == :timeout
+    assert step.fail.message =~ "run deadline expired during a parallel operation"
   end
 
   # The cap must survive both EvalContext reconstructions in Apply: the

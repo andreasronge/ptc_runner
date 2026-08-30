@@ -1,5 +1,5 @@
 defmodule PtcRunner.Lisp.RuntimeArithmeticTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   # ============================================================
   # Rounding Functions

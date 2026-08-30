@@ -150,6 +150,13 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenClientTest do
                end
              )
 
+    for reason <- [:connection_refused, :name_not_resolved, :tls_handshake_failed] do
+      assert {:error, :transport_error, :not_dispatched} =
+               TokenClient.exchange_code(authority, oauth_binding(authority), operation,
+                 request: fn _, _, _, _, _ -> {:error, reason, :not_dispatched} end
+               )
+    end
+
     assert {:error, :invalid_grant, :possibly_dispatched} =
              TokenClient.exchange_code(authority, oauth_binding(authority), operation,
                request: fn _, _, _, _, _ ->

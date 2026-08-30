@@ -7,10 +7,12 @@ defmodule PtcRunner.Kernel.CommandDestination do
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.ProjectArtifactRoot
   alias PtcRunner.Kernel.PublicationAuthority
 
   @artifact_names ["trace", "inspection", "result"]
-  @option_keys [:trace_dir, :inspect, :output, :private_output]
+  @result_keys [:output, :private_output]
+  @option_keys [:trace_dir, :inspect] ++ @result_keys
 
   @spec capture(map()) :: {map(), [atom()]}
   def capture(options) when is_map(options) do
@@ -70,7 +72,7 @@ defmodule PtcRunner.Kernel.CommandDestination do
     %{
       "trace" => requested_state(options, [:trace_dir, :trace]),
       "inspection" => requested_state(options, [:inspect]),
-      "result" => requested_state(options, [:output, :private_output])
+      "result" => requested_state(options, @result_keys)
     }
   end
 
@@ -99,12 +101,18 @@ defmodule PtcRunner.Kernel.CommandDestination do
   defp authorize_prepared(preparation, frontend) do
     options = preparation.artifact_destinations
 
-    case PublicationAuthority.authorize(
-           preparation.run_ref,
-           Map.to_list(options),
-           preparation.prepared_run.effective_event_policy,
-           preparation.prepared_run.effective_data_class
-         ) do
+    result =
+      with :ok <- ensure_project_artifact_root(preparation),
+           :ok <- ensure_private_result_destination(preparation, options) do
+        PublicationAuthority.authorize(
+          preparation.run_ref,
+          Map.to_list(options),
+          preparation.prepared_run.effective_event_policy,
+          preparation.prepared_run.effective_data_class
+        )
+      end
+
+    case result do
       {:ok, authority} ->
         {:ok, authority, nil}
 
@@ -118,6 +126,11 @@ defmodule PtcRunner.Kernel.CommandDestination do
         {:error, outcome, nil}
     end
   end
+
+  defp ensure_project_artifact_root(%{project_artifact_root: nil}), do: :ok
+
+  defp ensure_project_artifact_root(%{project_artifact_root: root}),
+    do: ProjectArtifactRoot.ensure(root)
 
   defp destination_failure(preparation, {phase, code}) do
     CommandPreparation.close(preparation)
@@ -158,6 +171,9 @@ defmodule PtcRunner.Kernel.CommandDestination do
             ] do
     {:destination, unavailable_destination_code(destination)}
   end
+
+  defp destination_diagnostic({:destination_directory_missing, destination}),
+    do: {:destination, missing_directory_code(destination)}
 
   defp destination_diagnostic({:private_directory_parent_unsafe, destination}),
     do: {:destination, unsafe_destination_code(destination)}
@@ -214,6 +230,10 @@ defmodule PtcRunner.Kernel.CommandDestination do
   defp unavailable_destination_code(:inspection), do: :inspection_destination_unavailable
   defp unavailable_destination_code(:result), do: :result_destination_unavailable
 
+  defp missing_directory_code(:trace), do: :trace_directory_missing
+  defp missing_directory_code(:inspection), do: :inspection_directory_missing
+  defp missing_directory_code(:result), do: :result_directory_missing
+
   defp unsafe_destination_code(:trace), do: :trace_destination_unsafe
   defp unsafe_destination_code(:inspection), do: :inspection_destination_unsafe
   defp unsafe_destination_code(:result), do: :result_destination_unsafe
@@ -238,6 +258,26 @@ defmodule PtcRunner.Kernel.CommandDestination do
       end
 
     CommandRejection.destination_collision(:run, first, second, frontend)
+  end
+
+  # Commands that publish a result reach this path; `doctor --connect` does not,
+  # and authorizes no result destination of its own. A run whose result is
+  # private-class therefore has nowhere to publish unless one was requested:
+  # stdout is not a private destination. Refusing here keeps the refusal in
+  # phase 6, before any provider activity, and gives it the same diagnostic a
+  # normal destination already earns inside `PublicationAuthority.authorize/4`.
+  defp ensure_private_result_destination(preparation, options) do
+    prepared = preparation.prepared_run
+
+    private? =
+      PublicationAuthority.private_result?(
+        prepared.effective_event_policy,
+        prepared.effective_data_class
+      )
+
+    if private? and not Enum.any?(@result_keys, &Map.has_key?(options, &1)),
+      do: {:error, :private_destination_required},
+      else: :ok
   end
 
   defp internal_outcome(%CommandPreparation{run_ref: run_ref}) do

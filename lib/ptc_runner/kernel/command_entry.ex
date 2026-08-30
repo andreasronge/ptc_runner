@@ -4,26 +4,43 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
   Entry generates the command reference, parses exactly once, and validates an
   envelope destination against every derivable artifact target before startup.
-  A rejected entry retains no caller-owned destination or unknown switch text.
+  A syntactically valid invocation whose named project fails schema validation
+  is retained as an admitted terminal diagnostic, so its envelope destination
+  is available without bootstrapping the command or opening project references.
+  One-shot result destinations are anchored into both parsed option views before
+  their frontends receive them. A rejected entry retains no caller-owned
+  destination or unknown switch text.
   """
 
   alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandDestination
-  alias PtcRunner.Kernel.CommandParser
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.DestinationIdentity
   alias PtcRunner.Kernel.PrivateDirectory
+  alias PtcRunner.Kernel.ProjectResolver
   alias PtcRunner.Kernel.PublicationAuthority
 
   @fallback_run_ref "cmd-00000000000000000000000000"
-  @enforce_keys [:run_ref, :frontend, :arguments, :rejection, :envelope_path, :destinations]
+  @frontend_commands CommandDeclaration.frontend_commands()
+  @enforce_keys [
+    :run_ref,
+    :frontend,
+    :arguments,
+    :diagnostic,
+    :rejection,
+    :envelope_path,
+    :destinations
+  ]
   defstruct @enforce_keys
 
   @type t :: %__MODULE__{
           run_ref: binary(),
           frontend: :standalone | :mix,
           arguments: CommandArguments.t() | nil,
+          diagnostic: CommandDiagnostic.t() | nil,
           rejection: CommandRejection.t() | nil,
           envelope_path: binary() | nil,
           destinations: {map(), [atom()]} | nil
@@ -57,9 +74,12 @@ defmodule PtcRunner.Kernel.CommandEntry do
   end
 
   defp open_safely(argv, frontend, run_ref) do
-    case CommandParser.parse(argv, frontend) do
+    case ProjectResolver.parse(argv, frontend, run_ref) do
       {:ok, %CommandArguments{} = arguments} ->
-        finish(arguments, run_ref, frontend)
+        finish(arguments, run_ref, frontend, nil)
+
+      {:document_error, %CommandArguments{} = arguments, %CommandDiagnostic{} = diagnostic} ->
+        finish(arguments, run_ref, frontend, diagnostic)
 
       {:error, %CommandRejection{} = rejection} ->
         {:error, rejected(run_ref, frontend, rejection)}
@@ -74,12 +94,15 @@ defmodule PtcRunner.Kernel.CommandEntry do
        rejected(run_ref, frontend, CommandRejection.generic(:unknown, :invalid_arguments))}
   end
 
-  defp finish(arguments, run_ref, frontend) do
+  defp finish(arguments, run_ref, frontend, diagnostic) do
     destinations = CommandDestination.capture(arguments.options)
 
-    case anchor_init_target(arguments) do
-      {:ok, arguments} ->
-        finish(arguments, destinations, run_ref, frontend)
+    with {:ok, arguments} <- anchor_entry_paths(arguments),
+         {:ok, arguments} <- anchor_one_shot_destinations(arguments, destinations, frontend) do
+      finish_envelope(arguments, destinations, run_ref, frontend, diagnostic)
+    else
+      {:error, %CommandRejection{} = rejection} ->
+        {:error, rejected(run_ref, frontend, rejection)}
 
       _invalid ->
         {:error,
@@ -91,20 +114,76 @@ defmodule PtcRunner.Kernel.CommandEntry do
     end
   end
 
-  defp finish(arguments, destinations, run_ref, frontend) do
+  defp anchor_one_shot_destinations(
+         %CommandArguments{command: command, options: options, ordered_options: ordered} =
+           arguments,
+         {destinations, failures},
+         frontend
+       )
+       when command in @frontend_commands do
+    keys = one_shot_destination_keys(command)
+
+    case Enum.find(keys, &(&1 in failures)) do
+      nil ->
+        anchored = Map.take(destinations, keys)
+
+        {:ok,
+         %{
+           arguments
+           | options: Map.merge(options, anchored),
+             ordered_options: replace_ordered_destinations(ordered, anchored)
+         }}
+
+      key ->
+        {:error, CommandRejection.invalid_destination(command, key, frontend)}
+    end
+  end
+
+  defp anchor_one_shot_destinations(%CommandArguments{} = arguments, _destinations, _frontend),
+    do: {:ok, arguments}
+
+  defp one_shot_destination_keys(:transcript), do: [:private_output]
+  defp one_shot_destination_keys(:repl), do: [:output, :private_output]
+  defp one_shot_destination_keys(:viewer), do: []
+
+  defp replace_ordered_destinations(ordered, destinations) do
+    Enum.reduce(destinations, ordered, fn {key, path}, options ->
+      Keyword.replace!(options, key, path)
+    end)
+  end
+
+  defp anchor_entry_paths(arguments) do
+    with {:ok, arguments} <- anchor_init_target(arguments),
+         do: anchor_env_file(arguments)
+  end
+
+  defp anchor_env_file(%CommandArguments{frontend_options: options} = arguments) do
+    case Keyword.fetch(options, :env_file) do
+      :error ->
+        {:ok, arguments}
+
+      {:ok, path} ->
+        with {:ok, path} <- anchor_file(path) do
+          {:ok, %{arguments | frontend_options: Keyword.replace!(options, :env_file, path)}}
+        end
+    end
+  end
+
+  defp finish_envelope(arguments, destinations, run_ref, frontend, diagnostic) do
     case Keyword.fetch(arguments.frontend_options, :envelope) do
       :error ->
-        {:ok, accepted(run_ref, frontend, arguments, nil, destinations)}
+        {:ok, accepted(run_ref, frontend, arguments, diagnostic, nil, destinations)}
 
       {:ok, envelope} ->
         with {:ok, envelope} <- anchor_file(envelope),
-             :ok <- distinct?(arguments, destinations, run_ref, envelope) do
+             :ok <- distinct?(arguments, destinations, run_ref, envelope),
+             :ok <- absent?(envelope) do
           arguments = %{
             arguments
             | frontend_options: Keyword.delete(arguments.frontend_options, :envelope)
           }
 
-          {:ok, accepted(run_ref, frontend, arguments, envelope, destinations)}
+          {:ok, accepted(run_ref, frontend, arguments, diagnostic, envelope, destinations)}
         else
           {:error, :invalid_destination} ->
             {:error,
@@ -118,6 +197,14 @@ defmodule PtcRunner.Kernel.CommandEntry do
                )
              )}
 
+          {:error, :destination_exists} ->
+            {:error,
+             rejected(
+               run_ref,
+               frontend,
+               CommandRejection.envelope_destination_exists(arguments.command, frontend)
+             )}
+
           {:error, {:destination_collision, key}} ->
             destination_collision(arguments, run_ref, frontend, key, :envelope)
 
@@ -129,6 +216,19 @@ defmodule PtcRunner.Kernel.CommandEntry do
                CommandRejection.init_destination_collision(frontend)
              )}
         end
+    end
+  end
+
+  # The publication reserve behind the envelope never clobbers, so an existing
+  # destination is refused whenever it is noticed. Noticing it here, where the
+  # path is already anchored and nothing has run, costs one lstat and keeps a
+  # second invocation of the same CI step from paying for a run whose result it
+  # cannot receive.
+  defp absent?(path) do
+    case File.lstat(path) do
+      {:error, :enoent} -> :ok
+      {:ok, _stat} -> {:error, :destination_exists}
+      {:error, _reason} -> :ok
     end
   end
 
@@ -241,11 +341,12 @@ defmodule PtcRunner.Kernel.CommandEntry do
 
   defp anchor_path(_path), do: {:error, :invalid_destination}
 
-  defp accepted(run_ref, frontend, arguments, envelope_path, destinations) do
+  defp accepted(run_ref, frontend, arguments, diagnostic, envelope_path, destinations) do
     %__MODULE__{
       run_ref: run_ref,
       frontend: frontend,
       arguments: arguments,
+      diagnostic: diagnostic,
       rejection: nil,
       envelope_path: envelope_path,
       destinations: destinations
@@ -257,6 +358,7 @@ defmodule PtcRunner.Kernel.CommandEntry do
       run_ref: run_ref,
       frontend: frontend,
       arguments: nil,
+      diagnostic: nil,
       rejection: rejection,
       envelope_path: nil,
       destinations: nil

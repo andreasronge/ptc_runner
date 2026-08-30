@@ -129,22 +129,47 @@ Features marked ✅ in the audit but whose behavior diverges from Clojure.
 
 **Fix:** Already working — rest args with vector destructuring (`[& [y]]`) are handled correctly by the existing variadic binding + pattern matching logic.
 
+### GAP-F03: Wrong-arity `recur` accepted in an uncalled definition
+
+| Field | Value |
+|-------|-------|
+| **Priority** | P0 |
+| **Status** | **fixed** |
+| **Source** | Issue #1638; DABStep experiment #1634 |
+
+**Clojure behavior:** Every `recur` must match the arity of its nearest recursion point (`loop`, `fn`, or `defn`) while that containing form is compiled. The definition is rejected even if the function is never invoked:
+
+```clojure
+(defn bad [] (loop [x 1 y 2] (recur 1 2 3)))
+;; Mismatched argument count to recur, expected: 2 args, got: 3
+```
+
+Recur arity is the number of loop binding pairs or function parameter slots, not the number of names introduced by destructuring. A variadic `[x & xs]` expects exactly two recur arguments: the new `x` and the new rest-slot value. Nested recursion points shadow the outer target for their body.
+
+**Fix:** The analyzer installs the current recur target arity while analyzing each `loop`/`fn`/`defn` body and rejects a mismatch as `{:invalid_arity, :recur, message}` before evaluation. Runtime `arity_mismatch` checks remain as invariant defenses.
+
 ---
 
 ## 3. Core Functions — Missing functions
 
 Functions listed as `🔲 candidate` in the audit that showed up in conformance testing.
 
-### Note: `dir`, `doc`, `apropos`, and `export-meta` are PTC extensions
+### Note: `dir`, `doc`, `apropos`, `export-meta`, and `source` are PTC extensions
 
-PTC-Lisp binds these names to prelude introspection (see *Prelude
-Introspection* in the specification). They are not implementations of
+PTC-Lisp binds these names to language introspection (see *Introspection* in
+the specification). They are not implementations of
 `clojure.repl/dir`, `clojure.repl/doc`, `clojure.repl/apropos`, or
 `clojure.core/meta`, and they carry no `clojure_var` in `priv/functions.exs`:
-they take a reference string rather than a symbol or object, and they read the
-attached prelude's public exports rather than interned vars. The corresponding
-Clojure vars remain unimplemented — PTC-Lisp has no var namespace to reflect
-over, and `clojure.core/meta` has no metadata-carrying object model to return.
+`dir`/`doc`/`export-meta`/`source` take a reference (string, quoted symbol, or
+unquoted symbol via the same macro-like rewrite as `clojure.repl/doc`);
+`apropos` takes a string or quoted symbol and otherwise evaluates its argument.
+None take a Clojure var or object.
+`dir`, `export-meta`, and `source` read attached prelude exports (`source`
+also covers reachable private helpers); `apropos` and `doc` also cover
+PTC-Lisp's fixed registry and bounded Java surface. The corresponding Clojure
+vars remain unimplemented — PTC-Lisp has no var namespace to reflect over, and
+`clojure.core/meta` has no metadata-carrying object model to return (and stays
+a normal function, not a discovery form).
 
 ### GAP-C01: `int?` predicate not implemented
 
@@ -245,7 +270,7 @@ over, and `clojure.core/meta` has no metadata-carrying object model to return.
 
 Documented differences where PTC-Lisp intentionally departs from Clojure for sandbox safety or simplicity.
 
-### DIV-01: Loop/recursion iteration limit
+### DIV-01: Optional loop/recursion iteration limit
 
 | Field | Value |
 |-------|-------|
@@ -253,16 +278,16 @@ Documented differences where PTC-Lisp intentionally departs from Clojure for san
 | **Status** | by design |
 | **Source** | SCI `recur-test` line 667 |
 
-PTC-Lisp enforces a default limit of 1,000 iterations (configurable up to 10,000) on `loop`/`recur` and recursive function calls. Clojure has no such limit.
+PTC-Lisp has no default `loop`/`recur` iteration counter. Direct embedders may pass `loop_limit` to `PtcRunner.Lisp.run/2`, and Kernel hosts may enable `workflow_loop_iterations` or `evaluation_loop_iterations`. When a positive limit is configured, it applies per `loop` or tail-`recur` function activation, not cumulatively across the evaluation. Ordinary non-tail function recursion and host collection traversal (`map`, `reduce`, and similar) are not counted. Clojure has no such limit.
 
 ```clojure
-;; Clojure: succeeds
+;; Clojure and default PTC-Lisp: succeeds
 (defn hello [x] (if (< x 10000) (recur (inc x)) x)) (hello 0)   ;=> 10000
 
-;; PTC-Lisp: loop_limit_exceeded (default limit 1000)
+;; PTC-Lisp with an explicit loop_limit of 1000: loop_limit_exceeded
 ```
 
-**Rationale:** Sandbox safety. LLM-generated code must terminate within bounded time/memory. See `lib/ptc_runner/lisp/eval/context.ex`.
+**Rationale:** Sandbox safety is provided by heap and elapsed-time containment. An optional activation-local counter can fail one runaway explicit loop quickly without scoring `loop`/`doseq` differently from `reduce`/`map`. See `lib/ptc_runner/lisp/eval/context.ex`.
 
 ### DIV-02: No lazy sequences
 
@@ -296,6 +321,8 @@ No `defmacro`, `macroexpand`, `eval`, `read-string`. LLM safety boundary.
 **Rationale:** Sandbox safety + transactional retries. Mutable state (atoms/refs) would break the all-or-nothing memory model and deterministic replay; PTC threads state functionally instead.
 
 No `atom`, `ref`, `agent`, `swap!`, `reset!`. Pure functional only.
+
+<a id="div-06-silent-deduplication-of-computed-duplicate-keys-in-mapset-literals"></a>
 
 ### DIV-06: Silent deduplication of computed duplicate keys in map/set literals
 
@@ -1038,6 +1065,8 @@ model (which takes precedence over Clojure-compat where they conflict). The
 related nil-keyseq protocol-error case was fixed as a BUG under
 [GAP-S23](#gap-s23-select-keys-with-nil-keyseq-raises-instead-of-returning-an-empty-map).
 
+<a id="div-47-flexible-keywordstring-key-access-keynormalizer"></a>
+
 ### DIV-47: Flexible keyword/string key access (KeyNormalizer)
 
 | Field | Value |
@@ -1076,7 +1105,7 @@ keyword lookup can return a string-keyed value, which can mask a data-shape
 mismatch at a map boundary — guard explicitly when exact-key semantics matter.
 This value model takes precedence over Clojure-compat where they conflict.
 When a map contains both a keyword key and its string alias, flexible lookup
-still prefers the exact key. Public Elixir projection preserves both entries
+still prefers the exact key. Public host projection preserves both entries
 with inert collision wrappers rather than choosing one during externalization;
 JSON-facing Kernel boundaries reject the ambiguity with
 `:public_projection_collision`.
@@ -1271,7 +1300,7 @@ displayable host-facing reference, but `symbol?` remains false, `name` rejects
 it, and general quoted data is unsupported. Keywords remain the ordinary
 identifier values used in data transformations; inert references exist for
 APIs that explicitly require a symbolic name. See
-[Quoted Symbol References](ptc-lisp-specification.md#311-quoted-symbol-references).
+[Quoted Symbol References](ptc-lisp-specification.md#3-11-quoted-symbol-references).
 
 **Rationale:** Simplicity. PTC-Lisp provides the narrow host-facing reference
 use case without adopting Clojure's general symbol and quotation model.
@@ -2677,6 +2706,8 @@ single non-map is accepted while multi-collection non-map arguments still fail
 validation with the canonical "expected map" error (matching Clojure, which
 also raises). A single nil keeps the existing empty-map behavior (GAP-S54).
 
+<a id="gap-s147-duplicate-literal-keys-in-mapset-literals-are-silently-deduplicated"></a>
+
 ### GAP-S147: Duplicate literal keys in map/set literals are silently deduplicated
 
 | Field | Value |
@@ -2713,7 +2744,7 @@ intentional silent dedupe of
 [DIV-06](#div-06-silent-deduplication-of-computed-duplicate-keys-in-mapset-literals).
 Keyword/string flex-collisions from
 [DIV-47](#div-47-flexible-keywordstring-key-access-keynormalizer) remain
-distinct runtime keys and are preserved by public Elixir projection.
+distinct runtime keys and are preserved by public host projection.
 The map-literal evaluator was also changed to keep the **last** colliding value
 (was first) for collisions that surface at map *construction* — i.e. distinct
 forms that evaluate to the same key, like `{:a 1 (keyword "a") 9} ;=> {:a 9}` —
@@ -2721,7 +2752,7 @@ so `{}`, `hash-map`, and `array-map` all agree with Clojure there.
 
 Keyword/string *flex*-collisions
 ([DIV-47](#div-47-flexible-keywordstring-key-access-keynormalizer)) are a
-separate case: the keys stay distinct at construction and in public Elixir
+separate case: the keys stay distinct at construction and in public host
 results. If both keys share one display or JSON representation, inert wrappers
 preserve both entries for direct observation and strict Kernel boundaries
 reject the ambiguous collection. The read-time form check and the
@@ -3348,41 +3379,33 @@ already matches Clojure for `(= ##NaN ##NaN)` and `(not= ##NaN ##NaN)`, so
 treating repeated NaN arguments as duplicates is an isolated predicate
 inconsistency rather than a documented numeric-equality divergence.
 
-### GAP-S65: `format` ignores width and padding flags
+### GAP-S65: `format` lacks sign and alternate-form flags
 
 | Field | Value |
 |-------|-------|
-| **Priority** | P1 |
+| **Priority** | P2 |
 | **Status** | open |
-| **Source** | Manual conformance cases `core/format-zero-padding-bug-001`, `core/format-left-width-bug-001`, `core/format-string-width-bug-001`, `core/format-float-zero-padding-bug-001`, `core/format-plus-sign-bug-001`, `core/format-space-sign-bug-001`, `core/format-hex-zero-padding-bug-001`, `core/format-alternate-hex-bug-001`, `core/format-parentheses-negative-bug-001` |
+| **Source** | Manual conformance cases `core/format-plus-sign-bug-001`, `core/format-space-sign-bug-001`, `core/format-alternate-hex-bug-001`, `core/format-parentheses-negative-bug-001` |
 
 ```clojure
 ;; Clojure
-(format "%02d" 3)      ;=> "03"
-(format "%-4s!" "x")   ;=> "x   !"
-(format "%5s" "x")     ;=> "    x"
-(format "%05.2f" 3.1)  ;=> "03.10"
 (format "%+d" 3)       ;=> "+3"
 (format "% d" 3)       ;=> " 3"
-(format "%04x" 15)     ;=> "000f"
 (format "%#x" 15)      ;=> "0xf"
 (format "%(d" -3)      ;=> "(3)"
 
 ;; PTC-Lisp current behavior
-(format "%02d" 3)      ;=> "3"
-(format "%-4s!" "x")   ;=> "x!"
-(format "%5s" "x")     ;=> "x"
-(format "%05.2f" 3.1)  ;=> "3.10"
 (format "%+d" 3)       ;=> runtime_error
 (format "% d" 3)       ;=> runtime_error
-(format "%04x" 15)     ;=> "f"
 (format "%#x" 15)      ;=> runtime_error
 (format "%(d" -3)      ;=> runtime_error
 ```
 
 **Decision:** BUG. `format` is marked supported and already accepts Java-style
-format strings for normal finite values. Ignoring or rejecting field width,
-padding, and sign flags produces silent presentation/data-export mismatches.
+format strings for normal finite values. Field width, `-` alignment, `0`
+padding, and numeric precision are supported and covered by runtime tests.
+The remaining sign and alternate-form flags are rejected instead of silently
+changing output, but still differ from Java/Clojure formatting.
 
 ### GAP-S89: `format` rejects boolean and newline conversions
 
@@ -4386,7 +4409,7 @@ Clojure, yielding the partial final group rather than raising.
 ```
 
 **Decision:** BUG. These are Clojure-named helpers on normal finite data.
-PTC-Lisp appears to pass negative counts into Elixir slicing behavior, which
+PTC-Lisp appears to pass negative counts into host slicing behavior, which
 returns plausible but wrong slices instead of Clojure's boundary results.
 
 ### GAP-S33: `apply` rejects nil or string final argument sequences

@@ -10,9 +10,11 @@ defmodule PtcRunner.Kernel.Environment do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.RoutedCapability
 
-  @reserved ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
+  @reserved ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
+  @workflow_implicit ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
 
   @doc "Validates common environment fields and returns normalized attributes."
   def assemble(bundle, capabilities, data, kind)
@@ -67,6 +69,17 @@ defmodule PtcRunner.Kernel.Environment do
     |> Enum.sort_by(& &1.name)
   end
 
+  @doc false
+  @spec capability_requirements(FrozenBundle.t() | nil) :: [binary()]
+  def capability_requirements(%FrozenBundle{prelude: %{exports: exports}}) do
+    exports
+    |> Enum.flat_map(&Map.get(&1, :tool_refs, []))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  def capability_requirements(nil), do: []
+
   defp valid_bundle(nil), do: :ok
 
   defp valid_bundle(%FrozenBundle{} = bundle),
@@ -99,25 +112,36 @@ defmodule PtcRunner.Kernel.Environment do
       else: :ok
   end
 
-  defp bundle_requirements(%{prelude: %{exports: exports}}, capabilities, kind) do
-    granted_names = Map.new(Map.keys(capabilities) ++ implicit_capabilities(kind), &{&1, true})
+  defp bundle_requirements(%FrozenBundle{} = bundle, capabilities, kind) do
+    granted_names =
+      Map.new(Map.keys(capabilities) ++ implicit_capabilities(kind, bundle), &{&1, true})
 
     missing =
-      exports
-      |> Enum.flat_map(&Map.get(&1, :tool_refs, []))
-      |> Enum.uniq()
+      bundle
+      |> capability_requirements()
       |> Enum.reject(&Map.has_key?(granted_names, &1))
 
     if missing == [],
       do: :ok,
-      else: {:error, {:missing_capability_requirement, Enum.sort(missing)}}
+      else: {:error, {:missing_capability_requirement, missing}}
   end
 
   defp bundle_requirements(_bundle, _capabilities, _kind), do: :ok
 
-  defp implicit_capabilities(:workflow), do: @reserved
+  defp implicit_capabilities(:workflow, bundle) do
+    if Library.shipped_component?(bundle, "agent.core"),
+      do: [
+        "kernel-agent-config-failure",
+        "kernel-agent-protocol-error",
+        "kernel-llm-provider-failure",
+        "kernel-result-contract-failure",
+        "kernel-runtime-limit-failure"
+        | @workflow_implicit
+      ],
+      else: @workflow_implicit
+  end
 
-  defp implicit_capabilities(:mission),
+  defp implicit_capabilities(:mission, _bundle),
     do: ~w(runtime-usage runtime-remaining cap-list cap-describe)
 
   defp capability_metadata(%Capability{} = capability), do: Capability.metadata(capability)

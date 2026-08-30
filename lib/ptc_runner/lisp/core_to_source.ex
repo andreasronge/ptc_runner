@@ -37,6 +37,8 @@ defmodule PtcRunner.Lisp.CoreToSource do
     :prelude_ref,
     :prelude_tool_refs
   ]
+  @internal_temporary_prefix <<0, "__ptc_">>
+  @serialized_temporary_prefix "__ptc_serialized_"
 
   @doc """
   Convert a Core AST node to a PTC-Lisp source string.
@@ -53,190 +55,193 @@ defmodule PtcRunner.Lisp.CoreToSource do
       "(+ 1 2)"
   """
   @spec format(term()) :: String.t()
+  def format(value), do: value |> encode_internal_temporaries() |> do_format()
+
+  @spec do_format(term()) :: String.t()
 
   # Literals
-  def format(nil), do: "nil"
-  def format(true), do: "true"
-  def format(false), do: "false"
-  def format(n) when is_integer(n), do: Integer.to_string(n)
+  defp do_format(nil), do: "nil"
+  defp do_format(true), do: "true"
+  defp do_format(false), do: "false"
+  defp do_format(n) when is_integer(n), do: Integer.to_string(n)
 
-  def format(n) when is_float(n) do
+  defp do_format(n) when is_float(n) do
     :erlang.float_to_binary(n, [:short])
   end
 
-  def format(:infinity), do: "##Inf"
-  def format(:negative_infinity), do: "##-Inf"
-  def format(:nan), do: "##NaN"
-  def format(keyword) when is_atom(keyword), do: ":#{keyword}"
+  defp do_format(:infinity), do: "##Inf"
+  defp do_format(:negative_infinity), do: "##-Inf"
+  defp do_format(:nan), do: "##NaN"
+  defp do_format(keyword) when is_atom(keyword), do: ":#{keyword}"
 
-  def format({:string, s}), do: ~s("#{escape_string(s)}")
-  def format({:keyword, k}), do: ":#{k}"
+  defp do_format({:string, s}), do: ~s("#{escape_string(s)}")
+  defp do_format({:keyword, k}), do: ":#{k}"
 
   # Delegate {:literal, v} to Formatter (used for compile-time constants)
-  def format({:literal, v}), do: Formatter.format(v)
+  defp do_format({:literal, v}), do: Formatter.format(v)
 
   # Raw runtime values (from step.memory, not Core AST)
-  def format(%LispKeyword{name: name} = keyword) do
+  defp do_format(%LispKeyword{name: name} = keyword) do
     if LispKeyword.valid?(keyword), do: ":#{name}", else: raise(ArgumentError, "invalid keyword")
   end
 
-  def format(%SymbolRef{name: name} = symbol_ref) do
+  defp do_format(%SymbolRef{name: name} = symbol_ref) do
     if SymbolRef.valid?(symbol_ref),
       do: "'#{name}",
       else: raise(ArgumentError, "invalid symbol reference")
   end
 
-  def format(s) when is_binary(s), do: ~s("#{escape_string(s)}")
-  def format(list) when is_list(list), do: "[#{format_list(list)}]"
+  defp do_format(s) when is_binary(s), do: ~s("#{escape_string(s)}")
+  defp do_format(list) when is_list(list), do: "[#{format_list(list)}]"
 
-  def format(%MapSet{map: map}) when is_map(map),
+  defp do_format(%MapSet{map: map}) when is_map(map),
     do: "\#{#{map |> Map.keys() |> format_list()}}"
 
-  def format(map) when is_map(map) and not is_struct(map) do
+  defp do_format(map) when is_map(map) and not is_struct(map) do
     inner =
-      Enum.map_join(map, " ", fn {k, v} -> "#{format_map_key(k)} #{format(v)}" end)
+      Enum.map_join(map, " ", fn {k, v} -> "#{format_map_key(k)} #{do_format(v)}" end)
 
     "{#{inner}}"
   end
 
   # Variables and data access
-  def format({:var, name}), do: to_string(name)
-  def format({:symbol_ref, name}) when is_binary(name), do: "'#{name}"
-  def format({:data, key}), do: "data/#{key}"
-  def format({:runtime_callable, namespace, name}), do: "#{namespace}/#{name}"
-  def format({:prelude_ref, ref}), do: ref
+  defp do_format({:var, name}), do: to_string(name)
+  defp do_format({:symbol_ref, name}) when is_binary(name), do: "'#{name}"
+  defp do_format({:data, key}), do: "data/#{key}"
+  defp do_format({:runtime_callable, namespace, name}), do: "#{namespace}/#{name}"
+  defp do_format({:prelude_ref, ref}), do: ref
 
-  def format({:prelude_call, ref, arguments}) do
+  defp do_format({:prelude_call, ref, arguments}) do
     "(#{ref} #{format_list(arguments)})"
   end
 
-  def format({:java_ref, reference_id}), do: java_reference_source(reference_id)
-  def format({:java_field, reference_id}), do: java_reference_source(reference_id)
+  defp do_format({:java_ref, reference_id}), do: java_reference_source(reference_id)
+  defp do_format({:java_field, reference_id}), do: java_reference_source(reference_id)
 
-  def format({tag, reference_id, arguments}) when tag in [:java_static, :java_new] do
+  defp do_format({tag, reference_id, arguments}) when tag in [:java_static, :java_new] do
     "(#{java_reference_source(reference_id)} #{format_list(arguments)})"
   end
 
-  def format({:java_instance, reference_id, receiver, arguments}) do
+  defp do_format({:java_instance, reference_id, receiver, arguments}) do
     {:ok, reference} = JavaSurface.fetch_reference(reference_id)
     {:ok, class} = JavaSurface.fetch_class(reference.class_id)
     "(#{class.name}/#{reference.member} #{format_list([receiver | arguments])})"
   end
 
-  def format({:java_dot, member_family_id, receiver, arguments}) do
+  defp do_format({:java_dot, member_family_id, receiver, arguments}) do
     {:ok, source} = JavaSurface.member_family_source(member_family_id)
     "(#{source} #{format_list([receiver | arguments])})"
   end
 
   # Collections
-  def format({:vector, elems}) do
+  defp do_format({:vector, elems}) do
     "[#{format_list(elems)}]"
   end
 
-  def format({:map, pairs}) do
+  defp do_format({:map, pairs}) do
     inner =
-      Enum.map_join(pairs, " ", fn {k, v} -> "#{format(k)} #{format(v)}" end)
+      Enum.map_join(pairs, " ", fn {k, v} -> "#{do_format(k)} #{do_format(v)}" end)
 
     "{#{inner}}"
   end
 
-  def format({:set, elems}) do
+  defp do_format({:set, elems}) do
     "\#{#{format_list(elems)}}"
   end
 
   # Let bindings
-  def format({:let, bindings, body}) do
+  defp do_format({:let, bindings, body}) do
     bindings_str =
       Enum.map_join(bindings, " ", fn {:binding, pattern, value} ->
-        "#{format_pattern(pattern)} #{format(value)}"
+        "#{format_pattern(pattern)} #{do_format(value)}"
       end)
 
-    "(let [#{bindings_str}] #{format(body)})"
+    "(let [#{bindings_str}] #{do_format(body)})"
   end
 
   # Anonymous function
-  def format({:fn, params, body}) do
-    "(fn [#{format_params(params)}] #{format(body)})"
+  defp do_format({:fn, params, body}) do
+    "(fn [#{format_params(params)}] #{do_format(body)})"
   end
 
-  def format({:fn, name, params, body}) do
-    "(fn #{name} [#{format_params(params)}] #{format(body)})"
+  defp do_format({:fn, name, params, body}) do
+    "(fn #{name} [#{format_params(params)}] #{do_format(body)})"
   end
 
   # Loop with tail recursion
-  def format({:loop, bindings, body}) do
+  defp do_format({:loop, bindings, body}) do
     bindings_str =
       Enum.map_join(bindings, " ", fn {:binding, pattern, value} ->
-        "#{format_pattern(pattern)} #{format(value)}"
+        "#{format_pattern(pattern)} #{do_format(value)}"
       end)
 
-    "(loop [#{bindings_str}] #{format(body)})"
+    "(loop [#{bindings_str}] #{do_format(body)})"
   end
 
   # Function call
-  def format({:call, {:var, name}, args}) do
+  defp do_format({:call, {:var, name}, args}) do
     "(#{name} #{format_list(args)})"
   end
 
-  def format({:call, target, args}) do
-    "(#{format(target)} #{format_list(args)})"
+  defp do_format({:call, target, args}) do
+    "(#{do_format(target)} #{format_list(args)})"
   end
 
   # Tool call
-  def format({:tool_call, name, args}) do
+  defp do_format({:tool_call, name, args}) do
     "(tool/#{name} #{format_list(args)})"
   end
 
   # Definitions retain the only source-representable metadata: a docstring.
-  def format({tag, name, value, metadata}) when tag in [:def, :defonce] do
-    "(#{tag} #{name}#{definition_metadata_source!(metadata)} #{format(value)})"
+  defp do_format({tag, name, value, metadata}) when tag in [:def, :defonce] do
+    "(#{tag} #{name}#{definition_metadata_source!(metadata)} #{do_format(value)})"
   end
 
   # Control flow
-  def format({:if, condition, then_branch, else_branch}) do
-    "(if #{format(condition)} #{format(then_branch)} #{format(else_branch)})"
+  defp do_format({:if, condition, then_branch, else_branch}) do
+    "(if #{do_format(condition)} #{do_format(then_branch)} #{do_format(else_branch)})"
   end
 
-  def format({:do, exprs}) do
+  defp do_format({:do, exprs}) do
     "(do #{format_list(exprs)})"
   end
 
-  def format({:and, exprs}) do
+  defp do_format({:and, exprs}) do
     "(and #{format_list(exprs)})"
   end
 
-  def format({:or, exprs}) do
+  defp do_format({:or, exprs}) do
     "(or #{format_list(exprs)})"
   end
 
   # Control signals
-  def format({:return, value}) do
-    "(return #{format(value)})"
+  defp do_format({:return, value}) do
+    "(return #{do_format(value)})"
   end
 
-  def format({:fail, value}) do
-    "(fail #{format(value)})"
+  defp do_format({:fail, value}) do
+    "(fail #{do_format(value)})"
   end
 
   # Recur
-  def format({:recur, args}) do
+  defp do_format({:recur, args}) do
     "(recur #{format_list(args)})"
   end
 
   # Turn history
-  def format({:turn_history, n}) when n in 1..3, do: "*#{n}"
+  defp do_format({:turn_history, n}) when n in 1..3, do: "*#{n}"
 
   # Parallel operations
-  def format({:pmap, fn_expr, coll_exprs}) do
-    "(pmap #{format(fn_expr)} #{format_list(coll_exprs)})"
+  defp do_format({:pmap, fn_expr, coll_exprs}) do
+    "(pmap #{do_format(fn_expr)} #{format_list(coll_exprs)})"
   end
 
-  def format({:pcalls, fn_exprs}) do
+  defp do_format({:pcalls, fn_exprs}) do
     "(pcalls #{format_list(fn_exprs)})"
   end
 
   # Juxt
-  def format({:juxt, fns}) do
+  defp do_format({:juxt, fns}) do
     "(juxt #{format_list(fns)})"
   end
 
@@ -398,18 +403,24 @@ defmodule PtcRunner.Lisp.CoreToSource do
        when is_map(metadata) do
     semantic_metadata = Enum.filter(@prelude_semantic_metadata, &Map.has_key?(metadata, &1))
 
-    cond do
-      Map.has_key?(metadata, :prelude_ref) ->
-        {:ok, {:prelude_ref, Map.fetch!(metadata, :prelude_ref)}}
+    result =
+      cond do
+        Map.has_key?(metadata, :prelude_ref) ->
+          {:ok, {:prelude_ref, Map.fetch!(metadata, :prelude_ref)}}
 
-      semantic_metadata != [] ->
-        {:error, {:non_exportable_closure_metadata, path, Enum.sort(semantic_metadata)}}
+        semantic_metadata != [] ->
+          {:error, {:non_exportable_closure_metadata, path, Enum.sort(semantic_metadata)}}
 
-      Map.has_key?(metadata, :fn_name) ->
-        {:ok, {:fn, Map.fetch!(metadata, :fn_name), params, body}}
+        Map.has_key?(metadata, :fn_name) ->
+          {:ok, {:fn, Map.fetch!(metadata, :fn_name), params, body}}
 
-      true ->
-        {:ok, {:fn, params, body}}
+        true ->
+          {:ok, {:fn, params, body}}
+      end
+
+    case result do
+      {:ok, source_ast} -> {:ok, encode_internal_temporaries(source_ast)}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -456,13 +467,13 @@ defmodule PtcRunner.Lisp.CoreToSource do
 
   defp definition_metadata_source!(%{docstring: docstring} = metadata)
        when map_size(metadata) == 1 and is_binary(docstring),
-       do: " " <> format({:string, docstring})
+       do: " " <> do_format({:string, docstring})
 
   defp definition_metadata_source!(_metadata),
     do: raise(ArgumentError, "definition metadata has no lossless source form")
 
   defp safe_format(value, path) do
-    {:ok, format(value)}
+    {:ok, do_format(value)}
   rescue
     _exception -> {:error, {:non_exportable_source_value, path, value}}
   end
@@ -840,12 +851,88 @@ defmodule PtcRunner.Lisp.CoreToSource do
        ),
        do: find_source_name(source_ast, path)
 
-  defp find_valid_closure_source_name(source_ast, closure, params, body, path) do
+  defp find_valid_closure_source_name(source_ast, closure, _params, _body, path) do
+    {params, body} = serialized_closure_parts(source_ast)
+
     with :ok <- validate_identifier_source_collisions(source_ast, path),
          :ok <- validate_closure_capture(closure, path),
          :ok <- validate_pattern_params(params, path ++ [:closure_params]),
          do: find_source_name(body, path ++ [:closure_body])
   end
+
+  defp serialized_closure_parts({:fn, params, body}), do: {params, body}
+  defp serialized_closure_parts({:fn, _name, params, body}), do: {params, body}
+
+  # Analyzer temporaries use a NUL-prefixed binary namespace that source cannot
+  # author, so they cannot collide with user bindings and never allocate atoms.
+  # Before exporting a closure, alpha-rename those variables to fresh legal
+  # identifiers while avoiding every textual value already present in its AST.
+  defp encode_internal_temporaries(source_ast) do
+    {temporary_names, used_names} = collect_temporary_names(source_ast)
+
+    {renames, _used_names, _next_index} =
+      Enum.reduce(temporary_names, {%{}, used_names, 0}, fn name, {renames, used, index} ->
+        {encoded, next_index} = next_serialized_temporary(used, index)
+        {Map.put(renames, name, encoded), MapSet.put(used, encoded), next_index}
+      end)
+
+    rewrite_internal_temporaries(source_ast, renames)
+  end
+
+  defp collect_temporary_names(source_ast) do
+    {names, _seen, used} = collect_temporary_names(source_ast, {[], MapSet.new(), MapSet.new()})
+    {Enum.reverse(names), used}
+  end
+
+  defp collect_temporary_names({:var, name}, {names, seen, used})
+       when is_binary(name) do
+    if String.starts_with?(name, @internal_temporary_prefix) do
+      if MapSet.member?(seen, name),
+        do: {names, seen, used},
+        else: {[name | names], MapSet.put(seen, name), used}
+    else
+      {names, seen, MapSet.put(used, name)}
+    end
+  end
+
+  defp collect_temporary_names({:literal, _value}, accumulator), do: accumulator
+
+  defp collect_temporary_names(value, {names, seen, used})
+       when is_atom(value) or is_binary(value),
+       do: {names, seen, MapSet.put(used, to_string(value))}
+
+  defp collect_temporary_names(value, accumulator) when is_list(value),
+    do: Enum.reduce(value, accumulator, &collect_temporary_names/2)
+
+  defp collect_temporary_names(value, accumulator) when is_tuple(value),
+    do: value |> Tuple.to_list() |> Enum.reduce(accumulator, &collect_temporary_names/2)
+
+  defp collect_temporary_names(_value, accumulator), do: accumulator
+
+  defp next_serialized_temporary(used_names, index) do
+    candidate = @serialized_temporary_prefix <> Integer.to_string(index)
+
+    if MapSet.member?(used_names, candidate),
+      do: next_serialized_temporary(used_names, index + 1),
+      else: {candidate, index + 1}
+  end
+
+  defp rewrite_internal_temporaries({:var, name}, renames) when is_binary(name),
+    do: {:var, Map.get(renames, name, name)}
+
+  defp rewrite_internal_temporaries({:literal, _value} = literal, _renames), do: literal
+
+  defp rewrite_internal_temporaries(value, renames) when is_list(value),
+    do: Enum.map(value, &rewrite_internal_temporaries(&1, renames))
+
+  defp rewrite_internal_temporaries(value, renames) when is_tuple(value) do
+    value
+    |> Tuple.to_list()
+    |> Enum.map(&rewrite_internal_temporaries(&1, renames))
+    |> List.to_tuple()
+  end
+
+  defp rewrite_internal_temporaries(value, _renames), do: value
 
   defp preserve_closure_source_name_error(params, body, path, structural_error) do
     candidate =
@@ -1690,7 +1777,7 @@ defmodule PtcRunner.Lisp.CoreToSource do
           ""
 
         _ ->
-          entries = Enum.map_join(defaults, " ", fn {k, v} -> "#{k} #{format(v)}" end)
+          entries = Enum.map_join(defaults, " ", fn {k, v} -> "#{k} #{do_format(v)}" end)
           ":or {#{entries}}"
       end
 
@@ -1710,11 +1797,11 @@ defmodule PtcRunner.Lisp.CoreToSource do
 
   defp format_map_key(k)
        when k in [nil, true, false, :infinity, :negative_infinity, :nan],
-       do: format(k)
+       do: do_format(k)
 
   defp format_map_key(k) when is_atom(k), do: ":#{k}"
   defp format_map_key(%LispKeyword{name: name}), do: ":#{name}"
-  defp format_map_key(k), do: format(k)
+  defp format_map_key(k), do: do_format(k)
 
   defp escape_string(s) do
     s

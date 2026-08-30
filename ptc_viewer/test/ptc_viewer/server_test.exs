@@ -1,7 +1,16 @@
 defmodule PtcViewer.ServerTest do
   use ExUnit.Case, async: false
 
-  alias PtcViewer.TestReplAdapter
+  alias PtcViewer.{PinningInspectionTestAdapter, TestInspectionAdapter, TestReplAdapter}
+
+  test "inspection startup preserves the sealed-reader failure" do
+    assert {:error, :malformed_source} =
+             PtcViewer.start(
+               inspection_file: "run.ptcins",
+               inspection_adapter: TestInspectionAdapter,
+               open: false
+             )
+  end
 
   test "requested REPL connection and feature failures fail startup" do
     assert {:error, :connection_rejected} =
@@ -24,6 +33,66 @@ defmodule PtcViewer.ServerTest do
              PtcViewer.start(port: 0, repl_adapter: String, repl_config: %{}, open: false)
   end
 
+  test "an unusable project adapter fails startup closed" do
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, project_adapter: "docs/ptc.json", open: false)
+
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, project_adapter: fn _argument -> %{} end, open: false)
+
+    # A module is accepted only when it actually exports describe/0.
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, project_adapter: String, open: false)
+  end
+
+  test "a live reporter token must have enough entropy" do
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, live_token: "too-short", open: false)
+
+    assert {:ok, viewer} =
+             PtcViewer.start(port: 0, live_token: String.duplicate("x", 32), open: false)
+
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  test "a live trace refresh callback must accept one run id" do
+    assert {:error, :invalid_viewer_config} =
+             PtcViewer.start(port: 0, live_trace_refresh: fn -> :ok end, open: false)
+  end
+
+  test "a pre-pinned inspection source is retained without invoking path pinning" do
+    source = {:inspection_snapshot, make_ref()}
+
+    {:ok, viewer} =
+      PtcViewer.start(
+        port: 0,
+        inspection_source: source,
+        inspection_adapter: PinningInspectionTestAdapter,
+        open: false
+      )
+
+    store = :sys.get_state(viewer).inspection_store
+    assert {:ok, ^source} = PtcViewer.InspectionStore.fetch(store)
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
+  @tag :tmp_dir
+  test "private trace mode pins inspection against the private directory", %{tmp_dir: trace_dir} do
+    {:ok, viewer} =
+      PtcViewer.start(
+        port: 0,
+        trace_dir: trace_dir,
+        private_traces: true,
+        inspection_file: "run.ptcins",
+        inspection_adapter: PinningInspectionTestAdapter,
+        open: false
+      )
+
+    store = :sys.get_state(viewer).inspection_store
+    assert {:ok, {:private_directory, ^trace_dir}} = PtcViewer.InspectionStore.fetch(store)
+    assert :ok = PtcViewer.stop(viewer)
+  end
+
   test "lifecycle owner exposes the bound listener and performs orderly REPL shutdown" do
     {:ok, viewer} =
       PtcViewer.start(
@@ -44,6 +113,20 @@ defmodule PtcViewer.ServerTest do
     assert :ok = PtcViewer.stop(viewer)
     assert_receive {:DOWN, ^store_ref, :process, ^store, :normal}, 1_000
     assert_receive {:DOWN, ^backend_ref, :process, ^backend, _reason}, 1_000
+  end
+
+  test "default starts use independent operating-system-assigned ports" do
+    assert {:ok, first} = PtcViewer.start(open: false)
+    assert {:ok, second} = PtcViewer.start(open: false)
+
+    assert {:ok, {_address, first_port}} = PtcViewer.listener_info(first)
+    assert {:ok, {_address, second_port}} = PtcViewer.listener_info(second)
+    assert first_port > 0
+    assert second_port > 0
+    assert first_port != second_port
+
+    assert :ok = PtcViewer.stop(second)
+    assert :ok = PtcViewer.stop(first)
   end
 
   test "unexpected store death fails the whole local server closed" do

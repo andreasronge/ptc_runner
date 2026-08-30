@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Understand a generated project · PtcRunner</title>
+<meta name="description" content="Understand the files, result, and trace created by ptc init without writing
+an agent loop.">
+<link rel="canonical" href="https://ptc-runner.dev/guides/getting-started/">
+<meta property="og:title" content="Understand a generated project · PtcRunner">
+<meta property="og:description" content="Understand the files, result, and trace created by ptc init without writing
+an agent loop.">
+<meta property="og:url" content="https://ptc-runner.dev/guides/getting-started/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/" class="current" aria-current="page">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="understand-a-generated-project">Understand a generated project</h1><p>Understand the files, result, and trace created by <code class="inline">ptc init</code> without writing
+an agent loop.</p><p>Create a project that needs no API key if you do not already have one:</p><p><code class="inline">ptc init</code> requires a target directory that does not already exist. It
+assembles the complete scaffold and publishes it atomically without replacing
+anything. To add PtcRunner to an existing repository, initialize a new sibling
+or subdirectory, then deliberately copy or move the generated files the
+repository wants.</p><pre><code class="console language-console">ptc init hello-ptc</code></pre><p>It contains four files with different jobs:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">File</th><th style="text-align: left;">Purpose</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">ptc-project.json</code></td><td style="text-align: left;">Stable local paths, artifacts, and Viewer preferences</td></tr><tr><td style="text-align: left;"><code class="inline">ptc.json</code></td><td style="text-align: left;">Workflow, input, missions, selected providers, and narrower limits</td></tr><tr><td style="text-align: left;"><code class="inline">main.clj</code></td><td style="text-align: left;">The generated example component selected by the workflow</td></tr><tr><td style="text-align: left;"><code class="inline">AGENTS.md</code></td><td style="text-align: left;">Routing card telling a coding agent which commands answer what</td></tr></tbody></table></div><p>The project document is the normal command argument. It points to the other
+files, so commands do not depend on the shell's current directory.</p><h2 id="run-a-data-workflow">Run a data workflow</h2><p>The checked-in orders example is deterministic and needs no credential:</p><pre><code class="console language-console">ptc init tutorial-example --example kernel-tutorial
+ptc run tutorial-example/01-orders.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;order_count&quot;:3,&quot;paid_count&quot;:2,&quot;paid_total&quot;:335.75,&quot;pending_ids&quot;:[&quot;A-101&quot;]}</code></pre><p>The application reads structured input and returns one bounded JSON value. No
+model or external tool is involved.</p><h2 id="inspect-the-run">Inspect the run</h2><p>Open the local Viewer:</p><pre><code class="console language-console">ptc viewer tutorial-example/01-orders.ptc-project.json</code></pre><p>The trace records the command, evaluations, limits, outcome, and
+resource usage. It never contains prompts, model responses, generated source,
+or tool payloads. Those are private evidence, recorded only when
+<code class="inline">artifacts.inspection</code> is true and served only when <code class="inline">viewer.private</code> is also
+true.</p><p>The tutorial project documents set both, so the Viewer joins that evidence into
+the transcript: every effective prelude lists a <code class="inline">source</code> link beside each
+component, and the model-driven steps show each evaluation's generated
+PTC-Lisp under <strong>Program source</strong> along with the model conversation. Set either
+setting back to <code class="inline">false</code> and the same run shows the trace alone.</p><p>You can also explore the workflow directly:</p><pre><code class="console language-console">ptc repl --project tutorial-example/01-orders.ptc-project.json</code></pre><p>Continue with <a href="/guides/manifests-and-capabilities/">Configure an application</a> to add
+input, missions, or selected providers. Use the
+<a href="/reference/project-files/">project-configuration reference</a> for
+the complete local file and artifact contract.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/quickstart/">&larr; Quickstart</a><a class="pager-next" href="/guides/concepts/">PtcRunner concepts &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/getting-started.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

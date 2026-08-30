@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install models and tools · PtcRunner</title>
+<meta name="description" content="The ptc-host.json installs credentials, model routes, MCP tools, and limits.
+An application selects and narrows aliases without changing host configuration.">
+<link rel="canonical" href="https://ptc-runner.dev/guides/host-configuration/">
+<meta property="og:title" content="Install models and tools · PtcRunner">
+<meta property="og:description" content="The ptc-host.json installs credentials, model routes, MCP tools, and limits.
+An application selects and narrows aliases without changing host configuration.">
+<meta property="og:url" content="https://ptc-runner.dev/guides/host-configuration/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/" class="current" aria-current="page">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="install-models-and-tools">Install models and tools</h1><p>The <code class="inline">ptc-host.json</code> installs credentials, model routes, MCP tools, and limits.
+An application selects and narrows aliases without changing host configuration.</p><h2 id="how-do-i-install-a-model">How do I install a model?</h2><p>Install one model alias with a credential read from the process environment:</p><pre><code class="json language-json">{
+  &quot;credentials&quot;: {
+    &quot;model_key&quot;: {&quot;env&quot;: &quot;OPENROUTER_API_KEY&quot;}
+  },
+  &quot;install&quot;: {
+    &quot;model&quot;: {
+      &quot;source&quot;: &quot;llm&quot;,
+      &quot;structured_output_mode&quot;: &quot;unsupported&quot;,
+      &quot;usage_guarantees&quot;: {&quot;tokens&quot;: true, &quot;cost_currency&quot;: &quot;USD&quot;},
+      &quot;installation_revision&quot;: &quot;model-v1&quot;,
+      &quot;model&quot;: &quot;openrouter:deepseek/deepseek-v4-flash&quot;,
+      &quot;credential&quot;: &quot;model_key&quot;,
+      &quot;params&quot;: {&quot;max_tokens&quot;: 4096}
+    }
+  }
+}</code></pre><p>Keep its path in <code class="inline">ptc-project.json</code>, then verify the selected application:</p><pre><code class="console language-console">ptc doctor ptc-project.json
+ptc doctor ptc-project.json --connect
+ptc models ptc-project.json</code></pre><p>Plain <code class="inline">doctor</code> validates configuration without loading credentials or dialing
+providers. <code class="inline">--connect</code> is a connectivity probe and may consume resources.</p><p>See <a href="/reference/host-installation/#usage-guarantees">usage guarantees</a> for
+the required accounting policy.</p><h2 id="how-do-i-install-an-mcp-server">How do I install an MCP server?</h2><p>Install MCP tools with the same separation: the host fixes the transport and
+public tool mapping, while the application selects the alias and may narrow a
+write-bearing tool set. The <code class="inline">workspace</code> alias selected in
+<a href="/guides/manifests-and-capabilities/">Configure an application</a> is installed as a
+second entry under the same <code class="inline">install</code> object:</p><pre><code class="json language-json">{
+  &quot;workspace&quot;: {
+    &quot;source&quot;: &quot;mcp&quot;,
+    &quot;installation_revision&quot;: &quot;workspace-v1&quot;,
+    &quot;transport&quot;: {
+      &quot;type&quot;: &quot;stdio&quot;,
+      &quot;command&quot;: &quot;node&quot;,
+      &quot;args&quot;: [&quot;server.js&quot;]
+    },
+    &quot;tools&quot;: {
+      &quot;read_text_file&quot;: {&quot;as&quot;: &quot;workspace.read&quot;, &quot;effect&quot;: &quot;read&quot;}
+    },
+    &quot;ceilings&quot;: {&quot;timeout_ms&quot;: 15000, &quot;max_result_bytes&quot;: 262144}
+  }
+}</code></pre><p>The upstream operation name and server command belong to the server you run.
+You choose the public <code class="inline">as</code> name and its <code class="inline">read</code> or <code class="inline">write</code> effect. Follow
+<a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a> for one complete workflow
+against a checked-in server.</p><p><code class="inline">ptc validate</code> reports <code class="inline">installation_config_digests</code> for the selected aliases so
+you can compare the host declaration you reviewed with the one a later
+validation or run actually named. The digest is configuration identity, not
+proof of live server scope; see the
+<a href="/reference/host-installation/">host-configuration reference</a>.</p><h2 id="where-is-the-complete-contract">Where is the complete contract?</h2><p>The <a href="/reference/host-installation/">host-configuration reference</a> owns the
+complete credential forms, provider sources, transport rules, OAuth behavior,
+data classes, ceilings, and diagnostics.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/manifests-and-capabilities/">&larr; Configure an application</a><a class="pager-next" href="/guides/using-models/">Use a model &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/host-configuration.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

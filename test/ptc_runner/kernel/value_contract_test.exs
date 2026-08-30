@@ -3,8 +3,10 @@ defmodule PtcRunner.Kernel.ValueContractTest do
 
   alias PtcRunner.Kernel.CommandContractAuthority
   alias PtcRunner.Kernel.CommandPath
+  alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Kernel.ValueContractDiagnostic
 
   test "compiles and validates an ordinary bounded object contract" do
     schema = %{
@@ -435,6 +437,60 @@ defmodule PtcRunner.Kernel.ValueContractTest do
              ])
   end
 
+  test "command diagnostics prefer declared leaves and name missing properties" do
+    assert {:ok, contract} =
+             ValueContract.compile(%{
+               "type" => "object",
+               "properties" => %{"answer" => %{"type" => "integer"}},
+               "required" => ["answer"]
+             })
+
+    {:ok, source} = CommandSource.new(:result_contract, "result.schema.json")
+
+    for value <- [%{"answer" => "wrong", "extra" => 1}, %{}] do
+      assert {:ok, classification} = ValueContractDiagnostic.classify(contract, value)
+
+      assert {_bound_source, %CommandPath{} = path} =
+               ValueContractDiagnostic.diagnostic_parts(source, classification)
+
+      assert CommandPath.to_pointer(path) == "/answer"
+    end
+
+    assert {:ok, missing} = ValueContractDiagnostic.classify(contract, %{})
+
+    assert Enum.any?(missing.violations, fn
+             %{missing_required: ["answer"], path: path} -> CommandPath.to_pointer(path) == ""
+             _other -> false
+           end)
+
+    assert {:ok, union_contract} = ValueContract.compile(decision_schema())
+    assert {:ok, union_classification} = ValueContractDiagnostic.classify(union_contract, %{})
+
+    assert {_bound_source, %CommandPath{} = discriminator_path} =
+             ValueContractDiagnostic.diagnostic_parts(source, union_classification)
+
+    assert CommandPath.to_pointer(discriminator_path) == "/decision"
+
+    assert {:error, :invalid_command_path} =
+             CommandPath.contract(union_classification.contract_authority, [
+               {:property, "reason"}
+             ])
+
+    assert {:ok, unmatched} =
+             ValueContractDiagnostic.classify(union_contract, %{
+               "decision" => "unknown",
+               "reason" => "still declared in one branch"
+             })
+
+    refute Enum.any?(unmatched.violations, &Map.has_key?(&1, :allowed_keys))
+    refute Enum.any?(unmatched.violations, &Map.has_key?(&1, :undeclared_key_count))
+
+    assert {_bound_source, %CommandPath{} = unmatched_path} =
+             ValueContractDiagnostic.diagnostic_parts(source, unmatched)
+
+    assert CommandPath.to_pointer(unmatched_path) == "/decision"
+  end
+
   test "nested object diagnostics retain the selected branch's attested path" do
     schema = %{
       "oneOf" => [
@@ -494,44 +550,64 @@ defmodule PtcRunner.Kernel.ValueContractTest do
     open = Map.put(propose, "additionalProperties", true)
 
     invalid = [
-      %{"oneOf" => [no_change]},
-      %{"oneOf" => ambiguous},
-      %{"oneOf" => [no_change, mismatched]},
-      %{"oneOf" => [no_change, repeated]},
-      %{"oneOf" => [no_change, open]},
-      %{"oneOf" => List.duplicate(no_change, 17)}
+      {%{"oneOf" => [no_change]}, :union_branch_count, [property: "oneOf"]},
+      {%{"oneOf" => ambiguous}, :union_discriminator_missing, [property: "oneOf"]},
+      {%{"oneOf" => [no_change, mismatched]}, :union_discriminator_missing, [property: "oneOf"]},
+      {%{"oneOf" => [no_change, repeated]}, :union_discriminator_missing, [property: "oneOf"]},
+      {%{"oneOf" => [no_change, open]}, :union_branch_not_closed_object,
+       [property: "oneOf", index: 1, property: "additionalProperties"]},
+      {%{"oneOf" => List.duplicate(no_change, 17)}, :union_branch_count, [property: "oneOf"]}
     ]
 
-    for schema <- invalid do
-      assert {:error, :invalid_value_contract} = ValueContract.compile(schema)
+    for {schema, rule, segments} <- invalid do
+      assert {:error, {:invalid_value_contract, %{rule: ^rule, segments: ^segments}}} =
+               ValueContract.compile(schema)
     end
   end
 
   test "does not enable general composition or references" do
     invalid = [
-      %{"oneOf" => [branch("a"), branch("b")], "$ref" => "#/$defs/decision"},
-      %{"allOf" => [branch("a"), branch("b")]},
-      %{
-        "oneOf" => [
-          branch("a"),
-          put_in(branch("b"), ["properties", "nested"], %{
-            "oneOf" => [%{"type" => "string"}, %{"type" => "null"}]
-          })
-        ]
-      },
-      %{
-        "oneOf" => [
-          branch("a"),
-          put_in(branch("b"), ["properties", "value"], %{
-            "type" => "string",
-            "pattern" => "^unsafe"
-          })
-        ]
-      }
+      {%{"oneOf" => [branch("a"), branch("b")], "$ref" => "#/$defs/decision"},
+       [property: "$ref"]},
+      {%{"allOf" => [branch("a"), branch("b")]}, [property: "allOf"]},
+      {%{
+         "oneOf" => [
+           branch("a"),
+           put_in(branch("b"), ["properties", "nested"], %{
+             "oneOf" => [%{"type" => "string"}, %{"type" => "null"}]
+           })
+         ]
+       },
+       [
+         property: "oneOf",
+         index: 1,
+         property: "properties",
+         property: "nested",
+         property: "oneOf"
+       ]},
+      {%{
+         "oneOf" => [
+           branch("a"),
+           put_in(branch("b"), ["properties", "value"], %{
+             "type" => "string",
+             "pattern" => "^unsafe"
+           })
+         ]
+       },
+       [
+         property: "oneOf",
+         index: 1,
+         property: "properties",
+         property: "value",
+         property: "pattern"
+       ]}
     ]
 
-    for schema <- invalid do
-      assert {:error, :invalid_value_contract} = ValueContract.compile(schema)
+    for {schema, segments} <- invalid do
+      assert {:error, {:invalid_value_contract, %{rule: :unsupported_keyword} = rejection}} =
+               ValueContract.compile(schema)
+
+      assert rejection.segments == segments
     end
   end
 

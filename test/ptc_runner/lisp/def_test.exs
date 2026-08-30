@@ -75,51 +75,51 @@ defmodule PtcRunner.Lisp.DefTest do
 
   describe "evaluator: def" do
     test "(def x 42) returns var and stores in user_ns" do
-      ast = {:def, :x, 42}
+      ast = {:def, :x, 42, %{}}
       {:ok, result, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
 
       assert result == %Var{name: :x}
-      assert user_ns == %{x: 42}
+      assert user_ns == %{"x" => 42}
     end
 
     test "def evaluates value expression before storing" do
       # (def result (+ 5 3))
-      ast = {:def, :result, {:call, {:var, :+}, [5, 3]}}
+      ast = {:def, :result, {:call, {:var, :+}, [5, 3]}, %{}}
       env = %{+: {:variadic, &+/2, 0}}
       {:ok, result, user_ns} = Eval.eval(ast, %{}, %{}, env, &dummy_tool/2)
 
       assert result == %Var{name: :result}
-      assert user_ns == %{result: 8}
+      assert user_ns == %{"result" => 8}
     end
 
     test "def overwrites existing binding" do
-      ast = {:def, :x, 100}
-      {:ok, _result, user_ns} = Eval.eval(ast, %{}, %{x: 42}, %{}, &dummy_tool/2)
+      ast = {:def, :x, 100, %{}}
+      {:ok, _result, user_ns} = Eval.eval(ast, %{}, %{"x" => 42}, %{}, &dummy_tool/2)
 
-      assert user_ns == %{x: 100}
+      assert user_ns == %{"x" => 100}
     end
 
     test "def shadows builtins" do
-      ast = {:def, :map, {:map, []}}
+      ast = {:def, :map, {:map, []}, %{}}
       {:ok, %Var{name: :map}, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
-      assert user_ns[:map] == %{}
+      assert user_ns["map"] == %{}
     end
 
     test "def shadows filter builtin" do
-      ast = {:def, :filter, 42}
+      ast = {:def, :filter, 42, %{}}
       {:ok, %Var{name: :filter}, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
-      assert user_ns[:filter] == 42
+      assert user_ns["filter"] == 42
     end
 
     test "nested def returns inner var" do
       # (def x (def y 1)) - y is defined, x gets the var #'y
-      inner = {:def, :y, 1}
-      outer = {:def, :x, inner}
+      inner = {:def, :y, 1, %{}}
+      outer = {:def, :x, inner, %{}}
       {:ok, result, user_ns} = Eval.eval(outer, %{}, %{}, %{}, &dummy_tool/2)
 
       assert result == %Var{name: :x}
-      assert user_ns[:y] == 1
-      assert user_ns[:x] == %Var{name: :y}
+      assert user_ns["y"] == 1
+      assert user_ns["x"] == %Var{name: :y}
     end
   end
 
@@ -131,7 +131,7 @@ defmodule PtcRunner.Lisp.DefTest do
     test "bare symbol resolves to def binding" do
       # Simulate having defined x = 42 via def
       ast = {:var, :x}
-      user_ns = %{x: 42}
+      user_ns = %{"x" => 42}
       {:ok, value, _} = Eval.eval(ast, %{}, user_ns, %{}, &dummy_tool/2)
 
       assert value == 42
@@ -140,7 +140,7 @@ defmodule PtcRunner.Lisp.DefTest do
     test "let binding shadows def binding" do
       # (let [x 10] x) where x is also defined in user_ns
       let_ast = {:let, [{:binding, {:var, :x}, 10}], {:var, :x}}
-      user_ns = %{x: 42}
+      user_ns = %{"x" => 42}
       {:ok, value, _} = Eval.eval(let_ast, %{}, user_ns, %{}, &dummy_tool/2)
 
       assert value == 10
@@ -160,7 +160,7 @@ defmodule PtcRunner.Lisp.DefTest do
       # because user_ns shadows the builtin in the binding value position.
       # This matches Clojure semantics.
       source = "(let [count count] count)"
-      {:ok, %{return: result}} = Lisp.run(source, memory: %{count: 99})
+      {:ok, %{return: result}} = Lisp.run(source, memory: %{"count" => 99})
 
       assert result == 99
     end
@@ -169,7 +169,7 @@ defmodule PtcRunner.Lisp.DefTest do
       # When user_ns is externally populated, values in user_ns take precedence
       # over builtins when resolving variables (not related to def behavior)
       ast = {:var, :count}
-      user_ns = %{count: 999}
+      user_ns = %{"count" => 999}
       {:ok, value, _} = Eval.eval(ast, %{}, user_ns, %{}, &dummy_tool/2)
 
       assert value == 999
@@ -188,7 +188,7 @@ defmodule PtcRunner.Lisp.DefTest do
       # Non-builtin in env without being tracked as local → user_ns wins
       ast = {:var, :x}
       env = %{x: :from_env}
-      user_ns = %{x: :from_user_ns}
+      user_ns = %{"x" => :from_user_ns}
       {:ok, value, _} = Eval.eval(ast, %{}, user_ns, env, &dummy_tool/2)
 
       assert value == :from_user_ns
@@ -274,7 +274,7 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == %Var{name: :map}
-      assert user_ns[:map] == %{}
+      assert user_ns["map"] == %{}
     end
 
     test "def shadows builtin filter" do
@@ -282,7 +282,7 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == %Var{name: :filter}
-      assert user_ns[:filter] == []
+      assert user_ns["filter"] == []
     end
 
     test "def shadowing makes builtin unreachable in same turn" do
@@ -299,7 +299,7 @@ defmodule PtcRunner.Lisp.DefTest do
       # Turn 1: shadow builtin with intermediate result
       {:ok, %{memory: user_ns}} = Lisp.run(~s|(def entries [{:a 1} {:b 2}])|)
 
-      assert user_ns[:entries] == [
+      assert user_ns["entries"] == [
                %{%LispKeyword{name: "a"} => 1},
                %{%LispKeyword{name: "b"} => 2}
              ]
@@ -362,15 +362,15 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, result, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
 
       assert result == %Var{name: :x}
-      assert user_ns == %{x: 42}
+      assert user_ns == %{"x" => 42}
     end
 
     test "(defonce x 99) is a no-op when x is already bound" do
       ast = {:defonce, :x, 99, %{}}
-      {:ok, result, user_ns} = Eval.eval(ast, %{}, %{x: 42}, %{}, &dummy_tool/2)
+      {:ok, result, user_ns} = Eval.eval(ast, %{}, %{"x" => 42}, %{}, &dummy_tool/2)
 
       assert result == %Var{name: :x}
-      assert user_ns == %{x: 42}
+      assert user_ns == %{"x" => 42}
     end
 
     test "defonce does NOT evaluate value expression when already bound" do
@@ -387,11 +387,11 @@ defmodule PtcRunner.Lisp.DefTest do
       ast = {:defonce, :x, {:tool_call, :counter, []}, %{}}
 
       {:ok, _result, user_ns} =
-        Eval.eval(ast, %{}, %{x: 99}, %{}, fn name, args ->
+        Eval.eval(ast, %{}, %{"x" => 99}, %{}, fn name, args ->
           tools[Atom.to_string(name)].(args)
         end)
 
-      assert user_ns == %{x: 99}
+      assert user_ns == %{"x" => 99}
       assert :counters.get(call_count, 1) == 0
     end
 
@@ -399,7 +399,7 @@ defmodule PtcRunner.Lisp.DefTest do
       ast = {:defonce, :map, {:map, []}, %{}}
 
       {:ok, %Var{name: :map}, user_ns} = Eval.eval(ast, %{}, %{}, %{}, &dummy_tool/2)
-      assert user_ns[:map] == %{}
+      assert user_ns["map"] == %{}
     end
   end
 
@@ -454,17 +454,17 @@ defmodule PtcRunner.Lisp.DefTest do
       {:ok, %{return: result, memory: user_ns}} = Lisp.run(source)
 
       assert result == %Var{name: :map}
-      assert user_ns[:map] == %{}
+      assert user_ns["map"] == %{}
     end
 
     test "defonce on builtin is no-op when already bound" do
       # Turn 1: bind map
       {:ok, %{memory: user_ns1}} = Lisp.run(~s|(defonce map {})|)
-      assert user_ns1[:map] == %{}
+      assert user_ns1["map"] == %{}
 
       # Turn 2: defonce again with different value — no-op
       {:ok, %{memory: user_ns2}} = Lisp.run(~s|(defonce map [])|, memory: user_ns1)
-      assert user_ns2[:map] == %{}
+      assert user_ns2["map"] == %{}
     end
   end
 

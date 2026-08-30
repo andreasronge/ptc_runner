@@ -1,11 +1,12 @@
 defmodule PtcRunner.Kernel.CommandInitializerTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandInitializer
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRunRef
+  alias PtcRunner.Kernel.ProjectConfig
 
   @run_ref CommandRunRef.encode(<<0::128>>)
 
@@ -13,7 +14,7 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
   (ns main)
 
   (defn run [input]
-    (return input))
+    (return {"greeting" (str "hello " (get input "name"))}))
   """
 
   @manifest """
@@ -29,23 +30,44 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
       "entry": "main/run"
     },
     "input": {
-      "value": {}
+      "value": {"name": "world"}
     }
   }
   """
 
   @tag :tmp_dir
-  test "init publishes the exact validated two-file scaffold", %{tmp_dir: directory} do
+  test "init publishes the exact validated scaffold and private-artifact ignores", %{
+    tmp_dir: directory
+  } do
     target = Path.join(directory, "application")
 
     assert {:ok, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["init", target])
-    assert outcome.envelope["result"] == %{"created" => ["main.clj", "ptc.json"]}
+
+    assert outcome.envelope["result"] == %{
+             "created" => ["AGENTS.md", ".gitignore", "main.clj", "ptc.json", "ptc-project.json"]
+           }
+
     assert File.read!(Path.join(target, "main.clj")) == @main_clj
     assert File.read!(Path.join(target, "ptc.json")) == @manifest
-    assert Enum.sort(File.ls!(target)) == ["main.clj", "ptc.json"]
 
-    assert {:ok, root} =
-             JSV.build(CommandContract.schema(), atoms: false, warnings: :silent)
+    assert File.read!(Path.join(target, ".gitignore")) ==
+             ".ptc/\n.ptc-private-*\n.ptc-private-result-*\n"
+
+    assert {:ok, project} =
+             ProjectConfig.load(Path.join(target, "ptc-project.json"))
+
+    assert project.application == Path.join(target, "ptc.json")
+    assert project.viewer.port == 0
+
+    assert Enum.sort(File.ls!(target)) == [
+             ".gitignore",
+             "AGENTS.md",
+             "main.clj",
+             "ptc-project.json",
+             "ptc.json"
+           ]
+
+    assert {:ok, root} = CommandContract.envelope_schema_root()
 
     assert {:ok, _validated} = JSV.validate(outcome.envelope, root, cast: false)
   end
@@ -59,10 +81,25 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
     sentinel = Path.join(target, "keep.txt")
     File.write!(sentinel, "existing")
 
-    assert_initialization_error(
-      CommandEngine.dispatch(["init", target]),
-      "initialization_target_exists"
-    )
+    outcome =
+      assert_initialization_error(
+        CommandEngine.dispatch(["init", target]),
+        "initialization_target_exists"
+      )
+
+    assert outcome.envelope["error"] == %{
+             "phase" => "publication",
+             "code" => "initialization_target_exists",
+             "message" =>
+               "ptc init publishes only to a new directory; choose a target that does not already exist",
+             "source" => nil,
+             "path" => nil,
+             "span" => nil,
+             "subject" => nil,
+             "notes" => [],
+             "retryable" => false,
+             "provider_activity" => false
+           }
 
     assert File.read!(sentinel) == "existing"
     assert File.ls!(target) == ["keep.txt"]
@@ -308,6 +345,61 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
     assert staging_entries(directory) == []
   end
 
+  @tag :tmp_dir
+  test "a nested staging directory replaced by a symlink refuses the write", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "tutorial")
+    escape = Path.join(directory, "escape")
+    File.mkdir!(escape)
+    test_process = self()
+
+    # A file is opened through the directories this run created. Swapping one for
+    # a symlink after creation would put every later write outside staging, so
+    # each recorded ancestor is verified again immediately before the open.
+    fault = fn
+      {:after_child_written, name}, %{staging: staging} ->
+        send(test_process, {:child_written, name})
+        nested = Path.join(staging, "01-orders")
+
+        if String.starts_with?(name, "01-orders/") and
+             match?({:ok, %File.Stat{type: :directory}}, File.lstat(nested)) do
+          File.rm_rf!(nested)
+          File.ln_s!(escape, nested)
+          send(test_process, {:replaced_after, name})
+        end
+
+        :ok
+
+      _stage, _context ->
+        :ok
+    end
+
+    assert_initialization_failed(
+      CommandInitializer.initialize(target, @run_ref,
+        example: "kernel-tutorial",
+        fault_hook: fault
+      )
+    )
+
+    assert_received {:replaced_after, swapped}
+
+    # Nothing was written after the swap: the very next open is refused, rather
+    # than following the symlink and materializing the rest of the tree outside
+    # the staging directory.
+    assert List.last(drain_written()) == swapped
+    refute File.exists?(target)
+    assert File.ls!(escape) == []
+  end
+
+  defp drain_written(written \\ []) do
+    receive do
+      {:child_written, name} -> drain_written(written ++ [name])
+    after
+      0 -> written
+    end
+  end
+
   defp assert_initialization_failed(result),
     do: assert_initialization_error(result, "initialization_failed")
 
@@ -323,7 +415,17 @@ defmodule PtcRunner.Kernel.CommandInitializerTest do
   defp assert_exact_scaffold(target) do
     assert File.read!(Path.join(target, "main.clj")) == @main_clj
     assert File.read!(Path.join(target, "ptc.json")) == @manifest
-    assert Enum.sort(File.ls!(target)) == ["main.clj", "ptc.json"]
+
+    assert {:ok, _project} =
+             ProjectConfig.load(Path.join(target, "ptc-project.json"))
+
+    assert Enum.sort(File.ls!(target)) == [
+             ".gitignore",
+             "AGENTS.md",
+             "main.clj",
+             "ptc-project.json",
+             "ptc.json"
+           ]
   end
 
   defp staging_entries(directory) do

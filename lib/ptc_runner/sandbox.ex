@@ -141,6 +141,29 @@ defmodule PtcRunner.Sandbox do
   @type failure_snapshot_fn :: (term() -> term())
 
   @doc """
+  The default wall-clock ceiling, in milliseconds, for one sandbox execution.
+
+  Configurable as `config :ptc_runner, :default_timeout`, so a host whose
+  machine is contended can raise the floor for every entry point at once
+  rather than per call site. An explicit `:timeout` option always wins.
+  """
+  @spec default_timeout() :: pos_integer()
+  def default_timeout do
+    Application.get_env(:ptc_runner, :default_timeout, @default_timeout)
+  end
+
+  @doc """
+  The default sandbox heap ceiling, in words.
+
+  Configurable as `config :ptc_runner, :default_max_heap`. An explicit
+  `:max_heap` option always wins.
+  """
+  @spec default_max_heap() :: non_neg_integer()
+  def default_max_heap do
+    Application.get_env(:ptc_runner, :default_max_heap, @default_max_heap)
+  end
+
+  @doc """
   Executes an AST in an isolated sandbox process.
 
   ## Arguments
@@ -172,11 +195,8 @@ defmodule PtcRunner.Sandbox do
   @spec execute(term(), term(), keyword()) :: execute_result()
 
   def execute(ast, context, opts \\ []) do
-    default_timeout = Application.get_env(:ptc_runner, :default_timeout, @default_timeout)
-    default_max_heap = Application.get_env(:ptc_runner, :default_max_heap, @default_max_heap)
-
-    timeout = Keyword.get(opts, :timeout, default_timeout)
-    max_heap = Keyword.get(opts, :max_heap, default_max_heap)
+    timeout = Keyword.get(opts, :timeout, default_timeout())
+    max_heap = Keyword.get(opts, :max_heap, default_max_heap())
 
     validate_limit!(:timeout, timeout)
     validate_limit!(:max_heap, max_heap)
@@ -206,7 +226,8 @@ defmodule PtcRunner.Sandbox do
       setup_max_heap: setup_max_heap,
       start_time: start_time,
       reply_alias: reply_alias,
-      failure_snapshot: failure_snapshot
+      failure_snapshot: failure_snapshot,
+      telemetry_run: Keyword.get(opts, :telemetry_run)
     }
 
     try do
@@ -242,7 +263,7 @@ defmodule PtcRunner.Sandbox do
               # environment setup. Measure them after a forced GC and re-arm
               # the heap flag at baseline + budget so the program is not
               # charged for either.
-              baseline_words = rebaseline(execution.max_heap)
+              baseline_words = rebaseline(execution.max_heap, execution.telemetry_run)
               send_baseline(execution.reply_alias, baseline_words, failure_snapshot)
 
               start_reductions = process_reductions()
@@ -454,7 +475,7 @@ defmodule PtcRunner.Sandbox do
   # Measure the post-copy baseline and re-arm the heap flag at
   # baseline + budget. `max_heap: 0` means "limit disabled" (BEAM treats
   # flag size 0 as no limit) — measure for metrics but leave the flag alone.
-  defp rebaseline(max_heap) do
+  defp rebaseline(max_heap, telemetry_run) do
     :erlang.garbage_collect()
     baseline = measure_baseline_words()
 
@@ -467,8 +488,19 @@ defmodule PtcRunner.Sandbox do
       })
     end
 
+    :telemetry.execute(
+      [:ptc_runner, :sandbox, :armed],
+      %{baseline_words: baseline, ceiling_words: baseline + max_heap},
+      maybe_put_live_run(%{pid: self(), max_heap: max_heap}, telemetry_run)
+    )
+
     baseline
   end
+
+  defp maybe_put_live_run(metadata, live_run) when is_pid(live_run),
+    do: Map.put(metadata, :live_run, live_run)
+
+  defp maybe_put_live_run(metadata, _live_run), do: metadata
 
   # total_heap_size (words) + referenced refc binary bytes converted to
   # words — approximating what `max_heap_size` with
@@ -525,11 +557,8 @@ defmodule PtcRunner.Sandbox do
              | {:memory_exceeded, non_neg_integer()}
              | {:execution_error, String.t()}}
   def run_bounded(fun, opts \\ []) when is_function(fun, 0) do
-    default_timeout = Application.get_env(:ptc_runner, :default_timeout, @default_timeout)
-    default_max_heap = Application.get_env(:ptc_runner, :default_max_heap, @default_max_heap)
-
-    timeout = Keyword.get(opts, :timeout, default_timeout)
-    max_heap = Keyword.get(opts, :max_heap, default_max_heap)
+    timeout = Keyword.get(opts, :timeout, default_timeout())
+    max_heap = Keyword.get(opts, :max_heap, default_max_heap())
     link? = Keyword.get(opts, :link, false)
 
     validate_limit!(:timeout, timeout)

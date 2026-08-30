@@ -81,9 +81,9 @@ defmodule PtcRunner.Lisp.EvalControlFlowTest do
 
     test "truthy memory variable is returned without hitting default" do
       exprs = [{:var, :my_counter}, 0]
-      # ctx=%{}, memory=%{my_counter: 42}, env=%{}
+      # ctx=%{}, memory=%{"my_counter" => 42}, env=%{}
       assert {:ok, 42, _} =
-               Eval.eval({:or, exprs}, %{}, %{my_counter: 42}, %{}, &dummy_tool/2)
+               Eval.eval({:or, exprs}, %{}, %{"my_counter" => 42}, %{}, &dummy_tool/2)
     end
 
     test "unbound variable in non-first position falls through" do

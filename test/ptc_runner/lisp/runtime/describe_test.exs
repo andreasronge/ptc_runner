@@ -1,7 +1,10 @@
 defmodule PtcRunner.Lisp.Runtime.DescribeTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
+  alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
   alias PtcRunner.Lisp.Runtime.Describe
+  alias PtcRunner.Lisp.RuntimeCallable
 
   describe "describe/1 scalars" do
     test "summarizes strings and numeric-looking strings" do
@@ -44,6 +47,32 @@ defmodule PtcRunner.Lisp.Runtime.DescribeTest do
 
       assert is_binary(result.keys["payload"].examples |> hd())
       assert String.length(result.keys["payload"].examples |> hd()) <= 134
+    end
+
+    test "bounds nested examples structurally before rendering the full value" do
+      nested = Enum.map(1..1_000, &%{"id" => &1, "payload" => String.duplicate("x", 1_000)})
+
+      [example] = Describe.describe(%{"rows" => nested}).keys["rows"].examples
+
+      assert String.length(example) <= 120
+      assert example =~ ~S|"id"|
+      refute example =~ String.duplicate("x", 100)
+    end
+
+    test "keeps callable and Java type labels consistent with their bounded samples" do
+      assert %{type: "function", sample: "#fn[...]"} =
+               Describe.describe({:constantly_fn, String.duplicate("secret", 100)})
+
+      assert %{type: "function", sample: "#fn[...]"} =
+               Describe.describe(RuntimeCallable.new(:tool, :search))
+
+      assert {:ok, java_callable} = JavaCallable.new(:boolean_parse_boolean)
+
+      assert %{type: "function", sample: "#java[java.lang.Boolean/parseBoolean]"} =
+               Describe.describe(java_callable)
+
+      assert {:ok, java_int} = JavaPrimitive.new(:int, 42)
+      assert %{type: "integer", sample: "#java[int 42]"} = Describe.describe(java_int)
     end
   end
 

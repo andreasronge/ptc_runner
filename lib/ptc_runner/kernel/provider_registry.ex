@@ -5,9 +5,9 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   A manifest can select a bounded provider name and JSON configuration; it
   cannot register a module, function, callback, command, or code URL. Builders
   receive a path-free application identity, requested workflow or mission
-  destination, building owner, and installed limits. They return either one
-  legacy `PtcRunner.Kernel.Capability` or a normalized provider build with one
-  or more capabilities, an optional safe snapshot, and an optional idempotent
+  destination, building owner, and installed limits. Acquisition returns a
+  normalized provider build with one or more capabilities, an optional safe
+  snapshot, bounded closed command warnings, and an optional idempotent
   close function. A close function must return exactly `:ok`; any other return,
   exception, or exit is a provider-cleanup failure. The Kernel still attempts
   every registered close function and may replace the run outcome with
@@ -42,10 +42,6 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   acquisition service. Services pass opaque values only between selected
   trusted providers after the barrier; they never enter Lisp environments,
   connector snapshots, traces, or result artifacts.
-  Legacy Elixir builders remain supported as normal-data-only providers and
-  are deferred to the acquisition phase; a classified custom provider must use
-  the staged form.
-
   There are no implicit built-ins. CLI applications receive exactly the
   aliases in their host installation, while trusted Elixir embedding can pass
   any explicit builder map. The registry also freezes the installed limit
@@ -66,16 +62,6 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   accepting work and the terminal operation has a bounded self-owner or
   adopter.
 
-  ## Adding a field to the prepared contract
-
-  A prepared map is built in two places: `normalize_prepared/1` defaults and
-  validates the staged form, and `prepare/4`'s legacy-builder branch
-  constructs one inline without passing through it. A new key must be added to
-  both, and to the `t:prepared/0` typespec — that type is exact, so a runtime
-  key it does not declare makes every later `preflight/1` clause unmatchable.
-  Adding a key to only one construction site compiles cleanly and then fails
-  at run time with `KeyError` in whatever reads it.
-
   `provides` is not a general marker. It names an acquisition service, and
   `normalize_build/2` requires the acquired build to export exactly the
   services declared here, so a provider that declares one without exporting it
@@ -85,10 +71,12 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.HostInstallationAuthority
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.ProviderDescriptor
   alias PtcRunner.Kernel.ResourceRegistrar
 
@@ -140,18 +128,15 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           close: close() | nil,
           data_class: :normal | :private_inspection,
           accepts_data: [:normal | :private_inspection],
-          exports: %{optional(atom()) => term()}
+          exports: %{optional(atom()) => term()},
+          warnings: [CommandWarning.t()]
         }
-  @type builder ::
-          (map(), context() ->
-             {:ok, Capability.t() | built_provider()} | {:error, term()})
   @type credential_values :: %{binary() => binary()}
   @type acquisition_services :: %{optional(atom()) => term()}
   @type acquire ::
-          (credential_values() ->
-             {:ok, Capability.t() | built_provider()} | {:error, term()})
+          (credential_values() -> {:ok, built_provider()} | {:error, term()})
           | (credential_values(), acquisition_services() ->
-               {:ok, Capability.t() | built_provider()} | {:error, term()})
+               {:ok, built_provider()} | {:error, term()})
   @type prepared :: %{
           credential_names: [binary()],
           data_class: :normal | :private_inspection,
@@ -162,9 +147,18 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           workflow_llm_route:
             nil
             | %{
-                source: binary(),
-                installation_revision: binary(),
-                default: boolean()
+                required(:source) => binary(),
+                required(:installation_revision) => binary(),
+                required(:default) => boolean(),
+                optional(:max_calls) => pos_integer() | nil,
+                optional(:structured_output_mode) =>
+                  :json_schema | :json_object | :unsupported | nil,
+                optional(:usage_guarantees) => %{
+                  tokens: boolean(),
+                  cost_currency: String.t() | nil
+                },
+                optional(:reservation_tariff) => %{currency: String.t(), id: binary()} | nil,
+                optional(:request_timeout_ms) => pos_integer() | nil
               },
           preflight: (-> {:ok, acquire()}
                          | {:ok, acquire(), (-> :ok | {:error, term()})}
@@ -182,7 +176,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
           {:staged,
            (map(), context() ->
               {:ok, prepared()} | {:error, term()}), ProviderDescriptor.data_policy() | nil}
-  @type registry_builder :: builder() | staged_builder()
+  @type registry_builder :: staged_builder()
   @type credential_resolver ::
           ([binary()] -> {:ok, credential_values()} | {:error, term()})
   @opaque authority_owner :: struct()
@@ -194,7 +188,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
         }
 
   @spec new(map(), keyword()) :: {:ok, t()} | {:error, :invalid_provider_registry}
-  @doc "Creates a registry from explicit builder functions keyed by provider name."
+  @doc "Creates a registry from explicit staged builders keyed by provider name."
   def new(additional_builders \\ %{}, opts \\ [])
 
   def new(additional_builders, opts)
@@ -348,25 +342,11 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
         |> normalize_prepared()
         |> declared_policy_honored(declared_policy)
 
-      {:ok, builder} when is_function(builder, 2) ->
-        full_context = Map.put(context, :provider, name)
-
-        {:ok,
-         %{
-           credential_names: [],
-           data_class: :normal,
-           accepts_data: [:normal],
-           requires: [],
-           provides: [],
-           workflow_llm?: false,
-           workflow_llm_route: nil,
-           preflight: fn ->
-             {:ok, fn %{}, %{} -> builder.(config, full_context) end}
-           end
-         }}
-
       :error ->
         {:error, :unknown_provider}
+
+      {:ok, _invalid} ->
+        {:error, :invalid_provider_registry}
     end
   end
 
@@ -543,13 +523,62 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp valid_workflow_llm_route?(true, route)
        when is_map(route) and not is_struct(route) do
-    Enum.sort(Map.keys(route)) == [:default, :installation_revision, :source] and
+    extra =
+      Map.keys(route) --
+        [
+          :default,
+          :installation_revision,
+          :max_calls,
+          :source,
+          :structured_output_mode,
+          :usage_guarantees,
+          :reservation_tariff,
+          :request_timeout_ms
+        ]
+
+    extra == [] and
+      Map.has_key?(route, :source) and
+      Map.has_key?(route, :installation_revision) and
+      Map.has_key?(route, :default) and
       route.source in ["llm", "llm_replay", "custom"] and
       is_binary(route.installation_revision) and valid_name?(route.installation_revision) and
-      is_boolean(route.default)
+      is_boolean(route.default) and valid_optional_max_calls?(Map.get(route, :max_calls)) and
+      valid_structured_output_mode?(Map.get(route, :structured_output_mode), route.source) and
+      valid_usage_guarantees?(Map.get(route, :usage_guarantees), route.source) and
+      valid_reservation_tariff?(Map.get(route, :reservation_tariff), route.source) and
+      LLMRouter.valid_route_timeout_ms?(Map.get(route, :request_timeout_ms), route.source)
   end
 
   defp valid_workflow_llm_route?(_workflow_llm?, _route), do: false
+
+  defp valid_structured_output_mode?(nil, source) when source in ["llm_replay", "custom"],
+    do: true
+
+  defp valid_structured_output_mode?(mode, "llm")
+       when mode in [:json_schema, :json_object, :unsupported],
+       do: true
+
+  defp valid_structured_output_mode?(_mode, _source), do: false
+
+  defp valid_usage_guarantees?(nil, source) when source in ["llm_replay", "custom"], do: true
+
+  defp valid_usage_guarantees?(%{tokens: tokens, cost_currency: currency} = guarantees, "llm")
+       when map_size(guarantees) == 2 and is_boolean(tokens) and currency in ["USD", nil],
+       do: true
+
+  defp valid_usage_guarantees?(_guarantees, _source), do: false
+
+  defp valid_reservation_tariff?(nil, _source), do: true
+
+  defp valid_reservation_tariff?(%{currency: "USD", id: id} = tariff, "llm")
+       when map_size(tariff) == 2 and is_binary(id) and byte_size(id) in 1..128,
+       do: String.valid?(id)
+
+  defp valid_reservation_tariff?(_tariff, _source), do: false
+
+  defp valid_optional_max_calls?(nil), do: true
+  defp valid_optional_max_calls?(max_calls) when is_integer(max_calls) and max_calls > 0, do: true
+  defp valid_optional_max_calls?(_max_calls), do: false
 
   # Checked after normalization so an omitted field is compared as the
   # normal-only default it becomes, not as an absent value. `accepts_data` is a
@@ -673,35 +702,24 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp normalize_credentials({:error, _reason} = error, _names), do: error
   defp normalize_credentials(_result, _names), do: {:error, :invalid_credential_values}
 
-  defp normalize_build({:ok, %Capability{} = capability}, []) do
-    {:ok,
-     %{
-       capabilities: [capability],
-       snapshot: nil,
-       close: nil,
-       data_class: :normal,
-       accepts_data: [:normal],
-       exports: %{}
-     }}
-  end
-
   defp normalize_build({:ok, %{capabilities: capabilities} = built}, provides) do
     snapshot = Map.get(built, :snapshot)
     close = Map.get(built, :close)
     data_class = Map.get(built, :data_class, :normal)
     accepts_data = Map.get(built, :accepts_data, [:normal])
     exports = Map.get(built, :exports, %{})
+    warnings = Map.get(built, :warnings, [])
 
     if Map.keys(built) --
-         [:capabilities, :snapshot, :close, :data_class, :accepts_data, :exports] == [] and
-         capabilities != [] and length(capabilities) <= 128 and
-         Enum.all?(capabilities, &match?(%Capability{}, &1)) and
+         [:capabilities, :snapshot, :close, :data_class, :accepts_data, :exports, :warnings] == [] and
+         valid_capabilities?(capabilities, provides) and
          (is_nil(snapshot) or JSONValue.map?(snapshot)) and
          (is_nil(close) or is_function(close, 0)) and
          data_class in [:normal, :private_inspection] and
          accepts_data != [] and accepts_data == Enum.uniq(accepts_data) and
          Enum.all?(accepts_data, &(&1 in [:normal, :private_inspection])) and
-         is_map(exports) and Enum.sort(Map.keys(exports)) == Enum.sort(provides) do
+         is_map(exports) and Enum.sort(Map.keys(exports)) == Enum.sort(provides) and
+         valid_warnings?(warnings) do
       {:ok,
        %{
          capabilities: capabilities,
@@ -709,7 +727,8 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
          close: close,
          data_class: data_class,
          accepts_data: accepts_data,
-         exports: exports
+         exports: exports,
+         warnings: warnings
        }}
     else
       {:error, :invalid_provider_build}
@@ -718,6 +737,18 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
 
   defp normalize_build({:error, _reason} = error, _provides), do: error
   defp normalize_build(_result, _provides), do: {:error, :invalid_provider_build}
+
+  defp valid_warnings?(warnings) when is_list(warnings) and length(warnings) <= 128,
+    do: Enum.all?(warnings, &CommandWarning.valid?/1)
+
+  defp valid_warnings?(_warnings), do: false
+
+  defp valid_capabilities?(capabilities, provides) when is_list(capabilities) do
+    (capabilities != [] or provides != []) and length(capabilities) <= 128 and
+      Enum.all?(capabilities, &match?(%Capability{}, &1))
+  end
+
+  defp valid_capabilities?(_capabilities, _provides), do: false
 
   defp invoke(function, failure) do
     function.()
@@ -736,7 +767,6 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp default_credential_resolver([]), do: {:ok, %{}}
   defp default_credential_resolver(_names), do: {:error, :credential_resolver_missing}
 
-  defp valid_builder?(builder) when is_function(builder, 2), do: true
   defp valid_builder?({:staged, prepare, nil}) when is_function(prepare, 2), do: true
 
   defp valid_builder?({:staged, prepare, %{data_class: class, accepts_data: accepts} = policy})
@@ -759,7 +789,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   @doc false
   def adapter_request(request) do
     request
-    |> Map.take(~w(system messages tools cache))
+    |> Map.take(~w(system messages tools cache schema))
     |> Map.new(fn {key, value} -> {String.to_existing_atom(key), adapter_value(key, value)} end)
   end
 

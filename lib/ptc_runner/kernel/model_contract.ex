@@ -20,10 +20,59 @@ defmodule PtcRunner.Kernel.ModelContract do
   """
 
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.TypedCanonicalJSON
+  alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Lisp.Signature
 
   @identifier ~r/\A[A-Za-z_][A-Za-z0-9_-]*\z/
   @literal_symbols ~w(nil true false)
+  @projection_domain <<"ptc.contract-prompt-projection.v1", 0>>
+
+  @doc "Projects the complete normalized application value-contract profile."
+  @spec value_contract(ValueContract.t()) ::
+          {:ok, term()} | {:error, :unsupported_contract}
+  def value_contract(%ValueContract{schema: schema} = contract) do
+    cond do
+      not ValueContract.sealed?(contract) ->
+        {:error, :unsupported_contract}
+
+      Map.has_key?(schema, "oneOf") ->
+        case ValueContract.prompt_discriminator(contract) do
+          {:ok, discriminator} -> json_schema_union(schema, discriminator)
+          :error -> {:error, :unsupported_contract}
+        end
+
+      true ->
+        json_schema(schema)
+    end
+  end
+
+  def value_contract(_contract), do: {:error, :unsupported_contract}
+
+  @doc "Returns the annotation-sensitive identity of a renderer-neutral projection."
+  @spec projection_hash(term()) :: {:ok, binary()} | {:error, :unsupported_contract}
+  def projection_hash(projection) do
+    case encoded_projection(projection) do
+      {:ok, encoded} ->
+        framed = <<byte_size(encoded)::unsigned-big-64, encoded::binary>>
+
+        {:ok,
+         "sha256:" <>
+           Base.encode16(:crypto.hash(:sha256, @projection_domain <> framed), case: :lower)}
+
+      {:error, _reason} ->
+        {:error, :unsupported_contract}
+    end
+  end
+
+  @doc false
+  @spec projection_bytes(term()) :: {:ok, non_neg_integer()} | {:error, :unsupported_contract}
+  def projection_bytes(projection) do
+    case encoded_projection(projection) do
+      {:ok, encoded} -> {:ok, byte_size(encoded)}
+      {:error, _reason} -> {:error, :unsupported_contract}
+    end
+  end
 
   @spec function(Signature.signature()) :: {:ok, term()} | {:error, :unsupported_contract}
   def function({:signature, params, return_type}) when is_list(params) do
@@ -38,6 +87,14 @@ defmodule PtcRunner.Kernel.ModelContract do
   @spec value(Signature.type()) :: {:ok, term()} | {:error, :unsupported_contract}
   def value(type) do
     with {:ok, value_type} <- type(type) do
+      {:ok, object([{"value", value_type}])}
+    end
+  end
+
+  @doc "Builds a value contract from only the top-level kind of a JSON value."
+  @spec json_value(term()) :: {:ok, term()} | {:error, :unsupported_contract}
+  def json_value(value) do
+    with {:ok, value_type} <- json_value_type(value) do
       {:ok, object([{"value", value_type}])}
     end
   end
@@ -109,6 +166,27 @@ defmodule PtcRunner.Kernel.ModelContract do
 
   defp type(_type), do: {:error, :unsupported_contract}
 
+  defp json_value_type(nil), do: {:ok, object([{"kind", "nil"}, {"nullable", true}])}
+  defp json_value_type(value) when is_boolean(value), do: scalar("boolean")
+  defp json_value_type(value) when is_integer(value), do: scalar("integer")
+  defp json_value_type(value) when is_float(value), do: scalar("number")
+  defp json_value_type(value) when is_binary(value), do: scalar("string")
+
+  defp json_value_type(value) when is_list(value) do
+    {:ok,
+     object([
+       {"kind", "array"},
+       {"nullable", false},
+       {"items", object([{"kind", "any"}, {"nullable", true}])}
+     ])}
+  end
+
+  defp json_value_type(value) when is_map(value) and not is_struct(value),
+    do:
+      {:ok, object([{"kind", "object"}, {"nullable", false}, {"closed", false}, {"fields", []}])}
+
+  defp json_value_type(_value), do: {:error, :unsupported_contract}
+
   defp signature_field({name, {:optional, inner_type}}) when is_binary(name) do
     with {:ok, {:object, pairs}} <- type(inner_type) do
       type = {:object, replace_pair(pairs, "nullable", true)}
@@ -140,7 +218,8 @@ defmodule PtcRunner.Kernel.ModelContract do
                   {"type", child_type}
                 ])}
              end
-           end) do
+           end),
+         {:ok, property_names} <- optional_property_names(schema) do
       {:ok,
        constrained_node(
          schema,
@@ -149,10 +228,14 @@ defmodule PtcRunner.Kernel.ModelContract do
            {"nullable", false},
            {"closed", Map.get(schema, "additionalProperties", false) == false},
            {"fields", fields}
-         ]
+         ] ++
+           if(is_nil(property_names), do: [], else: [{"property_names", property_names}])
        )}
     end
   end
+
+  defp json_schema(%{"oneOf" => branches}) when is_list(branches),
+    do: {:error, :unsupported_contract}
 
   defp json_schema(%{"type" => "array"} = schema) do
     with {:ok, items} <- optional_items(schema) do
@@ -172,6 +255,21 @@ defmodule PtcRunner.Kernel.ModelContract do
 
   defp json_schema(_schema), do: {:error, :unsupported_contract}
 
+  defp json_schema_union(%{"oneOf" => branches} = schema, discriminator)
+       when is_list(branches) and is_binary(discriminator) do
+    with {:ok, variants} <- map_types(branches, &union_variant(&1, discriminator)) do
+      {:ok,
+       constrained_node(
+         schema,
+         [
+           {"kind", "tagged_union"},
+           {"nullable", false},
+           {"variants", Enum.sort_by(variants, &union_sort_key/1)}
+         ]
+       )}
+    end
+  end
+
   defp optional_json_schema(nil), do: {:ok, nil}
   defp optional_json_schema(schema), do: json_schema(schema)
 
@@ -180,6 +278,41 @@ defmodule PtcRunner.Kernel.ModelContract do
       {:ok, items} -> json_schema(items)
       :error -> type(:any)
     end
+  end
+
+  defp optional_property_names(schema) do
+    case Map.fetch(schema, "propertyNames") do
+      {:ok, property_names} -> json_schema(property_names)
+      :error -> {:ok, nil}
+    end
+  end
+
+  defp union_variant(schema, discriminator_name) do
+    with {:ok, projection} <- json_schema(schema),
+         {:object, pairs} <- projection,
+         {:ok, discriminator} <- discriminator_literal(schema, discriminator_name) do
+      {:ok, object([{"discriminator", discriminator}, {"type", {:object, pairs}}])}
+    else
+      _invalid -> {:error, :unsupported_contract}
+    end
+  end
+
+  defp discriminator_literal(%{"properties" => properties}, name) when is_map(properties) do
+    case get_in(properties, [name, "const"]) do
+      literal when is_binary(literal) ->
+        {:ok, object([{"name", name}, {"literal", literal}])}
+
+      _invalid ->
+        {:error, :unsupported_contract}
+    end
+  end
+
+  defp discriminator_literal(_schema, _name), do: {:error, :unsupported_contract}
+
+  defp union_sort_key({:object, pairs}) do
+    {"discriminator", {:object, discriminator}} = List.keyfind(pairs, "discriminator", 0)
+    {"literal", literal} = List.keyfind(discriminator, "literal", 0)
+    enum_sort_key(literal)
   end
 
   defp constrained_node(schema, base_pairs) do
@@ -210,6 +343,10 @@ defmodule PtcRunner.Kernel.ModelContract do
   defp applicable_constraint_pairs(schema, "array") do
     optional_pair(schema, "minItems", "min_items") ++
       optional_pair(schema, "maxItems", "max_items")
+  end
+
+  defp applicable_constraint_pairs(schema, "object") do
+    optional_pair(schema, "maxProperties", "max_properties")
   end
 
   defp applicable_constraint_pairs(_schema, _kind), do: []
@@ -302,4 +439,10 @@ defmodule PtcRunner.Kernel.ModelContract do
   end
 
   defp object(pairs), do: {:object, pairs}
+
+  defp encoded_projection(projection) do
+    with {:ok, json} <- DeterministicJSON.encode(projection),
+         {:ok, value} <- Jason.decode(json),
+         do: TypedCanonicalJSON.encode(value)
+  end
 end

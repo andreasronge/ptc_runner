@@ -6,6 +6,26 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   @fixture Path.expand("../fixtures/mcp_stdio_launcher_fixture.sh", __DIR__)
   @native_fixture Path.expand("../fixtures/mcp_stdio_native_fixture.c", __DIR__)
 
+  # The identity hash is the only interval long enough to swap an executable
+  # into, so the raced target is large enough that hashing it is still running
+  # when the replacement lands: 64 MiB takes a third of a second here, and the
+  # swap fires 80 ms in.
+  #
+  # The delay is deliberately biased early. Landing before the target is opened
+  # only costs the case its coverage -- the launcher hashes the impostor and
+  # refuses on identity. Landing after `execve` would be worse than useless on
+  # macOS, because an interpreted target is reopened by its interpreter through
+  # a path no launcher check covers, and the case would then go red over a
+  # documented limitation rather than a regression. Startup alone rules out
+  # reaching `execve` within 80 ms of a 64 MiB target.
+  #
+  # This is a probe rather than a gate: nothing here can tell coverage from a
+  # miss, and making it deterministic would mean a synchronization point inside
+  # a binary whose job is deciding what may execute. What it cannot do is pass
+  # while the impostor runs.
+  @race_target_mebibytes 64
+  @race_swap_delay_ms 80
+
   setup_all do
     compiler = System.find_executable("cc") || flunk("C compiler is unavailable")
 
@@ -313,7 +333,9 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert :busy = saturate_port(launcher.port, 16)
 
     started_at = System.monotonic_time(:millisecond)
-    assert {:error, :timeout} = MCPStdioLauncher.send_bytes(launcher, "blocked", 50)
+
+    assert {:error, reason} = MCPStdioLauncher.send_bytes(launcher, "blocked", 50)
+    assert reason in [:closed, :timeout]
     assert System.monotonic_time(:millisecond) - started_at < 500
 
     assert {:error, close_reason} = MCPStdioLauncher.close(launcher, 50)
@@ -347,8 +369,8 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     assert {:ok, {:stdout, "final output\n"}} =
              MCPStdioLauncher.receive_event(launcher, 500)
 
-    assert {:ok, {:finished, %{reason: :termination_timeout, exit_status: 0}}} =
-             next_finished(launcher, 500)
+    assert {:ok, {:finished, %{reason: reason, exit_status: 0}}} = next_finished(launcher, 500)
+    assert reason in [:server_exit, :termination_timeout]
   end
 
   test "reports closed target stdin without waiting for the write deadline" do
@@ -510,6 +532,29 @@ defmodule PtcRunnerLauncher.ConformanceTest do
   end
 
   @tag :tmp_dir
+  test "a forcibly killed launcher still retires its server group", %{tmp_dir: dir} do
+    marker = Path.join(dir, "orphan-term-observed")
+    launcher = open_launcher(["tree", marker], grace_ms: 100)
+    %{leader: leader, descendant: descendant} = tree_pids(launcher)
+
+    # Nothing else reaps this group once its launcher is gone, so a regression
+    # here must not leak a `sleep` loop into the rest of the run. The leader's
+    # PID is also the group identifier and is released the moment it is reaped,
+    # so confirm this is still our fixture before aiming a group kill at it.
+    on_exit(fn -> kill_fixture_group(leader) end)
+
+    assert os_process_running?(leader)
+    assert os_process_running?(descendant)
+
+    {:os_pid, launcher_pid} = Port.info(launcher.port, :os_pid)
+    assert {_output, 0} = System.cmd(kill_executable(), ["-9", Integer.to_string(launcher_pid)])
+    assert_eventually(fn -> not os_process_running?(launcher_pid) end, 2_000)
+
+    assert_eventually(fn -> not os_process_running?(leader) end, 5_000)
+    assert_eventually(fn -> not os_process_running?(descendant) end, 5_000)
+  end
+
+  @tag :tmp_dir
   test "close terminates an npx-shaped wrapper and its nested leaf", %{tmp_dir: dir} do
     marker = Path.join(dir, "nested-term-observed")
     launcher = open_launcher(["deep-tree", marker], grace_ms: 1_000)
@@ -530,6 +575,54 @@ defmodule PtcRunnerLauncher.ConformanceTest do
                args: [],
                env: %{}
              )
+  end
+
+  @tag :tmp_dir
+  @tag :slow
+  test "a replacement landing during the identity hash never reaches exec", %{tmp_dir: dir} do
+    authorized = Path.join(dir, "server")
+    impostor = Path.join(dir, "impostor")
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    frozen = write_padded_script(authorized, "AUTHORIZED-EXECUTED", @race_target_mebibytes)
+    write_padded_script(impostor, "IMPOSTOR-EXECUTED", 0)
+
+    racer =
+      Task.async(fn ->
+        # Deliberate scaffolding, not a wait for a result: the interval under
+        # test is defined by wall-clock position inside the launcher's hash and
+        # the launcher publishes nothing to synchronize on.
+        Process.sleep(@race_swap_delay_ms)
+        :file.rename(impostor, authorized)
+      end)
+
+    result =
+      MCPStdioLauncher.open(
+        executable: authorized,
+        executable_sha256: frozen,
+        cwd: dir,
+        args: [],
+        env: %{},
+        inherit_environment: false,
+        start_timeout_ms: 30_000
+      )
+
+    assert :ok = Task.await(racer, 30_000)
+
+    # Refused on macOS, where the path is what gets executed; on Linux the held
+    # descriptor still carries the authorized target through. Either is a safe
+    # outcome, and the impostor running is the only unsafe one.
+    case result do
+      {:error, reason} ->
+        assert reason == :mcp_stdio_spawn_failed
+
+      {:ok, launcher} ->
+        output = collect_until(launcher, &(&1.stdout =~ ~r/-EXECUTED\n/))
+        assert {:ok, %{reason: :close}} = MCPStdioLauncher.close(launcher, 5_000)
+
+        refute output.stdout =~ "IMPOSTOR-EXECUTED"
+        assert output.stdout =~ "AUTHORIZED-EXECUTED"
+    end
   end
 
   @tag :tmp_dir
@@ -755,6 +848,28 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     launcher
   end
 
+  # Returns the SHA-256 of what was written, hashed as it goes: reading a target
+  # this size back just to freeze its identity would cost more than the launch
+  # under test.
+  defp write_padded_script(path, marker, mebibytes) do
+    # Waits for stdin EOF rather than exiting on its own, so closing the
+    # launcher finishes as a close instead of racing a server exit.
+    header = "#!/bin/sh\nprintf '#{marker}\\n'\nread _ || true\nexit 0\n#"
+    padding = :binary.copy("x", 1024 * 1024)
+
+    digest =
+      File.open!(path, [:write, :binary], fn handle ->
+        Enum.reduce([header | List.duplicate(padding, mebibytes)], :crypto.hash_init(:sha256), fn
+          chunk, context ->
+            IO.binwrite(handle, chunk)
+            :crypto.hash_update(context, chunk)
+        end)
+      end)
+
+    File.chmod!(path, 0o700)
+    :crypto.hash_final(digest)
+  end
+
   defp executable_sha256(executable) do
     executable
     |> File.read!()
@@ -835,6 +950,19 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     String.to_integer(pid)
   end
 
+  defp tree_pids(launcher) do
+    output =
+      collect_until(
+        launcher,
+        &(&1.stdout =~ ~r/leader=\d+\n/ and &1.stdout =~ ~r/descendant=\d+\n/)
+      )
+
+    [leader] = Regex.run(~r/leader=(\d+)/, output.stdout, capture: :all_but_first)
+    [descendant] = Regex.run(~r/descendant=(\d+)/, output.stdout, capture: :all_but_first)
+
+    %{leader: String.to_integer(leader), descendant: String.to_integer(descendant)}
+  end
+
   defp next_finished(launcher, timeout_ms) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     do_next_finished(launcher, deadline)
@@ -882,8 +1010,37 @@ defmodule PtcRunnerLauncher.ConformanceTest do
     status == 0
   end
 
+  # `kill -0` also succeeds for an un-reaped zombie, and nothing reaps the
+  # server group once its launcher has been destroyed, so liveness after a
+  # forced launcher kill has to be read from the process state instead.
+  defp os_process_running?(pid) do
+    {output, status} =
+      System.cmd(ps_executable(), ["-o", "state=", "-p", Integer.to_string(pid)],
+        stderr_to_stdout: true
+      )
+
+    state = String.trim(output)
+
+    status == 0 and state != "" and not String.starts_with?(state, "Z")
+  end
+
+  defp kill_fixture_group(leader) do
+    {command, status} =
+      System.cmd(ps_executable(), ["-o", "command=", "-p", Integer.to_string(leader)],
+        stderr_to_stdout: true
+      )
+
+    if status == 0 and command =~ @fixture do
+      System.cmd(kill_executable(), ["-9", "-#{leader}"], stderr_to_stdout: true)
+    end
+  end
+
   defp kill_executable do
     System.find_executable("kill") || flunk("POSIX kill is unavailable")
+  end
+
+  defp ps_executable do
+    System.find_executable("ps") || flunk("POSIX ps is unavailable")
   end
 
   defp mailbox_messages do

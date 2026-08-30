@@ -1,5 +1,5 @@
 defmodule PtcRunner.Lisp.RuntimeNestedKeysTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Runtime
   alias PtcRunner.Lisp.Runtime.FlexAccess

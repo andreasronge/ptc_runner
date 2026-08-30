@@ -19,32 +19,30 @@ defmodule PtcRunner.DotenvTest do
     end)
   end
 
-  describe "find_dotenv/1" do
-    test "returns the .env in the starting directory", %{tmp_dir: dir} do
-      env = Path.join(dir, ".env")
-      File.write!(env, "")
-      assert Dotenv.find_dotenv(dir) == env
-    end
-
-    test "walks up the directory tree to the nearest .env", %{tmp_dir: dir} do
-      far = Path.join(dir, ".env")
-      File.write!(far, "")
-      mid = Path.join([dir, "a", "b"])
-      File.mkdir_p!(mid)
-      File.write!(Path.join(mid, ".env"), "")
-      nested = Path.join([dir, "a", "b", "c", "d"])
-      File.mkdir_p!(nested)
-
-      # Picks the closest .env, not the one further up.
-      assert Dotenv.find_dotenv(nested) == Path.join(mid, ".env")
-    end
-
-    test "stops at the filesystem root and returns nil" do
-      assert Dotenv.find_dotenv("/") == nil
-    end
-  end
-
   describe "load_file/1" do
+    test "distinguishes common file failures", %{tmp_dir: dir} do
+      assert Dotenv.load_file(Path.join(dir, "missing.env")) ==
+               {:error, :environment_file_not_found}
+
+      directory = Path.join(dir, "directory.env")
+      File.mkdir!(directory)
+
+      assert Dotenv.load_file(directory) ==
+               {:error, :environment_file_not_regular}
+
+      invalid_utf8 = Path.join(dir, "invalid.env")
+      File.write!(invalid_utf8, <<255>>)
+
+      assert Dotenv.load_file(invalid_utf8) ==
+               {:error, :environment_file_invalid_utf8}
+
+      oversized = Path.join(dir, "large.env")
+      File.write!(oversized, String.duplicate("x", 1_000_001))
+
+      assert Dotenv.load_file(oversized) ==
+               {:error, :environment_file_too_large}
+    end
+
     test "parses KEY=VALUE pairs", %{tmp_dir: dir} do
       track_env(["PTC_DOTENV_TEST_A", "PTC_DOTENV_TEST_B"])
       path = Path.join(dir, ".env")
@@ -91,7 +89,7 @@ defmodule PtcRunner.DotenvTest do
       assert System.get_env("PTC_DOTENV_TEST_EQ") == "a=b=c"
     end
 
-    test "does not overwrite an env var that is already set", %{tmp_dir: dir} do
+    test "overwrites an env var that is already set", %{tmp_dir: dir} do
       track_env(["PTC_DOTENV_TEST_EXISTING"])
       System.put_env("PTC_DOTENV_TEST_EXISTING", "original")
       path = Path.join(dir, ".env")
@@ -99,52 +97,52 @@ defmodule PtcRunner.DotenvTest do
 
       Dotenv.load_file(path)
 
-      assert System.get_env("PTC_DOTENV_TEST_EXISTING") == "original"
+      assert System.get_env("PTC_DOTENV_TEST_EXISTING") == "from_file"
     end
   end
 
-  describe "load/0" do
-    test "loads the .env from the current working directory", %{tmp_dir: dir} do
-      track_env(["PTC_DOTENV_TEST_LOAD"])
-      # load/0 is once-per-VM; reset the guard so this test actually loads.
-      :persistent_term.erase({Dotenv, :dotenv_loaded})
-      on_exit(fn -> :persistent_term.erase({Dotenv, :dotenv_loaded}) end)
+  describe "with_file_scope/2" do
+    test "restores declared values so a changed file is used by the next launch", %{tmp_dir: dir} do
+      key = "PTC_DOTENV_SCOPED_ROTATION"
+      track_env([key])
+      System.delete_env(key)
+      path = Path.join(dir, ".env")
 
-      File.write!(Path.join(dir, ".env"), "PTC_DOTENV_TEST_LOAD=yep\n")
+      File.write!(path, "#{key}=first\n")
 
-      original_cwd = File.cwd!()
-      File.cd!(dir)
+      assert "first" =
+               Dotenv.with_file_scope(path, fn ->
+                 assert :ok = Dotenv.load_file(path)
+                 System.get_env(key)
+               end)
 
-      try do
-        assert Dotenv.load() == :ok
-        assert System.get_env("PTC_DOTENV_TEST_LOAD") == "yep"
-      after
-        File.cd!(original_cwd)
-      end
+      assert System.get_env(key) == nil
+
+      File.write!(path, "#{key}=second\n")
+
+      assert "second" =
+               Dotenv.with_file_scope(path, fn ->
+                 assert :ok = Dotenv.load_file(path)
+                 System.get_env(key)
+               end)
+
+      assert System.get_env(key) == nil
     end
 
-    test "is a no-op on the second call (once per VM)", %{tmp_dir: dir} do
-      track_env(["PTC_DOTENV_TEST_ONCE"])
-      :persistent_term.erase({Dotenv, :dotenv_loaded})
-      on_exit(fn -> :persistent_term.erase({Dotenv, :dotenv_loaded}) end)
+    test "temporarily overrides a value inherited before the launch", %{tmp_dir: dir} do
+      key = "PTC_DOTENV_SCOPED_EXISTING"
+      track_env([key])
+      System.put_env(key, "inherited")
+      path = Path.join(dir, ".env")
+      File.write!(path, "#{key}=from-file\n")
 
-      File.write!(Path.join(dir, ".env"), "PTC_DOTENV_TEST_ONCE=first\n")
-      original_cwd = File.cwd!()
-      File.cd!(dir)
+      assert "from-file" =
+               Dotenv.with_file_scope(path, fn ->
+                 assert :ok = Dotenv.load_file(path)
+                 System.get_env(key)
+               end)
 
-      try do
-        Dotenv.load()
-        assert System.get_env("PTC_DOTENV_TEST_ONCE") == "first"
-
-        # Change the var and the file; a second load/0 must not re-read it.
-        System.delete_env("PTC_DOTENV_TEST_ONCE")
-        File.write!(Path.join(dir, ".env"), "PTC_DOTENV_TEST_ONCE=second\n")
-
-        assert Dotenv.load() == :ok
-        assert System.get_env("PTC_DOTENV_TEST_ONCE") == nil
-      after
-        File.cd!(original_cwd)
-      end
+      assert System.get_env(key) == "inherited"
     end
   end
 end

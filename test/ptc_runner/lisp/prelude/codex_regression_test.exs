@@ -22,14 +22,13 @@ defmodule PtcRunner.Lisp.Prelude.CodexRegressionTest do
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Result, as: Step
 
-  # A `def`-bound name is externalized into `Step.memory` through the bounded
-  # vocabulary, so it may surface as either an atom or a binary key. Check both.
+  # `def`-bound names use their canonical binary spelling in `Step.memory`.
   defp memory_get(memory, name) when is_binary(name) do
-    Map.get(memory, String.to_atom(name)) || Map.get(memory, name)
+    Map.get(memory, name)
   end
 
   defp memory_has?(memory, name) when is_binary(name) do
-    Map.has_key?(memory, String.to_atom(name)) or Map.has_key?(memory, name)
+    Map.has_key?(memory, name)
   end
 
   describe "namespace-scoped private env (codex P1 #1)" do

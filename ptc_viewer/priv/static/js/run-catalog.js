@@ -39,6 +39,12 @@ export function createRunCatalog({
     } catch (error) {
       if (generation !== requestGeneration) return true;
 
+      if (error?.code === 'source_changed') {
+        if (cursor) return refresh();
+        scheduleFreshRetry(requestGeneration);
+        return false;
+      }
+
       reportError(error instanceof Error ? error.message : 'Canonical run listing is unavailable.');
       scheduleFreshRetry(requestGeneration);
       return false;

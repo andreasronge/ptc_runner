@@ -120,7 +120,7 @@ defmodule PtcRunner.Lisp.EvalSetsTest do
 
     test "set with wrong arity returns error" do
       {:error, %Step{fail: %{reason: :arity_error, message: message}}} = run(~S"(#{1 2} 1 2)")
-      assert message =~ "set expects 1 argument, got 2"
+      assert message =~ "arity error: set expects 1 argument(s), got 2"
     end
 
     test "set with keywords works as predicate" do

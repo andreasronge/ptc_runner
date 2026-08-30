@@ -1,45 +1,93 @@
 {
-  "elixir": "1.19.3",
-  "otp": "28",
+  "provenance": {
+    "architecture": "aarch64-apple-darwin25.4.0",
+    "dirty_cpu_schedulers": 10,
+    "elixir": "1.20.2",
+    "emu_flavor": "jit",
+    "erts": "17.0.3",
+    "logical_processors": 10,
+    "mix_env": "dev",
+    "otp": "29",
+    "schedulers_online": 10,
+    "wordsize_bytes": 8
+  },
+  "reason": "Accept Elixir 1.20/OTP 29 and evaluator correctness work since 7ed8da82; #1396 bisect attributes the July steps, while #1100 removes redundant default-path origin bookkeeping and closure atomics.",
   "samples": 7,
   "scenarios": [
     {
       "duration_ms": 0,
-      "eval_reductions": 779,
-      "memory_bytes": 6928,
+      "eval_reductions": 1171,
+      "identity_sha256": "5555fffb741af2046245fdbfd4171749e422488537b9bd65c702de40d5a128c8",
+      "memory_bytes": 16800,
       "name": "arithmetic",
+      "policy": "raw",
       "program": "(+ 1 (* 2 3) (- 10 4) (* (+ 1 1) 5))"
     },
     {
       "duration_ms": 0,
-      "eval_reductions": 10543,
-      "memory_bytes": 19072,
+      "eval_reductions": 14825,
+      "identity_sha256": "7c6038fc1e4ba74991214320615f6789403272d8757e8b38ada7e7896d459310",
+      "memory_bytes": 30048,
       "name": "collection_hofs",
+      "policy": "raw",
       "program": "(reduce + 0 (map (fn [x] (* x x)) (filter odd? (range 0 40))))"
     },
     {
       "duration_ms": 0,
-      "eval_reductions": 925,
-      "memory_bytes": 21608,
+      "eval_reductions": 1372,
+      "identity_sha256": "ba9d615a5afeb695414c392c3f2141c31b577e10ced169a9fdc839ac4b6bca45",
+      "memory_bytes": 26528,
       "name": "map_string",
+      "policy": "raw",
       "program": "(let [m {:a \"alpha\" :b \"beta\" :c \"gamma\"}] (clojure.string/join \",\" (map clojure.string/upper-case [(:a m) (:b m) (:c m)])))"
     },
     {
       "duration_ms": 0,
-      "eval_reductions": 3308,
-      "memory_bytes": 13872,
+      "eval_reductions": 4264,
+      "identity_sha256": "438a6ea13e91f58a1bac37bb21f4c88f5b26da3852590df093ae3a15a262dd14",
+      "memory_bytes": 21736,
       "name": "closure_apply",
+      "policy": "raw",
       "program": "(let [mk (fn [x] (fn [y] (+ x y)))] (reduce + 0 (map (mk 10) [1 2 3 4 5])))"
     },
     {
       "duration_ms": 0,
-      "eval_reductions": 2528,
-      "memory_bytes": 10736,
+      "eval_reductions": 3393,
+      "identity_sha256": "6745c6ef4c93e3d8b0072da4e9aa1fea7be08c1edd6c6727f6cf3335df493b0e",
+      "memory_bytes": 34504,
       "name": "context_filter",
+      "policy": "raw",
       "program": "(->> data/orders (filter #(> (:total %) 20)) (map :total) (reduce + 0))"
+    },
+    {
+      "duration_ms": 0,
+      "eval_reductions": 25049,
+      "identity_sha256": "b1b3d54bf09a7ef6fbea3070af6be35835bd613e43762c0c3ee43c6c976af633",
+      "memory_bytes": 68280,
+      "name": "public_prelude",
+      "policy": "public_prelude",
+      "program": "(reduce + 0 (map bench/square (range 0 40)))"
+    },
+    {
+      "duration_ms": 0,
+      "eval_reductions": 25143,
+      "identity_sha256": "625f62c516deadd3ddb92ff030f95e26e41d03baa46d929a4a31f65bbbf6bbd9",
+      "memory_bytes": 55824,
+      "name": "strict_transitive_prelude",
+      "policy": "strict_transitive_prelude",
+      "program": "(reduce + 0 (map bench/square (range 0 40)))"
+    },
+    {
+      "duration_ms": 0,
+      "eval_reductions": 5136,
+      "identity_sha256": "d0d984f00158e56490cdc81634c2671c8de756cef52c2fc1927d512b3172de9d",
+      "memory_bytes": 34528,
+      "name": "private_tool_prelude",
+      "policy": "private_tool_prelude",
+      "program": "(reduce + 0 (map bench/private-value [1 2 3 4 5]))"
     }
   ],
   "threshold": 1.07,
-  "version": 1,
+  "version": 2,
   "warmup": 20
 }

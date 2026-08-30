@@ -35,7 +35,7 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
     diagnostic = credential_diagnostic(false)
     result = failure_result(false)
 
-    outcome = CommandOutcome.doctor_failure(@run_ref, result, diagnostic)
+    outcome = CommandOutcome.doctor_failure({:doctor, :connect}, @run_ref, result, diagnostic)
 
     assert outcome.exit_status == 4
     assert outcome.envelope["status"] == "error"
@@ -45,6 +45,40 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
 
     assert CommandRenderer.render(outcome) ==
              {:stdout, Jason.encode!(result) <> "\n"}
+  end
+
+  test "default doctor rejects an enriched provider failure" do
+    {:ok, subject} =
+      CommandSubject.provider("model", :local, %{destination: :workflow, index: 0})
+
+    diagnostic =
+      CommandDiagnostic.new!(:local_preflight, :adapter_unavailable,
+        subject: subject,
+        provider_activity: false
+      )
+
+    result =
+      failure_result(false)
+      |> put_in(["checks", Access.at(3)], %{
+        "name" => "provider/model/local",
+        "status" => "fail",
+        "code" => "adapter_unavailable"
+      })
+      |> put_in(["checks", Access.at(5)], %{
+        "name" => "provider/model/credentials",
+        "status" => "skipped",
+        "code" => "not_verified_due_to_failure"
+      })
+
+    assert CommandContract.valid_doctor_failure_result?(
+             result,
+             CommandDiagnostic.to_map(diagnostic),
+             []
+           )
+
+    assert_raise ArgumentError, fn ->
+      CommandOutcome.doctor_failure(:doctor, @run_ref, result, diagnostic)
+    end
   end
 
   test "doctor failure result semantics reject every diagnostic correlation mismatch" do
@@ -70,7 +104,7 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
       refute CommandContract.valid_doctor_failure_result?(result, primary, [])
 
       assert_raise ArgumentError, fn ->
-        CommandOutcome.doctor_failure(@run_ref, result, diagnostic)
+        CommandOutcome.doctor_failure({:doctor, :connect}, @run_ref, result, diagnostic)
       end
     end
   end
@@ -89,13 +123,20 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
 
   test "the published failure schema rejects an unattributable primary diagnostic" do
     diagnostic = credential_diagnostic(false)
-    outcome = CommandOutcome.doctor_failure(@run_ref, failure_result(false), diagnostic)
+
+    outcome =
+      CommandOutcome.doctor_failure(
+        {:doctor, :connect},
+        @run_ref,
+        failure_result(false),
+        diagnostic
+      )
 
     timeout =
       CommandDiagnostic.new!(:active_preflight, :connectivity_timeout, provider_activity: false)
 
     envelope = %{outcome.envelope | "error" => CommandDiagnostic.to_map(timeout)}
-    {:ok, root} = JSV.build(CommandContract.schema(), atoms: false, warnings: :silent)
+    {:ok, root} = CommandContract.envelope_schema_root()
 
     assert {:error, _reason} = JSV.validate(envelope, root, cast: false)
   end
@@ -115,6 +156,79 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
              primary,
              [secondary]
            )
+  end
+
+  test "doctor usage semantics reject a fabricated or misattributed account" do
+    diagnostic = credential_diagnostic(true)
+    primary = CommandDiagnostic.to_map(diagnostic)
+
+    # One alias selected at two destinations, where only one probe came back
+    # with tokens: the row that carries a measurement and an unmeasured call at
+    # once, so its cost is deliberately incomplete.
+    measured = %{
+      "alias" => "model",
+      "installation_revision" => "model-v1",
+      "calls" => 2,
+      "successful_calls" => 2,
+      "usage_calls" => 1,
+      "missing_usage_calls" => 1,
+      "usage_overflow" => false,
+      "usage" => %{"input" => 12}
+    }
+
+    unmatched = %{
+      "alias" => "model",
+      "installation_revision" => "model-v1",
+      "calls" => 1,
+      "successful_calls" => 0,
+      "usage_calls" => 0,
+      "missing_usage_calls" => 1,
+      "usage_overflow" => false,
+      "usage" => %{}
+    }
+
+    selected = %{
+      "alias" => "model",
+      "source" => "llm",
+      "installation_revision" => "model-v1",
+      "default" => true,
+      "selected" => true
+    }
+
+    valid =
+      failure_result(true)
+      |> Map.put("model_aliases", [selected])
+      |> put_in(["usage"], %{"llm_usage_state" => "available", "llm_usage" => [measured]})
+
+    assert CommandContract.valid_doctor_failure_result?(valid, primary, [])
+
+    unmatched_valid =
+      valid
+      |> put_in(["usage"], %{"llm_usage_state" => "available", "llm_usage" => [unmatched]})
+
+    assert CommandContract.valid_doctor_failure_result?(unmatched_valid, primary, [])
+
+    tampered = [
+      # Spend attributed to a declaration the same report does not list.
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "alias"], "other"),
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "installation_revision"], "other-v1"),
+      put_in(valid, ["model_aliases", Access.at(0), "selected"], false)
+      |> put_in(["model_aliases", Access.at(0), "default"], nil),
+      # Counters that no measurement could have produced.
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "calls"], 0),
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "usage_calls"], 2),
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "missing_usage_calls"], 0),
+      # Tokens summed from calls that reported none.
+      valid
+      |> put_in(["usage", "llm_usage", Access.at(0), "usage_calls"], 0)
+      |> put_in(["usage", "llm_usage", Access.at(0), "missing_usage_calls"], 2),
+      # A call that reported no tokens cannot leave a complete cost behind.
+      put_in(valid, ["usage", "llm_usage", Access.at(0), "usage"], %{"total_cost" => 3.0e-6})
+    ]
+
+    for result <- tampered do
+      refute CommandContract.valid_doctor_failure_result?(result, primary, [])
+    end
   end
 
   defp credential_diagnostic(provider_activity) do
@@ -151,7 +265,13 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
       ],
       "model_aliases" => [],
       "provider_activity" => provider_activity,
-      "readiness" => "failed"
+      "readiness" => "failed",
+      "usage" => failure_usage(provider_activity)
     }
   end
+
+  # A failure that activated a provider may have been billed for work no result
+  # accounts for; one that activated none spent nothing.
+  defp failure_usage(true), do: %{"llm_usage_state" => "unavailable", "llm_usage" => nil}
+  defp failure_usage(false), do: %{"llm_usage_state" => "available", "llm_usage" => []}
 end

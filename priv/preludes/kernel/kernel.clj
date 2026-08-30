@@ -2,50 +2,33 @@
 
 (defn eval
   "Evaluate an opaque static Program in the mission environment."
-  [program-value]
-  (let [response (tool/kernel-eval {:kind :embedded :program program-value})]
+  [mission program-value]
+  (let [response (tool/kernel-eval {:kind :embedded :program program-value :mission mission})]
     (if (= :ok (get response :status))
       (get response :value)
       response)))
 
 (defn eval-source
   "Evaluate bounded dynamic source text in the mission environment."
-  [source]
-  (let [response (tool/kernel-eval {:kind :source :source source})]
-    (if (= :ok (get response :status))
-      (get response :value)
-      response)))
-
-(defn eval-with
-  "Evaluate an opaque static Program with JSON parameters at data/params."
-  [program-value params]
-  (let [response (tool/kernel-eval {:kind :embedded
-                                    :program program-value
-                                    :params params})]
-    (if (= :ok (get response :status))
-      (get response :value)
-      response)))
-
-(defn eval-source-with
-  "Evaluate bounded dynamic source with JSON parameters at data/params."
-  [source params]
-  (let [response (tool/kernel-eval {:kind :source
-                                    :source source
-                                    :params params})]
-    (if (= :ok (get response :status))
-      (get response :value)
-      response)))
-
-(defn eval-source-in
-  "Evaluate bounded dynamic source text in the named mission."
   [mission source]
   (let [response (tool/kernel-eval {:kind :source :source source :mission mission})]
     (if (= :ok (get response :status))
       (get response :value)
       response)))
 
-(defn eval-source-with-in
-  "Evaluate bounded dynamic source in the named mission with JSON parameters."
+(defn eval-with
+  "Evaluate an opaque static Program with JSON parameters at data/params."
+  [mission program-value params]
+  (let [response (tool/kernel-eval {:kind :embedded
+                                    :program program-value
+                                    :params params
+                                    :mission mission})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      response)))
+
+(defn eval-source-with
+  "Evaluate bounded dynamic source with JSON parameters at data/params."
   [mission source params]
   (let [response (tool/kernel-eval {:kind :source
                                     :source source
@@ -55,32 +38,26 @@
       (get response :value)
       response)))
 
-(defn mission-model-context-in
-  "Return the compact deterministic context for one named mission."
-  [mission]
-  (let [response (tool/kernel-mission-model-context {:mission mission})]
+(defn check-source
+  "Check bounded dynamic source against the live mission environment without executing it."
+  [mission source]
+  (let [response (tool/kernel-check-source {:source source :mission mission})]
     (if (= :ok (get response :status))
       (get response :value)
       response)))
 
-(defn check-source
-  "Check bounded dynamic source against the live mission environment without executing it."
-  [source]
-  (let [response (tool/kernel-check-source {:source source})]
+(defn check-terminal-source
+  "Check that bounded dynamic source compiles and consists of exactly one top-level return or fail form, without executing it."
+  [mission source]
+  (let [response (tool/kernel-check-source {:source source
+                                            :require :terminal
+                                            :mission mission})]
     (if (= :ok (get response :status))
       (get response :value)
       response)))
 
 (defn mission-inventory
-  "Return the exact frozen model-visible mission inventory JSON."
-  []
-  (let [response (tool/kernel-mission-inventory {})]
-    (if (= :ok (get response :status))
-      (get response :value)
-      response)))
-
-(defn mission-inventory-in
-  "Return the exact frozen model-visible inventory for one named mission."
+  "Return the frozen prompt-facing mission inventory JSON, including data grants."
   [mission]
   (let [response (tool/kernel-mission-inventory {:mission mission})]
     (if (= :ok (get response :status))
@@ -89,8 +66,8 @@
 
 (defn mission-model-context
   "Return the compact deterministic mission context for the model prompt."
-  []
-  (let [response (tool/kernel-mission-model-context {})]
+  [mission]
+  (let [response (tool/kernel-mission-model-context {:mission mission})]
     (if (= :ok (get response :status))
       (get response :value)
       response)))
@@ -102,29 +79,28 @@
     (if (= :ok (get response :status))
       (get response :value)
       (fail response))))
-(defn eval-in
-  "Evaluate an opaque static Program in a named mission."
-  [mission program-value]
-  (let [response (tool/kernel-eval {:kind :embedded :program program-value :mission mission})]
+
+(defn result-contract-presentation
+  "Return the bounded renderer-neutral application result contract, or nil."
+  []
+  (let [response (tool/kernel-result-contract {"presentation" true})]
     (if (= :ok (get response :status))
-      (get response :value)
+      (let [value (get response :value)]
+        (if (string? value) (json/parse-string value) nil))
+      (fail response))))
+
+(defn phase-return-contract-presentation
+  "Resolve one named phase-return contract and return its model projection."
+  [name]
+  (let [response (tool/kernel-result-contract {"phase_contract" name "presentation" true})]
+    (if (= :ok (get response :status))
+      (json/parse-string (get response :value))
       response)))
 
-(defn eval-with-in
-  "Evaluate an opaque static Program in a named mission with JSON parameters."
-  [mission program-value params]
-  (let [response (tool/kernel-eval {:kind :embedded
-                                    :program program-value
-                                    :params params
-                                    :mission mission})]
+(defn validate-phase-return
+  "Validate a non-final phase's explicit return against its named contract."
+  [name value]
+  (let [response (tool/kernel-result-contract {"phase_contract" name "value" value})]
     (if (= :ok (get response :status))
       (get response :value)
-      response)))
-
-(defn check-source-in
-  "Check bounded dynamic source against one named mission without executing it."
-  [mission source]
-  (let [response (tool/kernel-check-source {:source source :mission mission})]
-    (if (= :ok (get response :status))
-      (get response :value)
-      response)))
+      (fail response))))

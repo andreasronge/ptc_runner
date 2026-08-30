@@ -16,27 +16,32 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.ManifestReplPreparation
+  alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.PreparedRun
+  alias PtcRunner.Kernel.ProjectContext
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
+  alias PtcRunner.Kernel.SchemaViolation
+  alias PtcRunner.Kernel.SchemaViolationDiagnostic
 
   @doc false
-  @spec prepare_repl(binary(), binary() | nil, CommandRuntime.t()) ::
+  @spec prepare_repl(binary(), binary() | nil, CommandRuntime.t(), boolean()) ::
           {:ok, ManifestReplPreparation.t()}
           | {:error, CommandDiagnostic.t() | :host_config_required | :invalid_manifest_repl}
-  def prepare_repl(application, host_config, %CommandRuntime{} = runtime)
-      when is_binary(application) and (is_binary(host_config) or is_nil(host_config)) do
+  def prepare_repl(application, host_config, %CommandRuntime{} = runtime, interactive_loop?)
+      when is_binary(application) and (is_binary(host_config) or is_nil(host_config)) and
+             is_boolean(interactive_loop?) do
     case catalog(host_config) do
       {:ok, host, catalog} ->
-        prepare_repl_with_catalog(application, runtime, host, catalog)
+        prepare_repl_with_catalog(application, runtime, host, catalog, interactive_loop?)
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
         {:error, diagnostic}
     end
   end
 
-  def prepare_repl(_application, _host_config, _runtime),
+  def prepare_repl(_application, _host_config, _runtime, _interactive_loop?),
     do: {:error, :invalid_manifest_repl}
 
   @spec prepare(CommandArguments.t(), binary(), {map(), [atom()]}, CommandRuntime.t()) ::
@@ -99,15 +104,48 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
         {:ok, subject} = CommandSubject.provider(name, :declaration)
         {:error, CommandDiagnostic.new!(:host, :installation_revision_missing, subject: subject)}
 
-      {:error, {:host_schema_invalid, segments}} ->
-        {:error, host_path_diagnostic(:host_schema_invalid, segments)}
+      {:error, {:installation_endpoint_invalid, name, reason}} ->
+        {:ok, subject} = CommandSubject.provider(name, :declaration)
+
+        {:error,
+         CommandDiagnostic.new!(:host, endpoint_diagnostic_code(reason), subject: subject)}
+
+      {:error, {:host_schema_invalid, %SchemaViolation{} = violation}} ->
+        {:error, host_schema_diagnostic(violation)}
+
+      {:error, {:schema_validation_unavailable, _cause}} ->
+        {:error, diagnostic(:host, :schema_validation_unavailable)}
 
       {:error, {:installed_limit_invalid, segments}} ->
         {:error, host_path_diagnostic(:installed_limit_invalid, segments)}
+
+      {:error, {:optional_budget_prerequisite, _name, limit, prerequisite}} ->
+        {:ok, message} = OptionalBudgetDiagnostic.prerequisite_message(limit, prerequisite)
+
+        {:error,
+         host_path_diagnostic(
+           :installed_limit_invalid,
+           optional_budget_prerequisite_path(prerequisite),
+           message: message
+         )}
     end
   end
 
   def catalog(_source), do: {:error, diagnostic(:host, :host_unavailable)}
+
+  defp endpoint_diagnostic_code(:insecure_loopback_required),
+    do: :installation_endpoint_insecure_loopback_required
+
+  defp endpoint_diagnostic_code(:literal_loopback_required),
+    do: :installation_endpoint_literal_loopback_required
+
+  defp endpoint_diagnostic_code(:insecure_loopback_forbidden),
+    do: :installation_endpoint_insecure_loopback_forbidden
+
+  defp endpoint_diagnostic_code(:credentials_require_https),
+    do: :installation_endpoint_credentials_require_https
+
+  defp endpoint_diagnostic_code(_reason), do: :installation_endpoint_invalid
 
   @spec with_catalog(binary() | nil, (HostConfig.t() | nil, InstallationCatalog.t() -> term())) ::
           term()
@@ -180,11 +218,13 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
        ) do
     case arguments.command do
       :validate ->
-        result = validation_outcome(arguments, run_ref, prepared)
+        result = validation_outcome(arguments, run_ref, prepared, catalog, runtime_services)
         InstallationCatalog.close(catalog)
         result
 
       :run ->
+        destinations = project_result_destinations(arguments, prepared, destinations)
+
         case CommandPreparation.new(
                :run,
                run_ref,
@@ -192,8 +232,8 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
                catalog,
                runtime_services,
                environment_setup_required,
-               elem(destinations, 0),
-               elem(destinations, 1)
+               project_artifact_root(arguments),
+               destinations
              ) do
           {:ok, preparation} -> {:ok, preparation}
           {:error, _reason} -> invalid_preparation(arguments, run_ref, prepared)
@@ -211,6 +251,55 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
       :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
+  defp project_result_destinations(
+         %CommandArguments{project: %ProjectContext{derived_options: derived}},
+         %{effective_event_policy: :private},
+         {destinations, failures}
+       ) do
+    if MapSet.member?(derived, :result) do
+      destinations =
+        case Map.pop(destinations, :output) do
+          {nil, remaining} -> remaining
+          {path, remaining} -> Map.put(remaining, :private_output, private_result_path(path))
+        end
+
+      failures =
+        Enum.map(failures, fn
+          :output -> :private_output
+          key -> key
+        end)
+
+      {destinations, failures}
+    else
+      {destinations, failures}
+    end
+  end
+
+  defp project_result_destinations(_arguments, _prepared, destinations), do: destinations
+
+  defp project_artifact_root(%CommandArguments{
+         project: %ProjectContext{
+           config: %{artifact_root: root},
+           derived_options: derived
+         }
+       })
+       when is_binary(root) do
+    if MapSet.disjoint?(
+         derived,
+         MapSet.new([:trace_dir, :inspect, :result, :envelope_ledger])
+       ),
+       do: nil,
+       else: root
+  end
+
+  defp project_artifact_root(_arguments), do: nil
+
+  defp private_result_path(path) do
+    if String.ends_with?(path, ".json"),
+      do: String.replace_suffix(path, ".json", ".private.json"),
+      else: path <> ".private.json"
+  end
+
   defp command_runtime_services(nil, runtime),
     do: ProviderRuntimeServices.new(provider_application_mode: runtime.provider_application_mode)
 
@@ -220,14 +309,18 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
         provider_application_mode: runtime.provider_application_mode
       )
 
-  defp prepare_repl_with_catalog(application, runtime, host, catalog) do
+  defp prepare_repl_with_catalog(application, runtime, host, catalog, interactive_loop?) do
     result =
       with {:ok, request} <-
-             ApplicationPackage.request_directory(application,
-               installed_limits: catalog.installed_limits,
-               result_projection: :native,
-               input_authority: :normal,
-               inspection_capture: false
+             ApplicationPackage.request_repl_directory(
+               application,
+               [
+                 installed_limits: catalog.installed_limits,
+                 result_projection: :native,
+                 input_authority: :normal,
+                 inspection_capture: false
+               ],
+               interactive_loop?
              ),
            :ok <- require_repl_host(request, host),
            {:ok, prepared} <- RunCoordinator.prepare(request, catalog) do
@@ -258,7 +351,7 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
                prepared,
                catalog,
                runtime_services,
-               environment_setup_required?(host, prepared)
+               environment_setup_aliases(host, prepared)
              ) do
         {:ok, preparation}
       else
@@ -290,16 +383,44 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   def environment_setup_required?(nil, %PreparedRun{}), do: false
 
   def environment_setup_required?(%HostConfig{} = host, %PreparedRun{} = prepared) do
-    selected = MapSet.new(prepared.provider_declarations, & &1.name)
+    environment_setup_aliases(host, prepared) != []
+  end
 
-    Enum.any?(selected, fn name ->
-      with %{source: :llm, credential: credential} <- Map.get(host.install, name),
-           %{source: :env} <- Map.get(host.credentials, credential) do
-        true
-      else
-        _other -> false
-      end
-    end)
+  defp environment_setup_aliases(nil, %PreparedRun{}), do: []
+
+  # An MCP transport binds an environment credential through `transport.env` or
+  # `transport.auth` just as an LLM installation binds one through `credential`.
+  # Gating this on `source: :llm` left `--env-file` silently unread for an
+  # MCP-only project, which then failed with `credential_unavailable` naming a
+  # variable the operator had supplied in the file.
+  defp environment_setup_aliases(%HostConfig{} = host, %PreparedRun{} = prepared) do
+    prepared.provider_declarations
+    |> MapSet.new(& &1.name)
+    |> Enum.filter(&environment_credentialed?(host, &1))
+    |> Enum.sort()
+  end
+
+  defp environment_credentialed?(%HostConfig{} = host, name) do
+    case Map.get(host.install, name) do
+      nil ->
+        false
+
+      installation ->
+        installation
+        |> HostInstallation.installation_credential_names()
+        |> Enum.any?(&match?(%{source: :env}, Map.get(host.credentials, &1)))
+    end
+  end
+
+  defp validation_outcome(arguments, run_ref, prepared, catalog, runtime_services) do
+    case RunCoordinator.declared_input_checks(prepared, catalog, runtime_services) do
+      :ok ->
+        validation_outcome(arguments, run_ref, prepared)
+
+      {:error, %CommandDiagnostic{} = diagnostic} ->
+        PreparedRun.close(prepared)
+        {:error, arguments_outcome(arguments, run_ref, diagnostic)}
+    end
   end
 
   defp validation_outcome(arguments, run_ref, prepared) do
@@ -390,9 +511,48 @@ defmodule PtcRunner.Kernel.CommandAcquisition do
   defp arguments_outcome(%CommandArguments{} = arguments, run_ref, diagnostic),
     do: CommandOutcome.error(arguments.command, run_ref, diagnostic)
 
-  defp host_path_diagnostic(code, segments) do
+  defp optional_budget_prerequisite_path(:usage_tokens),
+    do: [
+      {:property, "install"},
+      {:property, "*"},
+      {:property, "usage_guarantees"},
+      {:property, "tokens"}
+    ]
+
+  defp optional_budget_prerequisite_path(:usage_cost_currency),
+    do: [
+      {:property, "install"},
+      {:property, "*"},
+      {:property, "usage_guarantees"},
+      {:property, "cost_currency"}
+    ]
+
+  defp optional_budget_prerequisite_path(:reservation_tariff),
+    do: [
+      {:property, "install"},
+      {:property, "*"},
+      {:property, "reservation_tariff"}
+    ]
+
+  defp host_path_diagnostic(code, segments, options \\ []) do
     {:ok, path} = CommandPath.host(segments)
-    CommandDiagnostic.new!(:host, code, source: CommandSource.fixed(:host), path: path)
+
+    CommandDiagnostic.new!(
+      :host,
+      code,
+      [source: CommandSource.fixed(:host), path: path] ++ options
+    )
+  end
+
+  defp host_schema_diagnostic(%SchemaViolation{rule: rule, path: segments}) do
+    {:ok, path} = CommandPath.host(segments)
+    {:ok, message} = SchemaViolationDiagnostic.message(:host, rule)
+
+    CommandDiagnostic.new!(:host, :host_schema_invalid,
+      source: CommandSource.fixed(:host),
+      path: path,
+      message: message
+    )
   end
 
   defp diagnostic(phase, code) do

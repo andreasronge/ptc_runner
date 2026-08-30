@@ -20,12 +20,19 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.HostConfig
+  alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MCPSource
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
+  alias PtcRunner.TestSupport.TestHelpers
+
+  if reason = TestHelpers.environment_skip_reason(["PTC_TEST_MCP_2026_ENDPOINT"]) do
+    @moduletag skip: reason
+  end
 
   test "a live stateless MCP server crosses the bounded Kernel capability boundary" do
     endpoint = System.fetch_env!("PTC_TEST_MCP_2026_ENDPOINT")
@@ -89,7 +96,7 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
       )
 
     source =
-      ~S|(return (tool/kernel-eval {"kind" :source "source" "(return (pmap (fn [city] (tool/time.city {\"city\" city \"delay_ms\" 100})) [\"nyc\" \"sf\" \"boston\" \"nyc\"]))"}))|
+      ~S|(return (tool/kernel-eval {"mission" "default" "kind" :source "source" "(return (pmap (fn [city] (tool/time.city {\"city\" city \"delay_ms\" 100})) [\"nyc\" \"sf\" \"boston\" \"nyc\"]))"}))|
 
     assert {:ok,
             %{
@@ -109,5 +116,96 @@ defmodule PtcRunner.Kernel.MCPRemoteE2ETest do
              _other ->
                false
            end)
+  end
+
+  @tag :tmp_dir
+  test "the same live server is reachable from a host document", %{tmp_dir: dir} do
+    # #1422: a host document could not name this server at all. `streamable_http`
+    # requires HTTPS, the loopback exception existed only in the Elixir API, and
+    # the upstream name `cityTime` failed the host layer's lowercase rule. Both
+    # are the CLI's own path, so this drives the document rather than a builder.
+    endpoint = System.fetch_env!("PTC_TEST_MCP_2026_ENDPOINT")
+
+    document = %{
+      "install" => %{
+        "workspace" => %{
+          "source" => "mcp",
+          "installation_revision" => "workspace-v1",
+          "transport" => %{
+            "type" => "streamable_http",
+            "endpoint" => endpoint,
+            "allow_insecure_loopback" => true
+          },
+          "tools" => %{"cityTime" => %{"as" => "time.city", "effect" => "read"}},
+          "ceilings" => %{"timeout_ms" => 30_000, "max_result_bytes" => 500_000}
+        }
+      }
+    }
+
+    path = Path.join(dir, "ptc-host.json")
+    File.write!(path, Jason.encode!(document))
+
+    assert {:ok, host} = HostConfig.load(path)
+    assert host.install["workspace"].transport.allow_insecure_loopback
+
+    {:ok, catalog} = HostInstallation.catalog(host)
+    {:ok, registry} = HostInstallation.runtime_registry(host, catalog)
+
+    {:ok, limits} =
+      Limits.new(
+        run_duration_ms: 90_000,
+        workflow_timeout_ms: 90_000,
+        evaluation_timeout_ms: 30_000,
+        live_provider_tasks: 1
+      )
+
+    {:ok, %{capabilities: [capability], snapshot: snapshot, close: close}} =
+      ProviderRegistry.build(
+        registry,
+        "workspace",
+        %{"allow" => ["time.city"]},
+        %{
+          application_content_digest: String.duplicate("0", 64),
+          destination: :mission,
+          limits: limits,
+          installed_limits: limits,
+          owner: self()
+        }
+      )
+
+    if is_function(close, 0), do: on_exit(close)
+
+    encoded_snapshot = snapshot |> Jason.encode!()
+    refute encoded_snapshot =~ URI.parse(endpoint).host
+    refute encoded_snapshot =~ "cityTime"
+
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new(capabilities: [capability])
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "mcp-remote-host-e2e")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source =
+      ~S|(return (tool/kernel-eval {"mission" "default" "kind" :source "source" "(return (tool/time.city {\"city\" \"nyc\"}))"}))|
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "ok",
+                "value" => %{
+                  "outcome" => "returned",
+                  "value" => %{"status" => "ok", "value" => %{"text" => [entry | _]}}
+                }
+              }
+            }} = Kernel.run(source, config)
+
+    assert is_binary(entry) and entry != ""
   end
 end

@@ -6,6 +6,7 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
           | {:chunked, pos_integer(), [{binary(), binary()}], [binary()]}
           | {:headers_only, pos_integer(), [{binary(), binary()}]}
           | {:status_only, pos_integer()}
+          | {:script, (:gen_tcp.socket() -> :ok)}
           | :close
 
   @spec start((map() -> response())) :: map()
@@ -74,6 +75,9 @@ defmodule PtcRunner.TestSupport.MCPHTTPFixture do
 
         {:chunked, status, headers, chunks} ->
           send_chunked(socket, status, headers, chunks, owner)
+
+        {:script, script} when is_function(script, 1) ->
+          script.(socket)
 
         :close ->
           :ok

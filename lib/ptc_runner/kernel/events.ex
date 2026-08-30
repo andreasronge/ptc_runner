@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.Events do
 
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.SafeMetadata
 
   @doc "Emits an event and records fail-closed sink failure in run state."
   def emit(_state, nil, _type, _data), do: :ok
@@ -43,6 +44,19 @@ defmodule PtcRunner.Kernel.Events do
   @doc "Returns non-negative elapsed monotonic milliseconds."
   def duration_ms(started_ms),
     do: max(System.monotonic_time(:millisecond) - started_ms, 0)
+
+  @doc """
+  Copies a payload-free rejection class from an error envelope onto event data.
+
+  Known Kernel envelope `kind` and `reason` atoms remain readable. An
+  unrecognized atom is retained only as a one-way fingerprint. Details,
+  messages, and caller-supplied strings stay off the canonical event.
+  Successful results omit these fields.
+  """
+  @spec put_rejection_class(map(), term()) :: map()
+  def put_rejection_class(data, result) when is_map(data) do
+    Map.merge(data, SafeMetadata.rejection_class(result))
+  end
 
   defp digest_prefix(value, bytes) do
     value

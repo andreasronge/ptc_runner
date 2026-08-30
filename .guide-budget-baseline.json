@@ -1,0 +1,100 @@
+{
+  "_comment": "Guide budget ratchet. Regenerate with `scripts/guide_budget.sh bless` and explain the change in the commit body. See docs/maintainers/guide-budget.md.",
+  "new_guide_caps": {
+    "words": 700,
+    "density": 5.0,
+    "blockers": 2
+  },
+  "guides": {
+    "docs/guides/agent-cli-usage.md": {
+      "words": 690,
+      "density": 5.0,
+      "blockers": 2
+    },
+    "docs/guides/agent-workflow-patterns.md": {
+      "words": 518,
+      "density": 1.9,
+      "blockers": 1
+    },
+    "docs/guides/building-agents.md": {
+      "words": 536,
+      "density": 1.2,
+      "blockers": 1
+    },
+    "docs/guides/components-and-preludes.md": {
+      "words": 292,
+      "density": 2.2,
+      "blockers": 0
+    },
+    "docs/guides/concepts.md": {
+      "words": 340,
+      "density": 2.9,
+      "blockers": 0
+    },
+    "docs/guides/connecting-tools-with-mcp.md": {
+      "words": 304,
+      "density": 4.2,
+      "blockers": 1
+    },
+    "docs/guides/debugging-a-failed-run.md": {
+      "words": 252,
+      "density": 1.4,
+      "blockers": 0
+    },
+    "docs/guides/designing-agent-workflows.md": {
+      "words": 1024,
+      "density": 2.0,
+      "blockers": 5
+    },
+    "docs/guides/evaluating-with-replay.md": {
+      "words": 718,
+      "density": 3.2,
+      "blockers": 1
+    },
+    "docs/guides/getting-started.md": {
+      "words": 369,
+      "density": 2.9,
+      "blockers": 0
+    },
+    "docs/guides/host-configuration.md": {
+      "words": 321,
+      "density": 4.5,
+      "blockers": 0
+    },
+    "docs/guides/kernel-repl.md": {
+      "words": 225,
+      "density": 0.6,
+      "blockers": 0
+    },
+    "docs/guides/manifests-and-capabilities.md": {
+      "words": 448,
+      "density": 5.8,
+      "blockers": 0
+    },
+    "docs/guides/project-configuration.md": {
+      "words": 200,
+      "density": 4.8,
+      "blockers": 0
+    },
+    "docs/guides/ptc-lisp-basics.md": {
+      "words": 920,
+      "density": 3.1,
+      "blockers": 0
+    },
+    "docs/guides/quickstart.md": {
+      "words": 365,
+      "density": 2.5,
+      "blockers": 0
+    },
+    "docs/guides/running-and-debugging.md": {
+      "words": 357,
+      "density": 2.9,
+      "blockers": 1
+    },
+    "docs/guides/using-models.md": {
+      "words": 332,
+      "density": 3.5,
+      "blockers": 0
+    }
+  }
+}

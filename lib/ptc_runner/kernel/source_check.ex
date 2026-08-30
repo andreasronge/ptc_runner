@@ -6,13 +6,14 @@ defmodule PtcRunner.Kernel.SourceCheck do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.Parser
   alias PtcRunner.Utf8
 
   @diagnostic_bytes 4_096
 
-  @spec check(RunState.t(), struct(), binary(), map(), term(), keyword()) :: map()
-  def check(state, mission, source, limits, event_sink, opts \\ []) when is_binary(source) do
-    mission_name = Keyword.get(opts, :mission_name, RunState.default_mission())
+  @spec check(RunState.t(), binary(), struct(), binary(), map(), term(), keyword()) :: map()
+  def check(state, mission_name, mission, source, limits, event_sink, opts \\ [])
+      when is_binary(mission_name) and is_binary(source) and is_list(opts) do
     source_bytes = byte_size(source)
 
     if source_bytes > limits.subordinate_source_bytes do
@@ -31,10 +32,10 @@ defmodule PtcRunner.Kernel.SourceCheck do
         {:ok, memory, revision} ->
           compile_and_finish(
             state,
-            {mission, source, limits, event_sink},
+            {mission_name, mission, source, limits, event_sink},
             {memory, revision},
             identity,
-            Keyword.put(opts, :mission_name, mission_name)
+            opts
           )
 
         {:error, reason} ->
@@ -45,7 +46,7 @@ defmodule PtcRunner.Kernel.SourceCheck do
 
   defp compile_and_finish(
          state,
-         {mission, source, limits, event_sink},
+         {mission_name, mission, source, limits, event_sink},
          {memory, revision},
          identity,
          opts
@@ -54,24 +55,40 @@ defmodule PtcRunner.Kernel.SourceCheck do
     compile_timeout_ms = Keyword.get(opts, :compile_timeout, timeout_ms)
 
     compile_result =
-      Lisp.check_native(source,
-        memory: memory,
-        tools: Evaluation.mission_tools(mission, state, timeout_ms, event_sink, nil),
-        prelude: bundle_prelude(mission),
-        timeout: timeout_ms,
-        compile_timeout: compile_timeout_ms,
-        max_heap: limits.evaluation_heap_words,
-        compile_max_heap: limits.evaluation_heap_words,
-        max_program_bytes: limits.subordinate_source_bytes,
-        filter_context: false,
-        caller: :kernel,
-        preserve_runtime_callables: true,
-        link: true
-      )
+      case required_shape(source, Keyword.get(opts, :required_shape)) do
+        :ok ->
+          Lisp.check_native(source,
+            memory: memory,
+            tools:
+              Evaluation.mission_tools(
+                mission,
+                state,
+                timeout_ms,
+                event_sink,
+                nil,
+                nil,
+                nil,
+                mission_name
+              ),
+            prelude: bundle_prelude(mission),
+            timeout: timeout_ms,
+            compile_timeout: compile_timeout_ms,
+            max_heap: limits.evaluation_heap_words,
+            compile_max_heap: limits.evaluation_heap_words,
+            max_program_bytes: limits.subordinate_source_bytes,
+            filter_context: false,
+            caller: :kernel,
+            preserve_runtime_callables: true,
+            link: true
+          )
+
+        {:error, failure} ->
+          {:error, %{fail: failure}}
+      end
 
     :ok = after_compile(Keyword.get(opts, :after_compile))
 
-    case RunState.finish_source_check(state, Keyword.fetch!(opts, :mission_name), revision) do
+    case RunState.finish_source_check(state, mission_name, revision) do
       :ok -> Map.merge(identity, compile_projection(compile_result))
       {:error, reason} -> Map.merge(identity, finish_failure(reason))
     end
@@ -132,6 +149,27 @@ defmodule PtcRunner.Kernel.SourceCheck do
 
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude
   defp bundle_prelude(_mission), do: nil
+
+  defp required_shape(_source, nil), do: :ok
+
+  defp required_shape(source, :terminal) do
+    case Parser.parse(source) do
+      {:ok, {:list, [{:symbol, head} | _arguments]}} when head in [:return, :fail] ->
+        :ok
+
+      {:error, _parse_error} ->
+        # Preserve the ordinary parser diagnostic from check_native/2.
+        :ok
+
+      {:ok, _other} ->
+        {:error,
+         %{
+           reason: :terminal_source_required,
+           message: "expected exactly one top-level return or fail form",
+           details: %{}
+         }}
+    end
+  end
 
   defp after_compile(nil), do: :ok
   defp after_compile(callback) when is_function(callback, 0), do: callback.()

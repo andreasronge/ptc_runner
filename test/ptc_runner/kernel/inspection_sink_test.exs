@@ -1,1243 +1,336 @@
 defmodule PtcRunner.Kernel.InspectionSinkTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
-  alias PtcRunner.Kernel.ApplicationPackage
-  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.InspectionArtifact
+  alias PtcRunner.Kernel.InspectionArtifact.Format
+  alias PtcRunner.Kernel.InspectionArtifact.Indexes
+  alias PtcRunner.Kernel.InspectionArtifact.Limits
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.ProviderRegistry
-  alias PtcRunner.Kernel.TraceLog
-  alias PtcRunner.Kernel.ViewerAdapter
-  alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.Kernel.InspectionSnapshot
+  alias PtcRunner.Kernel.PublicationHandle
+  alias PtcRunner.Kernel.TraceSnapshot
+  alias PtcRunner.TestSupport.PrivateInspectionFixture
 
-  @source "(return 42)"
-  @source_hash :crypto.hash(:sha256, @source) |> Base.encode16(case: :lower)
+  test "production format and admission maxima are exact" do
+    assert %{
+             max_record_bytes: 2_000_000,
+             max_evidence_bytes: 536_870_912,
+             max_artifact_bytes: 536_871_120,
+             default_max_records: 16_384,
+             maintained_max_records: 65_536,
+             max_retained_bytes: 128_000_000
+           } = InspectionArtifact.format_contract()
 
-  test "retains only normalized exact V1 records and fails closed" do
-    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+    assert {:ok, %{max_records: 65_536}} = Limits.merge(max_records: 65_536)
+    assert {:error, :invalid_limits} = Limits.merge(max_records: 65_537)
+    assert {:ok, %{max_record_bytes: 2_000_000}} = Limits.merge(max_record_bytes: 2_000_000)
+    assert {:error, :invalid_limits} = Limits.merge(max_record_bytes: 2_000_001)
 
-    assert :ok =
-             InspectionSink.emit(
-               sink,
-               "capability-input",
-               %{capability_id: "cap-1"},
-               %{environment: :mission, name: "remote.read", arguments: %{"query" => "x"}}
-             )
+    assert {:ok, %{max_total_bytes: 536_870_912}} =
+             Limits.merge(max_total_bytes: 536_870_912)
 
-    assert :ok =
-             InspectionSink.emit(
-               sink,
-               "capability-output",
-               %{"capability_id" => "cap-1"},
-               %{environment: :mission, name: "remote.read", result: %{status: :ok, value: 42}}
-             )
+    assert {:error, :invalid_limits} = Limits.merge(max_total_bytes: 536_870_913)
+    assert {:ok, %{cleanup_deadline_ms: 5_000}} = Limits.merge(cleanup_deadline_ms: 5_000)
+    assert {:error, :invalid_limits} = Limits.merge(cleanup_deadline_ms: 5_001)
+  end
 
-    assert :ok =
-             InspectionSink.emit(
-               sink,
-               "evaluation-source",
-               %{evaluation_id: "eval-1"},
-               %{
-                 environment: :mission,
-                 program_kind: :"ptc-lisp",
-                 source: @source,
-                 source_hash: @source_hash,
-                 source_bytes: byte_size(@source)
-               }
-             )
+  @tag :tmp_dir
+  test "streams the V1 header, framed evidence, and sealed footer to the reservation", %{
+    tmp_dir: root
+  } do
+    path = Path.join(root, "streamed.ptcins")
+    {sink, handle} = start_sink!(path, max_records: 3)
 
-    assert :ok =
-             InspectionSink.emit(
-               sink,
-               "prelude-source",
-               %{component_id: "tools"},
-               %{
-                 environment: :workflow,
-                 source: @source,
-                 source_hash: @source_hash,
-                 source_bytes: byte_size(@source)
-               }
-             )
+    assert :ok = emit_prints(sink, "evaluation-1", ["private output"])
+    refute File.exists?(path)
+    refute function_exported?(InspectionSink, :records, 1)
 
-    assert {:ok, [input, output, source, prelude]} = InspectionSink.records(sink)
-    assert Enum.map([input, output, source, prelude], & &1["sequence"]) == [1, 2, 3, 4]
-    assert input["payload"]["environment"] == "mission"
-    assert output["payload"]["result"] == %{"status" => "ok", "value" => 42}
-    assert source["payload"]["source"] == @source
-    assert prelude["correlation"] == %{"component_id" => "tools"}
-    assert prelude["payload"]["environment"] == "workflow"
-    assert prelude["payload"]["source"] == @source
-
-    assert {:error, :inspection_sink_error} =
-             InspectionSink.emit(
-               sink,
-               "capability-input",
-               %{capability_id: "cap-2"},
-               %{environment: :mission, name: "bad", arguments: %{}, extra: true}
-             )
-
-    assert {:error, :inspection_sink_error} = InspectionSink.records(sink)
+    assert {:ok, seal} = InspectionSink.seal(sink)
+    assert seal.record_count == 1
+    assert seal.evidence_bytes > 8
+    assert seal.total_bytes == 16 + seal.evidence_bytes + 192
+    assert :ok = InspectionArtifact.publish_handle(handle, seal)
     assert :ok = InspectionSink.stop(sink)
+
+    bytes = File.read!(path)
+    assert binary_part(bytes, 0, 16) == Format.encode_header()
+    footer = binary_part(bytes, byte_size(bytes) - 192, 192)
+    assert {:ok, decoded} = Format.decode_footer(footer)
+    assert decoded.total_bytes == byte_size(bytes)
+    assert decoded.record_count == 1
+    assert decoded.first_sequence == 1
+    assert decoded.last_sequence == 1
+    assert decoded.artifact_digest == seal.artifact_digest
+  end
+
+  @tag :tmp_dir
+  test "writer failure cannot publish a partial destination", %{tmp_dir: root} do
+    path = Path.join(root, "partial.ptcins")
+
+    hook = fn
+      :before_footer -> {:error, :injected}
+      _stage -> :ok
+    end
+
+    {sink, _handle} = start_sink!(path, writer_hook: hook)
+    assert :ok = emit_prints(sink, "evaluation-1", [])
+    assert {:error, :inspection_sink_error} = InspectionSink.seal(sink)
+    refute File.exists?(path)
     assert :ok = InspectionSink.stop(sink)
   end
 
-  test "V2 retains paired MCP exchange records while V1 rejects them" do
-    request = %{
-      "jsonrpc" => "2.0",
-      "id" => 7,
-      "method" => "tools/call",
-      "params" => %{"name" => "read", "arguments" => %{"path" => "README.md"}}
-    }
+  @tag :tmp_dir
+  test "publication re-authenticates the synchronized staging bytes", %{tmp_dir: root} do
+    path = Path.join(root, "mutated-before-publication.ptcins")
+    {sink, handle} = start_sink!(path, [])
+    assert :ok = emit_prints(sink, "evaluation-1", ["private output"])
+    assert {:ok, seal} = InspectionSink.seal(sink)
 
-    response = %{
-      "jsonrpc" => "2.0",
-      "id" => 7,
-      "result" => %{"content" => [%{"type" => "text", "text" => "hello"}]}
-    }
+    hook = fn :before_publish ->
+      File.write!(handle.staging_path, <<0>>, [:append])
+      :ok
+    end
 
-    correlation = %{capability_id: "cap-1", request_id: 7}
+    assert {:error, :publication_collision} =
+             InspectionArtifact.publish_handle(handle, seal, hook)
 
-    {:ok, v1} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
-
-    assert {:error, :inspection_sink_error} =
-             InspectionSink.emit(
-               v1,
-               "mcp-request",
-               correlation,
-               %{transport: :stdio, body: request}
-             )
-
-    {:ok, v2} =
-      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 2)
-
-    assert :ok =
-             InspectionSink.emit(
-               v2,
-               "mcp-request",
-               correlation,
-               %{transport: :stdio, body: request}
-             )
-
-    assert :ok =
-             InspectionSink.emit(
-               v2,
-               "mcp-response",
-               correlation,
-               %{transport: :stdio, body: response}
-             )
-
-    assert {:ok, [request_record, response_record]} = InspectionSink.records(v2)
-    assert request_record["schema_version"] == 2
-    assert request_record["payload"]["body"] == request
-    assert response_record["payload"]["body"] == response
+    refute File.exists?(path)
+    assert :ok = InspectionSink.stop(sink)
   end
 
-  test "V3 retains correlated execution-prints and execution-error records while V2 rejects them" do
-    {:ok, v2} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 2)
+  @tag :tmp_dir
+  test "record quota refusal poisons the stream before publication", %{tmp_dir: root} do
+    path = Path.join(root, "quota.ptcins")
+    {sink, _handle} = start_sink!(path, max_records: 2)
 
-    assert {:error, :inspection_sink_error} =
-             InspectionSink.emit(
-               v2,
-               "execution-prints",
-               %{evaluation_id: "eval-1"},
-               %{environment: :workflow, prints: ["CHECKPOINT"], truncated: false}
-             )
-
-    {:ok, v3} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 3)
-
-    assert :ok =
-             InspectionSink.emit(
-               v3,
-               "execution-prints",
-               %{evaluation_id: "eval-1"},
-               %{environment: :workflow, prints: ["CHECKPOINT"], truncated: false}
-             )
-
-    assert :ok =
-             InspectionSink.emit(
-               v3,
-               "execution-error",
-               %{evaluation_id: "eval-1"},
-               %{
-                 environment: :workflow,
-                 kind: :workflow_failed,
-                 reason: :invalid_result_projection,
-                 details: %{result_projection: true, projection_error: "some inspected reason"}
-               }
-             )
-
-    assert {:ok, [prints_record, error_record]} = InspectionSink.records(v3)
-    assert prints_record["schema_version"] == 3
-    assert prints_record["correlation"] == %{"evaluation_id" => "eval-1"}
-
-    assert prints_record["payload"] == %{
-             "environment" => "workflow",
-             "prints" => ["CHECKPOINT"],
-             "truncated" => false
-           }
-
-    assert error_record["payload"] == %{
-             "environment" => "workflow",
-             "kind" => "workflow_failed",
-             "reason" => "invalid_result_projection",
-             "details" => %{
-               "result_projection" => true,
-               "projection_error" => "some inspected reason"
-             }
-           }
-
-    assert {:error, :inspection_sink_error} =
-             InspectionSink.emit(
-               v3,
-               "execution-prints",
-               %{evaluation_id: "eval-2"},
-               %{environment: :mission, prints: ["nope"], truncated: false}
-             )
+    assert :ok = emit_prints(sink, "evaluation-1", [])
+    assert :ok = emit_prints(sink, "evaluation-2", [])
+    assert {:error, :inspection_sink_error} = emit_prints(sink, "evaluation-3", [])
+    assert {:error, :inspection_sink_error} = InspectionSink.seal(sink)
+    refute File.exists?(path)
+    assert :ok = InspectionSink.stop(sink)
   end
 
-  test "V4 requires and correlates exact mission identity" do
-    {:ok, missing_name} =
-      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 4)
+  @tag :tmp_dir
+  test "malformed framing, append, and truncation fail closed", %{tmp_dir: root} do
+    malformed = PrivateInspectionFixture.create!(Path.join(root, "malformed"), "malformed-run")
+    malformed_path = Path.join(malformed.inspection, "malformed-run.ptcins")
+    bytes = File.read!(malformed_path)
 
-    assert {:error, :inspection_sink_error} =
-             InspectionSink.emit(
-               missing_name,
-               "capability-input",
-               %{capability_id: "cap-1"},
-               %{environment: :mission, name: "read", arguments: %{}}
+    footer_bytes =
+      binary_part(bytes, byte_size(bytes) - Format.footer_size(), Format.footer_size())
+
+    assert {:ok, footer} = Format.decode_footer(footer_bytes)
+    {:ok, io} = :file.open(malformed_path, [:read, :write, :binary])
+    :ok = :file.pwrite(io, Format.header_size(), <<footer.evidence_bytes::unsigned-big-64>>)
+    :ok = :file.close(io)
+    {:ok, malformed_trace} = TraceSnapshot.start({:directory, malformed.traces}, owner: self())
+
+    assert {:error, :malformed_source} =
+             InspectionSnapshot.start(
+               {:directory, malformed.inspection},
+               malformed_trace,
+               owner: self()
              )
 
-    {:ok, workflow_name} =
-      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 4)
+    TraceSnapshot.stop(malformed_trace)
 
-    assert {:error, :inspection_sink_error} =
-             InspectionSink.emit(
-               workflow_name,
-               "capability-input",
-               %{capability_id: "cap-1"},
-               %{environment: :workflow, mission_name: "reader", name: "read", arguments: %{}}
-             )
+    changed = PrivateInspectionFixture.create!(Path.join(root, "changed"), "changed-run")
+    changed_path = Path.join(changed.inspection, "changed-run.ptcins")
+    original = File.read!(changed_path)
+    {trace, snapshot} = start_snapshots!(changed)
+
+    File.write!(changed_path, <<0>>, [:append])
+    assert {:error, :source_changed} = InspectionSnapshot.query(snapshot, :list_runs, %{})
+    InspectionSnapshot.stop(snapshot)
+    TraceSnapshot.stop(trace)
+
+    File.write!(changed_path, original)
+    {trace, snapshot} = start_snapshots!(changed)
+    File.write!(changed_path, binary_part(original, 0, byte_size(original) - 1))
+    assert {:error, :source_changed} = InspectionSnapshot.query(snapshot, :list_runs, %{})
+    InspectionSnapshot.stop(snapshot)
+    TraceSnapshot.stop(trace)
+  end
+
+  @tag :tmp_dir
+  test "query caller death cancels range work without killing the snapshot", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root, "query-lifecycle")
+    test = self()
+    calls = :atomics.new(1, signed: false)
+
+    hook = fn :before_query ->
+      if :atomics.add_get(calls, 1, 1) == 1 do
+        send(test, {:query_worker, self()})
+
+        receive do
+          :release_query -> :ok
+        end
+      end
+    end
+
+    {:ok, trace} = TraceSnapshot.start({:directory, fixture.traces}, owner: self())
+
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, fixture.inspection}, trace,
+        owner: self(),
+        query_hook: hook
+      )
+
+    caller = spawn(fn -> InspectionSnapshot.query(snapshot, :list_runs, %{}) end)
+    caller_ref = Process.monitor(caller)
+    assert_receive {:query_worker, worker}, 5_000
+    worker_ref = Process.monitor(worker)
+    Process.exit(caller, :kill)
+    assert_receive {:DOWN, ^caller_ref, :process, ^caller, :killed}, 5_000
+    assert_receive {:DOWN, ^worker_ref, :process, ^worker, :killed}, 5_000
+
+    assert {:ok, %{"items" => [%{"run_id" => "query-lifecycle"}]}} =
+             InspectionSnapshot.query(snapshot, :list_runs, %{})
+
+    InspectionSnapshot.stop(snapshot)
+    TraceSnapshot.stop(trace)
+  end
+
+  @tag :tmp_dir
+  test "omitted_count is exact ETS cardinality and omitted frames are not reread", %{
+    tmp_dir: root
+  } do
+    fixture = PrivateInspectionFixture.create_model_exchanges!(root, 5, "omitted-run")
+    {trace, snapshot} = start_snapshots!(fixture)
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace)
+    end)
+
+    assert {:ok,
+            %{
+              "items" => [%{"capability_id" => "llm-1-omitted-run"}],
+              "next_cursor" => cursor,
+              "omitted_count" => 4,
+              "truncated" => true
+            }} =
+             InspectionSnapshot.query(snapshot, :model_exchanges, %{
+               "run_id" => "omitted-run",
+               "limit" => 1
+             })
+
+    state = :sys.get_state(snapshot.pid)
+
+    [{_key, {_type, offset, _length, _digest}}] =
+      Indexes.lookup(state.indexes, :records, {"omitted-run", 3})
+
+    path = Path.join(fixture.inspection, "omitted-run.ptcins")
+    {:ok, io} = :file.open(path, [:read, :write, :binary])
+    :ok = :file.pwrite(io, offset, "[")
+    :ok = :file.close(io)
+
+    assert {:ok, %{"omitted_count" => 4}} =
+             InspectionSnapshot.query(snapshot, :model_exchanges, %{
+               "run_id" => "omitted-run",
+               "limit" => 1
+             })
+
+    assert {:error, :source_changed} =
+             InspectionSnapshot.query(snapshot, :model_exchanges, %{
+               "run_id" => "omitted-run",
+               "limit" => 1,
+               "cursor" => cursor
+             })
+  end
+
+  @tag :tmp_dir
+  test "large streamed artifacts admit and query without an eager record collection", %{
+    tmp_dir: root
+  } do
+    fixture = PrivateInspectionFixture.create_model_exchanges!(root, 120, "large-run")
+    path = Path.join(fixture.inspection, "large-run.ptcins")
+    assert File.stat!(path).size > 500_000
+
+    {trace, snapshot} = start_snapshots!(fixture)
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace)
+    end)
+
+    assert {:ok, %{"record_count" => 240, "counts" => counts}} =
+             InspectionSnapshot.query(snapshot, :get_run, %{"run_id" => "large-run"})
+
+    assert counts["model_exchanges"] == 120
+
+    assert {:ok, %{"items" => items, "omitted_count" => 110}} =
+             InspectionSnapshot.query(snapshot, :model_exchanges, %{
+               "run_id" => "large-run",
+               "limit" => 10
+             })
+
+    assert length(items) == 10
+  end
+
+  @tag :tmp_dir
+  test "admitted collections preserve all production query families", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root, "parity-run")
+    {trace, snapshot} = start_snapshots!(fixture)
+
+    on_exit(fn ->
+      InspectionSnapshot.stop(snapshot)
+      TraceSnapshot.stop(trace)
+    end)
+
+    expected_nonempty = [
+      list_runs: %{},
+      get_run: %{"run_id" => "parity-run"},
+      turns: %{"run_id" => "parity-run"},
+      model_exchanges: %{"run_id" => "parity-run"},
+      capability_calls: %{"run_id" => "parity-run"},
+      generated_sources: %{"run_id" => "parity-run"},
+      effective_preludes: %{"run_id" => "parity-run"},
+      provider_exchanges: %{"run_id" => "parity-run"},
+      execution_prints: %{"run_id" => "parity-run"},
+      execution_errors: %{"run_id" => "parity-run"},
+      explicit_failure_values: %{"run_id" => "parity-run"}
+    ]
+
+    Enum.each(expected_nonempty, fn {operation, arguments} ->
+      assert {:ok, result} = InspectionSnapshot.query(snapshot, operation, arguments)
+      assert operation == :get_run or result["items"] != []
+    end)
+
+    assert {:error, :result_not_found} =
+             InspectionSnapshot.query(snapshot, :result, %{"run_id" => "parity-run"})
+  end
+
+  defp emit_prints(sink, evaluation_id, prints) do
+    InspectionSink.emit(sink, "execution-prints", %{evaluation_id: evaluation_id}, %{
+      environment: :workflow,
+      prints: prints,
+      truncated: false
+    })
+  end
+
+  defp start_sink!(path, opts) do
+    {:ok, handle} = PublicationHandle.reserve_stream_for(path, :inspection, 0o600, self())
 
     {:ok, sink} =
-      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 4)
-
-    assert :ok =
-             InspectionSink.emit(
-               sink,
-               "capability-input",
-               %{capability_id: "cap-1"},
-               %{
-                 environment: :mission,
-                 mission_name: "reader",
-                 name: "read",
-                 arguments: %{}
-               }
-             )
-
-    assert :ok =
-             InspectionSink.emit(
-               sink,
-               "capability-output",
-               %{capability_id: "cap-1"},
-               %{
-                 environment: :mission,
-                 mission_name: "reader",
-                 name: "read",
-                 result: %{status: :ok, value: 1}
-               }
-             )
-
-    assert {:ok, records} = InspectionSink.records(sink)
-
-    event = %{
-      run_id: "run-1",
-      trace_id: "trace-1",
-      type: "capability-started",
-      data: %{
-        capability_id: "cap-1",
-        environment: :mission,
-        mission_name: "reader",
-        name: "read"
-      }
-    }
-
-    assert :ok = InspectionArtifact.validate_correlations(records, [event])
-
-    assert {:error, :inspection_correlation_missing} =
-             InspectionArtifact.validate_correlations(
-               records,
-               [put_in(event, [:data, :mission_name], "writer")]
-             )
-  end
-
-  test "enforces installed per-record and aggregate encoded byte ceilings" do
-    {:ok, record_limited} =
       InspectionSink.start(
-        run_id: "run-1",
-        trace_id: "trace-1",
-        max_record_bytes: 400,
-        max_total_bytes: 800
+        [
+          run_id: "stream-run",
+          trace_id: "stream-trace",
+          publication_handle: handle
+        ] ++ opts
       )
 
-    assert {:error, :inspection_sink_error} =
-             InspectionSink.emit(
-               record_limited,
-               "capability-input",
-               %{capability_id: "cap-1"},
-               %{
-                 environment: :mission,
-                 name: "large",
-                 arguments: %{"value" => String.duplicate("x", 1_000)}
-               }
-             )
-
-    {:ok, total_limited} =
-      InspectionSink.start(
-        run_id: "run-1",
-        trace_id: "trace-1",
-        max_record_bytes: 1_200,
-        max_total_bytes: 1_200
-      )
-
-    assert :ok = emit_small(total_limited, "cap-1")
-
-    results = Enum.map(2..10, &emit_small(total_limited, "cap-#{&1}"))
-    assert :ok in results
-    assert {:error, :inspection_sink_error} in results
+    {sink, handle}
   end
 
-  @tag :tmp_dir
-  test "artifacts reject duplicate, output-only, and identity-mismatched joins", %{tmp_dir: dir} do
-    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
-    assert :ok = emit_small(sink, "cap-1")
+  defp start_snapshots!(fixture) do
+    {:ok, trace} = TraceSnapshot.start({:directory, fixture.traces}, owner: self())
 
-    assert :ok =
-             InspectionSink.emit(
-               sink,
-               "capability-output",
-               %{capability_id: "cap-1"},
-               %{environment: :mission, name: "read", result: %{status: :ok, value: 1}}
-             )
+    {:ok, snapshot} =
+      InspectionSnapshot.start({:directory, fixture.inspection}, trace, owner: self())
 
-    assert {:ok, [input, output]} = InspectionSink.records(sink)
-
-    events = [
-      %{
-        run_id: "run-1",
-        trace_id: "trace-1",
-        type: "capability-started",
-        data: %{capability_id: "cap-1", environment: :mission, name: "read"}
-      }
-    ]
-
-    duplicate_input = resequence([input, input])
-
-    assert {:error, :invalid_inspection_artifact} =
-             InspectionArtifact.persist(
-               Path.join(dir, "duplicate-input.inspection.jsonl"),
-               duplicate_input,
-               events
-             )
-
-    assert {:error, :invalid_inspection_artifact} =
-             InspectionArtifact.persist(
-               Path.join(dir, "duplicate-output.inspection.jsonl"),
-               resequence([input, output, output]),
-               events
-             )
-
-    assert {:error, :invalid_inspection_artifact} =
-             InspectionArtifact.persist(
-               Path.join(dir, "output-only.inspection.jsonl"),
-               resequence([output]),
-               events
-             )
-
-    mismatched_output = put_in(output, ["payload", "name"], "other")
-
-    assert {:error, :invalid_inspection_artifact} =
-             InspectionArtifact.persist(
-               Path.join(dir, "mismatched-pair.inspection.jsonl"),
-               [input, mismatched_output],
-               events
-             )
-
-    wrong_canonical_name = put_in(events, [Access.at(0), :data, :name], "other")
-
-    assert {:error, :inspection_correlation_missing} =
-             InspectionArtifact.validate_correlations([input, output], wrong_canonical_name)
-
-    wrong_canonical_environment =
-      put_in(events, [Access.at(0), :data, :environment], :workflow)
-
-    assert {:error, :inspection_correlation_missing} =
-             InspectionArtifact.validate_correlations(
-               [input, output],
-               wrong_canonical_environment
-             )
-
-    duplicate_canonical = events ++ events
-
-    assert {:error, :inspection_correlation_missing} =
-             InspectionArtifact.validate_correlations(
-               [input, output],
-               duplicate_canonical
-             )
-
-    conflicting_canonical =
-      events ++ [put_in(hd(events), [:data, :name], "other")]
-
-    assert {:error, :inspection_correlation_missing} =
-             InspectionArtifact.validate_correlations(
-               [input, output],
-               conflicting_canonical
-             )
-
-    {:ok, source_sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
-
-    for _index <- 1..2 do
-      assert :ok =
-               InspectionSink.emit(
-                 source_sink,
-                 "evaluation-source",
-                 %{evaluation_id: "eval-1"},
-                 %{
-                   environment: :mission,
-                   program_kind: :"ptc-lisp",
-                   source: @source,
-                   source_hash: @source_hash,
-                   source_bytes: byte_size(@source)
-                 }
-               )
-    end
-
-    assert {:ok, duplicate_evaluations} = InspectionSink.records(source_sink)
-
-    assert {:error, :invalid_inspection_artifact} =
-             InspectionArtifact.persist(
-               Path.join(dir, "duplicate-evaluation.inspection.jsonl"),
-               duplicate_evaluations,
-               []
-             )
-
-    {:ok, prelude_sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
-
-    for _index <- 1..2 do
-      assert :ok =
-               InspectionSink.emit(
-                 prelude_sink,
-                 "prelude-source",
-                 %{component_id: "tools"},
-                 %{
-                   environment: :mission,
-                   source: @source,
-                   source_hash: @source_hash,
-                   source_bytes: byte_size(@source)
-                 }
-               )
-    end
-
-    assert {:ok, duplicate_preludes} = InspectionSink.records(prelude_sink)
-
-    assert {:error, :invalid_inspection_artifact} =
-             InspectionArtifact.persist(
-               Path.join(dir, "duplicate-prelude.inspection.jsonl"),
-               duplicate_preludes,
-               []
-             )
-  end
-
-  @tag :tmp_dir
-  test "artifacts accept only correlations proven missing by canonical dropped-event counts", %{
-    tmp_dir: dir
-  } do
-    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
-    assert :ok = emit_small(sink, "cap-1")
-    assert :ok = emit_small(sink, "cap-2")
-    assert {:ok, records} = InspectionSink.records(sink)
-
-    partial_events = dropped_events(%{"capability-started" => 2})
-    path = Path.join(dir, "partial.inspection.jsonl")
-
-    conflicting_terminal_counts =
-      put_in(
-        partial_events,
-        [Access.at(2), "data", "usage", "events_dropped"],
-        %{"capability-started" => 1}
-      )
-
-    intervening_event =
-      List.insert_at(partial_events, 2, canonical_event(3, "workflow-annotation", %{}))
-
-    reversed_terminal_events =
-      [Enum.at(partial_events, 0), Enum.at(partial_events, 2), Enum.at(partial_events, 1)]
-
-    assert :ok = InspectionArtifact.validate_correlations(records, partial_events)
-    assert :ok = InspectionArtifact.persist(path, records, partial_events)
-    assert {:ok, ^records} = InspectionArtifact.load(path)
-
-    for events <- [
-          dropped_events(%{"capability-started" => 1}),
-          dropped_events(%{"capability-stopped" => 2}),
-          conflicting_terminal_counts,
-          intervening_event,
-          reversed_terminal_events,
-          Enum.reject(partial_events, &(&1["type"] == "events-dropped")),
-          Enum.reject(partial_events, &(&1["type"] == "run-stopped"))
-        ] do
-      assert {:error, :inspection_correlation_missing} =
-               InspectionArtifact.validate_correlations(records, events)
-    end
-
-    conflicting =
-      canonical_event(2, "capability-started", %{
-        "capability_id" => "cap-1",
-        "environment" => "workflow",
-        "name" => "other"
-      })
-
-    assert {:error, :inspection_correlation_missing} =
-             InspectionArtifact.validate_correlations(records, [conflicting | partial_events])
-
-    assert :ok = InspectionSink.stop(sink)
-
-    {:ok, evaluation_sink} =
-      InspectionSink.start(run_id: "run-1", trace_id: "trace-1", schema_version: 3)
-
-    assert :ok =
-             InspectionSink.emit(
-               evaluation_sink,
-               "evaluation-source",
-               %{evaluation_id: "eval-mission"},
-               %{
-                 environment: :mission,
-                 program_kind: :"ptc-lisp",
-                 source: @source,
-                 source_hash: @source_hash,
-                 source_bytes: byte_size(@source)
-               }
-             )
-
-    assert :ok =
-             InspectionSink.emit(
-               evaluation_sink,
-               "execution-prints",
-               %{evaluation_id: "eval-workflow"},
-               %{environment: :workflow, prints: ["partial"], truncated: false}
-             )
-
-    assert {:ok, evaluation_records} = InspectionSink.records(evaluation_sink)
-    evaluation_events = dropped_events(%{"evaluation-started" => 2})
-
-    assert :ok = InspectionArtifact.validate_correlations(evaluation_records, evaluation_events)
-
-    conflicting_evaluation_records =
-      Enum.map(evaluation_records, fn record ->
-        put_in(record, ["correlation", "evaluation_id"], "eval-shared")
-      end)
-
-    assert {:error, :inspection_correlation_missing} =
-             InspectionArtifact.validate_correlations(
-               conflicting_evaluation_records,
-               dropped_events(%{"evaluation-started" => 1})
-             )
-
-    assert :ok = InspectionSink.stop(evaluation_sink)
-  end
-
-  test "rejects a non-MCP record above the artifact document-depth ceiling" do
-    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
-    nested = Enum.reduce(1..64, true, fn _level, value -> [value] end)
-
-    assert {:error, :inspection_sink_error} =
-             InspectionSink.emit(
-               sink,
-               "capability-input",
-               %{capability_id: "cap-1"},
-               %{
-                 environment: :mission,
-                 name: "remote.read",
-                 arguments: %{"nested" => nested}
-               }
-             )
-
-    assert {:error, :inspection_sink_error} = InspectionSink.records(sink)
-  end
-
-  # The retained record wraps the payload at exactly one level, so the ceiling is
-  # measured through that envelope. Pinning both sides of the edge keeps a
-  # cheaper pre-normalization check from quietly moving it.
-  test "retains a record at the document-depth ceiling and rejects the next level" do
-    nest = fn levels -> Enum.reduce(1..levels, true, fn _level, value -> [value] end) end
-
-    emit = fn levels ->
-      {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
-
-      InspectionSink.emit(
-        sink,
-        "capability-input",
-        %{capability_id: "cap-1"},
-        %{environment: :mission, name: "remote.read", arguments: %{"nested" => nest.(levels)}}
-      )
-    end
-
-    assert :ok = emit.(50)
-    assert {:error, :inspection_sink_error} = emit.(51)
-  end
-
-  @tag :tmp_dir
-  test "persists one exclusive 0600 artifact and validates immutable loading", %{tmp_dir: dir} do
-    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
-    assert :ok = emit_small(sink, "cap-1")
-    assert {:ok, records} = InspectionSink.records(sink)
-
-    events = [
-      %{
-        run_id: "run-1",
-        trace_id: "trace-1",
-        type: "capability-started",
-        data: %{capability_id: "cap-1", environment: :mission, name: "read"}
-      }
-    ]
-
-    for failure_stage <- [:before_chmod, :before_write] do
-      failed_path = Path.join(dir, "#{failure_stage}.inspection.jsonl")
-
-      hook = fn
-        ^failure_stage -> {:error, :simulated_write_failure}
-        _stage -> :ok
-      end
-
-      assert {:error, :inspection_persistence_failed} =
-               InspectionArtifact.persist(failed_path, records, events, hook)
-
-      refute File.exists?(failed_path)
-    end
-
-    File.cd!(dir, fn ->
-      relative_path = "-run.inspection.jsonl"
-
-      assert :ok = InspectionArtifact.persist(relative_path, records, events)
-      assert File.regular?(relative_path)
-    end)
-
-    path = Path.join(dir, "run.inspection.jsonl")
-
-    assert :ok = InspectionArtifact.persist(path, records, events)
-    assert {:ok, ^records} = InspectionArtifact.load(path)
-    assert {:ok, %File.Stat{mode: mode}} = File.stat(path)
-    assert Bitwise.band(mode, 0o777) == 0o600
-
-    assert {:error, :inspection_destination_exists} =
-             InspectionArtifact.persist(path, records, events)
-
-    assert {:error, :invalid_inspection_path} =
-             InspectionArtifact.persist(Path.join(dir, "wrong.jsonl"), records, events)
-
-    assert {:error, :inspection_correlation_missing} =
-             InspectionArtifact.persist(
-               Path.join(dir, "orphan.inspection.jsonl"),
-               records,
-               []
-             )
-
-    link = Path.join(dir, "link.inspection.jsonl")
-    File.ln_s!(path, link)
-    assert {:error, :invalid_inspection_source} = InspectionArtifact.load(link)
-
-    duplicate = Path.join(dir, "duplicate.inspection.jsonl")
-
-    duplicate_line =
-      records
-      |> hd()
-      |> Jason.encode!()
-      |> String.replace_prefix("{", ~S|{"schema_version":1,|)
-
-    File.write!(duplicate, duplicate_line <> "\n")
-    assert {:error, :malformed_inspection_artifact} = InspectionArtifact.load(duplicate)
-
-    invalid = Path.join(dir, "invalid.inspection.jsonl")
-    File.write!(invalid, Jason.encode!(Map.put(hd(records), "unknown", true)) <> "\n")
-    assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(invalid)
-
-    empty = Path.join(dir, "empty.inspection.jsonl")
-    File.write!(empty, "")
-    assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(empty)
-
-    wrong_type = Path.join(dir, "wrong-type.inspection.jsonl")
-
-    File.write!(
-      wrong_type,
-      Jason.encode!(Map.put(hd(records), "record_type", "unknown")) <> "\n"
-    )
-
-    assert {:error, :invalid_inspection_artifact} = InspectionArtifact.load(wrong_type)
-
-    repeated_sequence = Path.join(dir, "sequence.inspection.jsonl")
-
-    File.write!(
-      repeated_sequence,
-      Enum.map_join([hd(records), hd(records)], "\n", &Jason.encode!/1)
-    )
-
-    assert {:error, :invalid_inspection_artifact} =
-             InspectionArtifact.load(repeated_sequence)
-
-    assert {:error, :inspection_source_limit_exceeded} =
-             InspectionArtifact.load(path, max_bytes: 1)
-
-    oversized = Path.join(dir, "oversized.inspection.jsonl")
-
-    records
-    |> hd()
-    |> put_in(["payload", "arguments"], %{"value" => String.duplicate("x", 2_100_000)})
-    |> then(&File.write!(oversized, Jason.encode!(&1) <> "\n"))
-
-    assert {:error, :inspection_source_limit_exceeded} = InspectionArtifact.load(oversized)
-
-    trace_path = Path.join(dir, "run.jsonl")
-    assert :ok = TraceLog.append_jsonl(trace_path, canonical_events())
-    assert {:ok, grant} = ViewerAdapter.pin_inspection(path, {:file, trace_path})
-    assert {:error, :inspection_run_mismatch} = ViewerAdapter.inspection(grant, "another-run")
-
-    orphan = Path.join(dir, "pin-orphan.inspection.jsonl")
-    orphan_record = put_in(hd(records), ["correlation", "capability_id"], "missing-capability")
-    orphan_record = Map.put(orphan_record, "trace_id", "unrelated-trace")
-    File.write!(orphan, Jason.encode!(orphan_record) <> "\n")
-
-    assert {:error, :inspection_correlation_missing} =
-             ViewerAdapter.pin_inspection(orphan, {:file, trace_path})
-  end
-
-  @tag :tmp_dir
-  test "viewer startup pins the selected artifact even if its path is replaced", %{tmp_dir: dir} do
-    first_path = Path.join(dir, "pinned.inspection.jsonl")
-    private_marker = "PRIVATE_VIEWER_MARKER"
-    first_records = persisted_records(first_path, private_marker)
-    assert :ok = TraceLog.append_jsonl(Path.join(dir, "canonical.jsonl"), canonical_events())
-
-    telemetry_id = "inspection-telemetry-#{System.unique_integer([:positive])}"
-
-    :telemetry.attach_many(
-      telemetry_id,
-      [[:bandit, :request, :start], [:bandit, :request, :stop]],
-      fn event, _measurements, metadata, test_pid ->
-        send(test_pid, {:bandit_telemetry, event, metadata})
-      end,
-      self()
-    )
-
-    logger_id = :inspection_logger_probe
-    previous_level = Logger.level()
-    Logger.configure(level: :info)
-
-    :ok =
-      :logger.add_handler(logger_id, PtcRunner.TestSupport.LoggerProbeHandler, %{
-        level: :all,
-        test_pid: self()
-      })
-
-    on_exit(fn ->
-      :telemetry.detach(telemetry_id)
-      :logger.remove_handler(logger_id)
-      Logger.configure(level: previous_level)
-    end)
-
-    {:ok, viewer} =
-      PtcViewer.start(
-        port: 0,
-        trace_dir: dir,
-        inspection_file: first_path,
-        inspection_adapter: ViewerAdapter,
-        open: false
-      )
-
-    Process.unlink(viewer)
-    on_exit(fn -> if Process.alive?(viewer), do: PtcViewer.stop(viewer) end)
-
-    File.rm!(first_path)
-    replacement_records = persisted_records(first_path, "replacement")
-    refute replacement_records == first_records
-
-    assert {:ok, {_address, port}} = PtcViewer.listener_info(viewer)
-
-    response = Req.get!("http://127.0.0.1:#{port}/api/inspection/runs/run-1")
-    assert response.status == 200
-    assert response.body["records"] == first_records
-    assert inspect(response.body) =~ private_marker
-
-    assert_receive {:logger_probe, startup_event}
-    refute inspect(startup_event) =~ private_marker
-
-    assert_receive {:bandit_telemetry, [:bandit, :request, :start], start_metadata}
-    assert_receive {:bandit_telemetry, [:bandit, :request, :stop], stop_metadata}
-    refute inspect(start_metadata) =~ private_marker
-    refute inspect(stop_metadata) =~ private_marker
-  end
-
-  @tag :tmp_dir
-  test "loading rejects a same-size rewrite between bounded reads", %{tmp_dir: dir} do
-    path = Path.join(dir, "changing.inspection.jsonl")
-    replacement_path = Path.join(dir, "replacement.inspection.jsonl")
-    _records = persisted_records(path, "AAAA")
-    _replacement_records = persisted_records(replacement_path, "BBBB")
-    replacement = File.read!(replacement_path)
-
-    assert byte_size(File.read!(path)) == byte_size(replacement)
-
-    assert {:error, :inspection_source_changed} =
-             InspectionArtifact.load(path, [], fn -> File.write!(path, replacement) end)
-  end
-
-  @tag :tmp_dir
-  test "loading rejects an incomplete short read instead of parsing its prefix", %{tmp_dir: dir} do
-    path = Path.join(dir, "short-read.inspection.jsonl")
-    _records = persisted_records(path, "PRIVATE_SUFFIX")
-    valid_prefix_bytes = path |> File.read!() |> byte_size()
-    File.write!(path, File.read!(path) <> String.duplicate(" ", 64))
-    read_key = {__MODULE__, make_ref()}
-
-    short_reader = fn device, requested ->
-      case Process.get(read_key, :first) do
-        :first ->
-          Process.put(read_key, :done)
-          :file.read(device, min(requested, valid_prefix_bytes))
-
-        :done ->
-          :eof
-      end
-    end
-
-    assert {:error, :inspection_source_changed} =
-             InspectionArtifact.load(path, [], nil, short_reader)
-  end
-
-  @tag :tmp_dir
-  test "loading rejects excessive raw document depth before recursive normalization", %{
-    tmp_dir: dir
-  } do
-    path = Path.join(dir, "deep.inspection.jsonl")
-    nested = Enum.reduce(1..64, true, fn _level, value -> [value] end)
-
-    record = %{
-      "schema_version" => 1,
-      "run_id" => "deep",
-      "trace_id" => "deep",
-      "sequence" => 1,
-      "timestamp" => "2026-07-28T12:00:00Z",
-      "record_type" => "capability-input",
-      "correlation" => %{"capability_id" => "deep-capability"},
-      "payload" => %{
-        "environment" => "mission",
-        "name" => "read",
-        "arguments" => %{"nested" => nested}
-      }
-    }
-
-    File.write!(path, Jason.encode!(record) <> "\n")
-
-    assert {:error, :malformed_inspection_artifact} = InspectionArtifact.load(path)
-  end
-
-  @tag :tmp_dir
-  test "run builder captures correlated source and capability payloads outside canonical trace",
-       %{
-         tmp_dir: dir
-       } do
-    File.write!(
-      Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (do (tool/kernel-eval {"kind" :source "source" (get input "program")}) "done"))|
-    )
-
-    program = ~S|(return (tool/native-read {"query" "inspect me"}))|
-
-    manifest = %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "workflow.clj"}],
-        "entry" => "app/run"
-      },
-      "input" => %{"value" => %{"program" => program}},
-      "missions" => %{"default" => %{"providers" => ["native"]}},
-      "providers" => %{
-        "mission" => [%{"name" => "native", "config" => %{}}]
-      },
-      "events" => %{"policy" => "private"}
-    }
-
-    manifest_path = Path.join(dir, "ptc.json")
-    trace_path = Path.join(dir, "run.private.jsonl")
-    inspection_path = Path.join(dir, "run.inspection.jsonl")
-    result_path = Path.join(dir, "run.result.json")
-    File.write!(manifest_path, Jason.encode!(manifest))
-
-    builder = fn %{}, _context ->
-      Capability.new(
-        name: "native-read",
-        effect: :read,
-        input_schema: %{
-          "type" => "object",
-          "properties" => %{"query" => %{"type" => "string"}},
-          "required" => ["query"]
-        },
-        output_schema: %{
-          "type" => "object",
-          "properties" => %{"answer" => %{"type" => "string"}},
-          "required" => ["answer"]
-        },
-        callback: fn %{"query" => query} -> {:ok, %{"answer" => String.upcase(query)}} end
-      )
-    end
-
-    {:ok, registry} = ProviderRegistry.new(%{"native" => builder})
-
-    assert {:ok, _result} =
-             manifest_path
-             |> ApplicationPackage.request_directory(
-               inspection_capture: true,
-               result_projection: :json,
-               installed_limits: registry.installed_limits
-             )
-             |> RunLifecycle.build(registry,
-               trace_path: trace_path,
-               inspect: inspection_path,
-               private_output: result_path
-             )
-             |> RunLifecycle.execute()
-
-    assert {:ok, [prelude, source, input, output] = records} =
-             InspectionArtifact.load(inspection_path)
-
-    assert prelude["record_type"] == "prelude-source"
-    assert prelude["correlation"] == %{"component_id" => "app"}
-    assert prelude["payload"]["environment"] == "workflow"
-    assert prelude["payload"]["source"] =~ "(ns app)"
-
-    assert source["record_type"] == "evaluation-source"
-    assert source["payload"]["source"] == program
-
-    assert input["payload"] == %{
-             "environment" => "mission",
-             "mission_name" => "default",
-             "name" => "native-read",
-             "arguments" => %{"query" => "inspect me"}
-           }
-
-    assert output["payload"]["mission_name"] == "default"
-
-    assert output["payload"]["result"] == %{
-             "status" => "ok",
-             "value" => %{"answer" => "INSPECT ME"}
-           }
-
-    trace_lines = trace_path |> File.read!() |> String.split("\n", trim: true)
-    refute Enum.any?(trace_lines, &String.contains?(&1, "inspect me"))
-    refute Enum.any?(trace_lines, &String.contains?(&1, program))
-
-    evaluation_started =
-      trace_lines
-      |> Enum.map(&Jason.decode!/1)
-      |> Enum.find(
-        &(&1["type"] == "evaluation-started" and &1["data"]["environment"] == "mission")
-      )
-
-    assert evaluation_started["data"]["source_hash"] == source["payload"]["source_hash"]
-    assert evaluation_started["data"]["source_bytes"] == byte_size(program)
-    refute Map.has_key?(evaluation_started["data"], "source")
-
-    assert {:ok, private_trace} = TraceLog.new(source: {:private_file, trace_path})
-
-    assert {:ok, turns} =
-             TraceLog.query(private_trace, :list_turns, %{"run_id" => source["run_id"]})
-
-    encoded_turns = Jason.encode!(turns)
-    refute encoded_turns =~ "inspect me"
-    refute encoded_turns =~ program
-
-    assert {:ok, inspection_source} =
-             ViewerAdapter.pin_inspection(inspection_path, {:private_file, trace_path})
-
-    {:ok, inspection_store} = PtcViewer.InspectionStore.start(inspection_source)
-
-    on_exit(fn ->
-      if Process.alive?(inspection_store), do: PtcViewer.InspectionStore.stop(inspection_store)
-    end)
-
-    viewer_opts = [
-      trace_dir: dir,
-      kernel_trace_adapter: ViewerAdapter,
-      inspection_store: inspection_store,
-      inspection_adapter: ViewerAdapter
-    ]
-
-    response =
-      Plug.Test.conn(:get, "/api/inspection/runs/#{source["run_id"]}")
-      |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
-
-    assert response.status == 200
-    assert %{"records" => ^records} = Jason.decode!(response.resp_body)
-  end
-
-  @tag :tmp_dir
-  test "a provider-free execution failure captures prints and error detail outside canonical trace",
-       %{tmp_dir: dir} do
-    File.write!(
-      Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (println "CHECKPOINT" {:seen input}) #{1 2 3})|
-    )
-
-    manifest_path = Path.join(dir, "ptc.json")
-    trace_path = Path.join(dir, "run.private.jsonl")
-    inspection_path = Path.join(dir, "run.inspection.jsonl")
-    File.write!(manifest_path, Jason.encode!(checkpoint_manifest()))
-
-    assert {:error, %PtcRunner.Kernel.Error{kind: :workflow_failed}} =
-             execute_checkpoint(manifest_path, trace_path, inspection_path)
-
-    assert {:ok, records} = InspectionArtifact.load(inspection_path)
-
-    prints_record = Enum.find(records, &(&1["record_type"] == "execution-prints"))
-    error_record = Enum.find(records, &(&1["record_type"] == "execution-error"))
-
-    assert prints_record["payload"] == %{
-             "environment" => "workflow",
-             "prints" => [~S|CHECKPOINT {:seen {"seen" "checkpoint-input"}}|],
-             "truncated" => false
-           }
-
-    assert error_record["payload"]["environment"] == "workflow"
-    assert error_record["payload"]["kind"] == "workflow_failed"
-    assert is_map(error_record["payload"]["details"])
-    assert map_size(error_record["payload"]["details"]) > 0
-
-    trace_lines = trace_path |> File.read!() |> String.split("\n", trim: true)
-    refute Enum.any?(trace_lines, &String.contains?(&1, "CHECKPOINT"))
-    refute Enum.any?(trace_lines, &String.contains?(&1, "checkpoint-input"))
-
-    evaluation_started =
-      trace_lines
-      |> Enum.map(&Jason.decode!/1)
-      |> Enum.find(
-        &(&1["type"] == "evaluation-started" and &1["data"]["environment"] == "workflow")
-      )
-
-    assert evaluation_started["data"]["evaluation_id"] ==
-             prints_record["correlation"]["evaluation_id"]
-
-    assert evaluation_started["data"]["evaluation_id"] ==
-             error_record["correlation"]["evaluation_id"]
-
-    assert {:ok, inspection_source} =
-             ViewerAdapter.pin_inspection(inspection_path, {:private_file, trace_path})
-
-    {:ok, inspection_store} = PtcViewer.InspectionStore.start(inspection_source)
-
-    on_exit(fn ->
-      if Process.alive?(inspection_store), do: PtcViewer.InspectionStore.stop(inspection_store)
-    end)
-
-    viewer_opts = [
-      trace_dir: dir,
-      kernel_trace_adapter: ViewerAdapter,
-      inspection_store: inspection_store,
-      inspection_adapter: ViewerAdapter
-    ]
-
-    response =
-      Plug.Test.conn(:get, "/api/inspection/runs/#{evaluation_started["run_id"]}")
-      |> PtcViewer.Router.call(PtcViewer.Router.init(viewer_opts))
-
-    assert response.status == 200
-    assert %{"records" => viewed_records} = Jason.decode!(response.resp_body)
-    assert Enum.any?(viewed_records, &(&1["record_type"] == "execution-prints"))
-    assert Enum.any?(viewed_records, &(&1["record_type"] == "execution-error"))
-  end
-
-  @tag :tmp_dir
-  test "a provider-free execution success still captures its println output",
-       %{tmp_dir: dir} do
-    File.write!(
-      Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (println "CHECKPOINT" {:seen input}) (return {"ok" true}))|
-    )
-
-    manifest_path = Path.join(dir, "ptc.json")
-    trace_path = Path.join(dir, "run.private.jsonl")
-    inspection_path = Path.join(dir, "run.inspection.jsonl")
-    result_path = Path.join(dir, "run.result.json")
-    File.write!(manifest_path, Jason.encode!(checkpoint_manifest()))
-
-    {:ok, registry} = ProviderRegistry.new(%{})
-
-    assert {:ok, %PtcRunner.Kernel.Result{value: %{"ok" => true}}} =
-             manifest_path
-             |> ApplicationPackage.request_directory(
-               inspection_capture: true,
-               result_projection: :json,
-               installed_limits: registry.installed_limits
-             )
-             |> RunLifecycle.build(registry,
-               trace_path: trace_path,
-               inspect: inspection_path,
-               private_output: result_path
-             )
-             |> RunLifecycle.execute()
-
-    assert {:ok, records} = InspectionArtifact.load(inspection_path)
-
-    prints_record = Enum.find(records, &(&1["record_type"] == "execution-prints"))
-    refute Enum.any?(records, &(&1["record_type"] == "execution-error"))
-
-    assert prints_record["payload"] == %{
-             "environment" => "workflow",
-             "prints" => [~S|CHECKPOINT {:seen {"seen" "checkpoint-input"}}|],
-             "truncated" => false
-           }
-
-    trace_lines = trace_path |> File.read!() |> String.split("\n", trim: true)
-    refute Enum.any?(trace_lines, &String.contains?(&1, "CHECKPOINT"))
-    refute Enum.any?(trace_lines, &String.contains?(&1, "checkpoint-input"))
-
-    evaluation_started =
-      trace_lines
-      |> Enum.map(&Jason.decode!/1)
-      |> Enum.find(
-        &(&1["type"] == "evaluation-started" and &1["data"]["environment"] == "workflow")
-      )
-
-    assert evaluation_started["data"]["evaluation_id"] ==
-             prints_record["correlation"]["evaluation_id"]
-  end
-
-  @tag :tmp_dir
-  test "a normal workflow inspection retains a safe prelude type error", %{tmp_dir: dir} do
-    File.write!(
-      Path.join(dir, "workflow.clj"),
-      ~S|(ns app) (defn run [input] (> (get input "missing") 1))|
-    )
-
-    manifest_path = Path.join(dir, "ptc.json")
-    trace_path = Path.join(dir, "run.jsonl")
-    inspection_path = Path.join(dir, "run.inspection.jsonl")
-    File.write!(manifest_path, Jason.encode!(checkpoint_manifest("normal")))
-
-    assert {:error, %PtcRunner.Kernel.Error{kind: :workflow_failed}} =
-             execute_checkpoint(manifest_path, trace_path, inspection_path)
-
-    assert {:ok, records} = InspectionArtifact.load(inspection_path)
-    error_record = Enum.find(records, &(&1["record_type"] == "execution-error"))
-
-    assert error_record["payload"]["details"]["message"] ==
-             "type_error: app/run: >: expected number arguments, got nil, number"
-
-    refute trace_path |> File.read!() |> String.contains?("expected number arguments")
-  end
-
-  defp execute_checkpoint(manifest_path, trace_path, inspection_path) do
-    {:ok, registry} = ProviderRegistry.new(%{})
-
-    manifest_path
-    |> ApplicationPackage.request_directory(
-      inspection_capture: true,
-      result_projection: :json,
-      installed_limits: registry.installed_limits
-    )
-    |> RunLifecycle.build(registry, trace_path: trace_path, inspect: inspection_path)
-    |> RunLifecycle.execute()
-  end
-
-  defp checkpoint_manifest(event_policy \\ "private") do
-    %{
-      "version" => 1,
-      "workflow" => %{
-        "components" => [%{"id" => "app", "path" => "workflow.clj"}],
-        "entry" => "app/run"
-      },
-      "input" => %{"value" => %{"seen" => "checkpoint-input"}},
-      "events" => %{"policy" => event_policy}
-    }
-  end
-
-  defp emit_small(sink, capability_id) do
-    InspectionSink.emit(
-      sink,
-      "capability-input",
-      %{capability_id: capability_id},
-      %{environment: :mission, name: "read", arguments: %{"id" => 1}}
-    )
-  end
-
-  defp persisted_records(path, value) do
-    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
-
-    assert :ok =
-             InspectionSink.emit(
-               sink,
-               "capability-input",
-               %{capability_id: "cap-1"},
-               %{environment: :mission, name: "read", arguments: %{"value" => value}}
-             )
-
-    assert {:ok, records} = InspectionSink.records(sink)
-
-    events = [
-      %{
-        run_id: "run-1",
-        trace_id: "trace-1",
-        type: "capability-started",
-        data: %{capability_id: "cap-1", environment: :mission, name: "read"}
-      }
-    ]
-
-    assert :ok = InspectionArtifact.persist(path, records, events)
-    assert :ok = InspectionSink.stop(sink)
-    records
-  end
-
-  defp canonical_events do
-    [
-      canonical_event(1, "run-started", %{}),
-      canonical_event(2, "capability-started", %{
-        "capability_id" => "cap-1",
-        "environment" => "mission",
-        "name" => "read"
-      }),
-      canonical_event(3, "capability-stopped", %{
-        "capability_id" => "cap-1",
-        "environment" => "mission",
-        "name" => "read"
-      }),
-      canonical_event(4, "run-stopped", %{"outcome" => "ok"})
-    ]
-  end
-
-  defp dropped_events(counts) do
-    [
-      canonical_event(1, "run-started", %{}),
-      canonical_event(2, "events-dropped", %{"counts" => counts}),
-      canonical_event(3, "run-stopped", %{
-        "outcome" => "ok",
-        "reason" => nil,
-        "usage" => %{"events_dropped" => counts}
-      })
-    ]
-  end
-
-  defp canonical_event(sequence, type, data) do
-    %{
-      "schema_version" => 1,
-      "run_id" => "run-1",
-      "trace_id" => "trace-1",
-      "sequence" => sequence,
-      "timestamp" => "2026-07-17T12:00:00Z",
-      "type" => type,
-      "data" => data
-    }
-  end
-
-  defp resequence(records) do
-    records
-    |> Enum.with_index(1)
-    |> Enum.map(fn {record, sequence} -> Map.put(record, "sequence", sequence) end)
+    {trace, snapshot}
   end
 end

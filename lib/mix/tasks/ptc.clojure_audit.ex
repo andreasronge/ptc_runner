@@ -35,8 +35,9 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
 
   alias PtcRunner.Lisp.Analyze
   alias PtcRunner.Lisp.Env
+  alias PtcRunner.LLM.Requirements
 
-  @default_model "openrouter:google/gemini-3.1-flash-lite-preview"
+  @default_model "openrouter:google/gemini-3.1-flash-lite"
   @default_chunk_size 10
 
   @namespace_configs %{
@@ -218,8 +219,16 @@ defmodule Mix.Tasks.Ptc.ClojureAudit do
     """
 
     messages = [%{role: :user, content: "Classify these vars:\n\n#{var_list}"}]
+    requirements = Requirements.interim(%{max_tokens: 4_096})
 
-    case PtcRunner.LLM.call(model, %{system: system, messages: messages}) do
+    result =
+      with {:ok, prepared} <- PtcRunner.LLM.prepare(model, requirements),
+           {:ok, requester} <-
+             PtcRunner.LLM.callback(prepared, %{credential: nil, cache: false}) do
+        requester.(%{system: system, messages: messages}, %{llm_request_deadline_ms: nil})
+      end
+
+    case result do
       {:ok, %{content: content}} ->
         parse_classification(content, vars)
 

@@ -24,20 +24,23 @@ defmodule PtcRunner.Kernel.ToolGrant do
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
+  alias PtcRunner.Kernel.SafeMetadata
 
   @doc """
   Returns the capability dispatch callbacks plus reserved runtime routes for
   one environment.
 
   Callers add their own environment-specific routes (`kernel-eval`, the
-  workflow inventory routes, `TrustedTool` wrapping) to the result.
+  workflow inventory routes, `TrustedTool` wrapping) to the result. Those
+  extra routes are not capability callbacks and are not refusal-counted;
+  wrapping happens inside this grant, after `RuntimeTools.tools/5` is merged.
   """
   @spec capability_callbacks(
           term(),
           :workflow | :mission,
           map(),
           %{
-            optional(:mission_name) => binary() | nil,
+            mission_name: binary() | nil,
             timeout_ms: non_neg_integer(),
             validation_heap_words: pos_integer(),
             evaluation_lease: reference() | nil,
@@ -60,51 +63,6 @@ defmodule PtcRunner.Kernel.ToolGrant do
       kind,
       environment,
       dispatch_context,
-      event_sink,
-      inspection_sink
-    )
-  end
-
-  @doc false
-  def capability_callbacks(
-        state,
-        kind,
-        environment,
-        timeout_ms,
-        event_sink,
-        inspection_sink
-      )
-      when kind in [:workflow, :mission] and is_integer(timeout_ms) do
-    capability_callbacks(state, kind, environment, timeout_ms, event_sink, inspection_sink, [])
-  end
-
-  @doc false
-  def capability_callbacks(
-        state,
-        kind,
-        environment,
-        timeout_ms,
-        event_sink,
-        inspection_sink,
-        opts
-      )
-      when kind in [:workflow, :mission] and is_integer(timeout_ms) and is_list(opts) do
-    # Mission grants carry the lease of the evaluation constructing them, so
-    # a call surviving that evaluation's death is rejected as stale instead
-    # of being attributed to the next admitted evaluation.
-    lease = Keyword.get(opts, :lease)
-    limits = RunState.limits(state)
-
-    build_callbacks(
-      state,
-      kind,
-      environment,
-      %{
-        timeout_ms: timeout_ms,
-        validation_heap_words: validation_heap_words(limits, kind),
-        evaluation_lease: lease,
-        validation_deadline_ms: nil
-      },
       event_sink,
       inspection_sink
     )
@@ -143,8 +101,28 @@ defmodule PtcRunner.Kernel.ToolGrant do
         mission_name: Map.get(dispatch_context, :mission_name)
       )
     )
+    |> Map.new(fn {name, callback} ->
+      {name, wrap_refusal_counter(state, kind, callback)}
+    end)
   end
 
-  defp validation_heap_words(limits, :workflow), do: limits.workflow_heap_words
-  defp validation_heap_words(limits, :mission), do: limits.evaluation_heap_words
+  # Close over only the owner handle and environment atom. Capturing the
+  # environment map here would copy it once per callback on sandbox hand-over.
+  defp wrap_refusal_counter(state, kind, callback) do
+    fn arguments ->
+      result = callback.(arguments)
+      _ = maybe_record_capability_refusal(state, kind, result)
+      result
+    end
+  end
+
+  defp maybe_record_capability_refusal(state, kind, %{status: :error} = result)
+       when is_map(result) and not is_struct(result) do
+    RunState.record_capability_refusal(
+      state,
+      SafeMetadata.capability_refusal_key(kind, result)
+    )
+  end
+
+  defp maybe_record_capability_refusal(_state, _kind, _result), do: :ok
 end

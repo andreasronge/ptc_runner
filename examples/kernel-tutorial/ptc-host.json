@@ -5,26 +5,31 @@
   "install": {
     "deepseek": {
       "source": "llm",
-      "installation_revision": "tutorial-llm-v1",
+      "structured_output_mode": "unsupported",
+      "usage_guarantees": {"tokens": true, "cost_currency": "USD"},
+      "installation_revision": "tutorial-llm-v5",
       "model": "openrouter:deepseek/deepseek-v4-flash",
       "credential": "openrouter_key",
-      "cache": false
+      "cache": false,
+      "params": {"max_tokens": 4096}
     },
     "workspace": {
       "source": "mcp",
       "transport": {
         "type": "stdio",
-        "command": "node",
+        "command": "npx",
         "cwd": ".",
         "args": [
-          "../mcp/filesystem/dist/server.js",
+          "-y",
+          "ptc-fs-mcp@0.1.0",
           "--root",
           "03-file-agent/files",
           "--include",
           "**"
         ],
         "inherit_environment": true,
-        "env": {}
+        "env": {},
+        "start_timeout_ms": 60000
       },
       "tools": {
         "read_text_file": {
@@ -32,7 +37,7 @@
           "effect": "read"
         }
       },
-      "installation_revision": "filesystem-sample-0.1.0",
+      "installation_revision": "ptc-fs-mcp-0.1.0",
       "ceilings": {
         "timeout_ms": 15000,
         "max_catalog_tools": 8,

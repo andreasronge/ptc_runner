@@ -12,27 +12,49 @@ export const meta = {
 
 // Public-facing, hand-written docs. Excludes docs/plans/** (plans + future
 // specs) and all conformance docs (docs/conformance/**,
-// clojure-conformance-gaps.md, conformance-classification-log.md) per request.
+// clojure-conformance-gaps.md, docs/maintainers/conformance/**) per request.
 // Override by passing an array of paths as `args`.
 const DEFAULT_DOCS = [
   'README.md',
   'AGENTS.md',
   'CHANGELOG.md',
-  'docs/RELEASING.md',
+  'usage-rules.md',
   'docs/ptc-lisp-specification.md',
   'docs/signature-syntax.md',
   'docs/trace-log-contract.md',
+  'docs/installation/docker.md',
+  'docs/installation/source.md',
+  'docs/installation/standalone.md',
   'docs/guides/building-agents.md',
   'docs/guides/components-and-preludes.md',
-  'docs/guides/documentation-guidelines.md',
-  'docs/guides/embedding-in-elixir.md',
+  'docs/guides/connecting-tools-with-mcp.md',
+  'docs/guides/debugging-a-failed-run.md',
+  'docs/guides/evaluating-with-replay.md',
   'docs/guides/getting-started.md',
   'docs/guides/host-configuration.md',
-  'docs/guides/kernel-maintainer.md',
   'docs/guides/kernel-repl.md',
-  'docs/guides/large-change-guidelines.md',
   'docs/guides/manifests-and-capabilities.md',
+  'docs/guides/project-configuration.md',
+  'docs/guides/quickstart.md',
   'docs/guides/running-and-debugging.md',
+  'docs/guides/using-models.md',
+  'docs/reference/application-manifest.md',
+  'docs/reference/cli.md',
+  'docs/reference/component-contracts.md',
+  'docs/reference/debug-navigation.md',
+  'docs/reference/host-installation.md',
+  'docs/reference/mcp.md',
+  'docs/reference/project-files.md',
+  'docs/reference/repl.md',
+  'docs/maintainers/README.md',
+  'docs/maintainers/coding-agent-review.md',
+  'docs/maintainers/development-setup.md',
+  'docs/maintainers/documentation.md',
+  'docs/maintainers/duplication-gate.md',
+  'docs/maintainers/embedding.md',
+  'docs/maintainers/kernel.md',
+  'docs/maintainers/releasing.md',
+  'docs/maintainers/signature-integration.md',
   'ptc_viewer/README.md',
 ]
 
@@ -40,7 +62,7 @@ const DEFAULT_DOCS = [
 // `mix ptc.gen_docs --check`; we check freshness, not prose.
 const GENERATED_DOCS = ['docs/function-reference.md', 'docs/java-interop.md']
 
-const GUIDELINES = `Documentation rules (docs/guides/documentation-guidelines.md) — the audit standard:
+const GUIDELINES = `Documentation rules (docs/maintainers/documentation.md) — the audit standard:
 - Doc layers: Module docs describe the implemented public API; Guides explain implemented architecture/workflows; Specifications define normative language/runtime behavior; Plans (OUT OF SCOPE) describe unimplemented direction.
 - Keep ONE canonical explanation and link to it; do not copy contracts between files.
 - Do NOT present speculative/planned APIs as current behavior. Planned behavior MUST be explicitly labeled as planned (future tense).
@@ -52,7 +74,7 @@ const GUIDELINES = `Documentation rules (docs/guides/documentation-guidelines.md
 
 const CONTEXT = `Repository: PtcRunner — a BEAM-native Elixir runtime for Programmatic Tool Calling (PTC-Lisp).
 You run at the repo root. Source of truth for claims: lib/**, priv/preludes/**, priv/*.exs, mix.exs, examples/**, and the mix tasks under lib/mix/tasks/**.
-OUT OF SCOPE as audit targets (do not audit their content): docs/plans/** and all conformance docs (docs/conformance/**, docs/clojure-conformance-gaps.md, docs/conformance-classification-log.md).
+OUT OF SCOPE as audit targets (do not audit their content): docs/plans/** and all conformance docs (docs/conformance/**, docs/clojure-conformance-gaps.md, docs/maintainers/conformance/**).
 Generated docs (docs/function-reference.md, docs/java-interop.md, docs/conformance/*.md) are produced by 'mix ptc.gen_docs' from priv/*.exs — never propose hand-edits to them; links pointing INTO them still must resolve.`
 
 const FINDINGS_SCHEMA = {

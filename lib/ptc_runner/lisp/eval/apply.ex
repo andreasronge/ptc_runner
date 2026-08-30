@@ -21,12 +21,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Eval.HostContext
+  alias PtcRunner.Lisp.Eval.ParallelCall
   alias PtcRunner.Lisp.Eval.Patterns
-  alias PtcRunner.Lisp.Format
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.Introspection
   alias PtcRunner.Lisp.Java.Callable, as: JavaCallable
   alias PtcRunner.Lisp.Java.Condition, as: JavaCondition
   alias PtcRunner.Lisp.Java.Primitive, as: JavaPrimitive
+  alias PtcRunner.Lisp.Java.Surface, as: JavaSurface
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.Prelude.Contract
   alias PtcRunner.Lisp.PreludeClosure
@@ -34,8 +36,12 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   alias PtcRunner.Lisp.Runtime.Math
   alias PtcRunner.Lisp.Runtime.Predicates
   alias PtcRunner.Lisp.RuntimeCallable
+  alias PtcRunner.Lisp.SpecialBuiltin
+  alias PtcRunner.Lisp.ValuePreview
 
   @hof_callback_error :__ptc_hof_callback_error__
+  @introspection_specials SpecialBuiltin.names(:introspection)
+  @parallel_specials SpecialBuiltin.names(:parallel)
   alias PtcRunner.Lisp.TypeVocabulary
 
   import PtcRunner.Lisp.Runtime, only: [flex_get: 2, flex_fetch: 2]
@@ -51,6 +57,98 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     do_apply_fun(fun_val, args, eval_ctx, do_eval_fn)
   end
 
+  @doc false
+  @spec accepts_arity?(term(), non_neg_integer()) :: boolean()
+  def accepts_arity?(%Builtin{} = builtin, arity),
+    do: accepts_arity?(Builtin.unwrap(builtin), arity)
+
+  def accepts_arity?(%RuntimeCallable{}, _arity), do: true
+
+  def accepts_arity?(%JavaCallable{reference_id: reference_id} = callable, arity) do
+    with true <- JavaCallable.valid?(callable),
+         {:ok, reference} <- JavaSurface.fetch_reference(reference_id) do
+      Enum.any?(reference.overload_ids, fn overload_id ->
+        {:ok, overload} = JavaSurface.fetch_overload(overload_id)
+        receiver_arity = if reference.kind == :instance, do: 1, else: 0
+        overload.arity + receiver_arity == arity
+      end)
+    else
+      _invalid -> false
+    end
+  end
+
+  def accepts_arity?(%LispKeyword{}, arity), do: arity in [1, 2]
+  def accepts_arity?(%MapSet{}, arity), do: arity == 1
+
+  def accepts_arity?(value, arity) when is_map(value) and not is_struct(value),
+    do: arity in [1, 2]
+
+  def accepts_arity?(
+        {:closure, {:variadic, leading, _rest}, _body, _env, _history, _metadata},
+        arity
+      ),
+      do: arity >= length(leading)
+
+  def accepts_arity?({:closure, patterns, _body, _env, _history, _metadata}, arity)
+      when is_list(patterns),
+      do: length(patterns) == arity
+
+  def accepts_arity?({:special, name}, arity) do
+    case SpecialBuiltin.pcalls_thunk(name) do
+      :zero -> arity == 0
+      {:arity, expected} -> arity == expected
+      {:minimum_arity, minimum} -> arity >= minimum
+      :unsupported -> false
+    end
+  end
+
+  def accepts_arity?({:normal, fun}, arity) when is_function(fun),
+    do: function_arity(fun) == arity
+
+  def accepts_arity?({:variadic, fun, _identity}, _arity) when is_function(fun, 2), do: true
+
+  def accepts_arity?({:variadic_nonempty, _name, fun}, arity) when is_function(fun, 2),
+    do: arity > 0
+
+  def accepts_arity?({:collect, fun}, _arity) when is_function(fun, 1), do: true
+
+  def accepts_arity?({:multi_arity, _name, funs}, arity) when is_tuple(funs) do
+    minimum = funs |> elem(0) |> function_arity()
+    arity >= minimum and arity < minimum + tuple_size(funs)
+  end
+
+  def accepts_arity?({:partial_fn, callable, fixed}, arity) when is_list(fixed),
+    do: accepts_arity?(callable, length(fixed) + arity)
+
+  def accepts_arity?({:fnil_fn, callable, _default}, arity),
+    do: accepts_arity?(callable, arity)
+
+  def accepts_arity?({:complement_fn, callable}, arity),
+    do: accepts_arity?(callable, arity)
+
+  def accepts_arity?({:constantly_fn, _value}, _arity), do: true
+
+  def accepts_arity?({:juxt_fn, callables}, arity) when is_list(callables),
+    do: Enum.all?(callables, &accepts_arity?(&1, arity))
+
+  def accepts_arity?({:comp_fn, []}, arity), do: arity == 1
+
+  def accepts_arity?({:comp_fn, callables}, arity) when is_list(callables) do
+    [first | rest] = Enum.reverse(callables)
+    accepts_arity?(first, arity) and Enum.all?(rest, &accepts_arity?(&1, 1))
+  end
+
+  def accepts_arity?({tag, callables}, _arity)
+      when tag in [:every_pred_fn, :some_fn] and is_list(callables),
+      do: true
+
+  def accepts_arity?(value, arity)
+      when is_atom(value) and value not in [nil, true, false],
+      do: arity in [1, 2]
+
+  def accepts_arity?(fun, arity) when is_function(fun), do: function_arity(fun) == arity
+  def accepts_arity?(_callable, _arity), do: false
+
   defp do_apply_fun(
          %Builtin{name: name, binding: {:normal, fun}} = builtin,
          args,
@@ -62,10 +160,17 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       try do
         with_side_effect_stash(eval_ctx, do_eval_fn, fn -> apply(fun, args) end)
       rescue
-        e in Abort -> reraise_hof_callback_error(e, args, __STACKTRACE__)
-        FunctionClauseError -> {:error, Helpers.type_error_for_args(fun, args)}
-        e in BadArityError -> {:error, {:arity_error, Exception.message(e)}}
-        e in RuntimeError -> {:error, {:type_error, Exception.message(e), args}}
+        e in Abort ->
+          reraise_hof_callback_error(e, args, __STACKTRACE__)
+
+        FunctionClauseError ->
+          {:error, Helpers.type_error_for_args(fun, args)}
+
+        BadArityError ->
+          {:error, {:arity_error, %{actual: length(args)}}}
+
+        e in RuntimeError ->
+          {:error, {:type_error, Exception.message(e), args}}
       end
     end
   end
@@ -116,7 +221,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # nil is not callable: (nil x), (apply nil ...), and ((comp nil) x) raise
   # rather than treating nil as a keyword accessor (GAP-S109, GAP-S135).
   defp do_apply_fun(nil, _args, %EvalContext{}, _do_eval_fn) do
-    {:error, {:not_callable, nil}}
+    {:error, {:not_callable, %{}}}
   end
 
   # Keyword as function: (:key map) → Map.get(map, :key)
@@ -136,7 +241,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp do_apply_fun(set, args, %EvalContext{}, _do_eval_fn)
        when is_struct(set, MapSet) do
-    {:error, {:arity_error, "set expects 1 argument, got #{length(args)}"}}
+    {:error, {:arity_error, %{name: "set", expected: 1, actual: length(args)}}}
   end
 
   # Closure application (6-element tuple format with turn_history and metadata)
@@ -180,18 +285,19 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         end
 
       _ ->
-        {:error, {:arity_error, "apply expects at least 2 arguments, got #{length(args)}"}}
+        {:error, {:arity_error, %{name: "apply", expected: {:at_least, 2}, actual: length(args)}}}
     end
+  end
+
+  defp do_apply_fun({:special, operation}, args, eval_ctx, do_eval_fn)
+       when operation in @parallel_specials do
+    ParallelCall.invoke(operation, args, eval_ctx, do_eval_fn)
   end
 
   # Special builtin: println
   # Detects char lists (from `(take n string)`) and joins them back into strings
   defp do_apply_fun({:special, :println}, args, eval_ctx, _do_eval_fn) do
-    message =
-      Enum.map_join(args, " ", fn
-        s when is_binary(s) -> s
-        v -> format_for_println(v)
-      end)
+    message = format_println_args(args, eval_ctx.max_print_length)
 
     {:ok, nil, EvalContext.append_print(eval_ctx, message)}
   end
@@ -200,7 +306,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # `Introspection.invoke/3` owns validation and answers for this path and for
   # `Runtime.Callable`'s higher-order path alike, so the two cannot drift.
   defp do_apply_fun({:special, op}, args, eval_ctx, _do_eval_fn)
-       when op in [:dir, :apropos, :doc, :export_meta] do
+       when op in @introspection_specials do
     case Introspection.invoke(op, args, eval_ctx) do
       {:ok, value} -> {:ok, value, eval_ctx}
       {:print, text} -> {:ok, nil, EvalContext.append_print(eval_ctx, text)}
@@ -224,27 +330,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # Provide a helpful error message for type mismatches
         {:error, Helpers.type_error_for_args(fun, converted_args)}
 
-      e in BadArityError ->
-        # Extract function name and format a cleaner message
-        msg = Exception.message(e)
-
-        clean_msg =
-          case Regex.run(~r/&[\w.]+\.(\w+)\/(\d+).*called with (\d+)/, msg) do
-            [_, func, expected, actual] ->
-              "#{func} expects #{expected} argument(s), got #{actual}"
-
-            _ ->
-              msg
-          end
-
-        {:error, {:arity_error, clean_msg}}
+      BadArityError ->
+        {:error, {:arity_error, %{actual: length(converted_args)}}}
 
       e in RuntimeError ->
         # Catch errors from closure evaluation (destructuring, arity, eval errors)
         {:error, {:type_error, Exception.message(e), converted_args}}
 
       e in ArithmeticError ->
-        {:error, {:arithmetic_error, Exception.message(e)}}
+        {:error, {:arithmetic_error, arithmetic_token(e)}}
 
       e in BadFunctionError ->
         # Catch attempts to use non-functions as functions (e.g., :keyword passed to map)
@@ -287,10 +381,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     e in Abort ->
       reraise_hof_callback_error(e, args, __STACKTRACE__)
 
-    ArithmeticError ->
+    e in ArithmeticError ->
       # Distinguish between type errors (nil/non-number) and arithmetic errors (e.g., overflow)
       if Enum.all?(args, &is_number/1) do
-        {:error, {:arithmetic_error, "bad argument in arithmetic expression"}}
+        {:error, {:arithmetic_error, arithmetic_token(e)}}
       else
         {:error, Helpers.type_error_for_args(fun2, args)}
       end
@@ -298,7 +392,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   # Variadic requiring at least one arg: {:variadic_nonempty, name, fun2}
   defp do_apply_fun({:variadic_nonempty, name, _fun2}, [], %EvalContext{}, _do_eval_fn) do
-    {:error, {:arity_error, "#{name} requires at least 1 argument, got 0"}}
+    {:error, {:arity_error, %{name: lisp_name(name), expected: {:at_least, 1}, actual: 0}}}
   end
 
   defp do_apply_fun(
@@ -323,22 +417,14 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     e in ArithmeticError ->
       # Distinguish between type errors (nil/non-number) and arithmetic errors
       if Enum.all?(args, &is_number/1) do
-        # Check for division by zero specifically. Either the inner function
-        # raised with a "division by zero" message (Math.divide / Math.quot /
-        # Math.remainder / Math.mod) or any divisor in the tail is integer 0.
-        msg =
+        token =
           cond do
-            String.contains?(Exception.message(e), "division by zero") ->
-              "division by zero"
-
-            Enum.any?(tl(args), &(&1 === 0)) ->
-              "division by zero"
-
-            true ->
-              "bad argument in arithmetic expression"
+            arithmetic_token(e) == :division_by_zero -> :division_by_zero
+            Enum.any?(tl(args), &(&1 === 0)) -> :division_by_zero
+            true -> :bad_argument
           end
 
-        {:error, {:arithmetic_error, msg}}
+        {:error, {:arithmetic_error, token}}
       else
         {:error, Helpers.type_error_for_args(fun2, args)}
       end
@@ -399,8 +485,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     else
       arities = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
 
-      {:error,
-       {:arity_error, "#{name} expects #{format_arities(arities)} argument(s), got #{arity}"}}
+      {:error, {:arity_error, %{name: lisp_name(name), expected: arities, actual: arity}}}
     end
   end
 
@@ -502,7 +587,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   # Fallback: not callable
   defp do_apply_fun(other, _args, %EvalContext{}, _do_eval_fn) do
-    {:error, {:not_callable, other}}
+    {:error, {:not_callable, not_callable_details(other)}}
   end
 
   defp prepare_builtin_arguments(%Builtin{name: name}, args) do
@@ -541,24 +626,39 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   end
 
-  defp maybe_validate_builtin_args(%Builtin{binding: {:normal, fun}} = builtin, args) do
-    if function_arity(fun) == length(args), do: validate_builtin_args(builtin, args), else: :ok
+  defp maybe_validate_builtin_args(%Builtin{name: name, binding: {:normal, fun}} = builtin, args) do
+    expected = function_arity(fun)
+    actual = length(args)
+
+    if expected == actual do
+      validate_builtin_args(builtin, args)
+    else
+      {:error, {:arity_error, %{name: lisp_name(name), expected: expected, actual: actual}}}
+    end
   end
 
-  defp maybe_validate_builtin_args(%Builtin{binding: {:multi_arity, _name, funs}} = builtin, args) do
-    arity = length(args)
+  defp maybe_validate_builtin_args(
+         %Builtin{name: name, binding: {:multi_arity, _binding_name, funs}} = builtin,
+         args
+       ) do
+    actual = length(args)
     min_arity = function_arity(elem(funs, 0))
-    idx = arity - min_arity
+    idx = actual - min_arity
+    expected = Enum.map(0..(tuple_size(funs) - 1), fn i -> i + min_arity end)
 
-    if idx >= 0 and idx < tuple_size(funs), do: validate_builtin_args(builtin, args), else: :ok
+    if idx >= 0 and idx < tuple_size(funs) do
+      validate_builtin_args(builtin, args)
+    else
+      {:error, {:arity_error, %{name: lisp_name(name), expected: expected, actual: actual}}}
+    end
   end
 
-  defp maybe_validate_builtin_args(%Builtin{binding: {:variadic_nonempty, _name, _fun}}, []) do
-    :ok
+  defp maybe_validate_builtin_args(%Builtin{name: name, binding: {:variadic_nonempty, _, _}}, []) do
+    {:error, {:arity_error, %{name: lisp_name(name), expected: {:at_least, 1}, actual: 0}}}
   end
 
   defp maybe_validate_builtin_args(%Builtin{name: :"merge-with"}, []) do
-    {:error, {:arity_error, "merge-with requires at least 1 argument, got 0"}}
+    {:error, {:arity_error, %{name: "merge-with", expected: {:at_least, 1}, actual: 0}}}
   end
 
   defp maybe_validate_builtin_args(%Builtin{} = builtin, args),
@@ -779,7 +879,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       message =
         case arg do
           s when is_binary(s) -> s
-          v -> format_for_println(v)
+          v -> format_for_println(v, eval_ctx.max_print_length)
         end
 
       _updated_context = EvalContext.append_print(eval_ctx, message)
@@ -806,16 +906,104 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   # Internal Helpers
   # ============================================================
 
-  # Detect char lists (result of `(take n string)`) and join them for readable output
-  defp format_for_println(list) when is_list(list) do
-    if char_list?(list) do
-      Enum.join(list)
+  defp format_println_args([string], _max_chars) when is_binary(string), do: string
+  defp format_println_args([value], max_chars), do: format_for_println(value, max_chars)
+
+  defp format_println_args(args, max_chars) do
+    {parts, truncated?} = format_println_args(args, max_chars, [])
+    message = parts |> Enum.reverse() |> Enum.join()
+    if(truncated?, do: message <> "…", else: message)
+  end
+
+  defp format_println_args([], _remaining, parts), do: {parts, false}
+  defp format_println_args(_args, remaining, parts) when remaining <= 0, do: {parts, true}
+
+  defp format_println_args([value | rest], remaining, parts) do
+    separator = if(parts == [], do: "", else: " ")
+    available = remaining - String.length(separator)
+
+    if available <= 0 do
+      {parts, true}
     else
-      Format.to_clojure(list) |> elem(0)
+      text =
+        if is_binary(value),
+          do: bounded_plain_text(value, available),
+          else: format_for_println(value, available)
+
+      consumed = String.length(separator) + String.length(text)
+
+      format_println_args(
+        rest,
+        max(remaining - consumed, 0),
+        [separator <> text | parts]
+      )
     end
   end
 
-  defp format_for_println(v), do: Format.to_clojure(v) |> elem(0)
+  # Detect character lists without first traversing the complete list. Once a
+  # list exceeds the print budget, the sampled prefix is enough to render a
+  # bounded character preview; later elements cannot make printing allocate in
+  # proportion to the full value.
+  defp format_for_println(list, max_chars) when is_list(list) do
+    case bounded_char_list(list, max_chars) do
+      {:ok, text, false} -> text
+      :not_char_list -> preview_for_println(list, max_chars)
+    end
+  end
+
+  defp format_for_println(value, max_chars) do
+    case ValuePreview.scalar_text(value) do
+      {:ok, text} -> bounded_plain_text(text, max_chars)
+      :error -> preview_for_println(value, max_chars)
+    end
+  end
+
+  defp preview_for_println(value, max_chars) do
+    value
+    |> ValuePreview.render_with_notice(max_chars: max_chars, max_bytes: max(max_chars * 4, 1))
+    |> Map.fetch!(:text)
+  end
+
+  defp bounded_plain_text(text, max_chars) do
+    case take_text_graphemes(text, max_chars, []) do
+      {prefix, false} -> prefix
+      {prefix, true} when max_chars > 1 -> String.slice(prefix, 0, max_chars - 1) <> "…"
+      {_prefix, true} -> "…"
+    end
+  end
+
+  defp bounded_char_list(list, max_chars), do: bounded_char_list(list, max_chars, [])
+
+  defp bounded_char_list([], _remaining, []), do: :not_char_list
+
+  defp bounded_char_list([], _remaining, chars),
+    do: {:ok, chars |> Enum.reverse() |> Enum.join(), false}
+
+  # A bounded prefix cannot prove that the unseen tail is also character data.
+  # Fall back to the structural renderer rather than misclassifying a mixed
+  # vector after the preview budget is exhausted.
+  defp bounded_char_list(_rest, 0, _chars), do: :not_char_list
+
+  defp bounded_char_list([char | rest], remaining, chars) when is_binary(char) do
+    if String.length(char) == 1,
+      do: bounded_char_list(rest, remaining - 1, [char | chars]),
+      else: :not_char_list
+  end
+
+  defp bounded_char_list(_list, _remaining, _chars), do: :not_char_list
+
+  defp take_text_graphemes("", _remaining, chars),
+    do: {chars |> Enum.reverse() |> IO.iodata_to_binary(), false}
+
+  defp take_text_graphemes(rest, 0, chars),
+    do: {chars |> Enum.reverse() |> IO.iodata_to_binary(), rest != ""}
+
+  defp take_text_graphemes(text, remaining, chars) do
+    case String.next_grapheme(text) do
+      {grapheme, rest} -> take_text_graphemes(rest, remaining - 1, [grapheme | chars])
+      nil -> {chars |> Enum.reverse() |> IO.iodata_to_binary(), false}
+    end
+  end
 
   defp apply_comp_rest(rest, value, %EvalContext{} = eval_ctx, do_eval_fn) do
     Enum.reduce_while(rest, {:ok, value, eval_ctx}, fn f, {:ok, acc, ctx} ->
@@ -867,16 +1055,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp truthy?(false), do: false
   defp truthy?(_), do: true
 
-  # A char list is a list where all elements are single-character strings
-  defp char_list?([]), do: false
-
-  defp char_list?(list) do
-    Enum.all?(list, fn
-      s when is_binary(s) -> String.length(s) == 1
-      _ -> false
-    end)
-  end
-
   defp last_arg_to_list(nil),
     do: {:error, {:type_error, "apply expects collection as last argument, got nil", nil}}
 
@@ -905,7 +1083,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          closure_env,
          %EvalContext{} = eval_context,
          metadata,
-         do_eval_fn
+         do_eval_fn,
+         loop_iteration \\ 0
        ) do
     eval_context = Capture.materialize_context(eval_context)
     caller_baseline = eval_context
@@ -947,12 +1126,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       end
 
     eval_ctx =
-      EvalContext.new(
-        eval_context.ctx,
+      EvalContext.new_child(
+        eval_context,
         closure_user_ns,
         new_env,
-        eval_context.tool_exec,
-        eval_context.turn_history,
         max_print_length: eval_context.max_print_length,
         pmap_timeout: eval_context.pmap_timeout,
         parallel_deadline_cap: eval_context.parallel_deadline_cap,
@@ -965,6 +1142,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         worker_max_heap: eval_context.worker_max_heap,
         parallel_budget: eval_context.parallel_budget,
         max_tool_call_result_bytes: eval_context.max_tool_call_result_bytes,
+        loop_limit: eval_context.loop_limit,
         tools_meta: eval_context.tools_meta
       )
 
@@ -977,7 +1155,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           # nested pmap/pcalls inside this closure inherits it.
           pmap_deadline: eval_context.pmap_deadline
       }
-      |> EvalContext.inherit_prelude(eval_context)
       |> maybe_push_prelude_origin(metadata, eval_context)
       |> Capture.materialize_context()
 
@@ -1005,7 +1182,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
           body: body,
           closure_env: closure_env,
           metadata: metadata,
-          do_eval_fn: do_eval_fn
+          do_eval_fn: do_eval_fn,
+          loop_iteration: loop_iteration
         }
 
         handle_hof_abort(
@@ -1058,25 +1236,10 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          %Abort{outcome: {:control, :recur, new_args, %EvalContext{} = abort_ctx}},
          _prelude_ns,
          caller_baseline,
-         %{
-           patterns: patterns,
-           body: body,
-           closure_env: closure_env,
-           metadata: metadata,
-           do_eval_fn: do_eval_fn
-         },
+         callback,
          _stacktrace
        ) do
-    recur_hof_closure(
-      new_args,
-      abort_ctx.effects,
-      patterns,
-      body,
-      closure_env,
-      caller_baseline,
-      metadata,
-      do_eval_fn
-    )
+    recur_hof_closure(new_args, abort_ctx.effects, caller_baseline, callback)
   end
 
   defp handle_hof_abort(
@@ -1124,19 +1287,28 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       :timeout,
       :parallel_capacity_exceeded,
       :loop_limit_exceeded,
-      :tool_call_limit_exceeded
+      :tool_call_limit_exceeded,
+      :runtime_limit_exceeded,
+      :model_output_truncated,
+      :invalid_agent_config,
+      :result_contract_failed,
+      :llm_provider_failed
+      | EvaluatorErrorCatalog.kinds()
     ]
   end
 
   defp recur_hof_closure(
          new_args,
          effects,
-         patterns,
-         body,
-         closure_env,
          %EvalContext{} = caller_ctx,
-         metadata,
-         do_eval_fn
+         %{
+           patterns: patterns,
+           body: body,
+           closure_env: closure_env,
+           metadata: metadata,
+           do_eval_fn: do_eval_fn,
+           loop_iteration: loop_iteration
+         }
        ) do
     recur_patterns =
       case patterns do
@@ -1146,9 +1318,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
     case check_arity(recur_patterns, new_args) do
       :ok ->
-        case EvalContext.increment_iteration(caller_ctx) do
-          {:ok, next_ctx} ->
-            next_ctx = EvalContext.restore_recur_effects(next_ctx, effects)
+        case EvalContext.consume_loop_iteration(loop_iteration, caller_ctx.loop_limit) do
+          {:ok, next_iteration} ->
+            next_ctx = EvalContext.restore_recur_effects(caller_ctx, effects)
 
             eval_closure_args(
               new_args,
@@ -1157,7 +1329,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
               closure_env,
               next_ctx,
               metadata,
-              do_eval_fn
+              do_eval_fn,
+              next_iteration
             )
 
           {:error, :loop_limit_exceeded} ->
@@ -1174,35 +1347,37 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp count_prelude_entry_metadata(_metadata, eval_context), do: eval_context
 
-  # Stable nested-parallel failures cross the host callback via the evaluator's
-  # single abort carrier. Other closure errors keep the public HOF type-error
-  # classification by using the existing RuntimeError adapter.
+  # Catalogued evaluator reasons and stable nested-parallel failures cross the
+  # host callback via the evaluator's single abort carrier. Other closure
+  # errors keep the public HOF type-error classification.
   @spec raise_closure_error(term()) :: no_return()
-  defp raise_closure_error({atom, _} = reason)
-       when atom in [:memory_exceeded, :timeout, :parallel_capacity_exceeded] do
-    HostContext.error!(reason)
-  end
-
-  defp raise_closure_error({atom, _, _} = reason)
-       when atom in [:memory_exceeded, :timeout, :parallel_capacity_exceeded] do
-    HostContext.error!(reason)
-  end
-
   defp raise_closure_error(reason) do
-    HostContext.error!({@hof_callback_error, Helpers.format_closure_error(reason)})
+    if passthrough_hof_error?(reason) do
+      HostContext.error!(reason)
+    else
+      HostContext.error!({@hof_callback_error, Helpers.format_closure_error(reason)})
+    end
   end
 
   @spec reraise_hof_callback_error(Abort.t(), [term()], Exception.stacktrace()) :: no_return()
   defp reraise_hof_callback_error(
-         %Abort{outcome: {:error, {@hof_callback_error, message}, %EvalContext{} = context}},
+         %Abort{outcome: {:error, {@hof_callback_error, reason}, %EvalContext{} = context}},
          args,
          _stacktrace
        ) do
-    Abort.error!({:type_error, message, args}, context)
+    if passthrough_hof_error?(reason) do
+      Abort.error!(reason, context)
+    else
+      Abort.error!({:type_error, hof_callback_type_error_message(reason), args}, context)
+    end
   end
 
   defp reraise_hof_callback_error(%Abort{} = error, _args, stacktrace),
     do: reraise(error, stacktrace)
+
+  defp hof_callback_type_error_message(message) when is_binary(message), do: message
+
+  defp hof_callback_type_error_message(reason), do: Helpers.format_closure_error(reason)
 
   defp with_side_effect_stash(%EvalContext{} = eval_ctx, do_eval_fn, fun)
        when is_function(do_eval_fn, 2) and is_function(fun, 0) do
@@ -1285,6 +1460,18 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp maybe_push_prelude_origin(
          %EvalContext{} = context,
+         _metadata,
+         %EvalContext{
+           prelude: nil,
+           strict_transitive_calls: false,
+           private_tool_authority?: false
+         }
+       ) do
+    context
+  end
+
+  defp maybe_push_prelude_origin(
+         %EvalContext{} = context,
          %{
            prelude_ref: ref,
            prelude_ns: ns,
@@ -1326,8 +1513,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     %{
       caller_ctx
       | effects: closure_ctx.effects,
-        iteration_count: closure_ctx.iteration_count,
-        failure_origin: closure_ctx.failure_origin
+        failure_origin: closure_ctx.failure_origin,
+        return_origin: closure_ctx.return_origin
     }
   end
 
@@ -1341,8 +1528,8 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     %{
       caller_ctx
       | effects: closure_ctx.effects,
-        iteration_count: caller_ctx.iteration_count + closure_ctx.iteration_count,
-        failure_origin: closure_ctx.failure_origin
+        failure_origin: closure_ctx.failure_origin,
+        return_origin: closure_ctx.return_origin
     }
   end
 
@@ -1373,8 +1560,9 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          {:closure, _closure_patterns, body, closure_env, _closure_turn_history, meta} = closure,
          binding_patterns,
          args,
-         %EvalContext{ctx: ctx, user_ns: user_ns, tool_exec: tool_exec} = caller_ctx,
-         do_eval_fn
+         %EvalContext{user_ns: user_ns} = caller_ctx,
+         do_eval_fn,
+         loop_iteration \\ 0
        ) do
     case bind_args(binding_patterns, args) do
       {:ok, bindings} ->
@@ -1393,9 +1581,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
         # isolation, mirroring the direct `(crm/export ...)` call path).
         {closure_user_ns, restore_user_ns} = prelude_run_scope(meta, user_ns, caller_ctx)
 
-        closure_ctx =
-          EvalContext.new(ctx, closure_user_ns, new_env, tool_exec, caller_ctx.turn_history)
-          |> EvalContext.inherit_prelude(caller_ctx)
+        closure_ctx = EvalContext.new_child(caller_ctx, closure_user_ns, new_env)
 
         # Carry accumulated state from caller so tool_calls/cache aren't lost across closure calls.
         # `locals` is rebuilt from the closure's lexical capture + this invocation's
@@ -1467,7 +1653,15 @@ defmodule PtcRunner.Lisp.Eval.Apply do
     end
   rescue
     error in Abort ->
-      handle_direct_closure_abort(error, closure, meta, caller_ctx, do_eval_fn, __STACKTRACE__)
+      handle_direct_closure_abort(
+        error,
+        closure,
+        meta,
+        caller_ctx,
+        do_eval_fn,
+        loop_iteration,
+        __STACKTRACE__
+      )
   end
 
   defp handle_direct_closure_abort(
@@ -1476,6 +1670,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          meta,
          caller_ctx,
          _do_eval_fn,
+         _loop_iteration,
          _stacktrace
        ),
        do: rethrow_export_abort(:return, value, abort_ctx, meta, caller_ctx)
@@ -1486,6 +1681,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          meta,
          caller_ctx,
          _do_eval_fn,
+         _loop_iteration,
          _stacktrace
        ),
        do: rethrow_export_abort(:fail, value, abort_ctx, meta, caller_ctx)
@@ -1496,6 +1692,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          _meta,
          caller_ctx,
          do_eval_fn,
+         loop_iteration,
          _stacktrace
        ) do
     # For recur, variadic functions behave like fixed-arity functions
@@ -1510,18 +1707,18 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
     case check_arity(recur_patterns, new_args) do
       :ok ->
-        # Check iteration limit
-        case EvalContext.increment_iteration(caller_ctx) do
-          {:ok, updated_caller_ctx} ->
+        case EvalContext.consume_loop_iteration(loop_iteration, caller_ctx.loop_limit) do
+          {:ok, next_iteration} ->
             updated_caller_ctx =
-              EvalContext.restore_recur_effects(updated_caller_ctx, abort_ctx.effects)
+              EvalContext.restore_recur_effects(caller_ctx, abort_ctx.effects)
 
             do_execute_closure(
               closure,
               recur_patterns,
               new_args,
               updated_caller_ctx,
-              do_eval_fn
+              do_eval_fn,
+              next_iteration
             )
 
           {:error, :loop_limit_exceeded} ->
@@ -1539,6 +1736,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          meta,
          caller_ctx,
          _do_eval_fn,
+         _loop_iteration,
          _stacktrace
        ) do
     restored_ctx = restore_direct_caller(abort_ctx, caller_ctx, meta)
@@ -1555,6 +1753,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
          _meta,
          _caller_ctx,
          _do_eval_fn,
+         _loop_iteration,
          stacktrace
        ),
        do: reraise(error, stacktrace)
@@ -1660,8 +1859,22 @@ defmodule PtcRunner.Lisp.Eval.Apply do
 
   defp preserve_capability_binding(bindings, _pattern, _result), do: bindings
 
-  # Format arities list for human-readable error messages
-  defp format_arities([n]), do: "#{n}"
-  defp format_arities([a, b]), do: "#{a} or #{b}"
-  defp format_arities(arities), do: Enum.join(arities, ", ")
+  defp arithmetic_token(%ArithmeticError{} = error) do
+    message = Exception.message(error)
+
+    cond do
+      message == "division by zero" -> :division_by_zero
+      String.contains?(message, "division by zero") -> :division_by_zero
+      message == "integer overflow" -> :integer_overflow
+      String.contains?(message, "integer overflow") -> :integer_overflow
+      true -> :bad_argument
+    end
+  end
+
+  defp lisp_name(name) when is_atom(name), do: Atom.to_string(name)
+  defp lisp_name(name) when is_binary(name), do: name
+
+  defp not_callable_details({:data_ref, name}) when is_binary(name), do: %{name: name}
+
+  defp not_callable_details(_other), do: %{}
 end

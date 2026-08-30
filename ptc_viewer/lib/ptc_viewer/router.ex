@@ -1,12 +1,17 @@
 defmodule PtcViewer.Router do
   use Plug.Router
 
+  alias PtcViewer.LiveLaunch
+  alias PtcViewer.LiveProject
+  alias PtcViewer.LiveSecurity
+  alias PtcViewer.LiveStore
   alias PtcViewer.ReplError
   alias PtcViewer.ReplStore
 
   @id_pattern ~r/\A[A-Za-z0-9_-]{43}\z/
   @repl_paths ["/api/repl", "/api/repl/evaluations", "/api/repl/templates", "/api/repl/reset"]
   @body_limit 70_000
+  @live_launch_body_limit 2_000_010
 
   plug(Plug.Static,
     at: "/",
@@ -95,6 +100,10 @@ defmodule PtcViewer.Router do
     send_kernel_query(conn, :list_runs, query_arguments(conn))
   end
 
+  post "/api/kernel/refresh" do
+    refresh_snapshot(conn)
+  end
+
   get "/api/kernel/runs/:run_id" do
     send_kernel_query(conn, :get_run, %{"run_id" => run_id})
   end
@@ -108,8 +117,145 @@ defmodule PtcViewer.Router do
     send_kernel_query(conn, :counters, query_arguments(conn))
   end
 
-  get "/api/inspection/runs/:run_id" do
-    send_inspection(conn, run_id)
+  get "/api/analysis/runs/:run_id/conversation" do
+    send_analysis(conn, PtcViewer.Api.conversation(viewer_config(conn), run_id))
+  end
+
+  get "/api/analysis/runs/:run_id/preludes" do
+    send_analysis(conn, PtcViewer.Api.preludes(viewer_config(conn), run_id))
+  end
+
+  get "/api/analysis/runs/:run_id/execution-errors" do
+    send_analysis(conn, PtcViewer.Api.execution_errors(viewer_config(conn), run_id))
+  end
+
+  get "/api/analysis/runs/:run_id/explicit-failure-values" do
+    send_analysis(conn, PtcViewer.Api.explicit_failure_values(viewer_config(conn), run_id))
+  end
+
+  post "/api/live/runs/:run_id" do
+    with :ok <- valid_reporter_security(conn),
+         {:ok, store} <- live_store(conn),
+         {:ok, body, conn} <- json_body(conn),
+         :ok <- LiveStore.put_frame(store, run_id, body) do
+      send_live_json(conn, 200, %{"status" => "ok"})
+    else
+      {:error, :forbidden_request} -> send_live_forbidden(conn)
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
+      {:error, reason, conn} -> send_live_json(conn, 400, %{"error" => to_string(reason)})
+      {:error, reason} -> send_live_json(conn, 400, %{"error" => to_string(reason)})
+    end
+  end
+
+  get "/api/live/runs" do
+    with :ok <- valid_live_browser_request(conn),
+         {:ok, store} <- live_store(conn) do
+      send_live_json(conn, 200, %{"runs" => LiveStore.snapshot(store)})
+    else
+      {:error, :forbidden_request} -> send_live_forbidden(conn)
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
+    end
+  end
+
+  delete "/api/live/runs/:run_id" do
+    with :ok <- valid_live_browser_mutation(conn),
+         {:ok, store} <- live_store(conn),
+         :ok <- LiveStore.delete_run(store, run_id) do
+      send_live_json(conn, 200, %{"status" => "ok"})
+    else
+      {:error, :forbidden_request} -> send_live_forbidden(conn)
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
+      {:error, :unknown_run} -> send_live_json(conn, 404, %{"error" => "unknown_run"})
+    end
+  end
+
+  post "/api/live/runs/:run_id/inspect" do
+    with :ok <- valid_live_browser_mutation(conn),
+         :ok <- refresh_live_trace(conn, run_id) do
+      send_live_json(conn, 200, %{"status" => "ok"})
+    else
+      {:error, :forbidden_request} ->
+        send_live_forbidden(conn)
+
+      {:error, :not_found} ->
+        send_live_json(conn, 404, %{"error" => "run_not_found"})
+
+      {:error, :refresh_unavailable} ->
+        send_live_json(conn, 503, %{"error" => "refresh_unavailable"})
+
+      {:error, _reason} ->
+        send_live_json(conn, 500, %{"error" => "refresh_failed"})
+    end
+  end
+
+  get "/api/live/stream" do
+    case valid_live_browser_request(conn) do
+      {:error, :forbidden_request} ->
+        send_live_forbidden(conn)
+
+      :ok ->
+        stream_live_runs(conn)
+    end
+  end
+
+  defp stream_live_runs(conn) do
+    case live_store(conn) do
+      {:ok, store} ->
+        {:ok, snapshot} = LiveStore.subscribe(store, self())
+
+        conn =
+          conn
+          |> put_resp_header("content-type", "text/event-stream")
+          |> put_resp_header("cache-control", "no-cache")
+          |> send_chunked(200)
+
+        case send_live_frames(conn, snapshot) do
+          {:ok, conn} -> live_stream_loop(conn)
+          {:error, conn} -> conn
+        end
+
+      {:error, :live_disabled} ->
+        send_live_json(conn, 503, %{"error" => "live_disabled"})
+    end
+  end
+
+  get "/api/live/project" do
+    with :ok <- valid_live_browser_request(conn),
+         {:ok, _store} <- live_store(conn) do
+      send_live_json(conn, 200, LiveProject.describe(live_project(conn)))
+    else
+      {:error, :forbidden_request} -> send_live_forbidden(conn)
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
+    end
+  end
+
+  get "/api/live/launch" do
+    with :ok <- valid_live_browser_request(conn),
+         {:ok, store} <- live_store(conn),
+         {:ok, launch} <- live_launch(conn) do
+      send_live_json(conn, 200, LiveLaunch.describe(launch, LiveStore.launch_status(store)))
+    else
+      {:error, :forbidden_request} -> send_live_forbidden(conn)
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
+      {:error, :launch_not_configured} -> send_live_json(conn, 200, %{"enabled" => false})
+    end
+  end
+
+  post "/api/live/launch" do
+    with :ok <- valid_live_browser_mutation(conn),
+         {:ok, store} <- live_store(conn),
+         {:ok, launch} <- live_launch(conn),
+         {:ok, body, conn} <- json_body(conn, @live_launch_body_limit),
+         {:ok, run_fun} <- prepare_launch(launch, body, store),
+         :ok <- LiveStore.begin_launch(store, run_fun) do
+      send_live_json(conn, 202, %{"status" => "launched"})
+    else
+      {:error, :forbidden_request} -> send_live_forbidden(conn)
+      {:error, :live_disabled} -> send_live_json(conn, 503, %{"error" => "live_disabled"})
+      {:error, :launch_running} -> send_live_json(conn, 409, %{"error" => "launch_running"})
+      {:error, reason, conn} -> send_live_json(conn, 400, %{"error" => to_string(reason)})
+      {:error, reason} -> send_live_json(conn, 400, %{"error" => to_string(reason)})
+    end
   end
 
   match "/api/*path" do
@@ -134,14 +280,160 @@ defmodule PtcViewer.Router do
     end
   end
 
-  match _ do
+  get "/" do
     send_entry_document(conn)
+  end
+
+  get "/run/:run_id" do
+    if valid_browser_run_id?(run_id) do
+      encoded = URI.encode(run_id, &URI.char_unreserved?/1)
+
+      conn
+      |> security_headers()
+      |> put_resp_header("cache-control", "no-store")
+      |> put_resp_header("location", "/#/run/" <> encoded)
+      |> send_resp(302, "")
+      |> scrub_bandit_response()
+    else
+      send_resp(conn, 404, "Not found")
+    end
+  end
+
+  match _ do
+    send_resp(conn, 404, "Not found")
   end
 
   defp repl_store(conn) do
     case Keyword.get(viewer_config(conn), :repl_store) do
       store when is_pid(store) -> {:ok, store}
       _none -> {:error, :repl_not_configured}
+    end
+  end
+
+  defp live_store(conn) do
+    case Keyword.get(viewer_config(conn), :live_store) do
+      store when is_pid(store) -> {:ok, store}
+      _none -> {:error, :live_disabled}
+    end
+  end
+
+  defp live_launch(conn) do
+    case Keyword.get(viewer_config(conn), :live_launch) do
+      %{manifest: _manifest} = launch -> {:ok, launch}
+      _none -> {:error, :launch_not_configured}
+    end
+  end
+
+  defp live_project(conn), do: Keyword.get(viewer_config(conn), :live_project)
+
+  defp refresh_live_trace(conn, run_id) when byte_size(run_id) in 1..256 do
+    case Keyword.get(viewer_config(conn), :live_trace_refresh) do
+      callback when is_function(callback, 1) -> invoke_trace_refresh(callback, run_id)
+      _none -> {:error, :refresh_unavailable}
+    end
+  end
+
+  defp refresh_live_trace(_conn, _run_id), do: {:error, :not_found}
+
+  defp refresh_snapshot(conn) do
+    case Keyword.get(viewer_config(conn), :live_trace_refresh) do
+      callback when is_function(callback, 1) ->
+        case invoke_trace_refresh(callback, nil) do
+          :ok -> send_json(conn, %{"status" => "ok"})
+          {:error, :not_found} -> send_resp(conn, 404, "Not found")
+          {:error, :refresh_unavailable} -> send_resp(conn, 503, "Trace refresh unavailable")
+          {:error, _reason} -> send_resp(conn, 500, "Trace refresh failed")
+        end
+
+      _none ->
+        send_resp(conn, 503, "Trace refresh unavailable")
+    end
+  end
+
+  defp invoke_trace_refresh(callback, run_id) do
+    case callback.(run_id) do
+      :ok -> :ok
+      {:error, reason} when is_atom(reason) -> {:error, reason}
+      _invalid -> {:error, :refresh_failed}
+    end
+  rescue
+    _exception -> {:error, :refresh_failed}
+  catch
+    _kind, _reason -> {:error, :refresh_failed}
+  end
+
+  defp valid_reporter_security(conn) do
+    if LiveSecurity.reporter_request?(
+         conn,
+         Keyword.get(viewer_config(conn), :live_token_digest)
+       ),
+       do: :ok,
+       else: {:error, :forbidden_request}
+  end
+
+  defp valid_live_browser_request(conn) do
+    if LiveSecurity.browser_control_request?(
+         conn,
+         Keyword.get(viewer_config(conn), :live_token_digest)
+       ),
+       do: :ok,
+       else: {:error, :forbidden_request}
+  end
+
+  defp valid_live_browser_mutation(conn) do
+    nonce = Keyword.get(viewer_config(conn), :live_mutation_nonce)
+    token_digest = Keyword.get(viewer_config(conn), :live_token_digest)
+
+    if LiveSecurity.browser_mutation?(conn, nonce, token_digest),
+      do: :ok,
+      else: {:error, :forbidden_request}
+  end
+
+  # The browser picks one of two shapes: an edited input object for a workflow
+  # run, or a mission plus the expression to evaluate in it.
+  defp prepare_launch(launch, %{"mission" => mission, "expression" => expression}, store),
+    do: LiveLaunch.prepare_mission(launch, mission, expression, store)
+
+  defp prepare_launch(launch, body, store) do
+    with {:ok, input} <- launch_input(body), do: LiveLaunch.prepare(launch, input, store)
+  end
+
+  defp launch_input(%{"input" => input}) when is_map(input), do: {:ok, input}
+  defp launch_input(_body), do: {:error, :invalid_input}
+
+  defp send_live_json(conn, status, body) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(status, Jason.encode!(body))
+  end
+
+  defp send_live_forbidden(conn),
+    do: send_live_json(conn, 403, %{"error" => "forbidden_request"})
+
+  defp send_live_frames(conn, jsons) do
+    Enum.reduce_while(jsons, {:ok, conn}, fn json, {:ok, conn} ->
+      case chunk(conn, "data: " <> json <> "\n\n") do
+        {:ok, conn} -> {:cont, {:ok, conn}}
+        {:error, _reason} -> {:halt, {:error, conn}}
+      end
+    end)
+  end
+
+  # One process per connection under Bandit; blocking in receive is the
+  # intended shape for SSE. Heartbeat comments keep proxies from timing out.
+  defp live_stream_loop(conn) do
+    receive do
+      {:live_frame, json} ->
+        case chunk(conn, "data: " <> json <> "\n\n") do
+          {:ok, conn} -> live_stream_loop(conn)
+          {:error, _reason} -> conn
+        end
+    after
+      15_000 ->
+        case chunk(conn, ": heartbeat\n\n") do
+          {:ok, conn} -> live_stream_loop(conn)
+          {:error, _reason} -> conn
+        end
     end
   end
 
@@ -211,9 +503,9 @@ defmodule PtcViewer.Router do
     end
   end
 
-  defp json_body(conn) do
+  defp json_body(conn, limit \\ @body_limit) do
     with :ok <- json_content_type(conn),
-         {:ok, raw, conn} <- read_limited_body(conn),
+         {:ok, raw, conn} <- read_limited_body(conn, limit),
          {:ok, body} when is_map(body) <- Jason.decode(raw) do
       {:ok, body, conn}
     else
@@ -224,16 +516,16 @@ defmodule PtcViewer.Router do
   end
 
   defp bodyless(conn) do
-    case read_limited_body(conn) do
+    case read_limited_body(conn, @body_limit) do
       {:ok, "", conn} -> {:ok, conn}
       {:ok, _body, conn} -> {:error, :delete_body_not_allowed, conn}
       {:error, :body_too_large, conn} -> {:error, :body_too_large, conn}
     end
   end
 
-  defp read_limited_body(conn) do
-    case read_body(conn, length: @body_limit, read_length: @body_limit + 1) do
-      {:ok, body, conn} when byte_size(body) <= @body_limit -> {:ok, body, conn}
+  defp read_limited_body(conn, limit) do
+    case read_body(conn, length: limit, read_length: limit + 1) do
+      {:ok, body, conn} when byte_size(body) <= limit -> {:ok, body, conn}
       {:more, _body, conn} -> {:error, :body_too_large, conn}
       {:error, _reason} -> {:error, :invalid_json, conn}
     end
@@ -337,15 +629,31 @@ defmodule PtcViewer.Router do
 
     case File.read(index_path) do
       {:ok, content} ->
-        enabled = Keyword.get(viewer_config(conn), :repl_enabled, false)
+        repl_enabled = Keyword.get(viewer_config(conn), :repl_enabled, false)
+        live_nonce = Keyword.get(viewer_config(conn), :live_mutation_nonce)
+        live_token_digest = Keyword.get(viewer_config(conn), :live_token_digest)
+
+        live_enabled =
+          is_binary(live_nonce) and
+            LiveSecurity.browser_control_request?(conn, live_token_digest)
 
         config =
-          if enabled do
+          if repl_enabled do
             store = Keyword.fetch!(viewer_config(conn), :repl_store)
             {:ok, nonce} = ReplStore.page_bootstrap_nonce(store)
             %{"repl_enabled" => true, "page_bootstrap_nonce" => nonce}
           else
             %{"repl_enabled" => false}
+          end
+
+        config =
+          if live_enabled do
+            Map.merge(config, %{
+              "live_enabled" => true,
+              "live_mutation_nonce" => live_nonce
+            })
+          else
+            Map.put(config, "live_enabled", false)
           end
 
         encoded = config |> Jason.encode!() |> Base.url_encode64(padding: false)
@@ -364,6 +672,9 @@ defmodule PtcViewer.Router do
         send_resp(conn, 404, "Not found")
     end
   end
+
+  defp valid_browser_run_id?(run_id),
+    do: is_binary(run_id) and String.valid?(run_id) and byte_size(run_id) in 1..512
 
   defp security_headers(conn) do
     conn
@@ -404,6 +715,12 @@ defmodule PtcViewer.Router do
       {:error, :source_limit_exceeded} ->
         send_resp(conn, 413, "Trace source too large")
 
+      {:error, :source_retained_limit_exceeded} ->
+        send_resp(conn, 413, "Trace source retained size exceeded")
+
+      {:error, :run_isolated} ->
+        send_resp(conn, 422, "run_isolated")
+
       {:error, reason} when reason in [:malformed_source, :unsupported_version] ->
         send_resp(conn, 422, "Unsupported trace source")
 
@@ -412,16 +729,27 @@ defmodule PtcViewer.Router do
     end
   end
 
-  defp send_inspection(conn, run_id) do
-    case PtcViewer.Api.inspection(viewer_config(conn), run_id) do
+  defp send_analysis(conn, result) do
+    case result do
       {:ok, result} ->
         send_private_json(conn, result)
 
+      # Not a transport status: private evidence is withheld by a decision, and
+      # each of these four is a different decision with a different next action.
+      # The body is the reason code the browser renders as the change that would
+      # produce the evidence, so they answer separately rather than as one 404.
+      # The first two are about the run, the last two about the project.
       {:error, :not_found} ->
-        send_resp(conn, 404, "Not found")
+        send_resp(conn, 404, "inspection_run_not_recorded")
 
       {:error, :inspection_run_mismatch} ->
-        send_resp(conn, 404, "Inspection run mismatch")
+        send_resp(conn, 404, "inspection_run_mismatch")
+
+      {:error, :inspection_not_configured} ->
+        send_resp(conn, 404, "inspection_not_configured")
+
+      {:error, :inspection_not_private} ->
+        send_resp(conn, 404, "inspection_not_private")
 
       {:error, :unavailable} ->
         send_resp(conn, 503, "Inspection artifact unavailable")

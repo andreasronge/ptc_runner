@@ -200,10 +200,12 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     for {reason, code} <- [
           {:invalid_compatibility_environment, :environment_unavailable},
           {:invalid_mcp_working_directory, :environment_unavailable},
+          {:mcp_command_not_found, :environment_unavailable},
           {:invalid_mcp_executable, :environment_unavailable},
           {:mcp_stdio_launcher_unavailable, :launcher_unavailable},
           {:unsupported_mcp_stdio_platform, :launcher_unavailable},
-          {:invalid_llm_model, :adapter_unavailable}
+          {:invalid_llm_model, :adapter_unavailable},
+          {:unsupported_model_option, :model_contract_unsupported}
         ] do
       assert %CommandDiagnostic{phase: :local_preflight, code: ^code} = refuse(reason)
     end
@@ -313,6 +315,7 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
     # collapse into.
     for {reason, phase, code} <- [
           {:invalid_llm_model, :local_preflight, :adapter_unavailable},
+          {:unsupported_model_option, :local_preflight, :model_contract_unsupported},
           {:invalid_mcp_executable, :local_preflight, :environment_unavailable},
           {:mcp_stdio_launcher_unavailable, :local_preflight, :launcher_unavailable},
           {:provider_destination_denied, :active_preflight, :selection_rejected},
@@ -538,12 +541,13 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
   test "the local-preflight codes are admitted wherever a local check can run" do
     # A run admits every catalogued pair and renders a post-marker failure
     # through the classified branch, which is why `local_preflight` must not be
-    # a pre-classification phase. `validate` and `models` open no session and
-    # invoke no callback, so admitting these codes there would let them report a
-    # check they cannot run.
+    # a pre-classification phase. `models` opens no session and invokes no
+    # callback, so admitting these codes there would let it report a check it
+    # cannot run.
     for code <- [
           :environment_unavailable,
           :adapter_unavailable,
+          :model_contract_unsupported,
           :launcher_unavailable,
           :local_check_timeout
         ] do
@@ -552,10 +556,23 @@ defmodule PtcRunner.Kernel.LocalPreflightTest do
                "#{inspect(mode)} must admit local_preflight/#{code}"
       end
 
-      for mode <- [:validate, :models, :run_unclassified] do
+      for mode <- [:models, :run_unclassified] do
         refute CommandContract.diagnostic_allowed?(mode, :local_preflight, code),
                "#{inspect(mode)} must not admit local_preflight/#{code}"
       end
+    end
+
+    # `validate` runs exactly the audited-local checks that read a file the
+    # declaration names, so it admits the two codes those can produce and none
+    # of the environment-dependency codes it never checks for.
+    for code <- [:environment_unavailable, :local_check_timeout] do
+      assert CommandContract.diagnostic_allowed?(:validate, :local_preflight, code),
+             "validate must admit local_preflight/#{code}"
+    end
+
+    for code <- [:adapter_unavailable, :launcher_unavailable, :command_not_found] do
+      refute CommandContract.diagnostic_allowed?(:validate, :local_preflight, code),
+             "validate must not admit local_preflight/#{code}"
     end
   end
 

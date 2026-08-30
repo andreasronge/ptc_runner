@@ -10,10 +10,14 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   canonical executable, hashes it, and confirms that identity. It then starts
   a new session/process group with only the supplied environment. Linux hashes
   and executes the same held readable descriptor. macOS hashes a readable
-  descriptor for the same file and executes the canonical host-installed path.
-  The trusted operator must not modify executable contents during startup on
-  either platform; macOS additionally requires its installation hierarchy to
-  remain immutable. Linux script interpreters intentionally inherit the held
+  descriptor for the same file, re-reads the canonical path immediately before
+  `execve`, and refuses to start unless it still resolves to the device and
+  inode that were hashed. The trusted operator must not modify executable
+  contents during startup on either platform, and a macOS operator must also
+  leave the executable path hierarchy alone: an interpreted `#!` target is
+  handed to its interpreter as a path, which opens it a second time outside any
+  launcher check. Linux script interpreters instead intentionally inherit the
+  held
   executable descriptor because the kernel uses it for the interpreter
   handoff; native executables do not.
 
@@ -30,6 +34,12 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   process group. `close/1` drains but deliberately discards output emitted
   after shutdown begins; request output must be consumed before closing.
   Losing the owning BEAM process closes the Port and triggers the same cleanup.
+  A launcher that is destroyed outright instead runs none of it, so the target
+  forks a watchdog inside its own new process group; that watchdog retires the
+  group with a single `SIGKILL` once the launcher stops holding its end of a
+  private pipe. Signalling from inside the group avoids naming a PID that the
+  launcher's death would have released. The launcher's own escalation ends the
+  watchdog with the same signal that ends the group.
   POSIX process groups contain descendants that remain in the launched group;
   a deliberately trusted child can escape with `setpgid` or `setsid`. A killed
   group is only observably empty once every member has been reaped, so the
@@ -43,8 +53,10 @@ defmodule PtcRunnerLauncher.TestSupport.LauncherPort do
   Canonicalization and descriptor opening are separate POSIX operations.
   Operators must not mutate executable contents or the working-directory path
   hierarchy during startup on either platform. Linux executes the held object
-  after it is opened; macOS executes the canonical path and therefore also
-  requires its executable path hierarchy to stay immutable.
+  after it is opened; macOS executes a path, so the exposed interval there is
+  the identity re-check that immediately precedes `execve` rather than the
+  identity hash, whose cost scales with the executable — plus, for an
+  interpreted target, the interpreter's own second lookup of that path.
 
   This module is deliberately test-only. It exercises the packet protocol
   consumed by the core transport without making that transport part of the

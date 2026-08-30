@@ -2,14 +2,17 @@ defmodule PtcRunner.Kernel.ReplTerminalization do
   @moduledoc false
 
   alias PtcRunner.Kernel.EventSink
+  alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.TraceLog
 
   @doc false
-  @spec finalize_abandoned(map() | nil, binary() | nil, term()) :: :ok
+  @spec finalize_abandoned(map() | nil, binary() | nil, term(), Limits.t()) :: :ok
   def finalize_abandoned(
         %{event_sink: %EventSink{} = event_sink},
         trace_path,
-        provider_cleanup
+        provider_cleanup,
+        %Limits{} = limits
       ) do
     if Process.alive?(event_sink.pid) do
       reason =
@@ -20,7 +23,7 @@ defmodule PtcRunner.Kernel.ReplTerminalization do
       case EventSink.finalize_and_events(event_sink, %{
              outcome: :error,
              reason: reason,
-             usage: %{}
+             usage: %{llm_budget: LLMBudget.unavailable_terminal_projection(limits)}
            }) do
         {:ok, %{events: events}} -> persist(trace_path, event_sink, events)
         {:error, :event_sink_error} -> :ok
@@ -30,7 +33,7 @@ defmodule PtcRunner.Kernel.ReplTerminalization do
     :ok
   end
 
-  def finalize_abandoned(_opened_sinks, _trace_path, _provider_cleanup), do: :ok
+  def finalize_abandoned(_opened_sinks, _trace_path, _provider_cleanup, _limits), do: :ok
 
   @doc false
   @spec persist(binary() | nil, EventSink.t(), [map()]) ::

@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Read and write PTC-Lisp · PtcRunner</title>
+<meta name="description" content="Read what a model wrote in a trace, or try the language by hand before building
+anything.">
+<link rel="canonical" href="https://ptc-runner.dev/guides/ptc-lisp-basics/">
+<meta property="og:title" content="Read and write PTC-Lisp · PtcRunner">
+<meta property="og:description" content="Read what a model wrote in a trace, or try the language by hand before building
+anything.">
+<meta property="og:url" content="https://ptc-runner.dev/guides/ptc-lisp-basics/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/" class="current" aria-current="page">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="read-and-write-ptc-lisp">Read and write PTC-Lisp</h1><p>Read what a model wrote in a trace, or try the language by hand before building
+anything.</p><p>PTC-Lisp is the small, bounded, Clojure-like language the model writes its
+mission programs in. You can learn to read it in ten minutes, and the fastest
+way is to type it. This page is a tour; the
+<a href="/reference/ptc-lisp-specification/">language specification</a> is the contract, and the
+<a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">function reference</a> lists everything callable.</p><p>Every example below is validated against the interpreter, so what you see is
+what the runtime returns.</p><h2 id="open-a-repl">Open a REPL</h2><pre><code class="console language-console">ptc repl</code></pre><p>Type an expression, get a value back:</p><pre><code class="console language-console">PTC-Lisp REPL (:quit to exit; :help for commands)
+ptc&gt; (+ 1 2)
+3
+ptc&gt; (str &quot;tick&quot; &quot;-&quot; &quot;tock&quot;)
+&quot;tick-tock&quot;</code></pre><p>A REPL session keeps state: what one input defines, the next input can use.
+The model works the same way across turns, narrowing a problem step by step.</p><h2 id="values-are-json-values">Values are JSON values</h2><p>PTC-Lisp data is JSON-shaped: numbers, strings, booleans, <code class="inline">nil</code>, vectors, and
+maps. Literals evaluate to themselves:</p><pre><code class="clojure language-clojure">42            ; =&gt; 42
+&quot;hello&quot;       ; =&gt; &quot;hello&quot;
+true          ; =&gt; true
+[1 2 3]       ; =&gt; [1 2 3]
+{&quot;name&quot; &quot;Ada&quot;} ; =&gt; {&quot;name&quot; &quot;Ada&quot;}</code></pre><p>Map keys are strings. Keywords like <code class="inline">:name</code> are a shorthand you will see
+everywhere in generated code. Writing a keyword key stores the string key:</p><pre><code class="clojure language-clojure">(assoc {&quot;a&quot; 1} :b 2) ; =&gt; {&quot;a&quot; 1 &quot;b&quot; 2}</code></pre><h2 id="call-functions">Call functions</h2><p>A call is a list: the function first, then its arguments. There is no other
+syntax to learn.</p><pre><code class="clojure language-clojure">(+ 1 2)          ; =&gt; 3
+(count [1 2 3])  ; =&gt; 3
+(str &quot;a&quot; &quot;b&quot;)    ; =&gt; &quot;ab&quot;</code></pre><p>The REPL can describe any function for you:</p><pre><code class="console language-console">ptc&gt; (doc &quot;str&quot;)
+(str ...)
+  Convert and concatenate to string</code></pre><h2 id="name-things">Name things</h2><p><code class="inline">def</code> names a value for the whole session; <code class="inline">let</code> names values for one
+expression:</p><pre><code class="console language-console">ptc&gt; (def answer 42)
+#'answer
+ptc&gt; answer
+42</code></pre><pre><code class="clojure language-clojure">(let [a 2
+      b 3]
+  (* a b)) ; =&gt; 6</code></pre><p>Nothing is ever reassigned. Functions return new values and leave their
+arguments untouched. The <code class="inline">assoc</code> above returned a new map.</p><h2 id="reach-into-maps">Reach into maps</h2><pre><code class="clojure language-clojure">(get {&quot;name&quot; &quot;Ada&quot;} &quot;name&quot;)                        ; =&gt; &quot;Ada&quot;
+(:name {&quot;name&quot; &quot;Ada&quot;})                             ; =&gt; &quot;Ada&quot;
+(get-in {&quot;user&quot; {&quot;name&quot; &quot;Ada&quot;}} [&quot;user&quot; &quot;name&quot;])   ; =&gt; &quot;Ada&quot;</code></pre><p>A keyword in the function position looks itself up, and string and keyword
+access are interchangeable. Generated code uses both.</p><h2 id="transform-collections">Transform collections</h2><p><code class="inline">map</code>, <code class="inline">filter</code>, and <code class="inline">reduce</code> do most of the work in mission programs:</p><pre><code class="clojure language-clojure">(map inc [1 2 3])           ; =&gt; [2 3 4]
+(filter odd? [1 2 3 4 5])   ; =&gt; [1 3 5]
+(reduce + [1 2 3 4])        ; =&gt; 10</code></pre><p>The threading macro <code class="inline">-&gt;&gt;</code> chains steps in reading order. This is the shape
+most generated programs take:</p><pre><code class="clojure language-clojure">(-&gt;&gt; [1 2 3 4 5]
+     (filter odd?)
+     (map (fn [n] (* n n)))
+     (reduce +)) ; =&gt; 35</code></pre><h2 id="go-parallel">Go parallel</h2><p><code class="inline">map</code> has a parallel twin. <code class="inline">pmap</code> runs the function on each element in its
+own process and returns the results in order:</p><pre><code class="clojure language-clojure">(pmap (fn [n] (* n n)) [1 2 3 4]) ; =&gt; [1 4 9 16]</code></pre><p>Processes are cheap here, so fanning a slow step out over a whole collection
+is one word, not an architecture. It stays bounded like everything else: a
+worker budget, a per-worker heap limit, and the run's shared deadline.</p><h2 id="decide">Decide</h2><p><code class="inline">nil</code> and <code class="inline">false</code> are falsy; everything else, including <code class="inline">0</code> and <code class="inline">&quot;&quot;</code>, is
+truthy:</p><pre><code class="clojure language-clojure">(if (&gt; 3 2) &quot;yes&quot; &quot;no&quot;) ; =&gt; &quot;yes&quot;
+(if 0 &quot;truthy&quot; &quot;falsy&quot;) ; =&gt; &quot;truthy&quot;
+(nil? nil)              ; =&gt; true</code></pre><h2 id="mistakes-are-values">Mistakes are values</h2><p>Where many languages raise, the sandbox returns a recoverable error value and
+the session continues:</p><pre><code class="console language-console">ptc&gt; (/ 1 0)
+Error (arithmetic_error): arithmetic_error: division by zero
+ptc&gt; (+ 1 2)
+3</code></pre><p>This is deliberate: a mistake costs the model one expression, not the run.
+The <a href="/reference/clojure-conformance-gaps/">Clojure conformance gaps</a> reference
+records every place this value model diverges from Clojure, with rationale.</p><h2 id="define-functions">Define functions</h2><p><code class="inline">defn</code> defines a named function. In a REPL session it persists across inputs;
+in one expression, group the definition and the call with <code class="inline">do</code>:</p><pre><code class="clojure language-clojure">(do
+  (defn double [n] (* 2 n))
+  (double 21)) ; =&gt; 42</code></pre><p>Anonymous functions are <code class="inline">(fn [n] ...)</code>, as in the threading example above.</p><h2 id="declare-types">Declare types</h2><p>A function can declare a <strong>signature</strong>: what it takes and what it returns.</p><pre><code class="clojure language-clojure">(ns invoice &quot;Invoice helpers&quot; {:visibility :prompt})
+
+(defn total
+  &quot;Sum the amounts on an invoice.&quot;
+  {:signature &quot;(lines [{amount :float}]) -&gt; :float&quot;}
+  [lines]
+  (reduce + (map :amount lines)))</code></pre><p>The runtime checks the arguments before the body runs and the result before it
+leaves. A wrong shape names the field that broke, so the model can fix it on
+the next turn:</p><pre><code class="text language-text">prelude_contract_error: invoice/total input lines.0.amount: expected float, got string</code></pre><p>Signatures are PtcRunner's, not Clojure's, and they belong to components and
+preludes, not to a <code class="inline">defn</code> typed into the REPL. The
+<a href="/reference/signature-syntax/">signature reference</a> has the full type vocabulary.</p><h2 id="where-to-go-next">Where to go next</h2><ul><li><a href="/guides/kernel-repl/">Explore a project interactively</a> — the REPL against a real
+project: its data, components, and missions.</li><li><a href="/guides/getting-started/">Understand a generated project</a> — where PTC-Lisp sits
+inside a runnable application.</li><li><a href="/reference/ptc-lisp-specification/">PTC-Lisp specification</a> — the full language,
+with every example validated.</li><li><a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">Function reference</a> — everything callable, by
+section.</li><li><a href="/reference/signature-syntax/">Signature reference</a> — what a component export can
+declare about its inputs and results, and how those are checked.</li></ul>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/agent-cli-usage/">&larr; Drive ptc as an agent</a><a class="pager-next" href="/guides/project-configuration/">Keep a runnable project together &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/ptc-lisp-basics.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

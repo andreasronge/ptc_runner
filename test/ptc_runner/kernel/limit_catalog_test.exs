@@ -1,38 +1,46 @@
 defmodule PtcRunner.Kernel.LimitCatalogTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel.EventBudget
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.LimitConfiguration
+  alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.Manifest
+  alias PtcRunner.Kernel.SchemaViolation
+  alias PtcRunner.Kernel.TerminalUsage
 
   @manifest_narrowable [
-    {"capability_argument_bytes", :capability_argument_bytes, 262_144, 262_144},
-    {"capability_result_bytes", :capability_result_bytes, 1_000_000, 1_000_000},
-    {"entry_source_bytes", :entry_source_bytes, 262_144, 262_144},
-    {"evaluation_admission_timeout_ms", :evaluation_admission_timeout_ms, 10_000, 120_000},
+    {"capability_argument_bytes", :capability_argument_bytes, 262_144, 4_000_000},
+    {"capability_result_bytes", :capability_result_bytes, 1_000_000, 16_000_000},
+    {"entry_source_bytes", :entry_source_bytes, 262_144, 4_000_000},
+    {"evaluation_admission_timeout_ms", :evaluation_admission_timeout_ms, 10_000, 600_000},
     {"evaluation_heap_words", :evaluation_heap_words, 1_250_000, 1_250_000},
-    {"evaluation_history_bytes", :evaluation_history_bytes, 1_000_000, 1_000_000},
-    {"evaluation_memory_bytes", :evaluation_memory_bytes, 2_000_000, 2_000_000},
-    {"evaluation_timeout_ms", :evaluation_timeout_ms, 1_000, 60_000},
-    {"event_payload_bytes", :event_payload_bytes, 262_144, 262_144},
+    {"evaluation_history_bytes", :evaluation_history_bytes, 1_000_000, 16_000_000},
+    {"evaluation_memory_bytes", :evaluation_memory_bytes, 2_000_000, 32_000_000},
+    {"evaluation_timeout_ms", :evaluation_timeout_ms, 30_000, 600_000},
+    {"event_payload_bytes", :event_payload_bytes, 262_144, 4_000_000},
     {"live_provider_tasks", :live_provider_tasks, 8, 8},
-    {"mission_capability_calls", :mission_capability_calls, 128, 128},
-    {"mission_capability_calls_per_name", :mission_capability_calls_per_name, 32, 32},
-    {"normal_event_bytes", :normal_event_bytes, 4_000_000, 4_000_000},
-    {"normal_event_count", :normal_event_count, 256, 256},
-    {"parallel_timeout_ms", :parallel_timeout_ms, 30_000, 300_000},
-    {"protocol_errors", :protocol_errors, 32, 32},
+    {"llm_request_output_tokens", :llm_request_output_tokens, 4_096, 65_536},
+    {"llm_request_timeout_ms", :llm_request_timeout_ms, 120_000, 120_000},
+    {"mission_capability_calls", :mission_capability_calls, 256, 4_096},
+    {"mission_capability_calls_per_name", :mission_capability_calls_per_name, 128, 2_048},
+    {"normal_event_bytes", :normal_event_bytes, 4_000_000, 64_000_000},
+    {"normal_event_count", :normal_event_count, 256, 4_096},
+    {"parallel_timeout_ms", :parallel_timeout_ms, 60_000, 600_000},
+    {"protocol_errors", :protocol_errors, 64, 512},
     {"provider_heap_words", :provider_heap_words, 5_000_000, 5_000_000},
-    {"run_duration_ms", :run_duration_ms, 30_000, 300_000},
-    {"subordinate_evaluations", :subordinate_evaluations, 16, 16},
-    {"subordinate_source_bytes", :subordinate_source_bytes, 131_072, 131_072},
-    {"subordinate_source_checks", :subordinate_source_checks, 16, 16},
-    {"terminal_result_bytes", :terminal_result_bytes, 1_000_000, 1_000_000},
-    {"workflow_capability_calls", :workflow_capability_calls, 64, 64},
-    {"workflow_capability_calls_per_name", :workflow_capability_calls_per_name, 16, 16},
+    {"run_duration_ms", :run_duration_ms, 30_000, 1_800_000},
+    {"subordinate_evaluations", :subordinate_evaluations, 128, 2_048},
+    {"subordinate_source_bytes", :subordinate_source_bytes, 131_072, 2_000_000},
+    {"subordinate_source_checks", :subordinate_source_checks, 128, 2_048},
+    {"terminal_result_bytes", :terminal_result_bytes, 1_000_000, 16_000_000},
+    {"workflow_capability_calls", :workflow_capability_calls, 256, 4_096},
+    {"workflow_capability_calls_per_name", :workflow_capability_calls_per_name, 128, 2_048},
     {"workflow_heap_words", :workflow_heap_words, 8_000_000, 8_000_000},
-    {"workflow_timeout_ms", :workflow_timeout_ms, 30_000, 120_000}
+    {"workflow_timeout_ms", :workflow_timeout_ms, 30_000, 1_800_000}
   ]
 
   @installed_only %{
@@ -65,6 +73,21 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
   @expected_catalog Map.new(
                       @manifest_narrowable,
                       fn {name, field, compiled_default, installed_default} ->
+                        maximum =
+                          case name do
+                            "llm_request_output_tokens" -> 1_000_000
+                            "llm_request_timeout_ms" -> 1_800_000
+                            _other -> 2_592_000_000
+                          end
+
+                        minimum =
+                          case name do
+                            "event_payload_bytes" -> EventBudget.minimum_normal_payload_bytes()
+                            "llm_request_timeout_ms" -> 100
+                            "normal_event_count" -> 3
+                            _other -> 1
+                          end
+
                         {name,
                          %{
                            field: field,
@@ -72,8 +95,8 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                            scope: :manifest_narrowable,
                            compiled_default: compiled_default,
                            installed_default: installed_default,
-                           minimum: 1,
-                           maximum: 2_592_000_000,
+                           minimum: minimum,
+                           maximum: maximum,
                            identity: true
                          }}
                       end
@@ -90,12 +113,111 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                          })}
                       end)
                     )
+                    |> Map.put("evaluation_loop_iterations", %{
+                      field: :evaluation_loop_iterations,
+                      name: "evaluation_loop_iterations",
+                      scope: :optional_manifest_narrowable,
+                      compiled_default: nil,
+                      installed_default: nil,
+                      minimum: 1,
+                      maximum: 2_592_000_000,
+                      identity: true,
+                      prerequisites: [],
+                      prerequisite_description: nil
+                    })
+                    |> Map.put("llm_total_tokens", %{
+                      field: :llm_total_tokens,
+                      name: "llm_total_tokens",
+                      scope: :optional_manifest_narrowable,
+                      compiled_default: nil,
+                      installed_default: nil,
+                      minimum: 1,
+                      maximum: 9_007_199_254_740_991,
+                      identity: true,
+                      prerequisites: [:usage_tokens],
+                      prerequisite_description:
+                        "Requires usage_guarantees.tokens: true on every live LLM installation."
+                    })
+                    |> Map.put("llm_cost_microusd", %{
+                      field: :llm_cost_microusd,
+                      name: "llm_cost_microusd",
+                      scope: :optional_manifest_narrowable,
+                      compiled_default: nil,
+                      installed_default: nil,
+                      minimum: 1,
+                      maximum: 9_007_199_254_740_991,
+                      identity: true,
+                      prerequisites: [
+                        :usage_tokens,
+                        :usage_cost_currency,
+                        :reservation_tariff
+                      ],
+                      prerequisite_description:
+                        "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", and an explicit USD reservation_tariff on every live LLM installation."
+                    })
+                    |> Map.put("workflow_loop_iterations", %{
+                      field: :workflow_loop_iterations,
+                      name: "workflow_loop_iterations",
+                      scope: :optional_manifest_narrowable,
+                      compiled_default: nil,
+                      installed_default: nil,
+                      minimum: 1,
+                      maximum: 2_592_000_000,
+                      identity: true,
+                      prerequisites: [],
+                      prerequisite_description: nil
+                    })
+
+  # A ceiling equal to the default leaves a manifest no way to raise its own
+  # value except by writing a host document. Twenty-one rows were in that
+  # state. The four aggregate-memory rows stay there on purpose: live memory is
+  # a product, and raising it is a resource decision. The LLM whole-call
+  # deadline stays there because applications may only narrow it.
+  @aggregate_memory_names ~w(
+    evaluation_heap_words
+    live_provider_tasks
+    provider_heap_words
+    workflow_heap_words
+  )
+  @zero_headroom_names @aggregate_memory_names ++ ["llm_request_timeout_ms"]
+
+  test "every application-narrowable limit can be raised from the manifest alone" do
+    {zero_headroom, raisable} =
+      Enum.split_with(
+        LimitCatalog.rows(:manifest_narrowable),
+        &(&1.installed_default <= &1.compiled_default)
+      )
+
+    assert Enum.sort(Enum.map(zero_headroom, & &1.name)) == Enum.sort(@zero_headroom_names)
+
+    for row <- zero_headroom do
+      assert row.installed_default == row.compiled_default,
+             "#{row.name} is exempt but its installed ceiling #{row.installed_default} is not its default #{row.compiled_default}"
+    end
+
+    for row <- raisable do
+      assert row.installed_default > row.compiled_default,
+             "#{row.name} has no headroom: default and installed ceiling are both #{row.compiled_default}"
+    end
+  end
+
+  test "a manifest may request any value up to the installed ceiling without a host document" do
+    for row <- LimitCatalog.rows(:manifest_narrowable) do
+      assert {:ok, limits} =
+               Limits.new(%{row.field => row.installed_default}),
+             "#{row.name} rejected its own installed ceiling"
+
+      assert Map.fetch!(limits, row.field) == row.installed_default
+    end
+  end
 
   test "the checked-in catalog completely and uniquely defines the Limits struct" do
     rows = LimitCatalog.rows()
     fields = Map.keys(Map.from_struct(Limits.defaults()))
 
-    assert Map.new(rows, &{&1.name, &1}) == @expected_catalog
+    assert Map.new(rows, &{&1.name, Map.drop(&1, [:description, :unit])}) == @expected_catalog
+    assert Enum.all?(rows, &(is_binary(&1.description) and &1.description != ""))
+    assert Enum.all?(rows, &(&1.unit in [:milliseconds, :heap_words, :bytes, :count]))
     assert Enum.map(rows, & &1.name) == Enum.sort(Enum.map(rows, & &1.name))
     assert Enum.uniq_by(rows, & &1.name) == rows
     assert Enum.uniq_by(rows, & &1.field) == rows
@@ -163,6 +285,13 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                    "maximum" => ^maximum
                  } = Map.fetch!(manifest_properties, row.name)
 
+        :optional_manifest_narrowable ->
+          assert %{
+                   "type" => "integer",
+                   "minimum" => ^minimum,
+                   "maximum" => ^maximum
+                 } = Map.fetch!(manifest_properties, row.name)
+
         :installed_only ->
           refute Map.has_key?(manifest_properties, row.name)
       end
@@ -194,11 +323,24 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                  "/tmp"
                )
 
-      assert {:error, {:installed_limit_invalid, [{:property, "limits"}, {:property, ^name}]}} =
-               HostConfig.decode_command(
-                 host_config(%{row.name => row.minimum - 1}),
-                 "/tmp"
-               )
+      if row.name in ["event_payload_bytes", "normal_event_count"] do
+        assert {:error,
+                {:host_schema_invalid,
+                 %SchemaViolation{
+                   rule: :minimum,
+                   path: [{:property, "limits"}, {:property, ^name}]
+                 }}} =
+                 HostConfig.decode_command(
+                   host_config(%{row.name => row.minimum - 1}),
+                   "/tmp"
+                 )
+      else
+        assert {:error, {:installed_limit_invalid, [{:property, "limits"}, {:property, ^name}]}} =
+                 HostConfig.decode_command(
+                   host_config(%{row.name => row.minimum - 1}),
+                   "/tmp"
+                 )
+      end
 
       assert {:error, :invalid_host_config} =
                HostConfig.decode(
@@ -214,16 +356,136 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     end
   end
 
+  test "normal traces require three retained event slots" do
+    assert {:ok, row} = LimitCatalog.fetch(:normal_event_count)
+    assert row.minimum == 3
+
+    for schema <- [HostConfig.schema(), Manifest.schema()] do
+      assert get_in(schema, [
+               "properties",
+               "limits",
+               "properties",
+               "normal_event_count",
+               "minimum"
+             ]) ==
+               3
+    end
+  end
+
+  test "the event payload minimum admits every normal terminal payload" do
+    minimum = EventBudget.minimum_normal_payload_bytes()
+    dropped = EventBudget.maximum_dropped()
+
+    assert map_size(dropped) == 17
+    assert dropped["$overflow"] == 4_294_967_295
+
+    for {type, 4_294_967_295} <- Map.delete(dropped, "$overflow") do
+      assert byte_size(type) == 128
+      assert type =~ ~r/\A[a-z][a-z0-9-]{0,127}\z/
+    end
+
+    assert {:ok, row} = LimitCatalog.fetch(:event_payload_bytes)
+    assert row.minimum == minimum
+    refute EventBudget.normal_terminal_payload_capacity?(minimum - 1)
+    assert EventBudget.normal_terminal_payload_capacity?(minimum)
+
+    for schema <- [HostConfig.schema(), Manifest.schema()] do
+      assert get_in(schema, [
+               "properties",
+               "limits",
+               "properties",
+               "event_payload_bytes",
+               "minimum"
+             ]) == minimum
+    end
+  end
+
+  # The constant is the schema authority for every manifest and host document,
+  # so it cannot be policed by asserting it against itself. Re-derive it here
+  # from the complete fixed `run-stopped` projection, and prove no admitted
+  # limit set needs more than the floor an application-free manifest is given.
+  test "the event payload minimum is derived from the maximum fixed run-stopped payload" do
+    sink = %EventSink{pid: self(), token: make_ref(), policy: :normal}
+    minimum = EventBudget.minimum_normal_payload_bytes()
+
+    rows = LimitCatalog.rows()
+
+    overrides =
+      [%{}, Map.new(rows, &{&1.field, &1.minimum}), Map.new(rows, &{&1.field, &1.maximum})] ++
+        Enum.flat_map(rows, &[%{&1.field => &1.minimum}, %{&1.field => &1.maximum}])
+
+    for override <- overrides do
+      {:ok, limits} = Limits.new(override)
+      usage = TerminalUsage.maximum(%{}, %{}, [], limits)
+
+      assert EventSink.required_terminal_payload_bytes(sink, usage) <= minimum,
+             "#{inspect(override)} needs more than the published floor"
+    end
+
+    {:ok, catalog_maxima} = Limits.new(Map.new(rows, &{&1.field, &1.maximum}))
+    usage = TerminalUsage.maximum(%{}, %{}, [], catalog_maxima)
+    assert EventSink.required_terminal_payload_bytes(sink, usage) == minimum
+
+    private = %EventSink{pid: self(), token: make_ref(), policy: :private}
+    assert EventSink.required_terminal_payload_bytes(private, usage) <= minimum
+  end
+
+  test "effective normal trace bytes retain one ordinary event and terminal reserve" do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, base} = Limits.new(event_payload_bytes: payload_bytes)
+    required_bytes = LimitConfiguration.required_normal_event_bytes(base)
+
+    {:ok, invalid} =
+      Limits.new(event_payload_bytes: payload_bytes, normal_event_bytes: required_bytes - 1)
+
+    assert {:error,
+            {:limit_configuration_invalid, configured_bytes, ^required_bytes, ^payload_bytes}} =
+             LimitConfiguration.validate_effective(invalid, :normal)
+
+    assert {:ok, message} =
+             LimitConfigurationDiagnostic.message(
+               configured_bytes,
+               required_bytes,
+               payload_bytes
+             )
+
+    assert LimitConfigurationDiagnostic.valid_message?(message)
+    refute LimitConfigurationDiagnostic.valid_message?(message <> "\n")
+
+    assert :ok = LimitConfiguration.validate_effective(invalid, :private)
+
+    assert {:ok, valid} =
+             Limits.new(event_payload_bytes: payload_bytes, normal_event_bytes: required_bytes)
+
+    assert :ok = LimitConfiguration.validate_effective(valid, :normal)
+  end
+
   test "installed-only limits cannot be declared by an application" do
     for name <- Map.keys(@installed_only) do
       manifest = valid_manifest(%{"limits" => %{name => 100}})
 
-      assert {:error, {:manifest_path, [{:property, "limits"}], :unknown_properties}} =
+      assert {:error,
+              {:manifest_schema_invalid,
+               %SchemaViolation{rule: :unknown_property, path: [property: "limits"]}}} =
                Manifest.load_memory("ptc.json", documents(manifest))
     end
   end
 
   test "manifest narrowing consumes only scoped rows and preserves installed-only values" do
+    minimum_payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, minimum_payload_limits} = Limits.new(event_payload_bytes: minimum_payload_bytes)
+
+    minimum_normal_event_bytes =
+      LimitConfiguration.required_normal_event_bytes(minimum_payload_limits)
+
+    {:ok, normal_event_bytes_row} = LimitCatalog.fetch(:normal_event_bytes)
+
+    fixed_normal_event_overhead =
+      minimum_normal_event_bytes - 3 * minimum_payload_bytes
+
+    maximum_structural_payload_bytes =
+      div(normal_event_bytes_row.maximum - fixed_normal_event_overhead, 3)
+
     installed_overrides =
       Map.new(LimitCatalog.rows(), fn row ->
         value =
@@ -231,7 +493,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
             "provider_cleanup_timeout_ms" -> 100
             "selection_validation_timeout_ms" -> 30_000
             "doctor_connectivity_timeout_ms" -> 100
-            _manifest_narrowable -> row.maximum
+            _other -> if row.scope == :optional_manifest_narrowable, do: nil, else: row.maximum
           end
 
         {row.field, value}
@@ -242,7 +504,14 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     for requested_value <- [:minimum, :maximum] do
       requested =
         Map.new(LimitCatalog.rows(:manifest_narrowable), fn row ->
-          {row.name, Map.fetch!(row, requested_value)}
+          value =
+            case {requested_value, row.name} do
+              {:minimum, "normal_event_bytes"} -> minimum_normal_event_bytes
+              {:maximum, "event_payload_bytes"} -> maximum_structural_payload_bytes
+              _other -> Map.fetch!(row, requested_value)
+            end
+
+          {row.name, value}
         end)
 
       manifest = valid_manifest(%{"limits" => requested})
@@ -251,7 +520,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                Manifest.load_memory("ptc.json", documents(manifest), installed)
 
       for row <- LimitCatalog.rows(:manifest_narrowable) do
-        assert Map.fetch!(loaded.limits, row.field) == Map.fetch!(row, requested_value)
+        assert Map.fetch!(loaded.limits, row.field) == Map.fetch!(requested, row.name)
       end
 
       assert loaded.limits.provider_cleanup_timeout_ms == 100

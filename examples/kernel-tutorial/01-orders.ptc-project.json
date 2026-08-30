@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ptc-runner.dev/schemas/ptc-project-config.schema.json",
+  "kind": "ptc-project",
+  "version": 1,
+  "application": {
+    "path": "01-orders/ptc.json"
+  },
+  "artifacts": {
+    "root": "01-orders/.ptc",
+    "trace": true,
+    "inspection": true,
+    "result": false,
+    "envelope": true
+  },
+  "viewer": {
+    "port": 0,
+    "open": true,
+    "repl": true,
+    "private": true
+  }
+}

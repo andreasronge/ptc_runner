@@ -4,25 +4,35 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   Both environments receive read-only usage and local capability discovery.
   Only the workflow receives the annotation route. Annotation data uses a
-  finite type/key/value vocabulary, not caller-defined scalar metadata or
-  arbitrary JSON payloads. Every route is instrumented with the same canonical
+  finite type/key vocabulary with closed enumerations, plus a bounded mission
+  identifier on phased agent-action records — not arbitrary JSON payloads. Every route is instrumented with the same canonical
   capability start/stop events.
   """
 
+  alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Evaluation
+  alias PtcRunner.Kernel.EvaluationObservation
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.Library
+  alias PtcRunner.Kernel.LLMReplayDiagnostic
+  alias PtcRunner.Kernel.ModelContract
   alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SourceCheck
   alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Kernel.ValueContractDiagnostic
   alias PtcRunner.Lisp
+  alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.Lisp.TrustedError
   alias PtcRunner.Lisp.TrustedTool
+  alias PtcRunner.LLM.OutputLimit
 
   @mission_contract_version 1
   @mission_routes [
@@ -61,7 +71,9 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     view = Environment.capability_view(environment)
 
     @mission_routes
-    |> Map.new(fn {name, route} -> {name, route_callback(route, state, view, kind, lease)} end)
+    |> Map.new(fn {name, route} ->
+      {name, route_callback(route, state, view, event_sink, kind, lease)}
+    end)
     |> maybe_put_annotation(state, event_sink, kind)
     |> Map.new(fn {name, callback} ->
       attributes =
@@ -92,21 +104,35 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc "Builds the workflow-only frozen mission-inventory callback."
-  def mission_inventory(state, rendered_by_mission) when is_map(rendered_by_mission),
-    do: frozen_by_mission(state, rendered_by_mission, :invalid_mission_inventory_request)
+  def mission_inventory(state, rendered_by_mission, event_sink)
+      when is_map(rendered_by_mission),
+      do:
+        frozen_by_mission(
+          state,
+          rendered_by_mission,
+          event_sink,
+          :invalid_mission_inventory_request
+        )
 
   @doc "Builds the workflow-only frozen compact mission-model-context callback."
-  def mission_model_context(state, rendered_by_mission) when is_map(rendered_by_mission),
-    do: frozen_by_mission(state, rendered_by_mission, :invalid_mission_model_context_request)
+  def mission_model_context(state, rendered_by_mission, event_sink)
+      when is_map(rendered_by_mission),
+      do:
+        frozen_by_mission(
+          state,
+          rendered_by_mission,
+          event_sink,
+          :invalid_mission_model_context_request
+        )
 
-  defp frozen_by_mission(state, rendered_by_mission, invalid_reason) do
+  defp frozen_by_mission(state, rendered_by_mission, event_sink, invalid_reason) do
     fn arguments ->
       with {:ok, mission_name} <- requested_mission(arguments),
            {:ok, rendered} <- Map.fetch(rendered_by_mission, mission_name) do
         %{status: :ok, value: rendered}
       else
-        :error -> protocol_error(state, :unknown_mission)
-        {:error, :invalid_request} -> protocol_error(state, invalid_reason)
+        :error -> protocol_error(state, event_sink, :unknown_mission)
+        {:error, :invalid_request} -> protocol_error(state, event_sink, invalid_reason)
       end
     end
   end
@@ -114,7 +140,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   @doc """
   Builds the workflow-only subordinate-evaluation callback.
 
-  `opts` accepts `admission: :block | :fail_fast` (default `:fail_fast`).
+  `opts` accepts `admission: :block | :fail_fast` (default `:fail_fast`) and an
+  optional `parent_evaluation_id` for the enclosing workflow evaluation.
   The Runner's workflow route blocks, so concurrent agent loops queue behind
   the single evaluation lease instead of failing. The REPL keeps fail-fast:
   a REPL expression evaluates under the session's own lease, so a blocking
@@ -122,7 +149,10 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   """
   def kernel_eval(state, missions, limits, event_sink, inspection_sink \\ nil, opts \\ [])
       when is_map(missions) and not is_struct(missions) do
-    admission = Keyword.get(opts, :admission, :fail_fast)
+    evaluation_opts = [
+      admission: Keyword.get(opts, :admission, :fail_fast),
+      parent_evaluation_id: Keyword.get(opts, :parent_evaluation_id)
+    ]
 
     fn arguments ->
       case take_mission(arguments, missions) do
@@ -134,18 +164,350 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             limits,
             event_sink,
             inspection_sink,
-            admission
+            evaluation_opts
           )
 
         :error ->
-          protocol_error(state, :unknown_mission)
+          protocol_error(state, event_sink, :unknown_mission)
 
         {:error, :invalid_request} ->
-          invalid_kernel_eval_request(state)
+          invalid_kernel_eval_request(state, event_sink)
       end
     end
   end
 
+  @doc false
+  @spec runtime_limit_failure(RunState.t(), map()) :: (map() -> term())
+  def runtime_limit_failure(state, limits) do
+    fn arguments ->
+      case arguments do
+        %{"proof" => proof} when map_size(arguments) == 1 ->
+          case RunState.consume_evaluation_limit_proof(state, proof) do
+            :ok ->
+              %TrustedError{
+                reason: :runtime_limit_exceeded,
+                message: "subordinate_evaluations limit exceeded",
+                details: %{
+                  limit: :subordinate_evaluations,
+                  limit_value: limits.subordinate_evaluations
+                }
+              }
+
+            _failure ->
+              invalid_runtime_limit_failure()
+          end
+
+        %{"agent_turns" => limit, "reason" => reason}
+        when map_size(arguments) == 2 and limit in 1..128 ->
+          agent_turn_limit_failure(state, limit, reason)
+
+        # The transcript ceiling is a bound the caller set in the input document
+        # it just wrote, so it reports itself the way the turn limit does rather
+        # than reaching the generic workflow failure.
+        %{"max_transcript_chars" => limit}
+        when map_size(arguments) == 1 and limit in 1..1_000_000 ->
+          %TrustedError{
+            reason: :runtime_limit_exceeded,
+            message: "transcript limit exceeded",
+            details: %{limit: :max_transcript_chars, limit_value: limit}
+          }
+
+        %{"max_tokens" => value, "bindings" => bindings, "alias" => alias_name}
+        when map_size(arguments) == 3 ->
+          model_output_truncation_failure(value, bindings, alias_name)
+
+        %{"alias" => alias_name} when map_size(arguments) == 1 ->
+          model_output_truncation_failure(alias_name)
+
+        _invalid ->
+          invalid_runtime_limit_failure()
+      end
+    end
+  end
+
+  # The loop reports why it stopped, not only that it stopped. An unrecognised
+  # reason is refused rather than collapsed into the ordinary exhaustion case:
+  # a wrong explanation costs the reader more than a missing one.
+  defp agent_turn_limit_failure(state, limit, reason) do
+    case RuntimeLimitDiagnostic.agent_turns_reason(reason) do
+      {:ok, reason} ->
+        details =
+          %{limit: :agent_turns, limit_value: limit, limit_reason: reason}
+          |> attach_authenticated_evaluator_failure(state, reason)
+
+        %TrustedError{
+          reason: :runtime_limit_exceeded,
+          message: "agent turn limit exceeded",
+          details: details
+        }
+
+      :error ->
+        invalid_runtime_limit_failure()
+    end
+  end
+
+  defp attach_authenticated_evaluator_failure(details, state, :evaluation_error) do
+    case RunState.last_evaluator_failure(state) do
+      {:ok, %{kind: kind, details: eval_details} = evidence} ->
+        if EvaluatorErrorCatalog.kind?(kind) and is_map(eval_details) do
+          Map.put(details, :last_evaluator_failure, %{
+            kind: kind,
+            details: eval_details,
+            evaluation_id: Map.get(evidence, :evaluation_id),
+            environment: Map.get(evidence, :environment)
+          })
+        else
+          details
+        end
+
+      :error ->
+        details
+    end
+  end
+
+  defp attach_authenticated_evaluator_failure(details, _state, _reason), do: details
+
+  defp model_output_truncation_failure(value, bindings, alias_name) do
+    with {:ok, limit} <-
+           OutputLimit.normalize(%{name: :max_tokens, value: value, bindings: bindings}),
+         true <- OutputLimit.valid_alias?(alias_name) do
+      %TrustedError{
+        reason: :model_output_truncated,
+        message: "model output was truncated before a usable agent action",
+        details: %{
+          limit: :max_tokens,
+          limit_value: limit.value,
+          limit_bindings: limit.bindings,
+          alias: alias_name
+        }
+      }
+    else
+      _invalid -> invalid_runtime_limit_failure()
+    end
+  end
+
+  defp model_output_truncation_failure(alias_name) do
+    if OutputLimit.valid_alias?(alias_name) do
+      %TrustedError{
+        reason: :model_output_truncated,
+        message: "model output was truncated before a usable agent action",
+        details: %{alias: alias_name}
+      }
+    else
+      invalid_runtime_limit_failure()
+    end
+  end
+
+  defp invalid_runtime_limit_failure do
+    %{
+      status: :error,
+      kind: :protocol_error,
+      reason: :invalid_runtime_limit_failure
+    }
+  end
+
+  @doc false
+  @spec llm_provider_failure(RunState.t()) :: (map() -> term())
+  def llm_provider_failure(state) do
+    fn arguments ->
+      case SafeMetadata.llm_provider_failure(arguments) do
+        %{
+          llm_provider_failure: failure,
+          llm_provider_retryable?: retryable?
+        } = details ->
+          case RunState.consume_llm_provider_failure(state, failure, retryable?) do
+            :ok ->
+              %TrustedError{
+                reason: :llm_provider_failed,
+                message: "LLM provider request failed",
+                details:
+                  details
+                  |> Map.put(:failure_kind, "llm-provider-error")
+                  |> maybe_put_authenticated_replay(arguments, state)
+              }
+
+            :error ->
+              invalid_llm_provider_failure()
+          end
+
+        %{} ->
+          invalid_llm_provider_failure()
+      end
+    end
+  end
+
+  defp invalid_llm_provider_failure do
+    %{
+      status: :error,
+      kind: :protocol_error,
+      reason: :invalid_llm_provider_failure
+    }
+  end
+
+  defp maybe_put_authenticated_replay(details, arguments, state) do
+    case LLMReplayDiagnostic.failure_metadata(arguments) do
+      %{replay_request_hash: request_hash} = replay ->
+        if RunState.replay_miss?(state, request_hash),
+          do: Map.merge(details, replay),
+          else: details
+
+      %{} ->
+        details
+    end
+  end
+
+  @doc false
+  @spec maybe_put_llm_provider_failure(map(), RunState.t(), term(), term()) :: map()
+  def maybe_put_llm_provider_failure(tools, state, event_sink, bundle) when is_map(tools) do
+    if Library.shipped_component?(bundle, "agent.core") do
+      Map.put(
+        tools,
+        "kernel-llm-provider-failure",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-llm-provider-failure",
+          llm_provider_failure(state)
+        )
+      )
+    else
+      tools
+    end
+  end
+
+  @doc false
+  @spec maybe_put_runtime_limit_failure(map(), RunState.t(), term(), map(), term()) :: map()
+  def maybe_put_runtime_limit_failure(tools, state, event_sink, limits, bundle)
+      when is_map(tools) do
+    if Library.shipped_component?(bundle, "agent.core") do
+      Map.put(
+        tools,
+        "kernel-runtime-limit-failure",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-runtime-limit-failure",
+          runtime_limit_failure(state, limits)
+        )
+      )
+    else
+      tools
+    end
+  end
+
+  @doc false
+  @spec maybe_put_agent_loop_tools(map(), RunState.t(), term(), term()) :: map()
+  def maybe_put_agent_loop_tools(tools, state, event_sink, bundle) when is_map(tools) do
+    if Library.shipped_component?(bundle, "agent.core") do
+      tools
+      |> Map.put(
+        "kernel-agent-config-failure",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-agent-config-failure",
+          agent_config_failure()
+        )
+      )
+      |> Map.put(
+        "kernel-agent-protocol-error",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-agent-protocol-error",
+          agent_protocol_error(state)
+        )
+      )
+    else
+      tools
+    end
+  end
+
+  @doc false
+  @spec agent_config_failure() :: (map() -> term())
+  def agent_config_failure do
+    fn arguments ->
+      case agent_config_failure_details(arguments) do
+        {:ok, details, message} ->
+          %TrustedError{
+            reason: :invalid_agent_config,
+            message: message,
+            details: details
+          }
+
+        :error ->
+          invalid_agent_config_failure()
+      end
+    end
+  end
+
+  defp agent_config_failure_details(
+         %{"option" => option, "min" => min, "max" => max, "value" => value} = arguments
+       )
+       when map_size(arguments) == 4 do
+    details = %{option: option, min: min, max: max, value: value}
+
+    case AgentConfigDiagnostic.integer_message(option, min, max, value) do
+      {:ok, message} -> {:ok, details, message}
+      :error -> :error
+    end
+  end
+
+  defp agent_config_failure_details(
+         %{"option" => option, "min" => min, "max" => max, "type" => type} = arguments
+       )
+       when map_size(arguments) == 4 do
+    with {:ok, type} <- AgentConfigDiagnostic.type_tag(type),
+         details <- %{option: option, min: min, max: max, type: type},
+         {:ok, message} <- AgentConfigDiagnostic.type_message(option, min, max, type) do
+      {:ok, details, message}
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp agent_config_failure_details(_arguments), do: :error
+
+  defp invalid_agent_config_failure do
+    %{
+      status: :error,
+      kind: :protocol_error,
+      reason: :invalid_agent_config_failure
+    }
+  end
+
+  @doc false
+  @spec agent_protocol_error(RunState.t()) :: (map() -> term())
+  def agent_protocol_error(state) do
+    fn arguments ->
+      case arguments do
+        map when is_map(map) and map_size(map) == 0 ->
+          case RunState.record_agent_protocol_error(state) do
+            :ok -> true
+            _failure -> invalid_agent_protocol_error()
+          end
+
+        _invalid ->
+          invalid_agent_protocol_error()
+      end
+    end
+  end
+
+  defp invalid_agent_protocol_error do
+    %{
+      status: :error,
+      kind: :protocol_error,
+      reason: :invalid_agent_protocol_error
+    }
+  end
+
+  # The branches below enumerate the closed kernel-eval envelope variants; the
+  # repetition keeps every accepted map shape exact and rejects extra fields.
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   defp dispatch_kernel_eval(
          state,
          target,
@@ -153,15 +515,44 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          limits,
          event_sink,
          inspection_sink,
-         admission
+         evaluation_opts
        ) do
     case arguments do
       %{"kind" => kind, "source" => source} = arguments
       when is_binary(source) and map_size(arguments) == 2 ->
         if keyword_name(kind) == "source" do
-          evaluate_source(state, target, source, limits, event_sink, inspection_sink, admission)
+          evaluate_source(
+            state,
+            target,
+            source,
+            limits,
+            event_sink,
+            inspection_sink,
+            evaluation_opts
+          )
         else
-          invalid_kernel_eval_request(state)
+          invalid_kernel_eval_request(state, event_sink)
+        end
+
+      %{
+        "kind" => kind,
+        "source" => source,
+        "observation_chars" => observation_chars
+      } = arguments
+      when is_binary(source) and observation_chars in 1..65_536 and map_size(arguments) == 3 ->
+        if keyword_name(kind) == "source" do
+          evaluate_source(
+            state,
+            target,
+            source,
+            limits,
+            event_sink,
+            inspection_sink,
+            evaluation_opts,
+            observation_chars
+          )
+        else
+          invalid_kernel_eval_request(state, event_sink)
         end
 
       %{"kind" => kind, "source" => source, "params" => params} = arguments
@@ -175,18 +566,26 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             limits,
             event_sink,
             inspection_sink,
-            admission
+            evaluation_opts
           )
         else
-          invalid_kernel_eval_request(state)
+          invalid_kernel_eval_request(state, event_sink)
         end
 
       %{"kind" => kind, "program" => %Program{source: source}} = arguments
       when map_size(arguments) == 2 ->
         if keyword_name(kind) == "embedded" do
-          evaluate_source(state, target, source, limits, event_sink, inspection_sink, admission)
+          evaluate_source(
+            state,
+            target,
+            source,
+            limits,
+            event_sink,
+            inspection_sink,
+            evaluation_opts
+          )
         else
-          invalid_kernel_eval_request(state)
+          invalid_kernel_eval_request(state, event_sink)
         end
 
       %{"kind" => kind, "program" => %Program{source: source}, "params" => params} = arguments
@@ -200,42 +599,35 @@ defmodule PtcRunner.Kernel.RuntimeTools do
             limits,
             event_sink,
             inspection_sink,
-            admission
+            evaluation_opts
           )
         else
-          invalid_kernel_eval_request(state)
+          invalid_kernel_eval_request(state, event_sink)
         end
 
       _rest ->
-        invalid_kernel_eval_request(state)
+        invalid_kernel_eval_request(state, event_sink)
     end
   end
 
   @doc "Builds the workflow-only mission-aware source-check callback."
   def kernel_check_source(state, missions, limits, event_sink) when is_map(missions) do
     fn arguments ->
-      with {:ok, mission_name, mission, %{"source" => source} = rest} <-
-             take_mission(arguments, missions),
-           true <- is_binary(source) and map_size(rest) == 1 do
+      with {:ok, mission_name, mission, rest} <- take_mission(arguments, missions),
+           {:ok, source, opts} <- kernel_check_source_request(rest) do
         %{
           status: :ok,
-          value:
-            SourceCheck.check(state, mission, source, limits, event_sink,
-              mission_name: mission_name
-            )
+          value: SourceCheck.check(state, mission_name, mission, source, limits, event_sink, opts)
         }
       else
-        :error -> protocol_error(state, :unknown_mission)
-        _ -> invalid_kernel_check_source_request(state)
+        :error -> protocol_error(state, event_sink, :unknown_mission)
+        _ -> invalid_kernel_check_source_request(state, event_sink)
       end
     end
   end
 
   defp requested_mission(arguments) when is_map(arguments) do
     case arguments do
-      map when map_size(map) == 0 ->
-        {:ok, RunState.default_mission()}
-
       %{"mission" => mission_name} = map when is_binary(mission_name) and map_size(map) == 1 ->
         {:ok, mission_name}
 
@@ -247,19 +639,32 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp requested_mission(_arguments), do: {:error, :invalid_request}
 
   defp take_mission(arguments, missions) when is_map(arguments) do
-    {mission_name, rest} = Map.pop(arguments, "mission", RunState.default_mission())
+    case Map.pop(arguments, "mission") do
+      {mission_name, rest} when is_binary(mission_name) ->
+        case Map.fetch(missions, mission_name) do
+          {:ok, mission} -> {:ok, mission_name, mission, rest}
+          :error -> :error
+        end
 
-    if is_binary(mission_name) do
-      case Map.fetch(missions, mission_name) do
-        {:ok, mission} -> {:ok, mission_name, mission, rest}
-        :error -> :error
-      end
-    else
-      {:error, :invalid_request}
+      _other ->
+        {:error, :invalid_request}
     end
   end
 
   defp take_mission(_arguments, _missions), do: {:error, :invalid_request}
+
+  defp kernel_check_source_request(%{"source" => source} = arguments)
+       when is_binary(source) and map_size(arguments) == 1,
+       do: {:ok, source, []}
+
+  defp kernel_check_source_request(%{"source" => source, "require" => require} = arguments)
+       when is_binary(source) and map_size(arguments) == 2 do
+    if keyword_name(require) == "terminal",
+      do: {:ok, source, [required_shape: :terminal]},
+      else: {:error, :invalid_request}
+  end
+
+  defp kernel_check_source_request(_arguments), do: {:error, :invalid_request}
 
   @doc false
   @spec kernel_eval_ledger_arguments(map()) :: (map() -> map())
@@ -298,6 +703,48 @@ defmodule PtcRunner.Kernel.RuntimeTools do
            argument_projection: :raw
          }}
 
+      {"kernel-result-contract-failure" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           argument_projection: :raw,
+           ledger_arguments: &result_contract_failure_ledger_arguments/1,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
+         }}
+
+      {"kernel-llm-provider-failure" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
+         }}
+
+      {"kernel-runtime-limit-failure" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
+         }}
+
+      {"kernel-agent-config-failure" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
+         }}
+
+      {"kernel-agent-protocol-error" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
+         }}
+
       {name, callback} ->
         {name, %TrustedTool{function: callback}}
     end)
@@ -310,24 +757,32 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          limits,
          event_sink,
          inspection_sink,
-         admission
+         evaluation_opts,
+         observation_chars \\ nil
        ) do
+    evaluation =
+      state
+      |> Evaluation.evaluate_source(
+        mission_name,
+        mission,
+        source,
+        limits.evaluation_timeout_ms,
+        event_sink,
+        inspection_sink,
+        evaluation_opts
+      )
+      |> maybe_project_observation(observation_chars)
+
     %{
       status: :ok,
-      value:
-        state
-        |> Evaluation.evaluate_source_detailed(
-          mission,
-          source,
-          limits.evaluation_timeout_ms,
-          event_sink,
-          inspection_sink,
-          admission: admission,
-          mission_name: mission_name
-        )
-        |> Evaluation.legacy_projection()
+      value: evaluation
     }
   end
+
+  defp maybe_project_observation(evaluation, max_chars) when is_integer(max_chars),
+    do: EvaluationObservation.project(evaluation, max_chars)
+
+  defp maybe_project_observation(evaluation, nil), do: evaluation
 
   defp evaluate_source_with(
          state,
@@ -337,7 +792,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          limits,
          event_sink,
          inspection_sink,
-         admission
+         evaluation_opts
        ) do
     case normalize_params(params, limits.capability_argument_bytes) do
       {:ok, params} ->
@@ -345,21 +800,19 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           status: :ok,
           value:
             state
-            |> Evaluation.evaluate_source_detailed(
+            |> Evaluation.evaluate_source(
+              mission_name,
               mission,
               source,
               limits.evaluation_timeout_ms,
               event_sink,
               inspection_sink,
-              params: params,
-              admission: admission,
-              mission_name: mission_name
+              Keyword.put(evaluation_opts, :params, params)
             )
-            |> Evaluation.legacy_projection()
         }
 
       {:error, _reason} ->
-        invalid_kernel_eval_request(state)
+        invalid_kernel_eval_request(state, event_sink)
     end
   end
 
@@ -400,11 +853,19 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp project_kernel_eval_arguments(_arguments, _limits), do: %{"redacted" => true}
 
   defp project_kernel_check_source_arguments(arguments, limits) when is_map(arguments) do
-    maybe_put_source_identity(%{}, arguments, limits.subordinate_source_bytes)
+    %{}
+    |> maybe_put_source_identity(arguments, limits.subordinate_source_bytes)
+    |> maybe_put_source_requirement(arguments)
   end
 
   defp project_kernel_check_source_arguments(_arguments, _limits),
     do: %{"redacted" => true}
+
+  defp maybe_put_source_requirement(projected, arguments) do
+    if keyword_name(Map.get(arguments, "require")) == "terminal",
+      do: Map.put(projected, "require", "terminal"),
+      else: projected
+  end
 
   defp maybe_put_kind(projected, arguments) do
     case keyword_name(Map.get(arguments, "kind")) do
@@ -470,8 +931,20 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc "Builds the workflow-only application-result contract callback."
-  def result_contract(nil) do
+  def result_contract(contract, phase_contracts \\ %{})
+
+  def result_contract(nil, phase_contracts) do
     fn
+      %{"phase_contract" => name, "presentation" => true} = arguments
+      when map_size(arguments) == 2 ->
+        phase_contract_presentation(phase_contracts, name)
+
+      %{"phase_contract" => name, "value" => value} = arguments when map_size(arguments) == 2 ->
+        validate_phase_contract(phase_contracts, name, value)
+
+      %{"presentation" => true} = arguments when map_size(arguments) == 1 ->
+        %{status: :ok, value: nil}
+
       %{"value" => _value} = arguments when map_size(arguments) == 1 ->
         %{status: :ok, value: %{enforced?: false, valid?: true}}
 
@@ -480,12 +953,61 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
-  def result_contract(%ValueContract{} = contract) do
+  def result_contract(%ValueContract{} = contract, phase_contracts) do
     fn
+      %{"phase_contract" => name, "presentation" => true} = arguments
+      when map_size(arguments) == 2 ->
+        phase_contract_presentation(phase_contracts, name)
+
+      %{"phase_contract" => name, "value" => value} = arguments when map_size(arguments) == 2 ->
+        validate_phase_contract(phase_contracts, name, value)
+
+      %{"presentation" => true} = arguments when map_size(arguments) == 1 ->
+        result_contract_presentation(contract)
+
       %{"value" => value} = arguments when map_size(arguments) == 1 ->
         validate_result_contract(contract, value)
 
       _arguments ->
+        %{status: :error, kind: :protocol_error, reason: :invalid_result_contract_request}
+    end
+  end
+
+  defp phase_contract_presentation(contracts, name) when is_binary(name) do
+    case Map.fetch(contracts, name) do
+      {:ok, %{projection: projection}} ->
+        case DeterministicJSON.encode(projection) do
+          {:ok, encoded} -> %{status: :ok, value: encoded}
+          {:error, _reason} -> invalid_phase_contract_request(:invalid_projection)
+        end
+
+      :error ->
+        invalid_phase_contract_request(:unknown_phase_return_contract)
+    end
+  end
+
+  defp phase_contract_presentation(_contracts, _name),
+    do: invalid_phase_contract_request(:unknown_phase_return_contract)
+
+  defp validate_phase_contract(contracts, name, value) when is_binary(name) do
+    case Map.fetch(contracts, name) do
+      {:ok, %{contract: contract}} -> validate_result_contract(contract, value)
+      :error -> invalid_phase_contract_request(:unknown_phase_return_contract)
+    end
+  end
+
+  defp validate_phase_contract(_contracts, _name, _value),
+    do: invalid_phase_contract_request(:unknown_phase_return_contract)
+
+  defp invalid_phase_contract_request(reason),
+    do: %{status: :error, kind: :invalid_agent_config, reason: reason}
+
+  defp result_contract_presentation(contract) do
+    with {:ok, projection} <- ModelContract.value_contract(contract),
+         {:ok, encoded} <- DeterministicJSON.encode(projection) do
+      %{status: :ok, value: encoded}
+    else
+      _unsupported ->
         %{status: :error, kind: :protocol_error, reason: :invalid_result_contract_request}
     end
   end
@@ -496,7 +1018,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       if ValueContract.valid?(contract, json_value) do
         %{status: :ok, value: %{enforced?: true, valid?: true}}
       else
-        invalid_result_contract(ValueContract.classify(contract, json_value))
+        invalid_result_contract(ValueContract.model_feedback(contract, json_value))
       end
     else
       {:error, _reason} ->
@@ -507,7 +1029,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp invalid_json_result_contract(contract, value) do
     details =
       contract
-      |> ValueContract.classify(value)
+      |> ValueContract.model_feedback(value)
       |> Map.put(:json_value, false)
       |> Map.put(:violations, [])
 
@@ -518,7 +1040,176 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     %{status: :ok, value: %{enforced?: true, valid?: false, details: details}}
   end
 
-  @doc "Wraps an internal runtime callback with canonical capability events."
+  @doc false
+  @spec result_contract_failure(ValueContract.t() | nil, binary() | nil) :: (map() -> term())
+  def result_contract_failure(%ValueContract{} = contract, contract_source) do
+    fn
+      %{"value" => value, "agent_turns" => agent_turns} = arguments
+      when map_size(arguments) == 2 and agent_turns in 1..128 ->
+        result_contract_failure(contract, contract_source, value, agent_turns)
+
+      _invalid ->
+        invalid_result_contract_failure()
+    end
+  end
+
+  def result_contract_failure(_contract, _contract_source),
+    do: fn _arguments -> invalid_result_contract_failure() end
+
+  defp result_contract_failure(contract, contract_source, value, agent_turns) do
+    case Lisp.project_boundary_value(value, :kernel_json) do
+      {:ok, projected} ->
+        projected_result_contract_failure(
+          contract,
+          contract_source,
+          value,
+          projected,
+          agent_turns
+        )
+
+      {:error, _projection_error} ->
+        non_json_result_contract_failure(contract, contract_source, value, agent_turns)
+    end
+  end
+
+  defp projected_result_contract_failure(
+         contract,
+         contract_source,
+         original_value,
+         projected,
+         agent_turns
+       ) do
+    with {:ok, json_value} <- ValueContract.json_value(projected),
+         false <- ValueContract.valid?(contract, json_value),
+         {:ok, classification} <- ValueContractDiagnostic.classify(contract, json_value),
+         {:ok, details} <- terminal_contract_details(classification, contract_source, agent_turns) do
+      %TrustedError{
+        reason: :result_contract_failed,
+        message: "agent result contract correction exhausted",
+        details: details
+      }
+    else
+      {:error, reason} when reason in [:duplicate_key, :invalid_json] ->
+        non_json_result_contract_failure(contract, contract_source, original_value, agent_turns)
+
+      _invalid_or_satisfied ->
+        invalid_result_contract_failure()
+    end
+  end
+
+  defp non_json_result_contract_failure(contract, contract_source, value, agent_turns) do
+    case ValueContractDiagnostic.classify(contract, value) do
+      {:ok, classification} ->
+        details =
+          classification
+          |> Map.take([:contract_authority])
+          |> Map.put(:agent_turns, agent_turns)
+          |> Map.put(:constraint, :json_value)
+          |> Map.put(:violations, [])
+          |> maybe_put_contract_source(contract_source)
+
+        %TrustedError{
+          reason: :result_contract_failed,
+          message: "agent result contract correction exhausted",
+          details: details
+        }
+
+      {:error, :invalid_contract_classification} ->
+        invalid_result_contract_failure()
+    end
+  end
+
+  defp terminal_contract_details(classification, contract_source, agent_turns) do
+    case terminal_contract_violation(classification) do
+      %{kind: constraint} = violation when is_atom(constraint) ->
+        details =
+          classification
+          |> Map.take([:contract_authority])
+          |> Map.put(:agent_turns, agent_turns)
+          |> Map.put(:constraint, constraint)
+          |> Map.put(:violations, [Map.take(violation, [:kind, :path, :missing_required])])
+          |> maybe_put_contract_source(contract_source)
+
+        {:ok, details}
+
+      _unclassified ->
+        {:error, :invalid_contract_classification}
+    end
+  end
+
+  defp terminal_contract_violation(%{violations: violations}) when is_list(violations) do
+    violations
+    |> Enum.filter(fn
+      %{kind: kind, path: %{segments: segments}} when is_atom(kind) and is_list(segments) -> true
+      _invalid -> false
+    end)
+    |> Enum.sort_by(fn %{kind: kind, path: %{segments: segments}} ->
+      {segments == [], segments, Atom.to_string(kind)}
+    end)
+    |> List.first()
+  end
+
+  defp terminal_contract_violation(_classification), do: nil
+
+  defp maybe_put_contract_source(details, source) when is_binary(source),
+    do: Map.put(details, :contract_source, source)
+
+  defp maybe_put_contract_source(details, _source), do: details
+
+  defp invalid_result_contract_failure do
+    %TrustedError{
+      reason: :invalid_result_contract_failure,
+      message: "invalid result contract failure transition",
+      details: %{}
+    }
+  end
+
+  @doc false
+  def result_contract_failure_ledger_arguments(_arguments), do: %{"redacted" => true}
+
+  @doc false
+  @spec maybe_put_result_contract_failure(
+          map(),
+          RunState.t(),
+          term(),
+          ValueContract.t() | nil,
+          binary() | nil,
+          term()
+        ) :: map()
+  def maybe_put_result_contract_failure(
+        tools,
+        state,
+        event_sink,
+        contract,
+        contract_source,
+        bundle
+      )
+      when is_map(tools) do
+    if Library.shipped_component?(bundle, "agent.core") do
+      Map.put(
+        tools,
+        "kernel-result-contract-failure",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-result-contract-failure",
+          result_contract_failure(contract, contract_source)
+        )
+      )
+    else
+      tools
+    end
+  end
+
+  @doc """
+  Wraps an internal runtime callback with canonical capability events.
+
+  An error `capability-stopped` event carries the closed envelope `kind` and
+  `reason` when those atoms belong to the Kernel vocabulary. An unrecognized
+  atom is retained only as a one-way fingerprint. Arguments, details, and
+  messages stay off the event.
+  """
   def instrument(state, event_sink, environment, name, callback, attributes \\ %{})
       when environment in [:workflow, :mission] and is_binary(name) and is_function(callback, 1) and
              is_map(attributes) do
@@ -537,19 +1228,18 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         :ok ->
           result = callback.(arguments)
 
-          _ =
-            Events.emit(
-              state,
-              event_sink,
-              "capability-stopped",
-              Map.merge(attributes, %{
-                capability_id: capability_id,
-                environment: environment,
-                name: name,
-                status: result_status(result),
-                duration_ms: Events.duration_ms(started_ms)
-              })
-            )
+          stopped =
+            attributes
+            |> Map.merge(%{
+              capability_id: capability_id,
+              environment: environment,
+              name: name,
+              status: result_status(result),
+              duration_ms: Events.duration_ms(started_ms)
+            })
+            |> Events.put_rejection_class(result)
+
+          _ = Events.emit(state, event_sink, "capability-stopped", stopped)
 
           result
 
@@ -586,21 +1276,25 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp capability_description(state, _environment, _arguments, scope),
     do: scoped_protocol_error(state, :invalid_capability_description_request, scope)
 
-  defp route_callback(:usage, state, _environment, kind, lease),
-    do: fn arguments -> usage(state, arguments, {kind, lease}) end
+  defp route_callback(:usage, state, _environment, event_sink, kind, lease),
+    do: fn arguments -> usage(state, arguments, {kind, lease, event_sink}) end
 
-  defp route_callback(:remaining, state, _environment, kind, lease),
-    do: fn arguments -> remaining(state, arguments, {kind, lease}) end
+  defp route_callback(:remaining, state, _environment, event_sink, kind, lease),
+    do: fn arguments -> remaining(state, arguments, {kind, lease, event_sink}) end
 
-  defp route_callback(:capability_list, state, environment, kind, lease),
-    do: fn arguments -> capability_list(state, environment, arguments, {kind, lease}) end
+  defp route_callback(:capability_list, state, environment, event_sink, kind, lease),
+    do: fn arguments ->
+      capability_list(state, environment, arguments, {kind, lease, event_sink})
+    end
 
-  defp route_callback(:capability_description, state, environment, kind, lease),
-    do: fn arguments -> capability_description(state, environment, arguments, {kind, lease}) end
+  defp route_callback(:capability_description, state, environment, event_sink, kind, lease),
+    do: fn arguments ->
+      capability_description(state, environment, arguments, {kind, lease, event_sink})
+    end
 
   # Malformed-call accounting for a mission route authenticates the lease in
   # the same owner operation that records the error.
-  defp scoped_protocol_error(state, reason, {kind, lease}) do
+  defp scoped_protocol_error(state, reason, {kind, lease, event_sink}) do
     case RunState.protocol_error(state, kind, lease) do
       :ok ->
         %{status: :error, kind: :protocol_error, reason: reason}
@@ -609,7 +1303,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         %{status: :error, kind: :capability_denied, reason: :stale_evaluation, retryable?: false}
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors}
+        protocol_error_limit_envelope(state, event_sink)
     end
   end
 
@@ -641,20 +1335,20 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
-  defp annotate(state, _event_sink, _arguments),
-    do: protocol_error(state, :invalid_workflow_annotation)
+  defp annotate(state, event_sink, _arguments),
+    do: protocol_error(state, event_sink, :invalid_workflow_annotation)
 
-  defp protocol_error(state, reason) do
+  defp protocol_error(state, event_sink, reason) do
     case RunState.protocol_error(state) do
       :ok ->
         %{status: :error, kind: :protocol_error, reason: reason}
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors}
+        protocol_error_limit_envelope(state, event_sink)
     end
   end
 
-  defp invalid_kernel_eval_request(state) do
+  defp invalid_kernel_eval_request(state, event_sink) do
     case RunState.protocol_error(state) do
       :ok ->
         %{
@@ -665,11 +1359,11 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         }
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors, retryable?: false}
+        protocol_error_limit_envelope(state, event_sink, %{retryable?: false})
     end
   end
 
-  defp invalid_kernel_check_source_request(state) do
+  defp invalid_kernel_check_source_request(state, event_sink) do
     case RunState.protocol_error(state) do
       :ok ->
         %{
@@ -680,8 +1374,30 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         }
 
       {:error, :protocol_error_limit} ->
-        %{status: :error, kind: :limit_exceeded, reason: :protocol_errors, retryable?: false}
+        protocol_error_limit_envelope(state, event_sink, %{retryable?: false})
     end
+  end
+
+  defp protocol_error_limit_envelope(state, event_sink, extra \\ %{}) do
+    details = RunState.protocol_errors_details(state)
+
+    _ =
+      Events.emit(
+        state,
+        event_sink,
+        "limit-exceeded",
+        Map.merge(%{reason: :protocol_errors}, details)
+      )
+
+    Map.merge(
+      %{
+        status: :error,
+        kind: :limit_exceeded,
+        reason: :protocol_errors,
+        details: details
+      },
+      extra
+    )
   end
 
   defp keyword_name(%LispKeyword{name: name}), do: name

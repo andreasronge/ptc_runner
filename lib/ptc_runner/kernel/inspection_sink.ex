@@ -1,36 +1,29 @@
 defmodule PtcRunner.Kernel.InspectionSink do
   @moduledoc """
-  Required, bounded in-memory owner for sensitive developer inspection records.
+  Required owner for bounded streaming private inspection evidence.
 
-  Capture is host-enabled and fail-closed. Version 1 accepts capability-input,
-  capability-output, subordinate evaluation-source, and prelude-source.
-  Version 2 adds correlated exact MCP request and response bodies. Version 3
-  adds workflow execution-phase diagnostics, correlated by the workflow
-  `evaluation_id`: `execution-prints`, captured whenever the top-level
-  workflow evaluation produces `println` output, whether it succeeds or
-  fails; and `execution-error`, captured only when it fails with non-empty
-  error details. Version 4 requires `mission_name` on mission-owned source,
-  capability, prelude, and MCP records and forbids it on workflow-owned
-  records. It normalizes atom keys and
-  enum values to JSON strings, assigns the run identity, sequence, and UTC
-  timestamp, and rejects a record before retention when either its retained or
-  encoded size exceeds the installed bounds.
+  The sink validates and deterministically encodes one record at a time, then
+  appends its length-framed bytes to an exclusive missing-destination
+  reservation. It retains only incremental digests, identities, counts, and
+  limits. `seal/1` appends and synchronizes the terminal footer; it never
+  returns or retains a complete record collection.
 
-  This sink is independent of Logger, Telemetry, EventSink policy, manifests,
-  and Lisp. Records remain private until the host explicitly persists them as
-  a `0600` `.inspection.jsonl` artifact.
+  A record emitted with digest-results capture has its value replaced by a
+  deterministic value identity. The sink computes the identity, so an emitter
+  sends the same message in both capture modes and enabling digest capture
+  cannot change the emitting process's heap behaviour.
   """
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
-  alias PtcRunner.Kernel.InspectionRecordTypes
-  alias PtcRunner.Kernel.JSONValue
+  alias PtcRunner.Kernel.InspectionArtifact.Limits
+  alias PtcRunner.Kernel.InspectionArtifact.Writer
+  alias PtcRunner.Kernel.InspectionValueIdentity
   alias PtcRunner.Kernel.MCPProtocol
   alias PtcRunner.Kernel.OwnerHandoff
-  alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.Kernel.PublicationHandle
 
-  @default_record_bytes 2_000_000
-  @default_total_bytes 16_000_000
   @stop_timeout_ms 5_000
 
   @enforce_keys [:pid, :token]
@@ -39,60 +32,79 @@ defmodule PtcRunner.Kernel.InspectionSink do
   @type t :: %__MODULE__{pid: pid(), token: reference()}
 
   @spec start(keyword()) :: {:ok, t()} | {:error, :invalid_inspection_sink}
-  @doc "Starts one required sink for an exact run and trace identity."
   def start(opts) when is_list(opts) do
     allowed = [
       :run_id,
       :trace_id,
       :owner,
-      :schema_version,
+      :publication_handle,
       :max_record_bytes,
-      :max_total_bytes
+      :max_total_bytes,
+      :max_records,
+      :writer_hook
     ]
 
-    run_id = Keyword.get(opts, :run_id)
-    trace_id = Keyword.get(opts, :trace_id)
-    schema_version = Keyword.get(opts, :schema_version, 1)
-    max_record_bytes = Keyword.get(opts, :max_record_bytes, @default_record_bytes)
-    max_total_bytes = Keyword.get(opts, :max_total_bytes, @default_total_bytes)
+    limit_opts = Keyword.take(opts, [:max_record_bytes, :max_total_bytes, :max_records])
 
-    if Keyword.keys(opts) -- allowed == [] and schema_version in [1, 2, 3, 4] and
-         valid_id?(run_id) and
-         valid_id?(trace_id) and
-         is_integer(max_record_bytes) and max_record_bytes > 0 and
-         max_record_bytes <= @default_record_bytes and is_integer(max_total_bytes) and
-         max_total_bytes > 0 and max_total_bytes <= @default_total_bytes and
-         max_record_bytes <= max_total_bytes do
-      token = make_ref()
-      owner = Keyword.get(opts, :owner, self())
-
-      {:ok, pid} =
-        GenServer.start(
-          __MODULE__,
-          {token, owner, run_id, trace_id, schema_version, max_record_bytes, max_total_bytes}
-        )
-
+    with true <- Keyword.keys(opts) -- allowed == [],
+         run_id when is_binary(run_id) <- Keyword.get(opts, :run_id),
+         trace_id when is_binary(trace_id) <- Keyword.get(opts, :trace_id),
+         true <- valid_id?(run_id) and valid_id?(trace_id),
+         owner when is_pid(owner) <- Keyword.get(opts, :owner, self()),
+         %PublicationHandle{kind: :inspection} = handle <-
+           Keyword.get(opts, :publication_handle),
+         {:ok, limits} <- Limits.merge(limit_opts),
+         writer_hook when is_nil(writer_hook) or is_function(writer_hook, 1) <-
+           Keyword.get(opts, :writer_hook),
+         token <- make_ref(),
+         {:ok, pid} <-
+           GenServer.start(
+             __MODULE__,
+             {token, owner, run_id, trace_id, handle, limits, writer_hook}
+           ) do
       {:ok, %__MODULE__{pid: pid, token: token}}
     else
-      {:error, :invalid_inspection_sink}
+      _invalid -> {:error, :invalid_inspection_sink}
     end
   end
 
   def start(_opts), do: {:error, :invalid_inspection_sink}
 
-  @spec emit(t(), binary(), map(), map()) :: :ok | {:error, :inspection_sink_error}
-  @doc "Validates and retains one record from the sink's fixed vocabulary."
-  def emit(%__MODULE__{} = sink, record_type, correlation, payload)
-      when is_binary(record_type) and is_map(correlation) and is_map(payload) do
-    call(sink, {:emit, record_type, correlation, payload})
-  end
+  @spec emit(t(), binary(), map(), map(), keyword()) :: :ok | {:error, :inspection_sink_error}
+  def emit(sink, record_type, correlation, payload, opts \\ [])
 
-  def emit(%__MODULE__{} = sink, _record_type, _correlation, _payload),
+  def emit(%__MODULE__{} = sink, record_type, correlation, payload, opts)
+      when is_binary(record_type) and is_map(correlation) and is_map(payload) and
+             opts in [[], [capture: :digest_results]],
+      do: call(sink, {:emit, record_type, correlation, payload, capture_mode(opts)})
+
+  def emit(%__MODULE__{} = sink, _record_type, _correlation, _payload, _opts),
     do: call(sink, :fail)
 
-  @spec records(t()) :: {:ok, [map()]} | {:error, :inspection_sink_error}
-  @doc "Returns retained records in sequence order while the required sink is healthy."
-  def records(%__MODULE__{} = sink), do: call(sink, :records)
+  @doc false
+  @spec emit_mcp_exchange(t(), map(), map(), map(), map() | nil, keyword()) ::
+          :ok | {:error, :inspection_sink_error}
+  def emit_mcp_exchange(sink, correlation, request, response, stderr \\ nil, opts \\ [])
+
+  def emit_mcp_exchange(%__MODULE__{} = sink, correlation, request, response, stderr, opts)
+      when is_map(correlation) and is_map(request) and is_map(response) and
+             (is_nil(stderr) or is_map(stderr)) and
+             opts in [[], [response_capture: :digest_results]],
+      do:
+        call(
+          sink,
+          {:emit_mcp_exchange, correlation, request, response, stderr, response_mode(opts)}
+        )
+
+  def emit_mcp_exchange(%__MODULE__{} = sink, _correlation, _request, _response, _stderr, _opts),
+    do: call(sink, :fail)
+
+  defp capture_mode(opts), do: Keyword.get(opts, :capture, :full)
+  defp response_mode(opts), do: Keyword.get(opts, :response_capture, :full)
+
+  @spec seal(t()) :: {:ok, map()} | {:error, :inspection_sink_error}
+  @doc "Seals and synchronizes the streamed artifact and returns bounded publication metadata."
+  def seal(%__MODULE__{} = sink), do: call(sink, :seal)
 
   @doc false
   @spec owner?(t()) :: boolean()
@@ -114,23 +126,11 @@ defmodule PtcRunner.Kernel.InspectionSink do
           {:ok, %{run_id: binary(), trace_id: binary()}} | {:error, :inspection_sink_error}
   def identity(sink), do: call(sink, :identity)
 
-  @spec schema_version(t()) :: {:ok, 1 | 2 | 3 | 4} | {:error, :inspection_sink_error}
-  @doc """
-  Returns the sink's negotiated schema version.
-
-  A caller emitting a record type introduced after V1 should check this first
-  and skip emission entirely on an older sink, the same as it would for a `nil`
-  sink — the record's vocabulary is a version the sink predates, not a runtime
-  failure worth failing the run closed over.
-  """
-  def schema_version(sink), do: call(sink, :schema_version)
-
   @doc false
   @spec stop_timeout_ms() :: pos_integer()
   def stop_timeout_ms, do: @stop_timeout_ms
 
   @spec stop(t()) :: :ok
-  @doc "Stops the sink; repeated or owner-driven stops are harmless."
   def stop(sink), do: stop(sink, @stop_timeout_ms)
 
   @doc false
@@ -153,23 +153,25 @@ defmodule PtcRunner.Kernel.InspectionSink do
   end
 
   @impl GenServer
-  def init({token, owner, run_id, trace_id, schema_version, max_record_bytes, max_total_bytes}) do
-    {:ok,
-     %{
-       token: token,
-       owner: owner,
-       owner_ref: Process.monitor(owner),
-       owner_transferable?: true,
-       run_id: run_id,
-       trace_id: trace_id,
-       schema_version: schema_version,
-       max_record_bytes: max_record_bytes,
-       max_total_bytes: max_total_bytes,
-       sequence: 0,
-       encoded_bytes: 0,
-       records: [],
-       failed?: false
-     }}
+  def init({token, owner, run_id, trace_id, handle, limits, writer_hook}) do
+    case Writer.new(handle, run_id, trace_id, limits, writer_hook: writer_hook) do
+      {:ok, writer} ->
+        {:ok,
+         %{
+           token: token,
+           owner: owner,
+           owner_ref: Process.monitor(owner),
+           owner_transferable?: true,
+           run_id: run_id,
+           trace_id: trace_id,
+           writer: writer,
+           result?: false,
+           failed?: false
+         }}
+
+      {:error, _reason} ->
+        {:stop, :inspection_sink_error}
+    end
   end
 
   @impl GenServer
@@ -179,9 +181,6 @@ defmodule PtcRunner.Kernel.InspectionSink do
   def handle_call({token, :identity}, _from, %{token: token} = state),
     do: {:reply, {:ok, Map.take(state, [:run_id, :trace_id])}, state}
 
-  def handle_call({token, :schema_version}, _from, %{token: token} = state),
-    do: {:reply, {:ok, state.schema_version}, state}
-
   def handle_call({token, :owner?}, {caller, _tag}, %{token: token} = state),
     do: {:reply, caller == state.owner, state}
 
@@ -189,31 +188,71 @@ defmodule PtcRunner.Kernel.InspectionSink do
         {token, {:transfer_owner, owner}},
         {caller, _tag},
         %{token: token, owner: caller, owner_transferable?: true} = state
-      )
-      when is_pid(owner) do
+      ) do
     case OwnerHandoff.transfer_once(state, owner) do
       {:ok, next} -> {:reply, :ok, next}
       :error -> {:reply, {:error, :inspection_sink_error}, state}
     end
   end
 
-  def handle_call({token, :records}, _from, %{token: token, failed?: false} = state),
-    do: {:reply, {:ok, Enum.reverse(state.records)}, state}
+  # A failed sink stays failed; answer before computing an identity the
+  # append would discard anyway.
+  def handle_call(
+        {token, {:emit, _record_type, _correlation, _payload, _capture}},
+        _from,
+        %{token: token, failed?: true} = state
+      ),
+      do: {:reply, {:error, :inspection_sink_error}, state}
 
   def handle_call(
-        {token, {:emit, record_type, correlation, payload}},
+        {token, {:emit, record_type, correlation, payload, capture}},
         _from,
         %{token: token} = state
       ) do
-    if state.failed? do
-      {:reply, {:error, :inspection_sink_error}, state}
-    else
-      retain(state, record_type, correlation, payload)
+    case digest_payload(record_type, correlation, payload, capture) do
+      {:ok, payload} -> append_one(state, record_type, correlation, payload)
+      :error -> failed_reply(state)
     end
   end
 
-  def handle_call({token, :fail}, _from, %{token: token} = state),
-    do: {:reply, {:error, :inspection_sink_error}, %{state | failed?: true}}
+  def handle_call(
+        {token, {:emit_mcp_exchange, _correlation, _request, _response, _stderr, _capture}},
+        _from,
+        %{token: token, failed?: true} = state
+      ),
+      do: {:reply, {:error, :inspection_sink_error}, state}
+
+  def handle_call(
+        {token, {:emit_mcp_exchange, correlation, request, response, stderr, capture}},
+        _from,
+        %{token: token} = state
+      ) do
+    case digest_payload("mcp-response", correlation, response, capture) do
+      {:ok, response} ->
+        with {:ok, state} <- append(state, "mcp-request", correlation, request),
+             {:ok, state} <- append(state, "mcp-response", correlation, response),
+             {:ok, state} <- append_stderr(state, correlation, stderr) do
+          {:reply, :ok, state}
+        else
+          {:error, state} -> failed_reply(state)
+        end
+
+      :error ->
+        failed_reply(state)
+    end
+  end
+
+  def handle_call({token, :seal}, _from, %{token: token, failed?: false} = state) do
+    case Writer.seal(state.writer) do
+      {:ok, seal, writer} -> {:reply, {:ok, seal}, %{state | writer: writer}}
+      {:error, _reason} -> failed_reply(state)
+    end
+  end
+
+  def handle_call({token, :seal}, _from, %{token: token} = state),
+    do: {:reply, {:error, :inspection_sink_error}, state}
+
+  def handle_call({token, :fail}, _from, %{token: token} = state), do: failed_reply(state)
 
   def handle_call({_token, _request}, _from, state),
     do: {:reply, {:error, :inspection_sink_error}, state}
@@ -222,6 +261,7 @@ defmodule PtcRunner.Kernel.InspectionSink do
     do: {:reply, {:error, :inspection_sink_error}, state}
 
   @impl GenServer
+  # ex_dna:disable-for-next-line — OTP no-op cast callback is intentionally local to this owner
   def handle_cast(_request, state), do: {:noreply, state}
 
   @impl GenServer
@@ -230,293 +270,83 @@ defmodule PtcRunner.Kernel.InspectionSink do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-    def format_status(status), do: redact_status(status)
-  else
-    def format_status(status), do: redact_status(status)
-  end
+  defp append_one(%{failed?: true} = state, _type, _correlation, _payload),
+    do: {:reply, {:error, :inspection_sink_error}, state}
 
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
+  defp append_one(%{result?: true} = state, "run-result", _correlation, _payload),
+    do: failed_reply(state)
 
-  defp retain(state, record_type, correlation, payload) do
-    with true <- record_type in record_types(state.schema_version),
-         true <- within_record_depth?(correlation, payload),
-         {:ok, correlation} <- normalize(correlation),
-         {:ok, payload} <- normalize(payload),
-         :ok <- shape(record_type, correlation, payload, state.schema_version),
-         record <- record(state, record_type, correlation, payload),
-         true <- retained_within_limit?(record, state.max_record_bytes),
-         {:ok, encoded} <- Jason.encode(record),
-         bytes = byte_size(encoded) + 1,
-         true <- bytes <= state.max_record_bytes,
-         true <- state.encoded_bytes + bytes <= state.max_total_bytes do
-      retained_record = RetainedSize.detach_binaries(record)
-
-      {:reply, :ok,
-       %{
-         state
-         | sequence: state.sequence + 1,
-           encoded_bytes: state.encoded_bytes + bytes,
-           records: [retained_record | state.records]
-       }}
-    else
-      _reason -> {:reply, {:error, :inspection_sink_error}, %{state | failed?: true}}
+  defp append_one(state, type, correlation, payload) do
+    case append(state, type, correlation, payload) do
+      {:ok, state} -> {:reply, :ok, state}
+      {:error, state} -> failed_reply(state)
     end
   end
 
-  defp shape("capability-input", %{"capability_id" => id}, payload, 4) do
-    valid? =
-      valid_id?(id) and
-        ((payload["environment"] == "workflow" and
-            exact_payload(payload, ~w(environment name arguments))) or
-           (payload["environment"] == "mission" and
-              exact_payload(payload, ~w(environment mission_name name arguments)) and
-              valid_id?(payload["mission_name"]))) and
-        valid_capability_payload?(payload, "arguments")
+  defp append(state, type, correlation, payload) do
+    case Writer.append(state.writer, type, correlation, payload) do
+      {:ok, writer} ->
+        {:ok, %{state | writer: writer, result?: state.result? or type == "run-result"}}
 
-    ok_or_error(valid?)
+      {:error, _reason} ->
+        {:error, state}
+    end
   end
 
-  defp shape("capability-output", %{"capability_id" => id}, payload, 4) do
-    valid? =
-      valid_id?(id) and
-        ((payload["environment"] == "workflow" and
-            exact_payload(payload, ~w(environment name result))) or
-           (payload["environment"] == "mission" and
-              exact_payload(payload, ~w(environment mission_name name result)) and
-              valid_id?(payload["mission_name"]))) and
-        valid_capability_payload?(payload, "result")
+  defp append_stderr(state, _correlation, nil), do: {:ok, state}
 
-    ok_or_error(valid?)
+  defp append_stderr(state, correlation, payload) do
+    case Map.get(payload, :text, Map.get(payload, "text")) do
+      text when is_binary(text) and text != "" ->
+        append(state, "mcp-stderr", correlation, payload)
+
+      _empty ->
+        {:ok, state}
+    end
   end
 
-  defp shape("evaluation-source", %{"evaluation_id" => id}, payload, 4) do
-    valid? =
-      exact_payload(
-        payload,
-        ~w(environment mission_name program_kind source source_hash source_bytes)
-      ) and valid_id?(id) and valid_id?(payload["mission_name"]) and
-        payload["environment"] == "mission" and payload["program_kind"] == "ptc-lisp" and
-        is_binary(payload["source"]) and payload["source_hash"] == sha256(payload["source"]) and
-        payload["source_bytes"] == byte_size(payload["source"])
+  # Digest-results capture replaces the record's value with its identity here,
+  # after validating the full value exactly as full capture would, because an
+  # identity can no longer be checked against its exchange once the value is
+  # gone. A digest request for any other record type, a missing value, or a
+  # value the identity rejects fails the sink, the same channel an invalid
+  # full payload uses.
+  defp digest_payload(_record_type, _correlation, payload, :full), do: {:ok, payload}
 
-    ok_or_error(valid?)
+  defp digest_payload("capability-output", _correlation, payload, :digest_results) do
+    case Map.fetch(payload, :result) do
+      {:ok, result} when is_map(result) -> swap_value(payload, :result, :result_identity)
+      _invalid -> :error
+    end
   end
 
-  defp shape("prelude-source", %{"component_id" => id}, payload, 4) do
-    valid? =
-      valid_id?(id) and
-        ((payload["environment"] == "workflow" and
-            exact_payload(payload, ~w(environment source source_hash source_bytes))) or
-           (payload["environment"] == "mission" and
-              exact_payload(payload, ~w(environment mission_name source source_hash source_bytes)) and
-              valid_id?(payload["mission_name"]))) and is_binary(payload["source"]) and
-        payload["source_hash"] == sha256(payload["source"]) and
-        payload["source_bytes"] == byte_size(payload["source"])
-
-    ok_or_error(valid?)
-  end
-
-  defp shape(record_type, correlation, payload, 4)
-       when record_type in ["mcp-request", "mcp-response"] do
-    valid? =
-      exact_payload(correlation, ~w(capability_id request_id)) and
-        (exact_payload(payload, ~w(transport body)) or
-           (exact_payload(payload, ~w(transport body mission_name)) and
-              valid_id?(payload["mission_name"]))) and
-        valid_id?(correlation["capability_id"]) and valid_request_id?(correlation["request_id"])
-
-    ok_or_error(valid?)
-  end
-
-  defp shape(record_type, correlation, payload, _schema_version),
-    do: shape(record_type, correlation, payload)
-
-  # `normalize/1` recurses, so nesting is bounded before it runs. The retained
-  # record wraps correlation and payload at exactly one level, so bounding that
-  # envelope bounds the record itself without building the record — and without
-  # stamping a timestamp the check would discard.
-  defp within_record_depth?(correlation, payload) do
-    MCPProtocol.within_inspection_document_depth?(%{
-      "correlation" => correlation,
-      "payload" => payload
-    })
-  end
-
-  defp record(state, record_type, correlation, payload) do
-    %{
-      "schema_version" => state.schema_version,
-      "run_id" => state.run_id,
-      "trace_id" => state.trace_id,
-      "sequence" => state.sequence + 1,
-      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601(),
-      "record_type" => record_type,
-      "correlation" => correlation,
-      "payload" => payload
-    }
-  end
-
-  defp shape("capability-input", %{"capability_id" => id}, payload) do
-    valid? =
-      exact_payload(payload, ~w(environment name arguments)) and valid_id?(id) and
-        valid_capability_payload?(payload, "arguments")
-
-    ok_or_error(valid?)
-  end
-
-  defp shape("capability-output", %{"capability_id" => id}, payload) do
-    valid? =
-      exact_payload(payload, ~w(environment name result)) and valid_id?(id) and
-        valid_capability_payload?(payload, "result")
-
-    ok_or_error(valid?)
-  end
-
-  defp shape("evaluation-source", %{"evaluation_id" => id}, payload) do
-    # `space` is optional here for the same reason it is optional in the
-    # persisted artifact: a reader must accept evidence written before named
-    # missions existed.
-    valid? =
-      (exact_payload(payload, ~w(environment program_kind source source_hash source_bytes)) or
-         exact_payload(
-           payload,
-           ~w(environment space program_kind source source_hash source_bytes)
-         )) and valid_id?(id) and payload["environment"] == "mission" and
-        (is_nil(payload["space"]) or is_binary(payload["space"])) and
-        payload["program_kind"] == "ptc-lisp" and is_binary(payload["source"]) and
-        payload["source_hash"] == sha256(payload["source"]) and
-        payload["source_bytes"] == byte_size(payload["source"])
-
-    ok_or_error(valid?)
-  end
-
-  defp shape("prelude-source", %{"component_id" => id}, payload) do
-    valid? =
-      exact_payload(payload, ~w(environment source source_hash source_bytes)) and
-        valid_id?(id) and payload["environment"] in ["workflow", "mission"] and
-        is_binary(payload["source"]) and
-        payload["source_hash"] == sha256(payload["source"]) and
-        payload["source_bytes"] == byte_size(payload["source"])
-
-    ok_or_error(valid?)
-  end
-
-  defp shape(
-         "mcp-request",
-         %{"capability_id" => capability_id, "request_id" => request_id} = correlation,
-         payload
-       ) do
-    valid? =
-      exact_payload(correlation, ~w(capability_id request_id)) and
-        exact_payload(payload, ~w(transport body)) and valid_id?(capability_id) and
-        valid_request_id?(request_id) and payload["transport"] in ["stdio", "streamable_http"] and
-        MCPProtocol.valid_exchange_request?(payload["body"], request_id)
-
-    ok_or_error(valid?)
-  end
-
-  defp shape(
+  defp digest_payload("mcp-response", correlation, payload, :digest_results) do
+    if MCPProtocol.valid_inspection_exchange?(
          "mcp-response",
-         %{"capability_id" => capability_id, "request_id" => request_id} = correlation,
-         payload
+         Map.get(payload, :body),
+         correlation[:request_id]
        ) do
-    valid? =
-      exact_payload(correlation, ~w(capability_id request_id)) and
-        exact_payload(payload, ~w(transport body)) and valid_id?(capability_id) and
-        valid_request_id?(request_id) and payload["transport"] in ["stdio", "streamable_http"] and
-        MCPProtocol.valid_exchange_response?(payload["body"], request_id)
-
-    ok_or_error(valid?)
-  end
-
-  defp shape("execution-prints", %{"evaluation_id" => id}, payload) do
-    valid? =
-      exact_payload(payload, ~w(environment prints truncated)) and valid_id?(id) and
-        payload["environment"] == "workflow" and
-        is_list(payload["prints"]) and Enum.all?(payload["prints"], &is_binary/1) and
-        is_boolean(payload["truncated"])
-
-    ok_or_error(valid?)
-  end
-
-  defp shape("execution-error", %{"evaluation_id" => id}, payload) do
-    valid? =
-      exact_payload(payload, ~w(environment kind reason details)) and valid_id?(id) and
-        payload["environment"] == "workflow" and
-        valid_id?(payload["kind"]) and valid_id?(payload["reason"]) and
-        is_map(payload["details"])
-
-    ok_or_error(valid?)
-  end
-
-  defp shape(_record_type, _correlation, _payload), do: {:error, :invalid_record}
-
-  defp exact_payload(payload, keys) do
-    Map.keys(payload) |> Enum.sort() == Enum.sort(keys) and JSONValue.map?(payload)
-  end
-
-  defp valid_capability_payload?(payload, value_key) do
-    payload["environment"] in ["workflow", "mission"] and
-      valid_id?(payload["name"]) and is_map(payload[value_key])
-  end
-
-  defp record_types(schema_version), do: InspectionRecordTypes.for_schema_version(schema_version)
-  defp valid_request_id?(id), do: is_integer(id) and id > 0
-
-  defp ok_or_error(true), do: :ok
-  defp ok_or_error(false), do: {:error, :invalid_record}
-
-  defp retained_within_limit?(record, cap) do
-    case RetainedSize.bytes_with_cap(record, cap) do
-      bytes when is_integer(bytes) and bytes <= cap -> true
-      _bytes -> false
+      swap_value(payload, :body, :body_identity)
+    else
+      :error
     end
   end
 
-  defp normalize(value) when is_map(value) and not is_struct(value) do
-    Enum.reduce_while(value, {:ok, %{}}, fn {key, item}, {:ok, normalized} ->
-      with {:ok, key} <- normalize_key(key),
-           false <- Map.has_key?(normalized, key),
-           {:ok, item} <- normalize(item) do
-        {:cont, {:ok, Map.put(normalized, key, item)}}
-      else
-        _reason -> {:halt, {:error, :invalid_record}}
-      end
-    end)
-  end
+  defp digest_payload(_record_type, _correlation, _payload, _capture), do: :error
 
-  defp normalize(values) when is_list(values) do
-    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, normalized} ->
-      case normalize(value) do
-        {:ok, value} -> {:cont, {:ok, [value | normalized]}}
-        error -> {:halt, error}
-      end
-    end)
-    |> case do
-      {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
-      error -> error
+  defp swap_value(payload, key, identity_key) do
+    with {:ok, value} <- Map.fetch(payload, key),
+         {:ok, identity} <- InspectionValueIdentity.identity(value) do
+      {:ok, payload |> Map.delete(key) |> Map.put(identity_key, identity)}
+    else
+      _invalid -> :error
     end
   end
 
-  defp normalize(value) when is_atom(value) and value not in [true, false, nil],
-    do: {:ok, Atom.to_string(value)}
+  defp failed_reply(state),
+    do: {:reply, {:error, :inspection_sink_error}, %{state | failed?: true}}
 
-  defp normalize(value) when is_binary(value), do: {:ok, value}
-
-  defp normalize(value) when is_number(value) or is_boolean(value) or is_nil(value),
-    do: {:ok, value}
-
-  defp normalize(_value), do: {:error, :invalid_record}
-
-  defp normalize_key(key) when is_binary(key), do: {:ok, key}
-
-  defp normalize_key(key) when is_atom(key), do: {:ok, Atom.to_string(key)}
-  defp normalize_key(_key), do: {:error, :invalid_record}
-
-  defp valid_id?(id),
-    do: is_binary(id) and String.valid?(id) and byte_size(id) in 1..256
+  defp valid_id?(id), do: byte_size(id) in 1..256 and String.valid?(id)
 
   defp await_stop(ref, pid, timeout) do
     receive do
@@ -525,16 +355,6 @@ defmodule PtcRunner.Kernel.InspectionSink do
       timeout -> :ok
     end
   end
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
-  end
-
-  defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
 
   defp call(%__MODULE__{pid: pid, token: token}, request) do
     GenServer.call(pid, {token, request})

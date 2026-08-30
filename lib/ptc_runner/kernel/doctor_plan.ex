@@ -13,7 +13,8 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   # `requires_connect` or `active_check_required`, and the one step it does run
   # — the audited-local phase-7 check — leaves its rows pending.
   # `doctor --connect` runs all of them, so each becomes pending instead and is
-  # settled from what the connect operation returned.
+  # settled from what the connect operation returned. Default doctor instead
+  # settles every audited-local row from its complete finding set.
   #
   # A failed connect operation can be projected only when its closed diagnostic
   # identifies one canonical row in the exact plan. Every other pending row is
@@ -32,6 +33,8 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   @modes [:default, :connect]
 
   @failure_codes_by_operation DiagnosticCatalog.doctor_failure_codes_by_operation()
+  @application_failure_codes DiagnosticCatalog.doctor_application_rows()
+                             |> Enum.map(& &1.code)
 
   # Every code a connect plan cannot hold: the two that say default doctor
   # declined the work rather than doing it, and the two an application-less plan
@@ -110,9 +113,48 @@ defmodule PtcRunner.Kernel.DoctorPlan do
 
   def new(_catalog, _prepared, _environment, _mode), do: {:error, :invalid_doctor_plan}
 
+  @doc "Derives a closed failed plan when application preparation did not complete."
+  @spec application_failure(
+          InstallationCatalog.t(),
+          CommandDiagnostic.t(),
+          environment(),
+          mode()
+        ) :: {:ok, t()} | {:error, :invalid_doctor_plan}
+  def application_failure(
+        %InstallationCatalog{} = catalog,
+        %CommandDiagnostic{phase: :application, code: code} = diagnostic,
+        environment,
+        mode
+      )
+      when code in @application_failure_codes and mode in @modes do
+    with true <- InstallationCatalog.valid?(catalog),
+         true <- CommandDiagnostic.valid?(diagnostic),
+         {:ok, rows} <- derive_plan(catalog, nil, environment, :default) do
+      binding =
+        Attestation.attest(__MODULE__, {catalog.attestation, diagnostic, environment, mode})
+
+      {:ok,
+       Enum.map(rows, fn
+         %{name: "application"} = row ->
+           %{row | outcome: {:fail, code}, plan_binding: binding}
+
+         %{operation: _operation} = row ->
+           %{row | outcome: {:skipped, :not_verified_due_to_failure}, plan_binding: binding}
+
+         row ->
+           %{row | plan_binding: binding}
+       end)}
+    else
+      _invalid -> {:error, :invalid_doctor_plan}
+    end
+  end
+
+  def application_failure(_catalog, _diagnostic, _environment, _mode),
+    do: {:error, :invalid_doctor_plan}
+
   # Every outcome the contract has a code for. Projection validates against this
-  # rather than trusting its producers, so the rule that no provider row can
-  # express a failure holds at the boundary that renders them.
+  # rather than trusting its producers, including provider failures retained by
+  # doctor rather than raised as a bare command error.
   @permitted [
     {:pass, :supported},
     {:warn, :unsupported},
@@ -191,25 +233,38 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   def settle(_rows, _name, _outcome), do: {:error, :invalid_doctor_plan}
 
   @doc """
-  Settles every pending row as available.
+  Settles a default plan from doctor's complete audited-local finding set.
 
-  Callers use this only after the shared phase-7 step reported `:ok`, which
-  verifies every applicable audited-local occurrence. A partial result cannot
-  reach here: that step reports the first failure instead of returning.
+  The plan is reconstructed from the same catalog, preparation, and
+  environment before any row is changed. Each failing diagnostic must identify
+  a selected local occurrence; aliases without a finding pass. When an alias is
+  selected more than once, any failed occurrence fails its single collapsed
+  row, using the first finding in declaration order as its code.
   """
-  @spec settle_pending(t()) :: {:ok, t()} | {:error, :invalid_doctor_plan}
-  def settle_pending(rows) when is_list(rows) do
-    rows
-    |> pending()
-    |> Enum.reduce_while({:ok, rows}, fn row, {:ok, rows} ->
-      case settle(rows, row.name, {:pass, :available}) do
-        {:ok, settled} -> {:cont, {:ok, settled}}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
+  @spec settle_local(
+          t(),
+          [CommandDiagnostic.t()],
+          PreparedRun.t() | nil,
+          InstallationCatalog.t(),
+          environment()
+        ) :: {:ok, t()} | {:error, :invalid_doctor_plan}
+  def settle_local(rows, findings, prepared, %InstallationCatalog{} = catalog, environment)
+      when is_list(rows) and is_list(findings) do
+    with true <- InstallationCatalog.valid?(catalog),
+         true <- is_nil(prepared) or PreparedRun.inactive_valid?(prepared),
+         true <- bound_to_catalog?(prepared, catalog),
+         {:ok, canonical} <- derive_plan(catalog, prepared, environment, :default),
+         true <- rows == canonical,
+         true <- Enum.all?(findings, &CommandDiagnostic.valid?/1),
+         {:ok, failures} <- local_failures(findings, prepared, catalog) do
+      {:ok, Enum.map(rows, &settle_local_row(&1, failures))}
+    else
+      _invalid -> {:error, :invalid_doctor_plan}
+    end
   end
 
-  def settle_pending(_rows), do: {:error, :invalid_doctor_plan}
+  def settle_local(_rows, _findings, _prepared, _catalog, _environment),
+    do: {:error, :invalid_doctor_plan}
 
   @doc """
   Settles a connect-mode plan from the connect operation's sealed result.
@@ -235,7 +290,7 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   rather than claiming an authorization nothing performed.
 
   The rows are trusted to have come from `new/4` with the same trio, on the same
-  terms as `settle_pending/1` — a plan carries no seal of its own. What is
+  terms as `settle_local/5` — a plan carries no seal of its own. What is
   checked is that its provider aliases are the preparation's selected ones and
   that its pending connectivity rows are exactly the aliases the result reports
   reached, so a plan derived from another application or another set of
@@ -435,7 +490,26 @@ defmodule PtcRunner.Kernel.DoctorPlan do
     end
   end
 
-  defp pending(rows), do: Enum.filter(rows, &match?(%{outcome: :audited_local}, &1))
+  defp local_failures(findings, prepared, catalog) do
+    Enum.reduce_while(findings, {:ok, %{}}, fn diagnostic, {:ok, failures} ->
+      case failure_target(diagnostic, prepared, catalog) do
+        {:ok, {name, :local}} ->
+          {:cont, {:ok, Map.put_new(failures, name, diagnostic.code)}}
+
+        _invalid ->
+          {:halt, {:error, :invalid_doctor_plan}}
+      end
+    end)
+  end
+
+  defp settle_local_row(%{alias: name, outcome: :audited_local} = row, failures) do
+    case Map.fetch(failures, name) do
+      {:ok, code} -> %{row | outcome: {:fail, code}}
+      :error -> %{row | outcome: {:pass, :available}}
+    end
+  end
+
+  defp settle_local_row(row, _failures), do: row
 
   defp derive_plan(catalog, prepared, environment, mode) do
     with {:ok, runtime} <- environment_row("runtime", environment, :runtime, runtime_codes()),
@@ -456,6 +530,9 @@ defmodule PtcRunner.Kernel.DoctorPlan do
 
   defp permitted?(%{operation: operation, outcome: {:fail, code}}),
     do: code in Map.get(@failure_codes_by_operation, operation, [])
+
+  defp permitted?(%{name: "application", outcome: {:fail, code}}),
+    do: code in @application_failure_codes
 
   defp permitted?(%{outcome: {:skipped, :not_verified_due_to_failure}}), do: true
   defp permitted?(%{outcome: outcome}), do: outcome in @permitted

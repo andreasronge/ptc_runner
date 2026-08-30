@@ -24,6 +24,16 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
     assert :connectivity_unavailable in Map.fetch!(codes, :connectivity)
     assert :provider_unavailable in Map.fetch!(codes, :connectivity)
     refute :connectivity_timeout in Map.fetch!(codes, :connectivity)
+
+    refute Enum.any?(codes, fn {_operation, values} ->
+             :capability_requirement_missing in values
+           end)
+
+    refute CommandContract.diagnostic_allowed?(
+             {:doctor, :connect},
+             :provider_acquisition,
+             :capability_requirement_missing
+           )
   end
 
   test "the installed surface reports every alias without an application" do
@@ -41,6 +51,15 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
            ]
 
     assert_contract(checks, false)
+  end
+
+  test "an application failure plan refuses a forged catalog" do
+    catalog = catalog(%{"alpha" => []})
+    forged = %{catalog | attestation: <<>>}
+    diagnostic = CommandDiagnostic.new!(:application, :schema_violation)
+
+    assert {:error, :invalid_doctor_plan} =
+             DoctorPlan.application_failure(forged, diagnostic, @environment, :default)
   end
 
   test "an application narrows the plan to the aliases it selected" do
@@ -192,14 +211,16 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
     # Default doctor's one pending row settles from its phase-7 step. A connect
     # plan has no equivalent and stays unprojectable until its own operation
     # returned, which is what `settle_connect/4` needs and this one does not.
-    assert {:ok, settled} = DoctorPlan.settle_pending(default)
+    assert {:ok, settled} =
+             DoctorPlan.settle_local(default, [], prepared, catalog, @environment)
+
     assert {:ok, _checks} = DoctorPlan.checks(settled)
     assert {:error, :invalid_doctor_plan} = DoctorPlan.checks(connect)
 
-    # Default doctor's settlement is a no-op on a connect plan rather than a
-    # shortcut through it: it settles the marker its own step produces, and a
-    # connect plan holds none.
-    assert {:ok, ^connect} = DoctorPlan.settle_pending(connect)
+    # Default doctor's settlement refuses a connect plan rather than using its
+    # empty finding set as a shortcut through rows derived for another mode.
+    assert {:error, :invalid_doctor_plan} =
+             DoctorPlan.settle_local(connect, [], prepared, catalog, @environment)
   end
 
   test "connect has no application-free form" do
@@ -361,6 +382,31 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
                probing,
                @environment
              )
+  end
+
+  test "endpoint connection diagnostics settle acquisition connectivity rows" do
+    catalog = catalog(%{"provider" => [connectivity_mode: :acquisition]})
+    prepared = prepared(catalog, ["provider"])
+    assert {:ok, rows} = DoctorPlan.new(catalog, prepared, @environment, :connect)
+    occurrence = %{destination: :workflow, index: 0}
+
+    for code <- [
+          :provider_endpoint_connection_refused,
+          :provider_endpoint_name_unresolved,
+          :provider_endpoint_tls_failed
+        ] do
+      failure = diagnostic(:provider_acquisition, code, "provider", :acquisition, occurrence)
+
+      assert {:ok, settled} =
+               DoctorPlan.settle_failure(rows, failure, prepared, catalog, @environment)
+
+      assert {:ok, checks} = DoctorPlan.checks(settled)
+
+      assert %{"status" => "fail", "code" => rendered} =
+               fetch_check(checks, "provider/provider/connectivity")
+
+      assert rendered == Atom.to_string(code)
+    end
   end
 
   test "unattributable diagnostics cannot synthesize failed rows" do
@@ -688,7 +734,14 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
         }
       end)
 
-    {:ok, result} = ConnectivityResult.new(prepared, catalog, entries, provider_activity)
+    usage =
+      entries
+      |> Enum.filter(&(&1.mode == :probe))
+      |> Enum.map(&%{name: &1.name, destination: &1.destination, index: &1.index, usage: nil})
+
+    {:ok, result} =
+      ConnectivityResult.new(prepared, catalog, entries, provider_activity, usage)
+
     result
   end
 
@@ -699,7 +752,8 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
       "checks" => checks,
       "model_aliases" => [],
       "provider_activity" => provider_activity,
-      "readiness" => readiness
+      "readiness" => readiness,
+      "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
     assert CommandContract.valid_success_result?(:doctor, result)

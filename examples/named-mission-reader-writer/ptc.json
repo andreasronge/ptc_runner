@@ -32,6 +32,10 @@
       {"name": "writer_workspace", "config": {"allow": ["workspace.write"]}}
     ]
   },
+  "limits": {
+    "evaluation_timeout_ms": 15000,
+    "run_duration_ms": 90000
+  },
   "labels": {
     "name": "named-mission-reader-writer",
     "tags": {"mode": "agent"}

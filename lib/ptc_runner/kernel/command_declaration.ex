@@ -14,16 +14,41 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     syntax: ["--help"],
     description: "show help for this command"
   }
+  @env_file_option %{
+    key: :env_file,
+    type: :string,
+    syntax: ["--env-file FILE"],
+    description: "load environment variables from this exact file",
+    owner: :frontend
+  }
+  @envelope_option %{
+    key: :envelope,
+    type: :string,
+    syntax: ["--envelope ENVELOPE.json"],
+    description: "atomically publish the V4 command envelope"
+  }
+  @run_envelope_option %{
+    key: :envelope,
+    type: :string,
+    syntax: ["--envelope ENVELOPE.json"],
+    description:
+      "atomically publish a V4 command envelope copy (project ledger still written when artifacts.envelope is enabled)"
+  }
 
   @declarations %{
     root: %{
       usage: [
-        "ptc validate ptc.json [--host-config HOST.json]",
-        "ptc run ptc.json [OPTIONS]",
-        "ptc doctor [ptc.json] [--host-config HOST.json] [--connect]",
-        "ptc models --host-config HOST.json",
-        "ptc init DIRECTORY",
+        "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json]",
+        "ptc run MANIFEST.json|PROJECT.json [OPTIONS]",
+        "ptc doctor [MANIFEST.json|PROJECT.json] [--host-config HOST.json] [--connect]",
+        "ptc models PROJECT.json | --host-config HOST.json",
+        "ptc init DIRECTORY [--example NAME]",
+        "ptc docs [PAGE]",
+        "ptc help [COMMAND]",
+        "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
+        "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]",
+        "ptc version [--envelope ENVELOPE.json]",
         "ptc --version"
       ],
       options: [
@@ -34,24 +59,31 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--version"],
           description: "show the command version"
         }
-      ],
-      retired: %{}
+      ]
     },
     init: %{
-      usage: ["ptc init DIRECTORY"],
+      usage: ["ptc init DIRECTORY [--example NAME]"],
       options: [
         %{
-          key: :envelope,
+          key: :example,
           type: :string,
-          syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V2 command envelope"
+          syntax: ["--example NAME"],
+          description: "materialize one embedded example tree instead of the scaffold"
         },
+        @envelope_option,
         @help_option
-      ],
-      retired: %{}
+      ]
+    },
+    version: %{
+      usage: ["ptc version [--envelope ENVELOPE.json]"],
+      options: [@envelope_option]
+    },
+    docs: %{
+      usage: ["ptc docs [PAGE]"],
+      options: [@help_option]
     },
     validate: %{
-      usage: ["ptc validate ptc.json [--host-config HOST.json]"],
+      usage: ["ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json]"],
       options: [
         %{
           key: :host_config,
@@ -59,18 +91,12 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--host-config HOST.json"],
           description: "trusted provider installation document"
         },
-        %{
-          key: :envelope,
-          type: :string,
-          syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V2 command envelope"
-        },
+        @envelope_option,
         @help_option
-      ],
-      retired: %{}
+      ]
     },
     run: %{
-      usage: ["ptc run ptc.json [OPTIONS]"],
+      usage: ["ptc run MANIFEST.json|PROJECT.json [OPTIONS]"],
       options: [
         %{
           key: :host_config,
@@ -82,13 +108,15 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :input,
           type: :string,
           syntax: ["--input INPUT.json"],
-          description: "normal alternate input object"
+          description:
+            "normal alternate input object (application-relative document, or absolute/cwd path)"
         },
         %{
           key: :private_input,
           type: :string,
           syntax: ["--private-input INPUT.json"],
-          description: "private alternate input object"
+          description:
+            "private alternate input object (application-relative document, or absolute/cwd path)"
         },
         %{
           key: :trace_dir,
@@ -111,7 +139,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         %{
           key: :inspect,
           type: :string,
-          syntax: ["--inspect RUN.inspection.jsonl"],
+          syntax: ["--inspect RUN.ptcins"],
           description: "owner-only private inspection artifact"
         },
         %{
@@ -120,12 +148,8 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--component-override-descriptor DESCRIPTOR.json"],
           description: "verified replacement component descriptor"
         },
-        %{
-          key: :envelope,
-          type: :string,
-          syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V2 command envelope"
-        },
+        @env_file_option,
+        @run_envelope_option,
         %{
           key: :authorize_mcp,
           type: [:string, :keep],
@@ -136,17 +160,11 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           repeatable: true
         },
         @help_option
-      ],
-      retired: %{
-        "--mission" => "--input",
-        "--private-mission" => "--private-input",
-        "--trace" => "--trace-dir",
-        "--check" => "ptc validate"
-      }
+      ]
     },
     doctor: %{
       usage: [
-        "ptc doctor [ptc.json] [--host-config HOST.json] [--connect] [--show-model-selectors]"
+        "ptc doctor [MANIFEST.json|PROJECT.json] [--host-config HOST.json] [--connect] [--show-model-selectors]"
       ],
       options: [
         %{
@@ -167,18 +185,13 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--show-model-selectors"],
           description: "include safe configured model selectors"
         },
-        %{
-          key: :envelope,
-          type: :string,
-          syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V2 command envelope"
-        },
+        @env_file_option,
+        @envelope_option,
         @help_option
-      ],
-      retired: %{}
+      ]
     },
     models: %{
-      usage: ["ptc models --host-config HOST.json"],
+      usage: ["ptc models PROJECT.json | --host-config HOST.json"],
       options: [
         %{
           key: :host_config,
@@ -186,19 +199,52 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--host-config HOST.json"],
           description: "trusted provider installation document"
         },
+        @envelope_option,
+        @help_option
+      ]
+    },
+    transcript: %{
+      usage: [
+        "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE"
+      ],
+      options: [
         %{
-          key: :envelope,
+          key: :traces,
           type: :string,
-          syntax: ["--envelope ENVELOPE.json"],
-          description: "atomically publish the V2 command envelope"
+          syntax: ["--traces DIRECTORY"],
+          description: "trace directory; transcript selects RUN_ID.jsonl or RUN_ID.private.jsonl"
+        },
+        %{
+          key: :inspection,
+          type: :string,
+          syntax: ["--inspection DIRECTORY"],
+          description: "inspection directory; transcript selects RUN_ID.ptcins"
+        },
+        %{
+          key: :private_unattended,
+          type: :boolean,
+          syntax: ["--private-unattended"],
+          description: "explicitly authorize one unattended private result"
+        },
+        %{
+          key: :private_output,
+          type: :string,
+          syntax: ["--private-output TRANSCRIPT.json"],
+          description:
+            "new owner-only file; parent must exist without a symlink (macOS /tmp is one) and be physically separate from --traces and --inspection"
         },
         @help_option
-      ],
-      retired: %{}
+      ]
     },
     repl: %{
       usage: ["ptc repl [OPTIONS] [SCRIPT|-]"],
       options: [
+        %{
+          key: :project,
+          type: :string,
+          syntax: ["--project PROJECT.json"],
+          description: "reuse application, host, and environment project defaults"
+        },
         %{
           key: :eval,
           type: [:string, :keep],
@@ -222,11 +268,18 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           aliases: [:m]
         },
         %{
+          key: :mission,
+          type: :string,
+          syntax: ["--mission MISSION"],
+          description: "open one manifest-declared mission environment"
+        },
+        %{
           key: :host_config,
           type: :string,
           syntax: ["--host-config HOST.json"],
           description: "manifest-only trusted provider installation document"
         },
+        @env_file_option,
         %{
           key: :trace,
           type: :string,
@@ -248,16 +301,41 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           repeatable: true
         },
         %{
+          key: :run,
+          type: [:string, :keep],
+          syntax: ["--run RUN_ID"],
+          description: "select one private-analysis run; repeatable up to 16",
+          repeatable: true
+        },
+        %{
           key: :session_trace_dir,
           type: :string,
           syntax: ["--session-trace-dir DIRECTORY"],
           description: "existing directory for the profile session trace"
         },
         %{
+          key: :output,
+          type: :string,
+          syntax: ["--output VALUE.json"],
+          description: "publish one public profile evaluation value"
+        },
+        %{
+          key: :private_output,
+          type: :string,
+          syntax: ["--private-output VALUE.json"],
+          description: "publish one owner-only private profile evaluation value"
+        },
+        %{
           key: :format,
           type: :string,
           syntax: ["--format clojure|jsonl"],
           description: "choose human or JSON Lines profile output"
+        },
+        %{
+          key: :preview_chars,
+          type: :integer,
+          syntax: ["--preview-chars COUNT"],
+          description: "REPL structural preview character ceiling"
         },
         %{
           key: :continue_on_error,
@@ -290,15 +368,59 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "show repl help without starting a session",
           aliases: [:h]
         }
+      ]
+    },
+    viewer: %{
+      usage: [
+        "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]"
       ],
-      retired: %{}
+      options: [
+        %{
+          key: :port,
+          type: :string,
+          syntax: ["--port PORT"],
+          description: "override the project's Viewer port"
+        },
+        %{
+          key: :listen,
+          type: :string,
+          syntax: ["--listen 127.0.0.1|0.0.0.0"],
+          description: "bind address; 0.0.0.0 exposes the Viewer beyond this host"
+        },
+        @env_file_option,
+        @help_option
+      ]
     }
   }
 
-  @commands [:init, :validate, :run, :doctor, :models, :repl]
+  @commands [
+    :version,
+    :init,
+    :docs,
+    :validate,
+    :run,
+    :doctor,
+    :models,
+    :transcript,
+    :repl,
+    :viewer
+  ]
   @topics [:root | @commands]
+  # Commands the shared engine never dispatches: their frontend owns the
+  # process for as long as it runs and returns no envelope.
+  @frontend_commands [:transcript, :repl, :viewer]
 
-  @type command :: :init | :validate | :run | :doctor | :models | :repl
+  @type command ::
+          :version
+          | :init
+          | :docs
+          | :validate
+          | :run
+          | :doctor
+          | :models
+          | :transcript
+          | :repl
+          | :viewer
   @type topic :: :root | command()
   @type frontend :: :standalone | :mix
 
@@ -307,6 +429,9 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
 
   @spec topics() :: [topic()]
   def topics, do: @topics
+
+  @spec frontend_commands() :: [command()]
+  def frontend_commands, do: @frontend_commands
 
   @spec command_atom(binary()) :: {:ok, command()} | :error
   def command_atom(name) when is_binary(name) do
@@ -420,16 +545,6 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       }
     end)
   end
-
-  @spec retired_switch(command(), binary()) :: {:ok, binary()} | :error
-  def retired_switch(command, switch) when command in @commands and is_binary(switch) do
-    @declarations
-    |> Map.fetch!(command)
-    |> Map.fetch!(:retired)
-    |> Map.fetch(switch)
-  end
-
-  def retired_switch(_command, _switch), do: :error
 
   defp options(topic, frontend) when topic in @topics and frontend in @shared_frontends do
     @declarations

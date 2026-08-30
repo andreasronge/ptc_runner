@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunState
+  alias PtcRunner.TestSupport.StreamingInspection
 
   @logger_handler :owner_status_privacy_probe
 
@@ -123,18 +124,27 @@ defmodule PtcRunner.Kernel.OwnerStatusPrivacyTest do
 
   defp start_owners(markers, directory) do
     {:ok, store} = PtcViewer.InspectionStore.start({:pinned, markers.store})
-    {:ok, sink} = InspectionSink.start(run_id: "run-1", trace_id: "trace-1")
+
+    {:ok, sink} =
+      StreamingInspection.start(run_id: "run-1", trace_id: "trace-1")
 
     :ok =
       InspectionSink.emit(
         sink,
         "capability-input",
         %{capability_id: "cap-1"},
-        %{environment: :mission, name: "read", arguments: %{"value" => markers.sink}}
+        %{
+          environment: :mission,
+          mission_name: "default",
+          name: "read",
+          arguments: %{"value" => markers.sink}
+        }
       )
 
     {:ok, run_state} = RunState.start(Limits.defaults())
-    {:ok, %{}, [], evaluation_lease} = RunState.reserve_evaluation(run_state)
+
+    {:ok, %{}, [], evaluation_lease} =
+      RunState.reserve_evaluation(run_state, "default", :fail_fast)
 
     :ok =
       RunState.commit_evaluation(

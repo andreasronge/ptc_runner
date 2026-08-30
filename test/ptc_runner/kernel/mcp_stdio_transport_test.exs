@@ -55,6 +55,130 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
   end
 
   @tag :tmp_dir
+  test "returns accumulated child stderr with a captured exchange", %{tmp_dir: tmp_dir} do
+    transport = start_transport(tmp_dir)
+    port = safe_state(transport.pid).port
+
+    # Inject stderr before the exchange drains it. Child write-then-respond races
+    # multiplexed launcher O/E delivery under suite load.
+    send(transport.pid, {port, {:data, <<"E", "child diagnostic\n">>}})
+
+    assert_eventually(fn ->
+      match?(%{stderr: "child diagnostic\n"}, safe_state(transport.pid))
+    end)
+
+    assert {:ok,
+            %{
+              request: %{"method" => "captured"},
+              response: %{"result" => %{"method" => "captured"}},
+              stderr: stderr,
+              stderr_truncated?: false
+            }} =
+             MCPStdioTransport.request_exchange(
+               transport,
+               "captured",
+               %{},
+               %{},
+               8_192,
+               1_000
+             )
+
+    assert stderr == "child diagnostic\n"
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
+  test "marks launcher stderr overflow as truncated", %{tmp_dir: tmp_dir} do
+    transport = start_transport(tmp_dir, nil, "read", stderr_bytes: 8)
+    port = safe_state(transport.pid).port
+
+    # Inject the overflowed stderr frames before the exchange drains them.
+    # Waiting for the child to write stderr before its JSON response races the
+    # launcher's multiplexed O/E delivery under suite load and can drain an
+    # empty buffer with stderr_truncated? still false.
+    send(transport.pid, {port, {:data, <<"E", "abcdefgh">>}})
+    send(transport.pid, {port, {:data, "T"}})
+
+    assert_eventually(fn ->
+      match?(%{stderr: "abcdefgh", stderr_truncated?: true}, safe_state(transport.pid))
+    end)
+
+    assert {:ok,
+            %{
+              request: %{"method" => "captured"},
+              response: %{"result" => %{"method" => "captured"}},
+              stderr: stderr,
+              stderr_truncated?: true
+            }} =
+             MCPStdioTransport.request_exchange(
+               transport,
+               "captured",
+               %{},
+               %{},
+               8_192,
+               1_000
+             )
+
+    assert stderr == "abcdefgh"
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
+  test "serializes captured exchanges so stderr stays with one request", %{tmp_dir: tmp_dir} do
+    transport = start_transport(tmp_dir)
+
+    slow =
+      Task.async(fn ->
+        MCPStdioTransport.request_exchange(transport, "stderr-slow", %{}, %{}, 8_192, 5_000)
+      end)
+
+    fast =
+      Task.async(fn ->
+        MCPStdioTransport.request_exchange(transport, "stderr-fast", %{}, %{}, 8_192, 5_000)
+      end)
+
+    assert {:ok, %{stderr: slow_stderr, response: %{"result" => %{"method" => "stderr-slow"}}}} =
+             Task.await(slow)
+
+    assert {:ok, %{stderr: fast_stderr, response: %{"result" => %{"method" => "stderr-fast"}}}} =
+             Task.await(fast)
+
+    assert slow_stderr =~ "slow diagnostic\n"
+    refute slow_stderr =~ "fast diagnostic\n"
+    assert fast_stderr =~ "fast diagnostic\n"
+    refute fast_stderr =~ "slow diagnostic\n"
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
+  test "preserves a split UTF-8 sequence across captured exchanges", %{tmp_dir: tmp_dir} do
+    transport = start_transport(tmp_dir)
+    port = safe_state(transport.pid).port
+    euro = "€"
+    <<head::binary-size(2), tail::binary>> = euro
+
+    send(transport.pid, {port, {:data, <<"E", head::binary>>}})
+
+    assert_eventually(fn ->
+      match?(%{stderr: ^head}, safe_state(transport.pid))
+    end)
+
+    assert {:ok, %{stderr: "", stderr_truncated?: false}} =
+             MCPStdioTransport.request_exchange(transport, "captured", %{}, %{}, 8_192, 1_000)
+
+    assert_eventually(fn ->
+      match?(%{stderr: ^head}, safe_state(transport.pid))
+    end)
+
+    send(transport.pid, {port, {:data, <<"E", tail::binary>>}})
+
+    assert {:ok, %{stderr: ^euro, stderr_truncated?: false}} =
+             MCPStdioTransport.request_exchange(transport, "captured", %{}, %{}, 8_192, 1_000)
+
+    assert :ok = MCPStdioTransport.close(transport)
+  end
+
+  @tag :tmp_dir
   test "returns the exact decoded request and response for private capture", %{tmp_dir: tmp_dir} do
     transport = start_transport(tmp_dir)
 
@@ -694,6 +818,12 @@ defmodule PtcRunner.Kernel.MCPStdioTransportTest do
       grace_ms: Keyword.get(opts, :grace_ms, 50),
       start_timeout_ms: 5_000
     ]
+    |> then(fn options ->
+      case Keyword.get(opts, :stderr_bytes) do
+        nil -> options
+        bytes -> Keyword.put(options, :stderr_bytes, bytes)
+      end
+    end)
   end
 
   defp start_test_launcher(tmp_dir, mode) do

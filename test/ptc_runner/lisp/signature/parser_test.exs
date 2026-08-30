@@ -1,5 +1,5 @@
 defmodule PtcRunner.Lisp.Signature.ParserTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Signature.Parser
 

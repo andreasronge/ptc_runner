@@ -26,12 +26,10 @@ defmodule PtcRunner.Kernel.ApplicationSource do
   def open_directory(path) when is_binary(path) do
     with {:ok, canonical} <- ConfinedFile.resolve_absolute(Path.expand(path)),
          manifest_name = Path.basename(canonical),
-         true <- valid_name?(manifest_name),
          root = Path.dirname(canonical),
          {:ok, source} <- start({:directory, root}, manifest_name) do
       ensure_manifest(source)
     else
-      false -> {:error, :invalid_logical_name}
       {:error, _reason} = error -> error
     end
   end
@@ -61,7 +59,8 @@ defmodule PtcRunner.Kernel.ApplicationSource do
 
   @spec manifest(t()) :: {:ok, binary()} | {:error, atom()}
   @doc false
-  def manifest(%__MODULE__{} = source), do: read(source, source.manifest_name, 1_000_000)
+  def manifest(%__MODULE__{pid: pid, manifest_name: manifest_name}),
+    do: read_name(pid, manifest_name, 1_000_000)
 
   @spec logical_name(t(), binary()) ::
           {:ok, binary()} | {:error, :outside_application_source | :invalid_logical_name}
@@ -96,9 +95,14 @@ defmodule PtcRunner.Kernel.ApplicationSource do
   @spec resolve_reference(t(), binary(), binary()) ::
           {:ok, binary()} | {:error, :invalid_logical_name}
   @doc false
-  def resolve_reference(%__MODULE__{pid: pid}, document_name, relative_name)
+  def resolve_reference(
+        %__MODULE__{pid: pid, manifest_name: manifest_name},
+        document_name,
+        relative_name
+      )
       when is_binary(document_name) and is_binary(relative_name) do
-    if valid_name?(document_name) and valid_name?(relative_name) do
+    if (document_name == manifest_name or valid_name?(document_name)) and
+         valid_name?(relative_name) do
       Agent.get(pid, fn
         %{mode: {:directory, root}} ->
           directory = Path.expand(Path.dirname(document_name), root)
@@ -150,17 +154,10 @@ defmodule PtcRunner.Kernel.ApplicationSource do
   def read(%__MODULE__{pid: pid}, name, max_bytes)
       when is_binary(name) and is_integer(max_bytes) and max_bytes > 0 do
     if valid_name?(name) do
-      Agent.get_and_update(pid, fn state ->
-        case read_state(state, name, max_bytes) do
-          {:ok, bytes, next} -> {{:ok, bytes}, next}
-          {:error, _reason} = error -> {error, state}
-        end
-      end)
+      read_name(pid, name, max_bytes)
     else
       {:error, :invalid_logical_name}
     end
-  catch
-    :exit, _reason -> {:error, :application_source_closed}
   end
 
   def read(_source, _name, _max_bytes), do: {:error, :invalid_application_source}
@@ -199,6 +196,19 @@ defmodule PtcRunner.Kernel.ApplicationSource do
     :exit, _reason -> :ok
   end
 
+  @spec directory?(t()) :: boolean()
+  @doc false
+  def directory?(%__MODULE__{pid: pid}) do
+    Agent.get(pid, fn
+      %{mode: {:directory, _root}} -> true
+      _state -> false
+    end)
+  catch
+    :exit, _reason -> false
+  end
+
+  def directory?(_source), do: false
+
   @spec valid_name?(term()) :: boolean()
   @doc "Checks the portable lowercase ASCII logical-name grammar."
   def valid_name?(name) when is_binary(name) and byte_size(name) <= 1_024,
@@ -220,7 +230,7 @@ defmodule PtcRunner.Kernel.ApplicationSource do
   end
 
   defp ensure_manifest(source) do
-    case read(source, source.manifest_name, 1_000_000) do
+    case manifest(source) do
       {:ok, _manifest} ->
         {:ok, source}
 
@@ -228,6 +238,17 @@ defmodule PtcRunner.Kernel.ApplicationSource do
         close(source)
         error
     end
+  end
+
+  defp read_name(pid, name, max_bytes) do
+    Agent.get_and_update(pid, fn state ->
+      case read_state(state, name, max_bytes) do
+        {:ok, bytes, next} -> {{:ok, bytes}, next}
+        {:error, _reason} = error -> {error, state}
+      end
+    end)
+  catch
+    :exit, _reason -> {:error, :application_source_closed}
   end
 
   defp read_state(%{closed?: true}, _name, _max_bytes),

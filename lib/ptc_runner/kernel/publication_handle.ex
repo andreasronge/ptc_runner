@@ -71,6 +71,19 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   def reserve_for(_path, _kind, _mode, _controller), do: {:error, :invalid_destination}
 
   @doc false
+  @spec reserve_stream_for(binary(), :inspection, non_neg_integer(), pid()) ::
+          {:ok, t()} | {:error, atom()}
+  def reserve_stream_for(path, :inspection, mode, controller)
+      when is_binary(path) and is_integer(mode) and mode >= 0 and is_pid(controller) do
+    with {:ok, owner} <- PublicationHandleOwner.start(controller) do
+      PublicationHandleOwner.reserve_stream(owner, path, :inspection, mode)
+    end
+  end
+
+  def reserve_stream_for(_path, _kind, _mode, _controller),
+    do: {:error, :invalid_destination}
+
+  @doc false
   @spec reserve_direct(binary(), kind(), non_neg_integer(), pid()) ::
           {:ok, t()} | {:error, atom()}
   def reserve_direct(path, kind, mode, owner)
@@ -78,6 +91,7 @@ defmodule PtcRunner.Kernel.PublicationHandle do
              is_integer(mode) and mode >= 0 and is_pid(owner) do
     with :ok <- valid_path(path),
          {:ok, path} <- PrivateDirectory.anchor(path),
+         :ok <- parent_present(path),
          :ok <- PrivateDirectory.preflight(path),
          {:ok, parent, parent_identity} <- parent_identity(path),
          {:error, :enoent} <- File.lstat(path) do
@@ -228,6 +242,21 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   def write(%__MODULE__{} = handle, bytes), do: call_owner(handle, {:write, bytes})
 
   @doc false
+  @spec attest(t(), non_neg_integer(), binary()) :: :ok | {:error, atom()}
+  def attest(%__MODULE__{kind: :inspection} = handle, size, digest)
+      when is_integer(size) and size >= 0 and is_binary(digest) and byte_size(digest) == 32,
+      do: call_owner(handle, {:attest, size, digest})
+
+  def attest(_handle, _size, _digest), do: {:error, :invalid_destination}
+
+  @doc false
+  @spec append(t(), iodata()) :: {:ok, non_neg_integer()} | {:error, atom()}
+  def append(%__MODULE__{kind: :inspection} = handle, bytes),
+    do: call_owner(handle, {:append, bytes})
+
+  def append(_handle, _bytes), do: {:error, :invalid_destination}
+
+  @doc false
   @spec write_if_unchanged(t(), binary(), iodata()) :: :ok | {:error, atom()}
   def write_if_unchanged(%__MODULE__{} = handle, expected_source, bytes)
       when is_binary(expected_source),
@@ -255,6 +284,8 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   def owner_execute(_handle, _operation), do: {:error, :publication_collision}
 
   defp direct_execute(handle, {:write, bytes}), do: direct_write(handle, bytes)
+  defp direct_execute(handle, {:append, bytes}), do: direct_append(handle, bytes)
+  defp direct_execute(handle, {:attest, size, digest}), do: direct_attest(handle, size, digest)
 
   defp direct_execute(handle, {:write_if_unchanged, expected_source, bytes}),
     do: direct_write_if_unchanged(handle, expected_source, bytes)
@@ -335,6 +366,35 @@ defmodule PtcRunner.Kernel.PublicationHandle do
 
   defp direct_write_if_unchanged(_handle, _expected_source, _bytes),
     do: {:error, :invalid_destination}
+
+  defp direct_append(
+         %__MODULE__{kind: :inspection, visible?: false, append?: false} = handle,
+         bytes
+       ) do
+    with :ok <- direct_verify(handle),
+         {:ok, offset} <- :file.position(handle.device, :eof),
+         :ok <- :file.write(handle.device, bytes) do
+      {:ok, offset}
+    else
+      {:error, :publication_collision} = error -> error
+      _other -> {:error, :publication_failed}
+    end
+  rescue
+    _exception -> {:error, :publication_failed}
+  end
+
+  defp direct_append(_handle, _bytes), do: {:error, :invalid_destination}
+
+  defp direct_attest(%__MODULE__{kind: :inspection} = handle, size, digest) do
+    updated = %{handle | expected_size: size, expected_digest: digest}
+
+    case direct_verify(updated) do
+      :ok -> {:updated, updated}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp direct_attest(_handle, _size, _digest), do: {:error, :invalid_destination}
 
   defp write_result(%__MODULE__{kind: :recovery} = handle, bytes) do
     {:updated,
@@ -512,6 +572,24 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   end
 
   defp verify_attested_contents(%__MODULE__{
+         kind: :inspection,
+         expected_size: expected_size,
+         expected_digest: expected_digest,
+         device: device
+       })
+       when is_integer(expected_size) and expected_size >= 0 and is_binary(expected_digest) do
+    with {:ok, size} <- device_size(device),
+         true <- size == expected_size,
+         {:ok, 0} <- :file.position(device, :bof),
+         {:ok, digest} <- hash_device(device, expected_size, :crypto.hash_init(:sha256)),
+         true <- digest == expected_digest do
+      :ok
+    else
+      _other -> {:error, :publication_collision}
+    end
+  end
+
+  defp verify_attested_contents(%__MODULE__{
          kind: :recovery,
          expected_size: expected_size,
          expected_digest: expected_digest,
@@ -530,6 +608,20 @@ defmodule PtcRunner.Kernel.PublicationHandle do
   end
 
   defp verify_attested_contents(_handle), do: :ok
+
+  defp hash_device(_device, 0, acc), do: {:ok, :crypto.hash_final(acc)}
+
+  defp hash_device(device, remaining, acc) when remaining > 0 do
+    chunk = min(remaining, 65_536)
+
+    case :file.read(device, chunk) do
+      {:ok, bytes} when byte_size(bytes) == chunk ->
+        hash_device(device, remaining - chunk, :crypto.hash_update(acc, bytes))
+
+      _other ->
+        {:error, :publication_collision}
+    end
+  end
 
   @spec publish(t()) :: :ok | {:error, atom()}
   def publish(%__MODULE__{} = handle), do: call_owner(handle, :publish)
@@ -1178,6 +1270,21 @@ defmodule PtcRunner.Kernel.PublicationHandle do
     end
   end
 
+  # Decided before the private-directory preflight, which answers for a missing
+  # parent with the same reason it uses for every unusable one. `--trace-dir`
+  # already reports this condition by name; this is what lets `--output`,
+  # `--private-output`, and `--inspect` do the same.
+  #
+  # `lstat`, not `stat`: a dangling symlink is an entry that exists, and letting
+  # it through keeps the secure traversal's symlink and ownership judgement
+  # rather than relabelling an unsafe parent as a merely absent one.
+  defp parent_present(path) do
+    case File.lstat(Path.dirname(path), time: :posix) do
+      {:error, :enoent} -> {:error, :destination_directory_missing}
+      _other -> :ok
+    end
+  end
+
   defp parent_identity(path) do
     parent = Path.dirname(path)
 
@@ -1187,6 +1294,12 @@ defmodule PtcRunner.Kernel.PublicationHandle do
           {:ok, identity} -> {:ok, parent, identity}
           :error -> {:error, :destination_unavailable}
         end
+
+      # An absent parent directory is the ordinary operator mistake here, and
+      # the only one with an obvious remedy, so it keeps its own reason rather
+      # than joining every other way a destination can be unusable.
+      {:error, :enoent} ->
+        {:error, :destination_directory_missing}
 
       _other ->
         {:error, :destination_unavailable}

@@ -11,6 +11,8 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
   alias PtcRunner.Kernel.MCPOAuth.Store.Memory
   alias PtcRunner.Test.MCPOAuthRecordingStore
 
+  @setup_deadline_ms 5_000
+
   test "loads a valid external adapter before checking its callback" do
     module = PtcRunner.Test.MCPOAuthUnloadedStore
     :code.purge(module)
@@ -111,6 +113,12 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
     store_reference = Process.monitor(memory.pid)
     manager_reference = Process.monitor(manager)
 
+    # A monitor request is asynchronous. This process sends both it and the
+    # following process-info request to the manager, so the reply proves the
+    # monitor arrived before the store can be told to kill the manager.
+    assert {:monitored_by, monitoring_processes} = Process.info(manager, :monitored_by)
+    assert self() in monitoring_processes
+
     Process.exit(owner, :kill)
 
     assert_receive {:DOWN, ^store_reference, :process, _store, :normal}, 5_000
@@ -145,7 +153,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
         store,
         "tenant",
         [{authority.installation_id, authority.fingerprint}],
-        Deadline.new(1_000)
+        Deadline.new(@setup_deadline_ms)
       )
 
     {:ok, alice} =
@@ -153,7 +161,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
         tenant_id: "tenant",
         principal_id: "alice",
         store: store,
-        deadline: Deadline.new(1_000)
+        deadline: Deadline.new(@setup_deadline_ms)
       )
 
     {:ok, bob} =
@@ -161,7 +169,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.StoreMemoryTest do
         tenant_id: "tenant",
         principal_id: "bob",
         store: store,
-        deadline: Deadline.new(1_000)
+        deadline: Deadline.new(@setup_deadline_ms)
       )
 
     {:ok,

@@ -38,6 +38,7 @@ defmodule PtcRunner.Kernel.ConfinedFile do
           | :symlink_depth_exceeded
           | :not_found
           | :not_regular
+          | :unreadable
           | :too_large
           | :invalid_utf8
           | :changed_during_read
@@ -63,6 +64,48 @@ defmodule PtcRunner.Kernel.ConfinedFile do
   def read(root, relative_path, max_bytes, opts)
       when is_binary(root) and is_binary(relative_path) and is_integer(max_bytes) and
              max_bytes > 0 and is_list(opts) do
+    read_confined(root, relative_path, max_bytes, opts, :bounded)
+  end
+
+  def read(_root, _relative_path, _max_bytes, _opts), do: {:error, :invalid_path}
+
+  @doc false
+  @spec read_prefix(binary(), binary(), pos_integer()) :: {:ok, binary()} | {:error, error()}
+  def read_prefix(root, relative_path, max_bytes)
+      when is_binary(root) and is_binary(relative_path) and is_integer(max_bytes) and
+             max_bytes > 0 do
+    case read_prefix_status(root, relative_path, max_bytes) do
+      {:ok, prefix, _status} -> {:ok, prefix}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def read_prefix(_root, _relative_path, _max_bytes), do: {:error, :invalid_path}
+
+  @doc false
+  @spec read_prefix_status(binary(), binary(), pos_integer()) ::
+          {:ok, binary(), :complete | :truncated} | {:error, error()}
+  def read_prefix_status(root, relative_path, max_bytes)
+      when is_binary(root) and is_binary(relative_path) and is_integer(max_bytes) and
+             max_bytes > 0 do
+    read_confined(root, relative_path, max_bytes, [], :prefix_status)
+  end
+
+  def read_prefix_status(_root, _relative_path, _max_bytes), do: {:error, :invalid_path}
+
+  @doc false
+  @spec read_prefix_status(binary(), binary(), pos_integer(), keyword()) ::
+          {:ok, binary(), :complete | :truncated} | {:error, error()}
+  def read_prefix_status(root, relative_path, max_bytes, opts)
+      when is_binary(root) and is_binary(relative_path) and is_integer(max_bytes) and
+             max_bytes > 0 and is_list(opts) do
+    read_confined(root, relative_path, max_bytes, opts, :prefix_status)
+  end
+
+  def read_prefix_status(_root, _relative_path, _max_bytes, _opts),
+    do: {:error, :invalid_path}
+
+  defp read_confined(root, relative_path, max_bytes, opts, mode) do
     with :ok <- validate_relative(relative_path),
          true <- Keyword.keyword?(opts) and Keyword.keys(opts) -- [:before_open] == [],
          canonical_root = Path.expand(root),
@@ -73,14 +116,12 @@ defmodule PtcRunner.Kernel.ConfinedFile do
          {:ok, ancestors} <- snapshot_ancestors(canonical_root, absolute),
          :ok <- before_open(Keyword.get(opts, :before_open)),
          :ok <- ancestors_unchanged(ancestors) do
-      read_bounded(absolute, max_bytes, ancestors)
+      read_bounded(absolute, max_bytes, ancestors, mode)
     else
       {:error, reason} when is_atom(reason) -> {:error, normalize(reason)}
       _other -> {:error, :invalid_path}
     end
   end
-
-  def read(_root, _relative_path, _max_bytes, _opts), do: {:error, :invalid_path}
 
   @doc """
   Resolves an absolute path, following only symbolic links that stay within the
@@ -164,20 +205,22 @@ defmodule PtcRunner.Kernel.ConfinedFile do
 
   # Stat before opening, after opening, and after reading. A file swapped
   # between those points fails rather than yielding bytes from two files.
-  defp read_bounded(path, max_bytes, ancestors) do
+  defp read_bounded(path, max_bytes, ancestors, mode) do
     with :ok <- ancestors_unchanged(ancestors),
          {:ok, expected} <- lstat(path),
          :ok <- regular?(expected),
-         :ok <- within_size?(expected, max_bytes),
-         {:ok, content} <- read_verified(path, expected, max_bytes),
+         :ok <- size_allowed?(expected, max_bytes, mode),
+         {:ok, content, status} <- read_verified(path, expected, max_bytes, mode),
          :ok <- ancestors_unchanged(ancestors),
          {:ok, current} <- lstat(path),
          :ok <- same_file(expected, current) do
-      if String.valid?(content), do: {:ok, content}, else: {:error, :invalid_utf8}
+      if String.valid?(content),
+        do: read_result(content, status, mode),
+        else: {:error, :invalid_utf8}
     end
   end
 
-  defp read_verified(path, expected, max_bytes) do
+  defp read_verified(path, expected, max_bytes, mode) do
     case :file.open(String.to_charlist(path), [:read, :binary, :raw]) do
       {:ok, device} ->
         try do
@@ -185,8 +228,8 @@ defmodule PtcRunner.Kernel.ConfinedFile do
                opened = File.Stat.from_record(file_info),
                :ok <- same_file(expected, opened),
                :ok <- regular?(opened),
-               :ok <- within_size?(opened, max_bytes) do
-            read_content(device, max_bytes)
+               :ok <- size_allowed?(opened, max_bytes, mode) do
+            read_content(device, max_bytes, mode)
           else
             {:error, reason} -> {:error, normalize(reason)}
           end
@@ -199,12 +242,48 @@ defmodule PtcRunner.Kernel.ConfinedFile do
     end
   end
 
-  defp read_content(device, max_bytes) do
+  defp read_content(device, max_bytes, :bounded) do
     case :file.read(device, max_bytes + 1) do
-      {:ok, content} when byte_size(content) <= max_bytes -> {:ok, content}
+      {:ok, content} when byte_size(content) <= max_bytes -> {:ok, content, :complete}
       {:ok, _content} -> {:error, :too_large}
-      :eof -> {:ok, ""}
+      :eof -> {:ok, "", :complete}
       {:error, reason} -> {:error, normalize(reason)}
+    end
+  end
+
+  defp read_content(device, max_bytes, :prefix_status) do
+    case :file.read(device, max_bytes + 1) do
+      {:ok, content} when byte_size(content) <= max_bytes ->
+        {:ok, content, :complete}
+
+      {:ok, content} ->
+        content = binary_part(content, 0, max_bytes)
+        with {:ok, prefix} <- utf8_prefix(content), do: {:ok, prefix, :truncated}
+
+      :eof ->
+        {:ok, "", :complete}
+
+      {:error, reason} ->
+        {:error, normalize(reason)}
+    end
+  end
+
+  defp read_result(content, status, :prefix_status), do: {:ok, content, status}
+  defp read_result(content, _status, _mode), do: {:ok, content}
+
+  defp utf8_prefix(content) do
+    case :unicode.characters_to_binary(content, :utf8, :utf8) do
+      prefix when is_binary(prefix) ->
+        {:ok, prefix}
+
+      {:incomplete, prefix, suffix} when is_binary(prefix) and byte_size(suffix) <= 3 ->
+        {:ok, prefix}
+
+      {:error, _prefix, _suffix} ->
+        {:error, :invalid_utf8}
+
+      _other ->
+        {:error, :invalid_utf8}
     end
   end
 
@@ -221,6 +300,9 @@ defmodule PtcRunner.Kernel.ConfinedFile do
 
   defp within_size?(%File.Stat{size: size}, max_bytes) when size <= max_bytes, do: :ok
   defp within_size?(%File.Stat{}, _max_bytes), do: {:error, :too_large}
+
+  defp size_allowed?(stat, max_bytes, :bounded), do: within_size?(stat, max_bytes)
+  defp size_allowed?(%File.Stat{}, _max_bytes, :prefix_status), do: :ok
 
   defp same_file(
          %File.Stat{major_device: device, minor_device: minor, inode: inode, type: type},
@@ -284,6 +366,7 @@ defmodule PtcRunner.Kernel.ConfinedFile do
   defp normalize(:enotdir), do: :not_found
   defp normalize(:eloop), do: :symlink_depth_exceeded
   defp normalize(:eisdir), do: :not_regular
+  defp normalize(reason) when reason in [:eacces, :eperm], do: :unreadable
 
   defp normalize(reason)
        when reason in [
@@ -292,6 +375,7 @@ defmodule PtcRunner.Kernel.ConfinedFile do
               :symlink_depth_exceeded,
               :not_found,
               :not_regular,
+              :unreadable,
               :too_large,
               :invalid_utf8,
               :changed_during_read

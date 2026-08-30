@@ -14,6 +14,11 @@ blog
 demo
 examples
 private
-ptc_viewer
 priv/plts
 mcp_server/priv/plts
+
+# Dotenv files hold provider credentials. A build context is not a private
+# channel: it reaches the daemon, lands in a layer, and stays in the build
+# cache, so keep them out even though nothing in the image reads them.
+**/.env
+**/.env.*

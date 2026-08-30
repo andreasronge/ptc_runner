@@ -14,7 +14,12 @@ defmodule PtcRunner.Kernel.StrictJSON do
   @max_depth 64
   @max_nodes 100_000
   @timeout_ms 1_000
-  @max_heap_words 2_000_000
+  # Must cover full materialization plus admission of any document that
+  # satisfies `@max_nodes`, or the node limit is unreachable and legal inputs
+  # die in the worker (issue #1676). The worst admissible shape -- a flat
+  # object at the node limit -- peaks near 4.5M words; 8M words (64 MB on a
+  # 64-bit BEAM) keeps the kill a backstop rather than the operative bound.
+  @max_heap_words 8_000_000
 
   @type error ::
           :invalid_json
@@ -49,6 +54,46 @@ defmodule PtcRunner.Kernel.StrictJSON do
   def decode(_source, _opts), do: {:error, :invalid_json}
 
   @doc """
+  Decodes one JSON value and distinguishes proven invalid input from worker
+  unavailability.
+
+  Ordinary JSON, duplicate-key, depth, and node faults are `{:invalid, reason}`.
+  Timeout, heap exhaustion, cancellation, and worker failure are
+  `{:unavailable, cause}`. Dispatcher uses this split for `json_object`
+  structured output so a malformed provider payload is not a host-validator
+  outage.
+  """
+  @spec decode_classified(binary(), keyword()) ::
+          {:ok, term()} | {:invalid, error()} | {:unavailable, atom()}
+  def decode_classified(source, opts \\ [])
+
+  def decode_classified(source, opts) when is_binary(source) and is_list(opts) do
+    timeout_ms = Keyword.get(opts, :timeout_ms, @timeout_ms)
+    max_heap_words = Keyword.get(opts, :max_heap_words, @max_heap_words)
+    decode_opts = Keyword.take(opts, [:max_depth, :max_nodes])
+
+    with true <- is_integer(timeout_ms) and timeout_ms > 0,
+         true <- is_integer(max_heap_words) and max_heap_words > 0,
+         {:ok, limits} <- limits(decode_opts) do
+      case BoundedWorker.run(
+             fn -> decode_document(source, Map.put(limits, :duplicate_locations?, false)) end,
+             timeout_ms: timeout_ms,
+             max_heap_words: max_heap_words,
+             cancel_with_caller: true
+           ) do
+        {:ok, {:ok, value}} -> {:ok, value}
+        {:ok, {:error, reason}} -> {:invalid, reason}
+        {:ok, _unexpected} -> {:unavailable, :malformed_worker_result}
+        {:error, cause} -> {:unavailable, cause}
+      end
+    else
+      _invalid -> {:invalid, :invalid_json}
+    end
+  end
+
+  def decode_classified(_source, _opts), do: {:invalid, :invalid_json}
+
+  @doc """
   Decodes one JSON value and retains the bounded parent location of a duplicate.
 
   Location segments are internal evidence. Callers must authorize them against
@@ -64,6 +109,35 @@ defmodule PtcRunner.Kernel.StrictJSON do
   end
 
   def decode_with_locations(_source, _opts), do: {:error, :invalid_json}
+
+  @doc false
+  @spec unique_root_string(binary(), binary()) :: {:ok, binary()} | :error
+  def unique_root_string(source, key) when is_binary(source) and is_binary(key) do
+    bounded(fn ->
+      case Jason.decode(source, objects: :ordered_objects) do
+        {:ok, %OrderedObject{values: pairs}} -> unique_string_value(pairs, key)
+        _other -> :error
+      end
+    end)
+    |> case do
+      {:ok, value} when is_binary(value) -> {:ok, value}
+      _other -> :error
+    end
+  end
+
+  def unique_root_string(_source, _key), do: :error
+
+  @doc false
+  @spec root_string_prefix(binary(), binary()) :: {:ok, binary()} | :error
+  def root_string_prefix(source, key) when is_binary(source) and is_binary(key) do
+    bounded(fn -> root_member(source, key) end)
+    |> case do
+      {:ok, value} when is_binary(value) -> {:ok, value}
+      _other -> :error
+    end
+  end
+
+  def root_string_prefix(_source, _key), do: :error
 
   @spec admit(term(), keyword()) :: {:ok, term()} | {:error, error()}
   @doc """
@@ -112,16 +186,126 @@ defmodule PtcRunner.Kernel.StrictJSON do
   def admit_with_locations(_value, _opts), do: {:error, :invalid_json}
 
   defp decode_bounded(source, limits) do
-    bounded(fn ->
-      case Jason.decode(source, objects: :ordered_objects) do
-        {:ok, decoded} ->
-          admit_value(decoded, Map.put(limits, :ordered_objects?, true))
-
-        {:error, _reason} ->
-          {:error, :invalid_json}
-      end
-    end)
+    bounded(fn -> decode_document(source, limits) end)
   end
+
+  defp decode_document(source, limits) do
+    case Jason.decode(source, objects: :ordered_objects) do
+      {:ok, decoded} ->
+        admit_value(decoded, Map.put(limits, :ordered_objects?, true))
+
+      {:error, _reason} ->
+        {:error, :invalid_json}
+    end
+  end
+
+  defp unique_string_value(pairs, key) do
+    case for({^key, value} <- pairs, do: value) do
+      [value] when is_binary(value) ->
+        if String.valid?(value), do: {:ok, value}, else: :error
+
+      _other ->
+        :error
+    end
+  end
+
+  defp root_member(source, key) do
+    case skip_space(source) do
+      <<"{", rest::binary>> -> root_members(rest, key)
+      _other -> :error
+    end
+  end
+
+  defp root_members(source, wanted) do
+    with {:ok, key, rest} <- take_string(skip_space(source)),
+         <<":", value::binary>> <- skip_space(rest) do
+      value = skip_space(value)
+
+      if key == wanted do
+        case take_string(value) do
+          {:ok, found, _rest} -> {:ok, found}
+          :error -> :error
+        end
+      else
+        case skip_value(value) do
+          {:ok, rest} -> next_root_member(rest, wanted)
+          :error -> :error
+        end
+      end
+    else
+      _other -> :error
+    end
+  end
+
+  defp next_root_member(source, wanted) do
+    case skip_space(source) do
+      <<",", rest::binary>> -> root_members(rest, wanted)
+      _other -> :error
+    end
+  end
+
+  defp take_string(<<"\"", rest::binary>>), do: take_string_bytes(rest, "\"")
+  defp take_string(_source), do: :error
+
+  defp take_string_bytes(<<>>, _quoted), do: :error
+
+  defp take_string_bytes(<<"\"", rest::binary>>, quoted) do
+    case Jason.decode(quoted <> "\"") do
+      {:ok, value} when is_binary(value) -> {:ok, value, rest}
+      _other -> :error
+    end
+  end
+
+  defp take_string_bytes(<<"\\", escaped, rest::binary>>, quoted),
+    do: take_string_bytes(rest, quoted <> <<"\\", escaped>>)
+
+  defp take_string_bytes(<<byte, rest::binary>>, quoted),
+    do: take_string_bytes(rest, quoted <> <<byte>>)
+
+  defp skip_value(<<"\"", _rest::binary>> = source) do
+    case take_string(source) do
+      {:ok, _value, rest} -> {:ok, rest}
+      :error -> :error
+    end
+  end
+
+  defp skip_value(<<open, rest::binary>>) when open in ~c"[{",
+    do: skip_compound(rest, [closing(open)])
+
+  defp skip_value(source), do: skip_scalar(source, false)
+
+  defp skip_compound(<<>>, _closings), do: :error
+
+  defp skip_compound(<<"\"", _rest::binary>> = source, closings) do
+    case take_string(source) do
+      {:ok, _value, rest} -> skip_compound(rest, closings)
+      :error -> :error
+    end
+  end
+
+  defp skip_compound(<<open, rest::binary>>, closings) when open in ~c"[{",
+    do: skip_compound(rest, [closing(open) | closings])
+
+  defp skip_compound(<<close, rest::binary>>, [close]), do: {:ok, rest}
+
+  defp skip_compound(<<close, rest::binary>>, [close | closings]),
+    do: skip_compound(rest, closings)
+
+  defp skip_compound(<<_byte, rest::binary>>, closings), do: skip_compound(rest, closings)
+
+  defp skip_scalar(<<>>, _seen), do: :error
+  defp skip_scalar(<<byte, _rest::binary>> = source, true) when byte in ~c",}", do: {:ok, source}
+
+  defp skip_scalar(<<byte, rest::binary>>, seen) when byte in ~c" \t\r\n",
+    do: skip_scalar(rest, seen)
+
+  defp skip_scalar(<<_byte, rest::binary>>, _seen), do: skip_scalar(rest, true)
+
+  defp closing(?[), do: ?]
+  defp closing(?{), do: ?}
+
+  defp skip_space(<<byte, rest::binary>>) when byte in ~c" \t\r\n", do: skip_space(rest)
+  defp skip_space(source), do: source
 
   defp bounded(function) do
     case BoundedWorker.run(function,

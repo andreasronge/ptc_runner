@@ -3,11 +3,13 @@ defmodule PtcRunner.Kernel.TraceLog do
   Bounded canonical trace loading, validation, filtering, and pagination.
 
   A source is an in-memory `PtcRunner.Kernel.EventSink`, one JSONL file, or a
-  directory of JSONL files. Loading validates the complete event envelope,
-  schema version, JSON-like data, run/trace identity, timestamps, and monotonic
-  sequence before deriving query results. Each run must begin with exactly one
-  `run-started`; it may remain open or end with exactly one final
-  `run-stopped`.
+  directory of JSONL files. Explicit files validate one complete aggregate.
+  Immutable directory capture instead treats each
+  `<run-id>[.private].jsonl` member as one filename-bound run, proves the
+  selected namespace and bytes stable, and isolates a damaged connected
+  identity component without hiding disjoint healthy runs. Each admitted run
+  validates the complete event envelope, schema version, JSON-like data,
+  run/trace identity, timestamps, monotonic sequence, and lifecycle.
 
   Supported query operations are:
 
@@ -15,15 +17,32 @@ defmodule PtcRunner.Kernel.TraceLog do
     sequence and component-override provenance;
   - `:get_run` — one run summary by run ID;
   - `:list_turns` — ordered evaluation/capability facts for one run;
-  - `:counters` — aggregate counters for filtered runs.
+  - `:counters` — aggregate counters for filtered runs, including LLM usage by
+    alias/revision and by safely published resolved model.
 
   Pagination cursors are bound to the source and operation. Every source and
-  result has an aggregate byte ceiling. Normal directory sources exclude the
-  reserved private filename suffix; private files require an explicit source.
+  result has an aggregate encoded-and-retained byte ceiling. A requested page
+  limit is an upper bound; pagination returns the largest prefix that fits both
+  measurements. Normal directory sources exclude the reserved private filename
+  suffix; private files require an explicit source.
+  Internal immutable capture may use a private authority that admits both
+  normal and private trace files while retaining accurate per-run provenance.
+  Its `directory_admission_v1` identity commits to every selected raw name,
+  content digest, classification, admitted event, provenance claim, and full
+  isolation component, but excludes absolute paths, opposite-class names, and
+  advisory exclusion counts.
+
+  A direct directory query creates that admission transiently on every call
+  under the same entry, file, source, retained, and result ceilings as an
+  immutable snapshot. Consequently a direct cursor observes later selected
+  evidence as `:source_changed`, while a snapshot cursor stays bound to its
+  retained admission. Run-scoped queries distinguish a grant-visible isolated
+  claim as `:run_isolated` from an absent or out-of-grant run as `:not_found`.
 
   The internal trace-snapshot owner uses this module's canonical validation and
-  query execution against one immutable normal directory capture. A snapshot
-  is deliberately not another public `t:source/0` variant.
+  query execution against one immutable directory capture or one exact selected
+  canonical file. A snapshot is
+  deliberately not another public `t:source/0` variant.
   """
 
   alias Jason.OrderedObject
@@ -31,23 +50,33 @@ defmodule PtcRunner.Kernel.TraceLog do
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.JSONValue
-  alias PtcRunner.Kernel.LLMUsage
+  alias PtcRunner.Kernel.LLMBudget
+  alias PtcRunner.Kernel.LLMUsageSummary
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.PublicationHandle
+  alias PtcRunner.Kernel.QueryCursor
+  alias PtcRunner.Kernel.QueryValidation
+  alias PtcRunner.Kernel.ResultLimit
+  alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.TraceDirectoryAdmission
+  alias PtcRunner.Kernel.TraceEventValidation
+  alias PtcRunner.Kernel.TraceIsolationPresentation
   alias PtcRunner.Kernel.TracePublication
+  alias PtcRunner.Lisp.RetainedSize
 
   @default_source_bytes 8_000_000
+  @default_retained_bytes 32_000_000
   @default_result_bytes 1_000_000
   @default_capture_directory_entries 4_096
   @default_capture_trace_files 1_024
   @capture_listing_timeout_ms 5_000
   @capture_listing_heap_words 1_000_000
+  @direct_capture_timeout_ms 15_000
+  @direct_capture_heap_words 10_000_000
   @default_limit 20
   @max_limit 100
   @max_cursor_bytes 1_024
   @max_string_bytes 256
-  @event_type ~r/\A[a-z][a-z0-9-]{0,127}\z/
-  @event_keys ~w(schema_version run_id trace_id sequence timestamp type data)
   @append_lock_timeout_ms 30_000
   @append_lock_helper ~S"""
   set -eu
@@ -92,35 +121,48 @@ defmodule PtcRunner.Kernel.TraceLog do
   sync
   """
 
-  @enforce_keys [:source, :source_kind, :max_source_bytes, :max_result_bytes]
-  defstruct [:source, :source_kind, :max_source_bytes, :max_result_bytes]
+  @enforce_keys [
+    :source,
+    :source_kind,
+    :max_source_bytes,
+    :max_retained_bytes,
+    :max_result_bytes,
+    :max_directory_entries,
+    :max_trace_files
+  ]
+  defstruct @enforce_keys
 
   @type source :: EventSink.t() | {:file, binary()} | {:directory, binary()}
   @type t :: %__MODULE__{
           source: source(),
           source_kind: :sanitized | :private,
           max_source_bytes: pos_integer(),
-          max_result_bytes: pos_integer()
+          max_retained_bytes: pos_integer(),
+          max_result_bytes: pos_integer(),
+          max_directory_entries: pos_integer(),
+          max_trace_files: pos_integer()
         }
 
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_trace_log}
   @doc """
   Constructs a query boundary from required `:source` and optional positive
-  `:max_source_bytes` and `:max_result_bytes` limits.
+  `:max_source_bytes` and `:max_result_bytes` limits. Directory sources also
+  accept `:max_retained_bytes`, `:max_directory_entries`, and
+  `:max_trace_files`; all five directory limits may be lowered but never raised
+  above the canonical directory-query ceilings.
   """
   def new(opts) when is_list(opts) do
-    with true <- Keyword.keys(opts) -- [:source, :max_source_bytes, :max_result_bytes] == [],
-         {:ok, source, source_kind} <- validate_source(Keyword.get(opts, :source)),
-         max_source_bytes when is_integer(max_source_bytes) and max_source_bytes > 0 <-
-           Keyword.get(opts, :max_source_bytes, @default_source_bytes),
-         max_result_bytes when is_integer(max_result_bytes) and max_result_bytes > 0 <-
-           Keyword.get(opts, :max_result_bytes, @default_result_bytes) do
+    with {:ok, source, source_kind} <- validate_source(Keyword.get(opts, :source)),
+         {:ok, limits} <- trace_log_limits(source, opts) do
       {:ok,
        %__MODULE__{
          source: source,
          source_kind: source_kind,
-         max_source_bytes: max_source_bytes,
-         max_result_bytes: max_result_bytes
+         max_source_bytes: limits.max_source_bytes,
+         max_retained_bytes: limits.max_retained_bytes,
+         max_result_bytes: limits.max_result_bytes,
+         max_directory_entries: limits.max_directory_entries,
+         max_trace_files: limits.max_trace_files
        }}
     else
       _ -> {:error, :invalid_trace_log}
@@ -129,24 +171,122 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   def new(_opts), do: {:error, :invalid_trace_log}
 
+  defp trace_log_limits({:directory, _path}, opts) do
+    allowed = [
+      :source,
+      :max_source_bytes,
+      :max_retained_bytes,
+      :max_result_bytes,
+      :max_directory_entries,
+      :max_trace_files
+    ]
+
+    with true <- Keyword.keys(opts) -- allowed == [],
+         {:ok, max_source_bytes} <-
+           bounded_limit(opts, :max_source_bytes, @default_source_bytes),
+         {:ok, max_retained_bytes} <-
+           bounded_limit(opts, :max_retained_bytes, @default_retained_bytes),
+         {:ok, max_result_bytes} <-
+           bounded_limit(opts, :max_result_bytes, @default_result_bytes),
+         {:ok, max_directory_entries} <-
+           bounded_limit(opts, :max_directory_entries, @default_capture_directory_entries),
+         {:ok, max_trace_files} <-
+           bounded_limit(opts, :max_trace_files, @default_capture_trace_files) do
+      {:ok,
+       %{
+         max_source_bytes: max_source_bytes,
+         max_retained_bytes: max_retained_bytes,
+         max_result_bytes: max_result_bytes,
+         max_directory_entries: max_directory_entries,
+         max_trace_files: max_trace_files
+       }}
+    else
+      _invalid -> {:error, :invalid_trace_log}
+    end
+  end
+
+  defp trace_log_limits(_source, opts) do
+    with true <- Keyword.keys(opts) -- [:source, :max_source_bytes, :max_result_bytes] == [],
+         {:ok, max_source_bytes} <- positive_limit(opts, :max_source_bytes, @default_source_bytes),
+         {:ok, max_result_bytes} <- positive_limit(opts, :max_result_bytes, @default_result_bytes) do
+      {:ok,
+       %{
+         max_source_bytes: max_source_bytes,
+         max_retained_bytes: @default_retained_bytes,
+         max_result_bytes: max_result_bytes,
+         max_directory_entries: @default_capture_directory_entries,
+         max_trace_files: @default_capture_trace_files
+       }}
+    else
+      _invalid -> {:error, :invalid_trace_log}
+    end
+  end
+
+  defp bounded_limit(opts, key, maximum) do
+    case Keyword.get(opts, key, maximum) do
+      value when is_integer(value) and value in 1..maximum//1 -> {:ok, value}
+      _invalid -> {:error, :invalid_trace_log}
+    end
+  end
+
+  defp positive_limit(opts, key, default) do
+    case Keyword.get(opts, key, default) do
+      value when is_integer(value) and value > 0 -> {:ok, value}
+      _invalid -> {:error, :invalid_trace_log}
+    end
+  end
+
   @spec query(t(), :list_runs | :get_run | :list_turns | :counters, map()) ::
           {:ok, map()} | {:error, atom()}
   @doc "Executes one validated, source-scoped bounded trace query."
   def query(%__MODULE__{} = trace_log, operation, arguments)
       when operation in [:list_runs, :get_run, :list_turns, :counters] and is_map(arguments) do
-    with {:ok, events, source_id} <- load(trace_log),
-         do:
-           execute(
-             operation,
-             events,
-             source_id,
-             arguments,
-             trace_log.max_result_bytes,
-             trace_log.source_kind
-           )
+    with {:ok, events, source_id, source_kind, source_metadata, known_isolated_run_ids} <-
+           load(trace_log) do
+      result_metadata =
+        operation
+        |> source_presence_metadata(source_metadata)
+        |> reserve_snapshot_hash(trace_log.source, source_id)
+
+      operation
+      |> execute(
+        events,
+        source_id,
+        arguments,
+        trace_log.max_result_bytes,
+        source_kind,
+        result_metadata
+      )
+      |> maybe_run_isolated(operation, arguments, known_isolated_run_ids)
+      |> strip_reserved_snapshot_hash(trace_log.source)
+    end
   end
 
   def query(_trace_log, _operation, _arguments), do: {:error, :invalid_query}
+
+  defp reserve_snapshot_hash(metadata, {:directory, _path}, source_id),
+    do: Map.put(metadata, "snapshot_hash", SafeMetadata.fingerprint(source_id))
+
+  defp reserve_snapshot_hash(metadata, _source, _source_id), do: metadata
+
+  defp strip_reserved_snapshot_hash({:ok, result}, {:directory, _path}),
+    do: {:ok, Map.delete(result, "snapshot_hash")}
+
+  defp strip_reserved_snapshot_hash(result, _source), do: result
+
+  defp maybe_run_isolated(
+         {:error, :not_found},
+         operation,
+         %{"run_id" => run_id},
+         known_isolated_run_ids
+       )
+       when operation in [:get_run, :list_turns] and is_binary(run_id) do
+    if MapSet.member?(known_isolated_run_ids, run_id),
+      do: {:error, :run_isolated},
+      else: {:error, :not_found}
+  end
+
+  defp maybe_run_isolated(result, _operation, _arguments, _known_isolated_run_ids), do: result
 
   @doc false
   @spec query_loaded(
@@ -155,22 +295,223 @@ defmodule PtcRunner.Kernel.TraceLog do
           :list_runs | :get_run | :list_turns | :counters,
           map(),
           pos_integer(),
-          :sanitized | :private
+          :sanitized | :private | %{binary() => :sanitized | :private},
+          map(),
+          MapSet.t(binary())
         ) :: {:ok, map()} | {:error, atom()}
-  def query_loaded(events, source_id, operation, arguments, max_result_bytes, source_kind)
+  def query_loaded(
+        events,
+        source_id,
+        operation,
+        arguments,
+        max_result_bytes,
+        source_kind,
+        metadata \\ %{},
+        known_isolated_run_ids \\ MapSet.new()
+      )
+
+  def query_loaded(
+        events,
+        source_id,
+        operation,
+        arguments,
+        max_result_bytes,
+        source_kind,
+        metadata,
+        known_isolated_run_ids
+      )
       when is_list(events) and is_binary(source_id) and
              operation in [:list_runs, :get_run, :list_turns, :counters] and is_map(arguments) and
              is_integer(max_result_bytes) and max_result_bytes > 0 and
-             source_kind in [:sanitized, :private] do
-    execute(operation, events, source_id, arguments, max_result_bytes, source_kind)
+             (source_kind in [:sanitized, :private] or is_map(source_kind)) and is_map(metadata) and
+             is_struct(known_isolated_run_ids, MapSet) do
+    if valid_query_source_kind?(events, source_kind) do
+      operation
+      |> execute(events, source_id, arguments, max_result_bytes, source_kind, metadata)
+      |> maybe_run_isolated(operation, arguments, known_isolated_run_ids)
+    else
+      {:error, :invalid_query}
+    end
   end
 
-  def query_loaded(_events, _source_id, _operation, _arguments, _max_result_bytes, _source_kind),
-    do: {:error, :invalid_query}
+  def query_loaded(
+        _events,
+        _source_id,
+        _operation,
+        _arguments,
+        _max_result_bytes,
+        _source_kind,
+        _metadata,
+        _known_isolated_run_ids
+      ),
+      do: {:error, :invalid_query}
+
+  @doc false
+  @spec source_presence_metadata(atom(), map()) :: map()
+  # Only the two operations that answer "what does this source hold" carry the
+  # exclusion count. A run-scoped answer would attach it to a single run,
+  # where it would state nothing true about that run.
+  def source_presence_metadata(operation, metadata)
+      when operation in [:list_runs, :counters] and is_map(metadata),
+      do: metadata
+
+  def source_presence_metadata(_operation, _metadata), do: %{}
+
+  @doc false
+  @spec directory_source_metadata(map()) :: map()
+  def directory_source_metadata(%{
+        excluded_trace_files: excluded,
+        isolated_components: components,
+        known_isolated_run_ids: known_run_ids
+      }) do
+    Map.merge(excluded, TraceIsolationPresentation.metadata(components, known_run_ids))
+  end
+
+  def directory_source_metadata(%{excluded_trace_files: excluded}), do: excluded
+
+  @doc false
+  @spec compile_analysis([map()], :sanitized | :private | map()) :: map()
+  def compile_analysis(events, source_kind) when is_list(events) do
+    summaries = runs(events, source_kind)
+    summaries_by_id = Map.new(summaries, &{&1["run_id"], &1})
+
+    facts =
+      events
+      |> Enum.group_by(& &1["run_id"])
+      |> Map.new(fn {run_id, run_events} ->
+        summary = Map.fetch!(summaries_by_id, run_id)
+
+        expected_model_exchanges =
+          run_events
+          |> Enum.filter(fn event ->
+            event["type"] == "capability-started" and
+              stringify(event_data(event, "environment")) == "workflow" and
+              event_data(event, "name") == "llm-request"
+          end)
+          |> Enum.map(&event_data(&1, "capability_id"))
+          |> Enum.filter(&is_binary/1)
+          |> Enum.uniq()
+          |> Enum.sort()
+
+        parent_evaluation_ids =
+          run_events
+          |> Enum.filter(&(&1["type"] == "evaluation-started"))
+          |> Map.new(fn event ->
+            {event_data(event, "evaluation_id"), event_data(event, "parent_evaluation_id")}
+          end)
+          |> Map.reject(fn {evaluation_id, parent_evaluation_id} ->
+            not is_binary(evaluation_id) or not is_binary(parent_evaluation_id)
+          end)
+
+        evaluation_statuses =
+          run_events
+          |> Enum.filter(&(&1["type"] == "evaluation-stopped"))
+          |> Map.new(fn event ->
+            {event_data(event, "evaluation_id"), stringify(event_data(event, "status"))}
+          end)
+          |> Map.reject(fn {evaluation_id, status} ->
+            not is_binary(evaluation_id) or not is_binary(status)
+          end)
+
+        capabilities =
+          run_events
+          |> Enum.filter(&(&1["type"] == "capability-started"))
+          |> Map.new(fn event ->
+            {event_data(event, "capability_id"),
+             %{
+               "environment" => stringify(event_data(event, "environment")),
+               "mission_name" => event_data(event, "mission_name"),
+               "name" => event_data(event, "name")
+             }}
+          end)
+          |> Map.reject(fn {id, _value} -> not is_binary(id) end)
+
+        evaluations =
+          run_events
+          |> Enum.filter(&(&1["type"] == "evaluation-started"))
+          |> Map.new(fn event ->
+            {event_data(event, "evaluation_id"),
+             %{
+               "environment" => stringify(event_data(event, "environment")),
+               "mission_name" => event_data(event, "mission_name"),
+               "source_hash" => event_data(event, "source_hash"),
+               "source_bytes" => event_data(event, "source_bytes")
+             }}
+          end)
+          |> Map.reject(fn {id, _value} -> not is_binary(id) end)
+
+        {run_id,
+         %{
+           "trace_id" => summary["trace_id"],
+           "capabilities" => capabilities,
+           "evaluations" => evaluations,
+           "dropped_event_counts" => inspection_dropped_counts(run_events),
+           "terminal_result" => inspection_terminal_result(run_events),
+           "expected_model_exchange_ids" => expected_model_exchanges,
+           "evaluation_statuses" => evaluation_statuses,
+           "parent_evaluation_ids" => parent_evaluation_ids,
+           "workflow_prelude" => summary["workflow_prelude"],
+           "missions" => summary["missions"],
+           "terminal?" => Enum.any?(run_events, &(&1["type"] == "run-stopped")),
+           "events_dropped?" => Enum.any?(run_events, &(&1["type"] == "events-dropped"))
+         }}
+      end)
+
+    %{
+      runs: summaries,
+      runs_by_id: summaries_by_id,
+      facts_by_run_id: facts
+    }
+  end
+
+  defp inspection_dropped_counts(events) do
+    marker = Enum.find(events, &(&1["type"] == "events-dropped"))
+    terminal = Enum.find(events, &(&1["type"] == "run-stopped"))
+    marker_counts = event_data(marker, "counts")
+    terminal_counts = get_in(terminal || %{}, ["data", "usage", "events_dropped"])
+
+    if is_map(marker_counts) and marker_counts == terminal_counts,
+      do: marker_counts,
+      else: %{}
+  end
+
+  defp inspection_terminal_result(events) do
+    case Enum.filter(events, &(&1["type"] == "run-stopped")) do
+      [terminal] ->
+        %{
+          "outcome" => stringify(event_data(terminal, "outcome")),
+          "result_hash" => event_data(terminal, "result_hash")
+        }
+
+      _other ->
+        nil
+    end
+  end
+
+  defp valid_query_source_kind?(_events, source_kind)
+       when source_kind in [:sanitized, :private],
+       do: true
+
+  defp valid_query_source_kind?(events, run_sources) when is_map(run_sources) do
+    run_ids = events |> MapSet.new(& &1["run_id"]) |> MapSet.to_list() |> Enum.sort()
+
+    Enum.sort(Map.keys(run_sources)) == run_ids and
+      Enum.all?(run_sources, fn {run_id, source_kind} ->
+        is_binary(run_id) and source_kind in [:sanitized, :private]
+      end)
+  end
 
   @doc false
   @spec capture_directory(binary(), keyword()) ::
-          {:ok, %{events: [map()], source_id: binary(), source_bytes: non_neg_integer()}}
+          {:ok,
+           %{
+             events: [map()],
+             run_sources: %{binary() => :sanitized | :private},
+             source_id: binary(),
+             source_bytes: non_neg_integer(),
+             file_count: non_neg_integer(),
+             excluded_trace_files: %{optional(binary()) => pos_integer()}
+           }}
           | {:error, atom()}
   def capture_directory(directory, opts \\ [])
 
@@ -181,6 +522,8 @@ defmodule PtcRunner.Kernel.TraceLog do
                :max_source_bytes,
                :max_directory_entries,
                :max_trace_files,
+               :source_kind,
+               :include_sanitized,
                :capture_hook,
                :listing_hook
              ] == [],
@@ -196,16 +539,22 @@ defmodule PtcRunner.Kernel.TraceLog do
            ),
          max_trace_files when max_trace_files in 1..@default_capture_trace_files <-
            Keyword.get(opts, :max_trace_files, @default_capture_trace_files),
+         source_kind when source_kind in [:sanitized, :private] <-
+           Keyword.get(opts, :source_kind, :sanitized),
+         include_sanitized when is_boolean(include_sanitized) <-
+           Keyword.get(opts, :include_sanitized, source_kind == :private),
          capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
            Keyword.get(opts, :capture_hook),
          listing_hook when is_nil(listing_hook) or is_function(listing_hook, 0) <-
            Keyword.get(opts, :listing_hook),
          {:ok, capture} <-
-           capture_normal_directory(
+           capture_directory_files(
              Path.expand(directory),
+             source_kind,
              max_source_bytes,
              max_directory_entries,
              max_trace_files,
+             include_sanitized,
              capture_hook,
              listing_hook
            ) do
@@ -220,6 +569,80 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   def capture_directory(_directory, _opts), do: {:error, :invalid_trace_log}
+
+  @doc false
+  @spec capture_file(binary(), keyword()) ::
+          {:ok,
+           %{
+             events: [map()],
+             run_sources: %{binary() => :sanitized | :private},
+             source_id: binary(),
+             source_bytes: non_neg_integer(),
+             file_count: 1,
+             excluded_trace_files: %{optional(binary()) => pos_integer()}
+           }}
+          | {:error, atom()}
+  def capture_file(path, opts \\ [])
+
+  def capture_file(path, opts) when is_binary(path) and is_list(opts) do
+    with true <-
+           Keyword.keys(opts) -- [:max_source_bytes, :source_kind, :capture_hook] == [],
+         true <- String.valid?(path),
+         max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
+           Keyword.get(opts, :max_source_bytes, @default_source_bytes),
+         source_kind when source_kind in [:sanitized, :private] <-
+           Keyword.get(opts, :source_kind, :sanitized),
+         capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
+           Keyword.get(opts, :capture_hook),
+         path = Path.expand(path),
+         {:ok, before_inventory} <- file_inventory(path, source_kind) do
+      capture_inventory(
+        Path.dirname(path),
+        before_inventory,
+        max_source_bytes,
+        capture_hook,
+        fn -> changed_file_inventory(path, source_kind) end
+      )
+    else
+      false -> {:error, :invalid_trace_log}
+      {:error, _reason} = error -> error
+      _ -> {:error, :invalid_trace_log}
+    end
+  rescue
+    _exception -> {:error, :source_unavailable}
+  end
+
+  def capture_file(_path, _opts), do: {:error, :invalid_trace_log}
+
+  @doc false
+  @spec capture_selected([map()], keyword()) :: {:ok, map()} | {:error, atom()}
+  def capture_selected(selected, opts \\ [])
+
+  def capture_selected(selected, opts) when is_list(selected) and is_list(opts) do
+    with true <- Keyword.keys(opts) -- [:max_source_bytes, :capture_hook] == [],
+         max_source_bytes when max_source_bytes in 1..@default_source_bytes <-
+           Keyword.get(opts, :max_source_bytes, @default_source_bytes),
+         capture_hook when is_nil(capture_hook) or is_function(capture_hook, 0) <-
+           Keyword.get(opts, :capture_hook),
+         {:ok, directory, before_inventory} <- selected_inventory(selected) do
+      capture_directory_inventory(
+        directory,
+        before_inventory,
+        max_source_bytes,
+        capture_hook,
+        fn -> changed_selected_inventory(selected) end,
+        :selected_private_authorized
+      )
+    else
+      false -> {:error, :invalid_trace_log}
+      {:error, _reason} = error -> error
+      _invalid -> {:error, :invalid_trace_log}
+    end
+  rescue
+    _exception -> {:error, :source_unavailable}
+  end
+
+  def capture_selected(_selected, _opts), do: {:error, :invalid_trace_log}
 
   @doc """
   Appends canonical events to one admin-selected JSONL file under a total byte
@@ -619,18 +1042,26 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   def publish_jsonl(_path, _events, _opts), do: {:error, :invalid_trace_log}
 
-  defp execute(:list_runs, events, source_id, arguments, max_result_bytes, source_kind) do
+  defp execute(
+         :list_runs,
+         events,
+         source_id,
+         arguments,
+         max_result_bytes,
+         source_kind,
+         metadata
+       ) do
     with :ok <-
            validate_keys(
              arguments,
-             ~w(limit cursor status run_id trace_id tags name model provider from to)
+             ~w(limit cursor status run_id trace_id tags name bundle model provider from to)
            ),
          :ok <- validate_run_filters(arguments),
          {:ok, page} <- page_options(arguments, source_id, :list_runs) do
       events
       |> runs(source_kind)
       |> filter_runs(arguments)
-      |> paginate(page, source_id, max_result_bytes)
+      |> paginate(page, source_id, max_result_bytes, metadata)
     end
   end
 
@@ -640,22 +1071,32 @@ defmodule PtcRunner.Kernel.TraceLog do
          _source_id,
          %{"run_id" => run_id} = arguments,
          max_result_bytes,
-         source_kind
+         source_kind,
+         result_metadata
        ) do
     with :ok <- validate_keys(arguments, ["run_id"]),
          :ok <- valid_string(run_id),
          metadata when not is_nil(metadata) <-
            Enum.find(runs(events, source_kind), &(&1["run_id"] == run_id)),
-         :ok <- within_result_limit(metadata, max_result_bytes) do
-      {:ok, metadata}
+         result = Map.merge(metadata, result_metadata),
+         :ok <- ResultLimit.validate(result, max_result_bytes) do
+      {:ok, result}
     else
       nil -> {:error, :not_found}
       {:error, _reason} = error -> error
     end
   end
 
-  defp execute(:get_run, _events, _source_id, _arguments, _max_result_bytes, _source_kind),
-    do: {:error, :invalid_query}
+  defp execute(
+         :get_run,
+         _events,
+         _source_id,
+         _arguments,
+         _max_result_bytes,
+         _source_kind,
+         _metadata
+       ),
+       do: {:error, :invalid_query}
 
   defp execute(
          :list_turns,
@@ -663,12 +1104,13 @@ defmodule PtcRunner.Kernel.TraceLog do
          source_id,
          %{"run_id" => run_id} = arguments,
          max_result_bytes,
-         _source_kind
+         _source_kind,
+         metadata
        ) do
     with :ok <-
            validate_keys(
              arguments,
-             ~w(run_id limit cursor status evaluation_id capability mission_name)
+             ~w(run_id limit cursor status evaluation_id parent_evaluation_id capability mission_name)
            ),
          :ok <- valid_string(run_id),
          :ok <- validate_turn_filters(arguments),
@@ -677,36 +1119,55 @@ defmodule PtcRunner.Kernel.TraceLog do
       events
       |> Enum.filter(&(&1["run_id"] == run_id and turn_matches?(&1, arguments)))
       |> Enum.sort_by(& &1["sequence"])
-      |> paginate(page, source_id, max_result_bytes)
+      |> paginate(page, source_id, max_result_bytes, metadata)
     else
       false -> {:error, :not_found}
       {:error, _reason} = error -> error
     end
   end
 
-  defp execute(:list_turns, _events, _source_id, _arguments, _max_result_bytes, _source_kind),
-    do: {:error, :invalid_query}
+  defp execute(
+         :list_turns,
+         _events,
+         _source_id,
+         _arguments,
+         _max_result_bytes,
+         _source_kind,
+         _metadata
+       ),
+       do: {:error, :invalid_query}
 
-  defp execute(:counters, events, _source_id, arguments, max_result_bytes, source_kind) do
+  defp execute(
+         :counters,
+         events,
+         _source_id,
+         arguments,
+         max_result_bytes,
+         source_kind,
+         metadata
+       ) do
     with :ok <-
            validate_keys(
              arguments,
-             ~w(status run_id trace_id tags name model provider from to mission_name)
+             ~w(status run_id trace_id tags name bundle model provider from to mission_name)
            ),
          :ok <- validate_run_filters(arguments),
          :ok <- optional_strings(arguments, ["mission_name"]) do
       selected_ids =
         events |> runs(source_kind) |> filter_runs(arguments) |> MapSet.new(& &1["run_id"])
 
+      selected_run_events =
+        Enum.filter(events, &MapSet.member?(selected_ids, &1["run_id"]))
+
       selected =
-        Enum.filter(events, fn event ->
-          MapSet.member?(selected_ids, event["run_id"]) and
-            mission_matches?(event, arguments["mission_name"])
-        end)
+        Enum.filter(
+          selected_run_events,
+          &mission_matches?(&1, arguments["mission_name"])
+        )
 
-      result = counters(selected)
+      aggregate = counters(selected, selected_run_events)
 
-      with :ok <- within_result_limit(result, max_result_bytes), do: {:ok, result}
+      fit_metadata(metadata, max_result_bytes, &Map.merge(aggregate, &1))
     end
   end
 
@@ -1535,83 +1996,354 @@ defmodule PtcRunner.Kernel.TraceLog do
     |> EventSink.events()
     |> normalize()
     |> validate_loaded(trace_log.max_source_bytes)
+    |> with_source_metadata(trace_log.source_kind, %{})
   catch
     :exit, _reason -> {:error, :source_unavailable}
   end
 
-  defp load(%__MODULE__{source: {:file, path}, max_source_bytes: max_bytes}) do
+  defp load(%__MODULE__{source: {:file, path}, max_source_bytes: max_bytes} = trace_log) do
     with {:ok, source} <- read_regular_file(path, max_bytes),
          {:ok, events} <- decode_jsonl(source),
-         do: validate_loaded(events, max_bytes)
+         do:
+           events
+           |> validate_loaded(max_bytes)
+           |> with_source_metadata(trace_log.source_kind, %{})
   end
 
-  defp load(%__MODULE__{source: {:directory, directory}, max_source_bytes: max_bytes} = trace_log) do
-    with {:ok, %File.Stat{type: :directory}} <- File.lstat(directory),
-         {:ok, names} <- File.ls(directory),
-         {:ok, events} <-
-           load_files(directory, supported_names(names, trace_log.source_kind), max_bytes) do
-      validate_loaded(events, max_bytes)
-    else
-      {:error, reason} = error when reason in [:source_limit_exceeded, :malformed_source] ->
-        error
-
-      _ ->
-        {:error, :source_unavailable}
+  defp load(%__MODULE__{source: {:directory, directory}} = trace_log) do
+    case BoundedWorker.run(
+           fn -> load_directory_admission(directory, trace_log) end,
+           timeout_ms: @direct_capture_timeout_ms,
+           max_heap_words: @direct_capture_heap_words,
+           cancel_with_caller: true
+         ) do
+      {:ok, result} -> result
+      {:error, :heap_exceeded} -> {:error, :source_retained_limit_exceeded}
+      {:error, _reason} -> {:error, :source_unavailable}
     end
   end
 
-  defp supported_names(names, source_kind) do
-    names
-    |> Enum.filter(&supported_name?(&1, source_kind))
-    |> Enum.sort()
+  defp load_directory_admission(directory, trace_log) do
+    with {:ok, capture} <-
+           capture_directory(directory,
+             max_source_bytes: trace_log.max_source_bytes,
+             max_directory_entries: trace_log.max_directory_entries,
+             max_trace_files: trace_log.max_trace_files,
+             source_kind: trace_log.source_kind,
+             include_sanitized: false
+           ),
+         {:ok, capture} <- retain_transient_directory(capture, trace_log.max_retained_bytes) do
+      {:ok, capture.events, capture.source_id, capture.run_sources,
+       directory_source_metadata(capture), capture.known_isolated_run_ids}
+    end
   end
 
-  defp supported_name?(name, source_kind) do
-    Path.basename(name) == name and String.ends_with?(name, ".jsonl") and
-      not inspection_path?(name) and private_path?(name) == (source_kind == :private)
+  defp with_source_metadata({:ok, events, source_id}, source_kind, metadata),
+    do: {:ok, events, source_id, source_kind, metadata, MapSet.new()}
+
+  defp with_source_metadata({:error, _reason} = error, _source_kind, _metadata), do: error
+
+  defp retain_transient_directory(capture, max_retained_bytes) do
+    retained_capture = RetainedSize.detach_binaries(capture)
+
+    case RetainedSize.bytes(retained_capture) do
+      retained_bytes when is_integer(retained_bytes) and retained_bytes <= max_retained_bytes ->
+        {:ok, retained_capture}
+
+      retained_bytes when is_integer(retained_bytes) ->
+        {:error, :source_retained_limit_exceeded}
+
+      :oversized ->
+        {:error, :source_retained_limit_exceeded}
+    end
   end
 
-  defp capture_normal_directory(
+  # One trace directory holds both sanitized and private artifacts, and one
+  # query boundary reads exactly one kind. Staying silent about the other kind
+  # made an all-private project answer an empty run listing, so name the files
+  # this source kind refused to read. The count is advisory and deliberately
+  # outside `source_id`: a concurrent write to the kind this boundary does not
+  # read must not invalidate the evidence it does read.
+  defp excluded_trace_files(listed, accepted, source_kind) do
+    accepted = MapSet.new(accepted)
+
+    case Enum.count(listed, &(trace_file_name?(&1) and not MapSet.member?(accepted, &1))) do
+      0 -> %{}
+      excluded -> %{exclusion_key(source_kind) => excluded}
+    end
+  end
+
+  defp exclusion_key(:sanitized), do: "excluded_private_trace_files"
+  defp exclusion_key(:private), do: "excluded_sanitized_trace_files"
+
+  defp trace_file_name?(name) do
+    TraceDirectoryAdmission.source_kind(name) in [:sanitized, :private]
+  end
+
+  defp capture_directory_files(
          directory,
+         source_kind,
          max_source_bytes,
          max_directory_entries,
          max_trace_files,
+         include_sanitized,
          capture_hook,
          listing_hook
        ) do
-    with {:ok, before_inventory} <-
-           directory_inventory(directory, max_directory_entries, max_trace_files, listing_hook),
+    with {:ok, before_inventory, _initial_excluded} <-
+           directory_inventory(
+             directory,
+             source_kind,
+             max_directory_entries,
+             max_trace_files,
+             include_sanitized,
+             listing_hook
+           ) do
+      capture_directory_inventory(
+        directory,
+        before_inventory,
+        max_source_bytes,
+        capture_hook,
+        fn ->
+          changed_inventory(
+            directory,
+            source_kind,
+            max_directory_entries,
+            max_trace_files,
+            include_sanitized,
+            listing_hook
+          )
+        end,
+        directory_grant_class(source_kind, include_sanitized)
+      )
+    end
+  end
+
+  defp directory_grant_class(:sanitized, _include_sanitized), do: :sanitized
+  defp directory_grant_class(:private, false), do: :private
+  defp directory_grant_class(:private, true), do: :mixed_private_authorized
+
+  defp capture_directory_inventory(
+         directory,
+         before_inventory,
+         max_source_bytes,
+         capture_hook,
+         refresh_inventory,
+         grant_class
+       ) do
+    with {:ok, captured_sources, source_bytes} <-
+           read_directory_inventory(directory, before_inventory.files, max_source_bytes),
+         :ok <- run_capture_hook(capture_hook),
+         {:ok, after_read_inventory, _after_read_excluded} <- refresh_inventory.(),
+         :ok <- same_inventory(before_inventory, after_read_inventory),
+         :ok <- verify_directory_sources(directory, after_read_inventory.files, captured_sources),
+         {:ok, after_verify_inventory, final_excluded} <- refresh_inventory.(),
+         :ok <- same_inventory(after_read_inventory, after_verify_inventory),
+         :ok <-
+           verify_directory_sources(directory, after_verify_inventory.files, captured_sources),
+         {:ok, evidence, source_proofs} <- directory_evidence(captured_sources),
+         {:ok, classification} <- TraceDirectoryAdmission.classify(evidence) do
+      build_directory_admission(
+        grant_class,
+        classification,
+        source_proofs,
+        source_bytes,
+        final_excluded
+      )
+    end
+  end
+
+  defp build_directory_admission(
+         grant_class,
+         classification,
+         source_proofs,
+         source_bytes,
+         excluded_trace_files
+       ) do
+    events = Enum.flat_map(classification.admitted, & &1.events)
+
+    run_sources =
+      Map.new(classification.admitted, fn evidence ->
+        [run_id] = evidence.embedded_run_claims
+        {run_id, evidence.source_kind}
+      end)
+
+    analysis = compile_analysis(events, run_sources)
+
+    identity = %{
+      version: :directory_admission_v1,
+      grant_class: grant_class,
+      sources: directory_identity_sources(source_proofs, classification.components),
+      events: events,
+      run_sources: run_sources,
+      isolated_components: classification.isolated
+    }
+
+    admission = %{
+      version: :directory_admission_v1,
+      grant_class: grant_class,
+      events: events,
+      run_sources: run_sources,
+      analysis: analysis,
+      source_id: digest(identity),
+      source_bytes: source_bytes,
+      file_count: length(source_proofs),
+      excluded_trace_files: excluded_trace_files,
+      source_proofs: source_proofs,
+      components: classification.components,
+      isolated_components: classification.isolated,
+      known_isolated_run_ids: classification.known_isolated_run_ids
+    }
+
+    {:ok, admission}
+  end
+
+  defp directory_identity_sources(source_proofs, components) do
+    classifications =
+      components
+      |> Enum.flat_map(& &1.sources)
+      |> Map.new(&{&1.raw_name, &1})
+
+    Enum.map(source_proofs, fn proof ->
+      evidence = Map.fetch!(classifications, proof.raw_name)
+
+      %{
+        raw_name: proof.raw_name,
+        source_kind: proof.source_kind,
+        byte_length: proof.byte_length,
+        content_digest: proof.content_digest,
+        status: evidence.status,
+        filename_run_claim: evidence.filename_run_claim,
+        embedded_run_claims: evidence.embedded_run_claims,
+        embedded_trace_claims: evidence.embedded_trace_claims,
+        reasons: evidence.reasons
+      }
+    end)
+  end
+
+  defp capture_inventory(
+         directory,
+         before_inventory,
+         max_source_bytes,
+         capture_hook,
+         refresh_inventory
+       ) do
+    with true <- is_function(refresh_inventory, 0),
          {:ok, sources, source_bytes} <-
            read_inventory(directory, before_inventory.files, max_source_bytes),
          :ok <- run_capture_hook(capture_hook),
-         {:ok, after_read_inventory} <-
-           changed_inventory(directory, max_directory_entries, max_trace_files, listing_hook),
+         {:ok, after_read_inventory} <- refresh_inventory.(),
          :ok <- same_inventory(before_inventory, after_read_inventory),
          :ok <- verify_sources(directory, after_read_inventory.files, sources),
-         {:ok, after_verify_inventory} <-
-           changed_inventory(directory, max_directory_entries, max_trace_files, listing_hook),
+         {:ok, after_verify_inventory} <- refresh_inventory.(),
          :ok <- same_inventory(after_read_inventory, after_verify_inventory),
          :ok <- verify_sources(directory, after_verify_inventory.files, sources),
-         {:ok, events} <- decode_sources(sources),
-         {:ok, events, source_id} <- validate_loaded(events, max_source_bytes) do
+         {:ok, events, run_sources} <- decode_capture_sources(sources),
+         {:ok, events, _event_source_id} <- validate_loaded(events, max_source_bytes) do
+      source_id = digest({events, run_sources})
+
       {:ok,
        %{
          events: events,
+         run_sources: run_sources,
          source_id: source_id,
          source_bytes: source_bytes,
-         file_count: length(after_verify_inventory.files)
+         file_count: length(after_verify_inventory.files),
+         excluded_trace_files: %{}
        }}
     end
   end
 
-  defp directory_inventory(directory, max_directory_entries, max_trace_files, listing_hook) do
+  defp file_inventory(path, source_kind) do
+    name = Path.basename(path)
+
+    with true <- capture_file_name?(name, source_kind),
+         {:ok, %File.Stat{type: :regular} = stat} <- File.lstat(path, time: :posix) do
+      {:ok, %{files: [{name, stat_identity(stat)}]}}
+    else
+      false -> {:error, :invalid_trace_log}
+      {:ok, %File.Stat{}} -> {:error, :malformed_source}
+      {:error, _reason} -> {:error, :source_unavailable}
+    end
+  end
+
+  defp selected_inventory([%{path: first_path} | _rest] = selected) do
+    directory = first_path |> Path.expand() |> Path.dirname()
+
+    with true <-
+           Enum.all?(selected, fn
+             %{path: path, run_ref: run_ref, source_kind: source_kind}
+             when is_binary(path) and is_binary(run_ref) and
+                    source_kind in [:sanitized, :private] ->
+               expanded = Path.expand(path)
+
+               Path.dirname(expanded) == directory and
+                 capture_file_name?(Path.basename(expanded), source_kind)
+
+             _invalid ->
+               false
+           end),
+         names <- Enum.map(selected, &Path.basename(&1.path)),
+         true <- names == Enum.sort(names) and names == Enum.uniq(names),
+         {:ok, files} <- inventory_selected_files(directory, names) do
+      {:ok, directory, %{files: files}}
+    else
+      false -> {:error, :invalid_trace_log}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp selected_inventory(_selected), do: {:error, :invalid_trace_log}
+
+  defp changed_selected_inventory(selected) do
+    case selected_inventory(selected) do
+      {:ok, _directory, inventory} -> {:ok, inventory, %{}}
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp inventory_selected_files(directory, names) do
+    Enum.reduce_while(names, {:ok, []}, fn name, {:ok, files} ->
+      case File.lstat(Path.join(directory, name), time: :posix) do
+        {:ok, %File.Stat{type: :regular} = stat} ->
+          {:cont, {:ok, [{name, stat_identity(stat)} | files]}}
+
+        {:ok, %File.Stat{}} ->
+          {:halt, {:error, :selected_trace_not_regular}}
+
+        {:error, _reason} ->
+          {:halt, {:error, :source_unavailable}}
+      end
+    end)
+    |> case do
+      {:ok, files} -> {:ok, Enum.reverse(files)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp changed_file_inventory(path, source_kind) do
+    case file_inventory(path, source_kind) do
+      {:ok, inventory} -> {:ok, inventory}
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp directory_inventory(
+         directory,
+         source_kind,
+         max_directory_entries,
+         max_trace_files,
+         include_sanitized,
+         listing_hook
+       ) do
     with {:ok, %File.Stat{type: :directory} = directory_stat} <-
            File.lstat(directory, time: :posix),
-         {:ok, names} <- bounded_directory_names(directory, max_directory_entries, listing_hook),
+         {:ok, listed} <- bounded_directory_names(directory, max_directory_entries, listing_hook),
          {:ok, names} <-
-           bounded_supported_names(names, :sanitized, max_trace_files),
+           bounded_capture_names(listed, source_kind, include_sanitized, max_trace_files),
          {:ok, files} <- inventory_files(directory, names) do
-      {:ok, %{directory: stat_identity(directory_stat), files: files}}
+      {:ok, %{directory: directory_root_identity(directory_stat), files: files},
+       excluded_trace_files(listed, names, source_kind)}
     else
       {:ok, %File.Stat{}} -> {:error, :malformed_source}
       {:error, :source_limit_exceeded} = error -> error
@@ -1619,9 +2351,24 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp changed_inventory(directory, max_directory_entries, max_trace_files, listing_hook) do
-    case directory_inventory(directory, max_directory_entries, max_trace_files, listing_hook) do
-      {:ok, inventory} -> {:ok, inventory}
+  defp changed_inventory(
+         directory,
+         source_kind,
+         max_directory_entries,
+         max_trace_files,
+         include_sanitized,
+         listing_hook
+       ) do
+    case directory_inventory(
+           directory,
+           source_kind,
+           max_directory_entries,
+           max_trace_files,
+           include_sanitized,
+           listing_hook
+         ) do
+      {:ok, inventory, excluded} -> {:ok, inventory, excluded}
+      {:error, :source_limit_exceeded} = error -> error
       {:error, _reason} -> {:error, :source_changed}
     end
   end
@@ -1649,22 +2396,34 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  defp bounded_supported_names(names, source_kind, max_trace_files) do
-    supported = Enum.filter(names, &supported_name?(&1, source_kind))
+  defp bounded_capture_names(names, source_kind, include_sanitized, max_trace_files) do
+    supported = Enum.filter(names, &capture_name?(&1, source_kind, include_sanitized))
 
     if length(supported) <= max_trace_files,
       do: {:ok, Enum.sort(supported)},
       else: {:error, :source_limit_exceeded}
   end
 
+  defp capture_name?(name, :sanitized, _include_sanitized),
+    do: TraceDirectoryAdmission.source_kind(name) == :sanitized
+
+  defp capture_name?(name, :private, true),
+    do: TraceDirectoryAdmission.source_kind(name) in [:sanitized, :private]
+
+  defp capture_name?(name, :private, false),
+    do: TraceDirectoryAdmission.source_kind(name) == :private
+
+  defp capture_file_name?(name, :sanitized),
+    do: Path.basename(name) == name and not reserved_path?(name)
+
+  defp capture_file_name?(name, :private),
+    do: Path.basename(name) == name and private_path?(name)
+
   defp inventory_files(directory, names) do
     Enum.reduce_while(names, {:ok, []}, fn name, {:ok, files} ->
-      case File.lstat(Path.join(directory, name), time: :posix) do
-        {:ok, %File.Stat{type: :regular} = stat} ->
+      case File.lstat(directory_member_path(directory, name), time: :posix) do
+        {:ok, %File.Stat{} = stat} ->
           {:cont, {:ok, [{name, stat_identity(stat)} | files]}}
-
-        {:ok, %File.Stat{}} ->
-          {:halt, {:error, :malformed_source}}
 
         {:error, _reason} ->
           {:halt, {:error, :source_unavailable}}
@@ -1673,6 +2432,151 @@ defmodule PtcRunner.Kernel.TraceLog do
     |> case do
       {:ok, files} -> {:ok, Enum.reverse(files)}
       {:error, _reason} = error -> error
+    end
+  end
+
+  defp read_directory_inventory(directory, files, max_source_bytes) do
+    source_bytes =
+      Enum.reduce(files, 0, fn
+        {_name, %{type: :regular, size: size}}, bytes -> bytes + size
+        {_name, _identity}, bytes -> bytes
+      end)
+
+    if source_bytes <= max_source_bytes do
+      Enum.reduce_while(files, {:ok, []}, fn {name, expected}, {:ok, sources} ->
+        case read_directory_member(directory, name, expected) do
+          {:ok, status} ->
+            source = %{raw_name: name, stat_identity: expected, read_status: status}
+            {:cont, {:ok, [source | sources]}}
+
+          {:error, _reason} = error ->
+            {:halt, error}
+        end
+      end)
+      |> case do
+        {:ok, sources} -> {:ok, Enum.reverse(sources), source_bytes}
+        {:error, _reason} = error -> error
+      end
+    else
+      {:error, :source_limit_exceeded}
+    end
+  end
+
+  defp read_directory_member(directory, name, %{type: type} = expected) when type != :regular do
+    path = directory_member_path(directory, name)
+
+    with {:ok, %File.Stat{} = current} <- File.lstat(path, time: :posix),
+         :ok <- same_stat_identity(expected, stat_identity(current)) do
+      {:ok, :not_regular}
+    else
+      _changed -> {:error, :source_changed}
+    end
+  end
+
+  defp read_directory_member(directory, name, expected) do
+    path = directory_member_path(directory, name)
+
+    with {:ok, %File.Stat{type: :regular} = current} <- File.lstat(path, time: :posix),
+         :ok <- same_stat_identity(expected, stat_identity(current)) do
+      case :file.open(path, [:read, :binary, :raw]) do
+        {:ok, device} ->
+          try do
+            case read_inventory_device(device, expected) do
+              {:ok, source} -> {:ok, {:read, source}}
+              {:error, _reason} = error -> error
+            end
+          after
+            :file.close(device)
+          end
+
+        {:error, reason} when reason in [:eacces, :eperm] ->
+          confirm_unreadable_member(path, expected)
+
+        {:error, _reason} ->
+          confirm_open_failure(path, expected)
+      end
+    else
+      {:ok, %File.Stat{}} -> {:error, :source_changed}
+      {:error, :source_changed} = error -> error
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp confirm_unreadable_member(path, expected) do
+    with {:ok, %File.Stat{type: :regular} = current} <- File.lstat(path, time: :posix),
+         :ok <- same_stat_identity(expected, stat_identity(current)) do
+      {:ok, :unreadable}
+    else
+      _changed -> {:error, :source_changed}
+    end
+  end
+
+  defp confirm_open_failure(path, expected) do
+    with {:ok, %File.Stat{type: :regular} = current} <- File.lstat(path, time: :posix),
+         :ok <- same_stat_identity(expected, stat_identity(current)) do
+      {:error, :source_unavailable}
+    else
+      _changed -> {:error, :source_changed}
+    end
+  end
+
+  defp verify_directory_sources(directory, files, captured_sources) do
+    expected_sources = Map.new(captured_sources, &{&1.raw_name, &1})
+
+    Enum.reduce_while(files, :ok, fn {name, expected}, :ok ->
+      captured = Map.fetch!(expected_sources, name)
+
+      case verify_directory_source(directory, name, expected, captured.read_status) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp verify_directory_source(directory, name, expected, expected_status) do
+    case read_directory_member(directory, name, expected) do
+      {:ok, ^expected_status} -> :ok
+      {:ok, _changed_status} -> {:error, :source_changed}
+      {:error, :source_unavailable} = error -> error
+      {:error, _reason} -> {:error, :source_changed}
+    end
+  end
+
+  defp directory_evidence(captured_sources) do
+    Enum.reduce_while(captured_sources, {:ok, [], []}, fn source, {:ok, evidence, proofs} ->
+      with {:ok, status, digest} <- directory_evidence_status(source.read_status),
+           source_kind when source_kind in [:sanitized, :private] <-
+             TraceDirectoryAdmission.source_kind(source.raw_name),
+           {:ok, file_evidence} <-
+             TraceDirectoryAdmission.evidence(source.raw_name, source_kind, status) do
+        proof = %{
+          raw_name: source.raw_name,
+          source_kind: source_kind,
+          byte_length: source.stat_identity.size,
+          content_digest: digest,
+          stat_identity: source.stat_identity
+        }
+
+        {:cont, {:ok, [file_evidence | evidence], [proof | proofs]}}
+      else
+        _invalid -> {:halt, {:error, :source_unavailable}}
+      end
+    end)
+    |> case do
+      {:ok, evidence, proofs} -> {:ok, Enum.reverse(evidence), Enum.reverse(proofs)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp directory_evidence_status(:not_regular), do: {:ok, :not_regular, nil}
+  defp directory_evidence_status(:unreadable), do: {:ok, :unreadable, nil}
+
+  defp directory_evidence_status({:read, source}) do
+    digest = :crypto.hash(:sha256, source)
+
+    case decode_jsonl(source) do
+      {:ok, events} -> {:ok, {:decoded, events}, digest}
+      {:error, :malformed_source} -> {:ok, :malformed_jsonl, digest}
     end
   end
 
@@ -1753,24 +2657,62 @@ defmodule PtcRunner.Kernel.TraceLog do
     end)
   end
 
-  defp decode_sources(sources) do
-    Enum.reduce_while(sources, {:ok, []}, fn {_name, source}, {:ok, event_groups} ->
+  defp decode_capture_sources(sources) do
+    Enum.reduce_while(sources, {:ok, [], %{}}, fn {name, source},
+                                                  {:ok, event_groups, run_sources} ->
       case decode_jsonl(source) do
-        {:ok, events} -> {:cont, {:ok, [events | event_groups]}}
-        {:error, _reason} = error -> {:halt, error}
+        {:ok, events} ->
+          case put_run_sources(run_sources, events, filename_source_kind(name), name) do
+            {:ok, run_sources} -> {:cont, {:ok, [events | event_groups], run_sources}}
+            {:error, _reason} = error -> {:halt, error}
+          end
+
+        {:error, _reason} = error ->
+          {:halt, error}
       end
     end)
     |> case do
-      {:ok, event_groups} -> {:ok, event_groups |> Enum.reverse() |> List.flatten()}
-      {:error, _reason} = error -> error
+      {:ok, event_groups, run_sources} ->
+        source_kinds = Map.new(run_sources, fn {run_id, {kind, _name}} -> {run_id, kind} end)
+        {:ok, event_groups |> Enum.reverse() |> List.flatten(), source_kinds}
+
+      {:error, _reason} = error ->
+        error
     end
   end
+
+  defp put_run_sources(run_sources, events, source_kind, source_name) do
+    Enum.reduce_while(events, {:ok, run_sources}, fn
+      %{"run_id" => run_id}, {:ok, sources} ->
+        case Map.get(sources, run_id) do
+          nil -> {:cont, {:ok, Map.put(sources, run_id, {source_kind, source_name})}}
+          {^source_kind, ^source_name} -> {:cont, {:ok, sources}}
+          _conflicting -> {:halt, {:error, :malformed_source}}
+        end
+
+      _invalid_event, _acc ->
+        {:halt, {:error, :malformed_source}}
+    end)
+  end
+
+  defp filename_source_kind(name), do: if(private_path?(name), do: :private, else: :sanitized)
 
   defp same_inventory(inventory, inventory), do: :ok
   defp same_inventory(_before, _after), do: {:error, :source_changed}
 
   defp same_stat_identity(identity, identity), do: :ok
   defp same_stat_identity(_expected, _current), do: {:error, :source_changed}
+
+  defp directory_root_identity(%File.Stat{} = stat) do
+    %{
+      major_device: stat.major_device,
+      minor_device: stat.minor_device,
+      inode: stat.inode,
+      type: stat.type
+    }
+  end
+
+  defp directory_member_path(directory, raw_name), do: directory <> "/" <> raw_name
 
   # ex_dna:disable-for-next-line — TraceLog keeps its source identity contract independent from inspection snapshots.
   defp stat_identity(%File.Stat{} = stat) do
@@ -1798,24 +2740,6 @@ defmodule PtcRunner.Kernel.TraceLog do
     _exception -> {:error, :source_unavailable}
   catch
     _kind, _reason -> {:error, :source_unavailable}
-  end
-
-  defp load_files(directory, names, max_bytes) do
-    Enum.reduce_while(names, {:ok, {[], 0}}, fn name, {:ok, {event_groups, bytes}} ->
-      path = Path.join(directory, name)
-      remaining = max_bytes - bytes
-
-      with {:ok, source} <- read_regular_file(path, remaining),
-           {:ok, events} <- decode_jsonl(source) do
-        {:cont, {:ok, {[events | event_groups], bytes + byte_size(source)}}}
-      else
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
-    |> case do
-      {:ok, {event_groups, _bytes}} -> {:ok, event_groups |> Enum.reverse() |> List.flatten()}
-      {:error, _reason} = error -> error
-    end
   end
 
   defp read_regular_file(_path, remaining) when remaining < 0,
@@ -1910,7 +2834,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     encoded_bytes = Enum.reduce(events, 0, &(&2 + byte_size(Jason.encode!(&1))))
 
     with true <- encoded_bytes <= max_bytes,
-         :ok <- validate_events(events) do
+         :ok <- TraceEventValidation.validate(events) do
       source_id = digest(events)
 
       {:ok, events, source_id}
@@ -1922,177 +2846,22 @@ defmodule PtcRunner.Kernel.TraceLog do
     Jason.EncodeError -> {:error, :malformed_source}
   end
 
-  defp validate_events(events) do
-    initial = %{
-      sequences: %{},
-      run_traces: %{},
-      trace_runs: %{},
-      run_lifecycles: %{},
-      run_versions: %{}
-    }
-
-    Enum.reduce_while(events, {:ok, initial}, fn event, {:ok, state} ->
-      with :ok <- validate_event(event),
-           trace_id = event["trace_id"],
-           run_id = event["run_id"],
-           sequence = event["sequence"],
-           previous = Map.get(state.sequences, trace_id, 0),
-           true <- sequence > previous,
-           :ok <- same_identity(state, run_id, trace_id),
-           :ok <- same_run_version(state.run_versions, run_id, event["schema_version"]),
-           {:ok, run_lifecycles} <-
-             advance_run_lifecycle(state.run_lifecycles, run_id, event["type"]) do
-        {:cont,
-         {:ok,
-          %{
-            sequences: Map.put(state.sequences, trace_id, sequence),
-            run_traces: Map.put(state.run_traces, run_id, trace_id),
-            trace_runs: Map.put(state.trace_runs, trace_id, run_id),
-            run_lifecycles: run_lifecycles,
-            run_versions: Map.put(state.run_versions, run_id, event["schema_version"])
-          }}}
-      else
-        {:error, reason} -> {:halt, {:error, reason}}
-        _ -> {:halt, {:error, :malformed_source}}
-      end
-    end)
-    |> case do
-      {:ok, _state} ->
-        :ok
-
-      {:error, _reason} = error ->
-        error
-    end
-  end
-
-  defp advance_run_lifecycle(run_lifecycles, run_id, type) do
-    case {Map.get(run_lifecycles, run_id), type} do
-      {nil, "run-started"} ->
-        {:ok, Map.put(run_lifecycles, run_id, :open)}
-
-      {:open, "run-stopped"} ->
-        {:ok, Map.put(run_lifecycles, run_id, :stopped)}
-
-      {:open, "run-started"} ->
-        {:error, :malformed_source}
-
-      {:open, _type} ->
-        {:ok, run_lifecycles}
-
-      {_lifecycle, _type} ->
-        {:error, :malformed_source}
-    end
-  end
-
-  defp same_identity(state, run_id, trace_id) do
-    with existing_trace when existing_trace in [nil, trace_id] <-
-           Map.get(state.run_traces, run_id),
-         existing_run when existing_run in [nil, run_id] <- Map.get(state.trace_runs, trace_id) do
-      :ok
-    else
-      _other -> {:error, :malformed_source}
-    end
-  end
-
-  defp same_run_version(run_versions, run_id, version) do
-    if Map.get(run_versions, run_id, version) == version,
-      do: :ok,
-      else: {:error, :malformed_source}
-  end
-
-  defp validate_event(event) when is_map(event) do
-    with true <- Enum.sort(Map.keys(event)) == Enum.sort(@event_keys),
-         version when version in [1, 2] <- event["schema_version"],
-         :ok <- valid_string(event["run_id"]),
-         :ok <- valid_string(event["trace_id"]),
-         sequence when is_integer(sequence) and sequence > 0 <- event["sequence"],
-         timestamp when is_binary(timestamp) <- event["timestamp"],
-         {:ok, _datetime, 0} <- DateTime.from_iso8601(timestamp),
-         type when is_binary(type) <- event["type"],
-         true <- type =~ @event_type,
-         true <- JSONValue.map?(event["data"]),
-         :ok <- validate_event_data(version, type, event["data"]) do
-      :ok
-    else
-      version when is_integer(version) and version not in [1, 2] -> {:error, :unsupported_version}
-      _ -> {:error, :malformed_source}
-    end
-  end
-
-  defp validate_event(_event), do: {:error, :malformed_source}
-
-  defp validate_event_data(version, type, data) do
-    with :ok <- validate_versioned_event_data(version, type, data) do
-      validate_run_stopped_usage(type, data)
-    end
-  end
-
-  defp validate_versioned_event_data(1, _type, data) do
-    if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
-  end
-
-  defp validate_versioned_event_data(2, "run-started", data) do
-    singular =
-      ~w(mission_prelude mission_inventory_hash mission_inventory_bytes mission_model_context_hash mission_model_context_bytes)
-
-    if is_map(data["missions"]) and Enum.all?(singular, &(not Map.has_key?(data, &1))) and
-         not Map.has_key?(data, "mission_name") do
-      :ok
-    else
-      {:error, :malformed_source}
-    end
-  end
-
-  defp validate_versioned_event_data(2, type, data)
-       when type in ["run-stopped", "events-dropped"] do
-    if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
-  end
-
-  defp validate_versioned_event_data(2, _type, data) do
-    environment = stringify(data["environment"])
-
-    case environment do
-      "mission" ->
-        if valid_string(data["mission_name"]) == :ok,
-          do: :ok,
-          else: {:error, :malformed_source}
-
-      "workflow" ->
-        if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
-
-      _other ->
-        if Map.has_key?(data, "mission_name"), do: {:error, :malformed_source}, else: :ok
-    end
-  end
-
-  defp validate_run_stopped_usage("run-stopped", data) do
-    case Map.fetch(data, "usage") do
-      :error ->
-        :ok
-
-      {:ok, usage} when is_map(usage) ->
-        case Map.fetch(usage, "subordinate_source_checks") do
-          :error -> :ok
-          {:ok, count} when is_integer(count) and count >= 0 -> :ok
-          _invalid_count -> {:error, :malformed_source}
-        end
-
-      _invalid_usage ->
-        {:error, :malformed_source}
-    end
-  end
-
-  defp validate_run_stopped_usage(_type, _data), do: :ok
-
   defp runs(events, source_kind) do
     events
     |> Enum.group_by(& &1["run_id"])
-    |> Enum.map(fn {run_id, run_events} -> run_metadata(run_id, run_events, source_kind) end)
+    |> Enum.map(fn {run_id, run_events} ->
+      run_metadata(run_id, run_events, run_source_kind(source_kind, run_id))
+    end)
     |> Enum.sort(fn left, right ->
       {timestamp_sort_value(left["start_timestamp"]), left["run_id"]} >=
         {timestamp_sort_value(right["start_timestamp"]), right["run_id"]}
     end)
   end
+
+  defp run_source_kind(source_kind, _run_id) when source_kind in [:sanitized, :private],
+    do: source_kind
+
+  defp run_source_kind(run_sources, run_id), do: Map.fetch!(run_sources, run_id)
 
   defp run_metadata(run_id, events, source_kind) do
     started = Enum.find(events, &(&1["type"] == "run-started"))
@@ -2108,23 +2877,28 @@ defmodule PtcRunner.Kernel.TraceLog do
       "start_timestamp" => event_value(started, "timestamp"),
       "stop_timestamp" => event_value(stopped, "timestamp"),
       "status" => stringify(event_data(stopped, "outcome")),
+      "result_hash" => event_data(stopped, "result_hash"),
       "terminal_reason" => event_data(stopped, "reason"),
       "labels" => labels,
       "tags" => Map.get(labels, "tags", %{}),
       "name" => Map.get(labels, "name"),
       "model" => Map.get(labels, "model"),
       "provider" => Map.get(labels, "provider"),
+      "evaluations" => evaluation_count(events),
       "subordinate_evaluations" => evaluation_count(events, "mission"),
       "subordinate_source_checks" => subordinate_source_checks(stopped),
       "workflow_capability_calls" => workflow_calls,
       "mission_capability_calls" => mission_calls,
       "llm_calls" => capability_name_count(events, "llm-request"),
+      "llm_budget" => terminal_llm_budget(stopped),
+      "llm_spend" => terminal_llm_spend(stopped),
       "error_count" => Enum.count(events, &error_event?/1),
       "duration_ms" => duration_ms(started, stopped),
       "workflow_prelude" => event_data(started, "workflow_prelude", empty_prelude()),
       "missions" => missions,
       "component_overrides" => event_data(started, "component_overrides", []),
       "connector_snapshots" => event_data(started, "connector_snapshots", []),
+      "installation_config_digests" => event_data(started, "installation_config_digests", %{}),
       "session_profile" => event_data(started, "session_profile"),
       "positions" => event_positions(started),
       "complete" => not is_nil(stopped),
@@ -2134,32 +2908,25 @@ defmodule PtcRunner.Kernel.TraceLog do
     }
   end
 
-  # Absent prelude data projects to an empty graph. Legacy run-started
-  # payloads without dependency_indices pass through verbatim — the query
-  # layer never invents missing edges.
+  defp terminal_llm_budget(stopped) do
+    case LLMBudget.validate_terminal_projection(event_data(stopped, "usage", %{})["llm_budget"]) do
+      {:ok, budget} -> budget
+      {:error, :invalid_llm_budget} -> nil
+    end
+  end
+
+  defp terminal_llm_spend(stopped) do
+    case LLMUsageSummary.validate_spend(event_data(stopped, "usage", %{})["llm_spend"]) do
+      {:ok, spend} -> spend
+      {:error, :invalid_llm_spend} -> nil
+    end
+  end
+
+  # Absent prelude data projects to an empty graph.
   defp empty_prelude,
     do: %{"component_ids" => [], "dependency_indices" => [], "hash" => nil}
 
-  # V1 traces described one implicit mission with singular fields. The V2
-  # query projection always exposes the named map, including when its source
-  # is a retained V1 trace.
-  defp run_missions(started) do
-    case event_data(started, "missions") do
-      missions when is_map(missions) ->
-        missions
-
-      _other ->
-        %{
-          "default" => %{
-            "prelude" => event_data(started, "mission_prelude", empty_prelude()),
-            "inventory_hash" => event_data(started, "mission_inventory_hash"),
-            "inventory_bytes" => event_data(started, "mission_inventory_bytes"),
-            "model_context_hash" => event_data(started, "mission_model_context_hash"),
-            "model_context_bytes" => event_data(started, "mission_model_context_bytes")
-          }
-        }
-    end
-  end
+  defp run_missions(started), do: event_data(started, "missions", %{})
 
   defp subordinate_source_checks(%{
          "data" => %{"usage" => %{"subordinate_source_checks" => count}}
@@ -2178,6 +2945,7 @@ defmodule PtcRunner.Kernel.TraceLog do
     Enum.filter(items, fn item ->
       equal_filter?(item, arguments, "status") and equal_filter?(item, arguments, "run_id") and
         equal_filter?(item, arguments, "trace_id") and equal_filter?(item, arguments, "name") and
+        bundle_filter?(item, arguments["bundle"]) and
         equal_filter?(item, arguments, "model") and equal_filter?(item, arguments, "provider") and
         tags_match?(item["tags"], arguments["tags"]) and
         after_or_equal?(item["start_timestamp"], arguments["from"]) and
@@ -2187,6 +2955,11 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp equal_filter?(item, arguments, key),
     do: is_nil(arguments[key]) or item[key] == arguments[key]
+
+  defp bundle_filter?(_item, nil), do: true
+
+  defp bundle_filter?(item, bundle),
+    do: get_in(item, ["workflow_prelude", "hash"]) == bundle
 
   defp tags_match?(_tags, nil), do: true
 
@@ -2219,6 +2992,8 @@ defmodule PtcRunner.Kernel.TraceLog do
     (is_nil(arguments["status"]) or status == arguments["status"]) and
       (is_nil(arguments["evaluation_id"]) or
          event_data(event, "evaluation_id") == arguments["evaluation_id"]) and
+      (is_nil(arguments["parent_evaluation_id"]) or
+         event_data(event, "parent_evaluation_id") == arguments["parent_evaluation_id"]) and
       (is_nil(arguments["capability"]) or event_data(event, "name") == arguments["capability"]) and
       mission_matches?(event, arguments["mission_name"])
   end
@@ -2228,13 +3003,6 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp mission_matches?(event, expected) when is_binary(expected),
     do: event_mission_name(event) == expected
 
-  defp event_mission_name(%{"schema_version" => 1} = event) do
-    if stringify(event_data(event, "environment")) == "mission" and
-         is_nil(event_data(event, "mission_name")),
-       do: "default",
-       else: nil
-  end
-
   defp event_mission_name(%{"schema_version" => 2} = event) do
     if stringify(event_data(event, "environment")) == "mission",
       do: event_data(event, "mission_name"),
@@ -2243,7 +3011,7 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp event_mission_name(_event), do: nil
 
-  defp counters(events) do
+  defp counters(events, attribution_events) do
     %{
       "events" => length(events),
       "runs" => events |> Enum.map(& &1["run_id"]) |> Enum.uniq() |> length(),
@@ -2251,67 +3019,9 @@ defmodule PtcRunner.Kernel.TraceLog do
       "evaluations" => Enum.count(events, &(&1["type"] == "evaluation-started")),
       "evaluations_by_mission" => evaluations_by_mission(events),
       "workflow_capability_calls" => capability_call_count(events, "workflow"),
-      "mission_capability_calls" => capability_call_count(events, "mission"),
-      "llm_usage" => llm_usage_counters(events)
+      "mission_capability_calls" => capability_call_count(events, "mission")
     }
-  end
-
-  defp llm_usage_counters(events) do
-    events
-    |> Enum.filter(fn event ->
-      event["type"] == "capability-stopped" and
-        event_data(event, "name") == "llm-request" and
-        is_binary(event_data(event, "alias")) and
-        is_binary(event_data(event, "installation_revision"))
-    end)
-    |> Enum.reduce(%{}, fn event, counters ->
-      alias_name = event_data(event, "alias")
-      revision = event_data(event, "installation_revision")
-      key = {alias_name, revision}
-      success? = stringify(event_data(event, "status")) == "ok"
-
-      row =
-        Map.get(counters, key, %{
-          "alias" => alias_name,
-          "installation_revision" => revision,
-          "calls" => 0,
-          "successful_calls" => 0,
-          "usage_calls" => 0,
-          "missing_usage_calls" => 0,
-          "usage" => %{}
-        })
-
-      row =
-        row
-        |> Map.update!("calls", &(&1 + 1))
-        |> Map.update!("successful_calls", &(&1 + if(success?, do: 1, else: 0)))
-
-      row = update_usage_row(row, event_data(event, "usage"), success?)
-      Map.put(counters, key, row)
-    end)
-    |> Enum.sort_by(fn {{alias_name, revision}, _row} -> {alias_name, revision} end)
-    |> Enum.map(&elem(&1, 1))
-  end
-
-  defp update_usage_row(row, usage, true) when is_map(usage) do
-    case LLMUsage.normalize(usage) do
-      {:ok, normalized} ->
-        row
-        |> Map.update!("usage_calls", &(&1 + 1))
-        |> Map.update!("usage", &sum_usage(&1, normalized))
-
-      {:error, :invalid_llm_usage} ->
-        Map.update!(row, "missing_usage_calls", &(&1 + 1))
-    end
-  end
-
-  defp update_usage_row(row, _usage, true),
-    do: Map.update!(row, "missing_usage_calls", &(&1 + 1))
-
-  defp update_usage_row(row, _usage, false), do: row
-
-  defp sum_usage(left, right) do
-    Map.merge(left, right, fn _key, first, second -> first + second end)
+    |> Map.merge(LLMUsageSummary.summarize(events, attribution_events))
   end
 
   defp capability_call_count(events, environment) do
@@ -2325,6 +3035,8 @@ defmodule PtcRunner.Kernel.TraceLog do
     Enum.count(events, &(&1["type"] == "capability-started" and event_data(&1, "name") == name))
   end
 
+  defp evaluation_count(events), do: Enum.count(events, &(&1["type"] == "evaluation-started"))
+
   defp evaluation_count(events, environment) do
     Enum.count(events, fn event ->
       event["type"] == "evaluation-started" and
@@ -2332,9 +3044,15 @@ defmodule PtcRunner.Kernel.TraceLog do
     end)
   end
 
+  # The summary has to agree with the transcript a reader opens next, which
+  # renders one row per evaluation, capability call and exceeded limit. Counting
+  # every event carrying an error status also counted `run-stopped`, so a single
+  # failed capability call reported three errors against the rows that show it.
+  # The run's own outcome is its status, not a fourth error.
   defp error_event?(event) do
     event["type"] == "limit-exceeded" or
-      stringify(event_data(event, "status") || event_data(event, "outcome")) == "error"
+      (event["type"] in ["capability-stopped", "evaluation-stopped"] and
+         stringify(event_data(event, "status")) == "error")
   end
 
   defp duration_ms(nil, _stopped), do: nil
@@ -2349,75 +3067,100 @@ defmodule PtcRunner.Kernel.TraceLog do
     end
   end
 
-  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
   defp page_options(arguments, source_id, operation) do
-    limit = Map.get(arguments, "limit", @default_limit)
-    query_id = digest({operation, Map.drop(arguments, ["cursor", "limit"])})
-
-    with true <- is_integer(limit) and limit in 1..@max_limit,
-         {:ok, offset} <- cursor_offset(Map.get(arguments, "cursor"), source_id, query_id) do
-      {:ok, %{limit: limit, offset: offset, query_id: query_id}}
-    else
-      {:error, _reason} = error -> error
-      _ -> {:error, :invalid_query}
-    end
+    QueryCursor.page_options(
+      arguments,
+      source_id,
+      {operation, Map.drop(arguments, ["cursor", "limit"])},
+      @default_limit,
+      @max_limit,
+      @max_cursor_bytes
+    )
   end
-
-  # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
-  defp cursor_offset(nil, _source_id, _query_id), do: {:ok, 0}
-
-  defp cursor_offset(cursor, source_id, query_id)
-       when is_binary(cursor) and byte_size(cursor) <= @max_cursor_bytes do
-    with {:ok, encoded} <- Base.url_decode64(cursor, padding: false),
-         {:ok,
-          %{"offset" => offset, "source" => cursor_source, "query" => cursor_query} = payload} <-
-           Jason.decode(encoded),
-         true <- map_size(payload) == 3,
-         true <- is_integer(offset) and offset >= 0,
-         true <- is_binary(cursor_source) and is_binary(cursor_query) do
-      cond do
-        cursor_source != source_id -> {:error, :source_changed}
-        cursor_query != query_id -> {:error, :invalid_query}
-        true -> {:ok, offset}
-      end
-    else
-      _ -> {:error, :invalid_query}
-    end
-  end
-
-  defp cursor_offset(_cursor, _source_id, _query_id), do: {:error, :invalid_query}
 
   defp paginate(
          items,
          %{limit: limit, offset: offset, query_id: query_id},
          source_id,
-         max_result_bytes
+         max_result_bytes,
+         metadata
        ) do
     selected = items |> Enum.drop(offset) |> Enum.take(limit)
-    fit_page(selected, items, offset, source_id, query_id, max_result_bytes)
+    fit_page(selected, items, offset, source_id, query_id, max_result_bytes, metadata)
   end
 
   # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
-  defp fit_page(selected, all_items, offset, source_id, query_id, max_result_bytes) do
-    result = page_result(selected, all_items, offset, source_id, query_id)
+  defp fit_page(
+         selected,
+         all_items,
+         offset,
+         source_id,
+         query_id,
+         max_result_bytes,
+         metadata
+       ) do
+    full_result = fn fitted_metadata ->
+      page_result(selected, all_items, offset, source_id, query_id, fitted_metadata)
+    end
 
-    cond do
-      byte_size(Jason.encode!(result)) <= max_result_bytes ->
+    case fit_metadata_result(metadata, max_result_bytes, full_result) do
+      {:ok, result, _fitted_metadata} ->
         {:ok, result}
 
-      selected == [] ->
+      {:exhausted, fitted_metadata} ->
+        fit_page_items(
+          selected,
+          all_items,
+          offset,
+          source_id,
+          query_id,
+          max_result_bytes,
+          fitted_metadata
+        )
+    end
+  end
+
+  defp fit_page_items(
+         selected,
+         all_items,
+         offset,
+         source_id,
+         query_id,
+         max_result_bytes,
+         metadata
+       ) do
+    base = page_result([], all_items, offset, source_id, query_id, metadata)
+
+    cond do
+      not ResultLimit.within?(base, max_result_bytes) ->
         {:error, :result_limit_exceeded}
 
-      true ->
-        context = {all_items, offset, source_id, query_id, max_result_bytes}
+      selected == [] ->
+        {:ok, base}
 
-        fit_page_prefix(
-          selected,
-          context,
-          1,
-          length(selected) - 1,
-          nil
-        )
+      true ->
+        context = {all_items, offset, source_id, query_id, max_result_bytes, metadata}
+        fit_page_prefix(selected, context, 1, length(selected) - 1, nil)
+    end
+  end
+
+  defp fit_metadata(metadata, max_result_bytes, build_result) do
+    case fit_metadata_result(metadata, max_result_bytes, build_result) do
+      {:ok, result, _metadata} -> {:ok, result}
+      {:exhausted, _metadata} -> {:error, :result_limit_exceeded}
+    end
+  end
+
+  defp fit_metadata_result(metadata, max_result_bytes, build_result) do
+    result = build_result.(metadata)
+
+    if ResultLimit.within?(result, max_result_bytes) do
+      {:ok, result, metadata}
+    else
+      case TraceIsolationPresentation.shrink(metadata) do
+        {:ok, smaller} -> fit_metadata_result(smaller, max_result_bytes, build_result)
+        :exhausted -> {:exhausted, metadata}
+      end
     end
   end
 
@@ -2429,15 +3172,17 @@ defmodule PtcRunner.Kernel.TraceLog do
 
   defp fit_page_prefix(
          selected,
-         {all_items, offset, source_id, query_id, max_result_bytes} = context,
+         {all_items, offset, source_id, query_id, max_result_bytes, metadata} = context,
          lower,
          upper,
          best
        ) do
     count = div(lower + upper, 2)
-    result = page_result(Enum.take(selected, count), all_items, offset, source_id, query_id)
 
-    if byte_size(Jason.encode!(result)) <= max_result_bytes do
+    result =
+      page_result(Enum.take(selected, count), all_items, offset, source_id, query_id, metadata)
+
+    if ResultLimit.within?(result, max_result_bytes) do
       fit_page_prefix(
         selected,
         context,
@@ -2457,40 +3202,25 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   # ex_dna:disable-for-next-line — TraceLog and InspectionQuery intentionally own separate source query implementations.
-  defp page_result(selected, all_items, offset, source_id, query_id) do
+  defp page_result(selected, all_items, offset, source_id, query_id, metadata) do
     next_offset = offset + length(selected)
     more? = next_offset < length(all_items)
 
-    %{
+    Map.merge(metadata, %{
       "items" => selected,
-      "next_cursor" => if(more?, do: encode_cursor(next_offset, source_id, query_id), else: nil),
+      "next_cursor" =>
+        if(more?, do: QueryCursor.encode(next_offset, source_id, query_id), else: nil),
       "truncated" => more?,
       "omitted_count" => max(length(all_items) - next_offset, 0)
-    }
-  end
-
-  defp encode_cursor(offset, source_id, query_id) do
-    %{"offset" => offset, "source" => source_id, "query" => query_id}
-    |> Jason.encode!()
-    |> Base.url_encode64(padding: false)
-  end
-
-  defp within_result_limit(value, max_result_bytes) do
-    if byte_size(Jason.encode!(value)) <= max_result_bytes,
-      do: :ok,
-      else: {:error, :result_limit_exceeded}
-  end
-
-  defp digest(value) do
-    value
-    |> :erlang.term_to_binary([:deterministic])
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.url_encode64(padding: false)
+    })
   end
 
   defp validate_run_filters(arguments) do
     with :ok <-
-           optional_strings(arguments, ~w(status run_id trace_id name model provider from to)),
+           optional_strings(
+             arguments,
+             ~w(status run_id trace_id name bundle model provider from to)
+           ),
          :ok <- valid_tags(arguments["tags"]),
          :ok <- valid_timestamp(arguments["from"]) do
       valid_timestamp(arguments["to"])
@@ -2498,7 +3228,11 @@ defmodule PtcRunner.Kernel.TraceLog do
   end
 
   defp validate_turn_filters(arguments),
-    do: optional_strings(arguments, ~w(status evaluation_id capability mission_name))
+    do:
+      optional_strings(
+        arguments,
+        ~w(status evaluation_id parent_evaluation_id capability mission_name)
+      )
 
   defp evaluations_by_mission(events) do
     events
@@ -2514,36 +3248,19 @@ defmodule PtcRunner.Kernel.TraceLog do
       else: {:error, :invalid_query}
   end
 
-  defp valid_string(value)
-       when is_binary(value) and byte_size(value) in 1..@max_string_bytes,
-       do: if(String.valid?(value), do: :ok, else: {:error, :invalid_query})
-
-  defp valid_string(_value), do: {:error, :invalid_query}
+  defp valid_string(value), do: QueryValidation.string(value, @max_string_bytes)
   defp valid_tags(nil), do: :ok
-
-  defp valid_tags(tags) when is_map(tags) and map_size(tags) <= 16 do
-    if Enum.all?(tags, fn {key, value} -> valid_string(key) == :ok and JSONValue.value?(value) end),
-       do: :ok,
-       else: {:error, :invalid_query}
-  end
-
-  defp valid_tags(_tags), do: {:error, :invalid_query}
+  defp valid_tags(tags), do: QueryValidation.tags(tags, @max_string_bytes)
   defp valid_timestamp(nil), do: :ok
-
-  defp valid_timestamp(timestamp) when is_binary(timestamp) do
-    case DateTime.from_iso8601(timestamp) do
-      {:ok, _datetime, 0} -> :ok
-      _ -> {:error, :invalid_query}
-    end
-  end
-
-  defp valid_timestamp(_timestamp), do: {:error, :invalid_query}
+  defp valid_timestamp(timestamp), do: QueryValidation.timestamp(timestamp)
 
   defp validate_keys(arguments, allowed) do
     if JSONValue.map?(arguments) and Map.keys(arguments) -- allowed == [],
       do: :ok,
       else: {:error, :invalid_query}
   end
+
+  defp digest(value), do: QueryCursor.query_digest(value)
 
   defp event_data(nil, _key), do: nil
   defp event_data(event, key), do: get_in(event, ["data", key])
@@ -2567,7 +3284,7 @@ defmodule PtcRunner.Kernel.TraceLog do
   defp normalize(value), do: value
 
   defp private_path?(path), do: String.ends_with?(path, ".private.jsonl")
-  defp inspection_path?(path), do: String.ends_with?(path, ".inspection.jsonl")
+  defp inspection_path?(path), do: String.ends_with?(path, ".ptcins")
   defp reserved_path?(path), do: private_path?(path) or inspection_path?(path)
 
   @doc false

@@ -1,0 +1,9 @@
+{
+  "install": {
+    "frozen-model": {
+      "source": "llm_replay",
+      "installation_revision": "llm-replay-example-v1",
+      "fixtures": "replay.jsonl"
+    }
+  }
+}

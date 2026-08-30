@@ -18,7 +18,7 @@ defmodule PtcRunner do
 
   ## Guides
 
-  - [Kernel maintainer guide](kernel-maintainer.html)
+  - [Kernel maintainer guide](kernel.html)
   - [PTC-Lisp specification](ptc-lisp-specification.md)
   - [Function reference](function-reference.md)
   """

@@ -1,532 +1,115 @@
-# Manifests and capabilities
+# Configure an application
 
-A manifest is a JSON file you write to declare one runnable PTC-Lisp
-application: its code, its data, the providers it needs, the limits it wants,
-its event policy, and optional trace labels. Because it declares everything a
-run may use, it is also the boundary you deploy and review — nothing outside it
-reaches the run. Loading it is strict and executes no workflow.
+Use `ptc.json` to declare code, input, selected providers, missions, and limits.
 
-## Smallest useful manifest
+The document can select only names installed by `ptc-host.json`. It cannot add
+credentials, endpoints, commands, or permissions.
+
+## How do I start an application?
+
+Start with a generated project:
+
+```console
+ptc init my-application
+ptc run my-application/ptc-project.json
+```
+
+The generated application is deliberately small:
 
 ```json
 {
   "version": 1,
   "workflow": {
-    "components": [
-      {"id": "my.workflow", "path": "workflow.clj"}
-    ],
-    "entry": "my.workflow/run"
+    "components": [{"id": "main", "path": "main.clj"}],
+    "entry": "main/run"
   },
-  "input": {"value": {"question": "What should I process?"}}
+  "input": {"value": {"name": "world"}}
 }
 ```
 
-The Kernel generates `(my.workflow/run data/input)`. The entry must be a
-qualified public function that accepts the decoded input object.
+## How do I run the same application on new data?
 
-Unknown keys, duplicate JSON keys, unsafe paths, malformed identifiers, and
-invalid JSON-like values are rejected before a run starts.
-
-## Components and libraries
-
-A local component names its source and sorted, unique dependencies:
+Keep stable default input in `ptc.json`. For one run, put another JSON object in
+a file such as `input.json`:
 
 ```json
-{
-  "id": "my.workflow",
-  "path": "workflow.clj",
-  "dependencies": ["my.helpers"]
-}
+{"name":"Ada"}
 ```
 
-An installed PTC-Lisp library is selected by ID:
-
-```json
-{"library": "agent.core"}
-```
-
-A library's own dependencies expand deterministically, and everything compiles
-into one immutable bundle alongside your local components. Missing
-dependencies, cycles, duplicate selections, undeclared cross-component calls,
-and collisions between a local ID and a library ID all fail assembly.
-
-## Test a signed mission function without a model
-
-Public PTC-Lisp functions may declare input and output contracts. This mission
-function accepts one integer and promises one integer:
-
-```clojure
-(ns tutorial.signatures "Small signed mission functions." {:visibility :prompt})
-
-(defn double
-  "Double one integer."
-  {:signature "(value :int) -> :int"}
-  [value]
-  (* value 2))
-```
-
-The complete credential-free
-[`05-signature-feedback`](../../examples/kernel-tutorial/05-signature-feedback/ptc.json)
-example first evaluates the invalid model-style program
-`(tutorial.signatures/double "21")`. The signature rejects the string before
-the function body runs. Its workflow uses the same `agent.feedback` PTC-Lisp
-library as `agent.core` to render the correction, then evaluates the corrected
-program `(return (tutorial.signatures/double 21))`.
-
-Run it from the repository root:
+Pass it with `--input`. The path resolves relative to `ptc.json` first, so this
+works even when the command runs from another directory:
 
 ```console
-mix ptc run examples/kernel-tutorial/05-signature-feedback/ptc.json
+ptc run my-application/ptc-project.json --input input.json
 ```
 
-The result contains the failed evaluation, the exact feedback an agent model
-would receive, and the successful correction. The important fields are:
+Use `--private-input` instead when the input must not appear in ordinary output
+or traces. Private input also requires private output handling; see the
+[command-line reference](../reference/cli.md#run-a-manifest).
+
+## How do I select a provider?
+
+Add a provider only after `ptc-host.json` has installed its alias. Every provider
+the application uses is selected at the top level, under `providers.workflow`
+for model access the trusted workflow holds, and under `providers.mission` for
+the task tools that missions running model-authored programs may hold. Add both
+scopes to the manifest above:
 
 ```json
 {
-  "invalid_evaluation": {
-    "outcome": "evaluation_error",
-    "kind": "prelude_contract_error",
-    "retryable?": true,
-    "details": {
-      "ref": "tutorial.signatures/double",
-      "phase": "input",
-      "path": ["value"],
-      "message": "prelude_contract_error: tutorial.signatures/double input value: expected int, got string"
+  "providers": {
+    "workflow": [{"name": "model"}],
+    "mission": [{"name": "workspace"}]
+  },
+  "missions": {
+    "default": {
+      "components": [],
+      "providers": ["workspace"]
     }
-  },
-  "model_feedback": "The PTC-Lisp evaluation did not return successfully. outcome=:evaluation_error; error_code=:prelude_contract_error; message=prelude_contract_error: tutorial.signatures/double input value: expected int, got string. Send one corrected run_ptc_lisp call.",
-  "corrected_evaluation": {"outcome": "returned", "value": 42}
-}
-```
-
-This correction is retryable because validation failed before the function
-body and before any capability activity. A signed function also validates its
-successful output. The agent loop does not automatically retry a contract
-failure after capability activity, because repeating external effects may be
-unsafe. See [Signature syntax](../signature-syntax.md) for the complete
-signature grammar and [Components and preludes](components-and-preludes.md) for
-the runtime rules. [Building agents](building-agents.md) documents the
-correction protocol that renders this feedback for a live model.
-
-## Input and named missions
-
-Input is either an inline JSON object or a manifest-relative JSON object file:
-
-```json
-"input": {"value": {"task": "Summarize the report"}}
-```
-
-```json
-"input": {"path": "input.json"}
-```
-
-`missions` is a map of zero to sixteen explicitly named subordinate
-environments. Each mission owns its component bundle, JSON data, provider
-grants, inventory/model context, and continuation state:
-
-```json
-"missions": {
-  "reader": {
-    "components": [{"id": "app.reader", "path": "reader.clj"}],
-    "data": {"mode": "source"},
-    "providers": ["reader_workspace"]
-  },
-  "writer": {
-    "components": [{"id": "app.writer", "path": "writer.clj"}],
-    "data": {"mode": "destination"},
-    "providers": ["writer_workspace"]
   }
 }
 ```
 
-Names use the component-ID grammar. `"default"` is an ordinary name: it has
-no authority unless declared, and an unknown name never falls back to it.
-Provider names select unique occurrences already declared in
-`providers.mission`; they can narrow run authority but cannot introduce it.
-Across workflow and all missions, a manifest admits at most 128 component
-occurrences, 512 dependency edges, and 2,000,000 component-source bytes.
+A mission's own `providers` list can only narrow what `providers.mission`
+already selected; naming an alias there does not introduce it, and a name
+absent from `providers.mission` is rejected. Omitting a name is the point: the
+grant is then absent from that mission's environment.
 
-Workflow code selects a mission explicitly with `kernel/eval-in`,
-`kernel/eval-source-in`, `kernel/eval-with-in`,
-`kernel/eval-source-with-in`, `kernel/check-source-in`,
-`kernel/mission-inventory-in`, or `kernel/mission-model-context-in`. The
-shipped `agent.core` loop accepts a `{"mission" "name"}` selector and uses
-`"default"` only when that option is omitted; the selected mission must exist.
-Definitions and `*1`/`*2`/`*3` history committed in one mission are invisible
-to every other mission.
+## How do I stop a long or expensive run?
 
-The runnable
-[`named-mission-reader-writer`](../../examples/named-mission-reader-writer/README.md)
-example shows one workflow orchestrating separate reader and writer agents
-with distinct APIs, provider grants, roots, data, and continuation state.
-
-Referenced files use portable lowercase ASCII logical names. A name is at most
-1,024 bytes and 16 slash-separated segments; every segment starts with a
-lowercase letter or digit and otherwise contains only lowercase letters,
-digits, `.`, `_`, or `-`. Paths are resolved under the canonical manifest
-directory. Absolute paths, empty or dot segments, Unicode, uppercase names,
-devices, non-regular files, and symlink escapes are rejected. The same grammar
-applies to component, input, contract, and trusted override candidate names.
-For an in-memory application whose manifest logical name has directory
-segments, those references are resolved relative to the manifest's logical
-directory, exactly like the filesystem adapter. That transport prefix does not
-consume the referenced name's 1,024-byte or 16-segment application limit.
-When a directory-backed override descriptor and candidate are inside that
-application directory, they use the same logical-document cache as manifest
-references. A candidate that is also a selected component document is captured
-and charged once, matching the in-memory adapter. Candidate resolution still
-uses the descriptor's own directory as its confinement boundary; entering the
-shared cache does not widen that authority.
-
-Those rules govern files the host reads while loading the manifest. Files the
-*model* can reach are separate and never come from the manifest: they come from
-an MCP server the host installs. The
-[filesystem sample server](../../examples/mcp/filesystem/README.md) is a
-non-production example of one, used by the tutorials and integration tests.
-[Host configuration](host-configuration.md#mcp-servers) covers installing it.
-
-## Input and result contracts
-
-A manifest may validate its input and successful `Result.value` against
-manifest-relative JSON Schema files:
-
-```json
-"contracts": {
-  "input_schema": {"path": "task.schema.json"},
-  "result_schema": {"path": "candidate.schema.json"}
-}
-```
-
-The input contract covers inline input, an input file, and any `--input` or
-`--private-input` override. It is compiled and checked before provider
-preflight, credential resolution, process launch, or remote discovery. The
-result contract is checked after execution and evidence capture, but before
-stdout or `--output`/`--private-output` publication. The shipped
-`agent.main/run` entry also checks each model-authored terminal candidate while
-the bounded agent loop is still live. When turns remain, it returns the same
-structural classification to the model for one ordinary correction turn; the
-rejected value itself is withheld. Other workflow entries retain only the
-final fail-closed check. A mismatch returns `input_contract_failed` or
-`result_contract_failed`. A selected input that is not an admissible JSON
-object instead returns `input_invalid`, even when no input contract is
-declared.
-
-A rejection does carry a bounded classification, so a mismatch is diagnosable
-without repeating the run under private inspection. The command reports it as:
-
-```text
-{:error,
- {:result_contract_failed,
-  %{value_kind: :object, discriminator: "kind", matched_branch: "report",
-    violations: [
-      %{segments: [{:property, "timeline"}, {:index, 2}],
-        kind: :boolean_schema,
-        allowed_keys: ["citations", "observed_at", "statement"],
-        missing_required: ["observed_at", "statement"],
-        undeclared_key_count: 2},
-      %{segments: [{:property, "timeline"}, {:index, 2}], kind: :required}
-    ]}}}
-```
-
-Before schema validation, the Kernel applies the same terminal projection used
-for successful results: keyword keys and values become their name strings, and
-projection collisions are rejected. A candidate such as
-`{:decision :no-change}` therefore validates against the JSON shape
-`{"decision" "no-change"}`. Other non-JSON values can still fail before a
-schema keyword runs; that rejection carries `json_value: false` and an empty
-`violations` list without disclosing the rejected value.
-
-The reserved validator preserves the candidate across its internal call until
-that projection runs. In particular, it does not apply the ordinary
-tool-argument convention that rewrites hyphens to underscores, so validation
-and the terminal result see the same property names.
-
-Quoted symbol references retain the existing DIV-19 carve-out: candidate
-validation uses their inert display strings, while strict JSON terminal
-admission can still reject a symbol-reference struct. That pre-existing
-difference is intentionally narrower than the keyword rule.
-
-`violations` locates each failure by schema keyword and a typed property/index
-segment list within the branch the discriminator selected; branches it did not
-select are omitted, since they fail on keys they were never given. Segments are
-retained only while the exact local schema node declares that property or array
-index. At the first undeclared or structurally inconsistent segment,
-classification stops at the safe parent, so caller-authored property names
-never enter the report.
-
-Exactly one retained violation at each object path carries applicable local
-correction guidance. For a closed object schema, `allowed_keys` is its sorted
-property-name set and `undeclared_key_count` counts submitted keys outside that
-local set. When the rejected node is an object, `missing_required` lists its
-absent schema-required names. An explicitly open object can still report those
-missing names, but omits `allowed_keys` and the undeclared count because
-extension keys are valid. These facts are path-local; there are no root-only
-missing or undeclared summaries that can contradict a nested violation. A
-closed-object type mismatch still receives schema-only `allowed_keys`, but no
-missing or undeclared claim is made about a non-object value.
-
-Each allowed or missing list retains at most 32 names and at most 4,096 bytes in
-deterministic JSON encoding. When a sorted prefix is retained, the violation
-also carries `allowed_key_count`/`allowed_keys_truncated` or
-`missing_required_count`/`missing_required_truncated`. The complete
-model-facing structural-diagnostics rendering is separately capped at 32,768
-characters and ends with `(contract diagnostics truncated)` when necessary;
-the prospective encoded-request size check remains authoritative for a
-caller-narrowed or already-full transcript.
-
-Every published name comes from the compiled schema: the discriminator, the
-branch `const`, safe path properties, allowed keys, and missing required keys.
-The value contributes only its JSON kind, required-key absence, array indices,
-and numeric undeclared counts. The rejected value, its field values, and its
-undeclared field names stay out of the error entirely. The reserved result
-validator exposes only this bounded classification; it does not expose the
-whole contract or add a route for `ValueContract.describe/1`.
-
-Ordinary contracts are bounded object schemas and are closed by default;
-`additionalProperties: true` explicitly opens an object. The supported
-keywords are `type`, `title`, `description`, `properties`, `required`,
-`additionalProperties`, `items`, `enum`, `const`, numeric and length bounds.
-String schemas may additionally use the single asserted
-`"format": "sha256"` for an algorithm-qualified lowercase digest; arbitrary
-formats and regexes remain outside the profile.
-Application contracts also allow one root `oneOf` containing 2–16 closed
-object branches. Every branch must require the same single string
-discriminator and give it a distinct `const` value:
+Set runtime ceilings under `limits` and cap model calls on the selected alias:
 
 ```json
 {
-  "oneOf": [
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["decision", "reason"],
-      "properties": {
-        "decision": {"type": "string", "const": "no-change"},
-        "reason": {"type": "string", "maxLength": 1000}
-      }
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["decision", "content"],
-      "properties": {
-        "decision": {"type": "string", "const": "propose-change"},
-        "content": {"type": "string", "maxLength": 32000}
-      }
-    }
-  ]
+  "providers": {
+    "workflow": [{"name": "model", "config": {"max_calls": 6}}]
+  },
+  "limits": {
+    "run_duration_ms": 60000,
+    "workflow_capability_calls": 12
+  }
 }
 ```
 
-Contracts are at most 64 KiB after normalization. References, regexes, nested
-composition, union types, and general-purpose `oneOf` are rejected. Apart from
-the shared bounded `sha256` format, this application profile does not widen
-MCP capability schemas.
+`run_duration_ms` bounds the whole run. `max_calls` bounds calls to that model
+alias, while `workflow_capability_calls` covers all workflow capability calls.
+The installed ceilings in `ptc-host.json` remain the maximum values `ptc.json`
+may request. See the [limits reference](../kernel-limits-reference.md) for every
+ceiling and its default.
 
-`--output PATH` atomically writes only the validated `Result.value`, never
-clobbers an existing file, and can be passed directly to a later run with
-`--input`. Use `--private-output` for a private run; it creates a `0600`
-artifact and keeps the value off stdout. Destination conflicts and
-normal/private class mismatches are rejected before provider acquisition, while
-exclusive creation remains authoritative if the path appears during the run.
-Artifact publication currently requires a Unix host and POSIX-compatible
-`mkdir` and `id` executables on `PATH`. It fails closed if those authority and
-mode-at-create primitives are unavailable, rather than briefly exposing
-content through a wider default mode.
+## How do I check the configuration?
 
-## Providers come from the host, not the manifest
+Install the aliases first, then validate. Both commands resolve the selected
+providers against the host document, so they report the selected provider as
+not installed until [host configuration](host-configuration.md) declares
+`model` and `workspace`:
 
-A manifest cannot create a provider. It can only select one the operator
-already installed, by its public name plus JSON configuration:
-
-```json
-"providers": {
-  "workflow": [
-    {"name": "deepseek", "config": {"default": true}},
-    {"name": "sonnet"}
-  ],
-  "mission": [
-    {
-      "name": "workspace",
-      "config": {
-        "allow": ["workspace.read", "workspace.write"]
-      }
-    }
-  ]
-}
+```console
+ptc validate my-application/ptc-project.json
+ptc doctor my-application/ptc-project.json
 ```
 
-A name is all a manifest gets. The credentials, endpoints, commands, and tool
-mappings behind that name live in the host JSON, so a manifest cannot reach past
-its selection to launch a command, supply a credential, or point a provider
-somewhere else. Placement is fixed too: LLM providers are workflow-only, MCP and
-native snapshot providers mission-only.
-
-Multiple live and replay LLM aliases may be selected together. At most one
-workflow LLM selection may set `"default": true`; invalid values and multiple
-defaults are rejected while providers are still inert. Calls select an alias
-with the provider-neutral request's `"model"` field. If it is omitted, a lone
-alias or the declared default is used. Selection never falls back implicitly.
-
-For MCP, `allow` selects installed public names without changing their
-operator-declared effects. An all-read installation may omit `allow` to select
-every mapping. But if the installation contains even one write mapping, `allow`
-becomes mandatory and non-empty — so adding a write mapping breaks an unchanged
-manifest that relied on implicit selection instead of silently widening its
-authority.
-
-The optional `model_visible` list may only narrow the names the host already
-marked visible. Visibility is not authority in either direction: a granted
-capability the model cannot see stays callable by exact name, and an ungranted
-one stays denied no matter how visible it is.
-
-[Host configuration](host-configuration.md) is the operator reference for the
-host JSON itself: credentials, all five provider sources, transports, tool
-mappings, data classes, and installed ceilings.
-
-Two providers are native rather than MCP, and both serve PtcRunner's own
-evidence back to a mission. A `ptc_trace_snapshot` alias named `history` derives
-`history.list-runs`, `history.get-run`, `history.list-turns`, and
-`history.counters`. A `ptc_inspection_snapshot` alias derives `list-runs`,
-`model-exchanges`, `capability-calls`, `generated-sources`,
-`effective-preludes`, `provider-exchanges`, `execution-prints`, and
-`execution-errors`.
-[Kernel REPL](kernel-repl.md#private-inspection-mission-sessions) shows the
-queries in use, and the
-[TraceLog contract](../trace-log-contract.md#query-contract) is normative for
-paging and bounds.
-
-Four properties matter when selecting them. Each reads its directory once, so an
-agent querying the trace of its own run sees a stable catalog instead of its own
-writes. An inspection snapshot never stands alone: it requires exactly one trace
-snapshot to validate against, and one orphaned, duplicated, malformed, or
-oversized artifact rejects the whole private catalog rather than exposing part of
-it. Because inspection data classifies the run as `private_inspection`, every
-other selected provider must accept private data before either directory is
-opened. And neither provider's safe snapshot contains its directory path — only
-counts, ceilings, and content identity — so publishing a snapshot does not
-disclose where the evidence lives.
-
-That yields a simple trust boundary. Treat the workflow bundle and the manifest
-as application code. Treat model-generated source, mission input, file content,
-and provider output as untrusted data.
-
-## Requested limits narrow host ceilings
-
-All limits are positive hard ceilings. A manifest may request lower values:
-
-```json
-"limits": {
-  "run_duration_ms": 30000,
-  "workflow_capability_calls": 16,
-  "workflow_capability_calls_per_name": 8,
-  "mission_capability_calls": 32,
-  "subordinate_evaluations": 8,
-  "subordinate_source_checks": 8,
-  "terminal_result_bytes": 250000
-}
-```
-
-The installation sets the maximum for each one, and a manifest can only request
-that value or less. An omitted limit takes the normal runtime default, capped by
-any lower installed ceiling.
-
-Limits reach further than those shown above: they also bound process heap,
-source size, retained continuation memory, provider concurrency, capability
-arguments and results, and canonical events.
-`subordinate_source_checks` is independent of `subordinate_evaluations` and
-mission capability quotas because a check compiles but never executes source.
-
-The host-only `provider_cleanup_timeout_ms`, `local_preflight_timeout_ms`,
-`selection_validation_timeout_ms`, and `doctor_connectivity_timeout_ms` names
-are deliberately absent from the application schema. A manifest that declares
-one is rejected rather than narrowing host-owned operational policy.
-
-The compiled ceilings suit one bounded run. An agent that must work for hours
-needs more turns, model calls, and trace events than they allow, and only the
-operator can raise that — requesting more here than the host installed is
-rejected. Even after the operator raises a ceiling, a manifest that wants the
-larger budget must still ask for it.
-[Host configuration](host-configuration.md#installed-ceilings) lists every
-installable name.
-
-## Events and inspection
-
-Normal canonical events are sanitized and bounded:
-
-```json
-"events": {"policy": "normal"}
-```
-
-A private canonical event policy changes sink and discovery behavior but does
-not turn events into a prompt/response transcript:
-
-```json
-"events": {"policy": "private"}
-```
-
-Exact model exchanges, generated programs, and connector payloads require the
-separate host-selected inspection artifact. The manifest cannot enable or
-choose that destination.
-
-## Optional labels for trace queries
-
-Labels are one optional block at the manifest's top level. The loader validates
-them once and copies their normalized form into the canonical `run-started`
-event:
-
-```json
-"labels": {
-  "name": "report-agent",
-  "model": "deepseek",
-  "provider": "openrouter",
-  "tags": {"mode": "summary"}
-}
-```
-
-They exist for one job: grouping and filtering runs when a single trace
-directory holds many of them, in the log-analysis REPL or the Viewer. They
-affect nothing else — not execution, authority, prompts, results, or provider
-selection — so most small manifests should omit them entirely.
-
-Because the manifest author supplies labels, the Kernel does not treat them as
-authoritative. They are never inferred from the providers actually selected, so
-a label claiming `"model": "deepseek"` proves nothing about which model ran. For
-runtime accounting or security decisions, read the real provider configuration
-and the canonical capability events instead.
-
-The fields serve different purposes:
-
-- `tags` are readable, queryable categories from a fixed vocabulary, such as
-  `mode=agent`, `mode=deterministic`, or `environment=staging`;
-- `name`, `model`, and `provider` let trusted tooling correlate equal
-  identifiers without publishing them as plain text. The trace stores only
-  their SHA-256 fingerprints.
-
-For example, this query selects deterministic runs by their readable tag:
-
-```clojure
-(log/runs {"tags" {"mode" "deterministic"}})
-```
-
-Use labels when operational trace classification is useful; omit them when it
-is not. They are deliberately not a general metadata map: keys and tag values
-come from a finite vocabulary, identifier strings are bounded and
-fingerprinted, and prompts, results, credentials, paths, and arbitrary user
-text do not belong there.
-
-## Next steps
-
-- [Host configuration](host-configuration.md) is the operator half — what the
-  aliases selected here actually resolve to.
-- [Building agents](building-agents.md) puts model policy behind these grants.
-- [Running and debugging](running-and-debugging.md) runs a manifest and reads
-  the traces, results, and inspection artifacts it declares.
-- [Components and preludes](components-and-preludes.md) covers the bundle
-  rules behind the `components` key.
-
-Exact field and failure contracts live in the
-`PtcRunner.Kernel.Manifest` module documentation. The
-[Kernel maintainer guide](kernel-maintainer.md) describes provider installation
-and ownership.
+Use the [application-manifest reference](../reference/application-manifest.md)
+for every field, validation rule, mission shape, provider-selection rule,
+event policy, and limit. Continue with [host configuration](host-configuration.md)
+to install the aliases the application selects.

@@ -71,7 +71,7 @@ defmodule PtcRunner.Kernel.NamedMissionsDiagnosisTest do
       RunConfig.new(
         workflow_environment: workflow,
         missions: %{"default" => default_mission, "work" => work},
-        input: %{},
+        input: %{"input" => %{}},
         limits: limits,
         event_sink: sink
       )

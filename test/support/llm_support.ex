@@ -11,12 +11,46 @@ defmodule PtcRunner.TestSupport.LLMSupport do
 
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderApplicationGate
-  alias PtcRunner.LLM.Registry
   alias PtcRunner.LLM.ReqLLMAdapter
+  alias PtcRunner.LLM.Requirements
 
-  @default_model "deepseek"
+  @default_model "openrouter:deepseek/deepseek-v4-flash"
   @timeout 60_000
   @req_opts [retry: :transient, max_retries: 3]
+
+  @doc """
+  Returns direct-embedding requirements with no reporting guarantees or
+  reservation authority.
+  """
+  @spec interim_requirements(pos_integer() | map()) :: PtcRunner.LLM.Requirements.t()
+  def interim_requirements(max_tokens \\ 4_096)
+
+  def interim_requirements(max_tokens) when is_integer(max_tokens) do
+    Requirements.interim(%{max_tokens: max_tokens})
+  end
+
+  def interim_requirements(exact_options) when is_map(exact_options) do
+    Requirements.interim(exact_options)
+  end
+
+  @doc """
+  Returns the closed runtime binding used by `PtcRunner.LLM.callback/2`.
+  """
+  @spec llm_binding(keyword()) :: PtcRunner.LLM.runtime_binding()
+  def llm_binding(opts \\ []) do
+    %{
+      credential: Keyword.get(opts, :credential),
+      cache: Keyword.get(opts, :cache, false)
+    }
+  end
+
+  @doc """
+  Returns the requester context Kernel dispatch supplies. Live calls carry an
+  integer absolute deadline; replay, doctor probes, and direct embedding pass
+  `nil`.
+  """
+  @spec llm_context() :: PtcRunner.LLM.requester_context()
+  def llm_context, do: %{llm_request_deadline_ms: nil}
 
   @doc """
   Admits the shipped LLM provider application for a test that builds providers
@@ -95,36 +129,22 @@ defmodule PtcRunner.TestSupport.LLMSupport do
 
   @doc """
   Get the current model from PTC_TEST_MODEL env var or return default.
+
+  The value is a full provider-qualified identifier, such as
+  `"openrouter:deepseek/deepseek-v4-flash"`.
   """
   @spec model() :: String.t()
   def model do
-    case System.get_env("PTC_TEST_MODEL") do
-      nil -> resolve_model(@default_model)
-      name -> resolve_model(name)
-    end
+    System.get_env("PTC_TEST_MODEL") || @default_model
   end
 
   @doc """
-  Resolve a model name using the Registry.
-
-  If the name is an alias, returns the full model ID.
-  If resolution fails, returns the name as-is.
-  """
-  @spec resolve_model(String.t()) :: String.t()
-  def resolve_model(name) do
-    case Registry.resolve(name) do
-      {:ok, model_id} -> model_id
-      {:error, _} -> name
-    end
-  end
-
-  @doc """
-  Load environment variables from the nearest `.env` file.
-
-  Delegates to `PtcRunner.Dotenv.load/0`.
+  Load the root checkout's `.env` when it exists.
   """
   @spec load_dotenv() :: :ok
-  defdelegate load_dotenv, to: PtcRunner.Dotenv, as: :load
+  def load_dotenv do
+    if File.regular?(".env"), do: PtcRunner.Dotenv.load_file(".env"), else: :ok
+  end
 
   @doc """
   Clean LLM response text by trimming and removing markdown fences.

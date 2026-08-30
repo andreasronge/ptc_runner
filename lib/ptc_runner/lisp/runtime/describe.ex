@@ -3,13 +3,9 @@ defmodule PtcRunner.Lisp.Runtime.Describe do
   Bounded data-shape summaries for PTC-Lisp values.
   """
 
-  alias PtcRunner.Lisp.Env.Builtin
-  alias PtcRunner.Lisp.Format
-  alias PtcRunner.Lisp.Java.Time.Duration, as: JavaDuration
-  alias PtcRunner.Lisp.Java.Time.Instant, as: JavaInstant
-  alias PtcRunner.Lisp.Java.Time.LocalDate, as: JavaLocalDate
-  alias PtcRunner.Lisp.Java.Util.Date, as: JavaDate
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
+  alias PtcRunner.Lisp.TypeVocabulary
+  alias PtcRunner.Lisp.ValuePreview
 
   @default_depth 1
   @max_depth 5
@@ -280,17 +276,10 @@ defmodule PtcRunner.Lisp.Runtime.Describe do
   defp example_value(%LispKeyword{} = value), do: value
 
   defp example_value(value) do
-    value
-    |> Format.to_clojure(printable_limit: @max_example_chars)
-    |> elem(0)
-    |> truncate_string(@max_example_chars)
+    preview(value)
   end
 
-  defp example_key(value) do
-    value
-    |> Format.to_clojure(printable_limit: @max_example_chars)
-    |> elem(0)
-  end
+  defp example_key(value), do: preview(value)
 
   # `non_empty: 0` is the absence signal this profiler exists to surface, so
   # the field is emitted whenever the values are countable at all — only
@@ -542,55 +531,29 @@ defmodule PtcRunner.Lisp.Runtime.Describe do
     |> Map.new()
   end
 
-  defp type_name(nil), do: "nil"
-  defp type_name(value) when is_boolean(value), do: "boolean"
-  defp type_name(:nan), do: "nan"
-  defp type_name(:infinity), do: "infinity"
-  defp type_name(:negative_infinity), do: "infinity"
-  defp type_name(value) when is_integer(value), do: "integer"
-  defp type_name(value) when is_float(value), do: "float"
-  defp type_name(value) when is_binary(value), do: "string"
-  defp type_name(%LispKeyword{}), do: "keyword"
-  defp type_name(value) when is_atom(value), do: "keyword"
-  defp type_name(value) when is_list(value), do: "vector"
-  defp type_name(%MapSet{}), do: "set"
-  defp type_name(%Builtin{}), do: "function"
-
-  defp type_name(%JavaLocalDate{} = value),
-    do: java_type_name(JavaLocalDate, value, "java.time.LocalDate")
-
-  defp type_name(%JavaInstant{} = value),
-    do: java_type_name(JavaInstant, value, "java.time.Instant")
-
-  defp type_name(%JavaDuration{} = value),
-    do: java_type_name(JavaDuration, value, "java.time.Duration")
-
-  defp type_name(%JavaDate{} = value), do: java_type_name(JavaDate, value, "java.util.Date")
-  defp type_name(value) when is_function(value), do: "function"
-  defp type_name(value) when is_map(value) and not is_struct(value), do: "map"
-  defp type_name({:closure, _, _, _, _, _}), do: "function"
-  defp type_name({tag, _}) when tag in [:normal, :collect], do: "function"
-
-  defp type_name({:special, name})
-       when name in [:dir, :apropos, :doc, :export_meta, :println],
-       do: "function"
-
-  defp type_name({tag, _, _})
-       when tag in [:variadic, :variadic_nonempty, :multi_arity, :special],
-       do: "function"
-
-  defp type_name(_), do: "unknown"
-
-  defp java_type_name(module, value, name) do
-    if module.valid?(value), do: name, else: "unknown"
+  defp type_name(value) do
+    case TypeVocabulary.semantic_type(value) do
+      "list" -> "vector"
+      "invalid-java-value" -> "unknown"
+      type -> type
+    end
   end
 
   defp render_key(key) when is_binary(key), do: truncate_string(key, @max_example_chars)
 
-  defp render_key(key) do
-    key
-    |> Format.to_clojure(printable_limit: @max_example_chars)
-    |> elem(0)
+  defp render_key(key), do: preview(key)
+
+  defp preview(value) do
+    value
+    |> ValuePreview.render(
+      max_chars: @max_example_chars,
+      max_bytes: @max_example_chars * 4,
+      max_items: 8,
+      max_depth: 2,
+      max_nodes: 32,
+      max_string_chars: @max_example_chars
+    )
+    |> Map.fetch!(:text)
   end
 
   defp key_collisions(entries, key_fun) do

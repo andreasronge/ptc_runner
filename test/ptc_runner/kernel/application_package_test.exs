@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.TypedCanonicalJSON
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
 
   @source "(ns app) (defn run [input] (return input))"
   @schema ~S({"type":"object","properties":{"answer":{"type":"integer"}},"additionalProperties":false})
@@ -71,7 +72,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
              package_projection(memory_request.package)
 
     assert directory_request.package.application_content_digest ==
-             "abe6d9622bbb77dd2ed6f66c6878b96e2a3b51daac35bf6beb62b3c99c2da9ee"
+             "3c322c2f773804550adf68c8276adefac37edfcf8a5fb040a7b9bab2e0dd3178"
 
     assert directory_request.package.contract_behavior_hashes.input ==
              "7dfe6c77fe7a1360821e8848da675d1d869cc8fe5d7cf38313c749c40cc49ed3"
@@ -90,6 +91,36 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
 
     assert :ok = RunBuilder.close(directory_build)
     assert :ok = RunBuilder.close(memory_build)
+  end
+
+  @tag :tmp_dir
+  test "directory manifest filenames are transport paths, not portable logical names", %{
+    tmp_dir: directory
+  } do
+    documents = fixture_documents()
+    baseline_path = write_documents(Path.join(directory, "baseline"), documents)
+
+    assert {:ok, baseline} =
+             ApplicationPackage.request_directory(baseline_path, result_projection: :native)
+
+    for {filename, index} <-
+          Enum.with_index([
+            "_app.json",
+            ".app.json",
+            "-app.json",
+            "Manifest.json",
+            "manifest copy.json"
+          ]) do
+      manifest_path = write_documents(Path.join(directory, "variant-#{index}"), documents)
+      renamed_path = Path.join(Path.dirname(manifest_path), filename)
+      File.rename!(manifest_path, renamed_path)
+
+      assert {:ok, request} =
+               ApplicationPackage.request_directory(renamed_path, result_projection: :native)
+
+      assert package_projection(request.package) == package_projection(baseline.package)
+      assert request.input == baseline.input
+    end
   end
 
   @tag :tmp_dir
@@ -761,7 +792,8 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
       {:error, :stop_after_context}
     end
 
-    {:ok, registry} = ProviderRegistry.new(%{"capture" => builder})
+    {:ok, registry} =
+      ProviderRegistry.new(%{"capture" => TestHelpers.staged_provider(builder)})
 
     assert {:error, :stop_after_context} =
              manifest_path
