@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
   """
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.BoundedCapture
   alias PtcRunner.Kernel.RunCatalog
@@ -247,23 +248,6 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
     do: {:stop, :normal, state}
 
   def handle_info(_message, state), do: {:noreply, state}
-
-  # This OTP-version guard around `format_status/1` is byte-identical in the
-  # twelve other owner modules that carry it. A suppression comment does not
-  # attach to a bare module-level `if`, so this occurrence joins that cluster
-  # in `.duplication-baseline.json` rather than being marked here.
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-    def format_status(status), do: redact_status(status)
-  else
-    def format_status(status), do: redact_status(status)
-  end
-
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
-
-  defp redact_status(status) when is_map(status), do: Map.put(status, :state, :redacted)
-  defp redact_status(status), do: status
 
   defp call(%__MODULE__{pid: pid, token: token}, request) when is_pid(pid) do
     GenServer.call(pid, {token, request}, :infinity)

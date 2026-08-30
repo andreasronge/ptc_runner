@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
   @moduledoc false
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.MCPOAuth.ManagerCleanup
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
@@ -353,16 +354,6 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-    def format_status(status), do: redact_status(status)
-  else
-    def format_status(status), do: redact_status(status)
-  end
-
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
-
   defp safe_call(pid, request, timeout \\ 5_000) do
     GenServer.call(pid, request, timeout)
   catch
@@ -374,14 +365,6 @@ defmodule PtcRunner.Kernel.MCPRequestContext do
 
   defp fence_request_worker do
     Process.exit(self(), :kill)
-  end
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
   end
 
   defp release_active(state, caller, demonitor? \\ true) do

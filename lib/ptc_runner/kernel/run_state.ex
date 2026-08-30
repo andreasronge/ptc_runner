@@ -51,6 +51,7 @@ defmodule PtcRunner.Kernel.RunState do
   survive a later sandbox timeout or heap kill and are cleared with the lease.
   """
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.EventSink
@@ -1446,15 +1447,6 @@ defmodule PtcRunner.Kernel.RunState do
     end
   end
 
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-  end
-
-  def format_status(status), do: redact_status(status)
-
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
-
   @impl GenServer
   def terminate(_reason, state) do
     state.reservations
@@ -1495,14 +1487,6 @@ defmodule PtcRunner.Kernel.RunState do
     %{state | closed?: true, provider_tasks: 0, reservations: %{}}
     |> maybe_complete_evaluation_release()
     |> admit_from_queue()
-  end
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
   end
 
   defp drain_providers(refs) when map_size(refs) == 0, do: :ok

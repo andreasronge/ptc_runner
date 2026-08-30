@@ -23,6 +23,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
   """
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Authority
@@ -422,16 +423,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
-
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-    def format_status(status), do: redact_status(status)
-  else
-    def format_status(status), do: redact_status(status)
-  end
-
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
 
   defp usable_grant(pid, config, deadline_ms) do
     with {:ok, grant} <-
@@ -915,12 +906,4 @@ defmodule PtcRunner.Kernel.MCPOAuth.TokenManager do
 
   defp local_requirement_satisfied?(nil, _generation, _granted), do: true
   defp local_requirement_satisfied?(_requirement, _generation, _granted), do: false
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
-  end
 end
