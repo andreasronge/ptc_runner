@@ -4,42 +4,39 @@ Select, verify, and observe a model without working on PtcRunner's provider
 implementation.
 
 `ptc-host.json` installs a model under a stable alias, and
-`ptc.json` selects that alias for its trusted workflow. Generated mission code
-does not receive the model route.
+`ptc.json` selects it for trusted workflow code. Generated mission code never
+receives the route.
 
 ## What must the model support?
 
-An agent loop needs an endpoint that accepts tool-bearing requests. A model may
-accept ordinary completions while rejecting the agent's tool contract;
-PtcRunner reports that separately from a missing model or credential failure.
+An agent loop needs an endpoint that accepts tools. PtcRunner distinguishes an
+unsupported tool contract from a missing model or credential.
 
 ## How do I choose one?
 
-Start with the model in the shipped examples: OpenRouter's
+Start with the shipped example model: OpenRouter's
 [`deepseek/deepseek-v4-flash`](https://openrouter.ai/deepseek/deepseek-v4-flash).
-Model catalogs and routing change over time, so PtcRunner does not keep a static
-compatibility list. Choose a model advertised for tool use, install it under an
-alias, and confirm the exact route with `ptc doctor PROJECT.json --connect`.
+Catalogs and routing change, so choose a model advertised for tool use and
+confirm its exact route with `ptc doctor PROJECT.json --connect`.
 
 Two aliases share the public `llm-request` call budget. `config.max_calls`
 additionally caps an alias only when it is stricter than that shared budget.
 
 ## Where do credentials belong?
 
-Bind credentials outside the application, preferably through a named environment
-variable or another credential source in `ptc-host.json`. Then inspect the public
-installation without revealing its credential or private endpoint:
+Bind credentials outside the application, preferably through a named source in
+`ptc-host.json`. Inspect the public installation without revealing its
+credential or private endpoint:
 
 ```console
 ptc models ptc-project.json
 ptc doctor ptc-project.json
 ```
 
-`models` names the selector each LLM alias configured; an endpoint-bearing
-`openai-compat:` selector is withheld instead, because it carries the
-private address from `ptc-host.json`.
+`models` names each LLM selector but withholds an endpoint-bearing
+`openai-compat:` selector because it carries a private address.
 
-## How do I check connectivity?
+## What can I check before a run?
 
 Plain `doctor` is inert. Use the active connectivity probe only when a remote
 request is intended:
@@ -47,6 +44,11 @@ request is intended:
 ```console
 ptc doctor ptc-project.json --connect
 ```
+
+ptc models, ptc validate, and ptc doctor do not provide a pre-run price quote.
+Use the optional reservation budget described in [Size an LLM cost
+budget](../kernel-limits-reference.md#size-an-llm-cost-budget); a refusal names
+the next call's exact requirement.
 
 ## What does a run record?
 

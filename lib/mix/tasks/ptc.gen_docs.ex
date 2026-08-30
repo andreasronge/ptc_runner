@@ -40,6 +40,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   alias PtcRunner.Kernel.LLMFailureCatalog
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.ProjectConfig
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Lisp.Introspection
   alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Prelude.Export
@@ -199,6 +200,18 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     {:ok, workflow_timeout} = LimitCatalog.fetch(:workflow_timeout_ms)
     {:ok, normal_event_count} = LimitCatalog.fetch(:normal_event_count)
 
+    cost_limit = 2_400
+    next_cost_reservation = 2_419
+    cost_remaining = 2_338
+
+    {:ok, cost_budget_diagnostic} =
+      RuntimeLimitDiagnostic.budget_message(
+        :llm_cost_microusd,
+        cost_limit,
+        next_cost_reservation,
+        cost_remaining
+      )
+
     content = """
     <!-- Auto-generated — do not edit by hand -->
     # Kernel limits reference
@@ -253,6 +266,46 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     | Name | Meaning | Unit | Disabled default | Inclusive range |
     | --- | --- | --- | --- | ---: |
     #{optional_rows}
+
+    ### Size an LLM cost budget
+
+    `llm_cost_microusd` is a pre-dispatch reservation ceiling, not a pre-run
+    price quote or a direct measurement of realized spend. Before each live
+    call, PtcRunner computes a conservative, request-specific reservation from
+    the request and accumulated conversation, the full authorized output-token
+    allowance, and the model's pricing. Later calls can therefore require more
+    headroom than earlier ones, and a ceiling set near expected final spend can
+    refuse before any call is dispatched.
+
+    For example, after #{format_integer(cost_limit - cost_remaining)} microUSD has
+    settled, a #{format_integer(cost_limit)} microUSD ceiling has
+    #{format_integer(cost_remaining)} remaining. If the next call requires a
+    #{format_integer(next_cost_reservation)} microUSD reservation, it is refused
+    with the exact diagnostic:
+
+    ```text
+    #{cost_budget_diagnostic}
+    ```
+
+    Those numbers describe one request; their ratio to its eventual cost is not
+    a sizing multiplier. `ptc models`, `ptc validate`, and `ptc doctor` do not
+    provide a pre-run price quote. The optional cost budget is the fail-closed
+    admission control, and a refusal reports the next call's exact required
+    reservation.
+
+    Valid priced usage releases the unused reservation and charges actual cost.
+    A dispatched call without trustworthy priced usage conservatively charges
+    the full reservation and marks `llm_budget.cost.state` as `incomplete`; that
+    charge is an accounting upper bound, not measured spend. When its state is
+    `available`, `llm_spend` aggregates trustworthy priced usage from successful
+    and failed calls. A possibly dispatched failure without trustworthy usage
+    makes spend `incomplete`, because it can still incur unmeasured provider charges.
+
+    To reduce the output portion of future reservations, an application may
+    narrow `limits.llm_request_output_tokens`, or a model installation may set a
+    lower `params.max_tokens`. Lower either only when the smaller output allowance
+    is valid for the workload; request and conversation size still contribute to
+    each reservation.
 
     ## Installed-only limits
 
