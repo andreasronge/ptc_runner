@@ -13,7 +13,7 @@ defmodule PtcRunner.Kernel.AnalysisProfileRegistry do
   alias PtcRunner.Kernel.RunCatalogProfile
 
   @profiles %{
-    "private-run-analysis-v1" => PrivateRunAnalysisProfile,
+    "private-run-analysis-v2" => PrivateRunAnalysisProfile,
     "private-run-catalog-v1" => RunCatalogProfile,
     "run-analysis-v1" => PublicRunAnalysisProfile
   }
@@ -114,7 +114,7 @@ defmodule PtcRunner.Kernel.AnalysisProfileRegistry do
   the static declaration. Reading the static list is precisely what let #1220
   through: the "jsonl requires input" guard consulted
   `frontend.output_formats`, which does not contain `:jsonl` for
-  `private-run-analysis-v1`, so the guard skipped the very call that needed it.
+  `private-run-analysis-v2`, so the guard skipped the very call that needed it.
   """
   @spec reachable_frontend(recipe(), boolean()) :: %{
           input_modes: [atom()],

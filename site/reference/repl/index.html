@@ -99,7 +99,7 @@ private-session contract.">
 <article>
 <h1 id="repl-reference">REPL reference</h1><p>This is the complete interactive, unattended, analysis-profile, and
 private-session contract.</p><p><code class="inline">ptc repl</code> keeps its workflow, manifest-mission, and code-owned profile
-environments deliberately separate:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Session</th><th style="text-align: left;">Selection</th><th style="text-align: left;">Environment</th><th style="text-align: left;">Authority</th></tr></thead><tbody><tr><td style="text-align: left;">Direct scratchpad</td><td style="text-align: left;">no selector</td><td style="text-align: left;">fresh workflow</td><td style="text-align: left;">core REPL only</td></tr><tr><td style="text-align: left;">Manifest workflow</td><td style="text-align: left;"><code class="inline">--project</code> or <code class="inline">--manifest</code></td><td style="text-align: left;">manifest workflow</td><td style="text-align: left;">workflow capabilities and model routes</td></tr><tr><td style="text-align: left;">Manifest mission</td><td style="text-align: left;"><code class="inline">--project</code> or <code class="inline">--manifest</code> plus <code class="inline">--mission NAME</code></td><td style="text-align: left;">selected manifest mission</td><td style="text-align: left;">direct mission capabilities plus provider dependency closure</td></tr><tr><td style="text-align: left;">Public analysis profile</td><td style="text-align: left;"><code class="inline">--profile run-analysis-v1</code></td><td style="text-align: left;">fixed code-owned mission</td><td style="text-align: left;">immutable traces</td></tr><tr><td style="text-align: left;">Private analysis profile</td><td style="text-align: left;"><code class="inline">--profile private-run-analysis-v1</code></td><td style="text-align: left;">fixed code-owned mission</td><td style="text-align: left;">correlated traces and private inspection records</td></tr><tr><td style="text-align: left;">Private catalog profile</td><td style="text-align: left;"><code class="inline">--profile private-run-catalog-v1</code></td><td style="text-align: left;">fixed code-owned mission</td><td style="text-align: left;">safe metadata from bounded trace and inspection probes</td></tr></tbody></table></div><p>Successful definitions and exact <code class="inline">*1</code>, <code class="inline">*2</code>, and <code class="inline">*3</code> history persist for one
+environments deliberately separate:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Session</th><th style="text-align: left;">Selection</th><th style="text-align: left;">Environment</th><th style="text-align: left;">Authority</th></tr></thead><tbody><tr><td style="text-align: left;">Direct scratchpad</td><td style="text-align: left;">no selector</td><td style="text-align: left;">fresh workflow</td><td style="text-align: left;">core REPL only</td></tr><tr><td style="text-align: left;">Manifest workflow</td><td style="text-align: left;"><code class="inline">--project</code> or <code class="inline">--manifest</code></td><td style="text-align: left;">manifest workflow</td><td style="text-align: left;">workflow capabilities and model routes</td></tr><tr><td style="text-align: left;">Manifest mission</td><td style="text-align: left;"><code class="inline">--project</code> or <code class="inline">--manifest</code> plus <code class="inline">--mission NAME</code></td><td style="text-align: left;">selected manifest mission</td><td style="text-align: left;">direct mission capabilities plus provider dependency closure</td></tr><tr><td style="text-align: left;">Public analysis profile</td><td style="text-align: left;"><code class="inline">--profile run-analysis-v1</code></td><td style="text-align: left;">fixed code-owned mission</td><td style="text-align: left;">immutable traces</td></tr><tr><td style="text-align: left;">Private analysis profile</td><td style="text-align: left;"><code class="inline">--profile private-run-analysis-v2</code></td><td style="text-align: left;">fixed code-owned mission</td><td style="text-align: left;">correlated traces and private inspection records</td></tr><tr><td style="text-align: left;">Private catalog profile</td><td style="text-align: left;"><code class="inline">--profile private-run-catalog-v1</code></td><td style="text-align: left;">fixed code-owned mission</td><td style="text-align: left;">safe metadata from bounded trace and inspection probes</td></tr></tbody></table></div><p>Successful definitions and exact <code class="inline">*1</code>, <code class="inline">*2</code>, and <code class="inline">*3</code> history persist for one
 command. A failed form preserves the previously committed state. Profile and
 manifest modes are mutually exclusive because they carry different authority.</p><p>All three modes render successful values with the same bounded structural
 preview used for model observations. Collection items, nesting, nodes, strings,
@@ -335,7 +335,7 @@ ptc repl --profile private-run-catalog-v1 \
   -e '(analysis/catalog {&quot;state&quot; &quot;admissible&quot; &quot;limit&quot; 20})'
 
 # Session 2: re-verify and admit only the explicit set (at most sixteen).
-ptc repl --profile private-run-analysis-v1 \
+ptc repl --profile private-run-analysis-v2 \
   --run cmd-00000000000000000000000001 \
   --run cmd-00000000000000000000000002 \
   --resource traces=tmp/tutorial-traces \
@@ -349,7 +349,7 @@ session cannot acquire a newly named run dynamically.</p><p><code class="inline"
 only into this closed profile because ordinary workflows and manifests cannot
 receive its backing capability.</p><h2 id="query-private-inspection-evidence">Query private inspection evidence</h2><p>Interactive private analysis requires an attached terminal and explicit sink
 authorization:</p><pre><code class="console language-console">ptc repl \
-  --profile private-run-analysis-v1 \
+  --profile private-run-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \
@@ -357,7 +357,7 @@ authorization:</p><pre><code class="console language-console">ptc repl \
   --private-terminal</code></pre><p><code class="inline">--load</code> evaluates one bounded local setup file, then opens the authorized
 interactive terminal with those definitions available. <code class="inline">--eval</code>, scripts, and
 stdin remain unattended input and require <code class="inline">--private-unattended</code> instead.</p><p>Repeat <code class="inline">--run RUN_ID</code> one through sixteen times to admit one exact, bounded
-cohort. Selection is available only with <code class="inline">private-run-analysis-v1</code>; a single
+cohort. Selection is available only with <code class="inline">private-run-analysis-v2</code>; a single
 flag still uses the selected-set path, while no flags retain whole-directory
 capture. Values are validated as a complete list and then treated as an
 order-independent set. Selected capture resolves only each run's exact normal
@@ -419,7 +419,16 @@ values. <code class="inline">turns</code> reconstructs cumulative model requests
 snapshot opens. Each item exposes one individual turn and matching generated
 source; page-level evidence reports incomplete or ambiguous reconstruction
 without guessing. The repeated system prompt is omitted from turns and remains
-available in the raw <code class="inline">model_exchanges</code> collection.</p><p>For one complete conversation, use the simpler one-shot command:</p><pre><code class="console language-console">mkdir -p tmp/tutorial-transcript
+available in the raw <code class="inline">model_exchanges</code> collection.</p><p>The private profile installs the pure <code class="inline">prompt.audit</code> component so a recorded
+system prompt can be measured without adding a capability grant:</p><pre><code class="clojure language-clojure">(def exchanges
+  (analysis/read run-id {&quot;collection&quot; &quot;model_exchanges&quot; &quot;limit&quot; 1}))
+(def system-prompt
+  (get-in exchanges [&quot;items&quot; 0 &quot;arguments&quot; &quot;system&quot;]))
+(prompt.audit/measure system-prompt)</code></pre><p>Use <code class="inline">prompt.audit/segments</code> for the ordered authored/dynamic sections, or
+<code class="inline">prompt.audit/delta</code> to compare two rendered prompts. Recognition validates the
+V1 boundary structure, not every byte of authored prose; a string that fails
+those structural checks returns one <code class="inline">unrecognised</code> segment instead of guessed
+boundaries.</p><p>For one complete conversation, use the simpler one-shot command:</p><pre><code class="console language-console">mkdir -p tmp/tutorial-transcript
 ptc transcript RUN_ID \
   --traces tmp/tutorial-traces \
   --inspection tmp/tutorial-inspection \
@@ -443,7 +452,7 @@ disclosing any path:</p><pre><code class="text language-text">directories for --
 --traces contains --inspection</code></pre><h3 id="private-analysis-without-a-terminal">Private analysis without a terminal</h3><p><code class="inline">--private-unattended</code> authorizes the command's own streams as the private
 sink. It admits expressions, setup files, scripts, stdin, and JSON Lines and is
 mutually exclusive with <code class="inline">--private-terminal</code>:</p><pre><code class="console language-console">ptc repl \
-  --profile private-run-analysis-v1 \
+  --profile private-run-analysis-v2 \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \

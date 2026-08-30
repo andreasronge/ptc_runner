@@ -408,7 +408,7 @@ admissible rows in the first command's JSONL evaluation record:</p><pre><code cl
   --private-unattended --format jsonl \
   -e '(analysis/catalog {&quot;state&quot; &quot;admissible&quot; &quot;limit&quot; 20})'
 
-ptc repl --profile private-run-analysis-v1 \
+ptc repl --profile private-run-analysis-v2 \
   --run cmd-00000000000000000000000001 \
   --run cmd-00000000000000000000000002 \
   --resource traces=.ptc/traces \
@@ -445,7 +445,7 @@ remain authoritative, and unrelated directory members are not listed, opened,
 sized, decoded, or counted toward directory or aggregate source limits. The
 selected files still keep their individual source, record, retained-memory,
 heap, deadline, and result ceilings. Whole-directory snapshots used by
-<code class="inline">private-run-analysis-v1</code> stay a distinct source variant: they admit only
+<code class="inline">private-run-analysis-v2</code> stay a distinct source variant: they admit only
 filename-bound one-run files, isolate a stable damaged connected component,
 and keep disjoint healthy runs queryable. Namespace or selected-file mutation
 still rejects the whole capture.</p><p>The parent of <code class="inline">--private-output</code> must already exist and be reached without a
@@ -458,7 +458,7 @@ conflicting switches and their physical relationship, and discloses no path.
 A noncanonical or traversal-shaped <code class="inline">RUN_ID</code>, a missing or non-regular selected
 candidate, a selected identity or correlation mismatch, and ambiguous,
 incomplete, changed, unsupported, or oversized selected evidence fail without a
-partial output.</p><p>Use <code class="inline">private-run-analysis-v1</code> when you need several correlated questions or
+partial output.</p><p>Use <code class="inline">private-run-analysis-v2</code> when you need several correlated questions or
 custom PTC-Lisp analysis. Its results can include exact messages, generated
 source, effective components, capability payloads, prints, diagnostics, and
 terminal values. The attached-terminal and unattended switches are accident

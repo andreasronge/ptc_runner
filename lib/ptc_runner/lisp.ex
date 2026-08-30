@@ -1677,11 +1677,12 @@ defmodule PtcRunner.Lisp do
     do: unsupported_java_member_message(namespace, member)
 
   def format_error({:unsupported_java_class, class}),
-    do: "Analysis error: unsupported Java class #{class}"
+    do:
+      "Analysis error: unsupported Java class #{class}. Admitted Java classes: " <>
+        Enum.join(admitted_java_class_names(), ", ")
 
   def format_error({:java_arity_error, reference_id, details}),
-    do:
-      "Analysis error: Java reference #{reference_id} expects arity #{inspect(details.expected)}, got #{details.actual}"
+    do: java_arity_error_message(reference_id, details)
 
   # Handle Eval errors with specific types
   def format_error({:unbound_var, name}) do
@@ -2392,15 +2393,8 @@ defmodule PtcRunner.Lisp do
       :ok
     else
       label = if length(vars) == 1, do: "Undefined variable", else: "Undefined variables"
-      message = "#{label}: #{Enum.join(vars, ", ")}#{definition_only_suffix(vars)}"
+      message = "#{label}: #{Enum.join(vars, ", ")}#{Helpers.unresolved_name_suffix(vars)}"
       {:error, Step.error(:unbound_var, message, %{}, %{unbound_names: vars})}
-    end
-  end
-
-  defp definition_only_suffix(vars) do
-    case Helpers.definition_only_hint(vars) do
-      nil -> ""
-      hint -> ". Hint: #{hint}"
     end
   end
 
@@ -3105,6 +3099,49 @@ defmodule PtcRunner.Lisp do
   end
 
   defp pattern_vars(_other), do: []
+
+  defp admitted_java_class_names do
+    JavaSurface.references()
+    |> Enum.map(& &1.class_id)
+    |> Enum.uniq()
+    |> Enum.flat_map(fn class_id ->
+      case JavaSurface.fetch_class(class_id) do
+        {:ok, %{name: name}} -> [name]
+        :error -> []
+      end
+    end)
+    |> Enum.sort()
+  end
+
+  defp java_arity_error_message(reference_id, %{expected: []}) do
+    spelling = java_reference_spelling(reference_id)
+
+    "Analysis error: #{spelling} is a Java field, not a callable; " <>
+      "reference it as #{spelling} without parentheses"
+  end
+
+  defp java_arity_error_message(reference_id, details) do
+    arities = details.expected |> List.wrap() |> Enum.join(", ")
+
+    "Analysis error: #{java_reference_spelling(reference_id)} accepts arity #{arities}, " <>
+      "got #{details.actual}"
+  end
+
+  defp java_reference_spelling(reference_id) do
+    with :error <- java_reference_spelling_from_reference(reference_id),
+         :error <- JavaSurface.member_family_source(reference_id) do
+      "Java reference #{reference_id}"
+    else
+      {:ok, spelling} -> spelling
+    end
+  end
+
+  defp java_reference_spelling_from_reference(reference_id) do
+    case JavaSurface.fetch_reference(reference_id) do
+      {:ok, %{spellings: [spelling | _]}} -> {:ok, spelling}
+      _unspelled -> :error
+    end
+  end
 
   defp unsupported_java_member_message(namespace, member) do
     members = JavaSurface.namespace_members(namespace)

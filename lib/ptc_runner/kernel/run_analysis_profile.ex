@@ -21,9 +21,9 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
     quote do
       alias PtcRunner.Kernel.RunAnalysisProfile
 
-      def component_ids, do: RunAnalysisProfile.component_ids()
-      def component_selections, do: RunAnalysisProfile.component_selections()
-      def namespaces, do: RunAnalysisProfile.namespaces()
+      def component_ids, do: RunAnalysisProfile.component_ids(unquote(kind))
+      def component_selections, do: RunAnalysisProfile.component_selections(unquote(kind))
+      def namespaces, do: RunAnalysisProfile.namespaces(unquote(kind))
       def explicit_capabilities, do: RunAnalysisProfile.explicit_capabilities()
       def persistence_policy, do: RunAnalysisProfile.persistence_policy()
       def result_policy, do: RunAnalysisProfile.result_policy(unquote(kind))
@@ -54,9 +54,11 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
     end
   end
 
-  def component_ids, do: @components
-  def component_selections, do: Enum.map(@components, &{:library, &1})
-  def namespaces, do: @namespaces
+  def component_ids(:public), do: @components
+  def component_ids(:private), do: @components ++ ["prompt.audit"]
+  def component_selections(kind), do: Enum.map(component_ids(kind), &{:library, &1})
+  def namespaces(:public), do: @namespaces
+  def namespaces(:private), do: @namespaces ++ ["prompt.audit"]
   def explicit_capabilities, do: @capabilities
   def persistence_policy, do: @persistence
   def resource_names(:public), do: ["traces"]
@@ -300,8 +302,8 @@ defmodule PtcRunner.Kernel.RunAnalysisProfile do
     %{
       "id" => recipe.id(),
       "summary" => summary,
-      "components" => @components,
-      "namespaces" => @namespaces,
+      "components" => recipe.component_ids(),
+      "namespaces" => recipe.namespaces(),
       "explicit_capabilities" => @capabilities,
       "limits" => limits() |> Map.from_struct() |> stringify_keys(),
       "persistence_policy" => @persistence,

@@ -6,7 +6,7 @@ defmodule PtcRunner.Kernel.AnalysisResources do
   alias PtcRunner.Kernel.TraceSnapshot
 
   @public_profile "run-analysis-v1"
-  @private_profile "private-run-analysis-v1"
+  @private_profile "private-run-analysis-v2"
   @catalog_profile "private-run-catalog-v1"
 
   @enforce_keys [:profile_id, :handles]

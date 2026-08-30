@@ -150,7 +150,7 @@ unsupported, changed, or oversized selected evidence fails closed. A refusal
 names a stable <code class="inline">transcript/</code> diagnostic and does not echo <code class="inline">RUN_ID</code> or a
 filesystem path. Whole-directory analysis snapshots remain a separate
 contract: they still inventory every canonical member.</p><h2 id="choose-the-smallest-evidence-authority">Choose the smallest evidence authority</h2><p>The four navigation paths answer different questions. Pick one before opening
-private payloads:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Need</th><th style="text-align: left;">Use</th><th style="text-align: left;">Authority and lifetime</th></tr></thead><tbody><tr><td style="text-align: left;">find candidate runs in a large artifact root</td><td style="text-align: left;"><code class="inline">private-run-catalog-v1</code> and <code class="inline">analysis/catalog</code></td><td style="text-align: left;">one immutable metadata-only generation; no payload admission</td></tr><tr><td style="text-align: left;">publish one complete model conversation</td><td style="text-align: left;"><code class="inline">ptc transcript RUN_ID</code></td><td style="text-align: left;">one exact correlated pair and one new owner-only result file</td></tr><tr><td style="text-align: left;">ask several private questions about up to sixteen runs</td><td style="text-align: left;"><code class="inline">private-run-analysis-v1</code> with repeated <code class="inline">--run</code></td><td style="text-align: left;">one immutable selected-set session with <code class="inline">analysis/*</code></td></tr><tr><td style="text-align: left;">make a repeatable debugger application or agent</td><td style="text-align: left;">install snapshots and select <code class="inline">debug.nav</code></td><td style="text-align: left;">the manifest's fixed mission authority and typed relationship walk</td></tr></tbody></table></div><p>Catalog discovery and selected analysis are separate commands. For example,
+private payloads:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Need</th><th style="text-align: left;">Use</th><th style="text-align: left;">Authority and lifetime</th></tr></thead><tbody><tr><td style="text-align: left;">find candidate runs in a large artifact root</td><td style="text-align: left;"><code class="inline">private-run-catalog-v1</code> and <code class="inline">analysis/catalog</code></td><td style="text-align: left;">one immutable metadata-only generation; no payload admission</td></tr><tr><td style="text-align: left;">publish one complete model conversation</td><td style="text-align: left;"><code class="inline">ptc transcript RUN_ID</code></td><td style="text-align: left;">one exact correlated pair and one new owner-only result file</td></tr><tr><td style="text-align: left;">ask several private questions about up to sixteen runs</td><td style="text-align: left;"><code class="inline">private-run-analysis-v2</code> with repeated <code class="inline">--run</code></td><td style="text-align: left;">one immutable selected-set session with <code class="inline">analysis/*</code></td></tr><tr><td style="text-align: left;">make a repeatable debugger application or agent</td><td style="text-align: left;">install snapshots and select <code class="inline">debug.nav</code></td><td style="text-align: left;">the manifest's fixed mission authority and typed relationship walk</td></tr></tbody></table></div><p>Catalog discovery and selected analysis are separate commands. For example,
 page the first twenty admissible rows, then carry only chosen <code class="inline">run_id</code> values
 into a new session:</p><pre><code class="console language-console">ptc repl --profile private-run-catalog-v1 \
   --resource traces=.ptc/traces \
@@ -158,14 +158,14 @@ into a new session:</p><pre><code class="console language-console">ptc repl --pr
   --private-unattended --format jsonl \
   -e '(analysis/catalog {&quot;state&quot; &quot;admissible&quot; &quot;limit&quot; 20})'
 
-ptc repl --profile private-run-analysis-v1 \
+ptc repl --profile private-run-analysis-v2 \
   --run cmd-00000000000000000000000001 \
   --run cmd-00000000000000000000000002 \
   --resource traces=.ptc/traces \
   --resource inspection=.ptc/inspection \
   --private-unattended --format jsonl \
   -e '(analysis/open &quot;cmd-00000000000000000000000001&quot;)'</code></pre><p>If the catalog has more candidates than one selected set can hold, start a
-second <code class="inline">private-run-analysis-v1</code> command with a later batch. Each command
+second <code class="inline">private-run-analysis-v2</code> command with a later batch. Each command
 re-verifies only its own explicit references and has independent source,
 index, heap, result, handle, call, and session bounds. A catalog digest binds
 only paging inside its discovery generation; it never crosses as an admission
@@ -376,7 +376,7 @@ capability side effects;</li><li>it assumes a captured failure with retained gen
 produced no program leaves nothing to walk;</li><li>host validation, not a model report, decides whether a repair is accepted.</li></ul><p>The one shape it demonstrably covers is a complete single-call failure whose
 relevant source lies inside the called component's dependency closure.
 Discovery outside that closure, and repair of nonlocal or weakly specified
-defects, are not established.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/repl/">Kernel REPL</a> covers <code class="inline">private-run-analysis-v1</code> for
+defects, are not established.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/repl/">Kernel REPL</a> covers <code class="inline">private-run-analysis-v2</code> for
 interactive or unattended investigation of the same capture.</li><li><a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md">TraceLog and run-analysis reference</a> defines
 every collection,
 filter, relationship, and completeness field.</li><li><a href="/reference/cli/">Running and debugging</a> documents artifacts,

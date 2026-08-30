@@ -13,7 +13,7 @@ defmodule PtcRunner.Kernel.RunCatalogProfileTest do
 
   test "the closed catalog profile declares one capability and two private resources" do
     assert AnalysisProfileRegistry.ids() == [
-             "private-run-analysis-v1",
+             "private-run-analysis-v2",
              "private-run-catalog-v1",
              "run-analysis-v1"
            ]
@@ -27,7 +27,7 @@ defmodule PtcRunner.Kernel.RunCatalogProfileTest do
     assert description["result_data_class"] == "private_inspection"
 
     assert {:ok, private_analysis} =
-             AnalysisProfileRegistry.description("private-run-analysis-v1")
+             AnalysisProfileRegistry.description("private-run-analysis-v2")
 
     assert description["frontend"] == private_analysis["frontend"]
 

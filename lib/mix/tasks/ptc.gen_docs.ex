@@ -146,7 +146,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
      ~w(agent.prompt agent.feedback agent.retry agent.native agent.failure agent.machine)},
     {"Evaluation and models", ~w(kernel llm)},
     {"Workflow helpers", ~w(cap runtime result workflow.event)},
-    {"Run evidence", ~w(analysis debug.nav)}
+    {"Run evidence", ~w(analysis debug.nav prompt.audit)}
   ]
 
   @impl Mix.Task
@@ -648,6 +648,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     | Capability discovery, envelope handling, or bounded pagination | `cap` |
     | Stable run-analysis profile navigation | `analysis` |
     | Manifest-installed private snapshot navigation | `debug.nav` |
+    | Rendered agent prompt measurement | `prompt.audit` |
 
     ## Use and compose components
 

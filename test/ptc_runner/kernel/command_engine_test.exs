@@ -3692,7 +3692,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              CommandParser.parse([
                "repl",
                "--profile",
-               "private-run-analysis-v1",
+               "private-run-analysis-v2",
                "--run",
                second,
                "--run",
@@ -3717,7 +3717,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           [
             "repl",
             "--profile",
-            "private-run-analysis-v1",
+            "private-run-analysis-v2",
             "--resource",
             "traces=traces",
             "--private-unattended",

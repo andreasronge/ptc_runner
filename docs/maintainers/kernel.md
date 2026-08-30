@@ -497,8 +497,9 @@ span them:
   (`analysis-runs`, `analysis-open`, `analysis-read`, `analysis-counters`).
   Ordinary implicit mission introspection remains available. Filesystem,
   network, LLM, agent, workflow, MCP, private-inspection, and nested
-  `kernel-eval` authority are absent. `private-run-analysis-v1` uses the
-  private-authorized capture, adds the validated private-inspection source, and
+  `kernel-eval` authority are absent. `private-run-analysis-v2` uses the
+  private-authorized capture, adds the validated private-inspection source and
+  the pure `prompt.audit` component for measuring recorded system prompts, and
   requires a private terminal gate; its own session trace is still a sanitized
   normal artifact.
 - Each session queries one immutable snapshot and records its own canonical

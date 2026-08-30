@@ -111,7 +111,7 @@ private payloads:
 | --- | --- | --- |
 | find candidate runs in a large artifact root | `private-run-catalog-v1` and `analysis/catalog` | one immutable metadata-only generation; no payload admission |
 | publish one complete model conversation | `ptc transcript RUN_ID` | one exact correlated pair and one new owner-only result file |
-| ask several private questions about up to sixteen runs | `private-run-analysis-v1` with repeated `--run` | one immutable selected-set session with `analysis/*` |
+| ask several private questions about up to sixteen runs | `private-run-analysis-v2` with repeated `--run` | one immutable selected-set session with `analysis/*` |
 | make a repeatable debugger application or agent | install snapshots and select `debug.nav` | the manifest's fixed mission authority and typed relationship walk |
 
 Catalog discovery and selected analysis are separate commands. For example,
@@ -125,7 +125,7 @@ ptc repl --profile private-run-catalog-v1 \
   --private-unattended --format jsonl \
   -e '(analysis/catalog {"state" "admissible" "limit" 20})'
 
-ptc repl --profile private-run-analysis-v1 \
+ptc repl --profile private-run-analysis-v2 \
   --run cmd-00000000000000000000000001 \
   --run cmd-00000000000000000000000002 \
   --resource traces=.ptc/traces \
@@ -135,7 +135,7 @@ ptc repl --profile private-run-analysis-v1 \
 ```
 
 If the catalog has more candidates than one selected set can hold, start a
-second `private-run-analysis-v1` command with a later batch. Each command
+second `private-run-analysis-v2` command with a later batch. Each command
 re-verifies only its own explicit references and has independent source,
 index, heap, result, handle, call, and session bounds. A catalog digest binds
 only paging inside its discovery generation; it never crosses as an admission
@@ -555,7 +555,7 @@ defects, are not established.
 
 ## Next steps
 
-- [Kernel REPL](repl.md) covers `private-run-analysis-v1` for
+- [Kernel REPL](repl.md) covers `private-run-analysis-v2` for
   interactive or unattended investigation of the same capture.
 - [TraceLog and run-analysis reference](../maintainers/trace-log-contract.md) defines
   every collection,

@@ -746,7 +746,7 @@ ptc repl --profile private-run-catalog-v1 \
   --private-unattended --format jsonl \
   -e '(analysis/catalog {"state" "admissible" "limit" 20})'
 
-ptc repl --profile private-run-analysis-v1 \
+ptc repl --profile private-run-analysis-v2 \
   --run cmd-00000000000000000000000001 \
   --run cmd-00000000000000000000000002 \
   --resource traces=.ptc/traces \
@@ -808,7 +808,7 @@ remain authoritative, and unrelated directory members are not listed, opened,
 sized, decoded, or counted toward directory or aggregate source limits. The
 selected files still keep their individual source, record, retained-memory,
 heap, deadline, and result ceilings. Whole-directory snapshots used by
-`private-run-analysis-v1` stay a distinct source variant: they admit only
+`private-run-analysis-v2` stay a distinct source variant: they admit only
 filename-bound one-run files, isolate a stable damaged connected component,
 and keep disjoint healthy runs queryable. Namespace or selected-file mutation
 still rejects the whole capture.
@@ -825,7 +825,7 @@ candidate, a selected identity or correlation mismatch, and ambiguous,
 incomplete, changed, unsupported, or oversized selected evidence fail without a
 partial output.
 
-Use `private-run-analysis-v1` when you need several correlated questions or
+Use `private-run-analysis-v2` when you need several correlated questions or
 custom PTC-Lisp analysis. Its results can include exact messages, generated
 source, effective components, capability payloads, prints, diagnostics, and
 terminal values. The attached-terminal and unattended switches are accident
