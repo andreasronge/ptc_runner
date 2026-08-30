@@ -1128,7 +1128,10 @@ defmodule PtcRunner.Kernel.ReplSession do
       session.config.event_sink,
       session.config.workflow_environment.bundle
     )
-    |> RuntimeTools.trusted_tools(session.config.limits)
+    |> RuntimeTools.trusted_tools(
+      session.config.limits,
+      ToolGrant.capability_contracts(session.config.workflow_environment)
+    )
   end
 
   defp finish_evaluation(

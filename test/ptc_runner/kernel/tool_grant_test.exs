@@ -18,6 +18,20 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
   # the same primitive the original bug report's own measurements used.
   defp flat_words(term), do: :erts_debug.flat_size(term)
 
+  test "projects each installed capability contract once without filtering model visibility" do
+    visible = capability("visible", description: "Visible contract")
+    hidden = capability("hidden", description: "Hidden contract", model_visible: false)
+
+    contracts = ToolGrant.capability_contracts(environment_with([visible, hidden]))
+
+    assert contracts["visible"].description == "Visible contract"
+    assert contracts["visible"].model_visible
+    assert contracts["hidden"].description == "Hidden contract"
+    refute contracts["hidden"].model_visible
+    assert contracts["hidden"].input_schema == @input_schema
+    assert contracts["hidden"].effect == :unknown
+  end
+
   test "a callback's flat size does not depend on an unrelated capability's payload" do
     small = environment_with([capability("a"), capability("b")])
 

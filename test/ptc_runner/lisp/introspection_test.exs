@@ -6,6 +6,7 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
   alias PtcRunner.Lisp.Prelude
   alias PtcRunner.Lisp.Prelude.Compiler
   alias PtcRunner.Lisp.Prelude.Export
+  alias PtcRunner.Lisp.TrustedTool
 
   @source """
   (ns alpha "Alpha helpers." {:visibility :prompt})
@@ -86,6 +87,20 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
   end
 
   describe "apropos" do
+    test "finds only installed capability contracts, including non-model-visible tools", %{
+      prelude: prelude
+    } do
+      tools = capability_tools()
+
+      assert "tool/public-search" in eval!(~S|(apropos "catalog")|, prelude, tools: tools).return
+
+      assert "tool/private-search" in eval!(~S|(apropos "credential")|, prelude, tools: tools).return
+
+      refute "tool/absent-search" in eval!(~S|(apropos "absent")|, prelude, tools: tools).return
+
+      refute "tool/internal-helper" in eval!(~S|(apropos "internal")|, prelude, tools: tools).return
+    end
+
     test "matches on ref", %{prelude: prelude} do
       assert "beta/hidden" in eval!(~S|(apropos "hidden")|, prelude).return
     end
@@ -230,6 +245,27 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
   end
 
   describe "doc" do
+    test "renders installed capability description, input schema, and effect", %{prelude: prelude} do
+      tools = capability_tools()
+
+      for {name, description, property, effect} <- [
+            {"public-search", "Search the public catalog.", "query", "read"},
+            {"private-search", "Search credential records.", "credential_id", "write"}
+          ] do
+        doc =
+          eval!(~s|(doc "tool/#{name}")|, prelude, tools: tools).prints
+          |> Enum.join("\n")
+
+        assert doc =~ "tool/#{name}"
+        assert doc =~ description
+        assert doc =~ ~s|"#{property}"|
+        assert doc =~ "effect: #{effect}"
+      end
+
+      assert eval!(~S|(doc "tool/absent-search")|, prelude, tools: tools).prints ==
+               [~s(No documentation found for "tool/absent-search".)]
+    end
+
     test "prints and returns nil", %{prelude: prelude} do
       result = eval!(~S|(doc "alpha/greet")|, prelude)
 
@@ -331,6 +367,40 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       assert String.starts_with?(printed, "(map f coll)")
       assert printed =~ "20/"
     end
+  end
+
+  defp capability_tools do
+    %{
+      "public-search" =>
+        trusted_capability("public-search", "Search the public catalog.", "query", :read, true),
+      "private-search" =>
+        trusted_capability(
+          "private-search",
+          "Search credential records.",
+          "credential_id",
+          :write,
+          false
+        ),
+      "internal-helper" => %TrustedTool{function: fn _arguments -> %{} end, visibility: :private}
+    }
+  end
+
+  defp trusted_capability(name, description, property, effect, model_visible) do
+    %TrustedTool{
+      function: fn _arguments -> %{} end,
+      contract: %{
+        name: name,
+        description: description,
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{property => %{"type" => "string"}},
+          "required" => [property]
+        },
+        output_schema: nil,
+        effect: effect,
+        model_visible: model_visible
+      }
+    }
   end
 
   describe "no attached prelude" do

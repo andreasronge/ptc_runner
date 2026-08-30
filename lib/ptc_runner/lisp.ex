@@ -862,6 +862,7 @@ defmodule PtcRunner.Lisp do
              cache: tool.cache,
              visibility: tool.visibility,
              signature: tool.signature,
+             contract: tool.contract,
              argument_projection: tool.argument_projection,
              ledger_arguments: tool.ledger_arguments
            }}
