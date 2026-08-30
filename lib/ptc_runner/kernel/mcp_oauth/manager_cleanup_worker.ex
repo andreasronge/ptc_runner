@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.ManagerCleanupWorker do
   @moduledoc false
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.MCPOAuth.TokenManager
 
@@ -88,14 +89,4 @@ defmodule PtcRunner.Kernel.MCPOAuth.ManagerCleanupWorker do
     Process.send_after(self(), :close, delay_ms || state.retry_ms)
     {:noreply, %{state | retry_ms: min(state.retry_ms * 2, @maximum_retry_ms)}}
   end
-
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-    def format_status(_status), do: %{state: :redacted}
-  else
-    def format_status(_status), do: %{state: :redacted}
-  end
-
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
 end

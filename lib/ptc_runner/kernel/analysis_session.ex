@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   one that was never produced.
   """
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.AnalysisAssembly
   alias PtcRunner.Kernel.AnalysisProfileRegistry
@@ -268,16 +269,6 @@ defmodule PtcRunner.Kernel.AnalysisSession do
 
   def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
   def handle_info(_message, state), do: {:noreply, state}
-
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-    def format_status(status), do: redact_status(status)
-  else
-    def format_status(status), do: redact_status(status)
-  end
-
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
 
   defp close_state(%{lifecycle: :closed} = state, _outcome, _reason), do: {:ok, state}
 
@@ -723,14 +714,6 @@ defmodule PtcRunner.Kernel.AnalysisSession do
   defp lifecycle_error(:persistence_failed), do: :persistence_failed
   defp lifecycle_error(:backend_failed), do: :backend_failed
   defp lifecycle_error(_lifecycle), do: :session_closed
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
-  end
 
   defp call(%__MODULE__{pid: pid, token: token}, request, timeout) do
     GenServer.call(pid, {token, request}, timeout)

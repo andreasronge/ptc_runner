@@ -16,9 +16,11 @@ defmodule PtcRunner.Kernel.Capability do
   context for private observation and safe trace propagation; that context
   never crosses into Lisp.
 
-  `description` and `model_visible` control bounded discovery metadata only.
-  They do not grant authority. A capability can be invoked only when the host
-  placed it in the active workflow or mission environment.
+  `description` supplies bounded discovery metadata. `model_visible` controls
+  prompt inventory only; every installed callable capability remains available
+  to runtime documentation. Neither field grants authority. A capability can be
+  invoked only when the host placed it in the active workflow or mission
+  environment.
 
   Callbacks and validators remain host-owned and are never projected into Lisp
   values. The dispatcher contains ordinary raises, exits, timeouts, and

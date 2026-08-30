@@ -416,6 +416,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `application` | `application_not_found` | no | the application manifest does not exist |
 | 3 | `application` | `application_unavailable` | no | the application is unavailable |
 | 3 | `application` | `contract_invalid` | no | an application value contract is invalid |
+| 3 | `application` | `contract_projection_limit_exceeded` | no | application contract prompt projections exceed their bounded admission limit |
 | 3 | `application` | `document_limit_exceeded` | no | the application document closure exceeds its limit |
 | 3 | `application` | `duplicate_property` | no | an application document contains a duplicate property |
 | 3 | `application` | `event_identity_conflict` | no | the command event identity conflicts with the application |
@@ -423,6 +424,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `application` | `input_invalid` | no | the selected input is not an admissible JSON object |
 | 3 | `application` | `installed_limit_exceeded` | no | an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling |
 | 3 | `application` | `invalid_json` | no | an application document is not valid JSON |
+| 3 | `application` | `limit_capacity_invalid` | no | event_payload_bytes effective limit 8211 is below the required 12000 bytes for this application's resolved terminal usage; raise limits.event_payload_bytes, and its installed host ceiling if it is lower, or declare fewer capabilities or missions |
 | 3 | `application` | `limit_configuration_invalid` | no | normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes |
 | 3 | `application` | `limit_unavailable` | no | an optional application limit is unavailable because the host has not enabled it |
 | 3 | `application` | `override_invalid` | no | the component override is invalid |
@@ -744,7 +746,7 @@ ptc repl --profile private-run-catalog-v1 \
   --private-unattended --format jsonl \
   -e '(analysis/catalog {"state" "admissible" "limit" 20})'
 
-ptc repl --profile private-run-analysis-v1 \
+ptc repl --profile private-run-analysis-v2 \
   --run cmd-00000000000000000000000001 \
   --run cmd-00000000000000000000000002 \
   --resource traces=.ptc/traces \
@@ -806,7 +808,7 @@ remain authoritative, and unrelated directory members are not listed, opened,
 sized, decoded, or counted toward directory or aggregate source limits. The
 selected files still keep their individual source, record, retained-memory,
 heap, deadline, and result ceilings. Whole-directory snapshots used by
-`private-run-analysis-v1` stay a distinct source variant: they admit only
+`private-run-analysis-v2` stay a distinct source variant: they admit only
 filename-bound one-run files, isolate a stable damaged connected component,
 and keep disjoint healthy runs queryable. Namespace or selected-file mutation
 still rejects the whole capture.
@@ -823,7 +825,7 @@ candidate, a selected identity or correlation mismatch, and ambiguous,
 incomplete, changed, unsupported, or oversized selected evidence fail without a
 partial output.
 
-Use `private-run-analysis-v1` when you need several correlated questions or
+Use `private-run-analysis-v2` when you need several correlated questions or
 custom PTC-Lisp analysis. Its results can include exact messages, generated
 source, effective components, capability payloads, prints, diagnostics, and
 terminal values. The attached-terminal and unattended switches are accident

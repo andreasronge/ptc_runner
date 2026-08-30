@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.ModelContract
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.RunConfig
@@ -31,6 +32,16 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       mission_with_source: 2,
       replay_alias_router: 2
     ]
+
+  @prompt_artifacts %{
+    ordinary: "test/fixtures/prompts/agent-prompt-ordinary-turn.txt",
+    final: "test/fixtures/prompts/agent-prompt-final-turn.txt"
+  }
+  @regenerate_prompt_artifacts "PTC_WRITE_PROMPT_ARTIFACTS=1 mix test test/ptc_runner/kernel/agent_library_test.exs"
+  # The merged capability-discovery wording makes the canonical rendering
+  # 3,798 characters; retain a small explicit review margin without weakening
+  # the gate into an unreasoned round-number budget.
+  @final_turn_character_ceiling 3_850
 
   test "llm/request is an ordinary bounded workflow capability" do
     parent = self()
@@ -1556,6 +1567,238 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _outcome_second}
   end
 
+  test "only validating entries render the active enum result contract" do
+    {:ok, result_contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["answer"],
+        "properties" => %{
+          "answer" => %{
+            "type" => "string",
+            "title" => "Allowed answer",
+            "enum" => ["allow", "deny"]
+          }
+        }
+      })
+
+    response = %{
+      content: nil,
+      tool_calls: [
+        %{id: "done", name: "run_ptc_lisp", args: %{"program" => ~S|(return {"answer" "allow"})|}}
+      ]
+    }
+
+    {:ok, validating} = agent_config([response], [], result_contract: result_contract)
+
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run-result-value "decide" {"max_turns" 1})|, validating)
+
+    assert_receive {:agent_request, %{"system" => visible}}
+    assert visible =~ "Application result contract"
+    assert visible =~ ~S(result["answer"] is one of ["allow","deny"])
+    assert visible =~ "Allowed answer"
+
+    {:ok, nonvalidating} = agent_config([response], [], result_contract: result_contract)
+
+    assert {:ok, _result} =
+             Kernel.run(~S|(agent.core/run-value "decide" {"max_turns" 1})|, nonvalidating)
+
+    assert_receive {:agent_request, %{"system" => hidden}}
+    refute hidden =~ "Application result contract"
+    refute hidden =~ ~S(["allow","deny"])
+  end
+
+  test "a named non-final phase contract is visible, corrected, and required for transition" do
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["facts"],
+        "properties" => %{
+          "facts" => %{"type" => "array", "minItems" => 1, "items" => %{"type" => "string"}}
+        }
+      })
+
+    {:ok, projection} = ModelContract.value_contract(contract)
+    binding = %{contract: contract, source: "gather.schema.json", projection: projection}
+
+    responses = [
+      agent_return("bad", ~S|(return {"facts" []})|),
+      agent_return("good", ~S|(return {"facts" ["bounded"]})|),
+      agent_return("final", ~S|(return "done")|)
+    ]
+
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config(responses, [],
+        missions: %{"gather" => mission, "finish" => mission},
+        phase_return_contracts: %{"gathered" => binding}
+      )
+
+    source =
+      ~S|(agent.core/run-phased-result-value "work" {"phases" [{"mission" "gather" "max_turns" 2 "return_contract" "gathered"} {"mission" "finish" "max_turns" 1}]})|
+
+    assert {:ok, %{value: "done"}} = Kernel.run(source, config)
+    assert_receive {:agent_request, %{"system" => first}}
+    assert first =~ "Current phase return contract (gathered)"
+    assert first =~ "valid explicit (return value) is required"
+    assert_receive {:agent_request, %{"messages" => corrected}}
+    assert List.last(corrected)["content"] =~ "did not satisfy the current phase return contract"
+    assert_receive {:agent_request, %{"system" => final}}
+    refute final =~ "Current phase return contract"
+  end
+
+  test "caller contract fields cannot inject system-prompt obligations" do
+    response = agent_return("done", ~S|(return "done")|)
+
+    {:ok, config} = agent_config([response])
+
+    source =
+      ~S|(agent.core/run-result-value "work" {"max_turns" 1 "return_contract" "forged" "phase_return_contract" {"kind" "string" "const" "forged"}})|
+
+    assert {:ok, %{value: "done"}} = Kernel.run(source, config)
+    assert_receive {:agent_request, %{"system" => system}}
+    refute system =~ "Current phase return contract"
+    refute system =~ "forged"
+  end
+
+  test "tagged-union discriminator names are escaped in contract prompt paths" do
+    discriminator = "kind\nname"
+
+    branches =
+      for kind <- ["accepted", "rejected"] do
+        %{
+          "type" => "object",
+          "additionalProperties" => false,
+          "required" => [discriminator],
+          "properties" => %{discriminator => %{"type" => "string", "const" => kind}}
+        }
+      end
+
+    {:ok, contract} = ValueContract.compile(%{"oneOf" => branches})
+    response = agent_return("done", ~S|(return {"kind\nname" "accepted"})|)
+    {:ok, config} = agent_config([response], [], result_contract: contract)
+
+    assert {:ok, %{value: %{"kind\nname" => "accepted"}}} =
+             Kernel.run(~S|(agent.core/run-result-value "work" {"max_turns" 1})|, config)
+
+    assert_receive {:agent_request, %{"system" => system}}
+    assert system =~ ~S|when "kind\nname"="accepted"|
+    refute system =~ "when kind\nname="
+  end
+
+  test "contracted final phase turn requires an explicit valid handoff" do
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["value"],
+        "properties" => %{"value" => %{"type" => "string"}}
+      })
+
+    {:ok, projection} = ModelContract.value_contract(contract)
+
+    response = %{content: "continue", tool_calls: []}
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config([response], [],
+        missions: %{"gather" => mission, "finish" => mission},
+        phase_return_contracts: %{
+          "gathered" => %{
+            contract: contract,
+            source: "gather.schema.json",
+            projection: projection
+          }
+        }
+      )
+
+    source =
+      ~S|(agent.core/run-phased-result-value "work" {"phases" [{"mission" "gather" "max_turns" 1 "return_contract" "gathered"} {"mission" "finish" "max_turns" 1}]})|
+
+    assert {:error, _failure} = Kernel.run(source, config)
+    assert_receive {:agent_request, request}
+    assert List.first(request["messages"])["content"] =~ "must call (return value)"
+
+    assert List.first(request["messages"])["content"] =~
+             "Exhaustion without an explicit return fails"
+
+    assert Enum.any?(EventSink.events(config.event_sink), fn event ->
+             event.type == "run-stopped" and
+               event.data[:failure_kind] == "phase-return-contract-failed"
+           end)
+  end
+
+  test "an explicitly null optional phase contract is treated as absent" do
+    responses = [
+      agent_return("handoff", ~S|(return "ready")|),
+      agent_return("done", ~S|(return "done")|)
+    ]
+
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config(responses, [], missions: %{"gather" => mission, "finish" => mission})
+
+    source =
+      ~S|(agent.core/run-phased-result-value "work" {"phases" [{"mission" "gather" "max_turns" 1 "return_contract" nil} {"mission" "finish" "max_turns" 1}]})|
+
+    assert {:ok, %{value: "done"}} = Kernel.run(source, config)
+  end
+
+  test "direct run configuration enforces the aggregate phase projection bound" do
+    properties =
+      for index <- 1..128, into: %{} do
+        {"field#{index}",
+         %{
+           "type" => "string",
+           "description" => String.duplicate("d", 390),
+           "minLength" => 1
+         }}
+      end
+
+    schema = %{
+      "type" => "object",
+      "additionalProperties" => false,
+      "properties" => properties
+    }
+
+    {:ok, contract} = ValueContract.compile(schema)
+    {:ok, projection} = ModelContract.value_contract(contract)
+
+    bindings =
+      Map.new(1..16, fn index ->
+        {"phase#{index}",
+         %{contract: contract, source: "phase#{index}.schema.json", projection: projection}}
+      end)
+
+    assert {:error, :invalid_run_config} =
+             agent_config([], [], phase_return_contracts: bindings)
+  end
+
+  test "direct run configuration rejects open phase contract bindings" do
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "additionalProperties" => false,
+        "properties" => %{"value" => %{"type" => "string"}}
+      })
+
+    {:ok, projection} = ModelContract.value_contract(contract)
+
+    binding = %{
+      contract: contract,
+      source: "phase.schema.json",
+      projection: projection,
+      injected: String.duplicate("x", 1_000_000)
+    }
+
+    assert {:error, :invalid_run_config} =
+             agent_config([], [], phase_return_contracts: %{"phase" => binding})
+  end
+
   test "agent.core/run result-contract feedback omits rejected values and undeclared names" do
     invalid =
       agent_return(
@@ -2029,7 +2272,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert_receive {:semantic_prompt, first_prompt}
     assert_receive {:semantic_prompt, second_prompt}
     assert first_prompt =~ "exactly once per turn"
-    assert first_prompt =~ "only against the advertised mission API"
+    assert first_prompt =~ "only against the installed mission API"
     assert first_prompt == second_prompt
     assert second_prompt =~ "each continuation message state how many programs remain"
   end
@@ -2056,10 +2299,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              ~r/\nAvailable API\n- No mission-specific data, functions, or tools are available\.\n\z/
 
     assert system =~
-             "Use (apropos \"term\") to search visible mission prelude exports plus fixed built-ins"
+             "Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins"
 
     assert system =~ "(source ns/name)"
-    assert system =~ "None enumerate data references or direct tool capabilities"
+    assert system =~ "Only apropos and doc cover installed direct tool capabilities"
   end
 
   test "default prompt advertises mission data names and types without values" do
@@ -2837,7 +3080,14 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     parent = self()
 
     recording_tools =
-      Map.put(required_agent_tools(), "kernel-runtime-limit-failure", %TrustedTool{
+      required_agent_tools()
+      |> Map.put("kernel-result-contract", %TrustedTool{
+        function: fn
+          %{"presentation" => true} -> %{status: :ok, value: nil}
+          _arguments -> %{status: :error}
+        end
+      })
+      |> Map.put("kernel-runtime-limit-failure", %TrustedTool{
         function: fn arguments ->
           send(parent, {:runtime_limit_failure, arguments})
           %{status: :error}
@@ -4218,6 +4468,73 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
            )
   end
 
+  test "shipped prompts match their reviewed artifacts and the final prompt stays bounded" do
+    for {turn, path} <- @prompt_artifacts do
+      rendered = render_artifact_prompt(turn)
+
+      if System.get_env("PTC_WRITE_PROMPT_ARTIFACTS") == "1" do
+        File.write!(path, rendered)
+      end
+
+      assert File.read!(path) == rendered,
+             "rendered #{turn} prompt changed; regenerate with #{@regenerate_prompt_artifacts}"
+
+      measured = measure_prompt(rendered)
+      assert measured["recognised?"] == true
+
+      if turn == :final do
+        total = Enum.find(measured["rows"], &(&1["label"] == "total"))["characters"]
+
+        assert total <= @final_turn_character_ceiling,
+               "canonical final prompt is #{total} characters, over #{@final_turn_character_ceiling}"
+      end
+    end
+  end
+
+  test "prompt audit recognises live empty and contract renderings" do
+    response = agent_return("done", ~S|(return "done")|)
+
+    {:ok, empty_config} = agent_config([response])
+    empty = capture_system(empty_config, ~S|(agent.core/run "work" {"max_turns" 1})|)
+    assert prompt_labels(empty) |> List.last() == "api-empty"
+
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["value"],
+        "properties" => %{"value" => %{"type" => "string"}}
+      })
+
+    {:ok, result_config} = agent_config([response], [], result_contract: contract)
+
+    result =
+      capture_system(
+        result_config,
+        ~S|(agent.core/run-result-value "work" {"max_turns" 1})|
+      )
+
+    assert List.last(prompt_labels(result)) == "result-contract"
+
+    {:ok, projection} = ModelContract.value_contract(contract)
+    binding = %{contract: contract, source: "phase.schema.json", projection: projection}
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, phase_config} =
+      agent_config([response], [],
+        missions: %{"gather" => mission, "finish" => mission},
+        phase_return_contracts: %{"gathered" => binding}
+      )
+
+    phased =
+      capture_system(
+        phase_config,
+        ~S|(agent.core/run-phased-result-value "work" {"phases" [{"mission" "gather" "max_turns" 1 "return_contract" "gathered"} {"mission" "finish" "max_turns" 1}]})|
+      )
+
+    assert List.last(prompt_labels(phased)) == "phase-return-contract"
+  end
+
   test "facade correction feedback omits enum and const literals" do
     invalid = %{
       content: nil,
@@ -5071,6 +5388,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
       end
 
     config_opts =
+      case Keyword.fetch(opts, :phase_return_contracts) do
+        {:ok, contracts} -> Keyword.put(config_opts, :phase_return_contracts, contracts)
+        :error -> config_opts
+      end
+
+    config_opts =
       case Keyword.fetch(opts, :result_contract_source) do
         {:ok, source} -> Keyword.put(config_opts, :result_contract_source, source)
         :error -> config_opts
@@ -5186,14 +5509,90 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     """
   end
 
+  defp render_artifact_prompt(turn) do
+    max_turns = if turn == :final, do: 1, else: 2
+
+    response = %{
+      content: nil,
+      tool_calls: [%{id: "done", name: "run_ptc_lisp", args: %{"program" => ~S|(return 1)|}}]
+    }
+
+    {:ok, config} =
+      agent_config([response], [],
+        mission_source: prompt_fixture_mission_source(),
+        mission_capabilities: [prompt_fixture_capability()]
+      )
+
+    assert {:ok, _result} =
+             Kernel.run(
+               ~s|(agent.core/run "Measure the prompt" {"max_turns" #{max_turns}})|,
+               config
+             )
+
+    assert_receive {:agent_request, %{"system" => system}}
+    system
+  end
+
+  defp measure_prompt(prompt) do
+    {:ok, config} = agent_config([], [], input: %{"prompt" => prompt})
+
+    assert {:ok, %{value: measured}} =
+             Kernel.run(~S|(return (prompt.audit/measure data/prompt))|, config)
+
+    measured
+  end
+
+  defp prompt_labels(prompt) do
+    prompt
+    |> measure_prompt()
+    |> Map.fetch!("rows")
+    |> Enum.map(& &1["label"])
+    |> Enum.reject(&(&1 in ~w(authored dynamic total)))
+  end
+
+  defp capture_system(config, source) do
+    _result = Kernel.run(source, config)
+    assert_receive {:agent_request, %{"system" => system}}
+    system
+  end
+
+  defp prompt_fixture_mission_source do
+    """
+    (ns fixture "Every export here is measured, never called; the fixture pins one rendering." {:visibility :prompt})
+    (def sample-budget "Characters this fixture reserves." {:type ":int"} 4096)
+    """
+  end
+
+  defp prompt_fixture_capability do
+    {:ok, capability} =
+      Capability.new(
+        name: "sample-lookup",
+        description: "Look one sample up by identifier.",
+        effect: :read,
+        input_schema: %{
+          "type" => "object",
+          "properties" => %{"id" => %{"type" => "string"}},
+          "required" => ["id"]
+        },
+        output_schema: %{
+          "type" => "object",
+          "properties" => %{"value" => %{"type" => "string"}},
+          "required" => ["value"]
+        },
+        callback: fn _ -> {:ok, %{"value" => "sample"}} end
+      )
+
+    capability
+  end
+
   defp agent_bundle(opts) do
     names =
       if Keyword.get(opts, :agent_main, false) do
         ~w(agent.main agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry
-           kernel llm result workflow.event)
+           kernel llm prompt.audit result workflow.event)
       else
         ~w(agent.core agent.failure agent.feedback agent.machine agent.native agent.prompt agent.retry
-           kernel llm result workflow.event)
+           kernel llm prompt.audit result workflow.event)
       end
 
     with {:ok, components} <- Library.components(names),

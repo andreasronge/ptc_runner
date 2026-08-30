@@ -4,7 +4,9 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.EventSinkState
+  alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.TerminalUsage
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Lisp.RetainedSize
 
@@ -64,12 +66,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   end
 
   test "terminal reserve retains one dropped summary and one run-stopped event" do
-    {:ok, limits} =
-      Limits.new(
-        normal_event_count: 4,
-        normal_event_bytes: 20_000,
-        event_payload_bytes: 5_000
-      )
+    limits = reserved_limits(normal_event_count: 4, ordinary_bytes: 7_699)
 
     {:ok, sink} =
       EventSink.start(:normal, limits,
@@ -100,7 +97,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   end
 
   test "the minimum admitted normal budget retains run-started and both terminal events" do
-    payload_bytes = 5_000
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
     {:ok, base} = Limits.new(event_payload_bytes: payload_bytes)
     reserve = EventSink.terminal_reserve(:normal, base)
     run_started_bytes = EventBudget.maximum_event_bytes("run-started", payload_bytes)
@@ -126,12 +123,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   end
 
   test "terminal reserve remains available after the ordinary byte budget is saturated" do
-    {:ok, limits} =
-      Limits.new(
-        normal_event_count: 10,
-        normal_event_bytes: 20_000,
-        event_payload_bytes: 5_000
-      )
+    limits = reserved_limits(normal_event_count: 10, ordinary_bytes: 7_699)
 
     {:ok, sink} =
       EventSink.start(:normal, limits,
@@ -156,12 +148,7 @@ defmodule PtcRunner.Kernel.EventSinkTest do
   end
 
   test "finalization atomically hands off a frozen terminal batch" do
-    {:ok, limits} =
-      Limits.new(
-        normal_event_count: 4,
-        normal_event_bytes: 20_000,
-        event_payload_bytes: 5_000
-      )
+    limits = reserved_limits(normal_event_count: 4, ordinary_bytes: 7_699)
 
     {:ok, sink} =
       EventSink.start(:normal, limits,
@@ -271,17 +258,19 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     assert Enum.map(events, & &1.type) == ["events-dropped", "run-stopped"]
   end
 
-  test "terminal usage admission covers a maximum reachable drop-map layout" do
-    usage = %{closed?: true}
+  test "the payload minimum is exactly what the maximum fixed terminal usage needs" do
     sink = %EventSink{pid: self(), token: make_ref(), policy: :normal}
+    usage = TerminalUsage.maximum(%{}, %{}, [], catalog_maximum_limits())
 
     payload_bytes =
-      Enum.find(EventBudget.minimum_normal_payload_bytes()..10_000, fn payload_bytes ->
+      Enum.find(1..20_000, fn payload_bytes ->
         limits = %{Limits.defaults() | event_payload_bytes: payload_bytes}
         EventSink.terminal_usage_capacity?(sink, limits, usage)
       end)
 
-    assert payload_bytes == 4_873
+    assert payload_bytes == EventBudget.minimum_normal_payload_bytes()
+    assert EventSink.required_terminal_payload_bytes(sink, usage) == payload_bytes
+
     {:ok, limits} = Limits.new(event_payload_bytes: payload_bytes)
     token = make_ref()
 
@@ -372,6 +361,29 @@ defmodule PtcRunner.Kernel.EventSinkTest do
       payload = %{"value" => String.duplicate("x", size)}
       if RetainedSize.bytes(payload) == bytes, do: payload
     end) || flunk("could not construct a #{bytes}-byte payload")
+  end
+
+  # The smallest admitted payload plus an explicit ordinary byte budget on top
+  # of the measured terminal reserve, so these tests keep their intended
+  # headroom when the catalog floor moves.
+  defp reserved_limits(opts) do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, base} = Limits.new(event_payload_bytes: payload_bytes)
+
+    {:ok, limits} =
+      Limits.new(
+        normal_event_count: Keyword.fetch!(opts, :normal_event_count),
+        normal_event_bytes:
+          EventSink.terminal_reserve(:normal, base).bytes + Keyword.fetch!(opts, :ordinary_bytes),
+        event_payload_bytes: payload_bytes
+      )
+
+    limits
+  end
+
+  defp catalog_maximum_limits do
+    {:ok, limits} = Limits.new(Map.new(LimitCatalog.rows(), &{&1.field, &1.maximum}))
+    limits
   end
 
   defp saturated_drop_map do

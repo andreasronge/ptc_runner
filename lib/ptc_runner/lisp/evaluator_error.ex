@@ -78,6 +78,13 @@ defmodule PtcRunner.Lisp.EvaluatorError do
     end
   end
 
+  def lisp_message(:unsupported_java_member, details) when is_map(details) do
+    case admitted_java_member_name(details) do
+      {:ok, name} -> {:ok, "Java member #{name} does not accept this receiver"}
+      :error -> {:ok, @java_messages.unsupported_java_member}
+    end
+  end
+
   def lisp_message(reason, details) do
     case public_evidence(reason, details) do
       {:ok, %{kind: _kind, message: message}} ->
@@ -174,6 +181,22 @@ defmodule PtcRunner.Lisp.EvaluatorError do
     end
   end
 
+  defp retain_public_details(:unsupported_java_member, details) do
+    case admitted_java_member_name(details) do
+      {:ok, name} -> %{name: name}
+      :error -> %{}
+    end
+  end
+
+  defp retain_public_details(:java_arity_error, details), do: retain_arity_details(details)
+
+  defp retain_public_details(:java_type_error, details) do
+    case admitted_java_member_name(details) do
+      {:ok, name} -> %{name: name}
+      :error -> %{}
+    end
+  end
+
   defp retain_public_details(:loop_limit_exceeded, details) do
     case admitted_positive_integer(Map.get(details, :limit) || Map.get(details, "limit")) do
       {:ok, limit} -> %{limit: limit}
@@ -186,19 +209,41 @@ defmodule PtcRunner.Lisp.EvaluatorError do
   defp retain_arity_details(details) when is_map(details) do
     %{}
     |> maybe_put_arity_name(details)
-    |> maybe_put(:expected, Map.get(details, :expected) || Map.get(details, "expected"))
-    |> maybe_put(:actual, Map.get(details, :actual) || Map.get(details, "actual"))
+    |> maybe_put_expected(details)
+    |> maybe_put_actual(details)
+    |> maybe_put_receiver_required(details)
+  end
+
+  defp maybe_put_expected(map, details) do
+    expected = Map.get(details, :expected) || Map.get(details, "expected")
+
+    case format_expected_arity(expected) do
+      {:ok, _rendered} -> Map.put(map, :expected, expected)
+      :error -> map
+    end
+  end
+
+  defp maybe_put_actual(map, details) do
+    actual = Map.get(details, :actual) || Map.get(details, "actual")
+
+    case admitted_nonneg_integer(actual) do
+      {:ok, actual} -> Map.put(map, :actual, actual)
+      :error -> map
+    end
   end
 
   defp maybe_put_arity_name(map, details) do
-    case admitted_public_name(details) do
+    case admitted_arity_name(details) do
       {:ok, name} -> Map.put(map, :name, name)
       :error -> map
     end
   end
 
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+  defp maybe_put_receiver_required(map, details) do
+    if Map.get(details, :receiver_required?) == true,
+      do: Map.put(map, :receiver_required?, true),
+      else: map
+  end
 
   defp lisp_prefix(:arity_error), do: "arity error: "
   defp lisp_prefix(_reason), do: ""
@@ -238,6 +283,35 @@ defmodule PtcRunner.Lisp.EvaluatorError do
     end
   end
 
+  defp public_message(:unsupported_java_member, details) do
+    case admitted_java_member_name(details) do
+      {:ok, name} -> ok_message("Java member #{name} does not accept this receiver")
+      :error -> ok_message(@java_messages.unsupported_java_member)
+    end
+  end
+
+  defp public_message(:java_arity_error, details) do
+    with {:ok, name} <- admitted_arity_name(details),
+         {:ok, actual} <- admitted_nonneg_integer(Map.get(details, :actual)) do
+      if Map.get(details, :receiver_required?) do
+        ok_message("#{name} requires a receiver, got #{actual} argument(s)")
+      else
+        with {:ok, expected} <- format_expected_arity(Map.get(details, :expected)) do
+          ok_message("#{name} expects #{expected}, got #{actual}")
+        end
+      end
+    else
+      _closed -> ok_message(@java_messages.java_arity_error)
+    end
+  end
+
+  defp public_message(:java_type_error, details) do
+    case admitted_java_member_name(details) do
+      {:ok, name} -> ok_message("Java member #{name} does not accept this receiver")
+      :error -> ok_message(@java_messages.java_type_error)
+    end
+  end
+
   defp public_message(:loop_limit_exceeded, details) do
     with {:ok, limit} <- admitted_positive_integer(Map.get(details, :limit)) do
       ok_message(
@@ -273,6 +347,24 @@ defmodule PtcRunner.Lisp.EvaluatorError do
     end
   end
 
+  defp admitted_java_member_name(details) do
+    name = Map.get(details, :name) || Map.get(details, "name")
+
+    if is_binary(name) and String.valid?(name) and byte_size(name) <= @max_public_name_bytes and
+         String.match?(name, ~r/\A\.[A-Za-z][A-Za-z0-9]*[!?]?\z/) do
+      {:ok, name}
+    else
+      :error
+    end
+  end
+
+  defp admitted_arity_name(details) do
+    case admitted_public_name(details) do
+      {:ok, name} -> {:ok, name}
+      :error -> admitted_java_member_name(details)
+    end
+  end
+
   defp public_name?(name) do
     String.match?(name, ~r/\A[A-Za-z*+\-\/!?_=<>'][A-Za-z0-9*+\-\/!?_=<>'.]{0,127}\z/)
   end
@@ -300,25 +392,36 @@ defmodule PtcRunner.Lisp.EvaluatorError do
 
   defp arity_lisp_sentence(_name, _expected, _actual), do: :error
 
-  defp format_expected_arity(expected) when is_integer(expected) and expected >= 0,
-    do: {:ok, "#{expected} argument(s)"}
+  defp format_expected_arity(expected)
+       when is_integer(expected) and expected >= 0 and expected <= 1_000_000,
+       do: {:ok, "#{expected} argument(s)"}
 
-  defp format_expected_arity({:at_least, n}) when is_integer(n) and n >= 0,
-    do: {:ok, "at least #{n} argument(s)"}
+  defp format_expected_arity({:at_least, n})
+       when is_integer(n) and n >= 0 and n <= 1_000_000,
+       do: {:ok, "at least #{n} argument(s)"}
 
   defp format_expected_arity([left, right])
-       when is_integer(left) and left >= 0 and is_integer(right) and right >= 0,
+       when is_integer(left) and left >= 0 and left <= 1_000_000 and is_integer(right) and
+              right >= 0 and right <= 1_000_000,
        do: {:ok, "#{left} or #{right} argument(s)"}
 
   defp format_expected_arity(expected) when is_list(expected) and expected != [] do
-    if Enum.all?(expected, &(is_integer(&1) and &1 >= 0)) do
-      {:ok, Enum.join(expected, ", ") <> " argument(s)"}
-    else
-      :error
+    case admitted_expected_arities(expected, 32, []) do
+      {:ok, admitted} -> {:ok, Enum.join(admitted, ", ") <> " argument(s)"}
+      :error -> :error
     end
   end
 
   defp format_expected_arity(_expected), do: :error
+
+  defp admitted_expected_arities([], _remaining, admitted),
+    do: {:ok, Enum.reverse(admitted)}
+
+  defp admitted_expected_arities([value | rest], remaining, admitted)
+       when remaining > 0 and is_integer(value) and value >= 0 and value <= 1_000_000,
+       do: admitted_expected_arities(rest, remaining - 1, [value | admitted])
+
+  defp admitted_expected_arities(_values, _remaining, _admitted), do: :error
 
   defp admitted_nonneg_integer(value)
        when is_integer(value) and value >= 0 and value <= 1_000_000,

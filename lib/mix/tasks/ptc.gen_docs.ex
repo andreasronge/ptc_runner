@@ -40,6 +40,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
   alias PtcRunner.Kernel.LLMFailureCatalog
   alias PtcRunner.Kernel.Manifest
   alias PtcRunner.Kernel.ProjectConfig
+  alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Lisp.Introspection
   alias PtcRunner.Lisp.Java.Surface
   alias PtcRunner.Lisp.Prelude.Export
@@ -145,7 +146,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
      ~w(agent.prompt agent.feedback agent.retry agent.native agent.failure agent.machine)},
     {"Evaluation and models", ~w(kernel llm)},
     {"Workflow helpers", ~w(cap runtime result workflow.event)},
-    {"Run evidence", ~w(analysis debug.nav)}
+    {"Run evidence", ~w(analysis debug.nav prompt.audit)}
   ]
 
   @impl Mix.Task
@@ -198,6 +199,19 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     {:ok, run_duration} = LimitCatalog.fetch(:run_duration_ms)
     {:ok, workflow_timeout} = LimitCatalog.fetch(:workflow_timeout_ms)
     {:ok, normal_event_count} = LimitCatalog.fetch(:normal_event_count)
+    {:ok, event_payload_bytes} = LimitCatalog.fetch(:event_payload_bytes)
+
+    cost_limit = 2_400
+    next_cost_reservation = 2_419
+    cost_remaining = 2_338
+
+    {:ok, cost_budget_diagnostic} =
+      RuntimeLimitDiagnostic.budget_message(
+        :llm_cost_microusd,
+        cost_limit,
+        next_cost_reservation,
+        cost_remaining
+      )
 
     content = """
     <!-- Auto-generated — do not edit by hand -->
@@ -232,7 +246,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     requires the selected installation's `ceilings.request_timeout_ms` to be
     raised to the requested value.
 
-    Normal trace limits also have structural rules. `event_payload_bytes` is large enough for every bounded terminal payload, and `normal_event_count` is at least #{normal_event_count.minimum}: one ordinary `run-started` event plus the two-event terminal reserve. After host/application resolution, `normal_event_bytes` must be at least `EventSink.terminal_reserve(:normal, effective_limits).bytes + EventBudget.maximum_event_bytes("run-started", event_payload_bytes)`, preserving one complete maximum-size `run-started` envelope in addition to the complete `events-dropped` and `run-stopped` envelopes. Invalid combinations are refused before execution as `application/limit_configuration_invalid`. Private trace policy keeps its zero terminal reserve and does not use this normal-trace byte relationship.
+    Normal trace limits also have structural rules. `event_payload_bytes` is at least #{format_integer(event_payload_bytes.minimum)}: the largest `run-stopped` payload an application-free manifest can emit. An application that declares capabilities or missions needs more, and because that requirement is only known once providers are assembled it is refused when the run starts, as `application/limit_capacity_invalid`, naming the effective limit and the bytes it must reach. `normal_event_count` is at least #{normal_event_count.minimum}: one ordinary `run-started` event plus the two-event terminal reserve. After host/application resolution, `normal_event_bytes` must be at least `EventSink.terminal_reserve(:normal, effective_limits).bytes + EventBudget.maximum_event_bytes("run-started", event_payload_bytes)`, preserving one complete maximum-size `run-started` envelope in addition to the complete `events-dropped` and `run-stopped` envelopes. Invalid combinations are refused before execution as `application/limit_configuration_invalid`. Private trace policy keeps its zero terminal reserve and does not use this normal-trace byte relationship.
 
     A breached ceiling names itself, its configured value, and the manifest key that raises it, so the error at the point of failure carries this rule too. A request above the ceiling is refused by name, with both numbers.
 
@@ -253,6 +267,46 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     | Name | Meaning | Unit | Disabled default | Inclusive range |
     | --- | --- | --- | --- | ---: |
     #{optional_rows}
+
+    ### Size an LLM cost budget
+
+    `llm_cost_microusd` is a pre-dispatch reservation ceiling, not a pre-run
+    price quote or a direct measurement of realized spend. Before each live
+    call, PtcRunner computes a conservative, request-specific reservation from
+    the request and accumulated conversation, the full authorized output-token
+    allowance, and the model's pricing. Later calls can therefore require more
+    headroom than earlier ones, and a ceiling set near expected final spend can
+    refuse before any call is dispatched.
+
+    For example, after #{format_integer(cost_limit - cost_remaining)} microUSD has
+    settled, a #{format_integer(cost_limit)} microUSD ceiling has
+    #{format_integer(cost_remaining)} remaining. If the next call requires a
+    #{format_integer(next_cost_reservation)} microUSD reservation, it is refused
+    with the exact diagnostic:
+
+    ```text
+    #{cost_budget_diagnostic}
+    ```
+
+    Those numbers describe one request; their ratio to its eventual cost is not
+    a sizing multiplier. `ptc models`, `ptc validate`, and `ptc doctor` do not
+    provide a pre-run price quote. The optional cost budget is the fail-closed
+    admission control, and a refusal reports the next call's exact required
+    reservation.
+
+    Valid priced usage releases the unused reservation and charges actual cost.
+    A dispatched call without trustworthy priced usage conservatively charges
+    the full reservation and marks `llm_budget.cost.state` as `incomplete`; that
+    charge is an accounting upper bound, not measured spend. When its state is
+    `available`, `llm_spend` aggregates trustworthy priced usage from successful
+    and failed calls. A possibly dispatched failure without trustworthy usage
+    makes spend `incomplete`, because it can still incur unmeasured provider charges.
+
+    To reduce the output portion of future reservations, an application may
+    narrow `limits.llm_request_output_tokens`, or a model installation may set a
+    lower `params.max_tokens`. Lower either only when the smaller output allowance
+    is valid for the workload; request and conversation size still contribute to
+    each reservation.
 
     ## Installed-only limits
 
@@ -594,6 +648,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
     | Capability discovery, envelope handling, or bounded pagination | `cap` |
     | Stable run-analysis profile navigation | `analysis` |
     | Manifest-installed private snapshot navigation | `debug.nav` |
+    | Rendered agent prompt measurement | `prompt.audit` |
 
     ## Use and compose components
 
@@ -624,7 +679,7 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     Effects below use the same conservative, environment-independent projection as `(doc ...)` and `(export-meta ...)`: an export that reaches a capability is `unknown` unless its chain declares `write`. The authoritative model-visible effect belongs to the assembled mission inventory, where installed capability effects may resolve that value to `read` or `write`.
 
-    `:prompt` exports appear in model inventory. `:discoverable` exports stay out of that prompt inventory but remain callable and can be found with `(dir)`, `(dir "namespace")`, `(apropos "term")`, `(doc "namespace/name")`, `(export-meta "namespace/name")`, and `(source namespace/name)`. `apropos` and `doc` additionally cover fixed built-ins and the bounded Java surface; `dir`, `export-meta`, and `source` remain attached-prelude views. Hiding an export from the prompt does not narrow authority.
+    `:prompt` exports appear in model inventory. `:discoverable` exports stay out of that prompt inventory but remain callable and can be found with `(dir)`, `(dir "namespace")`, `(apropos "term")`, `(doc "namespace/name")`, `(export-meta "namespace/name")`, and `(source namespace/name)`. `apropos` and `doc` additionally cover installed callable capabilities, fixed built-ins, and the bounded Java surface; `dir`, `export-meta`, and `source` remain attached-prelude views. When a session has not attached a shipped library, `doc` and `apropos` print an attachment redirect. The shipped catalog identifies libraries rather than exact exports, so the redirect does not assert that the requested export exists. Hiding an export or capability from the prompt does not narrow authority or runtime discovery.
 
     ## Customize or replace a component
 

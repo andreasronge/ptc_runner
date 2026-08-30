@@ -72,7 +72,7 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
              package_projection(memory_request.package)
 
     assert directory_request.package.application_content_digest ==
-             "abe6d9622bbb77dd2ed6f66c6878b96e2a3b51daac35bf6beb62b3c99c2da9ee"
+             "3c322c2f773804550adf68c8276adefac37edfcf8a5fb040a7b9bab2e0dd3178"
 
     assert directory_request.package.contract_behavior_hashes.input ==
              "7dfe6c77fe7a1360821e8848da675d1d869cc8fe5d7cf38313c749c40cc49ed3"

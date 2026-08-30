@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
   """
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.BoundedCapture
   alias PtcRunner.Kernel.RunCatalog
@@ -236,9 +237,9 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
 
   @impl GenServer
   # ex_dna:disable-for-next-line — GenServer callbacks, intentionally per-module.
-  # An owner's reaction to its owner's death and the redaction of its own state
-  # are part of that owner's contract; routing them through a shared module
-  # would couple the lifecycles of otherwise independent snapshots.
+  # An owner's fallback and reaction to its owner's death are part of that
+  # owner's lifecycle contract; sharing them would couple otherwise independent
+  # snapshots.
   def handle_cast(_request, state), do: {:noreply, state}
 
   @impl GenServer
@@ -247,23 +248,6 @@ defmodule PtcRunner.Kernel.RunCatalogSnapshot do
     do: {:stop, :normal, state}
 
   def handle_info(_message, state), do: {:noreply, state}
-
-  # This OTP-version guard around `format_status/1` is byte-identical in the
-  # twelve other owner modules that carry it. A suppression comment does not
-  # attach to a bare module-level `if`, so this occurrence joins that cluster
-  # in `.duplication-baseline.json` rather than being marked here.
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-    def format_status(status), do: redact_status(status)
-  else
-    def format_status(status), do: redact_status(status)
-  end
-
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
-
-  defp redact_status(status) when is_map(status), do: Map.put(status, :state, :redacted)
-  defp redact_status(status), do: status
 
   defp call(%__MODULE__{pid: pid, token: token}, request) when is_pid(pid) do
     GenServer.call(pid, {token, request}, :infinity)

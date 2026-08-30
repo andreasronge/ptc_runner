@@ -66,7 +66,7 @@ defmodule PtcRunner.Kernel.AnalysisSessionBuilder do
     :private_unattended,
     :terminal_attached
   ]
-  @private_analysis_profile "private-run-analysis-v1"
+  @private_analysis_profile "private-run-analysis-v2"
 
   @doc """
   Starts one fixed analysis profile over immutable source captures.

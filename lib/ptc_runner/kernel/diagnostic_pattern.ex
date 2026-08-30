@@ -28,6 +28,30 @@ defmodule PtcRunner.Kernel.DiagnosticPattern do
   @spec exact(binary()) :: binary()
   def exact(body) when is_binary(body), do: "^" <> body <> "$(?![\\s\\S])"
 
+  @doc """
+  Publishes one bounded message as an exact JSON Schema string branch.
+
+  `parts` alternates literal prose and ECMA-262 value patterns. Only the
+  literals are escaped, so the published pattern admits exactly the text its
+  builder produces and nothing longer.
+  """
+  @spec exact_message_schema(pos_integer(), [{:literal | :pattern, binary()}]) :: map()
+  def exact_message_schema(maximum_bytes, parts)
+      when is_integer(maximum_bytes) and maximum_bytes > 0 and is_list(parts) do
+    body =
+      Enum.map_join(parts, fn
+        {:literal, text} when is_binary(text) -> escape(text)
+        {:pattern, pattern} when is_binary(pattern) -> pattern
+      end)
+
+    %{
+      "type" => "string",
+      "minLength" => 1,
+      "maxLength" => maximum_bytes,
+      "pattern" => exact(body)
+    }
+  end
+
   @doc false
   @spec valid_exact_integer_message?(
           binary(),

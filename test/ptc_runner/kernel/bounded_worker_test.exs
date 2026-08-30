@@ -322,7 +322,10 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
               :never -> :unexpected
             end
           end,
-          timeout_ms: 1,
+          # Guarded startup shares this deadline. 1ms expires before the
+          # callback can send under CI scheduler pressure, so cleanup
+          # arrives with no worker pid to monitor.
+          timeout_ms: 50,
           max_heap_words: 100_000,
           cancel_with_caller: true,
           timeout_cleanup_hook: fn ->

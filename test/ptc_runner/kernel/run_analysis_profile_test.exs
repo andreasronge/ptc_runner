@@ -19,11 +19,11 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   alias PtcRunner.Kernel.TraceSnapshot
   alias PtcRunner.TestSupport.PrivateInspectionFixture
 
-  @profile_id "private-run-analysis-v1"
+  @profile_id "private-run-analysis-v2"
 
   test "the profile registry is closed and describes fixed private authority" do
     assert AnalysisProfileRegistry.ids() == [
-             "private-run-analysis-v1",
+             "private-run-analysis-v2",
              "private-run-catalog-v1",
              "run-analysis-v1"
            ]
@@ -34,8 +34,8 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     assert {:ok, description} = AnalysisProfileRegistry.description(@profile_id)
     assert description["resources"] |> Map.keys() |> Enum.sort() == ["inspection", "traces"]
 
-    assert description["components"] == ["cap", "analysis"]
-    assert description["namespaces"] == ["analysis", "cap"]
+    assert description["components"] == ["cap", "analysis", "prompt.audit"]
+    assert description["namespaces"] == ["analysis", "cap", "prompt.audit"]
 
     assert description["source_data_class"] == "private_inspection"
     assert description["result_data_class"] == "private_inspection"
@@ -114,7 +114,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     end)
 
     assert {:error, :invalid_analysis_resources} =
-             AnalysisResources.new("private-run-analysis-v1", %{
+             AnalysisResources.new("private-run-analysis-v2", %{
                traces: normal_trace,
                inspection: inspection
              })
@@ -407,7 +407,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
     identity = state.profile.identity
     mission = state.config.missions["default"].environment
 
-    assert identity["components"] == ["cap", "analysis"]
+    assert identity["components"] == ["cap", "analysis", "prompt.audit"]
 
     assert identity["source_data_class"] == "private_inspection"
     assert identity["result_data_class"] == "private_inspection"

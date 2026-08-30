@@ -613,7 +613,7 @@ defmodule PtcRunner.LispTest do
       assert {:error, %{fail: %{reason: :unbound_var, message: message, details: details}}} =
                Lisp.run("undefined-var")
 
-      assert message == "Undefined variable: undefined-var"
+      assert message =~ "Undefined variable: undefined-var"
       assert details.unbound_names == ["undefined-var"]
     end
   end

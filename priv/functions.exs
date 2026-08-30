@@ -2850,7 +2850,7 @@
     %{
       name: "apropos",
       description:
-        "Searches visible prelude exports and fixed function documentation, returning names.",
+        "Searches visible prelude exports, installed capabilities, and fixed function documentation, returning names.",
       binding: :special,
       category: :core,
       dispatch: :env,
@@ -2860,12 +2860,16 @@
       ptc_extension?: true,
       examples: [],
       notes:
-        "Case-insensitive literal substring match over prelude refs/docstrings and fixed " <>
+        "Case-insensitive literal substring match over prelude refs/docstrings, installed " <>
+          "capability names/contracts, and fixed " <>
           "canonical names, signatures, descriptions, notes, divergences, and sections. " <>
           "Qualified Java aliases in signatures are searchable; fixed results use canonical " <>
-          "names. Results are sorted and deduplicated. A blank query returns an empty vector. " <>
-          "Accepts a string or a quoted symbol (via symbol-ref normalization). An unquoted " <>
-          "query evaluates normally — `apropos` is not macro-like.",
+          "names. Results are sorted and deduplicated callable names. A blank query returns " <>
+          "an empty vector. When a Kernel session supplies the shipped-library catalog, a " <>
+          "query that matches unattached shipped libraries prints an attachment advisory " <>
+          "instead of inserting those IDs into the result. Accepts a string or a quoted " <>
+          "symbol (via symbol-ref normalization). An unquoted query evaluates normally — " <>
+          "`apropos` is not macro-like.",
       see_also: ["dir", "doc", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil
@@ -2873,7 +2877,7 @@
     %{
       name: "doc",
       description:
-        "Prints documentation for a visible prelude export or fixed function and returns `nil`.",
+        "Prints documentation for a visible prelude export, installed capability, or fixed function and returns `nil`.",
       binding: :special,
       category: :core,
       dispatch: :env,
@@ -2888,7 +2892,12 @@
           "resolve before fixed registry entries; a hidden collision does not fall through. " <>
           "Macro-like over the ref: accepts an unquoted symbol (`str`, `ns/name`), a quoted " <>
           "symbol (`'ns/name`), or a string. Use `export-meta` for attached export information " <>
-          "as data. A miss prints a not-found line and still returns `nil`.",
+          "as data. A miss prints a not-found line and still returns `nil`. When a Kernel " <>
+          "session supplies the shipped-library catalog, a miss whose namespace is a " <>
+          "shipped library that this session has not attached prints an attachment redirect " <>
+          "with environment-neutral component guidance. The catalog contains library IDs, " <>
+          "not export refs, so the redirect does not assert that the requested export exists. " <>
+          "A malformed ref or unknown namespace keeps the not-found line.",
       see_also: ["apropos", "dir", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil
