@@ -183,6 +183,19 @@ string), and optional `terminal_only` (boolean). The sum of phase turn budgets
 must not exceed 128; an invalid vector fails with
 `invalid-agent-config/invalid-phases` before any provider request.
 
+A non-final phase may also select an application-declared named handoff schema
+with `return_contract`. Its complete contract is shown only in that phase's
+system prompt. Invalid explicit returns receive bounded correction feedback
+while a local turn remains; an invalid final-turn return or exhaustion without
+an explicit return fails instead of transitioning. The final phase rejects
+`return_contract` and uses the optional application result schema.
+
+Validating entries render the active application result schema in the final
+phase. Raw-result entries state that the exact returned value is validated.
+Envelope-producing `agent.core/run` states that the host validates the success
+envelope and tells the model to return only its value, avoiding double
+wrapping. `run-value` and `run-outcome` render no application result obligation.
+
 ### `agent.main/run`
 
 Set the manifest entry to `agent.main/run` and supply:
@@ -343,7 +356,11 @@ bounded structural types, but never their values. The inventory is the complete
 prompt-visible mission surface. `dir` and `export-meta` inspect visible
 attached prelude exports. `apropos` and `doc` cover those exports plus installed
 callable capabilities, fixed built-ins, and the bounded Java surface. They do
-not enumerate data values. When the inventory is empty, the prompt says so explicitly
+not enumerate data values. When a shipped library is not attached,
+they print an attachment redirect for a matching namespace or query. The
+catalog identifies only the library; it does not establish whether a requested
+export or its documentation exists. When the inventory is empty, the prompt
+says so explicitly
 instead of leaving a blank heading.
 The generic examples do not name `data/input`; an agent sees that reference
 only when the selected mission actually grants an `input` data key.

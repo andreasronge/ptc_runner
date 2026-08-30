@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.PrivateDirectory
@@ -812,7 +813,8 @@ defmodule PtcRunner.Kernel.ReplSession do
         filter_context: false,
         link: true,
         strict_data: true,
-        data_grants: DataKeys.source_referenceable_forms(session.config.input)
+        data_grants: DataKeys.source_referenceable_forms(session.config.input),
+        shipped_library_ids: Library.component_ids()
       )
 
     name_timeout_limit(result, session, remaining_ms)
@@ -1102,7 +1104,10 @@ defmodule PtcRunner.Kernel.ReplSession do
         session.config.event_sink,
         :workflow,
         "kernel-result-contract",
-        RuntimeTools.result_contract(session.config.result_contract)
+        RuntimeTools.result_contract(
+          session.config.result_contract,
+          session.config.phase_return_contracts
+        )
       )
     )
     |> RuntimeTools.maybe_put_result_contract_failure(

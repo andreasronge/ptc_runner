@@ -177,7 +177,12 @@ documentation. An installed capability is addressed as `tool/<name>`; its
 documentation includes its description, input schema, and effect. This remains
 true when its `model_visible` flag is false: that flag controls prompt inventory
 only, not runtime discovery or authority. Uninstalled capabilities and private
-Lisp runtime tools are not exposed. `(dir)` and
+Lisp runtime tools are not exposed. When the selected environment has not
+attached a matching shipped library, `doc` or `apropos` prints an attachment
+redirect. Add `{"library": "<id>"}` to `workflow.components` for a workflow or
+to `missions.<name>.components` for a mission, then restart the run or session.
+The redirect identifies a matching library namespace; it does not assert that
+the requested export exists. `(dir)` and
 `(export-meta "ns/name")` / `(export-meta ns/name)` inspect the attached
 prelude API specifically, and `(source ns/name)` prints an attached prelude
 defining form when available. For `doc`/`dir`/`export-meta`/`source`, unquoted

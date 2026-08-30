@@ -7,10 +7,15 @@ defmodule PtcRunner.Lisp.Introspection do
   and `doc` additionally expose installed callable capability contracts, fixed
   built-ins, and the bounded Java surface from `PtcRunner.Lisp.Registry`.
   Capability discovery includes installed tools whose `model_visible` flag is
-  false: that flag controls prompt inventory, not runtime documentation. The
-  same answers are produced in the REPL, in
-  workflow and mission source, and inside a prelude export reading another
-  prelude's documentation — there is no REPL-only path.
+  false: that flag controls prompt inventory, not runtime documentation. When
+  the Kernel supplies a shipped-library
+  catalog, a miss in an unattached shipped namespace prints an attachment
+  redirect; `apropos` prints the same class of advisory while still returning
+  only callable names. The redirect identifies the library whose namespace
+  matched, but does not claim that the requested export exists.
+  The same answers are produced in the REPL, in workflow and mission source,
+  and inside a prelude export reading another prelude's documentation — there
+  is no REPL-only path.
 
   Ref arguments accept a string or a `{:symbol_ref, name}` runtime value (from
   a quoted symbol, or from the analyzer's bare-symbol rewrite on these forms).
@@ -71,7 +76,14 @@ defmodule PtcRunner.Lisp.Introspection do
   applied. A hidden attached ref therefore cannot fall through to registry
   documentation for the same spelling. Otherwise `doc` falls back to the
   registry, and `apropos` merges visible attached refs with canonical registry
-  names. An unknown or malformed ref is a miss, not a failure.
+  names. When the evaluation context carries a shipped-library catalog, a miss
+  whose namespace is in that catalog and not attached is a redirect naming the
+  missing attachment. Because the catalog contains library IDs rather than
+  export refs, the redirect does not claim that the requested export exists.
+  `apropos` prints the same class of advisory for matching unattached shipped
+  libraries and still returns only callable names. An unknown or malformed ref
+  is a miss, not a failure. A `nil` catalog degrades to the registry-only miss,
+  so embedded `Lisp.run` callers stay unchanged.
   """
 
   alias PtcRunner.Lisp.Eval.Context, as: EvalContext
@@ -102,10 +114,14 @@ defmodule PtcRunner.Lisp.Introspection do
   Every call path — direct application and higher-order dispatch — routes
   through here, so argument faults and answers cannot differ between them.
   `doc` answers `{:print, text}` because its text belongs on the print channel
-  rather than in the result.
+  rather than in the result. `apropos` may answer `{:print, text, names}` when
+  it also has an attachment advisory: the names stay on the result channel.
   """
   @spec invoke(operation(), [term()], EvalContext.t()) ::
-          {:ok, term()} | {:print, String.t()} | {:error, term()}
+          {:ok, term()}
+          | {:print, String.t()}
+          | {:print, String.t(), term()}
+          | {:error, term()}
   def invoke(op, args, %EvalContext{} = context) when op in @operations do
     invoke_normalized(op, normalize_args(args), context)
   end
@@ -116,14 +132,28 @@ defmodule PtcRunner.Lisp.Introspection do
   defp invoke_normalized(:dir, [namespace], %EvalContext{} = context) when is_binary(namespace),
     do: {:ok, dir(context.prelude, namespace, filter(context))}
 
-  defp invoke_normalized(:apropos, [query], %EvalContext{} = context) when is_binary(query),
-    do: {:ok, apropos(context.prelude, query, filter(context), context.tools_meta)}
+  defp invoke_normalized(:apropos, [query], %EvalContext{} = context) when is_binary(query) do
+    names = apropos(context.prelude, query, filter(context), context.tools_meta)
+
+    case unattached_library_advisory(query, context.prelude, context.shipped_library_ids) do
+      nil -> {:ok, names}
+      text -> {:print, text, names}
+    end
+  end
 
   defp invoke_normalized(:export_meta, [ref], %EvalContext{} = context) when is_binary(ref),
     do: {:ok, export_meta(context.prelude, ref, filter(context))}
 
   defp invoke_normalized(:doc, [ref], %EvalContext{} = context) when is_binary(ref),
-    do: {:print, render_doc(context.prelude, ref, filter(context), context.tools_meta)}
+    do:
+      {:print,
+       render_doc(
+         context.prelude,
+         ref,
+         filter(context),
+         context.tools_meta,
+         context.shipped_library_ids
+       )}
 
   defp invoke_normalized(:source, [ref], %EvalContext{} = context) when is_binary(ref),
     do: {:print, render_source(context.prelude, ref, filter(context))}
@@ -271,22 +301,39 @@ defmodule PtcRunner.Lisp.Introspection do
   """
   @spec render_doc(Prelude.t() | nil, String.t(), visible()) :: String.t()
   def render_doc(prelude, ref, visible) when is_binary(ref) do
-    render_doc(prelude, ref, visible, %{})
+    render_doc(prelude, ref, visible, %{}, nil)
+  end
+
+  @spec render_doc(Prelude.t() | nil, String.t(), visible(), MapSet.t(String.t()) | nil) ::
+          String.t()
+  def render_doc(prelude, ref, visible, nil) when is_binary(ref) do
+    render_doc(prelude, ref, visible, %{}, nil)
+  end
+
+  def render_doc(prelude, ref, visible, %MapSet{} = catalog) when is_binary(ref) do
+    render_doc(prelude, ref, visible, %{}, catalog)
   end
 
   @spec render_doc(Prelude.t() | nil, String.t(), visible(), map()) :: String.t()
   def render_doc(prelude, ref, visible, tools_meta) when is_binary(ref) and is_map(tools_meta) do
+    render_doc(prelude, ref, visible, tools_meta, nil)
+  end
+
+  @spec render_doc(Prelude.t() | nil, String.t(), visible(), map(), MapSet.t(String.t()) | nil) ::
+          String.t()
+  def render_doc(prelude, ref, visible, tools_meta, catalog)
+      when is_binary(ref) and is_map(tools_meta) do
     case fetch_attached(prelude, ref) do
       %Export{} = export ->
         if visible.(export),
           do: render_export(export),
-          else: missing_doc(ref)
+          else: missing_doc(ref, prelude, catalog)
 
       nil ->
         case capability_contract(tools_meta, ref) do
           nil ->
             case Registry.doc(ref) do
-              nil -> missing_doc(ref)
+              nil -> missing_doc(ref, prelude, catalog)
               entry -> render_registry_entry(entry)
             end
 
@@ -383,8 +430,82 @@ defmodule PtcRunner.Lisp.Introspection do
 
   defp hidden_registry_names(_prelude, _visible), do: MapSet.new()
 
-  defp missing_doc(ref), do: ~s(No documentation found for "#{ref}".)
+  defp missing_doc(ref, prelude, catalog) do
+    case unattached_shipped_library(ref, prelude, catalog) do
+      {:ok, library_id} -> unattached_library_message(ref, library_id)
+      :error -> ~s(No documentation found for "#{ref}".)
+    end
+  end
+
   defp missing_source(ref), do: ~s(No source available for "#{ref}".)
+
+  defp unattached_library_advisory(query, prelude, catalog) do
+    needle = String.downcase(String.trim(query))
+
+    if needle == "" do
+      nil
+    else
+      case unattached_library_matches(prelude, needle, catalog) do
+        [] -> nil
+        [library_id] -> unattached_library_message(library_id, library_id)
+        ids -> unattached_libraries_message(needle, ids)
+      end
+    end
+  end
+
+  defp unattached_libraries_message(query, ids) do
+    "Unattached shipped libraries matching \"#{query}\": #{Enum.join(ids, ", ")}.\n" <>
+      ~s(Attach {"library": "<id>"} to this environment's component list before starting the run or session.)
+  end
+
+  defp unattached_library_matches(_prelude, _needle, nil), do: []
+
+  defp unattached_library_matches(prelude, needle, catalog) do
+    attached = attached_namespaces(prelude)
+
+    catalog
+    |> Enum.filter(fn id ->
+      id not in attached and String.contains?(String.downcase(id), needle)
+    end)
+    |> Enum.sort()
+  end
+
+  defp unattached_shipped_library(_ref, _prelude, nil), do: :error
+
+  defp unattached_shipped_library(ref, prelude, catalog) do
+    case library_id_for_ref(ref) do
+      nil ->
+        :error
+
+      library_id ->
+        if MapSet.member?(catalog, library_id) and
+             library_id not in attached_namespaces(prelude) do
+          {:ok, library_id}
+        else
+          :error
+        end
+    end
+  end
+
+  defp library_id_for_ref(ref) do
+    case String.split(ref, "/") do
+      [name] when name != "" -> name
+      [namespace, symbol] when namespace != "" and symbol != "" -> namespace
+      _ -> nil
+    end
+  end
+
+  @spec attached_namespaces(Prelude.t() | nil) :: [String.t()]
+  defp attached_namespaces(%Prelude{namespaces: namespaces}) when is_list(namespaces),
+    do: namespaces
+
+  defp attached_namespaces(_prelude), do: []
+
+  defp unattached_library_message(ref, library_id) do
+    ~s(Shipped library "#{library_id}" is not attached, so "#{ref}" cannot be resolved in this session.) <>
+      "\n" <>
+      ~s(Attach {"library": "#{library_id}"} to this environment's component list before starting the run or session.)
+  end
 
   defp render_registry_entry(entry) do
     details =

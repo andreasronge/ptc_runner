@@ -229,6 +229,10 @@ defmodule PtcRunner.Lisp.Runtime.Callable do
       {:ok, value} ->
         value
 
+      {:print, text, value} ->
+        _updated_context = EvalContext.append_print(context, text)
+        value
+
       {:print, text} ->
         _updated_context = EvalContext.append_print(context, text)
         nil
