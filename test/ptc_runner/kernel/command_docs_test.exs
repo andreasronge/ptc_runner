@@ -90,8 +90,8 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert limits =~ "limits.llm_request_output_tokens"
     assert limits =~ "params.max_tokens"
     assert limits =~ "not a sizing multiplier"
-    assert limits =~ "measured successful-call aggregate"
-    assert limits =~ "failed calls can still incur provider charges"
+    assert limits =~ "trustworthy priced usage from successful and failed calls"
+    assert limits =~ "possibly dispatched failure without trustworthy usage"
 
     assert {:ok, diagnostic} =
              RuntimeLimitDiagnostic.budget_message(:llm_cost_microusd, 2_400, 2_419, 2_338)

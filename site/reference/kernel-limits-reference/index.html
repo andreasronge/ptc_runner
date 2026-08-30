@@ -124,8 +124,9 @@ reservation.</p><p>Valid priced usage releases the unused reservation and charge
 A dispatched call without trustworthy priced usage conservatively charges
 the full reservation and marks <code class="inline">llm_budget.cost.state</code> as <code class="inline">incomplete</code>; that
 charge is an accounting upper bound, not measured spend. When its state is
-<code class="inline">available</code>, <code class="inline">llm_spend</code> is the measured successful-call aggregate; failed
-calls can still incur provider charges that it does not measure.</p><p>To reduce the output portion of future reservations, an application may
+<code class="inline">available</code>, <code class="inline">llm_spend</code> aggregates trustworthy priced usage from successful
+and failed calls. A possibly dispatched failure without trustworthy usage
+makes spend <code class="inline">incomplete</code>, because it can still incur unmeasured provider charges.</p><p>To reduce the output portion of future reservations, an application may
 narrow <code class="inline">limits.llm_request_output_tokens</code>, or a model installation may set a
 lower <code class="inline">params.max_tokens</code>. Lower either only when the smaller output allowance
 is valid for the workload; request and conversation size still contribute to

@@ -112,8 +112,9 @@ Valid priced usage releases the unused reservation and charges actual cost.
 A dispatched call without trustworthy priced usage conservatively charges
 the full reservation and marks `llm_budget.cost.state` as `incomplete`; that
 charge is an accounting upper bound, not measured spend. When its state is
-`available`, `llm_spend` is the measured successful-call aggregate; failed
-calls can still incur provider charges that it does not measure.
+`available`, `llm_spend` aggregates trustworthy priced usage from successful
+and failed calls. A possibly dispatched failure without trustworthy usage
+makes spend `incomplete`, because it can still incur unmeasured provider charges.
 
 To reduce the output portion of future reservations, an application may
 narrow `limits.llm_request_output_tokens`, or a model installation may set a
