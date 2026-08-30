@@ -190,7 +190,16 @@ turn-limit reason.</p><p><code class="inline">run-phased-result-value</code> rep
 string), <code class="inline">max_turns</code> (integer, 1–128), optional <code class="inline">instruction</code> (non-empty
 string), and optional <code class="inline">terminal_only</code> (boolean). The sum of phase turn budgets
 must not exceed 128; an invalid vector fails with
-<code class="inline">invalid-agent-config/invalid-phases</code> before any provider request.</p><h3 id="agent-main-run"><code class="inline">agent.main/run</code></h3><p>Set the manifest entry to <code class="inline">agent.main/run</code> and supply:</p><pre><code class="json language-json">{
+<code class="inline">invalid-agent-config/invalid-phases</code> before any provider request.</p><p>A non-final phase may also select an application-declared named handoff schema
+with <code class="inline">return_contract</code>. Its complete contract is shown only in that phase's
+system prompt. Invalid explicit returns receive bounded correction feedback
+while a local turn remains; an invalid final-turn return or exhaustion without
+an explicit return fails instead of transitioning. The final phase rejects
+<code class="inline">return_contract</code> and uses the optional application result schema.</p><p>Validating entries render the active application result schema in the final
+phase. Raw-result entries state that the exact returned value is validated.
+Envelope-producing <code class="inline">agent.core/run</code> states that the host validates the success
+envelope and tells the model to return only its value, avoiding double
+wrapping. <code class="inline">run-value</code> and <code class="inline">run-outcome</code> render no application result obligation.</p><h3 id="agent-main-run"><code class="inline">agent.main/run</code></h3><p>Set the manifest entry to <code class="inline">agent.main/run</code> and supply:</p><pre><code class="json language-json">{
   &quot;task&quot;: &quot;Complete the requested analysis.&quot;,
   &quot;agent&quot;: {
     &quot;max_turns&quot;: 8

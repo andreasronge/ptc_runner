@@ -614,6 +614,14 @@ defmodule PtcRunner.Kernel.ValueContract do
     end
   end
 
+  @doc false
+  @spec prompt_discriminator(t()) :: {:ok, binary()} | :error
+  def prompt_discriminator(%__MODULE__{schema: %{"oneOf" => branches}} = contract) do
+    if sealed?(contract), do: shared_discriminator(branches), else: :error
+  end
+
+  def prompt_discriminator(_contract), do: :error
+
   defp branch_tag(branch, nil), do: get_in(branch, ["properties"]) && nil
   defp branch_tag(branch, name), do: get_in(branch, ["properties", name, "const"])
 

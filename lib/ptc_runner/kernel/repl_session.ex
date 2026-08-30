@@ -1102,7 +1102,10 @@ defmodule PtcRunner.Kernel.ReplSession do
         session.config.event_sink,
         :workflow,
         "kernel-result-contract",
-        RuntimeTools.result_contract(session.config.result_contract)
+        RuntimeTools.result_contract(
+          session.config.result_contract,
+          session.config.phase_return_contracts
+        )
       )
     )
     |> RuntimeTools.maybe_put_result_contract_failure(
