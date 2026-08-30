@@ -3,6 +3,8 @@ defmodule PtcViewer.Server do
 
   use GenServer
 
+  alias PtcViewer.OwnerStatusRedaction
+
   alias PtcViewer.InspectionStore
   alias PtcViewer.LiveSecurity
   alias PtcViewer.ReplConnection
@@ -225,13 +227,13 @@ defmodule PtcViewer.Server do
 
   if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
     @impl GenServer
-    def format_status(status), do: redact_status(status)
+    def format_status(status), do: OwnerStatusRedaction.format(status)
   else
-    def format_status(status), do: redact_status(status)
+    def format_status(status), do: OwnerStatusRedaction.format(status)
   end
 
   @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
+  def format_status(reason, status), do: OwnerStatusRedaction.format(reason, status)
 
   @impl GenServer
   def terminate(_reason, state) do
@@ -447,13 +449,5 @@ defmodule PtcViewer.Server do
     end)
 
     :ok
-  end
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
   end
 end
