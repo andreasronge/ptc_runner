@@ -401,6 +401,11 @@ defmodule Mix.Tasks.Ptc.GenDocs do
 
     Every classified diagnostic and the status it exits with:
 
+    From shipped CLI input, `authorization_target_unknown` and
+    `authorization_not_applicable` are reachable only through source-checkout
+    `mix ptc run --authorize-mcp`; runtime-included `ptc` rejects that switch.
+    Embedding runtimes can supply authorization targets directly.
+
     | Status | Phase | Code | Retryable | Message |
     | ---: | --- | --- | --- | --- |
     #{exit_status_rows()}

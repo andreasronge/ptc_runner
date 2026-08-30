@@ -191,7 +191,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:active_preflight, :credential_unavailable, 4, false,
      "a required provider credential is unavailable"},
     {:active_preflight, :authorization_required, 4, false,
-     "explicit provider authorization is required"},
+     "provider authorization is required; runtime-included ptc cannot initiate authorization; " <>
+       "source-checkout mix ptc run ... --authorize-mcp NAME can initiate it, and embedding " <>
+       "hosts may provide authorization"},
     {:active_preflight, :authorization_rejected, 4, false,
      "explicit provider authorization was rejected"},
     {:active_preflight, :authentication_rejected, 4, false,

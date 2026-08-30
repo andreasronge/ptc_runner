@@ -81,6 +81,15 @@ defmodule PtcRunner.Kernel.AcquisitionReasonTest do
     end
   end
 
+  test "authorization loss during acquisition gives frontend-specific guidance" do
+    diagnostic = AcquisitionReason.diagnostic(:mcp_authorization_required, @occurrence)
+
+    assert diagnostic.message ==
+             "provider authorization is required; runtime-included ptc cannot initiate " <>
+               "authorization; source-checkout mix ptc run ... --authorize-mcp NAME can " <>
+               "initiate it, and embedding hosts may provide authorization"
+  end
+
   test "a rejected fixture line reports its rule and number through acquisition too" do
     diagnostic = AcquisitionReason.diagnostic({:schema_version_invalid, 7}, @occurrence)
 
