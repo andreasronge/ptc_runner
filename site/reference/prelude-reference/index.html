@@ -194,9 +194,11 @@ projections are manifest-derived; the remaining segments are authored in
 <code class="inline">agent.prompt</code>. The order is the structure — the rendering interleaves
 authored and dynamic text, so no unordered value can encode reassembly.</p><p>The authored empty-API sentence is an <code class="inline">api-empty</code> segment. <code class="inline">api-notes</code> is absent
 when the mission declares no namespace docstrings. Result and phase-return
-contracts are optional dynamic suffix segments.</p><p>Any string that is not a shipped rendering — a manifest's own prompt, a
-malformed one, or one whose manifest text reproduces an anchor — returns a
-single <code class="inline">unrecognised</code> segment carrying the whole input.</p><p>Joining the segment texts in order reproduces the input exactly, in both the
+contracts are optional dynamic suffix segments.</p><p>Recognition validates the V1 marker, boundary anchors, their ordering and
+uniqueness, complete entry termination, and the fixed contract prefixes. It
+is structural rather than a byte-for-byte validation of authored prose. A
+string that fails those checks returns one <code class="inline">unrecognised</code> segment carrying
+the whole input instead of guessed boundaries.</p><p>Joining the segment texts in order reproduces the input exactly, in both the
 recognised and the unrecognised case. That invariant is what makes the
 per-segment character counts add up to the whole.</p><ul><li><strong>Kind:</strong> <code class="inline">function</code></li><li><strong>Visibility:</strong> <code class="inline">discoverable</code></li><li><strong>Effect:</strong> <code class="inline">unknown</code></li><li><strong>Backing requirements:</strong> —</li></ul><h2 id="related-guides">Related guides</h2><ul><li><a href="/guides/components-and-preludes/">Components and preludes</a> explains local components, contracts, dependency boundaries, and authority.</li><li><a href="/guides/building-agents/">Building agents</a> applies the agent libraries to workflow and mission design.</li><li><a href="/reference/agent-library-reference/">Agent library reference</a> defines the complete loop configuration, turn protocol, retry, and failure behavior.</li><li><a href="/guides/manifests-and-capabilities/">Manifests and capabilities</a> defines selection and environment assembly.</li></ul>
 </article>

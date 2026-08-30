@@ -575,8 +575,10 @@ system prompt can be measured without adding a capability grant:
 ```
 
 Use `prompt.audit/segments` for the ordered authored/dynamic sections, or
-`prompt.audit/delta` to compare two rendered prompts. A non-shipped rendering
-returns one `unrecognised` segment instead of guessed boundaries.
+`prompt.audit/delta` to compare two rendered prompts. Recognition validates the
+V1 boundary structure, not every byte of authored prose; a string that fails
+those structural checks returns one `unrecognised` segment instead of guessed
+boundaries.
 
 For one complete conversation, use the simpler one-shot command:
 

@@ -21,6 +21,13 @@
 (defn- unrecognised [text]
   [{"label" "unrecognised" "text" text}])
 
+(defn- complete-type-line? [text type-at]
+  (if (nil? type-at)
+    false
+    (let [value-at (+ type-at (count "Type: "))
+          end-at (index-of text "\n" value-at)]
+      (and (not (nil? end-at)) (> end-at value-at)))))
+
 ;; The last blank line strictly before the legend, never the first one after the
 ;; heading. A namespace docstring may contain a blank line, and ending the notes
 ;; at the first would cut manifest text off inside its own segment and count the
@@ -84,9 +91,11 @@
                                                  "\nApplication result contract\nThe host validates the exact value passed to (return value).\nType: ")
                                    (starts-with? result-text
                                                  "\nApplication result contract\nThe host validates {\"ok\":true,\"value\":value}. Return only value; do not construct or return that envelope yourself.\nType: "))
+                               (complete-type-line? result-text (index-of result-text "Type: "))
                                (ends-with? result-text "\n")))
         phase-valid? (or (nil? phase-text)
                          (and (index-of phase-text ")\nA valid explicit (return value) is required to transition to the next phase.\nType: ")
+                              (complete-type-line? phase-text (index-of phase-text "Type: "))
                               (ends-with? phase-text "\n")))]
     (if (and unique? ordered? result-valid? phase-valid?)
       {"api-limit" api-limit
@@ -115,9 +124,11 @@
   when the mission declares no namespace docstrings. Result and phase-return
   contracts are optional dynamic suffix segments.
 
-  Any string that is not a shipped rendering — a manifest's own prompt, a
-  malformed one, or one whose manifest text reproduces an anchor — returns a
-  single `unrecognised` segment carrying the whole input.
+  Recognition validates the V1 marker, boundary anchors, their ordering and
+  uniqueness, complete entry termination, and the fixed contract prefixes. It
+  is structural rather than a byte-for-byte validation of authored prose. A
+  string that fails those checks returns one `unrecognised` segment carrying
+  the whole input instead of guessed boundaries.
 
   Joining the segment texts in order reproduces the input exactly, in both the
   recognised and the unrecognised case. That invariant is what makes the
@@ -160,10 +171,10 @@
 
 ;; Neither loop/recur, a regex, nor `(seq text)`. Evaluation caps loops at a
 ;; thousand iterations, the regex runtime truncates at 32,768 bytes, and seq
-;; materialises every grapheme as a heap-heavy list. String replacement keeps
-;; the large payload in binaries while the difference gives the exact count.
+;; materialises every grapheme as a heap-heavy list. Doubling each newline keeps
+;; grapheme boundaries intact; the added grapheme count is the newline count.
 (defn- newline-count [text]
-  (- (count text) (count (replace text "\n" ""))))
+  (- (count (replace text "\n" "\n\n")) (count text)))
 
 (defn- text-characters [text]
   (if (string? text) (count text) 0))

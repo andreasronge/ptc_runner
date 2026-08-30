@@ -425,8 +425,10 @@ system prompt can be measured without adding a capability grant:</p><pre><code c
 (def system-prompt
   (get-in exchanges [&quot;items&quot; 0 &quot;arguments&quot; &quot;system&quot;]))
 (prompt.audit/measure system-prompt)</code></pre><p>Use <code class="inline">prompt.audit/segments</code> for the ordered authored/dynamic sections, or
-<code class="inline">prompt.audit/delta</code> to compare two rendered prompts. A non-shipped rendering
-returns one <code class="inline">unrecognised</code> segment instead of guessed boundaries.</p><p>For one complete conversation, use the simpler one-shot command:</p><pre><code class="console language-console">mkdir -p tmp/tutorial-transcript
+<code class="inline">prompt.audit/delta</code> to compare two rendered prompts. Recognition validates the
+V1 boundary structure, not every byte of authored prose; a string that fails
+those structural checks returns one <code class="inline">unrecognised</code> segment instead of guessed
+boundaries.</p><p>For one complete conversation, use the simpler one-shot command:</p><pre><code class="console language-console">mkdir -p tmp/tutorial-transcript
 ptc transcript RUN_ID \
   --traces tmp/tutorial-traces \
   --inspection tmp/tutorial-inspection \

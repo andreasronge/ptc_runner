@@ -209,9 +209,27 @@ defmodule PtcRunner.Lisp.EvaluatorError do
   defp retain_arity_details(details) when is_map(details) do
     %{}
     |> maybe_put_arity_name(details)
-    |> maybe_put(:expected, Map.get(details, :expected) || Map.get(details, "expected"))
-    |> maybe_put(:actual, Map.get(details, :actual) || Map.get(details, "actual"))
+    |> maybe_put_expected(details)
+    |> maybe_put_actual(details)
     |> maybe_put_receiver_required(details)
+  end
+
+  defp maybe_put_expected(map, details) do
+    expected = Map.get(details, :expected) || Map.get(details, "expected")
+
+    case format_expected_arity(expected) do
+      {:ok, _rendered} -> Map.put(map, :expected, expected)
+      :error -> map
+    end
+  end
+
+  defp maybe_put_actual(map, details) do
+    actual = Map.get(details, :actual) || Map.get(details, "actual")
+
+    case admitted_nonneg_integer(actual) do
+      {:ok, actual} -> Map.put(map, :actual, actual)
+      :error -> map
+    end
   end
 
   defp maybe_put_arity_name(map, details) do
@@ -220,9 +238,6 @@ defmodule PtcRunner.Lisp.EvaluatorError do
       :error -> map
     end
   end
-
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp maybe_put_receiver_required(map, details) do
     if Map.get(details, :receiver_required?) == true,
@@ -335,7 +350,7 @@ defmodule PtcRunner.Lisp.EvaluatorError do
   defp admitted_java_member_name(details) do
     name = Map.get(details, :name) || Map.get(details, "name")
 
-    if is_binary(name) and byte_size(name) <= @max_public_name_bytes and
+    if is_binary(name) and String.valid?(name) and byte_size(name) <= @max_public_name_bytes and
          String.match?(name, ~r/\A\.[A-Za-z][A-Za-z0-9]*[!?]?\z/) do
       {:ok, name}
     else

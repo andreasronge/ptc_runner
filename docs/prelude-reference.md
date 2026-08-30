@@ -1270,9 +1270,11 @@ The authored empty-API sentence is an `api-empty` segment. `api-notes` is absent
 when the mission declares no namespace docstrings. Result and phase-return
 contracts are optional dynamic suffix segments.
 
-Any string that is not a shipped rendering — a manifest's own prompt, a
-malformed one, or one whose manifest text reproduces an anchor — returns a
-single `unrecognised` segment carrying the whole input.
+Recognition validates the V1 marker, boundary anchors, their ordering and
+uniqueness, complete entry termination, and the fixed contract prefixes. It
+is structural rather than a byte-for-byte validation of authored prose. A
+string that fails those checks returns one `unrecognised` segment carrying
+the whole input instead of guessed boundaries.
 
 Joining the segment texts in order reproduces the input exactly, in both the
 recognised and the unrecognised case. That invariant is what makes the

@@ -52,6 +52,7 @@ defmodule PtcRunner.Kernel.PromptAuditTest do
       for suffix <- [
             "\nApplication result contract\n",
             "\nApplication result contract\nThe host validates the exact value passed to (return value).\n",
+            "\nApplication result contract\nThe host validates the exact value passed to (return value).\nType: \n",
             "\nCurrent phase return contract (draft)\n",
             "\nCurrent phase return contract (draft)\nA valid explicit (return value) is required to transition to the next phase.\n"
           ] do
@@ -155,6 +156,7 @@ defmodule PtcRunner.Kernel.PromptAuditTest do
       assert row(measure("one\ntwo"), "total")["lines"] == 2
       assert row(measure("one\ntwo\n"), "total")["lines"] == 2
       assert row(measure("\n"), "total")["lines"] == 1
+      assert row(measure("a\n\u0301"), "total")["lines"] == 2
     end
 
     test "summed segment lines equal the whole-string line count" do
