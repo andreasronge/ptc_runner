@@ -976,21 +976,27 @@ defmodule PtcRunner.Kernel.Evaluation do
       ) do
     limits = RunState.limits(state)
 
-    state
-    |> ToolGrant.capability_callbacks(
-      :mission,
-      environment,
-      %{
-        timeout_ms: timeout_ms,
-        validation_heap_words: limits.evaluation_heap_words,
-        evaluation_lease: evaluation_lease,
-        validation_deadline_ms: validation_deadline_ms,
-        mission_name: mission_name
-      },
-      event_sink,
-      inspection_sink
-    )
-    |> Map.new(fn {name, callback} -> {name, %TrustedTool{function: callback}} end)
+    callbacks =
+      ToolGrant.capability_callbacks(
+        state,
+        :mission,
+        environment,
+        %{
+          timeout_ms: timeout_ms,
+          validation_heap_words: limits.evaluation_heap_words,
+          evaluation_lease: evaluation_lease,
+          validation_deadline_ms: validation_deadline_ms,
+          mission_name: mission_name
+        },
+        event_sink,
+        inspection_sink
+      )
+
+    contracts = ToolGrant.capability_contracts(environment)
+
+    Map.new(callbacks, fn {name, callback} ->
+      {name, %TrustedTool{function: callback, contract: Map.get(contracts, name)}}
+    end)
   end
 
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude

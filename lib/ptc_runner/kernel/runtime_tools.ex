@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.JSONValue
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LLMReplayDiagnostic
+  alias PtcRunner.Kernel.ModelContract
   alias PtcRunner.Kernel.Program
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
@@ -678,8 +679,8 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc false
-  @spec trusted_tools(map(), map()) :: map()
-  def trusted_tools(tools, limits) when is_map(tools) do
+  @spec trusted_tools(map(), map(), map()) :: map()
+  def trusted_tools(tools, limits, contracts \\ %{}) when is_map(tools) and is_map(contracts) do
     Map.new(tools, fn
       {"kernel-eval" = name, callback} ->
         {name,
@@ -745,7 +746,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          }}
 
       {name, callback} ->
-        {name, %TrustedTool{function: callback}}
+        {name, %TrustedTool{function: callback, contract: Map.get(contracts, name)}}
     end)
   end
 
@@ -930,8 +931,20 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   end
 
   @doc "Builds the workflow-only application-result contract callback."
-  def result_contract(nil) do
+  def result_contract(contract, phase_contracts \\ %{})
+
+  def result_contract(nil, phase_contracts) do
     fn
+      %{"phase_contract" => name, "presentation" => true} = arguments
+      when map_size(arguments) == 2 ->
+        phase_contract_presentation(phase_contracts, name)
+
+      %{"phase_contract" => name, "value" => value} = arguments when map_size(arguments) == 2 ->
+        validate_phase_contract(phase_contracts, name, value)
+
+      %{"presentation" => true} = arguments when map_size(arguments) == 1 ->
+        %{status: :ok, value: nil}
+
       %{"value" => _value} = arguments when map_size(arguments) == 1 ->
         %{status: :ok, value: %{enforced?: false, valid?: true}}
 
@@ -940,12 +953,61 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
-  def result_contract(%ValueContract{} = contract) do
+  def result_contract(%ValueContract{} = contract, phase_contracts) do
     fn
+      %{"phase_contract" => name, "presentation" => true} = arguments
+      when map_size(arguments) == 2 ->
+        phase_contract_presentation(phase_contracts, name)
+
+      %{"phase_contract" => name, "value" => value} = arguments when map_size(arguments) == 2 ->
+        validate_phase_contract(phase_contracts, name, value)
+
+      %{"presentation" => true} = arguments when map_size(arguments) == 1 ->
+        result_contract_presentation(contract)
+
       %{"value" => value} = arguments when map_size(arguments) == 1 ->
         validate_result_contract(contract, value)
 
       _arguments ->
+        %{status: :error, kind: :protocol_error, reason: :invalid_result_contract_request}
+    end
+  end
+
+  defp phase_contract_presentation(contracts, name) when is_binary(name) do
+    case Map.fetch(contracts, name) do
+      {:ok, %{projection: projection}} ->
+        case DeterministicJSON.encode(projection) do
+          {:ok, encoded} -> %{status: :ok, value: encoded}
+          {:error, _reason} -> invalid_phase_contract_request(:invalid_projection)
+        end
+
+      :error ->
+        invalid_phase_contract_request(:unknown_phase_return_contract)
+    end
+  end
+
+  defp phase_contract_presentation(_contracts, _name),
+    do: invalid_phase_contract_request(:unknown_phase_return_contract)
+
+  defp validate_phase_contract(contracts, name, value) when is_binary(name) do
+    case Map.fetch(contracts, name) do
+      {:ok, %{contract: contract}} -> validate_result_contract(contract, value)
+      :error -> invalid_phase_contract_request(:unknown_phase_return_contract)
+    end
+  end
+
+  defp validate_phase_contract(_contracts, _name, _value),
+    do: invalid_phase_contract_request(:unknown_phase_return_contract)
+
+  defp invalid_phase_contract_request(reason),
+    do: %{status: :error, kind: :invalid_agent_config, reason: reason}
+
+  defp result_contract_presentation(contract) do
+    with {:ok, projection} <- ModelContract.value_contract(contract),
+         {:ok, encoded} <- DeterministicJSON.encode(projection) do
+      %{status: :ok, value: encoded}
+    else
+      _unsupported ->
         %{status: :error, kind: :protocol_error, reason: :invalid_result_contract_request}
     end
   end

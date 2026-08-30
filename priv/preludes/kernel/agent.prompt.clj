@@ -11,7 +11,11 @@
    :turns-remaining (get cfg "max_turns")
    :terminal-only? (true? (get cfg "terminal_only"))
    :max-observation-chars (get cfg "max_observation_chars")
-   :max-program-chars (get cfg "max_program_chars")})
+   :max-program-chars (get cfg "max_program_chars")
+   :result-contract (get cfg "result_contract")
+   :result-contract-mode (get cfg "result_contract_mode")
+   :phase-return-contract (get cfg "phase_return_contract")
+   :phase-return-contract-name (get cfg "return_contract")})
 
 (defn- inline-json [value]
   (let [encoded (json/generate-string value)
@@ -53,6 +57,7 @@
             "any" ":any"
             "array" (str "[" (render-type (get node "items")) "]")
             "object" (str "{" (join ", " (map render-field (get node "fields" []))) "}")
+            "tagged_union" (str "oneOf(" (join " | " (map #(render-type (get % "type")) (get node "variants" []))) ")")
             ":any")]
       (str base (if (and (true? (get node "nullable")) (not= kind "nil")) "?" "")))
     ":any"))
@@ -93,8 +98,17 @@
        (str path " item count >= " (get node "min_items")))
      (when (contains? node "max_items")
        (str path " item count <= " (get node "max_items")))
+     (when (contains? node "max_properties")
+       (str path " field count <= " (get node "max_properties")))
+     (when (and (= "string" (get node "kind")) (= "sha256" (get node "format")))
+       (str path " has sha256 format"))
      (when (and (= "object" (get node "kind")) (true? (get node "closed")))
        (str path " has no additional fields"))]))
+
+(defn- variant-path [path variant]
+  (let [discriminator (get variant "discriminator")]
+    (str path " when " (inline-json (get discriminator "name")) "="
+         (inline-json (get discriminator "literal")))))
 
 (defn- constraint-lines [node path]
   (if (map? node)
@@ -104,6 +118,8 @@
         "object"
         (concat
           own
+          (when (map? (get node "property_names"))
+            (constraint-lines (get node "property_names") (str path " field-name")))
           (mapcat
             (fn [field]
               (constraint-lines
@@ -113,6 +129,11 @@
 
         "array"
         (concat own (constraint-lines (get node "items") (str path "[]")))
+
+        "tagged_union"
+        (concat own
+                (mapcat #(constraint-lines (get % "type") (variant-path path %))
+                        (get node "variants" [])))
 
         own))
     []))
@@ -150,6 +171,8 @@
         "object"
         (concat
           own
+          (when (map? (get node "property_names"))
+            (documentation-lines (get node "property_names") (str path " field-name")))
           (mapcat
             (fn [field]
               (documentation-lines
@@ -159,6 +182,11 @@
 
         "array"
         (concat own (documentation-lines (get node "items") (str path "[]")))
+
+        "tagged_union"
+        (concat own
+                (mapcat #(documentation-lines (get % "type") (variant-path path %))
+                        (get node "variants" [])))
 
         own))
     []))
@@ -235,6 +263,34 @@
          "\n")
     "Available API\n- No mission-specific data, functions, or tools are available.\n"))
 
+(defn- render-result-contract [state]
+  (let [contract (get state :result-contract)
+        mode (get state :result-contract-mode)]
+    (if (and (map? contract) (or (= mode :identity) (= mode :ok-envelope)))
+      (str "\nApplication result contract\n"
+           (if (= mode :ok-envelope)
+             "The host validates {\"ok\":true,\"value\":value}. Return only value; do not construct or return that envelope yourself.\n"
+             "The host validates the exact value passed to (return value).\n")
+           "Type: " (render-type contract) "\n"
+           (let [constraints (constraint-lines contract "result")]
+             (if (seq constraints) (str "Constraints: " (join "; " constraints) "\n") ""))
+           (let [docs (documentation-lines contract "result")]
+             (if (seq docs) (str "Schema docs: " (join "; " docs) "\n") "")))
+      "")))
+
+(defn- render-phase-return-contract [state]
+  (let [contract (get state :phase-return-contract)
+        name (get state :phase-return-contract-name)]
+    (if (and (map? contract) (string? name))
+      (str "\nCurrent phase return contract (" name ")\n"
+           "A valid explicit (return value) is required to transition to the next phase.\n"
+           "Type: " (render-type contract) "\n"
+           (let [constraints (constraint-lines contract "phase-return")]
+             (if (seq constraints) (str "Constraints: " (join "; " constraints) "\n") ""))
+           (let [docs (documentation-lines contract "phase-return")]
+             (if (seq docs) (str "Schema docs: " (join "; " docs) "\n") "")))
+      "")))
+
 (defn render
   "Renders the system prompt, or the capability error envelope that prevented it."
   [state]
@@ -257,7 +313,7 @@
                  "Failed evaluations roll back every definition created by that failed program.\n"
                  "Use (return value) only when the task is complete; (return value) completes successfully.\n"
                  "Use (fail value) only when the task cannot be completed; (fail value) aborts the run.\n"
-                 "Generated programs run only against the advertised mission API below.\n"
+                 "Generated programs run only against the installed mission API; the prompt inventory below may omit runtime-discoverable capabilities.\n"
                  "Do not repeat irreversible capability effects merely to reconstruct state.\n"
                  "The task and each continuation message state how many programs remain; use that budget to pace exploration.\n"
                  "When a budget notice says FINAL TURN, the next program must call (return value) or (fail value).\n"
@@ -273,9 +329,9 @@
                    "- Explore first, return last. Use (println ...) only for concise diagnostics; output previews are bounded.\n")
                  "- Successful def and defn bindings remain callable in later turns; failed turns publish none of their candidate bindings.\n"
                  "- Value references are values; call only function references.\n"
-                 "- The Available API section below is complete for mission data, prompt-visible mission functions, and granted tools.\n"
-                 "- Use (apropos \"term\") to search visible mission prelude exports plus fixed built-ins and the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. None enumerate data references or direct tool capabilities.\n"
-                 "- Call granted capabilities only with the exact tool/... forms shown below.\n"
+                 "- The Available API section below is complete for mission data and prompt-visible mission functions and tools; other installed capabilities remain discoverable at runtime.\n"
+                 "- Use (apropos \"term\") to search visible mission prelude exports, installed capabilities, and fixed built-ins plus the bounded Java surface; use (doc \"name\") to print their documentation. (dir) lists attached prelude namespaces, (dir \"ns\") their exports, (export-meta \"ns/name\") returns attached export metadata as data, and (source ns/name) prints an attached prelude definition when available. Only apropos and doc cover installed direct tool capabilities; none enumerate data references.\n"
+                 "- Call granted capabilities only with exact tool/... forms shown below or documented by doc.\n"
                  "- Fixed namespaces: clojure.core/core, clojure.string/str/string, clojure.set/set, clojure.walk/walk, regex, Math, System, Boolean, numeric/date/time namespaces, data, tool, and json.\n"
                  "- No ns/require/refer/import, user-defined macros, eval/read-string, or host file I/O.\n\n"
                  "Examples\n"
@@ -285,7 +341,9 @@
                  (render-api
                    (get context "namespaces" [])
                    (prompt-entries
-                     (sort-by #(get % "form") (get context "entries" [])))))
+                     (sort-by #(get % "form") (get context "entries" []))))
+                 (render-result-contract state)
+                 (render-phase-return-contract state))
             nil))))
     nil))
 

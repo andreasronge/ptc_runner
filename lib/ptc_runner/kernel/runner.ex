@@ -682,7 +682,7 @@ defmodule PtcRunner.Kernel.Runner do
         config.event_sink,
         :workflow,
         "kernel-result-contract",
-        RuntimeTools.result_contract(config.result_contract)
+        RuntimeTools.result_contract(config.result_contract, config.phase_return_contracts)
       )
     )
     |> RuntimeTools.maybe_put_result_contract_failure(
@@ -708,7 +708,10 @@ defmodule PtcRunner.Kernel.Runner do
       config.event_sink,
       config.workflow_environment.bundle
     )
-    |> RuntimeTools.trusted_tools(config.limits)
+    |> RuntimeTools.trusted_tools(
+      config.limits,
+      ToolGrant.capability_contracts(config.workflow_environment)
+    )
   end
 
   defp bundle_prelude(%{bundle: %{prelude: prelude}}), do: prelude

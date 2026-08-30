@@ -46,7 +46,7 @@ A project document can capture both instead of the two switches; see
 Three code-owned profiles read those artifacts. `run-analysis-v1` takes the
 canonical trace and grants the four `analysis-*` capabilities (`analysis-runs`,
 `analysis-open`, `analysis-read`, `analysis-counters`).
-`private-run-analysis-v1` additionally takes the inspection artifact, and
+`private-run-analysis-v2` additionally takes the inspection artifact, and
 requires an authorized private sink because the records it returns carry exact
 prompts, generated source, and capability payloads. `private-run-catalog-v1`
 uses bounded metadata-only probes of both directories and grants only the
@@ -59,7 +59,7 @@ ptc repl --profile run-analysis-v1 --resource traces=traces/
 
 # Private: adds every private collection. --resource takes the DIRECTORY
 # holding the artifact, not the .ptcins path --inspect was given.
-ptc repl --profile private-run-analysis-v1 --private-terminal \
+ptc repl --profile private-run-analysis-v2 --private-terminal \
   --resource traces=traces/ --resource inspection=traces-private/
 
 # Private catalog: safe cohort metadata without payload admission.
@@ -139,7 +139,7 @@ partial run is selected.
 
 Exact selected capture is a distinct source variant used by
 `ptc transcript RUN_ID` and by one through sixteen repeated `--run` flags on
-`private-run-analysis-v1`: it resolves only
+`private-run-analysis-v2`: it resolves only
 `<run-ref>.jsonl` or `<run-ref>.private.jsonl` plus
 `<run-ref>.ptcins`, never lists the granted directory, and does not
 count unrelated members toward `max_directory_entries`, `max_files`, or the
@@ -167,7 +167,7 @@ state, descriptor identity, and exact probe-byte digest. Absent halves commit
 to absence. The returned `catalog_digest` identifies that immutable captured
 value; page cursors bind it and the complete filter query. Neither the digest
 nor a cursor is an admission credential, persisted catalog, or input to
-`private-run-analysis-v1`.
+`private-run-analysis-v2`.
 
 Catalog capture has finite ceilings: 4,096 entries per directory, 1,024 joined
 run stems, 2,048 encoded bytes per row, 4,194,304 retained bytes, 1,000,000
@@ -383,7 +383,7 @@ Examples:
                     "from" "2026-08-01T00:00:00Z"
                     "to" "2026-09-01T00:00:00Z"})
 
-;; private-run-analysis-v1 only: every collection but `activity` is private
+;; private-run-analysis-v2 only: every collection but `activity` is private
 ;; authority, and returns an :invalid_request envelope under the public profile.
 (analysis/read "run-id" {"collection" "turns" "limit" 20})
 (analysis/read "run-id" {"collection" "generated_sources"

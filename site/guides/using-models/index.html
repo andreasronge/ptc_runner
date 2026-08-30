@@ -99,21 +99,21 @@ implementation.">
 <article>
 <h1 id="use-a-model">Use a model</h1><p>Select, verify, and observe a model without working on PtcRunner's provider
 implementation.</p><p><code class="inline">ptc-host.json</code> installs a model under a stable alias, and
-<code class="inline">ptc.json</code> selects that alias for its trusted workflow. Generated mission code
-does not receive the model route.</p><h2 id="what-must-the-model-support">What must the model support?</h2><p>An agent loop needs an endpoint that accepts tool-bearing requests. A model may
-accept ordinary completions while rejecting the agent's tool contract;
-PtcRunner reports that separately from a missing model or credential failure.</p><h2 id="how-do-i-choose-one">How do I choose one?</h2><p>Start with the model in the shipped examples: OpenRouter's
+<code class="inline">ptc.json</code> selects it for trusted workflow code. Generated mission code never
+receives the route.</p><h2 id="what-must-the-model-support">What must the model support?</h2><p>An agent loop needs an endpoint that accepts tools. PtcRunner distinguishes an
+unsupported tool contract from a missing model or credential.</p><h2 id="how-do-i-choose-one">How do I choose one?</h2><p>Start with the shipped example model: OpenRouter's
 <a href="https://openrouter.ai/deepseek/deepseek-v4-flash"><code class="inline">deepseek/deepseek-v4-flash</code></a>.
-Model catalogs and routing change over time, so PtcRunner does not keep a static
-compatibility list. Choose a model advertised for tool use, install it under an
-alias, and confirm the exact route with <code class="inline">ptc doctor PROJECT.json --connect</code>.</p><p>Two aliases share the public <code class="inline">llm-request</code> call budget. <code class="inline">config.max_calls</code>
-additionally caps an alias only when it is stricter than that shared budget.</p><h2 id="where-do-credentials-belong">Where do credentials belong?</h2><p>Bind credentials outside the application, preferably through a named environment
-variable or another credential source in <code class="inline">ptc-host.json</code>. Then inspect the public
-installation without revealing its credential or private endpoint:</p><pre><code class="console language-console">ptc models ptc-project.json
-ptc doctor ptc-project.json</code></pre><p><code class="inline">models</code> names the selector each LLM alias configured; an endpoint-bearing
-<code class="inline">openai-compat:</code> selector is withheld instead, because it carries the
-private address from <code class="inline">ptc-host.json</code>.</p><h2 id="how-do-i-check-connectivity">How do I check connectivity?</h2><p>Plain <code class="inline">doctor</code> is inert. Use the active connectivity probe only when a remote
-request is intended:</p><pre><code class="console language-console">ptc doctor ptc-project.json --connect</code></pre><h2 id="what-does-a-run-record">What does a run record?</h2><p>After a run, the trace records how many model calls were made, which alias they
+Catalogs and routing change, so choose a model advertised for tool use and
+confirm its exact route with <code class="inline">ptc doctor PROJECT.json --connect</code>.</p><p>Two aliases share the public <code class="inline">llm-request</code> call budget. <code class="inline">config.max_calls</code>
+additionally caps an alias only when it is stricter than that shared budget.</p><h2 id="where-do-credentials-belong">Where do credentials belong?</h2><p>Bind credentials outside the application, preferably through a named source in
+<code class="inline">ptc-host.json</code>. Inspect the public installation without revealing its
+credential or private endpoint:</p><pre><code class="console language-console">ptc models ptc-project.json
+ptc doctor ptc-project.json</code></pre><p><code class="inline">models</code> names each LLM selector but withholds an endpoint-bearing
+<code class="inline">openai-compat:</code> selector because it carries a private address.</p><h2 id="what-can-i-check-before-a-run">What can I check before a run?</h2><p>Plain <code class="inline">doctor</code> is inert. Use the active connectivity probe only when a remote
+request is intended:</p><pre><code class="console language-console">ptc doctor ptc-project.json --connect</code></pre><p>ptc models, ptc validate, and ptc doctor do not provide a pre-run price quote.
+Use the optional reservation budget described in <a href="/reference/kernel-limits-reference/#size-an-llm-cost-budget">Size an LLM cost
+budget</a>; a refusal names
+the next call's exact requirement.</p><h2 id="what-does-a-run-record">What does a run record?</h2><p>After a run, the trace records how many model calls were made, which alias they
 used, reported token usage and cost, timing, and a safe failure class. Prompts
 and responses are private and appear only when private inspection is enabled.</p><p>Start with <a href="/guides/host-configuration/">Install models and tools</a> for one complete
 workflow. The <a href="/reference/host-installation/">model and host reference</a>

@@ -3,6 +3,8 @@ defmodule PtcViewer.InspectionStore do
 
   use GenServer
 
+  alias PtcViewer.OwnerStatusRedaction
+
   def start(source), do: GenServer.start(__MODULE__, source)
   def attach(store, owner), do: GenServer.call(store, {:attach, owner})
   def fetch(store), do: GenServer.call(store, :fetch)
@@ -31,19 +33,11 @@ defmodule PtcViewer.InspectionStore do
 
   if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
     @impl GenServer
-    def format_status(status), do: redact_status(status)
+    def format_status(status), do: OwnerStatusRedaction.format(status)
   else
-    def format_status(status), do: redact_status(status)
+    def format_status(status), do: OwnerStatusRedaction.format(status)
   end
 
   @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
-  end
+  def format_status(reason, status), do: OwnerStatusRedaction.format(reason, status)
 end

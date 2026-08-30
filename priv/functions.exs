@@ -2850,7 +2850,7 @@
     %{
       name: "apropos",
       description:
-        "Searches visible prelude exports and fixed function documentation, returning names.",
+        "Searches visible prelude exports, installed capabilities, and fixed function documentation, returning names.",
       binding: :special,
       category: :core,
       dispatch: :env,
@@ -2860,12 +2860,14 @@
       ptc_extension?: true,
       examples: [],
       notes:
-        "Case-insensitive literal substring match over prelude refs/docstrings and fixed " <>
+        "Case-insensitive literal substring match over prelude refs/docstrings, installed " <>
+          "capability names/contracts, and fixed " <>
           "canonical names, signatures, descriptions, notes, divergences, and sections. " <>
           "Qualified Java aliases in signatures are searchable; fixed results use canonical " <>
-          "names. Results are sorted and deduplicated. A blank query returns an empty vector. " <>
-          "Accepts a string or a quoted symbol (via symbol-ref normalization). An unquoted " <>
-          "query evaluates normally — `apropos` is not macro-like.",
+          "names. Results are sorted and deduplicated callable names. A blank query returns " <>
+          "an empty vector. The shipped-export diagnostic index is not searched. Accepts a string or a quoted " <>
+          "symbol (via symbol-ref normalization). An unquoted query evaluates normally — " <>
+          "`apropos` is not macro-like.",
       see_also: ["dir", "doc", "export-meta", "source"],
       clojure_var: nil,
       divergences: nil
@@ -2873,7 +2875,7 @@
     %{
       name: "doc",
       description:
-        "Prints documentation for a visible prelude export or fixed function and returns `nil`.",
+        "Prints documentation for a visible prelude export, installed capability, or fixed function and returns `nil`.",
       binding: :special,
       category: :core,
       dispatch: :env,
@@ -2889,7 +2891,8 @@
           "Macro-like over the ref: accepts an unquoted symbol (`str`, `ns/name`), a quoted " <>
           "symbol (`'ns/name`), or a string. Use `export-meta` for attached export information " <>
           "as data. At Kernel boundaries, an exact generated-index match for a public export " <>
-          "of an unattached shipped component prints manifest attachment guidance. Typos, " <>
+          "of an unattached shipped selection prints attachment guidance for CLI applications " <>
+          "and other hosts. Typos, " <>
           "hidden or overridden-away attached exports, and embedded runs without the index " <>
           "print the ordinary not-found line. The index is diagnostic only and grants no " <>
           "documentation or call authority.",

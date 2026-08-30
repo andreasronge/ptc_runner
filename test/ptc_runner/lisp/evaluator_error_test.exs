@@ -67,6 +67,27 @@ defmodule PtcRunner.Lisp.EvaluatorErrorTest do
     refute message =~ "secret"
   end
 
+  test "an admitted Java member spelling survives while arbitrary detail is dropped" do
+    assert {:ok,
+            %{
+              kind: "unsupported_java_member",
+              message: "Java member .isBefore does not accept this receiver"
+            }} =
+             EvaluatorError.public_evidence(:unsupported_java_member, %{
+               name: ".isBefore",
+               receiver_profile: :unsupported,
+               secret: "nope"
+             })
+
+    assert {:ok, {:unsupported_java_member, %{name: ".isBefore"}}} =
+             EvaluatorError.retain_reason(
+               {:unsupported_java_member, %{name: ".isBefore", secret: "nope"}}
+             )
+
+    assert {:ok, %{message: "Java member is outside the admitted interop surface"}} =
+             EvaluatorError.public_evidence(:unsupported_java_member, %{name: ".bad/name"})
+  end
+
   test "unknown reasons fail closed" do
     assert EvaluatorError.public_evidence(:explicit_failure, %{}) == :error
     assert EvaluatorError.public_evidence(:unbound_var, %{name: "x"}) == :error
@@ -93,5 +114,14 @@ defmodule PtcRunner.Lisp.EvaluatorErrorTest do
              )
 
     assert EvaluatorError.retain_reason({:explicit_failure, %{"secret" => true}}) == :error
+  end
+
+  test "Java arity retention drops hostile arity details" do
+    for expected <- [%{"secret" => true}, List.duplicate(1, 33), [1 | :improper]] do
+      assert {:ok, {:java_arity_error, %{name: ".length"}}} =
+               EvaluatorError.retain_reason(
+                 {:java_arity_error, %{name: ".length", expected: expected, actual: "SECRET"}}
+               )
+    end
   end
 end

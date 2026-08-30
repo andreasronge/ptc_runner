@@ -24,7 +24,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
   @minimums %{
     # EventBudget owns the retained-size upper bound; the catalog test keeps
     # this schema authority synchronized with that runtime contract.
-    event_payload_bytes: 4_826,
+    event_payload_bytes: 8_211,
     llm_request_timeout_ms: 100,
     normal_event_count: 3
   }
@@ -155,7 +155,7 @@ defmodule PtcRunner.Kernel.LimitCatalog do
     llm_total_tokens:
       "Aggregate provider-counted input and output tokens authorized across live language-model calls in one run.",
     llm_cost_microusd:
-      "Aggregate USD cost in microunits authorized across live language-model calls in one run.",
+      "Pre-dispatch USD reservation ceiling, in microunits, across live language-model calls in one run.",
     workflow_capability_calls: "Total workflow capability calls in one run.",
     workflow_capability_calls_per_name:
       "Workflow capability calls to any one public name in one run.",

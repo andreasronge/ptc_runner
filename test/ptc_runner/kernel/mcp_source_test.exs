@@ -1724,7 +1724,9 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
   end
 
   @tag :tmp_dir
-  test "snapshot identity changes with upstream names and effective descriptions", %{tmp_dir: dir} do
+  test "snapshot identity changes with upstream names and runtime-visible descriptions", %{
+    tmp_dir: dir
+  } do
     first = fixture(self(), structured_description: "First description")
     on_exit(first.close)
 
@@ -1732,7 +1734,13 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       build_snapshot(
         dir,
         first.endpoint,
-        %{"structured" => %{as: "remote.structured", effect: :read}}
+        %{
+          "structured" => %{
+            as: "remote.structured",
+            effect: :read,
+            model_visible: false
+          }
+        }
       )
 
     second =
@@ -1747,11 +1755,19 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
       build_snapshot(
         dir,
         second.endpoint,
-        %{"structured-v2" => %{as: "remote.structured", effect: :read}}
+        %{
+          "structured-v2" => %{
+            as: "remote.structured",
+            effect: :read,
+            model_visible: false
+          }
+        }
       )
 
     [first_tool] = first_snapshot["tools"]
     [second_tool] = second_snapshot["tools"]
+    refute first_tool["model_visible"]
+    refute second_tool["model_visible"]
     assert first_tool["upstream_name_hash"] != second_tool["upstream_name_hash"]
     assert first_tool["description_hash"] != second_tool["description_hash"]
     assert first_snapshot["snapshot_hash"] != second_snapshot["snapshot_hash"]
@@ -2604,10 +2620,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
 
     assert [
              %{"model_visible" => true, "description_hash" => visible_hash},
-             %{"model_visible" => false, "description_hash" => nil}
+             %{"model_visible" => false, "description_hash" => hidden_hash}
            ] = restricted_snapshot["tools"]
 
     assert is_binary(visible_hash)
+    assert is_binary(hidden_hash)
     assert :ok = RunBuilder.close(built)
 
     {:ok, fully_visible} =
@@ -2660,10 +2677,11 @@ defmodule PtcRunner.Kernel.MCPSourceTest do
     [revealed_snapshot] = revealed.config.connector_snapshots
 
     assert [
-             %{"model_visible" => false, "description_hash" => nil},
+             %{"model_visible" => false, "description_hash" => hidden_hash},
              %{"model_visible" => true, "description_hash" => visible_hash}
            ] = revealed_snapshot["tools"]
 
+    assert is_binary(hidden_hash)
     assert is_binary(visible_hash)
     assert :ok = RunBuilder.close(revealed)
 

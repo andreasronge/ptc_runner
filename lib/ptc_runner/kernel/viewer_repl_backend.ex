@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ViewerReplBackend do
   @moduledoc false
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.ViewerReplSessionWorker
   alias PtcRunner.Lisp.Formatter
@@ -354,16 +355,6 @@ defmodule PtcRunner.Kernel.ViewerReplBackend do
   def handle_info({:EXIT, _pid, _reason}, state), do: {:noreply, state}
   def handle_info(_message, state), do: {:noreply, state}
 
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-    def format_status(status), do: redact_status(status)
-  else
-    def format_status(status), do: redact_status(status)
-  end
-
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
-
   @impl GenServer
   def terminate(_reason, state) do
     workers =
@@ -605,14 +596,6 @@ defmodule PtcRunner.Kernel.ViewerReplBackend do
 
   defp cancel_timer(timer) when is_reference(timer), do: Process.cancel_timer(timer)
   defp cancel_timer(_timer), do: false
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
-  end
 
   defp call(%__MODULE__{pid: pid, token: token}, request, timeout \\ 5_000) do
     GenServer.call(pid, {token, request}, timeout)

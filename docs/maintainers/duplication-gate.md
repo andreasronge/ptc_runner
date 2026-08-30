@@ -37,8 +37,8 @@ Suppress when independent contracts happen to look alike and extraction would
 couple them. Put a reason above one copy:
 
 ```elixir
-# ex_dna:disable-for-next-line — GenServer callback, intentionally per-module
-def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
+# ex_dna:disable-for-next-line — owner-specific lifecycle fallback
+def handle_cast(_request, state), do: {:noreply, state}
 ```
 
 Suppressing one occurrence removes the clone from the report. Common examples

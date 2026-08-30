@@ -1381,7 +1381,7 @@ because it cannot be represented as JSON. Read a retained value back with the
 analysis profile:
 
 ```console
-ptc repl --profile private-run-analysis-v1 \
+ptc repl --profile private-run-analysis-v2 \
   --resource traces=.ptc/traces --resource inspection=.ptc/inspection \
   --session-trace-dir analysis-traces --private-unattended --format jsonl \
   -e '(analysis/read "RUN_REF" {"collection" "explicit_failure_values"})'
@@ -3616,14 +3616,17 @@ Five builtins provide one language-level discovery interface. They answer
 identically in the REPL, in generated workflow or mission source, and inside a
 prelude export reading another prelude's documentation. `dir`, `export-meta`,
 and `source` describe the attached prelude API; `apropos` and `doc` also cover
-fixed built-ins and the bounded Java surface.
+installed callable capabilities, fixed built-ins, and the bounded Java surface.
+When a Kernel session supplies the generated exact shipped-export index, `doc`
+can redirect an indexed miss to its unattached owning library. The index is not
+searched by `apropos` and grants no documentation or call authority.
 
 | Form | Result |
 |------|--------|
 | `(dir)` | Sorted vector of namespace names holding public exports |
 | `(dir "ns")` | Sorted vector of export refs in `ns` |
-| `(apropos "term")` | Sorted vector of matching prelude refs and canonical fixed-function names |
-| `(doc "name")` | Prints prelude or fixed-function documentation, returns `nil` |
+| `(apropos "term")` | Sorted vector of matching prelude refs, installed capability refs, and canonical fixed-function names |
+| `(doc "name")` | Prints prelude, installed capability, or fixed-function documentation; returns `nil` |
 | `(export-meta "ns/name")` | Metadata map, or `nil` when unknown |
 | `(source "ns/name")` | Prints the attached prelude defining form, or a miss notice; returns `nil` |
 
@@ -3682,23 +3685,29 @@ registry. Visibility is applied after that occupancy check, so a hidden
 attached export cannot reveal registry documentation through the same
 spelling. `apropos` similarly suppresses a colliding registry name when its
 attached export is hidden. This preserves the invariant that attached API
-discovery never advertises something the running program cannot call.
+discovery never advertises something the running program cannot call. A Kernel
+session may still print an attachment redirect from `doc`; that diagnostic is
+not an `apropos` search surface.
 
 At workflow, mission, and REPL Kernel boundaries, an exact `doc` miss may be
 looked up in a build-generated map from shipped public export ref to owning
-component ID. When that owner is absent from the effective frozen component
-IDs, the diagnostic identifies the unattached shipped library and explains the
-manifest selection needed to attach it. This map is diagnostic metadata only:
+component ID. When that owner is absent from the environment's effective
+shipped-library selections, the diagnostic identifies the unattached shipped
+library and explains both application-manifest and host-environment attachment.
+This map is diagnostic metadata only:
 it adds no documentation or call authority and is never an `apropos` search
 surface. A typo, a masked attached export, or an indexed export removed by a
 selected component override is the ordinary exact not-found line. Embedded
 `PtcRunner.Lisp.run/2` without a supplied map also uses that ordinary miss.
 
-None of the forms enumerate `data/...` values or `tool/...` capabilities;
-those appear in the mission inventory. `dir`, `export-meta`, and `source`
+None of the forms enumerate `data/...` values. `apropos` and `doc` expose only
+the `tool/...` capabilities installed and callable in the current environment,
+including those omitted from prompt inventory by `model_visible: false`.
+Capability documentation includes the description, input schema, and effect;
+private Lisp runtime tools remain hidden. `dir`, `export-meta`, and `source`
 remain attached prelude-only: namespace/export records and defining forms have
-no lossless equivalent for fixed registry entries. `source` has no registry
-fallthrough at all.
+no lossless equivalent for capability or fixed registry entries. `source` has
+no registry fallthrough at all.
 
 Both `:prompt` and `:discoverable` exports are visible to `dir`/`doc`/
 `export-meta`/`apropos`, which is how a `:discoverable` export is found at
@@ -3709,9 +3718,12 @@ that are transitively reachable from a public export.
 
 Attached prelude results for `dir`/`doc`/`apropos`/`export-meta` are filtered
 to what the running program may actually call. A miss is not a failure:
-`export-meta` returns `nil`, `doc` and `source` print a not-found line, and
+`export-meta` returns `nil`, `doc` and `source` print a not-found line (or, for
+`doc` on an unattached shipped library, an attachment redirect), and
 `dir` returns `[]`. A blank `apropos` query returns `[]` rather than every
-fixed and attached function.
+fixed and attached function. When the query matches unattached shipped
+libraries, `apropos` prints those library IDs and still returns only callable
+names.
 
 `export-meta` is not `clojure.core/meta`, which takes an object rather than a
 reference string and is not implemented.

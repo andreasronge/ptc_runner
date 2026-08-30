@@ -5,6 +5,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
   alias PtcRunner.Kernel
   alias PtcRunner.Kernel.Capability
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.Library
@@ -191,6 +192,26 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
              ReplSession.evaluation_memory_summary(session)
 
     assert history_bytes > 0
+  end
+
+  test "direct eval names an unattached shipped library" do
+    {:ok, session} = ReplSession.new()
+
+    assert {:ok, doc, session} = ReplSession.eval(session, ~S|(doc "agent.core/run")|)
+    assert doc.return == nil
+
+    output = Enum.join(doc.prints, "\n")
+    assert output =~ ~s|"agent.core/run" is an export of shipped library "agent.core"|
+    assert output =~ "--project PROJECT.json or --manifest MANIFEST.json"
+
+    assert {:ok, apropos, session} = ReplSession.eval(session, ~S|(apropos "agent")|)
+    refute "agent.core" in apropos.return
+    assert apropos.prints == []
+
+    assert {:ok, unknown, session} = ReplSession.eval(session, ~S|(doc "missing/ns")|)
+    assert unknown.prints == [~s(No documentation found for "missing/ns".)]
+
+    assert {:ok, _events} = ReplSession.close(session)
   end
 
   test "REPL sessions reject JSON-result configurations" do
@@ -1415,7 +1436,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
   test "configuration assembly rejects a run-started payload above the event ceiling" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
-    {:ok, limits} = Limits.new(event_payload_bytes: 5_000)
+    {:ok, limits} = Limits.new(event_payload_bytes: EventBudget.minimum_normal_payload_bytes())
     connector_snapshots = [%{"value" => String.duplicate("x", 10_000)}]
     {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-metadata-ceiling")
 
