@@ -3616,14 +3616,14 @@ Five builtins provide one language-level discovery interface. They answer
 identically in the REPL, in generated workflow or mission source, and inside a
 prelude export reading another prelude's documentation. `dir`, `export-meta`,
 and `source` describe the attached prelude API; `apropos` and `doc` also cover
-fixed built-ins and the bounded Java surface.
+installed callable capabilities, fixed built-ins, and the bounded Java surface.
 
 | Form | Result |
 |------|--------|
 | `(dir)` | Sorted vector of namespace names holding public exports |
 | `(dir "ns")` | Sorted vector of export refs in `ns` |
-| `(apropos "term")` | Sorted vector of matching prelude refs and canonical fixed-function names |
-| `(doc "name")` | Prints prelude or fixed-function documentation, returns `nil` |
+| `(apropos "term")` | Sorted vector of matching prelude refs, installed capability refs, and canonical fixed-function names |
+| `(doc "name")` | Prints prelude, installed capability, or fixed-function documentation; returns `nil` |
 | `(export-meta "ns/name")` | Metadata map, or `nil` when unknown |
 | `(source "ns/name")` | Prints the attached prelude defining form, or a miss notice; returns `nil` |
 
@@ -3684,11 +3684,14 @@ spelling. `apropos` similarly suppresses a colliding registry name when its
 attached export is hidden. This preserves the invariant that attached API
 discovery never advertises something the running program cannot call.
 
-None of the forms enumerate `data/...` values or `tool/...` capabilities;
-those appear in the mission inventory. `dir`, `export-meta`, and `source`
+None of the forms enumerate `data/...` values. `apropos` and `doc` expose only
+the `tool/...` capabilities installed and callable in the current environment,
+including those omitted from prompt inventory by `model_visible: false`.
+Capability documentation includes the description, input schema, and effect;
+private Lisp runtime tools remain hidden. `dir`, `export-meta`, and `source`
 remain attached prelude-only: namespace/export records and defining forms have
-no lossless equivalent for fixed registry entries. `source` has no registry
-fallthrough at all.
+no lossless equivalent for capability or fixed registry entries. `source` has
+no registry fallthrough at all.
 
 Both `:prompt` and `:discoverable` exports are visible to `dir`/`doc`/
 `export-meta`/`apropos`, which is how a `:discoverable` export is found at

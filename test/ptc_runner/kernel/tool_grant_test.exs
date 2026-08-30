@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -30,6 +31,28 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
     refute contracts["hidden"].model_visible
     assert contracts["hidden"].input_schema == @input_schema
     assert contracts["hidden"].effect == :unknown
+  end
+
+  test "projects routed capability contracts used by workflow llm-request" do
+    route = capability("llm-request")
+
+    assert {:ok, routed} =
+             RoutedCapability.new(
+               name: "llm-request",
+               description: "Submit a routed model request.",
+               input_schema: @input_schema,
+               output_schema: nil,
+               routes: %{"default" => route},
+               resolve: fn _arguments -> {:error, :not_called, "not called"} end,
+               validation_arguments: & &1,
+               model_visible: false
+             )
+
+    contracts = ToolGrant.capability_contracts(environment_with([routed]))
+
+    assert contracts["llm-request"].description == "Submit a routed model request."
+    refute contracts["llm-request"].model_visible
+    assert contracts["llm-request"].input_schema == @input_schema
   end
 
   test "a callback's flat size does not depend on an unrelated capability's payload" do

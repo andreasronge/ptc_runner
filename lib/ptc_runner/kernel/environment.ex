@@ -69,6 +69,12 @@ defmodule PtcRunner.Kernel.Environment do
     |> Enum.sort_by(& &1.name)
   end
 
+  @doc "Returns bounded metadata for every installed capability, regardless of prompt visibility."
+  @spec capability_contracts(map()) :: %{binary() => map()}
+  def capability_contracts(%{capabilities: capabilities}) when is_map(capabilities) do
+    Map.new(capabilities, fn {name, capability} -> {name, capability_metadata(capability)} end)
+  end
+
   @doc false
   @spec capability_requirements(FrozenBundle.t() | nil) :: [binary()]
   def capability_requirements(%FrozenBundle{prelude: %{exports: exports}}) do

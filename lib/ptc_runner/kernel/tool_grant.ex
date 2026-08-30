@@ -20,7 +20,6 @@ defmodule PtcRunner.Kernel.ToolGrant do
   units); that is what the sandbox's own baseline measurement bills.
   """
 
-  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Dispatcher
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.RunState
@@ -72,7 +71,7 @@ defmodule PtcRunner.Kernel.ToolGrant do
   @doc "Returns the bounded documentation contracts for installed capabilities."
   @spec capability_contracts(map()) :: %{binary() => map()}
   def capability_contracts(%{capabilities: capabilities}) when is_map(capabilities) do
-    Map.new(capabilities, fn {name, capability} -> {name, Capability.metadata(capability)} end)
+    Environment.capability_contracts(%{capabilities: capabilities})
   end
 
   defp build_callbacks(

@@ -381,7 +381,10 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
           :write,
           false
         ),
-      "internal-helper" => %TrustedTool{function: fn _arguments -> %{} end, visibility: :private}
+      "internal-helper" => %{
+        trusted_capability("internal-helper", "Internal secret.", "secret", :read, true)
+        | visibility: :private
+      }
     }
   end
 

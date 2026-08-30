@@ -401,7 +401,8 @@ defmodule PtcRunner.Lisp.Introspection do
       (is_binary(doc) and String.contains?(String.downcase(doc), needle))
   end
 
-  defp capability_matches?(%{contract: contract}, needle) when is_map(contract) do
+  defp capability_matches?(%{visibility: :public, contract: contract}, needle)
+       when is_map(contract) do
     contract
     |> Map.take([:name, :description, :input_schema, :effect])
     |> inspect(limit: :infinity)
@@ -413,7 +414,7 @@ defmodule PtcRunner.Lisp.Introspection do
 
   defp capability_contract(tools_meta, "tool/" <> name) do
     case Map.get(tools_meta, name) do
-      %{contract: contract} when is_map(contract) -> contract
+      %{visibility: :public, contract: contract} when is_map(contract) -> contract
       _other -> nil
     end
   end
