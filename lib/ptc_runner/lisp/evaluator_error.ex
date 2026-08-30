@@ -392,25 +392,36 @@ defmodule PtcRunner.Lisp.EvaluatorError do
 
   defp arity_lisp_sentence(_name, _expected, _actual), do: :error
 
-  defp format_expected_arity(expected) when is_integer(expected) and expected >= 0,
-    do: {:ok, "#{expected} argument(s)"}
+  defp format_expected_arity(expected)
+       when is_integer(expected) and expected >= 0 and expected <= 1_000_000,
+       do: {:ok, "#{expected} argument(s)"}
 
-  defp format_expected_arity({:at_least, n}) when is_integer(n) and n >= 0,
-    do: {:ok, "at least #{n} argument(s)"}
+  defp format_expected_arity({:at_least, n})
+       when is_integer(n) and n >= 0 and n <= 1_000_000,
+       do: {:ok, "at least #{n} argument(s)"}
 
   defp format_expected_arity([left, right])
-       when is_integer(left) and left >= 0 and is_integer(right) and right >= 0,
+       when is_integer(left) and left >= 0 and left <= 1_000_000 and is_integer(right) and
+              right >= 0 and right <= 1_000_000,
        do: {:ok, "#{left} or #{right} argument(s)"}
 
   defp format_expected_arity(expected) when is_list(expected) and expected != [] do
-    if Enum.all?(expected, &(is_integer(&1) and &1 >= 0)) do
-      {:ok, Enum.join(expected, ", ") <> " argument(s)"}
-    else
-      :error
+    case admitted_expected_arities(expected, 32, []) do
+      {:ok, admitted} -> {:ok, Enum.join(admitted, ", ") <> " argument(s)"}
+      :error -> :error
     end
   end
 
   defp format_expected_arity(_expected), do: :error
+
+  defp admitted_expected_arities([], _remaining, admitted),
+    do: {:ok, Enum.reverse(admitted)}
+
+  defp admitted_expected_arities([value | rest], remaining, admitted)
+       when remaining > 0 and is_integer(value) and value >= 0 and value <= 1_000_000,
+       do: admitted_expected_arities(rest, remaining - 1, [value | admitted])
+
+  defp admitted_expected_arities(_values, _remaining, _admitted), do: :error
 
   defp admitted_nonneg_integer(value)
        when is_integer(value) and value >= 0 and value <= 1_000_000,

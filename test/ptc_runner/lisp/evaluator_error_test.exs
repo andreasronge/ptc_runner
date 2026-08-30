@@ -117,10 +117,11 @@ defmodule PtcRunner.Lisp.EvaluatorErrorTest do
   end
 
   test "Java arity retention drops hostile arity details" do
-    assert {:ok, {:java_arity_error, %{name: ".length"}}} =
-             EvaluatorError.retain_reason(
-               {:java_arity_error,
-                %{name: ".length", expected: %{"secret" => true}, actual: "SECRET"}}
-             )
+    for expected <- [%{"secret" => true}, List.duplicate(1, 33), [1 | :improper]] do
+      assert {:ok, {:java_arity_error, %{name: ".length"}}} =
+               EvaluatorError.retain_reason(
+                 {:java_arity_error, %{name: ".length", expected: expected, actual: "SECRET"}}
+               )
+    end
   end
 end
