@@ -34,9 +34,9 @@ defmodule PtcRunner.Kernel.Evaluation do
   `kernel/eval-source-with`. `PtcRunner.Lisp.run/2` stays permissive.
   """
 
+  alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
@@ -45,6 +45,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.DataKeys
   alias PtcRunner.Lisp.EvaluatorErrorCatalog
+  alias PtcRunner.Lisp.ShippedExportCatalog
   alias PtcRunner.Lisp.TrustedTool
 
   @missing_data_params_message "data/params is not available because this evaluation supplied no params. " <>
@@ -384,6 +385,8 @@ defmodule PtcRunner.Kernel.Evaluation do
           mission_name
         ),
       prelude: bundle_prelude(environment),
+      shipped_export_owners: ShippedExportCatalog.load(),
+      attached_component_ids: Environment.shipped_component_ids(environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
       compile_max_heap: limits.evaluation_heap_words,
@@ -399,8 +402,7 @@ defmodule PtcRunner.Kernel.Evaluation do
       link: true,
       strict_data: true,
       data_grants: DataKeys.source_referenceable_forms(environment.data),
-      missing_data_params_message: @missing_data_params_message,
-      shipped_library_ids: Library.component_ids()
+      missing_data_params_message: @missing_data_params_message
     ]
 
     mission_calls_before = mission_capability_calls(state)

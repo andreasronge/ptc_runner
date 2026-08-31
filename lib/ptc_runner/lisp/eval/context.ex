@@ -113,10 +113,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # Kernel-supplied diagnostic used when `data/params` is missing under
     # strict data. `nil` treats `params` as an ordinary missing key.
     missing_data_params_message: nil,
-    # Kernel-supplied catalog of shipped library component IDs. `nil` means
-    # Introspection should not distinguish unattached shipped refs from
-    # unknown ones.
-    shipped_library_ids: nil,
     # When true, session-authored code may only name prelude namespaces that
     # were directly attached. Prelude-internal calls remain allowed because the
     # compiler already validated their declared namespace deps.
@@ -127,6 +123,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
     direct_namespaces: MapSet.new(),
     transitive_namespace_requirers: %{},
     prelude_export_mask: nil,
+    shipped_export_owners: nil,
+    attached_component_ids: MapSet.new(),
     # The attached compiled prelude's PUBLIC
     # export table, a map from string ref (e.g. "crm/get-user") to a
     # `{callable, ns_env, export}` tuple — the callable captured from `private_env` plus
@@ -218,12 +216,13 @@ defmodule PtcRunner.Lisp.Eval.Context do
           strict_data: boolean(),
           data_grants: [String.t()] | nil,
           missing_data_params_message: String.t() | nil,
-          shipped_library_ids: MapSet.t(String.t()) | nil,
           strict_transitive_calls: boolean(),
           private_tool_authority?: boolean(),
           direct_namespaces: MapSet.t(String.t()),
           transitive_namespace_requirers: %{String.t() => [String.t()]},
           prelude_export_mask: %{String.t() => MapSet.t(String.t())} | nil,
+          shipped_export_owners: %{String.t() => String.t()} | nil,
+          attached_component_ids: MapSet.t(String.t()),
           prelude_exports: %{String.t() => {term(), map()}},
           prelude: PtcRunner.Lisp.Prelude.t() | nil
         }
@@ -306,13 +305,14 @@ defmodule PtcRunner.Lisp.Eval.Context do
       data_grants: normalize_data_grants(Keyword.get(opts, :data_grants)),
       missing_data_params_message:
         normalize_missing_params_message(Keyword.get(opts, :missing_data_params_message)),
-      shipped_library_ids: normalize_shipped_library_ids(Keyword.get(opts, :shipped_library_ids)),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       private_tool_authority?: Keyword.get(opts, :private_tool_authority?, false),
       direct_namespaces: namespace_set(Keyword.get(opts, :direct_namespaces, [])),
       transitive_namespace_requirers:
         normalize_namespace_requirers(Keyword.get(opts, :transitive_namespace_requirers, %{})),
       prelude_export_mask: normalize_export_mask(Keyword.get(opts, :prelude_export_mask)),
+      shipped_export_owners: Keyword.get(opts, :shipped_export_owners),
+      attached_component_ids: namespace_set(Keyword.get(opts, :attached_component_ids, [])),
       prelude_exports: prelude_exports(Keyword.get(opts, :prelude)),
       prelude: prelude_artifact(Keyword.get(opts, :prelude))
     }
@@ -370,15 +370,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
     do: message
 
   defp normalize_missing_params_message(_message), do: nil
-
-  defp normalize_shipped_library_ids(ids) when is_list(ids) do
-    ids
-    |> Enum.filter(&is_binary/1)
-    |> MapSet.new()
-  end
-
-  defp normalize_shipped_library_ids(%MapSet{} = ids), do: ids
-  defp normalize_shipped_library_ids(_ids), do: nil
 
   defp normalize_namespace_requirers(requirers) when is_map(requirers) do
     Map.new(requirers, fn
@@ -625,6 +616,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
         direct_namespaces: source.direct_namespaces,
         transitive_namespace_requirers: source.transitive_namespace_requirers,
         prelude_export_mask: source.prelude_export_mask,
+        shipped_export_owners: source.shipped_export_owners,
+        attached_component_ids: source.attached_component_ids,
         max_tool_calls: source.max_tool_calls,
         loop_limit: source.loop_limit,
         tool_call_budget: source.tool_call_budget,
@@ -636,8 +629,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
         prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack,
         strict_data: source.strict_data,
         data_grants: source.data_grants,
-        missing_data_params_message: source.missing_data_params_message,
-        shipped_library_ids: source.shipped_library_ids
+        missing_data_params_message: source.missing_data_params_message
     }
   end
 

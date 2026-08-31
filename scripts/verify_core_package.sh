@@ -64,6 +64,7 @@ test -x "$package_tmp_dir/source/rel/overlays/bin/ptc"
 test -f "$package_tmp_dir/source/priv/schemas/ptc-host-config.schema.json"
 test -f "$package_tmp_dir/source/priv/schemas/ptc-application-manifest.schema.json"
 test -f "$package_tmp_dir/source/priv/schemas/ptc-project-config.schema.json"
+test -f "$package_tmp_dir/source/priv/shipped_export_owners.json"
 grep -Eq '^[0-9a-f]{40}$' "$package_tmp_dir/source/priv/source_revision"
 grep -Eq '^(true|false)$' "$package_tmp_dir/source/priv/source_dirty"
 cmp "$project_root/site/schemas/mcp-2026-07-28.schema.json" \
@@ -166,4 +167,17 @@ done
     MIX_DEPS_PATH="$project_root/deps" \
     MIX_BUILD_PATH="$package_tmp_dir/build" \
     mix compile --no-deps-check --no-optional-deps --warnings-as-errors
+
+  MIX_ENV=prod \
+    MIX_DEPS_PATH="$project_root/deps" \
+    MIX_BUILD_PATH="$package_tmp_dir/build" \
+    mix run --no-compile --no-deps-check -e '
+      owners = PtcRunner.Lisp.ShippedExportCatalog.load()
+      {:ok, result} = PtcRunner.Lisp.run(~S|(doc "agent.core/run")|,
+        shipped_export_owners: owners,
+        attached_component_ids: []
+      )
+      [printed] = result.prints
+      true = String.contains?(printed, ~S|"agent.core/run" is an export of shipped library "agent.core"|)
+    '
 )

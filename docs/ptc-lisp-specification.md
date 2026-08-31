@@ -3617,10 +3617,9 @@ identically in the REPL, in generated workflow or mission source, and inside a
 prelude export reading another prelude's documentation. `dir`, `export-meta`,
 and `source` describe the attached prelude API; `apropos` and `doc` also cover
 installed callable capabilities, fixed built-ins, and the bounded Java surface.
-When a Kernel session supplies the
-shipped-library catalog, a miss in an unattached shipped namespace prints an
-attachment redirect. The catalog contains library IDs rather than export refs,
-so this redirect does not assert that the requested export exists.
+When a Kernel session supplies the generated exact shipped-export index, `doc`
+can redirect an indexed miss to its unattached owning library. The index is not
+searched by `apropos` and grants no documentation or call authority.
 
 | Form | Result |
 |------|--------|
@@ -3687,10 +3686,19 @@ attached export cannot reveal registry documentation through the same
 spelling. `apropos` similarly suppresses a colliding registry name when its
 attached export is hidden. This preserves the invariant that attached API
 discovery never advertises something the running program cannot call. A Kernel
-session may still *print* an attachment redirect for an unattached shipped
-library; that advisory is not a callable name in `apropos`'s result. Its
-component-list guidance is environment-neutral because the same function runs
-in workflow, mission, and direct REPL contexts.
+session may still print an attachment redirect from `doc`; that diagnostic is
+not an `apropos` search surface.
+
+At workflow, mission, and REPL Kernel boundaries, an exact `doc` miss may be
+looked up in a build-generated map from shipped public export ref to owning
+component ID. When that owner is absent from the environment's effective
+shipped-library selections, the diagnostic identifies the unattached shipped
+library and explains both application-manifest and host-environment attachment.
+This map is diagnostic metadata only:
+it adds no documentation or call authority and is never an `apropos` search
+surface. A typo, a masked attached export, or an indexed export removed by a
+selected component override is the ordinary exact not-found line. Embedded
+`PtcRunner.Lisp.run/2` without a supplied map also uses that ordinary miss.
 
 None of the forms enumerate `data/...` values. `apropos` and `doc` expose only
 the `tool/...` capabilities installed and callable in the current environment,
@@ -3711,11 +3719,10 @@ that are transitively reachable from a public export.
 Attached prelude results for `dir`/`doc`/`apropos`/`export-meta` are filtered
 to what the running program may actually call. A miss is not a failure:
 `export-meta` returns `nil`, `doc` and `source` print a not-found line (or, for
-`doc` on an unattached shipped library, an attachment redirect), and
+`doc` on an exact indexed export of an unattached shipped library, an attachment redirect), and
 `dir` returns `[]`. A blank `apropos` query returns `[]` rather than every
-fixed and attached function. When the query matches unattached shipped
-libraries, `apropos` prints those library IDs and still returns only callable
-names.
+fixed and attached function. `apropos` searches only callable/discoverable names
+and never consults the shipped-export diagnostic index.
 
 `export-meta` is not `clojure.core/meta`, which takes an object rather than a
 reference string and is not implemented.

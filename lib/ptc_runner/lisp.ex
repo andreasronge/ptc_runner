@@ -295,13 +295,13 @@ defmodule PtcRunner.Lisp do
     - `:missing_data_params_message` - Optional diagnostic used when `data/params`
       is missing under `:strict_data`. The Kernel sets this so a no-params
       evaluation is not reported as a missing grant.
-    - `:shipped_library_ids` - Optional catalog of shipped library component IDs.
-      The Kernel passes `PtcRunner.Kernel.Library.component_ids/0` so `doc` and
-      `apropos` can name an unattached shipped library. The catalog contains
-      library IDs, not export refs, so a `doc` redirect does not assert that the
-      requested export exists.
-      `nil` (the default) keeps today's miss message, so embedded `run/2`
-      callers are unchanged.
+    - `:shipped_export_owners` - Optional exact public-export ref to shipped
+      component-ID map used only for `doc` miss diagnostics.
+    - `:attached_component_ids` - Shipped component selections attached to the
+      current environment. With the ownership map, this suppresses redirects
+      for selected overrides whose replacement source removed an export.
+      Omitting the ownership map keeps the ordinary miss, so embedded callers
+      are unchanged.
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
       SOURCE string, or a list of source-bearing selection maps accepted by
       `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code.
@@ -822,11 +822,12 @@ defmodule PtcRunner.Lisp do
       strict_data: Keyword.get(opts, :strict_data, false),
       data_grants: Keyword.get(opts, :data_grants),
       missing_data_params_message: Keyword.get(opts, :missing_data_params_message),
-      shipped_library_ids: Keyword.get(opts, :shipped_library_ids),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
       prelude_export_mask: Keyword.get(opts, :prelude_export_mask),
+      shipped_export_owners: Keyword.get(opts, :shipped_export_owners),
+      attached_component_ids: Keyword.get(opts, :attached_component_ids, []),
       prelude_filtered_exports: Keyword.get(opts, :prelude_filtered_exports, []),
       link: Keyword.get(opts, :link, false),
       telemetry_run: Keyword.get(opts, :telemetry_run)
@@ -1244,12 +1245,13 @@ defmodule PtcRunner.Lisp do
       strict_data: strict_data,
       data_grants: data_grants,
       missing_data_params_message: missing_data_params_message,
-      shipped_library_ids: shipped_library_ids,
       strict_transitive_calls: strict_transitive_calls,
       private_tool_authority?: private_tool_authority?,
       direct_namespaces: direct_namespaces,
       transitive_namespace_requirers: transitive_namespace_requirers,
-      prelude_export_mask: prelude_export_mask
+      prelude_export_mask: prelude_export_mask,
+      shipped_export_owners: shipped_export_owners,
+      attached_component_ids: attached_component_ids
     } = opts
 
     prelude = Map.get(opts, :prelude)
@@ -1288,12 +1290,13 @@ defmodule PtcRunner.Lisp do
         strict_data: strict_data,
         data_grants: data_grants,
         missing_data_params_message: missing_data_params_message,
-        shipped_library_ids: shipped_library_ids,
         strict_transitive_calls: strict_transitive_calls,
         private_tool_authority?: private_tool_authority?,
         direct_namespaces: direct_namespaces,
         transitive_namespace_requirers: transitive_namespace_requirers,
         prelude_export_mask: prelude_export_mask,
+        shipped_export_owners: shipped_export_owners,
+        attached_component_ids: attached_component_ids,
         prelude: prelude
       ]
       |> Enum.reject(fn {_k, v} -> is_nil(v) end)

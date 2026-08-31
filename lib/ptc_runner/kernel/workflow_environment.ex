@@ -17,7 +17,14 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.Environment
-  @enforce_keys [:bundle, :capabilities, :data, :private_capabilities]
+
+  @enforce_keys [
+    :bundle,
+    :capabilities,
+    :data,
+    :private_capabilities,
+    :shipped_component_ids
+  ]
   defstruct @enforce_keys ++ [attestation: nil]
   @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
 
@@ -26,12 +33,16 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
           capabilities: %{binary() => PtcRunner.Kernel.Capability.t()},
           data: map(),
           private_capabilities: [binary()],
+          shipped_component_ids: [binary()],
           attestation: binary()
         }
   @spec new(keyword()) :: {:ok, t()} | {:error, term()}
   @doc """
   Assembles a workflow environment from optional `:bundle`, `:capabilities`,
-  and JSON-like `:data` options. Unknown options are rejected.
+  and JSON-like `:data` options. `:shipped_component_ids` records the shipped
+  library selections represented by the bundle for exact diagnostic misses;
+  it is validated against both the bundle and installed library catalog.
+  Unknown options are rejected.
   """
   def new(opts) when is_list(opts), do: assemble(opts, %{})
 
@@ -68,14 +79,16 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
   def private_capability_granted?(_environment, _name), do: false
 
   defp assemble(opts, authorization) do
-    with false <- Keyword.keys(opts) -- [:bundle, :capabilities, :data] != [],
+    with false <-
+           Keyword.keys(opts) -- [:bundle, :capabilities, :data, :shipped_component_ids] != [],
          {:ok, attributes} <-
            Environment.assemble(
              Keyword.get(opts, :bundle),
              Keyword.get(opts, :capabilities, []),
              Keyword.get(opts, :data, %{}),
              :workflow,
-             authorization
+             authorization: authorization,
+             shipped_component_ids: Keyword.get(opts, :shipped_component_ids)
            ) do
       environment = struct!(__MODULE__, attributes)
       {:ok, %{environment | attestation: Attestation.attest(__MODULE__, payload(environment))}}

@@ -200,16 +200,13 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:ok, doc, session} = ReplSession.eval(session, ~S|(doc "agent.core/run")|)
     assert doc.return == nil
 
-    assert Enum.join(doc.prints, "\n") ==
-             """
-             Shipped library "agent.core" is not attached, so "agent.core/run" cannot be resolved in this session.
-             Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
-             """
+    output = Enum.join(doc.prints, "\n")
+    assert output =~ ~s|"agent.core/run" is an export of shipped library "agent.core"|
+    assert output =~ "--project PROJECT.json or --manifest MANIFEST.json"
 
     assert {:ok, apropos, session} = ReplSession.eval(session, ~S|(apropos "agent")|)
     refute "agent.core" in apropos.return
-    assert Enum.join(apropos.prints, "\n") =~ "agent.core"
-    assert Enum.join(apropos.prints, "\n") =~ "agent.failure"
+    assert apropos.prints == []
 
     assert {:ok, unknown, session} = ReplSession.eval(session, ~S|(doc "missing/ns")|)
     assert unknown.prints == [~s(No documentation found for "missing/ns".)]

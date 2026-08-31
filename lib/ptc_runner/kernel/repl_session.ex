@@ -28,11 +28,11 @@ defmodule PtcRunner.Kernel.ReplSession do
   releasing its resources.
   """
 
+  alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Evaluation
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.PrivateDirectory
@@ -50,6 +50,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Lisp.Eval.Helpers
   alias PtcRunner.Lisp.Result, as: Native
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.Lisp.ShippedExportCatalog
 
   @access_table_key {__MODULE__, :access_table}
   @maximum_counter 4_294_967_295
@@ -800,6 +801,9 @@ defmodule PtcRunner.Kernel.ReplSession do
         turn_history: history,
         tools: tools(session, deadline_ms),
         prelude: prelude(session.config.workflow_environment),
+        shipped_export_owners: ShippedExportCatalog.load(),
+        attached_component_ids:
+          Environment.shipped_component_ids(session.config.workflow_environment),
         timeout: timeout_ms,
         compile_timeout: timeout_ms,
         run_deadline_ms: deadline_ms,
@@ -813,8 +817,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         filter_context: false,
         link: true,
         strict_data: true,
-        data_grants: DataKeys.source_referenceable_forms(session.config.input),
-        shipped_library_ids: Library.component_ids()
+        data_grants: DataKeys.source_referenceable_forms(session.config.input)
       )
 
     name_timeout_limit(result, session, remaining_ms)

@@ -17,19 +17,20 @@ defmodule PtcRunner.Kernel.Environment do
   @workflow_implicit ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
   @agent_core_private ~w(kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-phase-return-contract-failure kernel-result-contract-failure kernel-runtime-limit-failure)
 
-  @doc "Validates common environment fields and returns normalized attributes."
-  def assemble(bundle, capabilities, data, :workflow),
-    do: assemble(bundle, capabilities, data, :workflow, %{})
+  @doc """
+  Validates common environment fields and returns normalized attributes.
 
-  def assemble(bundle, capabilities, data, :mission),
-    do: do_assemble(bundle, capabilities, data, :mission, [])
+  `opts` carries `:authorization`, the workflow package authority that decides
+  private diagnostic routes, and `:shipped_component_ids`, the shipped library
+  selections the bundle represents.
+  """
+  def assemble(bundle, capabilities, data, kind, opts \\ [])
 
-  @doc false
-  def assemble(bundle, capabilities, data, :workflow, authorization)
-      when is_map(authorization) do
-    private_capabilities = workflow_private_capabilities(bundle, authorization)
+  def assemble(bundle, capabilities, data, :workflow, opts) when is_list(opts) do
+    private_capabilities =
+      workflow_private_capabilities(bundle, Keyword.get(opts, :authorization, %{}))
 
-    case do_assemble(bundle, capabilities, data, :workflow, private_capabilities) do
+    case do_assemble(bundle, capabilities, data, :workflow, private_capabilities, opts) do
       {:ok, attributes} ->
         {:ok, Map.put(attributes, :private_capabilities, private_capabilities)}
 
@@ -38,18 +39,68 @@ defmodule PtcRunner.Kernel.Environment do
     end
   end
 
-  defp do_assemble(bundle, capabilities, data, kind, private_capabilities) do
+  def assemble(bundle, capabilities, data, :mission, opts) when is_list(opts),
+    do: do_assemble(bundle, capabilities, data, :mission, [], opts)
+
+  defp do_assemble(bundle, capabilities, data, kind, private_capabilities, opts) do
     with :ok <- valid_bundle(bundle),
          true <- JSONValue.map?(data),
          {:ok, capability_map} <- capability_map(capabilities),
          :ok <- reserved_names(kind, capability_map),
-         :ok <- bundle_requirements(bundle, capability_map, kind, private_capabilities) do
-      {:ok, %{bundle: bundle, capabilities: capability_map, data: data}}
+         :ok <- bundle_requirements(bundle, capability_map, kind, private_capabilities),
+         {:ok, shipped_component_ids} <-
+           normalize_shipped_component_ids(bundle, Keyword.get(opts, :shipped_component_ids)) do
+      {:ok,
+       %{
+         bundle: bundle,
+         capabilities: capability_map,
+         data: data,
+         shipped_component_ids: shipped_component_ids
+       }}
     else
       false -> {:error, :invalid_environment_data}
       error -> error
     end
   end
+
+  @doc false
+  @spec component_ids(%{bundle: FrozenBundle.t() | nil}) :: [binary()]
+  def component_ids(%{bundle: nil}), do: []
+  def component_ids(%{bundle: %FrozenBundle{component_ids: component_ids}}), do: component_ids
+
+  @doc false
+  @spec shipped_component_ids(%{
+          optional(:shipped_component_ids) => [binary()] | nil,
+          optional(any()) => any()
+        }) :: [binary()]
+  def shipped_component_ids(%{shipped_component_ids: nil}), do: []
+  def shipped_component_ids(%{shipped_component_ids: component_ids}), do: component_ids
+
+  defp normalize_shipped_component_ids(_bundle, nil), do: {:ok, []}
+
+  defp normalize_shipped_component_ids(%FrozenBundle{component_ids: attached}, component_ids)
+       when is_list(component_ids) do
+    shipped_ids = MapSet.new(Library.component_ids())
+
+    if Enum.all?(component_ids, &is_binary/1) do
+      normalized =
+        component_ids
+        |> Enum.filter(&(&1 in attached and MapSet.member?(shipped_ids, &1)))
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      {:ok, normalized}
+    else
+      {:error, :invalid_shipped_component_ids}
+    end
+  end
+
+  defp normalize_shipped_component_ids(nil, component_ids) when is_list(component_ids) do
+    if component_ids == [], do: {:ok, []}, else: {:error, :invalid_shipped_component_ids}
+  end
+
+  defp normalize_shipped_component_ids(_bundle, _component_ids),
+    do: {:error, :invalid_shipped_component_ids}
 
   @doc """
   Returns the whole-environment capability view.

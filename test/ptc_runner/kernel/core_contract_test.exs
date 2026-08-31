@@ -4017,6 +4017,12 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     forged = %FrozenBundle{components: [], component_ids: [], hash: "forged", prelude: nil}
     assert {:error, :invalid_bundle} = WorkflowEnvironment.new(bundle: forged)
+
+    assert {:error, :invalid_shipped_component_ids} =
+             WorkflowEnvironment.new(shipped_component_ids: :invalid)
+
+    assert {:error, :invalid_shipped_component_ids} =
+             MissionEnvironment.new(shipped_component_ids: %{})
   end
 
   test "run configuration rejects a mutated workflow private grant" do

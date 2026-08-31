@@ -187,12 +187,7 @@ documentation. An installed capability is addressed as <code class="inline">tool
 documentation includes its description, input schema, and effect. This remains
 true when its <code class="inline">model_visible</code> flag is false: that flag controls prompt inventory
 only, not runtime discovery or authority. Uninstalled capabilities and private
-Lisp runtime tools are not exposed. When the selected environment has not
-attached a matching shipped library, <code class="inline">doc</code> or <code class="inline">apropos</code> prints an attachment
-redirect. Add <code class="inline">{&quot;library&quot;: &quot;&lt;id&gt;&quot;}</code> to <code class="inline">workflow.components</code> for a workflow or
-to <code class="inline">missions.&lt;name&gt;.components</code> for a mission, then restart the run or session.
-The redirect identifies a matching library namespace; it does not assert that
-the requested export exists. <code class="inline">(dir)</code> and
+Lisp runtime tools are not exposed. <code class="inline">(dir)</code> and
 <code class="inline">(export-meta &quot;ns/name&quot;)</code> / <code class="inline">(export-meta ns/name)</code> inspect the attached
 prelude API specifically, and <code class="inline">(source ns/name)</code> prints an attached prelude
 defining form when available. For <code class="inline">doc</code>/<code class="inline">dir</code>/<code class="inline">export-meta</code>/<code class="inline">source</code>, unquoted
@@ -200,7 +195,13 @@ and quoted symbols are accepted the same way as strings; <code class="inline">ap
 quoted symbols or strings (an unquoted query evaluates normally). An attached interactive terminal prints
 this guidance in its startup banner, and <code class="inline">:help</code> repeats it. Detached input,
 scripts, repeated <code class="inline">--eval</code>, stdin mode, and JSONL output do not print the
-startup hint.</p><p>See the <a href="/reference/ptc-lisp-specification/">PTC-Lisp specification</a> and <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">function
+startup hint.</p><p>On an exact <code class="inline">doc</code> miss for a public export of an unattached shipped library,
+Kernel-backed sessions use the generated shipped-export index to identify the
+owning component and the manifest selection that attaches it. The index is
+diagnostic metadata, not a discovery or authority surface: <code class="inline">apropos</code> never
+searches it, and typos, masked exports, and exports removed by an attached
+component override keep the ordinary not-found response. Embedded
+<code class="inline">PtcRunner.Lisp.run/2</code> calls without the index do likewise.</p><p>See the <a href="/reference/ptc-lisp-specification/">PTC-Lisp specification</a> and <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">function
 reference</a> for the full language surface.</p><p>Persist canonical session events with <code class="inline">--trace</code>:</p><pre><code class="console language-console">ptc repl --trace trace.jsonl
 ptc repl --manifest ptc.json --trace trace.jsonl</code></pre><p>A private manifest requires an attached terminal and
 <code class="inline">--private-terminal</code> before provider activity. It rejects scripts, stdin,

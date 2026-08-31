@@ -10,13 +10,13 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.BoundedPrints
   alias PtcRunner.Kernel.DeterministicJSON
+  alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Error
   alias PtcRunner.Kernel.EvaluatorEvidence
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
   alias PtcRunner.Kernel.JSONValue
-  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LLMBudget
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ProjectionError
@@ -37,6 +37,7 @@ defmodule PtcRunner.Kernel.Runner do
   alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.Lisp.RetainedSize
+  alias PtcRunner.Lisp.ShippedExportCatalog
   alias PtcRunner.LLM.OutputLimit
 
   # Matches the bound `PtcRunner.Kernel.AnalysisSession` already applies when
@@ -243,6 +244,8 @@ defmodule PtcRunner.Kernel.Runner do
       context: config.input,
       tools: workflow_tools(config, state, deadline_ms, evaluation_id),
       prelude: bundle_prelude(config.workflow_environment),
+      shipped_export_owners: ShippedExportCatalog.load(),
+      attached_component_ids: Environment.shipped_component_ids(config.workflow_environment),
       timeout: timeout_ms,
       compile_timeout: timeout_ms,
       run_deadline_ms: deadline_ms,
@@ -255,8 +258,7 @@ defmodule PtcRunner.Kernel.Runner do
       caller: :kernel,
       telemetry_run: state.pid,
       strict_data: true,
-      data_grants: DataKeys.source_referenceable_forms(config.input),
-      shipped_library_ids: Library.component_ids()
+      data_grants: DataKeys.source_referenceable_forms(config.input)
     ]
 
     case Lisp.run_native(entry_source, opts) do

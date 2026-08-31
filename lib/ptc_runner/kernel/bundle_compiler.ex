@@ -38,6 +38,21 @@ defmodule PtcRunner.Kernel.BundleCompiler do
   def compile(_components), do: {:error, %{reason: :invalid_components}}
 
   @doc false
+  @spec component_public_exports([Component.t()]) ::
+          {:ok, [{String.t(), [PtcRunner.Lisp.Prelude.Export.t()]}]} | {:error, map()}
+  def component_public_exports(components) when is_list(components) do
+    with {:ok, components} <- validate_components(components),
+         {:ok, by_id} <- unique_ids(components),
+         :ok <- dependencies_exist(by_id),
+         {:ok, ordered} <- topological_order(by_id),
+         {:ok, compiled} <- describe_ordered(ordered) do
+      {:ok, Enum.map(compiled, &{&1.id, &1.prelude.exports})}
+    end
+  end
+
+  def component_public_exports(_components), do: {:error, %{reason: :invalid_components}}
+
+  @doc false
   @spec compile_named(map(), integer(), non_neg_integer(), pos_integer(), [tuple()]) ::
           {:ok, map()} | {:error, {map(), [Component.t()]}}
   def compile_named(missions, deadline_ms, initial_bytes, max_bytes, reusable)

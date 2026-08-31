@@ -11,7 +11,7 @@ defmodule PtcRunner.Kernel.UnattachedLibraryDocTest do
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.TestSupport.StreamingInspection
 
-  test "mission evaluation gives environment-neutral attachment guidance" do
+  test "mission evaluation gives exact export and environment-neutral attachment guidance" do
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new()
     {:ok, state} = RunState.start(limits)
@@ -25,18 +25,18 @@ defmodule PtcRunner.Kernel.UnattachedLibraryDocTest do
                1_000
              )
 
-    assert Enum.join(prints, "\n") ==
-             """
-             Shipped library "agent.core" is not attached, so "agent.core/run" cannot be resolved in this session.
-             Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
-             """
-
-    refute Enum.join(prints, "\n") =~ "workflow.components"
+    output = Enum.join(prints, "\n")
+    assert output =~ ~s|"agent.core/run" is an export of shipped library "agent.core"|
+    assert output =~ "--project PROJECT.json or --manifest MANIFEST.json"
+    assert output =~ ~s|{"library": "agent.core"}|
+    assert output =~ "workflow.components or missions.<name>.components"
+    assert output =~ "Other hosts must construct an environment"
+    assert output =~ "fixed profiles cannot change their component set"
 
     assert :ok = RunState.stop(state)
   end
 
-  test "workflow evaluation gives environment-neutral attachment guidance" do
+  test "workflow evaluation gives exact export attachment guidance" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, limits} = Limits.new()
@@ -66,10 +66,10 @@ defmodule PtcRunner.Kernel.UnattachedLibraryDocTest do
       |> Enum.filter(&(&1["record_type"] == "execution-prints"))
       |> Enum.flat_map(& &1["payload"]["prints"])
 
-    assert Enum.join(prints, "\n") ==
-             """
-             Shipped library "agent.core" is not attached, so "agent.core/run" cannot be resolved in this session.
-             Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
-             """
+    output = Enum.join(prints, "\n")
+    assert output =~ ~s|"agent.core/run" is an export of shipped library "agent.core"|
+    assert output =~ "--project PROJECT.json or --manifest MANIFEST.json"
+    assert output =~ ~s|{"library": "agent.core"}|
+    assert output =~ "workflow.components or missions.<name>.components"
   end
 end

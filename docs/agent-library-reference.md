@@ -385,10 +385,9 @@ bounded structural types, but never their values. The inventory is the complete
 prompt-visible mission surface. `dir` and `export-meta` inspect visible
 attached prelude exports. `apropos` and `doc` cover those exports plus installed
 callable capabilities, fixed built-ins, and the bounded Java surface. They do
-not enumerate data values. When a shipped library is not attached,
-they print an attachment redirect for a matching namespace or query. The
-catalog identifies only the library; it does not establish whether a requested
-export or its documentation exists. When the inventory is empty, the prompt
+not enumerate data values. At Kernel boundaries, `doc` can identify an exact
+indexed public export and its unattached owning shipped library. The index is
+not searched by `apropos` and grants no documentation or call authority. When the inventory is empty, the prompt
 says so explicitly
 instead of leaving a blank heading.
 The generic examples do not name `data/input`; an agent sees that reference

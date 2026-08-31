@@ -1,6 +1,10 @@
 defmodule PtcRunner.Lisp.IntrospectionTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel
+  alias PtcRunner.Kernel.Component
+  alias PtcRunner.Kernel.Environment
+  alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.Introspection
   alias PtcRunner.Lisp.Prelude
@@ -411,6 +415,59 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
 
       assert result.return == nil
       assert result.prints == [~s(No documentation found for "alpha/nope".)]
+    end
+
+    test "an exact unattached shipped export gives attachment guidance", %{prelude: prelude} do
+      result =
+        eval!(~S|(doc "agent.core/run")|, prelude,
+          shipped_export_owners: %{"agent.core/run" => "agent.core"},
+          attached_component_ids: []
+        )
+
+      assert [printed] = result.prints
+      assert printed =~ ~s|"agent.core/run" is an export of shipped library "agent.core"|
+      assert printed =~ "--project PROJECT.json or --manifest MANIFEST.json"
+      assert printed =~ ~s|{"library": "agent.core"}|
+      assert printed =~ "workflow.components or missions.<name>.components"
+    end
+
+    test "a colliding local component ID does not count as an attached shipped library" do
+      {:ok, component} =
+        Component.new(
+          id: "agent.core",
+          source: ~S|(ns local.component) (defn value [] 1)|,
+          origin: "priv/preludes/kernel/agent.core.clj"
+        )
+
+      {:ok, bundle} = Kernel.compile_bundle([component])
+      {:ok, environment} = WorkflowEnvironment.new(bundle: bundle)
+
+      assert Environment.shipped_component_ids(environment) == []
+    end
+
+    test "a typo, attached missing export, and hidden attached export are ordinary misses", %{
+      prelude: prelude
+    } do
+      owners = %{"agent.core/run" => "agent.core", "alpha/greet" => "alpha-component"}
+
+      typo = eval!(~S|(doc "agent.core/typo")|, prelude, shipped_export_owners: owners)
+
+      removed =
+        eval!(~S|(doc "agent.core/run")|, prelude,
+          shipped_export_owners: owners,
+          attached_component_ids: ["agent.core"]
+        )
+
+      hidden =
+        eval!(~S|(doc "alpha/greet")|, prelude,
+          shipped_export_owners: owners,
+          attached_component_ids: ["alpha-component"],
+          prelude_export_mask: %{"alpha" => MapSet.new()}
+        )
+
+      assert typo.prints == [~s(No documentation found for "agent.core/typo".)]
+      assert removed.prints == [~s(No documentation found for "agent.core/run".)]
+      assert hidden.prints == [~s(No documentation found for "alpha/greet".)]
     end
 
     test "output is subject to the print budget", %{prelude: prelude} do
@@ -930,156 +987,6 @@ defmodule PtcRunner.Lisp.IntrospectionTest do
       for ref <- eval!(~S|(dir "alpha")|, prelude, strict).return, ref != "alpha/limit" do
         assert {:ok, _} = Lisp.run(~s|(#{ref} "x")|, [prelude: prelude] ++ strict)
       end
-    end
-  end
-
-  describe "unattached shipped libraries" do
-    @catalog ["agent.core", "agent.failure", "cap", "kernel"]
-    @catalog_opts [shipped_library_ids: @catalog]
-
-    test "Lisp.run without a catalog keeps the generic miss" do
-      result = eval!(~S|(doc "agent.core/run")|, nil)
-
-      assert result.return == nil
-      assert result.prints == [~s(No documentation found for "agent.core/run".)]
-      refute "agent.core" in eval!(~S|(apropos "agent")|, nil).return
-    end
-
-    test "a ref in an unattached shipped namespace names the missing attachment", %{
-      prelude: prelude
-    } do
-      result = eval!(~S|(doc "agent.core/run")|, prelude, @catalog_opts)
-
-      assert result.return == nil
-
-      assert result.prints == [
-               """
-               Shipped library "agent.core" is not attached, so "agent.core/run" cannot be resolved in this session.
-               Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
-               """
-             ]
-    end
-
-    test "an unknown symbol under an unattached shipped namespace is not called an export", %{
-      prelude: prelude
-    } do
-      result = eval!(~S|(doc "agent.core/not-real")|, prelude, @catalog_opts)
-      output = Enum.join(result.prints, "\n")
-
-      refute output =~ "is a shipped library export"
-
-      assert output ==
-               """
-               Shipped library "agent.core" is not attached, so "agent.core/not-real" cannot be resolved in this session.
-               Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
-               """
-    end
-
-    test "an unattached shipped namespace names the missing attachment" do
-      result = eval!(~S|(doc "agent.core")|, nil, @catalog_opts)
-
-      assert result.prints == [
-               """
-               Shipped library "agent.core" is not attached, so "agent.core" cannot be resolved in this session.
-               Attach {"library": "agent.core"} to this environment's component list before starting the run or session.\
-               """
-             ]
-    end
-
-    test "an unknown ref stays a generic miss when a catalog is present", %{prelude: prelude} do
-      result = eval!(~S|(doc "missing/ns")|, prelude, @catalog_opts)
-
-      assert result.prints == [~s(No documentation found for "missing/ns".)]
-    end
-
-    test "an attached shipped namespace does not redirect a missing export" do
-      {:ok, prelude} =
-        Compiler.compile("""
-        (ns agent.core "Fake." {:visibility :prompt})
-        (defn run [task cfg] cfg)
-        """)
-
-      result = eval!(~S|(doc "agent.core/nope")|, prelude, @catalog_opts)
-
-      assert result.prints == [~s(No documentation found for "agent.core/nope".)]
-
-      printed = hd(eval!(~S|(doc "agent.core/run")|, prelude, @catalog_opts).prints)
-      assert printed =~ "(agent.core/run"
-      refute printed =~ "has not attached"
-    end
-
-    test "an attached private-only shipped namespace does not redirect" do
-      {:ok, prelude} =
-        Compiler.compile("""
-        (ns agent.core "Fake." {:visibility :prompt})
-        (defn- helper [x] x)
-        """)
-
-      assert prelude.namespaces == ["agent.core"]
-      assert prelude.exports == []
-
-      result = eval!(~S|(doc "agent.core/nope")|, prelude, @catalog_opts)
-
-      assert result.prints == [~s(No documentation found for "agent.core/nope".)]
-
-      refute Enum.join(eval!(~S|(apropos "agent")|, prelude, @catalog_opts).prints, "\n") =~
-               "agent.core"
-    end
-
-    test "a malformed shipped-looking ref stays a generic miss" do
-      for ref <- ["agent.core/", "/run", "agent.core/foo/bar"] do
-        result = eval!(~s|(doc "#{ref}")|, nil, @catalog_opts)
-        assert result.prints == [~s(No documentation found for "#{ref}".)]
-      end
-    end
-
-    test "a hidden attached shipped export stays a generic miss" do
-      {:ok, prelude} =
-        Compiler.compile("""
-        (ns agent.core "Fake." {:visibility :prompt})
-        (defn run [task cfg] cfg)
-        (defn other [x] x)
-        """)
-
-      mask = [prelude_export_mask: %{"agent.core" => MapSet.new(["agent.core/other"])}]
-      result = eval!(~S|(doc "agent.core/run")|, prelude, mask ++ @catalog_opts)
-
-      assert result.prints == [~s(No documentation found for "agent.core/run".)]
-    end
-
-    test "apropos prints matching unattached libraries and returns only callable names" do
-      result = eval!(~S|(apropos "agent")|, nil, @catalog_opts)
-
-      refute "agent.core" in result.return
-      refute "agent.failure" in result.return
-
-      assert result.prints == [
-               """
-               Unattached shipped libraries matching "agent": agent.core, agent.failure.
-               Attach {"library": "<id>"} to this environment's component list before starting the run or session.\
-               """
-             ]
-    end
-
-    test "apropos does not advise about an attached shipped library" do
-      {:ok, prelude} =
-        Compiler.compile("""
-        (ns agent.core "Fake." {:visibility :prompt})
-        (defn run [task cfg] cfg)
-        """)
-
-      result = eval!(~S|(apropos "agent")|, prelude, @catalog_opts)
-
-      assert "agent.core/run" in result.return
-      refute "agent.core" in result.return
-      assert Enum.join(result.prints, "\n") =~ "agent.failure"
-      refute Enum.join(result.prints, "\n") =~ "agent.core,"
-    end
-
-    test "a blank apropos still matches nothing when a catalog is present" do
-      result = eval!(~S|(apropos "")|, nil, @catalog_opts)
-      assert result.return == []
-      assert result.prints == []
     end
   end
 end

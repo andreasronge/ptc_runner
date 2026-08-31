@@ -177,12 +177,7 @@ documentation. An installed capability is addressed as `tool/<name>`; its
 documentation includes its description, input schema, and effect. This remains
 true when its `model_visible` flag is false: that flag controls prompt inventory
 only, not runtime discovery or authority. Uninstalled capabilities and private
-Lisp runtime tools are not exposed. When the selected environment has not
-attached a matching shipped library, `doc` or `apropos` prints an attachment
-redirect. Add `{"library": "<id>"}` to `workflow.components` for a workflow or
-to `missions.<name>.components` for a mission, then restart the run or session.
-The redirect identifies a matching library namespace; it does not assert that
-the requested export exists. `(dir)` and
+Lisp runtime tools are not exposed. `(dir)` and
 `(export-meta "ns/name")` / `(export-meta ns/name)` inspect the attached
 prelude API specifically, and `(source ns/name)` prints an attached prelude
 defining form when available. For `doc`/`dir`/`export-meta`/`source`, unquoted
@@ -191,6 +186,14 @@ quoted symbols or strings (an unquoted query evaluates normally). An attached in
 this guidance in its startup banner, and `:help` repeats it. Detached input,
 scripts, repeated `--eval`, stdin mode, and JSONL output do not print the
 startup hint.
+
+On an exact `doc` miss for a public export of an unattached shipped library,
+Kernel-backed sessions use the generated shipped-export index to identify the
+owning component and the manifest selection that attaches it. The index is
+diagnostic metadata, not a discovery or authority surface: `apropos` never
+searches it, and typos, masked exports, and exports removed by an attached
+component override keep the ordinary not-found response. Embedded
+`PtcRunner.Lisp.run/2` calls without the index do likewise.
 
 See the [PTC-Lisp specification](../ptc-lisp-specification.md) and [function
 reference](../function-reference.md) for the full language surface.

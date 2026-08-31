@@ -136,6 +136,7 @@ find "$release_root/lib" -maxdepth 1 -type d -name 'ptc_viewer-*' -print -quit |
 cmp "$project_root/THIRD_PARTY_NOTICES.md" "$release_root/THIRD_PARTY_NOTICES.md"
 cmp "$project_root/LICENSES/Apache-2.0.txt" "$release_root/LICENSES/Apache-2.0.txt"
 cmp "$project_root/LICENSES/MIT.txt" "$release_root/LICENSES/MIT.txt"
+find "$release_root/lib" -path '*/priv/shipped_export_owners.json' -type f -print -quit | grep -q .
 "$release_root/bin/ptc_runner" eval '
   true = PtcRunner.Kernel.SemanticRevision.runtime_dependency_artifacts_verified?()
 '

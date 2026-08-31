@@ -35,7 +35,12 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
          {:ok, capabilities} <- recipe.capabilities(resources),
          :ok <- validate_contract(recipe, bundle, capabilities),
          {:ok, mission} <-
-           MissionEnvironment.new(bundle: bundle, capabilities: capabilities, data: %{}),
+           MissionEnvironment.new(
+             bundle: bundle,
+             capabilities: capabilities,
+             data: %{},
+             shipped_component_ids: shipped_component_ids(recipe.component_selections())
+           ),
          {:ok, workflow} <- WorkflowEnvironment.new([]),
          {:ok, profile} <- descriptor(recipe, bundle, mission, limits),
          {:ok, config} <- fixed_config(recipe, workflow, mission, limits, sink, profile) do
@@ -43,6 +48,14 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
     else
       _ -> {:error, recipe.invalid_profile_error()}
     end
+  end
+
+  defp shipped_component_ids(selections) do
+    selections
+    |> Enum.flat_map(fn
+      {:library, id} -> [id]
+      _component -> []
+    end)
   end
 
   @doc """

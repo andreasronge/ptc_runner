@@ -309,7 +309,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
        when op in @introspection_specials do
     case Introspection.invoke(op, args, eval_ctx) do
       {:ok, value} -> {:ok, value, eval_ctx}
-      {:print, text, value} -> {:ok, value, EvalContext.append_print(eval_ctx, text)}
       {:print, text} -> {:ok, nil, EvalContext.append_print(eval_ctx, text)}
       {:error, reason} -> {:error, reason}
     end
