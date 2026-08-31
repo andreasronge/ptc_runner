@@ -22,8 +22,8 @@
       "blockers": 1
     },
     "docs/guides/components-and-preludes.md": {
-      "words": 292,
-      "density": 2.2,
+      "words": 291,
+      "density": 1.2,
       "blockers": 0
     },
     "docs/guides/concepts.md": {
@@ -47,8 +47,8 @@
       "blockers": 5
     },
     "docs/guides/evaluating-with-replay.md": {
-      "words": 717,
-      "density": 3.2,
+      "words": 706,
+      "density": 3.1,
       "blockers": 1
     },
     "docs/guides/getting-started.md": {

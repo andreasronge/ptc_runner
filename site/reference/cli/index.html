@@ -246,7 +246,8 @@ for holding model responses fixed and comparing a baseline with that candidate.
 The <a href="/reference/component-contracts/#evaluate-one-replacement-component">component reference</a>
 defines every descriptor field. Candidate creation is not currently a
 standalone command; a source checkout provides <code class="inline">mix ptc.materialize</code> as
-documented in the repository's maintainer guide on embedding.</p><p>Both <code class="inline">ptc validate</code> and <code class="inline">ptc run</code> accept the descriptor switch. Validation
+shown in
+<a href="/guides/components-and-preludes/#try-a-different-agent-prompt">Customize agent components</a>.</p><p>Both <code class="inline">ptc validate</code> and <code class="inline">ptc run</code> accept the descriptor switch. Validation
 compiles and checks the replacement without provider acquisition; running uses
 the same verified candidate in the immutable workflow or mission bundle.</p><h2 id="read-results-and-failures">Read results and failures</h2><p>A successful normal run prints the compact JSON result value. A private run
 does not print its value. The V4 envelope records the result class, artifact

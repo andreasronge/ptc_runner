@@ -139,9 +139,9 @@ descriptor names the field it broke (<code class="inline">base_source_hash</code
 sentence. See the
 <a href="/reference/component-contracts/#evaluate-one-replacement-component">component reference</a>
 for every descriptor field and validation rule.</p><p>Candidate creation is a trusted build step and is not currently exposed by the
-standalone executable. The source-checkout tool for maintainers is documented
-under &quot;Materialize candidate source&quot; in <code class="inline">docs/maintainers/embedding.md</code>, which
-is a repository document rather than a page the executable carries.</p><p>The active bundle stays immutable for the whole run. A run may author source,
+standalone executable. In a source checkout, follow
+<a href="/guides/components-and-preludes/#try-a-different-agent-prompt">Customize agent components</a>
+to create and check a candidate.</p><p>The active bundle stays immutable for the whole run. A run may author source,
 but only a later host invocation can materialize it and start with the newly
 compiled bundle. Component-override switches are invocation-only and are not
 stored in <code class="inline">ptc-project.json</code>.</p><p>Run the unchanged baseline and the override with the same replay installation,

@@ -255,7 +255,8 @@ for holding model responses fixed and comparing a baseline with that candidate.
 The [component reference](component-contracts.md#evaluate-one-replacement-component)
 defines every descriptor field. Candidate creation is not currently a
 standalone command; a source checkout provides `mix ptc.materialize` as
-documented in the repository's maintainer guide on embedding.
+shown in
+[Customize agent components](../guides/components-and-preludes.md#try-a-different-agent-prompt).
 
 Both `ptc validate` and `ptc run` accept the descriptor switch. Validation
 compiles and checks the replacement without provider acquisition; running uses
