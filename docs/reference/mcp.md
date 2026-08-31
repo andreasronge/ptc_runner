@@ -212,6 +212,40 @@ capture recovers the value and the identity confirms it is the same one.
 Digests of guessable values are not confidential. Select provider page sizes
 and configured call, event, and clock limits suitable for the source volume.
 
+### Inspect retained MCP exchanges
+
+`inspection_capture` controls what a private inspection artifact retains; it
+does not publish an artifact by itself. Produce a run with correlated trace
+and inspection artifacts (normally `"artifacts": {"trace": true,
+"inspection": true}` in the project document), then use that run's matching
+`run_ref` (the `cmd-...` value) and artifact directories:
+
+```console
+ptc repl \
+  --profile private-run-analysis-v2 \
+  --run cmd-00000000000000000000000001 \
+  --resource traces=.ptc/traces \
+  --resource inspection=.ptc/inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/read "cmd-00000000000000000000000001" {"collection" "provider_exchanges" "limit" 100})'
+```
+
+The `cmd-...` value is a placeholder. The `--run` value, the expression's
+run reference, and the trace and inspection artifacts must all identify the
+same run. `analysis/read` returns one bounded page; when `next_cursor` is not
+`null`, pass it to the next read instead of changing the query. The
+`provider_exchanges` collection exposes retained MCP wire requests and
+responses, including tool-call boundaries; it is not the reconstructed model
+conversation.
+
+With `"full"`, accepted response bodies are retained. With
+`"digest_results"`, accepted responses and results are replaced by
+deterministic JSON identity metadata; rejected responses and error envelopes
+remain available for diagnosis. Arguments and any retained response bodies
+are private inspection data, so protect the artifact directories and every
+downstream output sink. `ptc transcript` publishes the reconstructed model
+conversation, not MCP wire exchanges.
+
 ## Select less authority in the manifest
 
 The application selects the installed alias in its mission provider list:
