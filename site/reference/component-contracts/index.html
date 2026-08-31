@@ -183,7 +183,12 @@ envelope.</p><p>An override preserves the selected component's ID and declared d
 It cannot add a component or change the graph. The replacement still passes
 the normal dependency, signature, export, capability-requirement, and bundle
 checks. The descriptor contains no source, credentials, provider grants, or
-installation instruction.</p><p>The optional closed <code class="inline">provenance</code> object may contain <code class="inline">run_id</code>, <code class="inline">prompt_hash</code>,
+installation instruction.</p><p>One existing library authority also follows verified lineage: a workflow
+override of the shipped <code class="inline">agent.core</code> retains its fixed private diagnostic
+routes. PtcRunner admits those routes only when the selected base is the
+shipped library, its descriptor base hash matches that library, and the
+compiled candidate matches the descriptor source hash. A byte-identical local
+component does not inherit the grant.</p><p>The optional closed <code class="inline">provenance</code> object may contain <code class="inline">run_id</code>, <code class="inline">prompt_hash</code>,
 <code class="inline">authored_at</code>, and <code class="inline">accept_widened_effect</code>. These are supplied claims rather
 than proof of origin.</p><h2 id="boundaries">Boundaries</h2><p>The manifest selects component sources and trusted provider aliases;
 executable callbacks stay in the host-owned provider registry. New provider

@@ -28,6 +28,10 @@ defmodule PtcRunner.Kernel.ComponentOverride do
   either used the verified bytes or failed. Normal dependency, export,
   signature, and capability validation still applies afterwards, because an
   override changes which source compiles, never what compilation permits.
+  A workflow override of the shipped `agent.core` retains only its fixed
+  private diagnostic routes. That grant follows the verified shipped-library
+  base identity; copying the same source into a local component does not gain
+  it.
 
   Nothing here writes. Materializing a candidate is a separate trusted host
   step, and promotion stays an explicit human decision.

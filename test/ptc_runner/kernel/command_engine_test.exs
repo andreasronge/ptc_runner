@@ -3530,12 +3530,16 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert validate_help.envelope["result"] == %{
              "topic" => "validate",
              "usage" => [
-               "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json]"
+               "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json] [--component-override-descriptor DESCRIPTOR.json]"
              ],
              "options" => [
                %{
                  "switches" => ["--host-config HOST.json"],
                  "description" => "trusted provider installation document"
+               },
+               %{
+                 "switches" => ["--component-override-descriptor DESCRIPTOR.json"],
+                 "description" => "verified replacement component descriptor"
                },
                %{
                  "switches" => ["--envelope ENVELOPE.json"],
@@ -3553,7 +3557,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              CommandParser.parse(["validate", "ptc.json", "--output", "result.json"])
 
     assert rejection.kind == :unknown_switch
-    assert rejection.accepted == ["--host-config", "--envelope", "--help"]
+
+    assert rejection.accepted == [
+             "--host-config",
+             "--component-override-descriptor",
+             "--envelope",
+             "--help"
+           ]
   end
 
   test "declared command help aliases resolve to generated topics only by themselves" do
@@ -6971,6 +6981,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     refute ApplicationPackage.valid?(Map.put(package, :application_path, "private"))
     refute ExecutionInput.valid?(Map.put(input, :input_path, "private"))
+    refute ExecutionInput.valid?(Map.delete(input, :value))
     refute ExecutionPolicy.valid?(Map.put(policy, :output_path, "private"))
     refute RunRequest.valid?(Map.put(request, :application_path, "private"))
     refute PreparedRun.valid?(Map.put(preparation.prepared_run, :application_path, "private"))
@@ -6979,8 +6990,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              Map.put(preparation.prepared_run.workflow_bundle, :private_path, ".")
            )
 
+    refute FrozenBundle.valid?(Map.delete(preparation.prepared_run.workflow_bundle, :components))
+
     assert ProviderActivity.value(Map.put(activity, :provider_endpoint, "private")) == :unknown
     refute ValueContract.sealed?(Map.put(contract, :schema_path, "private"))
+    refute ValueContract.sealed?(Map.delete(contract, :schema))
     refute ValueContractClassification.valid?(Map.put(evidence, :branch_secret, "private"))
     refute CommandContractAuthority.valid?(Map.put(authority, :branch_secret, "private"))
     refute CommandPath.valid?(Map.put(path, :source_path, "private"))

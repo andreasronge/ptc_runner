@@ -184,6 +184,17 @@ defmodule PtcRunner.Kernel.Library do
 
   def shipped_component?(_bundle, _id), do: false
 
+  @doc false
+  @spec shipped_or_verified_override_component?(FrozenBundle.t() | nil, binary(), map()) ::
+          boolean()
+  def shipped_or_verified_override_component?(%FrozenBundle{} = bundle, id, authorization)
+      when is_binary(id) and is_map(authorization) do
+    authorized_shipped_component?(bundle, id, authorization) or
+      verified_override_component?(bundle, id, authorization)
+  end
+
+  def shipped_or_verified_override_component?(_bundle, _id, _authorization), do: false
+
   @spec components([binary()]) :: {:ok, [Component.t()]} | {:error, :unknown_library}
   @doc "Returns shipped components in the requested order."
   def components(names) when is_list(names) do
@@ -200,6 +211,47 @@ defmodule PtcRunner.Kernel.Library do
   end
 
   def components(_names), do: {:error, :unknown_library}
+
+  defp authorized_shipped_component?(bundle, id, authorization)
+       when map_size(authorization) == 0,
+       do: shipped_component?(bundle, id)
+
+  defp authorized_shipped_component?(bundle, id, %{component_kinds: component_kinds})
+       when is_map(component_kinds),
+       do: Map.get(component_kinds, id) == :library and shipped_component?(bundle, id)
+
+  defp authorized_shipped_component?(_bundle, _id, _authorization), do: false
+
+  defp verified_override_component?(bundle, id, %{
+         component_kinds: component_kinds,
+         component_overrides: component_overrides
+       })
+       when is_map(component_kinds) and is_list(component_overrides) do
+    with true <- FrozenBundle.valid?(bundle),
+         :library <- Map.get(component_kinds, id),
+         {:ok, expected} <- component(id),
+         %{dependencies: dependencies, origin: "component-override", source_hash: source_hash} <-
+           Enum.find(bundle.components, &(&1.id == id)),
+         true <- dependencies == expected.dependencies do
+      Enum.any?(component_overrides, fn
+        %{
+          "target" => %{"environment" => "workflow"},
+          "component_id" => ^id,
+          "base_source_hash" => base_source_hash,
+          "source_hash" => candidate_source_hash
+        } ->
+          base_source_hash == qualified_source_hash(expected.source) and
+            candidate_source_hash == "sha256:" <> source_hash
+
+        _other ->
+          false
+      end)
+    else
+      _other -> false
+    end
+  end
+
+  defp verified_override_component?(_bundle, _id, _authorization), do: false
 
   @spec resolve_components([Component.t() | {:library, binary()}]) ::
           {:ok, [Component.t()]}
@@ -323,4 +375,6 @@ defmodule PtcRunner.Kernel.Library do
 
   defp source_hash(source),
     do: :crypto.hash(:sha256, source) |> Base.encode16(case: :lower)
+
+  defp qualified_source_hash(source), do: "sha256:" <> source_hash(source)
 end

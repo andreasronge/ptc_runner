@@ -257,6 +257,10 @@ defines every descriptor field. Candidate creation is not currently a
 standalone command; a source checkout provides `mix ptc.materialize` as
 documented in the repository's maintainer guide on embedding.
 
+Both `ptc validate` and `ptc run` accept the descriptor switch. Validation
+compiles and checks the replacement without provider acquisition; running uses
+the same verified candidate in the immutable workflow or mission bundle.
+
 ## Read results and failures
 
 A successful normal run prints the compact JSON result value. A private run

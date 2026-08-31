@@ -75,10 +75,8 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   @spec sealed?(term()) :: boolean()
   @doc "Checks that a contract is the unchanged result of bounded compilation."
-  def sealed?(%__MODULE__{attestation: attestation} = contract) do
-    Enum.sort(Map.keys(contract)) == @field_keys and
-      Attestation.valid?(__MODULE__, payload(contract), attestation)
-  end
+  def sealed?(%__MODULE__{} = contract),
+    do: Attestation.valid_struct?(__MODULE__, contract, @field_keys, fn -> payload(contract) end)
 
   def sealed?(_contract), do: false
 

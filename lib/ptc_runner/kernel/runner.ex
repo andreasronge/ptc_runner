@@ -688,23 +688,23 @@ defmodule PtcRunner.Kernel.Runner do
       config.event_sink,
       config.result_contract,
       config.result_contract_source,
-      config.workflow_environment.bundle
+      config.workflow_environment
     )
     |> RuntimeTools.maybe_put_llm_provider_failure(
       state,
       config.event_sink,
-      config.workflow_environment.bundle
+      config.workflow_environment
     )
     |> RuntimeTools.maybe_put_runtime_limit_failure(
       state,
       config.event_sink,
       config.limits,
-      config.workflow_environment.bundle
+      config.workflow_environment
     )
     |> RuntimeTools.maybe_put_agent_loop_tools(
       state,
       config.event_sink,
-      config.workflow_environment.bundle
+      config.workflow_environment
     )
     |> RuntimeTools.trusted_tools(
       config.limits,
