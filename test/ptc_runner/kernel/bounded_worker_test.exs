@@ -257,7 +257,11 @@ defmodule PtcRunner.Kernel.BoundedWorkerTest do
             end
           end,
           timeout_ms: 60_000,
-          max_heap_words: 10_000,
+          # This case isolates caller cancellation, not heap enforcement. A
+          # 10k-word worker can hit its heap limit before the test installs
+          # its monitor under full-suite scheduler pressure and report
+          # `:noproc` instead of the cancellation reason being asserted.
+          max_heap_words: 100_000,
           cancel_with_caller: true
         )
       end)
