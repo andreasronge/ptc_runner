@@ -73,7 +73,14 @@ defmodule PtcRunner.Kernel.Environment do
   @spec capability_requirements(FrozenBundle.t() | nil) :: [binary()]
   def capability_requirements(%FrozenBundle{prelude: %{exports: exports}}) do
     exports
-    |> Enum.flat_map(&Map.get(&1, :tool_refs, []))
+    |> Enum.flat_map(fn export ->
+      explicit =
+        export
+        |> Map.get(:requires, [])
+        |> Enum.map(fn "tool:" <> name -> name end)
+
+      explicit ++ Map.get(export, :tool_refs, [])
+    end)
     |> Enum.uniq()
     |> Enum.sort()
   end

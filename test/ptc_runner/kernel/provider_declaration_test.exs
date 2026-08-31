@@ -1989,7 +1989,8 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
       write_application(directory, "provider-free-mission-requirements", %{
         "ptc.json" => Jason.encode!(manifest),
         "main.clj" => "(ns app) (defn run [input] input)",
-        "alpha.clj" => "(ns alpha) (defn run [input] (do (tool/zeta {}) (tool/alpha {}) input))",
+        "alpha.clj" =>
+          "(ns alpha) (defn run {:requires [\"tool:audit\"]} [input] (do (tool/zeta {}) (tool/alpha {}) input))",
         "zeta.clj" => "(ns zeta) (defn run [input] (tool/omega {}))",
         "provider-bearing.clj" => "(ns provider-bearing) (defn run [input] (tool/unknown {}))",
         "implicit.clj" =>
@@ -2006,7 +2007,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
              "phase" => "bundle",
              "code" => "mission_capability_ungranted",
              "message" =>
-               ~s(mission "alpha" has no providers; missing capability requirements: alpha, zeta),
+               ~s(mission "alpha" has no providers; missing capability requirements: alpha, audit, zeta),
              "source" => nil,
              "path" => nil,
              "span" => nil,
