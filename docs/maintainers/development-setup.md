@@ -9,8 +9,10 @@ forget.
 
 ## Toolchain and dependencies
 
-Tool versions are pinned in `mise.toml`. From a new clone or worktree, install
-the toolchain and dependencies before running tests:
+Tool versions are pinned in `mise.toml`. `scripts/worktree.sh new` performs the
+commands below automatically for a new worktree. From a new clone, or to repair
+a partially initialized checkout, run `scripts/worktree.sh init`; its
+equivalent manual sequence is:
 
 ```bash
 mise install
@@ -44,10 +46,19 @@ The focused tests use only a loopback raw HTTP fixture and no credentials.
 ## Worktree seeding
 
 `scripts/worktree.sh new` seeds a fresh worktree with the main checkout's
-`deps/`, `_build/`, and `priv/plts/` (root, Viewer, and launcher) so the
-commands above become incremental instead of cold. It prints one line per
-artifact saying whether it was seeded or why not — copy skipped, source not
-built, already present, or pinned by a file that differs from the main
+`deps/`, `_build/`, and `priv/plts/` (root, Viewer, and launcher), then runs
+`scripts/worktree.sh init` so the checkout is ready for tests. Initialization
+installs the shared Git hooks, installs the pinned toolchain through `mise`,
+fetches root/Viewer/launcher dependencies, and compiles the root project. It
+removes unsafe write permissions from checkout directories and uses a `0022`
+umask so Linux cloud agents do not retain or create group-writable directory
+trees that fail private-destination safety tests. Pass `new --no-init` only
+when deliberately deferring that work, then run `scripts/worktree.sh init
+<dir>` before editing or testing.
+
+Seeding makes initialization incremental instead of cold. It prints one line
+per artifact saying whether it was seeded or why not — copy skipped, source
+not built, already present, or pinned by a file that differs from the main
 checkout's copy.
 
 That last key is per artifact, not per seed: every artifact is pinned by
@@ -103,8 +114,14 @@ scripts/worktree.sh seed <dir>    # seed another worktree
 
 ## Git hooks
 
-Run `./scripts/install-hooks.sh` once per clone. Linked worktrees share the
-clone's installed hook wrappers, so they do not need to reinstall them.
+`scripts/worktree.sh new` and `scripts/worktree.sh init` run
+`./scripts/install-hooks.sh` automatically. Linked worktrees share the clone's
+installed hook wrappers, so this is idempotent and also repairs a clone whose
+wrappers are absent. Run `./scripts/install-hooks.sh` directly only when
+setting up a clone without using the worktree lifecycle script. The wrappers
+set a `0022` umask and, when `mix` is absent from Git's non-interactive `PATH`,
+run the tracked hooks through the same `mise` resolution used by worktree
+initialization.
 
 The script also registers the merge driver for
 `priv/semantic_build_projection.json`. That projection is derived, its hashes

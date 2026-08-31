@@ -15,7 +15,9 @@
    :result-contract (get cfg "result_contract")
    :result-contract-mode (get cfg "result_contract_mode")
    :phase-return-contract (get cfg "phase_return_contract")
-   :phase-return-contract-name (get cfg "return_contract")})
+   :phase-return-contract-name (get cfg "return_contract")
+   :standalone-return-contract (get cfg "standalone_return_contract_projection")
+   :standalone-return-contract-name (get cfg "standalone_return_contract_name")})
 
 (defn- inline-json [value]
   (let [encoded (json/generate-string value)
@@ -291,6 +293,21 @@
              (if (seq docs) (str "Schema docs: " (join "; " docs) "\n") "")))
       "")))
 
+(defn- render-standalone-return-contract [state]
+  (let [contract (get state :standalone-return-contract)
+        name (get state :standalone-return-contract-name)]
+    (if (and (map? contract) (string? name))
+      (str "\nStandalone return contract (" name ")\n"
+           "The host checks the exact value passed to (return value) against this named contract.\n"
+           "A valid return closes this standalone loop and hands the value to workflow code.\n"
+           "An invalid return consumes a turn and may receive bounded correction feedback.\n"
+           "Type: " (render-type contract) "\n"
+           (let [constraints (constraint-lines contract "phase-return")]
+             (if (seq constraints) (str "Constraints: " (join "; " constraints) "\n") ""))
+           (let [docs (documentation-lines contract "phase-return")]
+             (if (seq docs) (str "Schema docs: " (join "; " docs) "\n") "")))
+      "")))
+
 (defn render
   "Renders the system prompt, or the capability error envelope that prevented it."
   [state]
@@ -343,7 +360,8 @@
                    (prompt-entries
                      (sort-by #(get % "form") (get context "entries" []))))
                  (render-result-contract state)
-                 (render-phase-return-contract state))
+                 (render-phase-return-contract state)
+                 (render-standalone-return-contract state))
             nil))))
     nil))
 

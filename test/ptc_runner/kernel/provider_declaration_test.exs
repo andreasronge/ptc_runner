@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
@@ -25,6 +26,7 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSnapshot
+  alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.SelectionRules
   alias PtcRunner.Kernel.TypedCanonicalJSON
@@ -1963,6 +1965,164 @@ defmodule PtcRunner.Kernel.ProviderDeclarationTest do
            }
 
     assert Map.keys(outcome.envelope["result"]["mission_bundle_hashes"]) == ["intake"]
+  end
+
+  test "provider-free mission requirements fail before provider declaration or work", %{
+    tmp_dir: directory
+  } do
+    mission = fn component, providers ->
+      %{
+        "components" => [%{"id" => component, "path" => component <> ".clj"}],
+        "data" => %{},
+        "providers" => providers
+      }
+    end
+
+    manifest =
+      manifest()
+      |> Map.put("providers", %{
+        "workflow" => [%{"name" => "missing", "config" => %{}}],
+        "mission" => [%{"name" => "probe", "config" => %{}}]
+      })
+      |> Map.put("missions", %{
+        "zeta" => mission.("zeta", []),
+        "alpha" => mission.("alpha", []),
+        "provider-bearing" => mission.("provider-bearing", ["probe"]),
+        "implicit" => mission.("implicit", []),
+        "plain" => mission.("plain", [])
+      })
+
+    application =
+      write_application(directory, "provider-free-mission-requirements", %{
+        "ptc.json" => Jason.encode!(manifest),
+        "main.clj" => "(ns app) (defn run [input] input)",
+        "alpha.clj" =>
+          "(ns alpha) (defn run {:requires [\"tool:audit\"]} [input] (do (tool/zeta {}) (tool/alpha {}) input))",
+        "zeta.clj" => "(ns zeta) (defn run [input] (tool/omega {}))",
+        "provider-bearing.clj" => "(ns provider-bearing) (defn run [input] (tool/unknown {}))",
+        "implicit.clj" =>
+          "(ns implicit) (defn run [input] (do (tool/runtime-usage {}) (tool/runtime-remaining {}) (tool/cap-list {}) (tool/cap-describe {}) input))",
+        "plain.clj" => "(ns plain) (defn run [input] input)"
+      })
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare(["validate", application])
+
+    assert outcome.exit_status == 3
+
+    assert outcome.envelope["error"] == %{
+             "phase" => "bundle",
+             "code" => "mission_capability_ungranted",
+             "message" =>
+               ~s(mission "alpha" has no providers; missing capability requirements: alpha, audit, zeta),
+             "source" => nil,
+             "path" => nil,
+             "span" => nil,
+             "subject" => nil,
+             "notes" => [],
+             "retryable" => false,
+             "provider_activity" => false
+           }
+
+    assert {:ok, request} =
+             ApplicationPackage.request_directory(application, result_projection: :json)
+
+    parent = self()
+
+    builder = fn _selection, _context ->
+      send(parent, :mission_requirement_provider_invoked)
+      {:error, :should_not_run}
+    end
+
+    assert {:ok, registry} =
+             ProviderRegistry.new(%{"probe" => TestHelpers.staged_provider(builder)})
+
+    assert {:error,
+            %CommandDiagnostic{
+              phase: :bundle,
+              code: :mission_capability_ungranted,
+              provider_activity: false
+            }} = RunBuilder.build(request, registry)
+
+    refute_receive :mission_requirement_provider_invoked
+  end
+
+  test "implicit-only and provider-bearing mission requirements remain valid" do
+    assert {:ok, rules} = SelectionRules.new(fields: %{}, cross_rules: [], named_sets: %{})
+
+    assert {:ok, descriptor} =
+             ProviderDescriptor.new(
+               source: :custom,
+               installation_revision: "probe-v1",
+               credential_names: [],
+               authorization_mode: :none,
+               data_class: :normal,
+               accepts_data: [:normal],
+               requires: [],
+               provides: [],
+               destinations: [:mission],
+               workflow_llm?: false,
+               connectivity_mode: :none,
+               probe_effect: nil,
+               selection_validation: :declarative,
+               selection_rules: rules,
+               authority_fingerprint: nil,
+               local_preflight: :unverified
+             )
+
+    parent = self()
+
+    assert {:ok, catalog} =
+             InstallationCatalog.new(%{
+               "probe" => %{
+                 descriptor: descriptor,
+                 authority: nil,
+                 implementation: %{
+                   builder: fn _selection, _context ->
+                     send(parent, :validation_provider_invoked)
+                     {:error, :should_not_run}
+                   end,
+                   local_preflight: fn _selection, _context, _services -> :ok end
+                 }
+               }
+             })
+
+    manifest =
+      manifest()
+      |> Map.put("providers", %{
+        "workflow" => [],
+        "mission" => [%{"name" => "probe", "config" => %{}}]
+      })
+      |> Map.put("missions", %{
+        "implicit" => %{
+          "components" => [%{"id" => "implicit", "path" => "implicit.clj"}],
+          "data" => %{},
+          "providers" => []
+        },
+        "provider-bearing" => %{
+          "components" => [
+            %{"id" => "provider-bearing", "path" => "provider-bearing.clj"}
+          ],
+          "data" => %{},
+          "providers" => ["probe"]
+        }
+      })
+
+    documents = %{
+      "ptc.json" => Jason.encode!(manifest),
+      "main.clj" => "(ns app) (defn run [input] input)",
+      "implicit.clj" =>
+        "(ns implicit) (defn run [input] (do (tool/runtime-usage {}) (tool/runtime-remaining {}) (tool/cap-list {}) (tool/cap-describe {}) input))",
+      "provider-bearing.clj" => "(ns provider-bearing) (defn run [input] (tool/not-yet-known {}))"
+    }
+
+    assert {:ok, request} =
+             ApplicationPackage.request_memory("ptc.json", documents, result_projection: :json)
+
+    assert {:ok, prepared} = RunCoordinator.prepare(request, catalog)
+    refute_receive :validation_provider_invoked
+    assert :ok = PreparedRun.close(prepared)
+    assert :ok = InstallationCatalog.close(catalog)
   end
 
   defp manifest, do: TestHelpers.valid_manifest()

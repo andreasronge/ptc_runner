@@ -187,10 +187,8 @@ defmodule PtcRunner.Kernel.FrozenBundle do
 
   @spec valid?(t()) :: boolean()
   @doc "Checks that a bundle still matches its in-VM attestation."
-  def valid?(%__MODULE__{attestation: attestation} = bundle) when is_binary(attestation),
-    do:
-      Enum.sort(Map.keys(bundle)) == @field_keys and
-        Attestation.valid?(__MODULE__, payload(bundle), attestation)
+  def valid?(%__MODULE__{} = bundle),
+    do: Attestation.valid_struct?(__MODULE__, bundle, @field_keys, fn -> payload(bundle) end)
 
   def valid?(_bundle), do: false
 

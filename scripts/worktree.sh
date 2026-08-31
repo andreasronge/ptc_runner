@@ -3,7 +3,8 @@
 # Worktree lifecycle.
 #
 #   scripts/worktree.sh gc [--yes] [--no-fetch] [--no-issues]
-#   scripts/worktree.sh new <branch> [issue-number]
+#   scripts/worktree.sh new [--no-init] <branch> [issue-number]
+#   scripts/worktree.sh init [<dir>]
 #   scripts/worktree.sh seed [<dir>]
 #
 # A worktree is a cache, not an artifact. `git worktree remove` never deletes
@@ -17,6 +18,10 @@
 # as well as the ones you made by hand.
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/mise-runtime.sh
+source "$SCRIPT_DIR/mise-runtime.sh"
 
 BASE="origin/main"
 DO_REMOVE=0
@@ -33,8 +38,42 @@ die() {
 mtime_of() {
   case "$(uname -s)" in
     Darwin) stat -f %m "$1" 2>/dev/null || printf '0' ;;
-    *) stat -c %m "$1" 2>/dev/null || printf '0' ;;
+    Linux) stat -c %Y "$1" 2>/dev/null || printf '0' ;;
+    *)
+      stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || printf '0'
+      ;;
   esac
+}
+
+initialize_worktree() {
+  local dst="$1" mise_bin
+
+  [ -d "$dst" ] || die "$dst is not a directory"
+  [ -f "$dst/mise.toml" ] || die "$dst does not look like a PtcRunner checkout"
+  mise_bin="$(ptc_mise_executable)" ||
+    die "mise is required to initialize a worktree; install it or set MISE_BIN"
+  find "$dst" -type d -exec chmod go-w {} + ||
+    die "could not remove unsafe directory permissions from $dst"
+
+  echo ""
+  echo "🔧 Initializing $dst"
+
+  (
+    cd "$dst"
+    # Cloud VMs commonly inherit a group-writable umask. Checkout directories
+    # were normalized above; create later artifacts with the permissions
+    # expected by local and GitHub private-destination safety gates too.
+    umask 0022
+    bash scripts/install-hooks.sh
+    "$mise_bin" install
+    "$mise_bin" exec -- mix deps.get
+    (cd ptc_viewer && "$mise_bin" exec -- mix deps.get)
+    (cd ptc_runner_launcher && "$mise_bin" exec -- mix deps.get)
+    "$mise_bin" exec -- mix compile
+  )
+
+  echo ""
+  echo "✅ Worktree initialized: $dst"
 }
 
 # A worktree stopped part-way through an operation is not idle, however clean
@@ -334,6 +373,14 @@ cmd_seed() {
   seed_worktree "$main_wt" "$dst"
 }
 
+cmd_init() {
+  local dst="${1:-$(pwd -P)}"
+
+  [ "$#" -le 1 ] || die "usage: scripts/worktree.sh init [<dir>]"
+  dst="$(cd "$dst" 2>/dev/null && pwd -P)" || die "$dst is not a directory"
+  initialize_worktree "$dst"
+}
+
 cmd_gc() {
   local main_wt current_wt path head branch flags dirt
   local reapable="" held="" unmerged="" count_reapable=0
@@ -456,9 +503,20 @@ cmd_gc() {
 }
 
 cmd_new() {
-  local branch="${1:-}" issue="${2:-}" main_wt slug dir assignees state
+  local do_init=1 branch issue main_wt slug dir assignees state
 
-  [ -n "$branch" ] || die "usage: scripts/worktree.sh new <branch> [issue-number]"
+  if [ "${1:-}" = "--no-init" ]; then
+    do_init=0
+    shift
+  fi
+
+  branch="${1:-}"
+  issue="${2:-}"
+
+  [ -n "$branch" ] ||
+    die "usage: scripts/worktree.sh new [--no-init] <branch> [issue-number]"
+  [ "$#" -le 2 ] ||
+    die "usage: scripts/worktree.sh new [--no-init] <branch> [issue-number]"
 
   main_wt="$(main_worktree)"
   slug="$(printf '%s' "$branch" | tr '/' '-')"
@@ -499,7 +557,12 @@ Assignment here is advisory, not a lock. If this claim has no commits on \`${bra
 
   echo ""
   echo "📁 $dir"
-  echo "   Fresh worktrees need the setup in AGENTS.md before tests will run."
+
+  if [ "$do_init" = "1" ]; then
+    initialize_worktree "$dir"
+  else
+    echo "   Initialization skipped; run scripts/worktree.sh init \"$dir\" before testing."
+  fi
 }
 
 usage() {
@@ -510,13 +573,22 @@ scripts/worktree.sh gc [--yes] [--idle-hours N] [--no-fetch] [--no-issues]
     With --yes, remove them; branches are always kept. --quiet prints only a
     one-line count, and nothing at all when there is nothing to reclaim.
 
-scripts/worktree.sh new <branch> [issue-number]
+scripts/worktree.sh new [--no-init] <branch> [issue-number]
     Create a worktree beside the main checkout, branched from origin/main,
     and seed it with the main checkout's deps, _build, and project-PLT
     artifacts when toolchain and lockfiles match (Mix revalidates them, so
     a stale seed only costs a rebuild). With an issue number, verify it is
     open and unassigned, then assign it and post a claim comment. The branch
-    name must contain the issue number.
+    name must contain the issue number. By default, install the shared Git
+    hooks, install the pinned mise toolchain, fetch root/Viewer/launcher
+    dependencies, and compile the root project. --no-init leaves those steps
+    for a later `scripts/worktree.sh init`.
+
+scripts/worktree.sh init [<dir>]
+    Initialize an existing checkout (default: the current directory): install
+    the clone-shared Git hooks, install the pinned mise toolchain, fetch all
+    three Mix projects' dependencies, and compile the root project. Safe to
+    re-run. Finds mise on PATH, at $HOME/.local/bin/mise, or via MISE_BIN.
 
 scripts/worktree.sh seed [<dir>]
     Seed an existing worktree (default: the current one) from the main
@@ -549,6 +621,7 @@ main() {
       cmd_gc
       ;;
     new) cmd_new "$@" ;;
+    init) cmd_init "$@" ;;
     seed) cmd_seed "$@" ;;
     ""| -h | --help | help) usage ;;
     *)

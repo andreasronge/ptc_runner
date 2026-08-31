@@ -255,7 +255,12 @@ for holding model responses fixed and comparing a baseline with that candidate.
 The [component reference](component-contracts.md#evaluate-one-replacement-component)
 defines every descriptor field. Candidate creation is not currently a
 standalone command; a source checkout provides `mix ptc.materialize` as
-documented in the repository's maintainer guide on embedding.
+shown in
+[Customize agent components](../guides/components-and-preludes.md#try-a-different-agent-prompt).
+
+Both `ptc validate` and `ptc run` accept the descriptor switch. Validation
+compiles and checks the replacement without provider acquisition; running uses
+the same verified candidate in the immutable workflow or mission bundle.
 
 ## Read results and failures
 
@@ -290,7 +295,11 @@ dependencies and belong to `doctor`.
 On success, the validate result includes `mission_grants`: for each named
 mission, the sorted parseable `data/<name>` grants, every public export ref,
 and selected mission provider names. This is the static grant declaration;
-validate does not acquire providers, so capability tool names remain unresolved.
+validate does not acquire providers. It can nevertheless prove that a mission
+with no selected provider cannot receive a non-implicit capability, so it
+rejects that case during bundle validation. Capability tool names remain
+unresolved for missions selecting one or more providers, and validation does
+not infer them from provider aliases or provider dependency services.
 `kernel/mission-inventory` lists model-visible capabilities once a run or REPL
 session has built the frozen inventory.
 
@@ -444,6 +453,7 @@ Embedding runtimes can supply authorization targets directly.
 | 3 | `bundle` | `compile_failed` | no | the component bundle could not be compiled |
 | 3 | `bundle` | `duplicate_definition` | no | the component bundle defines the same name more than once |
 | 3 | `bundle` | `entry_invalid` | no | the workflow entry is not a public bundle export |
+| 3 | `bundle` | `mission_capability_ungranted` | no | a mission with no providers requires a capability not supplied implicitly |
 | 3 | `bundle` | `mission_undeclared` | no | the workflow entry evaluates into a mission and the manifest declares none |
 | 3 | `bundle` | `syntax_invalid` | no | the component source is not valid PTC-Lisp |
 | 3 | `bundle` | `undefined_variable` | no | the component source contains an undefined variable reference |
@@ -523,6 +533,7 @@ Embedding runtimes can supply authorization targets directly.
 | 5 | `execution` | `llm_tool_calling_unsupported` | no | the configured model does not support tool calling |
 | 5 | `execution` | `llm_usage_unavailable` | no | the LLM provider did not return the promised usage or cost metadata |
 | 5 | `execution` | `mission_failed` | no | a subordinate mission failed |
+| 5 | `execution` | `phase_return_contract_failed` | no | the standalone agent return does not satisfy its named contract |
 | 5 | `execution` | `provider_failed` | no | a provider failed during execution |
 | 5 | `execution` | `replay_fixture_missing` | no | no replay fixture matches the workflow request |
 | 5 | `execution` | `workflow_failed` | no | the workflow failed |

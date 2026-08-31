@@ -323,6 +323,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        ),
        do: true
 
+  defp valid_path_authority?(
+         {:contract, authority},
+         %CommandSource{kind: :phase_return_contract, contract_authority: authority},
+         %{phase: :execution, code: :phase_return_contract_failed}
+       ),
+       do: true
+
   defp valid_path_authority?(_authority, _source, _row), do: false
 
   defp valid_span?(nil, _source), do: true
@@ -417,6 +424,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_message_source?(
          _message,
          %{phase: :provider_acquisition, code: :capability_requirement_missing},
+         nil
+       ),
+       do: true
+
+  defp valid_message_source?(
+         _message,
+         %{phase: :bundle, code: :mission_capability_ungranted},
          nil
        ),
        do: true

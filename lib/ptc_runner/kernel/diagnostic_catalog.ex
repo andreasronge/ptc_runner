@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
+  alias PtcRunner.Kernel.MissionCapabilityDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
@@ -115,6 +116,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:bundle, :entry_invalid, 3, false, "the workflow entry is not a public bundle export"},
     {:bundle, :mission_undeclared, 3, false,
      "the workflow entry evaluates into a mission and the manifest declares none"},
+    {:bundle, :mission_capability_ungranted, 3, false,
+     "a mission with no providers requires a capability not supplied implicitly"},
     {:provider_declaration, :provider_unknown, 3, false,
      "the selected provider is not installed"},
     {:provider_declaration, :selection_invalid, 3, false, "the provider selection is invalid"},
@@ -239,6 +242,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:execution, :evaluation_failed, 5, false, "the evaluation failed"},
     {:execution, :invalid_agent_config, 5, false,
      "an agent configuration option is outside its supported range"},
+    {:execution, :phase_return_contract_failed, 5, false,
+     "the standalone agent return does not satisfy its named contract"},
     {:execution, :llm_authentication_failed, 5, false,
      "the LLM provider rejected authentication; check the installed credential"},
     {:execution, :llm_payment_required, 5, false,
@@ -456,6 +461,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     do: ComponentOverrideDiagnostic.message_schema(fallback)
 
   def message_schema(%{
+        phase: :bundle,
+        code: :mission_capability_ungranted,
+        message: fallback
+      }),
+      do: MissionCapabilityDiagnostic.message_schema(fallback)
+
+  def message_schema(%{
         phase: :provider_acquisition,
         code: :provider_protocol_version_unsupported,
         message: fallback
@@ -557,6 +569,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:application, :override_invalid, message),
     do: ComponentOverrideDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:bundle, :mission_capability_ungranted, message),
+    do: MissionCapabilityDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:provider_acquisition, :provider_tool_missing, message),
     do: MCPAcquisitionDiagnostic.valid_missing_tool_message?(message)
@@ -682,6 +697,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   # from all providers granted to an environment. No single occurrence is the
   # authoritative cause, so attributing one would be arbitrary.
   def subject_policy(:provider_acquisition, :capability_requirement_missing), do: :forbidden
+  def subject_policy(:bundle, :mission_capability_ungranted), do: :forbidden
 
   # The one active-preflight outcome that belongs to the operation rather than
   # to an occurrence. A budget spent before or between occurrences cannot be
@@ -888,8 +904,10 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   def source_kinds(:application, :override_invalid), do: [:component_override]
 
+  def source_kinds(:bundle, :mission_capability_ungranted), do: []
   def source_kinds(:bundle, _code), do: [:component]
   def source_kinds(:execution, :turn_limit_exceeded), do: []
+  def source_kinds(:execution, :phase_return_contract_failed), do: [:phase_return_contract]
   def source_kinds(:execution, code) when code != :provider_failed, do: [:runtime]
 
   def source_kinds(:result_cleanup, code)
@@ -998,6 +1016,10 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       do: :optional
 
   def path_policy(:result_cleanup, :result_contract_failed, :result_contract), do: :optional
+
+  def path_policy(:execution, :phase_return_contract_failed, :phase_return_contract),
+    do: :optional
+
   def path_policy(_phase, _code, _source_kind), do: :forbidden
 
   @spec subject_occurrence_policy(phase(), atom(), atom()) ::

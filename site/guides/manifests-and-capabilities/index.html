@@ -123,10 +123,10 @@ scopes to the manifest above:</p><pre><code class="json language-json">{
       &quot;providers&quot;: [&quot;workspace&quot;]
     }
   }
-}</code></pre><p>A mission's own <code class="inline">providers</code> list can only narrow what <code class="inline">providers.mission</code>
-already selected; naming an alias there does not introduce it, and a name
-absent from <code class="inline">providers.mission</code> is rejected. Omitting a name is the point: the
-grant is then absent from that mission's environment.</p><h2 id="how-do-i-stop-a-long-or-expensive-run">How do I stop a long or expensive run?</h2><p>Set runtime ceilings under <code class="inline">limits</code> and cap model calls on the selected alias:</p><pre><code class="json language-json">{
+}</code></pre><p>A mission can only narrow <code class="inline">providers.mission</code>; an absent alias is rejected. If
+it selects no providers, requirements outside implicit capabilities are also
+rejected. See <a href="/reference/application-manifest/#supply-input-and-named-missions">mission isolation</a>
+for the complete rule and remediation.</p><h2 id="how-do-i-stop-a-long-or-expensive-run">How do I stop a long or expensive run?</h2><p>Set runtime ceilings under <code class="inline">limits</code> and cap model calls on the selected alias:</p><pre><code class="json language-json">{
   &quot;providers&quot;: {
     &quot;workflow&quot;: [{&quot;name&quot;: &quot;model&quot;, &quot;config&quot;: {&quot;max_calls&quot;: 6}}]
   },

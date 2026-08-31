@@ -515,6 +515,46 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
     end
   end
 
+  def sanitize_private_error(
+        {:phase_return_contract_failed, message,
+         %{
+           completion: :invalid_return,
+           phase_index: 1,
+           mission: mission,
+           contract: contract,
+           max_turns: turns,
+           constraint: constraint,
+           contract_authority: authority,
+           violations: violations
+         } = details}
+      )
+      when is_binary(message) and is_binary(mission) and is_binary(contract) and
+             turns in 1..128 and constraint in @result_contract_constraints and
+             is_map(authority) and is_list(violations) do
+    source = Map.get(details, :contract_source)
+
+    if identifier?(mission) and identifier?(contract) and
+         (is_nil(source) or is_binary(source)) and
+         result_contract_violations?(violations, constraint) do
+      retained =
+        Map.take(details, [
+          :completion,
+          :phase_index,
+          :mission,
+          :contract,
+          :max_turns,
+          :constraint,
+          :contract_authority,
+          :contract_source,
+          :violations
+        ])
+
+      {:phase_return_contract_failed, message, retained}
+    else
+      {:private_prelude_error, "private prelude evaluation failed"}
+    end
+  end
+
   def sanitize_private_error({:invalid_agent_config, message, details} = reason)
       when is_binary(message) do
     if AgentConfigDiagnostic.valid_error?(message, details),
@@ -586,6 +626,11 @@ defmodule PtcRunner.Lisp.Eval.Helpers do
   end
 
   defp result_contract_violations?(_violations, _constraint), do: false
+
+  defp identifier?(value),
+    do:
+      byte_size(value) in 1..128 and
+        Regex.match?(~r/\A[a-z][a-z0-9._-]*\z/, value)
 
   @doc false
   @spec sanitize_private_error(term(), term()) :: term()

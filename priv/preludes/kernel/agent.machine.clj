@@ -18,9 +18,18 @@
 (defn- phase-effective-cfg [cfg phase final-phase?]
   (let [phase-cfg (assoc (assoc (assoc cfg "mission" (get phase "mission"))
                                 "max_turns" (get phase "max_turns"))
-                         "terminal_only" (true? (get phase "terminal_only")))]
-    (if final-phase?
+                         "terminal_only" (true? (get phase "terminal_only")))
+        standalone (get cfg "standalone_return_contract")]
+    (cond
+      (and final-phase? (map? standalone))
+      (assoc (assoc phase-cfg
+                    "standalone_return_contract_name" (get standalone :name))
+             "standalone_return_contract_projection" (get standalone :projection))
+
+      final-phase?
       phase-cfg
+
+      :else
       (assoc (assoc (assoc phase-cfg "result_contract" nil)
                     "return_contract" (get phase "return_contract"))
              "phase_return_contract" (get phase "return_contract_projection")))))
@@ -383,12 +392,46 @@
                                   (get (current-context machine) :max-observation-chars)))
         {:op :host-failure
          :error (result/error :invalid-prompt :invalid-initial-state)}))
-    (if (= :none (get (current-context machine) :projector-kind))
+    (cond
+      (get (current-context machine) :standalone-return-contract?)
+      {:op :validate-standalone
+       :machine machine
+       :action action
+       :value (get evaluation :value)}
+
+      (= :none (get (current-context machine) :projector-kind))
       (done (returned-outcome (get evaluation :value)))
+
+      :else
       {:op :validate
        :machine machine
        :action action
        :value (get evaluation :value)})))
+
+(defn- standalone-contract-failure [machine value]
+  (let [contract (get (current-context machine) :standalone-return-contract)]
+    {:op :standalone-contract-failure
+     :completion :invalid-return
+     :value value
+     :phase-index 1
+     :mission (get (current-phase machine) "mission")
+     :contract-name (get contract :name)
+     :max-turns (get (current-phase machine) "max_turns")}))
+
+(defn- decide-standalone-validation [machine event]
+  (let [action (get event :action)
+        value (get event :value)
+        validation (get event :validation)]
+    (if (true? (get validation :valid?))
+      (done (returned-outcome value))
+      (continue-or
+        machine
+        (continuation-state
+          machine
+          action
+          (agent.feedback/phase-result-contract (assoc validation :standalone? true))
+          :phase-contract-error)
+        (standalone-contract-failure machine value)))))
 
 (defn- decide-phase-validation [machine event]
   (let [action (get event :action)
@@ -581,6 +624,9 @@
 
         (= :phase-validation type)
         (decide-phase-validation machine event)
+
+        (= :standalone-validation type)
+        (decide-standalone-validation machine event)
 
         :else
         {:op :host-failure :error (result/error :unknown-event type)}))))

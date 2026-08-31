@@ -579,6 +579,16 @@ defmodule PtcRunner.Kernel.Runner do
     end
   end
 
+  defp inspection_error_details(:phase_return_contract_failed, details) do
+    boundary = Map.take(details, [:boundary_producer])
+    contract = Map.drop(details, [:boundary_producer])
+
+    case ResultContractDiagnostic.phase_inspection_details(contract) do
+      {:ok, projected} -> Map.merge(projected, boundary)
+      :error -> boundary
+    end
+  end
+
   defp inspection_error_details(_reason, details), do: details
 
   defp project_result(value, :native), do: {:ok, value}
@@ -690,23 +700,29 @@ defmodule PtcRunner.Kernel.Runner do
       config.event_sink,
       config.result_contract,
       config.result_contract_source,
-      config.workflow_environment.bundle
+      config.workflow_environment
+    )
+    |> RuntimeTools.maybe_put_phase_return_contract_failure(
+      state,
+      config.event_sink,
+      config.phase_return_contracts,
+      config.workflow_environment
     )
     |> RuntimeTools.maybe_put_llm_provider_failure(
       state,
       config.event_sink,
-      config.workflow_environment.bundle
+      config.workflow_environment
     )
     |> RuntimeTools.maybe_put_runtime_limit_failure(
       state,
       config.event_sink,
       config.limits,
-      config.workflow_environment.bundle
+      config.workflow_environment
     )
     |> RuntimeTools.maybe_put_agent_loop_tools(
       state,
       config.event_sink,
-      config.workflow_environment.bundle
+      config.workflow_environment
     )
     |> RuntimeTools.trusted_tools(
       config.limits,
@@ -782,6 +798,12 @@ defmodule PtcRunner.Kernel.Runner do
        ) do
     Map.merge(stopped_data, SafeMetadata.retain_failure_taxonomy_fields(details))
   end
+
+  defp maybe_put_failure_taxonomy(
+         stopped_data,
+         {:error, %Error{reason: :phase_return_contract_failed}}
+       ),
+       do: Map.put(stopped_data, :failure_kind, "phase-return-contract-failed")
 
   defp maybe_put_failure_taxonomy(
          stopped_data,
@@ -1215,6 +1237,18 @@ defmodule PtcRunner.Kernel.Runner do
          _sink
        ) do
     case ResultContractDiagnostic.retain_details(details) do
+      {:ok, retained} -> retained
+      :error -> %{}
+    end
+  end
+
+  defp workflow_error_details(
+         %{reason: :phase_return_contract_failed, details: details},
+         _timeout_ms,
+         _limits,
+         _sink
+       ) do
+    case ResultContractDiagnostic.retain_phase_details(details) do
       {:ok, retained} -> retained
       :error -> %{}
     end

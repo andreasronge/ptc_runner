@@ -808,6 +808,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
              workflow_bundle,
              request.package.entry,
              request.package.missions
+           ),
+         :ok <-
+           RunCoordinator.validate_mission_capabilities(
+             request.package.missions,
+             mission_bundles
            ) do
       assemble(
         request,
@@ -923,10 +928,13 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
     result =
       with {:ok, workflow} <-
-             WorkflowEnvironment.new(
-               bundle: workflow_bundle,
-               capabilities: providers.workflow.capabilities,
-               shipped_component_ids: library_component_ids(package.workflow_component_kinds)
+             WorkflowEnvironment.new_for_package(
+               [
+                 bundle: workflow_bundle,
+                 capabilities: providers.workflow.capabilities,
+                 shipped_component_ids: library_component_ids(package.workflow_component_kinds)
+               ],
+               package
              ),
            {:ok, missions} <- mission_environments(package, mission_bundles, providers),
            {:ok, publication_authority, sink, inspection_sink} <-

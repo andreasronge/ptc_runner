@@ -1609,6 +1609,9 @@ defmodule PtcRunner.Lisp do
   defp error_details({:result_contract_failed, _message, details}) when is_map(details),
     do: details
 
+  defp error_details({:phase_return_contract_failed, _message, details}) when is_map(details),
+    do: details
+
   defp error_details({:llm_provider_failed, _message, details}) when is_map(details),
     do: details
 
@@ -2191,23 +2194,7 @@ defmodule PtcRunner.Lisp do
         {externalized_key, display_key, externalize_lisp_values(item, boundary)}
       end)
 
-    frequencies = Enum.frequencies_by(pairs, &elem(&1, 0))
-    next_ordinal = pairs |> Enum.map(&elem(&1, 0)) |> next_collision_ordinal(:map)
-
-    pairs
-    |> Enum.map_reduce(next_ordinal, fn {key, display_key, item}, ordinal ->
-      if Map.fetch!(frequencies, key) > 1 do
-        {{%ExternalizedCollision{
-            collection: :map,
-            value: display_key,
-            ordinal: ordinal
-          }, item}, ordinal + 1}
-      else
-        {{key, item}, ordinal}
-      end
-    end)
-    |> elem(0)
-    |> Map.new()
+    rebuild_externalized_map(pairs)
   end
 
   defp externalize_lisp_values(value, boundary) when is_tuple(value) do
@@ -2344,6 +2331,10 @@ defmodule PtcRunner.Lisp do
         {externalized_key, display_key, externalize_lisp_values(item)}
       end)
 
+    rebuild_externalized_map(pairs)
+  end
+
+  defp rebuild_externalized_map(pairs) do
     frequencies = Enum.frequencies_by(pairs, &elem(&1, 0))
     next_ordinal = pairs |> Enum.map(&elem(&1, 0)) |> next_collision_ordinal(:map)
 

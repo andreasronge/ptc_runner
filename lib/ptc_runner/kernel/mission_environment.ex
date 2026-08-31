@@ -38,7 +38,7 @@ defmodule PtcRunner.Kernel.MissionEnvironment do
              Keyword.get(opts, :capabilities, []),
              Keyword.get(opts, :data, %{}),
              :mission,
-             Keyword.get(opts, :shipped_component_ids)
+             shipped_component_ids: Keyword.get(opts, :shipped_component_ids)
            ) do
       {:ok, struct!(__MODULE__, attributes)}
     else

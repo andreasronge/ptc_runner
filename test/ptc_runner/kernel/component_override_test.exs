@@ -8,11 +8,14 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
   """
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.Library
+  alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.RunBuilder
   alias PtcRunner.TestSupport.RunLifecycle
+  alias PtcRunner.TestSupport.TestHelpers
 
   setup do
     {:ok, base} = Library.component("agent.retry")
@@ -323,6 +326,138 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
     end
   end
 
+  describe "private diagnostic grant lineage" do
+    @tag :tmp_dir
+    test "a verified shipped agent.core override retains its private diagnostic routes",
+         context do
+      {:ok, base} = Library.component("agent.core")
+      paths = write_agent_core_application(context.tmp_dir, base, :library)
+      parent = self()
+
+      {:ok, llm} =
+        LLMCapability.new(
+          requester: fn _request ->
+            send(parent, :unexpected_llm_request)
+            {:error, :unavailable}
+          end
+        )
+
+      {:ok, registry} =
+        ProviderRegistry.new(%{
+          "model" =>
+            TestHelpers.staged_provider(fn _config, _provider_context ->
+              {:ok, %{capabilities: [llm]}}
+            end)
+        })
+
+      assert {:ok, built} =
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: registry.installed_limits,
+                 component_override_descriptor: paths.descriptor
+               )
+               |> RunLifecycle.build(registry)
+
+      assert {:error,
+              %{
+                kind: :workflow_failed,
+                reason: :invalid_agent_config,
+                details: %{option: "max_turns", min: 1, max: 128, value: 0}
+              }} = RunLifecycle.execute({:ok, built})
+
+      refute_receive :unexpected_llm_request
+    end
+
+    @tag :tmp_dir
+    test "an override of a byte-identical local agent.core does not inherit shipped grants",
+         context do
+      {:ok, base} = Library.component("agent.core")
+      paths = write_agent_core_application(context.tmp_dir, base, :local)
+
+      {:ok, llm} = LLMCapability.new(requester: fn _request -> {:error, :unavailable} end)
+
+      {:ok, registry} =
+        ProviderRegistry.new(%{
+          "model" =>
+            TestHelpers.staged_provider(fn _config, _provider_context ->
+              {:ok, %{capabilities: [llm]}}
+            end)
+        })
+
+      assert {:error,
+              {:missing_capability_requirement,
+               [
+                 "kernel-agent-config-failure",
+                 "kernel-agent-protocol-error",
+                 "kernel-llm-provider-failure",
+                 "kernel-phase-return-contract-failure",
+                 "kernel-result-contract-failure",
+                 "kernel-runtime-limit-failure"
+               ]}} =
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: registry.installed_limits,
+                 component_override_descriptor: paths.descriptor
+               )
+               |> RunLifecycle.build(registry)
+    end
+
+    @tag :tmp_dir
+    test "a local agent.core at the shipped origin path does not inherit shipped grants",
+         context do
+      {:ok, base} = Library.component("agent.core")
+
+      paths =
+        write_agent_core_application(context.tmp_dir, base, :local,
+          local_path: "priv/preludes/kernel/agent.core.clj"
+        )
+
+      {:ok, llm} = LLMCapability.new(requester: fn _request -> {:error, :unavailable} end)
+
+      {:ok, registry} =
+        ProviderRegistry.new(%{
+          "model" =>
+            TestHelpers.staged_provider(fn _config, _provider_context ->
+              {:ok, %{capabilities: [llm]}}
+            end)
+        })
+
+      assert {:error,
+              {:missing_capability_requirement,
+               [
+                 "kernel-agent-config-failure",
+                 "kernel-agent-protocol-error",
+                 "kernel-llm-provider-failure",
+                 "kernel-phase-return-contract-failure",
+                 "kernel-result-contract-failure",
+                 "kernel-runtime-limit-failure"
+               ]}} =
+               paths.manifest
+               |> ApplicationPackage.request_directory(
+                 installed_limits: registry.installed_limits
+               )
+               |> RunLifecycle.build(registry)
+    end
+
+    @tag :tmp_dir
+    test "validate accepts and compiles a component override without provider acquisition",
+         context do
+      {:ok, base} = Library.component("agent.core")
+      paths = write_agent_core_application(context.tmp_dir, base, :library, providers: false)
+
+      assert {:ok, outcome} =
+               CommandEngine.dispatch([
+                 "validate",
+                 paths.manifest,
+                 "--component-override-descriptor",
+                 paths.descriptor
+               ])
+
+      assert is_binary(outcome.envelope["result"]["workflow_bundle_hash"])
+      assert outcome.envelope["result"]["provider_activity"] == false
+    end
+  end
+
   describe "authoring provenance" do
     @tag :tmp_dir
     test "a promoted candidate names the run that authored it", context do
@@ -444,6 +579,72 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
   end
 
   defp hash(source), do: ComponentOverride.hash(source)
+
+  defp write_agent_core_application(dir, base, selection, opts \\ []) do
+    File.mkdir_p!(dir)
+    candidate = base.source <> "\n;; no-op override probe\n"
+    File.write!(Path.join(dir, "agent.core.candidate.clj"), candidate)
+
+    descriptor = %{
+      "target" => %{"environment" => "workflow"},
+      "component_id" => "agent.core",
+      "base_source_hash" => hash(base.source),
+      "source_hash" => hash(candidate),
+      "path" => "agent.core.candidate.clj"
+    }
+
+    descriptor_path = Path.join(dir, "agent-core-override.json")
+    File.write!(descriptor_path, Jason.encode!(descriptor))
+
+    File.write!(
+      Path.join(dir, "app.clj"),
+      ~S|(ns app) (defn run [_input] (agent.core/run "task" {"max_turns" 0}))|
+    )
+
+    selections =
+      case selection do
+        :library ->
+          [%{"library" => "agent.core"}]
+
+        :local ->
+          local_path = Keyword.get(opts, :local_path, "agent.core.clj")
+          full_local_path = Path.join(dir, local_path)
+          File.mkdir_p!(Path.dirname(full_local_path))
+          File.write!(full_local_path, base.source)
+
+          [
+            %{
+              "id" => "agent.core",
+              "path" => local_path,
+              "dependencies" => base.dependencies
+            }
+          ] ++ Enum.map(base.dependencies, &%{"library" => &1})
+      end
+
+    providers =
+      if Keyword.get(opts, :providers, true),
+        do: %{"workflow" => [%{"name" => "model"}]},
+        else: %{}
+
+    manifest = %{
+      "version" => 1,
+      "workflow" => %{
+        "components" =>
+          selections ++
+            [%{"id" => "app", "path" => "app.clj", "dependencies" => ["agent.core"]}],
+        "entry" => "app/run"
+      },
+      "missions" => %{"default" => %{"components" => [], "data" => %{}}},
+      "providers" => providers,
+      "input" => %{"value" => %{}},
+      "limits" => %{"run_duration_ms" => 30_000}
+    }
+
+    manifest_path = Path.join(dir, "agent-core.ptc.json")
+    File.write!(manifest_path, Jason.encode!(manifest))
+
+    %{manifest: manifest_path, descriptor: descriptor_path}
+  end
 
   defp write_application(%{tmp_dir: dir, base: base}, _base, opts \\ []) do
     File.mkdir_p!(dir)

@@ -4025,6 +4025,30 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              MissionEnvironment.new(shipped_component_ids: %{})
   end
 
+  test "run configuration rejects a mutated workflow private grant" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+
+    refute WorkflowEnvironment.valid?(Map.delete(workflow, :private_capabilities))
+
+    forged = %{
+      workflow
+      | private_capabilities: ["kernel-agent-config-failure"]
+    }
+
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "forged-private-grant")
+
+    assert {:error, :invalid_run_config} =
+             RunConfig.new(
+               workflow_environment: forged,
+               missions: %{"default" => mission},
+               input: %{},
+               limits: limits,
+               event_sink: sink
+             )
+  end
+
   test "protocol errors exhaust their hard run limit" do
     {:ok, capability} =
       Capability.new(

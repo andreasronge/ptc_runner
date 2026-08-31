@@ -45,10 +45,8 @@ defmodule PtcRunner.Kernel.ExecutionInput do
 
   @spec valid?(term()) :: boolean()
   @doc "Checks the input's in-VM construction attestation."
-  def valid?(%__MODULE__{attestation: attestation} = input),
-    do:
-      Enum.sort(Map.keys(input)) == @field_keys and
-        Attestation.valid?(__MODULE__, payload(input), attestation)
+  def valid?(%__MODULE__{} = input),
+    do: Attestation.valid_struct?(__MODULE__, input, @field_keys, fn -> payload(input) end)
 
   def valid?(_input), do: false
 

@@ -11,8 +11,11 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRouter
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.ValueContract
+  alias PtcRunner.Kernel.ValueContractDiagnostic
   import PtcRunner.TestSupport.CommandEngineFixtures, only: [validate_success_result: 0]
 
   @run_ref "cmd-00000000000000000000000001"
@@ -1091,6 +1094,33 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
               "error: provider_declaration/selection_invalid: " <>
                 "provider/workspace/selection at mission[2]: the provider selection is invalid " <>
                 "(run_ref: #{@run_ref})\n"}
+  end
+
+  test "human failures render standalone return-contract source and path" do
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+      })
+
+    assert {:ok, details} = ValueContractDiagnostic.classify(contract, %{"sum" => 3})
+    assert {:ok, source} = CommandSource.new(:phase_return_contract, "work.schema.json")
+    {source, path} = ValueContractDiagnostic.diagnostic_parts(source, details)
+
+    outcome =
+      valid_outcome(
+        CommandDiagnostic.new!(:execution, :phase_return_contract_failed,
+          source: source,
+          path: path,
+          provider_activity: true
+        )
+      )
+
+    assert CommandRenderer.render(outcome) ==
+             {:stderr,
+              "error: execution/phase_return_contract_failed: " <>
+                "the standalone agent return does not satisfy its named contract " <>
+                "at /sum in work.schema.json (run_ref: #{@run_ref})\n"}
   end
 
   test "structured argument rejections and envelope publication match exact fixtures" do

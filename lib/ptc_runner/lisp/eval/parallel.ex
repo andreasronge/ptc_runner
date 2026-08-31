@@ -260,35 +260,17 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
        do: error
 
   defp classify_runner_error(
-         {:runtime_limit_exceeded, _message, details} = error,
+         {reason, _message, details} = error,
          _type,
          _index
        )
-       when is_map(details),
-       do: error
-
-  defp classify_runner_error(
-         {:model_output_truncated, _message, details} = error,
-         _type,
-         _index
-       )
-       when is_map(details),
-       do: error
-
-  defp classify_runner_error(
-         {:result_contract_failed, _message, details} = error,
-         _type,
-         _index
-       )
-       when is_map(details),
-       do: error
-
-  defp classify_runner_error(
-         {:llm_provider_failed, _message, details} = error,
-         _type,
-         _index
-       )
-       when is_map(details),
+       when reason in [
+              :runtime_limit_exceeded,
+              :model_output_truncated,
+              :result_contract_failed,
+              :phase_return_contract_failed,
+              :llm_provider_failed
+            ] and is_map(details),
        do: error
 
   defp classify_runner_error(:parallel_capacity_exceeded, _type, _index),
@@ -373,35 +355,17 @@ defmodule PtcRunner.Lisp.Eval.Parallel do
        do: {reason, message}
 
   defp parallel_abort_error(
-         {:runtime_limit_exceeded, _message, details} = error,
+         {reason, _message, details} = error,
          _type,
          _index
        )
-       when is_map(details),
-       do: error
-
-  defp parallel_abort_error(
-         {:model_output_truncated, _message, details} = error,
-         _type,
-         _index
-       )
-       when is_map(details),
-       do: error
-
-  defp parallel_abort_error(
-         {:result_contract_failed, _message, details} = error,
-         _type,
-         _index
-       )
-       when is_map(details),
-       do: error
-
-  defp parallel_abort_error(
-         {:llm_provider_failed, _message, details} = error,
-         _type,
-         _index
-       )
-       when is_map(details),
+       when reason in [
+              :runtime_limit_exceeded,
+              :model_output_truncated,
+              :result_contract_failed,
+              :phase_return_contract_failed,
+              :llm_provider_failed
+            ] and is_map(details),
        do: error
 
   defp parallel_abort_error({@hof_callback_error, message}, type, index)
