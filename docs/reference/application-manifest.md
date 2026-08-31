@@ -115,6 +115,10 @@ model context, and continuation state:
 
 Mission provider names refer to unique occurrences already selected under
 `providers.mission`; a mission can narrow authority but cannot introduce it.
+When a mission selects no provider, validation rejects any compiled capability
+requirement that the mission environment does not supply implicitly. Add an
+appropriate provider selection or remove the requirement. Missions selecting
+one or more providers remain unresolved until those providers are acquired.
 `"default"` is an ordinary declared name, not an implicit fallback.
 Definitions and `*1`/`*2`/`*3` history never cross between missions.
 
