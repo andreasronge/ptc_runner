@@ -203,6 +203,9 @@
         bounded (cap-with-marker diagnostics
                                  (contract-diagnostic-max-chars)
                                  (contract-diagnostic-truncation-marker))]
-    (str "The returned value did not satisfy the current phase return contract. "
+    (str "The returned value did not satisfy the "
+         (if (true? (get validation :standalone?))
+           "selected standalone return contract. "
+           "current phase return contract. ")
          "Structural diagnostics: " bounded
          ". Send one corrected run_ptc_lisp call with a contract-valid explicit return.")))

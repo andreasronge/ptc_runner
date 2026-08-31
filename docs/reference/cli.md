@@ -528,6 +528,7 @@ Embedding runtimes can supply authorization targets directly.
 | 5 | `execution` | `llm_tool_calling_unsupported` | no | the configured model does not support tool calling |
 | 5 | `execution` | `llm_usage_unavailable` | no | the LLM provider did not return the promised usage or cost metadata |
 | 5 | `execution` | `mission_failed` | no | a subordinate mission failed |
+| 5 | `execution` | `phase_return_contract_failed` | no | the standalone agent return does not satisfy its named contract |
 | 5 | `execution` | `provider_failed` | no | a provider failed during execution |
 | 5 | `execution` | `replay_fixture_missing` | no | no replay fixture matches the workflow request |
 | 5 | `execution` | `workflow_failed` | no | the workflow failed |

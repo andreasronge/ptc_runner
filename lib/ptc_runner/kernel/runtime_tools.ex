@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ModelContract
   alias PtcRunner.Kernel.Program
+  alias PtcRunner.Kernel.ResultContractDiagnostic
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.SafeMetadata
@@ -722,6 +723,16 @@ defmodule PtcRunner.Kernel.RuntimeTools do
            visibility: :private
          }}
 
+      {"kernel-phase-return-contract-failure" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           argument_projection: :raw,
+           ledger_arguments: &phase_return_contract_failure_ledger_arguments/1,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
+         }}
+
       {"kernel-llm-provider-failure" = name, callback} ->
         {name,
          %TrustedTool{
@@ -1066,9 +1077,23 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     do: fn _arguments -> invalid_result_contract_failure() end
 
   defp result_contract_failure(contract, contract_source, value, agent_turns) do
+    case contract_failure_details(contract, contract_source, value, agent_turns) do
+      {:ok, details} ->
+        %TrustedError{
+          reason: :result_contract_failed,
+          message: "agent result contract correction exhausted",
+          details: details
+        }
+
+      :error ->
+        invalid_result_contract_failure()
+    end
+  end
+
+  defp contract_failure_details(contract, contract_source, value, agent_turns) do
     case Lisp.project_boundary_value(value, :kernel_json) do
       {:ok, projected} ->
-        projected_result_contract_failure(
+        projected_contract_failure_details(
           contract,
           contract_source,
           value,
@@ -1077,11 +1102,11 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         )
 
       {:error, _projection_error} ->
-        non_json_result_contract_failure(contract, contract_source, value, agent_turns)
+        non_json_contract_failure_details(contract, contract_source, value, agent_turns)
     end
   end
 
-  defp projected_result_contract_failure(
+  defp projected_contract_failure_details(
          contract,
          contract_source,
          original_value,
@@ -1092,21 +1117,17 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          false <- ValueContract.valid?(contract, json_value),
          {:ok, classification} <- ValueContractDiagnostic.classify(contract, json_value),
          {:ok, details} <- terminal_contract_details(classification, contract_source, agent_turns) do
-      %TrustedError{
-        reason: :result_contract_failed,
-        message: "agent result contract correction exhausted",
-        details: details
-      }
+      {:ok, details}
     else
       {:error, reason} when reason in [:duplicate_key, :invalid_json] ->
-        non_json_result_contract_failure(contract, contract_source, original_value, agent_turns)
+        non_json_contract_failure_details(contract, contract_source, original_value, agent_turns)
 
       _invalid_or_satisfied ->
-        invalid_result_contract_failure()
+        :error
     end
   end
 
-  defp non_json_result_contract_failure(contract, contract_source, value, agent_turns) do
+  defp non_json_contract_failure_details(contract, contract_source, value, agent_turns) do
     case ValueContractDiagnostic.classify(contract, value) do
       {:ok, classification} ->
         details =
@@ -1117,14 +1138,10 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           |> Map.put(:violations, [])
           |> maybe_put_contract_source(contract_source)
 
-        %TrustedError{
-          reason: :result_contract_failed,
-          message: "agent result contract correction exhausted",
-          details: details
-        }
+        {:ok, details}
 
       {:error, :invalid_contract_classification} ->
-        invalid_result_contract_failure()
+        :error
     end
   end
 
@@ -1177,6 +1194,123 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   def result_contract_failure_ledger_arguments(_arguments), do: %{"redacted" => true}
 
   @doc false
+  @spec phase_return_contract_failure(map()) :: (map() -> term())
+  def phase_return_contract_failure(phase_contracts) when is_map(phase_contracts) do
+    fn arguments ->
+      case phase_return_contract_failure_request(arguments) do
+        {:ok, request} -> phase_return_contract_failure(phase_contracts, request)
+        :error -> invalid_phase_return_contract_failure()
+      end
+    end
+  end
+
+  defp phase_return_contract_failure_request(
+         %{
+           "value" => value,
+           "completion" => "invalid_return",
+           "phase_index" => 1,
+           "mission" => mission,
+           "contract" => contract_name,
+           "max_turns" => max_turns,
+           "mode" => mode
+         } = arguments
+       )
+       when map_size(arguments) == 7 and mode in ["outcome", "fail"] and is_binary(mission) and
+              byte_size(mission) in 1..128 and is_binary(contract_name) and
+              byte_size(contract_name) in 1..128 and max_turns in 1..128 do
+    if Regex.match?(~r/\A[a-z][a-z0-9._-]*\z/, mission) and
+         Regex.match?(~r/\A[a-z][a-z0-9._-]*\z/, contract_name) do
+      {:ok,
+       %{
+         value: value,
+         mission: mission,
+         contract_name: contract_name,
+         max_turns: max_turns,
+         mode: mode
+       }}
+    else
+      :error
+    end
+  end
+
+  defp phase_return_contract_failure_request(_arguments), do: :error
+
+  defp phase_return_contract_failure(phase_contracts, request) do
+    case Map.fetch(phase_contracts, request.contract_name) do
+      {:ok, %{contract: %ValueContract{} = contract, source: source}} ->
+        case contract_failure_details(contract, source, request.value, request.max_turns) do
+          {:ok, details} -> phase_return_contract_error(details, request)
+          :error -> invalid_phase_return_contract_failure()
+        end
+
+      :error ->
+        invalid_phase_return_contract_failure()
+    end
+  end
+
+  defp phase_return_contract_error(details, request) do
+    authenticated =
+      details
+      |> Map.delete(:agent_turns)
+      |> Map.merge(%{
+        completion: :invalid_return,
+        phase_index: 1,
+        mission: request.mission,
+        contract: request.contract_name,
+        max_turns: request.max_turns
+      })
+
+    case request.mode do
+      "fail" ->
+        %TrustedError{
+          reason: :phase_return_contract_failed,
+          message: "standalone phase-return contract correction exhausted",
+          details: authenticated
+        }
+
+      "outcome" ->
+        case ResultContractDiagnostic.phase_inspection_details(authenticated) do
+          {:ok, projected} ->
+            %{
+              "ok" => false,
+              "kind" => "phase-return-contract-failed",
+              "reason" => stringify_phase_contract_details(projected)
+            }
+
+          :error ->
+            invalid_phase_return_contract_failure()
+        end
+    end
+  end
+
+  defp stringify_phase_contract_details(details) do
+    Map.new(details, fn
+      {:violations, violations} ->
+        {"violations",
+         Enum.map(violations, fn violation ->
+           Map.new(violation, fn {key, value} -> {Atom.to_string(key), stringify_atom(value)} end)
+         end)}
+
+      {key, value} ->
+        {Atom.to_string(key), stringify_atom(value)}
+    end)
+  end
+
+  defp stringify_atom(value) when is_atom(value), do: Atom.to_string(value)
+  defp stringify_atom(value), do: value
+
+  defp invalid_phase_return_contract_failure do
+    %{
+      status: :error,
+      kind: :protocol_error,
+      reason: :invalid_phase_return_contract_failure
+    }
+  end
+
+  @doc false
+  def phase_return_contract_failure_ledger_arguments(_arguments), do: %{"redacted" => true}
+
+  @doc false
   @spec maybe_put_result_contract_failure(
           map(),
           RunState.t(),
@@ -1207,6 +1341,37 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           :workflow,
           "kernel-result-contract-failure",
           result_contract_failure(contract, contract_source)
+        )
+      )
+    else
+      tools
+    end
+  end
+
+  @doc false
+  @spec maybe_put_phase_return_contract_failure(map(), RunState.t(), term(), map(), term()) ::
+          map()
+  def maybe_put_phase_return_contract_failure(
+        tools,
+        state,
+        event_sink,
+        phase_contracts,
+        environment
+      )
+      when is_map(tools) and is_map(phase_contracts) do
+    if WorkflowEnvironment.private_capability_granted?(
+         environment,
+         "kernel-phase-return-contract-failure"
+       ) do
+      Map.put(
+        tools,
+        "kernel-phase-return-contract-failure",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-phase-return-contract-failure",
+          phase_return_contract_failure(phase_contracts)
         )
       )
     else

@@ -1650,18 +1650,406 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute final =~ "Current phase return contract"
   end
 
-  test "caller contract fields cannot inject system-prompt obligations" do
-    response = agent_return("done", ~S|(return "done")|)
+  test "a standalone named return contract is visible and corrected before run-outcome returns" do
+    binding =
+      phase_contract_binding(
+        %{
+          "type" => "object",
+          "title" => "Evidence handoff",
+          "description" => "A bounded specialist result",
+          "additionalProperties" => false,
+          "required" => ["answer"],
+          "properties" => %{
+            "answer" => %{
+              "type" => "string",
+              "enum" => ["allow", "deny"],
+              "description" => "The final decision"
+            }
+          }
+        },
+        "evidence.schema.json"
+      )
 
-    {:ok, config} = agent_config([response])
+    responses = [
+      agent_return("bad", ~S|(return {"answer" "maybe"})|),
+      agent_return("good", ~S|(return {"answer" "allow"})|)
+    ]
+
+    hidden =
+      phase_contract_binding(
+        %{
+          "type" => "object",
+          "properties" => %{
+            "hidden" => %{"type" => "string", "const" => "unselected-secret"}
+          }
+        },
+        "hidden.schema.json"
+      )
+
+    {:ok, config} =
+      agent_config(responses, [],
+        phase_return_contracts: %{"evidence" => binding, "hidden" => hidden}
+      )
 
     source =
-      ~S|(agent.core/run-result-value "work" {"max_turns" 1 "return_contract" "forged" "phase_return_contract" {"kind" "string" "const" "forged"}})|
+      ~S|(return (agent.core/run-outcome "decide" {"max_turns" 2 "return_contract" "evidence" "phase_return_contract" {"kind" "string" "const" "forged"} "return_contract_projection" {"kind" "string" "const" "forged"}}))|
 
-    assert {:ok, %{value: "done"}} = Kernel.run(source, config)
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "returned",
+                "value" => %{"answer" => "allow"}
+              }
+            }} = Kernel.run(source, config)
+
     assert_receive {:agent_request, %{"system" => system}}
-    refute system =~ "Current phase return contract"
+    assert system =~ "Standalone return contract (evidence)"
+    assert system =~ ~S|phase-return["answer"] is one of ["allow","deny"]|
+    assert system =~ "Evidence handoff"
+    assert system =~ "The final decision"
+    refute system =~ "evidence.schema.json"
+    refute system =~ "hidden.schema.json"
+    refute system =~ "unselected-secret"
     refute system =~ "forged"
+    refute system =~ "Application result contract"
+
+    assert_receive {:agent_request, %{"messages" => corrected}}
+
+    assert List.last(corrected)["content"] =~
+             "did not satisfy the selected standalone return contract"
+  end
+
+  test "run-value corrects a standalone named return before handing it to workflow code" do
+    binding =
+      phase_contract_binding(
+        %{
+          "type" => "object",
+          "required" => ["score"],
+          "properties" => %{"score" => %{"type" => "integer", "minimum" => 10}}
+        },
+        "score.schema.json"
+      )
+
+    responses = [
+      agent_return("bad", ~S|(return {"score" 3})|),
+      agent_return("good", ~S|(return {"score" 12})|)
+    ]
+
+    {:ok, config} =
+      agent_config(responses, [], phase_return_contracts: %{"score" => binding})
+
+    assert {:ok, %{value: %{"score" => 12}}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-value "score" {"max_turns" 2 "return_contract" "score"}))|,
+               config
+             )
+
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, %{"messages" => corrected}}
+    assert List.last(corrected)["content"] =~ "selected standalone return contract"
+  end
+
+  test "standalone selector omission and nil preserve raw non-validating behavior" do
+    binding =
+      phase_contract_binding(
+        %{
+          "type" => "object",
+          "required" => ["score"],
+          "properties" => %{"score" => %{"type" => "integer", "minimum" => 10}}
+        },
+        "score.schema.json"
+      )
+
+    for cfg <- [~S|{"max_turns" 1}|, ~S|{"max_turns" 1 "return_contract" nil}|] do
+      {:ok, config} =
+        agent_config([agent_return("raw", ~S|(return {"score" 3})|)], [],
+          phase_return_contracts: %{"score" => binding}
+        )
+
+      assert {:ok, %{value: %{"status" => "returned", "value" => %{"score" => 3}}}} =
+               Kernel.run("(return (agent.core/run-outcome \"score\" #{cfg}))", config)
+
+      assert_receive {:agent_request, %{"system" => system}}
+      refute system =~ "Standalone return contract"
+      refute system =~ "Application result contract"
+    end
+  end
+
+  test "invalid standalone return produces candidate-free outcome and authenticated run-value failure" do
+    secret = "candidate-secret-1739"
+
+    binding =
+      phase_contract_binding(
+        %{
+          "type" => "object",
+          "additionalProperties" => false,
+          "required" => ["sum"],
+          "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+        },
+        "work.schema.json"
+      )
+
+    invalid = agent_return("bad", ~s|(return {"sum" 3 "secret" "#{secret}"})|)
+
+    {:ok, outcome_config} =
+      agent_config([invalid], [], phase_return_contracts: %{"evidence" => binding})
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "subject-failure",
+                "kind" => "phase-return-contract-failed",
+                "error" => %{
+                  "ok" => false,
+                  "kind" => "phase-return-contract-failed",
+                  "reason" => %{
+                    "completion" => "invalid-return",
+                    "phase_index" => 1,
+                    "mission" => "default",
+                    "contract" => "evidence",
+                    "contract_source" => "work.schema.json",
+                    "max_turns" => 1,
+                    "constraint" => "minimum",
+                    "violations" => [%{"kind" => "minimum", "path" => "/sum"}]
+                  }
+                }
+              }
+            }} =
+             outcome =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "evidence" {"max_turns" 1 "return_contract" "evidence"}))|,
+               outcome_config
+             )
+
+    refute inspect(outcome) =~ secret
+    refute inspect(EventSink.events(outcome_config.event_sink)) =~ secret
+
+    {:ok, native_config} =
+      agent_config([invalid], [], phase_return_contracts: %{"evidence" => binding})
+
+    assert {:ok,
+            %{
+              value: %{
+                "native_error" => true,
+                "native_reason" => true,
+                "native_error_keys" => true,
+                "native_reason_keys" => true
+              }
+            }} =
+             Kernel.run(
+               ~S|(let [outcome (agent.core/run-outcome "evidence" {"max_turns" 1 "return_contract" "evidence"}) error (get outcome :error) reason (get error :reason)] (return {"native_error" (= :phase-return-contract-failed (get error :kind)) "native_reason" (and (= :invalid-return (get reason :completion)) (= :minimum (get reason :constraint))) "native_error_keys" (every? keyword? (keys error)) "native_reason_keys" (every? keyword? (keys reason))}))|,
+               native_config
+             )
+
+    {:ok, inspection_sink} =
+      StreamingInspection.start(run_id: "standalone-contract", trace_id: "standalone-contract")
+
+    {:ok, value_config} =
+      agent_config([invalid], [],
+        phase_return_contracts: %{"evidence" => binding},
+        inspection_sink: inspection_sink
+      )
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error,
+                %{
+                  kind: :workflow_failed,
+                  reason: :phase_return_contract_failed,
+                  details: %{
+                    completion: :invalid_return,
+                    phase_index: 1,
+                    mission: "default",
+                    contract: "evidence",
+                    contract_source: "work.schema.json",
+                    max_turns: 1,
+                    constraint: :minimum,
+                    violations: [%{kind: :minimum, path: path}]
+                  }
+                }} =
+                 Kernel.run(
+                   ~S|(return (agent.core/run-value "evidence" {"max_turns" 1 "return_contract" "evidence"}))|,
+                   value_config
+                 )
+
+        assert path.segments == [{:property, "sum"}]
+      end)
+
+    assert {:ok, records} = StreamingInspection.records(inspection_sink)
+
+    diagnostics =
+      Enum.filter(records, fn record ->
+        record["record_type"] in ["execution-error", "explicit-failure-value"]
+      end)
+
+    refute inspect(diagnostics) =~ secret
+    value_events = EventSink.events(value_config.event_sink)
+    refute inspect(value_events) =~ secret
+
+    assert Enum.any?(value_events, fn event ->
+             event.type == "run-stopped" and
+               event.data[:failure_kind] == "phase-return-contract-failed"
+           end)
+
+    refute log =~ secret
+  end
+
+  test "standalone return-contract exhaustion survives sequential and parallel composition" do
+    binding =
+      phase_contract_binding(
+        %{
+          "type" => "object",
+          "additionalProperties" => false,
+          "required" => ["sum"],
+          "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+        },
+        "work.schema.json"
+      )
+
+    invalid = agent_return("bad", ~S|(return {"sum" 3})|)
+
+    for source <- [
+          ~S|(map (fn [_] (agent.core/run-value "evidence" {"max_turns" 1 "return_contract" "evidence"})) [1])|,
+          ~S|(pmap (fn [_] (agent.core/run-value "evidence" {"max_turns" 1 "return_contract" "evidence"})) [1])|,
+          ~S|(pcalls #(agent.core/run-value "evidence" {"max_turns" 1 "return_contract" "evidence"}))|
+        ] do
+      {:ok, config} =
+        agent_config([invalid], [], phase_return_contracts: %{"evidence" => binding})
+
+      assert {:error,
+              %{
+                reason: :phase_return_contract_failed,
+                details: %{
+                  completion: :invalid_return,
+                  contract: "evidence",
+                  contract_source: "work.schema.json",
+                  constraint: :minimum,
+                  violations: [%{kind: :minimum, path: path}]
+                }
+              }} = Kernel.run(source, config)
+
+      assert path.segments == [{:property, "sum"}]
+
+      assert Enum.any?(EventSink.events(config.event_sink), fn event ->
+               event.type == "run-stopped" and
+                 event.data[:failure_kind] == "phase-return-contract-failed"
+             end)
+    end
+  end
+
+  test "malformed and unknown standalone selectors fail before provider or mission activity" do
+    binding =
+      phase_contract_binding(
+        %{"type" => "object", "properties" => %{"value" => %{"type" => "integer"}}},
+        "evidence.schema.json"
+      )
+
+    for {selector, reason} <- [
+          {"Bad Name", "invalid-return-contract"},
+          {7, "invalid-return-contract"},
+          {"missing", "unknown_phase_return_contract"}
+        ] do
+      {:ok, inspection_sink} =
+        StreamingInspection.start(
+          run_id: "standalone-selector-#{reason}",
+          trace_id: "standalone-selector-#{reason}"
+        )
+
+      {:ok, config} =
+        agent_config([], [],
+          phase_return_contracts: %{"evidence" => binding},
+          inspection_sink: inspection_sink
+        )
+
+      source =
+        ~S|(return (agent.core/run-outcome "evidence" {"max_turns" 1 "return_contract" SELECTOR}))|
+        |> String.replace("SELECTOR", Jason.encode!(selector))
+
+      assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+               Kernel.run(source, config)
+
+      refute_receive {:agent_request, _request}
+
+      assert {:ok, records} = StreamingInspection.records(inspection_sink)
+      failure = Enum.find(records, &(&1["record_type"] == "explicit-failure-value"))
+      assert failure["payload"]["value"]["kind"] == "invalid-agent-config"
+      assert failure["payload"]["value"]["reason"] == reason
+
+      refute Enum.any?(EventSink.events(config.event_sink), fn event ->
+               event.type == "capability-started" and
+                 event.data[:name] in ["llm-request", "kernel-mission-model-context"]
+             end)
+    end
+  end
+
+  test "Runner and project-backed REPL resolve standalone selectors before provider activity" do
+    binding =
+      phase_contract_binding(
+        %{
+          "type" => "object",
+          "required" => ["score"],
+          "properties" => %{"score" => %{"type" => "integer", "minimum" => 10}}
+        },
+        "score.json"
+      )
+
+    for route <- [:runner, :repl] do
+      {:ok, config} =
+        agent_config([], [], phase_return_contracts: %{"score" => binding})
+
+      source =
+        ~S|(agent.core/run-outcome "score" {"max_turns" 1 "return_contract" "missing"})|
+
+      session =
+        case route do
+          :runner ->
+            assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+                     Kernel.run("(return #{source})", config)
+
+            nil
+
+          :repl ->
+            {:ok, session} = ReplSession.new(config: config)
+            assert {:error, step, session} = ReplSession.eval(session, source)
+            assert step.fail.reason == :explicit_failure
+            session
+        end
+
+      refute_receive {:agent_request, _request}
+
+      assert Enum.any?(EventSink.events(config.event_sink), fn event ->
+               event.type == "capability-started" and
+                 event.data[:name] == "kernel-result-contract"
+             end)
+
+      refute Enum.any?(EventSink.events(config.event_sink), fn event ->
+               event.type == "capability-started" and
+                 event.data[:name] in ["kernel-mission-model-context", "llm-request"]
+             end)
+
+      if session, do: assert({:ok, _events} = ReplSession.close(session))
+    end
+  end
+
+  test "result-validating entries reject a top-level standalone selector before provider activity" do
+    sources = [
+      ~S|(return (agent.core/run-result-value "work" {"max_turns" 1 "return_contract" "evidence"}))|,
+      ~S|(return (agent.core/run-phased-result-value "work" {"return_contract" "evidence" "phases" [{"mission" "default" "max_turns" 1}]}))|,
+      ~S|(agent.core/run "work" {"max_turns" 1 "return_contract" "evidence"})|
+    ]
+
+    for source <- sources do
+      {:ok, config} = agent_config([])
+
+      assert {:error,
+              %{
+                kind: :workflow_failed,
+                reason: :explicit_failure,
+                details: %{failure_kind: "invalid-agent-config"}
+              }} = Kernel.run(source, config)
+
+      refute_receive {:agent_request, _request}
+    end
   end
 
   test "tagged-union discriminator names are escaped in contract prompt paths" do
@@ -5333,6 +5721,12 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     })
   end
 
+  defp phase_contract_binding(schema, source) do
+    {:ok, contract} = ValueContract.compile(schema)
+    {:ok, projection} = ModelContract.value_contract(contract)
+    %{contract: contract, source: source, projection: projection}
+  end
+
   defp assert_host_validation_unavailable_reason(inspection_sink, reason) do
     assert {:ok, records} = StreamingInspection.records(inspection_sink)
 
@@ -5635,7 +6029,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp required_agent_tools do
     Map.new(
-      ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
+      ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-phase-return-contract-failure kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
          llm-request workflow-annotate),
       &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
     )

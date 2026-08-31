@@ -98,7 +98,7 @@
       response)))
 
 (defn validate-phase-return
-  "Validate a non-final phase's explicit return against its named contract."
+  "Validate an explicit phase or standalone handoff return against its named contract."
   [name value]
   (let [response (tool/kernel-result-contract {"phase_contract" name "value" value})]
     (if (= :ok (get response :status))

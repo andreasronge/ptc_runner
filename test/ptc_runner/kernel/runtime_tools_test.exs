@@ -18,6 +18,7 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
+  alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp.TrustedError
 
@@ -214,6 +215,57 @@ defmodule PtcRunner.Kernel.RuntimeToolsTest do
              callback.(%{"option" => "not_an_option", "min" => 1, "max" => 128, "value" => 129})
 
     assert {:ok, _} = AgentConfigDiagnostic.integer_message("max_turns", 1, 128, 129)
+  end
+
+  test "standalone phase-contract failures are authenticated and candidate-free" do
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "additionalProperties" => false,
+        "required" => ["sum"],
+        "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+      })
+
+    callback =
+      RuntimeTools.phase_return_contract_failure(%{
+        "evidence" => %{contract: contract, source: "work.schema.json", projection: %{}}
+      })
+
+    arguments = %{
+      "value" => %{"sum" => 3, "secret" => "candidate-secret-1739"},
+      "completion" => "invalid_return",
+      "phase_index" => 1,
+      "mission" => "default",
+      "contract" => "evidence",
+      "max_turns" => 1,
+      "mode" => "outcome"
+    }
+
+    assert %{
+             "ok" => false,
+             "kind" => "phase-return-contract-failed",
+             "reason" => %{
+               "completion" => "invalid_return",
+               "constraint" => "minimum",
+               "violations" => [%{"kind" => "minimum", "path" => "/sum"}]
+             }
+           } = outcome = callback.(arguments)
+
+    refute inspect(outcome) =~ "candidate-secret-1739"
+
+    assert %TrustedError{
+             reason: :phase_return_contract_failed,
+             details: %{completion: :invalid_return, violations: [%{path: path}]}
+           } = callback.(Map.put(arguments, "mode", "fail"))
+
+    assert path.segments == [{:property, "sum"}]
+
+    assert %{status: :error, reason: :invalid_phase_return_contract_failure} =
+             callback.(Map.put(arguments, "value", %{"sum" => 100}))
+
+    assert RuntimeTools.phase_return_contract_failure_ledger_arguments(arguments) == %{
+             "redacted" => true
+           }
   end
 
   test "exhausting protocol_errors on a malformed annotation emits one named limit-exceeded event" do
