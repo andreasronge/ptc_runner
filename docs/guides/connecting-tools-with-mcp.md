@@ -50,6 +50,6 @@ retry. A server that returned a complete refusal has already answered; that
 failure is not indeterminate. Keep credentials out of application manifests
 and model-visible descriptions.
 
-Use the [MCP reference](../reference/mcp.md) for stdio and HTTP transports,
+Use the [MCP reference](../reference/mcp.md#inspect-retained-mcp-exchanges) for stdio and HTTP transports,
 tool mapping, effects, authentication, OAuth, lifecycle, cursors, content
 identity, ceilings, and diagnostics.

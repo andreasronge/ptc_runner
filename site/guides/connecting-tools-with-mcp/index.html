@@ -112,7 +112,7 @@ handshake; check the <a href="/reference/mcp/#protocol-compatibility">protocol c
 before choosing a server.</p><h2 id="how-do-i-add-a-real-tool">How do I add a real tool?</h2><p>When adding a real tool:</p><ol><li>install the MCP source in <code class="inline">ptc-host.json</code>;</li><li>map only the upstream operations the mission needs;</li><li>give every public mapping an explicit <code class="inline">read</code> or <code class="inline">write</code> effect;</li><li>select the alias in the intended mission;</li><li>explicitly allow selected write-bearing tools; and</li><li>run plain <code class="inline">doctor</code> before the active <code class="inline">--connect</code> probe.</li></ol><h2 id="what-should-i-do-after-a-failed-write">What should I do after a failed write?</h2><p>Treat an indeterminate write as an unknown outcome, not as a safe automatic
 retry. A server that returned a complete refusal has already answered; that
 failure is not indeterminate. Keep credentials out of application manifests
-and model-visible descriptions.</p><p>Use the <a href="/reference/mcp/">MCP reference</a> for stdio and HTTP transports,
+and model-visible descriptions.</p><p>Use the <a href="/reference/mcp/#inspect-retained-mcp-exchanges">MCP reference</a> for stdio and HTTP transports,
 tool mapping, effects, authentication, OAuth, lifecycle, cursors, content
 identity, ceilings, and diagnostics.</p>
 </article>
