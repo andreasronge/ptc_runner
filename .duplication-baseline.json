@@ -61,7 +61,7 @@
       "type": "type_i"
     },
     "41f30d7e6e40f905a3655972436df6881f923d32d8f26b6807042adcb0105d9a": {
-      "describe": "type_i mass=41 test/ptc_runner/kernel/provider_execution_oauth_test.exs:322 <-> test/ptc_runner/kernel/provider_execution_oauth_test.exs:561",
+      "describe": "type_i mass=41 test/ptc_runner/kernel/provider_execution_oauth_test.exs:322 <-> test/ptc_runner/kernel/provider_execution_oauth_test.exs:567",
       "files": [
         "test/ptc_runner/kernel/provider_execution_oauth_test.exs"
       ],
@@ -185,24 +185,6 @@
         {
           "file": "lib/ptc_runner/kernel/session_trace.ex",
           "snippet": "c8e2a325b87570fe8237a4197e0d1295a5024a1fead4e18a987d58141b269b8e"
-        }
-      ],
-      "type": "type_i"
-    },
-    "63a8b9c6c7c94c8476d3c81cb58c4476cdee5a342d1cf2833db339a202db6d6e": {
-      "describe": "type_i mass=50 lib/ptc_runner/lisp.ex:2194 <-> lib/ptc_runner/lisp.ex:2347",
-      "files": [
-        "lib/ptc_runner/lisp.ex"
-      ],
-      "mass": 50,
-      "occurrences": [
-        {
-          "file": "lib/ptc_runner/lisp.ex",
-          "snippet": "98b5840b87c5fb2af17be66ef4407792a98c09cbab78083949e8ebb45b9107b5"
-        },
-        {
-          "file": "lib/ptc_runner/lisp.ex",
-          "snippet": "98b5840b87c5fb2af17be66ef4407792a98c09cbab78083949e8ebb45b9107b5"
         }
       ],
       "type": "type_i"
