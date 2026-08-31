@@ -1,57 +1,66 @@
 # Customize agent components
 
-Replace shipped prompts, policies, libraries, or complete agent loops when the
-shipped behavior no longer fits.
+Try a changed prompt or agent loop without changing `ptc.json`. If you keep the
+change, give your permanent components new IDs.
 
-Most applications select shipped libraries
-and do not copy their source:
+A prelude is the compiled set of components used by one workflow or mission.
+It is immutable during a run. You do not replace the whole prelude. You replace
+one selected component when the next run starts.
 
-```json
-{
-  "workflow": {
-    "components": [
-      {"id": "app.agent", "path": "agent.clj", "dependencies": ["agent.core"]},
-      {"library": "agent.core"}
-    ],
-    "entry": "app.agent/run"
-  }
-}
+## Try a different agent prompt
+
+Selecting `agent.core` also selects `agent.prompt`. The prompt is therefore an
+override target even when it is not listed directly in the manifest.
+
+Candidate creation requires a source checkout. Copy the shipped prompt, then
+edit the copy:
+
+```console
+mkdir -p private
+cp priv/preludes/kernel/agent.prompt.clj private/agent.prompt.clj
 ```
 
-The shipped `agent.core` loop is a replaceable library, not Kernel behavior.
-Start with it, then introduce a custom component under a new ID when the
-application needs different prompts, feedback, retry policy, continuation, or
-completion rules.
+Turn the edited source into a checked candidate:
 
-## Trial a replacement safely
+```console
+mix ptc.materialize ptc.json \
+  --workflow \
+  --component agent.prompt \
+  --out private/agent-prompt-candidate \
+  --source private/agent.prompt.clj
+```
 
-Selecting `agent.core` also selects its `agent.prompt` dependency. A verified
-component override can trial another prompt for one invocation without changing
-`ptc.json`. The active bundle remains immutable throughout the run; a later
-invocation compiles and checks the candidate before it can become active.
+The command checks the source and creates the candidate and descriptor files.
+The output directory must not already exist.
 
-The standalone executable can run a prepared override descriptor but does not
-create one. Candidate creation is currently a source-checkout workflow. Use
-[Evaluate changes with replay](evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
-to compare a prepared candidate, and use the repository's
-[embedding guide](https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/embedding.md#materialize-candidate-source)
-when creating the descriptor.
+Validate the candidate without acquiring a provider:
 
-Each component declares its direct namespace dependencies. Selecting a library
-installs its immutable dependency closure, but does not add tools. Mission tools
-still come only from providers installed in `ptc-host.json` and selected for
-that mission in `ptc.json`.
+```console
+mix ptc validate ptc.json \
+  --component-override-descriptor private/agent-prompt-candidate/descriptor.json
+```
 
-Keep reusable components narrow:
+Run the normal version first. Then run the candidate:
 
-- expose a small documented public surface;
-- declare signatures where model-written calls benefit from validation;
-- keep prompt-visible helpers focused on the task contract;
-- separate workflow policy from mission-only task functions; and
-- use a new component ID for a permanently customized prompt or loop.
+```console
+mix ptc run ptc.json
+mix ptc run ptc.json \
+  --component-override-descriptor private/agent-prompt-candidate/descriptor.json
+```
 
-Use the [components-and-preludes reference](../reference/component-contracts.md)
-for namespaces, dependency rules, visibility, signatures, shipped library
-selection, compilation, and provider-selection boundaries. The
-[agent library reference](../agent-library-reference.md) documents the exact
-shipped loop entries and options.
+The override applies only to that command. It does not edit the manifest or
+install the candidate. Use
+[replay](evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
+when you need a fair comparison with the same model responses.
+
+## Keep a change
+
+Use new component IDs for permanent application code. A local component cannot
+reuse a shipped library ID. If you replace a prompt or policy permanently,
+select a loop whose dependencies point to your new components.
+
+The [components-and-preludes reference](../reference/component-contracts.md)
+defines dependencies, mission targets, descriptor fields, hashes, effect
+widening, failure messages, and security boundaries. The
+[agent library reference](../agent-library-reference.md) documents the shipped
+agent components and their options.

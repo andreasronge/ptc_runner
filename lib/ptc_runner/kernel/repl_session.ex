@@ -1115,23 +1115,23 @@ defmodule PtcRunner.Kernel.ReplSession do
       session.config.event_sink,
       session.config.result_contract,
       session.config.result_contract_source,
-      session.config.workflow_environment.bundle
+      session.config.workflow_environment
     )
     |> RuntimeTools.maybe_put_llm_provider_failure(
       session.state,
       session.config.event_sink,
-      session.config.workflow_environment.bundle
+      session.config.workflow_environment
     )
     |> RuntimeTools.maybe_put_runtime_limit_failure(
       session.state,
       session.config.event_sink,
       session.config.limits,
-      session.config.workflow_environment.bundle
+      session.config.workflow_environment
     )
     |> RuntimeTools.maybe_put_agent_loop_tools(
       session.state,
       session.config.event_sink,
-      session.config.workflow_environment.bundle
+      session.config.workflow_environment
     )
     |> RuntimeTools.trusted_tools(
       session.config.limits,

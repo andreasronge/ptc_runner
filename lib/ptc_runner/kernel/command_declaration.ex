@@ -34,11 +34,17 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     description:
       "atomically publish a V4 command envelope copy (project ledger still written when artifacts.envelope is enabled)"
   }
+  @component_override_option %{
+    key: :component_override_descriptor,
+    type: :string,
+    syntax: ["--component-override-descriptor DESCRIPTOR.json"],
+    description: "verified replacement component descriptor"
+  }
 
   @declarations %{
     root: %{
       usage: [
-        "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json]",
+        "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json] [--component-override-descriptor DESCRIPTOR.json]",
         "ptc run MANIFEST.json|PROJECT.json [OPTIONS]",
         "ptc doctor [MANIFEST.json|PROJECT.json] [--host-config HOST.json] [--connect]",
         "ptc models PROJECT.json | --host-config HOST.json",
@@ -83,7 +89,9 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
       options: [@help_option]
     },
     validate: %{
-      usage: ["ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json]"],
+      usage: [
+        "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json] [--component-override-descriptor DESCRIPTOR.json]"
+      ],
       options: [
         %{
           key: :host_config,
@@ -91,6 +99,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--host-config HOST.json"],
           description: "trusted provider installation document"
         },
+        @component_override_option,
         @envelope_option,
         @help_option
       ]
@@ -142,12 +151,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           syntax: ["--inspect RUN.ptcins"],
           description: "owner-only private inspection artifact"
         },
-        %{
-          key: :component_override_descriptor,
-          type: :string,
-          syntax: ["--component-override-descriptor DESCRIPTOR.json"],
-          description: "verified replacement component descriptor"
-        },
+        @component_override_option,
         @env_file_option,
         @run_envelope_option,
         %{

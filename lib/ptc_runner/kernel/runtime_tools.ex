@@ -16,7 +16,6 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.EvaluationObservation
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.JSONValue
-  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.LLMReplayDiagnostic
   alias PtcRunner.Kernel.ModelContract
   alias PtcRunner.Kernel.Program
@@ -26,6 +25,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.SourceCheck
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractDiagnostic
+  alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
@@ -358,8 +358,11 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   @doc false
   @spec maybe_put_llm_provider_failure(map(), RunState.t(), term(), term()) :: map()
-  def maybe_put_llm_provider_failure(tools, state, event_sink, bundle) when is_map(tools) do
-    if Library.shipped_component?(bundle, "agent.core") do
+  def maybe_put_llm_provider_failure(tools, state, event_sink, environment) when is_map(tools) do
+    if WorkflowEnvironment.private_capability_granted?(
+         environment,
+         "kernel-llm-provider-failure"
+       ) do
       Map.put(
         tools,
         "kernel-llm-provider-failure",
@@ -378,9 +381,12 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   @doc false
   @spec maybe_put_runtime_limit_failure(map(), RunState.t(), term(), map(), term()) :: map()
-  def maybe_put_runtime_limit_failure(tools, state, event_sink, limits, bundle)
+  def maybe_put_runtime_limit_failure(tools, state, event_sink, limits, environment)
       when is_map(tools) do
-    if Library.shipped_component?(bundle, "agent.core") do
+    if WorkflowEnvironment.private_capability_granted?(
+         environment,
+         "kernel-runtime-limit-failure"
+       ) do
       Map.put(
         tools,
         "kernel-runtime-limit-failure",
@@ -399,8 +405,11 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   @doc false
   @spec maybe_put_agent_loop_tools(map(), RunState.t(), term(), term()) :: map()
-  def maybe_put_agent_loop_tools(tools, state, event_sink, bundle) when is_map(tools) do
-    if Library.shipped_component?(bundle, "agent.core") do
+  def maybe_put_agent_loop_tools(tools, state, event_sink, environment) when is_map(tools) do
+    if WorkflowEnvironment.private_capability_granted?(
+         environment,
+         "kernel-agent-config-failure"
+       ) do
       tools
       |> Map.put(
         "kernel-agent-config-failure",
@@ -1182,10 +1191,13 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         event_sink,
         contract,
         contract_source,
-        bundle
+        environment
       )
       when is_map(tools) do
-    if Library.shipped_component?(bundle, "agent.core") do
+    if WorkflowEnvironment.private_capability_granted?(
+         environment,
+         "kernel-result-contract-failure"
+       ) do
       Map.put(
         tools,
         "kernel-result-contract-failure",

@@ -159,6 +159,7 @@ defmodule PtcRunner.Kernel.RunConfig do
              ] !=
              [],
          %WorkflowEnvironment{} = workflow <- Keyword.get(opts, :workflow_environment),
+         true <- WorkflowEnvironment.valid?(workflow),
          true <- JSONValue.map?(Keyword.get(opts, :input)),
          %Limits{} = limits <- Keyword.get(opts, :limits),
          {:ok, missions} <- build_missions(Keyword.get(opts, :missions), limits),

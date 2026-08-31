@@ -917,9 +917,9 @@ defmodule PtcRunner.Kernel.RunBuilder do
 
     result =
       with {:ok, workflow} <-
-             WorkflowEnvironment.new(
-               bundle: workflow_bundle,
-               capabilities: providers.workflow.capabilities
+             WorkflowEnvironment.new_for_package(
+               [bundle: workflow_bundle, capabilities: providers.workflow.capabilities],
+               package
              ),
            {:ok, missions} <- mission_environments(package, mission_bundles, providers),
            {:ok, publication_authority, sink, inspection_sink} <-

@@ -117,9 +117,9 @@ sentence. See the
 for every descriptor field and validation rule.
 
 Candidate creation is a trusted build step and is not currently exposed by the
-standalone executable. The source-checkout tool for maintainers is documented
-under "Materialize candidate source" in `docs/maintainers/embedding.md`, which
-is a repository document rather than a page the executable carries.
+standalone executable. In a source checkout, follow
+[Customize agent components](components-and-preludes.md#try-a-different-agent-prompt)
+to create and check a candidate.
 
 The active bundle stays immutable for the whole run. A run may author source,
 but only a later host invocation can materialize it and start with the newly

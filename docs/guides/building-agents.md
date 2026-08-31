@@ -86,7 +86,7 @@ retain prompts, responses, generated source, and tool payloads. Use replay to
 hold model responses fixed while comparing a prompt or prelude candidate, then
 promote a change only after evaluating its evidence.
 
-The short [component replacement guide](components-and-preludes.md#trial-a-replacement-safely)
+The short [component replacement guide](components-and-preludes.md#try-a-different-agent-prompt)
 shows how to materialize and run an `agent.prompt` candidate.
 
 Use the [agent library reference](../agent-library-reference.md#agent-core-run) for exact entry
