@@ -2,8 +2,9 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   @moduledoc """
   Path-free preparation and one-shot execution.
 
-  Bundle compilation and public-entry validation run before provider
-  declarations. Provider declaration checks inspect only installed aliases;
+  Bundle compilation, public-entry validation, and decidable provider-free
+  mission capability validation run before provider declarations. Provider
+  declaration checks inspect only installed aliases;
   they never invoke a builder, credential resolver, preflight callback, OAuth
   context, store, process, or network operation.
 
@@ -23,11 +24,13 @@ defmodule PtcRunner.Kernel.RunCoordinator do
   alias PtcRunner.Kernel.Component
   alias PtcRunner.Kernel.ConnectivityResult
   alias PtcRunner.Kernel.Deadline
+  alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.ExecutionOutcome
   alias PtcRunner.Kernel.ExecutionSessionOwner
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.InstallationConfigDigest
   alias PtcRunner.Kernel.LocalPreflight
+  alias PtcRunner.Kernel.MissionCapabilityDiagnostic
   alias PtcRunner.Kernel.MissionInventory
   alias PtcRunner.Kernel.MissionReplTarget
   alias PtcRunner.Kernel.PreparedRun
@@ -70,6 +73,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
              request.package.entry,
              request.package.missions
            ),
+         :ok <- validate_mission_capabilities(request.package.missions, mission_bundles),
          {:ok, declarations} <-
            prepare_providers(request, workflow_bundle, mission_bundles, catalog),
          {:ok, derived} <-
@@ -524,6 +528,36 @@ defmodule PtcRunner.Kernel.RunCoordinator do
     if map_size(missions || %{}) == 0 and mission_context_entry?(workflow_bundle, entry),
       do: {:error, diagnostic(:bundle, :mission_undeclared)},
       else: :ok
+  end
+
+  @doc false
+  @spec validate_mission_capabilities(map() | nil, map()) ::
+          :ok | {:error, CommandDiagnostic.t()}
+  def validate_mission_capabilities(missions, mission_bundles) do
+    (missions || %{})
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.reduce_while(:ok, fn {name, mission}, :ok ->
+      missing =
+        if mission.provider_occurrences == [] do
+          mission_bundles
+          |> Map.get(name)
+          |> Environment.missing_capability_requirements([], :mission)
+        else
+          []
+        end
+
+      if missing == [] do
+        {:cont, :ok}
+      else
+        opts =
+          case MissionCapabilityDiagnostic.message(name, missing) do
+            {:ok, message} -> [message: message, provider_activity: false]
+            :error -> [provider_activity: false]
+          end
+
+        {:halt, {:error, diagnostic(:bundle, :mission_capability_ungranted, opts)}}
+      end
+    end)
   end
 
   defp mission_context_entry?(%{prelude: prelude}, entry) when is_binary(entry) do

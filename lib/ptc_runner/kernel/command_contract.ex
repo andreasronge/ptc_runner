@@ -1238,6 +1238,12 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp diagnostic_message_schema(%{code: :capability_requirement_missing} = row, _source),
     do: DiagnosticCatalog.message_schema(row)
 
+  defp diagnostic_message_schema(
+         %{phase: :bundle, code: :mission_capability_ungranted} = row,
+         %{"type" => "null"}
+       ),
+       do: DiagnosticCatalog.message_schema(row)
+
   defp diagnostic_message_schema(%{code: :provider_tool_missing} = row, _source),
     do: DiagnosticCatalog.message_schema(row)
 

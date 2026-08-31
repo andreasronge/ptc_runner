@@ -80,6 +80,19 @@ defmodule PtcRunner.Kernel.Environment do
 
   def capability_requirements(nil), do: []
 
+  @doc false
+  @spec missing_capability_requirements(FrozenBundle.t() | nil, [binary()], :workflow | :mission) ::
+          [binary()]
+  def missing_capability_requirements(bundle, capability_names, kind)
+      when is_list(capability_names) and kind in [:workflow, :mission] do
+    granted_names =
+      Map.new(capability_names ++ implicit_capabilities(kind, bundle), &{&1, true})
+
+    bundle
+    |> capability_requirements()
+    |> Enum.reject(&Map.has_key?(granted_names, &1))
+  end
+
   defp valid_bundle(nil), do: :ok
 
   defp valid_bundle(%FrozenBundle{} = bundle),
@@ -113,13 +126,7 @@ defmodule PtcRunner.Kernel.Environment do
   end
 
   defp bundle_requirements(%FrozenBundle{} = bundle, capabilities, kind) do
-    granted_names =
-      Map.new(Map.keys(capabilities) ++ implicit_capabilities(kind, bundle), &{&1, true})
-
-    missing =
-      bundle
-      |> capability_requirements()
-      |> Enum.reject(&Map.has_key?(granted_names, &1))
+    missing = missing_capability_requirements(bundle, Map.keys(capabilities), kind)
 
     if missing == [],
       do: :ok,
