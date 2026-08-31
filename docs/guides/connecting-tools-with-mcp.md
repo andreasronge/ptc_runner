@@ -43,6 +43,10 @@ When adding a real tool:
 5. explicitly allow selected write-bearing tools; and
 6. run plain `doctor` before the active `--connect` probe.
 
+## Was my tool called, and with what?
+
+Read [Inspect retained MCP exchanges](../reference/mcp.md#inspect-retained-mcp-exchanges).
+
 ## What should I do after a failed write?
 
 Treat an indeterminate write as an unknown outcome, not as a safe automatic
@@ -50,6 +54,6 @@ retry. A server that returned a complete refusal has already answered; that
 failure is not indeterminate. Keep credentials out of application manifests
 and model-visible descriptions.
 
-Use the [MCP reference](../reference/mcp.md#inspect-retained-mcp-exchanges) for stdio and HTTP transports,
+Use the [MCP reference](../reference/mcp.md) for stdio and HTTP transports,
 tool mapping, effects, authentication, OAuth, lifecycle, cursors, content
 identity, ceilings, and diagnostics.
