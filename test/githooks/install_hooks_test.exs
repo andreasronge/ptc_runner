@@ -47,12 +47,63 @@ defmodule PtcRunner.GitHooks.InstallHooksTest do
     assert git(repo, ["config", "--get", "merge.ptc-generated.driver"]) == "true"
   end
 
+  @tag :tmp_dir
+  test "installed hooks use mise and a safe umask in non-interactive shells", %{tmp_dir: dir} do
+    repo = init_repo(dir)
+    bin = Path.join(dir, "bin")
+    log = Path.join(dir, "hook.log")
+    File.mkdir_p!(bin)
+
+    write_executable!(
+      Path.join(bin, "mise"),
+      ~S"""
+      #!/usr/bin/env bash
+      printf 'mise|%s\n' "$*" >> "$PTC_HOOK_LOG"
+      shift
+      [ "${1:-}" = "--" ] && shift
+      exec "$@"
+      """
+    )
+
+    tracked_hook = Path.join([repo, ".githooks", "pre-commit"])
+
+    write_executable!(
+      tracked_hook,
+      ~S"""
+      #!/usr/bin/env bash
+      printf 'hook|%s\n' "$(umask)" >> "$PTC_HOOK_LOG"
+      """
+    )
+
+    {_, 0} = install(repo)
+
+    {output, status} =
+      System.cmd(Path.join([repo, ".git", "hooks", "pre-commit"]), [],
+        cd: repo,
+        env:
+          GitEnv.clear(
+            HOME: dir,
+            PATH: bin <> ":/usr/bin:/bin",
+            PTC_HOOK_LOG: log
+          ),
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+
+    assert log |> File.read!() |> String.split("\n", trim: true) == [
+             "mise|exec -- #{tracked_hook}",
+             "hook|0022"
+           ]
+  end
+
   defp init_repo(dir) do
     repo = Path.join(dir, "clone")
     File.mkdir_p!(Path.join(repo, "scripts"))
     {_, 0} = System.cmd("git", ["init", "-q", "."], cd: repo, env: @git_env)
 
-    for script <- ~w(install-hooks.sh pre-commit.template pre-push) do
+    for script <-
+          ~w(install-hooks.sh pre-commit.template pre-push hook-runtime.sh mise-runtime.sh) do
       File.cp!(Path.join([@repo_root, "scripts", script]), Path.join([repo, "scripts", script]))
     end
 
@@ -70,5 +121,11 @@ defmodule PtcRunner.GitHooks.InstallHooksTest do
   defp git(repo, args) do
     {output, _status} = System.cmd("git", args, cd: repo, env: @git_env, stderr_to_stdout: true)
     String.trim(output)
+  end
+
+  defp write_executable!(path, contents) do
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, contents)
+    File.chmod!(path, 0o755)
   end
 end
