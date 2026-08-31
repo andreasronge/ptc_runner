@@ -152,12 +152,22 @@ defmodule PtcRunner.Kernel.CommandDiagnosticRenderer do
        do: " at " <> terminal_contract_path(path)
 
   defp location_suffix(%{
+         "phase" => "execution",
+         "code" => "phase_return_contract_failed",
+         "source" => %{"kind" => "phase_return_contract", "name" => name},
+         "path" => path
+       })
+       when is_binary(name) and is_binary(path) and path != "",
+       do: " at #{terminal_contract_path(path)} in #{terminal_source_name(name)}"
+
+  defp location_suffix(%{
          "phase" => "application",
          "code" => "contract_invalid",
          "source" => %{"kind" => kind, "name" => name},
          "path" => path
        })
-       when kind in ["input_contract", "result_contract"] and is_binary(name) and
+       when kind in ["input_contract", "result_contract", "phase_return_contract"] and
+              is_binary(name) and
               is_binary(path) and path != "",
        do: " at #{terminal_contract_path(path)} in #{terminal_source_name(name)}"
 

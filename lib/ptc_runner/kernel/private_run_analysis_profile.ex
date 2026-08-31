@@ -8,7 +8,7 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfile do
 
   use PtcRunner.Kernel.RunAnalysisProfile, kind: :private
 
-  @id "private-run-analysis-v1"
+  @id "private-run-analysis-v2"
 
   def id, do: @id
   def invalid_profile_error, do: :invalid_private_run_analysis_profile

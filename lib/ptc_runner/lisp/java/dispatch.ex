@@ -125,9 +125,28 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
            :unsupported_java_member,
            member_family_id,
            nil,
-           "unsupported Java member for receiver class",
-           %{receiver_profile: profile}
+           ambiguous_family_message(member_family_id),
+           %{name: member_family_name(member_family_id), receiver_profile: profile}
          )}
+    end
+  end
+
+  # Names the member and stops. This is a type failure, not a failed lookup, so
+  # there is no alternative name to offer; and the receiver profile stays
+  # structured detail rather than message text, because receiver_profile/1
+  # answers :unsupported for most wrong receivers and that atom is not a type
+  # the model could act on.
+  defp ambiguous_family_message(member_family_id) do
+    case Surface.member_family_source(member_family_id) do
+      {:ok, spelling} -> "Java member #{spelling} does not accept this receiver"
+      :error -> "Java member does not accept this receiver"
+    end
+  end
+
+  defp member_family_name(member_family_id) do
+    case Surface.member_family_source(member_family_id) do
+      {:ok, spelling} -> spelling
+      :error -> nil
     end
   end
 
@@ -585,8 +604,15 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
        reference.reference_id,
        nil,
        "Java member expects #{format_arities(expected)} argument(s), got #{actual}",
-       %{expected: expected, actual: actual}
+       %{name: reference_spelling(reference), expected: expected, actual: actual}
      )}
+  end
+
+  defp reference_spelling(reference) do
+    case reference.spellings do
+      [spelling | _] -> spelling
+      [] -> nil
+    end
   end
 
   defp type_error(reference, candidates, receiver, arguments),
@@ -603,7 +629,12 @@ defmodule PtcRunner.Lisp.Java.Dispatch do
          reference.reference_id,
          nil,
          "Java member receiver does not match an admitted class",
-         %{receiver: true, expected: receiver_profiles, actual: value_type(receiver)}
+         %{
+           name: reference_spelling(reference),
+           receiver: true,
+           expected: receiver_profiles,
+           actual: value_type(receiver)
+         }
        )}
     else
       argument_type_error(reference, candidates, arguments, argument_coercer)

@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   import PtcRunner.TestSupport.CommandEngineFixtures
 
   alias PtcRunner.Kernel.ApplicationPackage
+  alias PtcRunner.Kernel.CommandApplicationDiagnostic
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandContractAuthority
   alias PtcRunner.Kernel.CommandDeclaration
@@ -25,12 +26,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.Error
+  alias PtcRunner.Kernel.EventBudget
   alias PtcRunner.Kernel.ExecutionInput
   alias PtcRunner.Kernel.ExecutionPolicy
   alias PtcRunner.Kernel.FrozenBundle
   alias PtcRunner.Kernel.HostConfig
   alias PtcRunner.Kernel.HostInstallation
   alias PtcRunner.Kernel.InstallationCatalog
+  alias PtcRunner.Kernel.LimitCapacityDiagnostic
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.Limits
@@ -42,14 +45,27 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractClassification
+  alias PtcRunner.Lisp.TrustedError
   alias PtcRunner.StandaloneCLI
   alias PtcRunner.TestSupport.MCPHTTPFixture
   alias PtcRunner.TestSupport.StreamingInspection
   alias PtcRunner.TestSupport.TestHelpers
 
   @zero_entropy <<0::128>>
+
+  test "contract projection overflow has a stable source-free application diagnostic" do
+    diagnostic =
+      CommandApplicationDiagnostic.project(:validate, :contract_projection_limit_exceeded)
+
+    assert diagnostic.phase == :application
+    assert diagnostic.code == :contract_projection_limit_exceeded
+    assert diagnostic.exit_status == 3
+    assert diagnostic.source == nil
+    assert diagnostic.path == nil
+  end
 
   test "run references use the fixed Crockford encoding" do
     assert CommandRunRef.encode(@zero_entropy) == "cmd-" <> String.duplicate("0", 26)
@@ -1874,6 +1890,91 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "an agent configuration option is outside its supported range"
   end
 
+  test "standalone return-contract failures retain their authenticated source and path" do
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "required" => ["sum"],
+        "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+      })
+
+    failure =
+      RuntimeTools.phase_return_contract_failure(%{
+        "evidence" => %{contract: contract, source: "work.schema.json"}
+      })
+
+    assert %TrustedError{details: details} =
+             failure.(%{
+               "value" => %{"sum" => 3},
+               "completion" => "invalid_return",
+               "phase_index" => 1,
+               "mission" => "default",
+               "contract" => "evidence",
+               "max_turns" => 1,
+               "mode" => "fail"
+             })
+
+    usage = %{
+      remaining_ms: 0,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 1,
+      evaluations_by_mission: %{"default" => 1},
+      protocol_errors: 0,
+      agent_protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{},
+      llm_budget: %{"total_tokens" => nil, "cost" => nil},
+      llm_spend: %{"state" => "empty"}
+    }
+
+    evidence = %{
+      result:
+        {:error,
+         %Error{
+           kind: :workflow_failed,
+           reason: :phase_return_contract_failed,
+           details: details,
+           usage: usage
+         }}
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: %{
+           "trace" => "not_requested",
+           "inspection" => "not_requested",
+           "result" => "not_requested"
+         },
+         error: nil,
+         secondary_errors: []
+       }}
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandRunOutcome.project(
+               evidence,
+               settlement,
+               CommandRunRef.encode(@zero_entropy),
+               true
+             )
+
+    assert outcome.envelope["error"]
+           |> Map.take(~w(phase code source path)) == %{
+             "phase" => "execution",
+             "code" => "phase_return_contract_failed",
+             "source" => %{
+               "kind" => "phase_return_contract",
+               "name" => "work.schema.json"
+             },
+             "path" => "/sum"
+           }
+
+    assert_schema_valid(outcome.envelope)
+  end
+
   test "transcript-ceiling diagnostics bind their bounded message to a null source" do
     runtime_source = CommandSource.fixed(:runtime)
 
@@ -3516,12 +3617,16 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert validate_help.envelope["result"] == %{
              "topic" => "validate",
              "usage" => [
-               "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json]"
+               "ptc validate MANIFEST.json|PROJECT.json [--host-config HOST.json] [--component-override-descriptor DESCRIPTOR.json]"
              ],
              "options" => [
                %{
                  "switches" => ["--host-config HOST.json"],
                  "description" => "trusted provider installation document"
+               },
+               %{
+                 "switches" => ["--component-override-descriptor DESCRIPTOR.json"],
+                 "description" => "verified replacement component descriptor"
                },
                %{
                  "switches" => ["--envelope ENVELOPE.json"],
@@ -3539,7 +3644,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              CommandParser.parse(["validate", "ptc.json", "--output", "result.json"])
 
     assert rejection.kind == :unknown_switch
-    assert rejection.accepted == ["--host-config", "--envelope", "--help"]
+
+    assert rejection.accepted == [
+             "--host-config",
+             "--component-override-descriptor",
+             "--envelope",
+             "--help"
+           ]
   end
 
   test "declared command help aliases resolve to generated topics only by themselves" do
@@ -3678,7 +3789,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              CommandParser.parse([
                "repl",
                "--profile",
-               "private-run-analysis-v1",
+               "private-run-analysis-v2",
                "--run",
                second,
                "--run",
@@ -3703,7 +3814,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           [
             "repl",
             "--profile",
-            "private-run-analysis-v1",
+            "private-run-analysis-v2",
             "--resource",
             "traces=traces",
             "--private-unattended",
@@ -5700,7 +5811,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   test "impossible normal trace budgets are rejected identically before execution", %{
     tmp_dir: directory
   } do
-    payload_bytes = 7_000
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
     {:ok, base_limits} = Limits.new(event_payload_bytes: payload_bytes)
     required_bytes = LimitConfiguration.required_normal_event_bytes(base_limits)
     configured_bytes = required_bytes - 1
@@ -5758,6 +5869,54 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:ok, %CommandOutcome{}} = CommandEngine.prepare(["validate", admitted])
   end
 
+  # The fixed part of the terminal projection is a catalog minimum; the part
+  # keyed by declared capability and mission names cannot be, because it is only
+  # resolved when the run assembles. That refusal is still a limits decision, so
+  # it must arrive as a configuration diagnostic and not as an internal error.
+  @tag :tmp_dir
+  test "a resolved terminal usage above the payload ceiling is refused as a limits diagnostic",
+       %{tmp_dir: directory} do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    padding = String.duplicate("x", 120)
+
+    missions =
+      Map.new(1..3, fn index ->
+        {"m#{padding}#{String.pad_leading(Integer.to_string(index), 3, "0")}",
+         %{"components" => [], "data" => %{}, "providers" => []}}
+      end)
+
+    application =
+      write_application(
+        directory,
+        "resolved-terminal-usage-too-large",
+        valid_manifest(%{
+          "limits" => %{"event_payload_bytes" => payload_bytes},
+          "missions" => missions
+        })
+      )
+
+    assert {:ok, %CommandOutcome{}} = CommandEngine.prepare(["validate", application])
+
+    assert {:error, %CommandOutcome{} = outcome} = CommandEngine.dispatch(["run", application])
+    assert_schema_valid(outcome.envelope)
+    assert outcome.envelope["error"]["phase"] == "application"
+    assert outcome.envelope["error"]["code"] == "limit_capacity_invalid"
+    assert outcome.envelope["error"]["provider_activity"] == false
+    assert outcome.exit_status == 3
+    assert outcome.envelope["execution"] == %{"state" => "not_started"}
+    assert outcome.envelope["artifact_state"]["trace"] == "not_requested"
+    assert outcome.envelope["error"]["path"] == nil
+
+    assert [_matched, reported, required] =
+             Regex.run(
+               ~r/\Aevent_payload_bytes effective limit (\d+) is below the required (\d+) bytes/,
+               outcome.envelope["error"]["message"]
+             )
+
+    assert String.to_integer(reported) == payload_bytes
+    assert String.to_integer(required) > payload_bytes
+  end
+
   @tag :tmp_dir
   test "normal trace count values below three use schema diagnostics", %{tmp_dir: directory} do
     for count <- [1, 2] do
@@ -5788,6 +5947,111 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         )
 
       assert outcome.envelope["error"]["path"] == "/limits/normal_event_count"
+      assert outcome.envelope["error"]["message"] =~ "minimum"
+    end
+  end
+
+  # Only a run that already assembled providers can reach this code, so the
+  # commands that stop before assembly must not admit it at all.
+  test "the capacity refusal is admitted only by a run" do
+    for mode <- [:validate, :doctor, {:doctor, :connect}, :run_unclassified] do
+      refute CommandContract.diagnostic_allowed?(mode, :application, :limit_capacity_invalid),
+             "#{inspect(mode)} admits limit_capacity_invalid"
+
+      assert CommandContract.diagnostic_allowed?(
+               mode,
+               :application,
+               :limit_configuration_invalid
+             ),
+             "#{inspect(mode)} lost limit_configuration_invalid"
+    end
+
+    assert CommandContract.diagnostic_allowed?(:run, :application, :limit_capacity_invalid)
+  end
+
+  # The refusal is computed after provider assembly, so it can be reported with
+  # or without provider activity, and the dispatcher calls an active failure
+  # incomplete. Every one of those outcomes has to seal, or the run that raised
+  # this reason exits 70 through the very path the diagnostic exists to replace.
+  test "every reachable capacity refusal outcome seals as a V4 envelope" do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, message} = LimitCapacityDiagnostic.message(payload_bytes, payload_bytes * 2)
+    {:ok, run_ref} = CommandRunRef.generate()
+
+    artifact_state = %{
+      "trace" => "not_written",
+      "inspection" => "not_requested",
+      "result" => "not_requested"
+    }
+
+    for provider_activity <- [false, true],
+        execution_state <- [:not_started, :incomplete],
+        result_class <- [:normal, :private] do
+      assert {:ok, diagnostic} =
+               CommandDiagnostic.new(:application, :limit_capacity_invalid,
+                 source: CommandSource.fixed(:application),
+                 message: message,
+                 provider_activity: provider_activity
+               )
+
+      assert {:error, outcome} =
+               CommandRunOutcome.operation_failure(
+                 run_ref,
+                 diagnostic,
+                 result_class,
+                 artifact_state,
+                 provider_activity,
+                 execution_state
+               )
+
+      assert outcome.exit_status == 3
+      assert outcome.envelope["error"]["code"] == "limit_capacity_invalid"
+      assert outcome.envelope["error"]["provider_activity"] == provider_activity
+      assert CommandContract.valid_envelope?(outcome.envelope)
+    end
+  end
+
+  @tag :tmp_dir
+  test "event payload values below the catalog minimum use schema diagnostics", %{
+    tmp_dir: directory
+  } do
+    minimum = EventBudget.minimum_normal_payload_bytes()
+
+    for payload_bytes <- [1, minimum - 1] do
+      application =
+        write_application(
+          directory,
+          "invalid-event-payload-#{payload_bytes}",
+          valid_manifest(%{"limits" => %{"event_payload_bytes" => payload_bytes}})
+        )
+
+      for command <- ["validate", "run", "doctor"] do
+        outcome = assert_error([command, application], "application", "schema_violation")
+        assert outcome.envelope["error"]["path"] == "/limits/event_payload_bytes"
+        assert outcome.envelope["error"]["message"] =~ "minimum"
+      end
+
+      host =
+        write_host_config(directory, "invalid-event-payload-#{payload_bytes}", %{
+          "install" => %{},
+          "limits" => %{"event_payload_bytes" => payload_bytes}
+        })
+
+      admitted =
+        write_application(
+          directory,
+          "admitted-event-payload-#{payload_bytes}",
+          valid_manifest()
+        )
+
+      outcome =
+        assert_error(
+          ["validate", admitted, "--host-config", host],
+          "host",
+          "host_schema_invalid"
+        )
+
+      assert outcome.envelope["error"]["path"] == "/limits/event_payload_bytes"
       assert outcome.envelope["error"]["message"] =~ "minimum"
     end
   end
@@ -6804,6 +7068,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     refute ApplicationPackage.valid?(Map.put(package, :application_path, "private"))
     refute ExecutionInput.valid?(Map.put(input, :input_path, "private"))
+    refute ExecutionInput.valid?(Map.delete(input, :value))
     refute ExecutionPolicy.valid?(Map.put(policy, :output_path, "private"))
     refute RunRequest.valid?(Map.put(request, :application_path, "private"))
     refute PreparedRun.valid?(Map.put(preparation.prepared_run, :application_path, "private"))
@@ -6812,8 +7077,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              Map.put(preparation.prepared_run.workflow_bundle, :private_path, ".")
            )
 
+    refute FrozenBundle.valid?(Map.delete(preparation.prepared_run.workflow_bundle, :components))
+
     assert ProviderActivity.value(Map.put(activity, :provider_endpoint, "private")) == :unknown
     refute ValueContract.sealed?(Map.put(contract, :schema_path, "private"))
+    refute ValueContract.sealed?(Map.delete(contract, :schema))
     refute ValueContractClassification.valid?(Map.put(evidence, :branch_secret, "private"))
     refute CommandContractAuthority.valid?(Map.put(authority, :branch_secret, "private"))
     refute CommandPath.valid?(Map.put(path, :source_path, "private"))
@@ -7829,6 +8097,36 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     # A distinct cause must produce a distinct diagnostic; the bare-enum and
     # bare-const rows deliberately share one rule at two locations.
     assert length(Enum.uniq(messages)) == length(cases) - 1
+
+    phase_path =
+      write_application(
+        directory,
+        "invalid-phase-contract",
+        valid_manifest(%{
+          "contracts" => %{
+            "phase_return_schemas" => %{
+              "gathered" => %{"path" => "gather.schema.json"}
+            }
+          }
+        }),
+        %{
+          "gather.schema.json" =>
+            Jason.encode!(%{
+              "type" => "object",
+              "properties" => %{
+                "sum" => %{"type" => "integer", "minimum" => 2, "maximum" => 1}
+              }
+            })
+        }
+      )
+
+    phase_outcome = assert_error(["validate", phase_path], "application", "contract_invalid")
+    assert phase_outcome.envelope["error"]["path"] == "/properties/sum/minimum"
+
+    assert phase_outcome.envelope["error"]["source"] == %{
+             "kind" => "phase_return_contract",
+             "name" => "gather.schema.json"
+           }
 
     # A contract document that is not an object at all reaches the compiler and
     # is named as such. Refusing it before compilation would leave the

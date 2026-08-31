@@ -192,9 +192,9 @@ the transport, mapping, effect, snapshot policy, or server behavior changes.
 
 The required `effect` declaration in `ptc-host.json` is authoritative; server
 annotations cannot change it. `model_visible` on a host mapping is the default
-for prompt discovery, not a ceiling: a selecting manifest may still list that
+for model context, not a ceiling: a selecting manifest may still list that
 name in `config.model_visible`. Visibility never grants or denies call
-authority. `error_feedback: "bounded"` may expose up to 1,024 bytes of
+authority or runtime documentation. `error_feedback: "bounded"` may expose up to 1,024 bytes of
 validated server error text as untrusted model feedback, so enable it only when
 the server cannot return secrets, paths, or stack traces.
 
@@ -211,6 +211,40 @@ body remains an identity; the mapping is a read, so rerunning with full
 capture recovers the value and the identity confirms it is the same one.
 Digests of guessable values are not confidential. Select provider page sizes
 and configured call, event, and clock limits suitable for the source volume.
+
+### Inspect retained MCP exchanges
+
+`inspection_capture` controls what a private inspection artifact retains; it
+does not publish an artifact by itself. Produce a run with correlated trace
+and inspection artifacts (normally `"artifacts": {"trace": true,
+"inspection": true}` in the project document), then use that run's matching
+`run_ref` (the `cmd-...` value) and artifact directories:
+
+```console
+ptc repl \
+  --profile private-run-analysis-v2 \
+  --run cmd-00000000000000000000000001 \
+  --resource traces=.ptc/traces \
+  --resource inspection=.ptc/inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/read "cmd-00000000000000000000000001" {"collection" "provider_exchanges" "limit" 100})'
+```
+
+The `cmd-...` value is a placeholder. The `--run` value, the expression's
+run reference, and the trace and inspection artifacts must all identify the
+same run. `analysis/read` returns one bounded page; when `next_cursor` is not
+`null`, pass it to the next read instead of changing the query. The
+`provider_exchanges` collection exposes retained MCP wire requests and
+responses, including tool-call boundaries; it is not the reconstructed model
+conversation.
+
+With `"full"`, accepted response bodies are retained. With
+`"digest_results"`, accepted responses and results are replaced by
+deterministic JSON identity metadata; rejected responses and error envelopes
+remain available for diagnosis. Arguments and any retained response bodies
+are private inspection data, so protect the artifact directories and every
+downstream output sink. `ptc transcript` publishes the reconstructed model
+conversation, not MCP wire exchanges.
 
 ## Select less authority in the manifest
 
@@ -549,7 +583,7 @@ exercising this exact host-document and command path.
 Interactive authorization is currently available only from a source checkout:
 
 ```console
-ptc run ptc.json --host-config ptc-host.json \
+mix ptc run ptc.json --host-config ptc-host.json \
   --authorize-mcp workspace
 ```
 

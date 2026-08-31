@@ -489,6 +489,39 @@ defmodule PtcRunner.Lisp.Java.ProjectTest do
            end)
   end
 
+  test "value and memory maps share collision ordinals without replacing display keys" do
+    keyword = %Keyword{name: "count"}
+    symbol = %Format.SymbolRef{name: "x"}
+    existing = %ExternalizedCollision{collection: :map, value: "existing", ordinal: 4}
+
+    native = %{
+      existing => :existing,
+      keyword => :keyword,
+      :count => :atom,
+      symbol => :public_symbol,
+      {:symbol_ref, "x"} => :native_symbol
+    }
+
+    for externalized <- [Lisp.externalize_value(native), Lisp.externalize_memory(native)] do
+      assert map_size(externalized) == 5
+      assert externalized[existing] == :existing
+
+      collisions =
+        externalized
+        |> Enum.filter(fn {key, _value} -> match?(%ExternalizedCollision{}, key) end)
+        |> Map.new(fn {%ExternalizedCollision{value: value, ordinal: ordinal}, item} ->
+          {{value, item}, ordinal}
+        end)
+
+      assert collisions[{keyword, :keyword}] in 5..8
+      assert collisions[{:count, :atom}] in 5..8
+      assert collisions[{symbol, :public_symbol}] in 5..8
+      assert collisions[{symbol, :native_symbol}] in 5..8
+      assert collisions[{"existing", :existing}] == 4
+      assert collisions |> Map.values() |> Enum.sort() == [4, 5, 6, 7, 8]
+    end
+  end
+
   test "Java projection errors preserve valid effects and discard malformed diagnostics" do
     malformed = {:symbol_ref, <<255>>}
     tool_call = %{name: "echo", arguments: %{}, result: :ok}

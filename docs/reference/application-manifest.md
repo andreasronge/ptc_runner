@@ -169,6 +169,19 @@ Feedback is schema-derived and bounded: it may identify a safe declared path,
 missing required names, allowed names, and an undeclared-name count, but never
 an undeclared submitted name or value.
 
+Applications may additionally declare up to 16 named non-final handoff
+contracts under `contracts.phase_return_schemas`, using the same
+`{"path": "..."}` reference shape. A non-final agent phase selects one with
+`return_contract`. The active contract is rendered in that phase's prompt and
+requires an explicit contract-valid return before transition. Final phases
+cannot select a phase-return contract; they continue to use `result_schema`.
+
+Each renderer-neutral prompt projection is limited to 262,144 encoded bytes.
+The result projection and every declared phase-return projection are charged,
+once per declaration, to a 1,048,576-byte application aggregate. Overflow is
+rejected during inert acquisition as
+`application/contract_projection_limit_exceeded`.
+
 Contracts are closed object schemas by default. The profile supports common
 object, array, scalar, enum, const, and bound keywords, plus the asserted
 `sha256` string format. It also supports one root discriminated `oneOf` for

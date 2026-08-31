@@ -43,6 +43,10 @@ When adding a real tool:
 5. explicitly allow selected write-bearing tools; and
 6. run plain `doctor` before the active `--connect` probe.
 
+## Was my tool called, and with what?
+
+Read [Inspect retained MCP exchanges](../reference/mcp.md#inspect-retained-mcp-exchanges).
+
 ## What should I do after a failed write?
 
 Treat an indeterminate write as an unknown outcome, not as a safe automatic

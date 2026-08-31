@@ -304,6 +304,13 @@ defmodule PtcRunner.Lisp.Java.StringDispatchTest do
   test "a null receiver does not bypass Java callable arity selection" do
     assert {:error, step} = Lisp.run(~S|((fn [f] (f nil "extra")) .length)|)
     assert step.fail.reason == :java_arity_error
+    assert step.fail.message =~ ".length"
+  end
+
+  test "a first-class instance callable missing its receiver names the member" do
+    assert {:error, step} = Lisp.run(~S|((fn [f] (f)) .length)|)
+    assert step.fail.reason == :java_arity_error
+    assert step.fail.message == ".length requires a receiver, got 0 argument(s)"
   end
 
   test "ordinary PTC string helpers retain grapheme semantics" do

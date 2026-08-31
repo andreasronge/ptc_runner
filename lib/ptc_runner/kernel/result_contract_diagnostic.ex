@@ -78,6 +78,57 @@ defmodule PtcRunner.Kernel.ResultContractDiagnostic do
   end
 
   @doc false
+  @spec retain_phase_details(term()) :: {:ok, map()} | :error
+  def retain_phase_details(
+        %{
+          completion: :invalid_return,
+          phase_index: 1,
+          mission: mission,
+          contract: contract,
+          max_turns: turns,
+          constraint: constraint,
+          contract_authority: %CommandContractAuthority{} = authority,
+          violations: violations
+        } = details
+      )
+      when is_binary(mission) and is_binary(contract) and turns in 1..128 and
+             constraint in @constraints and is_list(violations) do
+    with true <- identifier?(mission),
+         true <- identifier?(contract),
+         true <- CommandContractAuthority.valid?(authority),
+         true <- valid_phase_contract_source?(Map.get(details, :contract_source)),
+         {:ok, retained_violations} <- retain_violations(violations, constraint, authority) do
+      retained = %{
+        completion: :invalid_return,
+        phase_index: 1,
+        mission: mission,
+        contract: contract,
+        max_turns: turns,
+        constraint: constraint,
+        contract_authority: authority,
+        violations: retained_violations
+      }
+
+      {:ok, maybe_put_source(retained, Map.get(details, :contract_source))}
+    else
+      _invalid -> :error
+    end
+  end
+
+  def retain_phase_details(_details), do: :error
+
+  @doc false
+  @spec phase_inspection_details(term()) :: {:ok, map()} | :error
+  def phase_inspection_details(details) do
+    with {:ok, retained} <- retain_phase_details(details) do
+      {:ok,
+       retained
+       |> Map.delete(:contract_authority)
+       |> Map.put(:violations, Enum.map(retained.violations, &inspection_violation/1))}
+    end
+  end
+
+  @doc false
   @spec message(term(), term()) :: {:ok, binary()} | :error
   def message(turns, constraint) when turns in 1..128 and constraint in @constraints,
     do: {:ok, @prefix <> Integer.to_string(turns) <> @middle <> Atom.to_string(constraint)}
@@ -143,6 +194,18 @@ defmodule PtcRunner.Kernel.ResultContractDiagnostic do
     do: match?({:ok, _source}, CommandSource.new(:result_contract, source))
 
   defp valid_contract_source?(_source), do: false
+
+  defp valid_phase_contract_source?(nil), do: true
+
+  defp valid_phase_contract_source?(source) when is_binary(source),
+    do: match?({:ok, _source}, CommandSource.new(:phase_return_contract, source))
+
+  defp valid_phase_contract_source?(_source), do: false
+
+  defp identifier?(value),
+    do:
+      byte_size(value) in 1..128 and
+        Regex.match?(~r/\A[a-z][a-z0-9._-]*\z/, value)
 
   defp maybe_put_source(details, source) when is_binary(source),
     do: Map.put(details, :contract_source, source)

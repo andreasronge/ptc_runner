@@ -13,17 +13,37 @@ defmodule PtcRunner.Kernel.Environment do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.RoutedCapability
 
-  @reserved ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
+  @reserved ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-phase-return-contract-failure kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
   @workflow_implicit ~w(kernel-check-source kernel-eval kernel-mission-inventory kernel-mission-model-context kernel-result-contract runtime-usage runtime-remaining cap-list cap-describe workflow-annotate)
+  @agent_core_private ~w(kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-phase-return-contract-failure kernel-result-contract-failure kernel-runtime-limit-failure)
 
   @doc "Validates common environment fields and returns normalized attributes."
-  def assemble(bundle, capabilities, data, kind)
-      when kind in [:workflow, :mission] do
+  def assemble(bundle, capabilities, data, :workflow),
+    do: assemble(bundle, capabilities, data, :workflow, %{})
+
+  def assemble(bundle, capabilities, data, :mission),
+    do: do_assemble(bundle, capabilities, data, :mission, [])
+
+  @doc false
+  def assemble(bundle, capabilities, data, :workflow, authorization)
+      when is_map(authorization) do
+    private_capabilities = workflow_private_capabilities(bundle, authorization)
+
+    case do_assemble(bundle, capabilities, data, :workflow, private_capabilities) do
+      {:ok, attributes} ->
+        {:ok, Map.put(attributes, :private_capabilities, private_capabilities)}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp do_assemble(bundle, capabilities, data, kind, private_capabilities) do
     with :ok <- valid_bundle(bundle),
          true <- JSONValue.map?(data),
          {:ok, capability_map} <- capability_map(capabilities),
          :ok <- reserved_names(kind, capability_map),
-         :ok <- bundle_requirements(bundle, capability_map, kind) do
+         :ok <- bundle_requirements(bundle, capability_map, kind, private_capabilities) do
       {:ok, %{bundle: bundle, capabilities: capability_map, data: data}}
     else
       false -> {:error, :invalid_environment_data}
@@ -69,6 +89,19 @@ defmodule PtcRunner.Kernel.Environment do
     |> Enum.sort_by(& &1.name)
   end
 
+  @doc "Returns bounded metadata for every installed capability, regardless of prompt visibility."
+  @spec capability_contracts(map()) :: %{binary() => map()}
+  def capability_contracts(%{capabilities: capabilities}) when is_map(capabilities) do
+    Map.new(capabilities, fn {name, capability} ->
+      contract =
+        capability
+        |> capability_metadata()
+        |> Map.take([:name, :description, :input_schema, :effect])
+
+      {name, contract}
+    end)
+  end
+
   @doc false
   @spec capability_requirements(FrozenBundle.t() | nil) :: [binary()]
   def capability_requirements(%FrozenBundle{prelude: %{exports: exports}}) do
@@ -92,8 +125,30 @@ defmodule PtcRunner.Kernel.Environment do
           [binary()]
   def missing_capability_requirements(bundle, capability_names, kind)
       when is_list(capability_names) and kind in [:workflow, :mission] do
+    private_capabilities =
+      case kind do
+        :workflow -> workflow_private_capabilities(bundle, %{})
+        :mission -> []
+      end
+
+    missing_capability_requirements(bundle, capability_names, kind, private_capabilities)
+  end
+
+  @doc false
+  @spec missing_capability_requirements(
+          FrozenBundle.t() | nil,
+          [binary()],
+          :workflow | :mission,
+          [binary()]
+        ) :: [binary()]
+  def missing_capability_requirements(bundle, capability_names, kind, private_capabilities)
+      when is_list(capability_names) and is_list(private_capabilities) and
+             kind in [:workflow, :mission] do
     granted_names =
-      Map.new(capability_names ++ implicit_capabilities(kind, bundle), &{&1, true})
+      Map.new(
+        capability_names ++ implicit_capabilities(kind, private_capabilities),
+        &{&1, true}
+      )
 
     bundle
     |> capability_requirements()
@@ -132,31 +187,33 @@ defmodule PtcRunner.Kernel.Environment do
       else: :ok
   end
 
-  defp bundle_requirements(%FrozenBundle{} = bundle, capabilities, kind) do
-    missing = missing_capability_requirements(bundle, Map.keys(capabilities), kind)
+  defp bundle_requirements(%FrozenBundle{} = bundle, capabilities, kind, private_capabilities) do
+    missing =
+      missing_capability_requirements(
+        bundle,
+        Map.keys(capabilities),
+        kind,
+        private_capabilities
+      )
 
     if missing == [],
       do: :ok,
       else: {:error, {:missing_capability_requirement, missing}}
   end
 
-  defp bundle_requirements(_bundle, _capabilities, _kind), do: :ok
+  defp bundle_requirements(_bundle, _capabilities, _kind, _private_capabilities), do: :ok
 
-  defp implicit_capabilities(:workflow, bundle) do
-    if Library.shipped_component?(bundle, "agent.core"),
-      do: [
-        "kernel-agent-config-failure",
-        "kernel-agent-protocol-error",
-        "kernel-llm-provider-failure",
-        "kernel-result-contract-failure",
-        "kernel-runtime-limit-failure"
-        | @workflow_implicit
-      ],
-      else: @workflow_implicit
-  end
+  defp implicit_capabilities(:workflow, private_capabilities),
+    do: private_capabilities ++ @workflow_implicit
 
-  defp implicit_capabilities(:mission, _bundle),
+  defp implicit_capabilities(:mission, _private_capabilities),
     do: ~w(runtime-usage runtime-remaining cap-list cap-describe)
+
+  defp workflow_private_capabilities(bundle, authorization) do
+    if Library.shipped_or_verified_override_component?(bundle, "agent.core", authorization),
+      do: @agent_core_private,
+      else: []
+  end
 
   defp capability_metadata(%Capability{} = capability), do: Capability.metadata(capability)
 

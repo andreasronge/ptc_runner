@@ -14,11 +14,11 @@ defmodule PtcRunner.ReplFrontend do
       ptc repl --manifest ptc.json --host-config ptc-host.json --mission review
       ptc repl --manifest ptc.json --trace trace.jsonl
       ptc repl --profile run-analysis-v1 --resource traces=tmp/traces
-      ptc repl --profile private-run-analysis-v1 \
+      ptc repl --profile private-run-analysis-v2 \
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
         --private-terminal
-      ptc repl --profile private-run-analysis-v1 \
+      ptc repl --profile private-run-analysis-v2 \
         --resource traces=tmp/traces \
         --resource inspection=tmp/inspection \
         --private-unattended --format jsonl -e '(analysis/runs {})'
@@ -41,7 +41,7 @@ defmodule PtcRunner.ReplFrontend do
     * `-t, --trace` — append this session's canonical events to a JSONL file;
     * `--profile` — select a code-owned mission session profile;
     * `--resource NAME=VALUE` — supply a required profile resource; repeatable;
-    * `--run RUN_ID` — select an exact run for `private-run-analysis-v1`;
+    * `--run RUN_ID` — select an exact run for `private-run-analysis-v2`;
       repeat one through sixteen times to admit one bounded cohort;
     * `--session-trace-dir` — existing output directory for a profile session's
       separate canonical trace;
@@ -464,7 +464,7 @@ defmodule PtcRunner.ReplFrontend do
     do: "--private-terminal and --private-unattended are mutually exclusive"
 
   defp profile_frontend_error(:selected_runs_unsupported),
-    do: "--run is supported only with --profile private-run-analysis-v1"
+    do: "--run is supported only with --profile private-run-analysis-v2"
 
   defp profile_frontend_error(_reason), do: "invalid profile command"
 

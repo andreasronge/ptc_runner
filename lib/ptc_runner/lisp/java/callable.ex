@@ -74,14 +74,14 @@ defmodule PtcRunner.Lisp.Java.Callable do
   defp invoke_reference(%{kind: :instance, reference_id: reference_id}, [receiver | arguments]),
     do: Dispatch.invoke(reference_id, :instance, receiver, arguments)
 
-  defp invoke_reference(%{reference_id: reference_id}, arguments) do
+  defp invoke_reference(%{reference_id: reference_id, spellings: [name | _]}, arguments) do
     {:error,
      Condition.new(
        :java_arity_error,
        reference_id,
        nil,
        "Java instance callable requires a receiver",
-       %{actual: length(arguments), receiver_required?: true}
+       %{name: name, actual: length(arguments), receiver_required?: true}
      )}
   end
 end

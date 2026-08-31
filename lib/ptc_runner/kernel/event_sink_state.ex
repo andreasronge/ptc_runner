@@ -119,14 +119,38 @@ defmodule PtcRunner.Kernel.EventSinkState do
   def ready?(state), do: not state.finalized?
 
   @doc false
-  def payload_within_limit?(data, limit) when is_map(data) and is_integer(limit) and limit > 0 do
-    with {:ok, normalized_data} <- JSONValue.normalize(data),
-         true <- JSONValue.map?(normalized_data),
-         bytes when is_integer(bytes) <- RetainedSize.bytes_with_cap(normalized_data, limit),
-         do: bytes <= limit
+  def payload_within_limit?(data, limit) when is_integer(limit) and limit > 0 do
+    with {:ok, normalized_data} <- normalized_payload(data),
+         bytes when is_integer(bytes) <- RetainedSize.bytes_with_cap(normalized_data, limit) do
+      bytes <= limit
+    else
+      _unsizable -> false
+    end
   end
 
   def payload_within_limit?(_data, _limit), do: false
+
+  @doc false
+  @spec payload_bytes(term()) :: non_neg_integer() | :error
+  def payload_bytes(data) do
+    with {:ok, normalized_data} <- normalized_payload(data),
+         bytes when is_integer(bytes) <- RetainedSize.bytes(normalized_data) do
+      bytes
+    else
+      _unsizable -> :error
+    end
+  end
+
+  defp normalized_payload(data) when is_map(data) do
+    with {:ok, normalized_data} <- JSONValue.normalize(data),
+         true <- JSONValue.map?(normalized_data) do
+      {:ok, normalized_data}
+    else
+      _invalid -> :error
+    end
+  end
+
+  defp normalized_payload(_data), do: :error
 
   defp enqueue(state, event, bytes) do
     if ordinary_capacity?(state, bytes) do

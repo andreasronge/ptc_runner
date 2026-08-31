@@ -139,11 +139,25 @@ defmodule PtcRunner.Kernel.EventSink do
   def begin_capacity?(_sink, _data), do: false
 
   @doc false
-  def terminal_usage_capacity?(
-        %__MODULE__{policy: policy},
-        %Limits{} = limits,
-        usage
-      )
+  def terminal_usage_capacity?(sink, %Limits{} = limits, usage) do
+    case required_terminal_payload_bytes(sink, usage) do
+      bytes when is_integer(bytes) -> limits.event_payload_bytes >= bytes
+      :error -> false
+    end
+  end
+
+  def terminal_usage_capacity?(_sink, _limits, _usage), do: false
+
+  @doc """
+  Returns the `event_payload_bytes` one terminal payload of `usage` needs.
+
+  Admission compares this against the effective limit, and the refusal reports
+  it, so the number a caller is told to raise to is the number that refused
+  them. Normal policy charges the saturated reachable drop map at its
+  conservative bound rather than at whatever the current run happens to hold.
+  """
+  @spec required_terminal_payload_bytes(t(), map()) :: pos_integer() | :error
+  def required_terminal_payload_bytes(%__MODULE__{policy: policy}, usage)
       when policy in [:normal, :private] and is_map(usage) do
     {dropped, drop_map_headroom} =
       if policy == :normal,
@@ -151,7 +165,6 @@ defmodule PtcRunner.Kernel.EventSink do
         else: {%{}, 0}
 
     usage = Map.put(usage, :events_dropped, dropped)
-    payload_limit = limits.event_payload_bytes - drop_map_headroom
 
     payloads = [
       %{outcome: :error, reason: EventBudget.maximum_terminal_reason(), usage: usage},
@@ -163,11 +176,15 @@ defmodule PtcRunner.Kernel.EventSink do
       }
     ]
 
-    payload_limit > 0 and
-      Enum.all?(payloads, &EventSinkState.payload_within_limit?(&1, payload_limit))
+    Enum.reduce_while(payloads, 1, fn payload, required ->
+      case EventSinkState.payload_bytes(payload) do
+        bytes when is_integer(bytes) -> {:cont, max(required, bytes + drop_map_headroom)}
+        :error -> {:halt, :error}
+      end
+    end)
   end
 
-  def terminal_usage_capacity?(_sink, _limits, _usage), do: false
+  def required_terminal_payload_bytes(_sink, _usage), do: :error
 
   @spec events(t()) :: [map()]
   @doc "Returns retained canonical events in sequence order."

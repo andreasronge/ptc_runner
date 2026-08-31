@@ -15,10 +15,24 @@
 (defn- next-phase? [phases phase-index]
   (< (inc phase-index) (count phases)))
 
-(defn- phase-effective-cfg [cfg phase]
-  (assoc (assoc (assoc cfg "mission" (get phase "mission"))
-                "max_turns" (get phase "max_turns"))
-         "terminal_only" (true? (get phase "terminal_only"))))
+(defn- phase-effective-cfg [cfg phase final-phase?]
+  (let [phase-cfg (assoc (assoc (assoc cfg "mission" (get phase "mission"))
+                                "max_turns" (get phase "max_turns"))
+                         "terminal_only" (true? (get phase "terminal_only")))
+        standalone (get cfg "standalone_return_contract")]
+    (cond
+      (and final-phase? (map? standalone))
+      (assoc (assoc phase-cfg
+                    "standalone_return_contract_name" (get standalone :name))
+             "standalone_return_contract_projection" (get standalone :projection))
+
+      final-phase?
+      phase-cfg
+
+      :else
+      (assoc (assoc (assoc phase-cfg "result_contract" nil)
+                    "return_contract" (get phase "return_contract"))
+             "phase_return_contract" (get phase "return_contract_projection")))))
 
 (defn- current-state [machine]
   (get machine :state))
@@ -37,13 +51,16 @@
   {:type :action :kind (get action :kind) :action action})
 
 (defn- phase-turn-budget
-  [turns-remaining consolidate-at-turns-remaining has-next-phase?]
+  [turns-remaining consolidate-at-turns-remaining has-next-phase? return-contract?]
   (if (not has-next-phase?)
     (agent.feedback/turn-budget turns-remaining consolidate-at-turns-remaining)
     (str "PHASE BUDGET: " turns-remaining " "
          (if (= turns-remaining 1) "turn remains" "turns remain")
          " in the current mission phase, including the next program."
          (cond
+           (and (= turns-remaining 1) return-contract?)
+           "\nFINAL PHASE TURN: the next program must call (return value) satisfying the current phase contract, or (fail value). Exhaustion without an explicit return fails the phase."
+
            (= turns-remaining 1)
            "\nFINAL PHASE TURN: close the most material evidence gap. The host will then switch mission authority and continue with the retained transcript."
 
@@ -54,12 +71,13 @@
            :else ""))))
 
 (defn- with-phase-budget
-  [content turns-remaining consolidate-at-turns-remaining has-next-phase?]
+  [content turns-remaining consolidate-at-turns-remaining has-next-phase? return-contract?]
   (str content "\n\n"
        (phase-turn-budget
          turns-remaining
          consolidate-at-turns-remaining
-         has-next-phase?)))
+         has-next-phase?
+         return-contract?)))
 
 ;; The model's own narration is its stated plan for the turn. Dropping it left
 ;; the next turn seeing a tool result with no record of why it was requested.
@@ -108,7 +126,8 @@
        (phase-turn-budget
          (get phase "max_turns")
          consolidate-at-turns-remaining
-         has-next-phase?)))
+         has-next-phase?
+         (string? (get phase "return_contract")))))
 
 (defn- returned-outcome [value]
   {:status :returned :value value})
@@ -196,7 +215,9 @@
     (if (next-phase? phases phase-index)
       (let [next-index (inc phase-index)
             next-phase (get phases next-index)
-            next-cfg (phase-effective-cfg (get context :effective-cfg) next-phase)
+            next-cfg (phase-effective-cfg (get context :effective-cfg)
+                                          next-phase
+                                          (not (next-phase? phases next-index)))
             next-prompt (agent.prompt/initial-state next-cfg)
             retained (append-agent-feedback (get state :messages) action content)]
         (if (map? next-prompt)
@@ -237,11 +258,30 @@
                content
                (get event :turns-remaining)
                (get context :consolidate-at-turns-remaining)
-               (next-phase? phases phase-index)))
+               (next-phase? phases phase-index)
+               (string? (get phase "return_contract"))))
            :prompt-state next-prompt
            :closing? (get state :closing?)}
           {:prompt-error :invalid-transition}))
-      (transitioned-state machine action content))))
+      (if (string? (get phase "return_contract"))
+        nil
+        (transitioned-state machine action content)))))
+
+(defn- phase-contract-failure [machine completion value]
+  {:op :phase-contract-failure
+   :completion completion
+   :value value
+   :phase-index (inc (get (current-state machine) :phase-index))
+   :mission (get (current-phase machine) "mission")
+   :contract-name (get (current-phase machine) "return_contract")
+   :max-turns (get (current-phase machine) "max_turns")})
+
+(defn- exhaustion-fallback [machine fallback]
+  (if (and (next-phase? (get (current-context machine) :phases)
+                        (get (current-state machine) :phase-index))
+           (string? (get (current-phase machine) "return_contract")))
+    (phase-contract-failure machine :missing-return nil)
+    fallback))
 
 (defn- unsafe-closing-state [machine action evaluation]
   (let [state (current-state machine)
@@ -276,7 +316,7 @@
         machine
         (continuation-state
           machine action (agent.feedback/protocol-error action) :protocol-error)
-        (done (turn-limit-failure :protocol-error total-max-turns)))
+        (exhaustion-fallback machine (done (turn-limit-failure :protocol-error total-max-turns))))
 
       (= :model-output-truncated kind)
       (let [limit (get action :output-limit)]
@@ -316,7 +356,7 @@
             machine action
             (agent.feedback/terminal-source-required check)
             :terminal-source-required)
-          (done (turn-limit-failure :terminal-source-required total-max-turns)))
+          (exhaustion-fallback machine (done (turn-limit-failure :terminal-source-required total-max-turns))))
         {:op :host-failure
          :error (result/error :evaluation-unavailable
                               (or (get check :reason)
@@ -342,20 +382,73 @@
 (defn- decide-returned [machine action evaluation]
   (if (next-phase? (get (current-context machine) :phases)
                    (get (current-state machine) :phase-index))
-    (continue-or
-      machine
-      (transitioned-state
-        machine action
-        (agent.feedback/success evaluation
-                                (get (current-context machine) :max-observation-chars)))
-      {:op :host-failure
-       :error (result/error :invalid-prompt :invalid-initial-state)})
-    (if (= :none (get (current-context machine) :projector-kind))
+    (if (string? (get (current-phase machine) "return_contract"))
+      {:op :validate-phase :machine machine :action action :value (get evaluation :value) :evaluation evaluation}
+      (continue-or
+        machine
+        (transitioned-state
+          machine action
+          (agent.feedback/success evaluation
+                                  (get (current-context machine) :max-observation-chars)))
+        {:op :host-failure
+         :error (result/error :invalid-prompt :invalid-initial-state)}))
+    (cond
+      (get (current-context machine) :standalone-return-contract?)
+      {:op :validate-standalone
+       :machine machine
+       :action action
+       :value (get evaluation :value)}
+
+      (= :none (get (current-context machine) :projector-kind))
       (done (returned-outcome (get evaluation :value)))
+
+      :else
       {:op :validate
        :machine machine
        :action action
        :value (get evaluation :value)})))
+
+(defn- standalone-contract-failure [machine value]
+  (let [contract (get (current-context machine) :standalone-return-contract)]
+    {:op :standalone-contract-failure
+     :completion :invalid-return
+     :value value
+     :phase-index 1
+     :mission (get (current-phase machine) "mission")
+     :contract-name (get contract :name)
+     :max-turns (get (current-phase machine) "max_turns")}))
+
+(defn- decide-standalone-validation [machine event]
+  (let [action (get event :action)
+        value (get event :value)
+        validation (get event :validation)]
+    (if (true? (get validation :valid?))
+      (done (returned-outcome value))
+      (continue-or
+        machine
+        (continuation-state
+          machine
+          action
+          (agent.feedback/phase-result-contract (assoc validation :standalone? true))
+          :phase-contract-error)
+        (standalone-contract-failure machine value)))))
+
+(defn- decide-phase-validation [machine event]
+  (let [action (get event :action)
+        value (get event :value)
+        evaluation (get event :evaluation)
+        validation (get event :validation)]
+    (if (true? (get validation :valid?))
+      (continue-or
+        machine
+        (transitioned-state machine action (agent.feedback/success
+                                             evaluation
+                                             (get (current-context machine) :max-observation-chars)))
+        {:op :host-failure :error (result/error :invalid-prompt :invalid-initial-state)})
+      (continue-or
+        machine
+        (continuation-state machine action (agent.feedback/phase-result-contract validation) :phase-contract-error)
+        (phase-contract-failure machine :invalid-return value)))))
 
 (defn- decide-retryable-evaluation [machine action evaluation]
   (let [phase (current-phase machine)
@@ -390,7 +483,7 @@
           machine action
           (agent.feedback/evaluation-error evaluation)
           :evaluation-error)
-        (done (turn-limit-failure :evaluation-error total-max-turns))))))
+        (exhaustion-fallback machine (done (turn-limit-failure :evaluation-error total-max-turns)))))))
 
 (defn- decide-evaluation [machine event]
   (let [action (get event :action)
@@ -438,7 +531,7 @@
             machine action
             (agent.feedback/success evaluation max-observation-chars)
             :evaluation-success)
-          (done (turn-limit-failure :intermediate-result total-max-turns)))
+          (exhaustion-fallback machine (done (turn-limit-failure :intermediate-result total-max-turns))))
 
         ;; A refused admission is a host condition, not something the model
         ;; wrote: either another caller holds the run's single evaluation
@@ -475,7 +568,9 @@
   [task context]
   (let [phases (get context :phases)
         initial-phase (first phases)
-        initial-cfg (phase-effective-cfg (get context :effective-cfg) initial-phase)
+        initial-cfg (phase-effective-cfg (get context :effective-cfg)
+                                         initial-phase
+                                         (not (next-phase? phases 0)))
         initial-prompt-state (agent.prompt/initial-state initial-cfg)]
     (if (not (map? initial-prompt-state))
       {:op :host-failure
@@ -499,7 +594,8 @@
                          task)
                        (get initial-phase "max_turns")
                        (get context :consolidate-at-turns-remaining)
-                       (next-phase? phases 0))}]
+                       (next-phase? phases 0)
+                       (string? (get initial-phase "return_contract")))}]
          :prompt-state initial-prompt-state
          :closing? false}}})))
 
@@ -525,6 +621,12 @@
 
         (= :validation type)
         (decide-result-validation machine event)
+
+        (= :phase-validation type)
+        (decide-phase-validation machine event)
+
+        (= :standalone-validation type)
+        (decide-standalone-validation machine event)
 
         :else
         {:op :host-failure :error (result/error :unknown-event type)}))))

@@ -174,6 +174,13 @@ the normal dependency, signature, export, capability-requirement, and bundle
 checks. The descriptor contains no source, credentials, provider grants, or
 installation instruction.
 
+One existing library authority also follows verified lineage: a workflow
+override of the shipped `agent.core` retains its fixed private diagnostic
+routes. PtcRunner admits those routes only when the selected base is the
+shipped library, its descriptor base hash matches that library, and the
+compiled candidate matches the descriptor source hash. A byte-identical local
+component does not inherit the grant.
+
 The optional closed `provenance` object may contain `run_id`, `prompt_hash`,
 `authored_at`, and `accept_widened_effect`. These are supplied claims rather
 than proof of origin.

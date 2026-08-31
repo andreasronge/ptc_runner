@@ -32,6 +32,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.PrivateDirectory
@@ -812,7 +813,8 @@ defmodule PtcRunner.Kernel.ReplSession do
         filter_context: false,
         link: true,
         strict_data: true,
-        data_grants: DataKeys.source_referenceable_forms(session.config.input)
+        data_grants: DataKeys.source_referenceable_forms(session.config.input),
+        shipped_library_ids: Library.component_ids()
       )
 
     name_timeout_limit(result, session, remaining_ms)
@@ -1102,7 +1104,10 @@ defmodule PtcRunner.Kernel.ReplSession do
         session.config.event_sink,
         :workflow,
         "kernel-result-contract",
-        RuntimeTools.result_contract(session.config.result_contract)
+        RuntimeTools.result_contract(
+          session.config.result_contract,
+          session.config.phase_return_contracts
+        )
       )
     )
     |> RuntimeTools.maybe_put_result_contract_failure(
@@ -1110,25 +1115,34 @@ defmodule PtcRunner.Kernel.ReplSession do
       session.config.event_sink,
       session.config.result_contract,
       session.config.result_contract_source,
-      session.config.workflow_environment.bundle
+      session.config.workflow_environment
+    )
+    |> RuntimeTools.maybe_put_phase_return_contract_failure(
+      session.state,
+      session.config.event_sink,
+      session.config.phase_return_contracts,
+      session.config.workflow_environment
     )
     |> RuntimeTools.maybe_put_llm_provider_failure(
       session.state,
       session.config.event_sink,
-      session.config.workflow_environment.bundle
+      session.config.workflow_environment
     )
     |> RuntimeTools.maybe_put_runtime_limit_failure(
       session.state,
       session.config.event_sink,
       session.config.limits,
-      session.config.workflow_environment.bundle
+      session.config.workflow_environment
     )
     |> RuntimeTools.maybe_put_agent_loop_tools(
       session.state,
       session.config.event_sink,
-      session.config.workflow_environment.bundle
+      session.config.workflow_environment
     )
-    |> RuntimeTools.trusted_tools(session.config.limits)
+    |> RuntimeTools.trusted_tools(
+      session.config.limits,
+      ToolGrant.capability_contracts(session.config.workflow_environment)
+    )
   end
 
   defp finish_evaluation(

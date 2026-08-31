@@ -75,10 +75,8 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   @spec sealed?(term()) :: boolean()
   @doc "Checks that a contract is the unchanged result of bounded compilation."
-  def sealed?(%__MODULE__{attestation: attestation} = contract) do
-    Enum.sort(Map.keys(contract)) == @field_keys and
-      Attestation.valid?(__MODULE__, payload(contract), attestation)
-  end
+  def sealed?(%__MODULE__{} = contract),
+    do: Attestation.valid_struct?(__MODULE__, contract, @field_keys, fn -> payload(contract) end)
 
   def sealed?(_contract), do: false
 
@@ -613,6 +611,14 @@ defmodule PtcRunner.Kernel.ValueContract do
       _other -> nil
     end
   end
+
+  @doc false
+  @spec prompt_discriminator(t()) :: {:ok, binary()} | :error
+  def prompt_discriminator(%__MODULE__{schema: %{"oneOf" => branches}} = contract) do
+    if sealed?(contract), do: shared_discriminator(branches), else: :error
+  end
+
+  def prompt_discriminator(_contract), do: :error
 
   defp branch_tag(branch, nil), do: get_in(branch, ["properties"]) && nil
   defp branch_tag(branch, name), do: get_in(branch, ["properties", name, "const"])

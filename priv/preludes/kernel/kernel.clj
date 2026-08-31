@@ -79,3 +79,28 @@
     (if (= :ok (get response :status))
       (get response :value)
       (fail response))))
+
+(defn result-contract-presentation
+  "Return the bounded renderer-neutral application result contract, or nil."
+  []
+  (let [response (tool/kernel-result-contract {"presentation" true})]
+    (if (= :ok (get response :status))
+      (let [value (get response :value)]
+        (if (string? value) (json/parse-string value) nil))
+      (fail response))))
+
+(defn phase-return-contract-presentation
+  "Resolve one named phase-return contract and return its model projection."
+  [name]
+  (let [response (tool/kernel-result-contract {"phase_contract" name "presentation" true})]
+    (if (= :ok (get response :status))
+      (json/parse-string (get response :value))
+      response)))
+
+(defn validate-phase-return
+  "Validate an explicit phase or standalone handoff return against its named contract."
+  [name value]
+  (let [response (tool/kernel-result-contract {"phase_contract" name "value" value})]
+    (if (= :ok (get response :status))
+      (get response :value)
+      (fail response))))

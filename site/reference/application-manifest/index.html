@@ -190,7 +190,16 @@ raw object when <code class="inline">result_envelope</code> is false. <code clas
 the right contract when that raw value is itself the application result.
 Feedback is schema-derived and bounded: it may identify a safe declared path,
 missing required names, allowed names, and an undeclared-name count, but never
-an undeclared submitted name or value.</p><p>Contracts are closed object schemas by default. The profile supports common
+an undeclared submitted name or value.</p><p>Applications may additionally declare up to 16 named non-final handoff
+contracts under <code class="inline">contracts.phase_return_schemas</code>, using the same
+<code class="inline">{&quot;path&quot;: &quot;...&quot;}</code> reference shape. A non-final agent phase selects one with
+<code class="inline">return_contract</code>. The active contract is rendered in that phase's prompt and
+requires an explicit contract-valid return before transition. Final phases
+cannot select a phase-return contract; they continue to use <code class="inline">result_schema</code>.</p><p>Each renderer-neutral prompt projection is limited to 262,144 encoded bytes.
+The result projection and every declared phase-return projection are charged,
+once per declaration, to a 1,048,576-byte application aggregate. Overflow is
+rejected during inert acquisition as
+<code class="inline">application/contract_projection_limit_exceeded</code>.</p><p>Contracts are closed object schemas by default. The profile supports common
 object, array, scalar, enum, const, and bound keywords, plus the asserted
 <code class="inline">sha256</code> string format. It also supports one root discriminated <code class="inline">oneOf</code> for
 closed object branches. References, regexes, nested composition, union types,

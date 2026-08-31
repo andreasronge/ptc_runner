@@ -34,6 +34,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     transcript-limit
     turn-limit
     model-program-failed
+    phase-return-contract-failed
     non-retryable-evaluation
     evaluation-unavailable
     llm-provider-error
@@ -87,6 +88,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :invalid_request,
     :invalid_result,
     :invalid_result_contract_failure,
+    :invalid_phase_return_contract_failure,
     :invalid_result_contract_request,
     :invalid_runtime_limit_failure,
     :invalid_runtime_remaining_request,
@@ -100,6 +102,7 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     :output_schema_mismatch,
     :output_validation_unavailable,
     :payment_required,
+    :phase_return_contract_failed,
     :protocol_errors,
     :provider_exit,
     :provider_heap_exceeded,
@@ -255,9 +258,10 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   Maximum distinct closed-class keys retained in `usage.capability_refusals`.
 
   Terminal usage admission reserves this many fingerprint-length keys plus
-  `$overflow`. Two named classes is the largest such map that still admits an
-  empty environment at the 7_000-byte `event_payload_bytes` floor used by
-  terminal preflight. Further classes increment `$overflow`.
+  `$overflow`, and `EventBudget.minimum_normal_payload_bytes/0` is derived with
+  that reservation already in the projection, so raising this constant raises
+  the published `event_payload_bytes` floor every manifest and host document
+  must clear. Further classes increment `$overflow`.
   """
   @spec capability_refusal_map_limit() :: 2
   def capability_refusal_map_limit, do: 2

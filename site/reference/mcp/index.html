@@ -201,9 +201,9 @@ not see an unrestricted filesystem or the server command.</p><h2 id="install-and
 capability name exposed by PtcRunner. Change <code class="inline">installation_revision</code> whenever
 the transport, mapping, effect, snapshot policy, or server behavior changes.</p><p>The required <code class="inline">effect</code> declaration in <code class="inline">ptc-host.json</code> is authoritative; server
 annotations cannot change it. <code class="inline">model_visible</code> on a host mapping is the default
-for prompt discovery, not a ceiling: a selecting manifest may still list that
+for model context, not a ceiling: a selecting manifest may still list that
 name in <code class="inline">config.model_visible</code>. Visibility never grants or denies call
-authority. <code class="inline">error_feedback: &quot;bounded&quot;</code> may expose up to 1,024 bytes of
+authority or runtime documentation. <code class="inline">error_feedback: &quot;bounded&quot;</code> may expose up to 1,024 bytes of
 validated server error text as untrusted model feedback, so enable it only when
 the server cannot return secrets, paths, or stack traces.</p><p><code class="inline">inspection_capture</code> is the closed host-only enum <code class="inline">&quot;full&quot;</code> (the default) or
 <code class="inline">&quot;digest_results&quot;</code>. The latter is accepted only for read mappings. Private
@@ -217,7 +217,28 @@ admission, output validation -- keeps its full error envelope while the wire
 body remains an identity; the mapping is a read, so rerunning with full
 capture recovers the value and the identity confirms it is the same one.
 Digests of guessable values are not confidential. Select provider page sizes
-and configured call, event, and clock limits suitable for the source volume.</p><h2 id="select-less-authority-in-the-manifest">Select less authority in the manifest</h2><p>The application selects the installed alias in its mission provider list:</p><pre><code class="json language-json">&quot;providers&quot;: {
+and configured call, event, and clock limits suitable for the source volume.</p><h3 id="inspect-retained-mcp-exchanges">Inspect retained MCP exchanges</h3><p><code class="inline">inspection_capture</code> controls what a private inspection artifact retains; it
+does not publish an artifact by itself. Produce a run with correlated trace
+and inspection artifacts (normally <code class="inline">&quot;artifacts&quot;: {&quot;trace&quot;: true, &quot;inspection&quot;: true}</code> in the project document), then use that run's matching
+<code class="inline">run_ref</code> (the <code class="inline">cmd-...</code> value) and artifact directories:</p><pre><code class="console language-console">ptc repl \
+  --profile private-run-analysis-v2 \
+  --run cmd-00000000000000000000000001 \
+  --resource traces=.ptc/traces \
+  --resource inspection=.ptc/inspection \
+  --private-unattended --format jsonl \
+  -e '(analysis/read &quot;cmd-00000000000000000000000001&quot; {&quot;collection&quot; &quot;provider_exchanges&quot; &quot;limit&quot; 100})'</code></pre><p>The <code class="inline">cmd-...</code> value is a placeholder. The <code class="inline">--run</code> value, the expression's
+run reference, and the trace and inspection artifacts must all identify the
+same run. <code class="inline">analysis/read</code> returns one bounded page; when <code class="inline">next_cursor</code> is not
+<code class="inline">null</code>, pass it to the next read instead of changing the query. The
+<code class="inline">provider_exchanges</code> collection exposes retained MCP wire requests and
+responses, including tool-call boundaries; it is not the reconstructed model
+conversation.</p><p>With <code class="inline">&quot;full&quot;</code>, accepted response bodies are retained. With
+<code class="inline">&quot;digest_results&quot;</code>, accepted responses and results are replaced by
+deterministic JSON identity metadata; rejected responses and error envelopes
+remain available for diagnosis. Arguments and any retained response bodies
+are private inspection data, so protect the artifact directories and every
+downstream output sink. <code class="inline">ptc transcript</code> publishes the reconstructed model
+conversation, not MCP wire exchanges.</p><h2 id="select-less-authority-in-the-manifest">Select less authority in the manifest</h2><p>The application selects the installed alias in its mission provider list:</p><pre><code class="json language-json">&quot;providers&quot;: {
   &quot;mission&quot;: [
     {&quot;name&quot;: &quot;workspace&quot;, &quot;config&quot;: {&quot;allow&quot;: [&quot;workspace.read&quot;]}}
   ]
@@ -422,7 +443,7 @@ credential-free and cannot be combined with an <code class="inline">oauth</code>
 does not accept a custom CA path in the host document: use a certificate trusted
 by the runtime's operating-system trust store. The repository E2E harness is a
 test-only exception; it loads an ephemeral CA directly into the test VM before
-exercising this exact host-document and command path.</p><p>Interactive authorization is currently available only from a source checkout:</p><pre><code class="console language-console">ptc run ptc.json --host-config ptc-host.json \
+exercising this exact host-document and command path.</p><p>Interactive authorization is currently available only from a source checkout:</p><pre><code class="console language-console">mix ptc run ptc.json --host-config ptc-host.json \
   --authorize-mcp workspace</code></pre><p>The command prints a URL and waits on an operating-system-selected loopback
 port. The shipped CLI store is process-local, so a later invocation must
 authorize again; embedding hosts may provide a secure principal-scoped store.

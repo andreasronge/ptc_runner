@@ -59,6 +59,10 @@
 (defn- nonblank-string? [value]
   (and (string? value) (not (blank? value))))
 
+(defn- contract-name? [value]
+  (and (string? value)
+       (re-matches #"[a-z][a-z0-9._-]{0,127}" value)))
+
 (defn- valid-phase? [phase]
   (and (map? phase)
        (nonblank-string? (get phase "mission"))
@@ -69,7 +73,44 @@
            (nonblank-string? (get phase "instruction")))
        (or (nil? (get phase "terminal_only"))
            (true? (get phase "terminal_only"))
-           (false? (get phase "terminal_only")))))
+           (false? (get phase "terminal_only")))
+       (or (nil? (get phase "return_contract"))
+           (contract-name? (get phase "return_contract")))))
+
+(defn- resolve-phase-contracts [phases]
+  (let [final-phase (last phases)]
+    (if (string? (get final-phase "return_contract"))
+      (fail (result/error :invalid-agent-config :final-phase-return-contract))
+      (mapv
+        (fn [phase]
+          (if (string? (get phase "return_contract"))
+            (let [projection (kernel/phase-return-contract-presentation (get phase "return_contract"))]
+              (if (= :error (get projection :status))
+                (fail (result/error :invalid-agent-config (get projection :reason)))
+                (assoc phase "return_contract_projection" projection)))
+            phase))
+        phases))))
+
+(defn- resolve-standalone-contract [cfg projector-kind]
+  (let [name (get cfg "return_contract")]
+    (cond
+      (nil? name)
+      nil
+
+      (not= projector-kind :none)
+      (fail (result/error :invalid-agent-config :incompatible-return-contract))
+
+      (contains? cfg "phases")
+      (fail (result/error :invalid-agent-config :incompatible-return-contract))
+
+      (not (contract-name? name))
+      (fail (result/error :invalid-agent-config :invalid-return-contract))
+
+      :else
+      (let [projection (kernel/phase-return-contract-presentation name)]
+        (if (= :error (get projection :status))
+          (fail (result/error :invalid-agent-config (get projection :reason)))
+          {:name name :projection projection})))))
 
 (defn- configured-phases [cfg default-max-turns]
   (if (contains? cfg "phases")
@@ -94,20 +135,31 @@
         (fail (result/error :invalid-agent-config :invalid-mission))))))
 
 (defn- loop-context [cfg projector-kind]
-  (let [default-max-turns (bounded-option cfg "max_turns" 4 128)
-        phases (configured-phases cfg default-max-turns)
+  (let [standalone-contract (resolve-standalone-contract cfg projector-kind)
+        trusted-cfg (dissoc cfg "result_contract" "result_contract_mode"
+                            "return_contract" "phase_return_contract"
+                            "return_contract_projection"
+                            "standalone_return_contract"
+                            "standalone_return_contract_name"
+                            "standalone_return_contract_projection")
+        default-max-turns (bounded-option trusted-cfg "max_turns" 4 128)
+        phases (resolve-phase-contracts (configured-phases trusted-cfg default-max-turns))
         total-max-turns (reduce + 0 (map #(get % "max_turns") phases))
         consolidate-at-turns-remaining
         (consolidation-threshold
-          (get cfg "consolidate_at_turns_remaining")
+          (get trusted-cfg "consolidate_at_turns_remaining")
           total-max-turns)
-        max-program-chars (bounded-option cfg "max_program_chars" 64000 1000000)
-        max-observation-chars (bounded-option cfg "max_observation_chars" 2048 65536)
-        max-transcript-chars (bounded-option cfg "max_transcript_chars" 262144 1000000)
-        effective-cfg (assoc cfg
+        max-program-chars (bounded-option trusted-cfg "max_program_chars" 64000 1000000)
+        max-observation-chars (bounded-option trusted-cfg "max_observation_chars" 2048 65536)
+        max-transcript-chars (bounded-option trusted-cfg "max_transcript_chars" 262144 1000000)
+        presentation (when (not= projector-kind :none) (kernel/result-contract-presentation))
+        effective-cfg (assoc trusted-cfg
                              "max_program_chars" max-program-chars
                              "max_observation_chars" max-observation-chars
-                             "max_transcript_chars" max-transcript-chars)]
+                             "max_transcript_chars" max-transcript-chars
+                             "result_contract" presentation
+                             "result_contract_mode" projector-kind
+                             "standalone_return_contract" standalone-contract)]
     {:effective-cfg effective-cfg
      :phases phases
      :total-max-turns total-max-turns
@@ -116,7 +168,9 @@
      :max-observation-chars max-observation-chars
      :max-transcript-chars max-transcript-chars
      :projector-kind projector-kind
-     :phased? (contains? cfg "phases")}))
+     :standalone-return-contract standalone-contract
+     :standalone-return-contract? (map? standalone-contract)
+     :phased? (contains? trusted-cfg "phases")}))
 
 (defn- machine-phase [machine]
   (get (get (get machine :context) :phases)
@@ -212,6 +266,28 @@
          :kind (get action :kind)}
         {:turn (get state :phase-turn) :kind (get action :kind)}))))
 
+(defn- native-contract-violation [violation]
+  (let [native {:kind (keyword (get violation "kind"))
+                :path (get violation "path")}
+        missing (get violation "missing_required")]
+    (if (nil? missing)
+      native
+      (assoc native :missing_required missing))))
+
+(defn- native-standalone-contract-error [response]
+  (let [reason (get response "reason")
+        details {:completion :invalid-return
+                 :phase_index (get reason "phase_index")
+                 :mission (get reason "mission")
+                 :contract (get reason "contract")
+                 :max_turns (get reason "max_turns")
+                 :constraint (keyword (get reason "constraint"))
+                 :violations (mapv native-contract-violation (get reason "violations"))}
+        source (get reason "contract_source")]
+    (result/error
+      :phase-return-contract-failed
+      (if (string? source) (assoc details :contract_source source) details))))
+
 (defn- dispatch-request [machine]
   (let [action (agent.native/normalize
                  (llm/request (bounded-request machine))
@@ -219,7 +295,7 @@
     (annotate-action machine action)
     action))
 
-(defn- execute-command [cmd]
+(defn- execute-command [cmd failure-mode]
   (let [op (get cmd :op)]
     (cond
       (= :host-failure op)
@@ -236,6 +312,30 @@
       (= :result-contract-failure op)
       (tool/kernel-result-contract-failure
         {"value" (get cmd :value) "agent_turns" (get cmd :agent-turns)})
+
+      (= :phase-contract-failure op)
+      (fail (result/error :phase-return-contract-failed
+                          {:completion (get cmd :completion)
+                           :phase_index (get cmd :phase-index)
+                           :mission (get cmd :mission)
+                           :contract (get cmd :contract-name)
+                           :max_turns (get cmd :max-turns)}))
+
+      (= :standalone-contract-failure op)
+      (let [error
+            (tool/kernel-phase-return-contract-failure
+              {"value" (get cmd :value)
+               "completion" "invalid_return"
+               "phase_index" (get cmd :phase-index)
+               "mission" (get cmd :mission)
+               "contract" (get cmd :contract-name)
+               "max_turns" (get cmd :max-turns)
+               "mode" (if (= failure-mode :outcome) "outcome" "fail")})]
+        (if (= failure-mode :outcome)
+          {:status :subject-failure
+           :kind :phase-return-contract-failed
+           :error (native-standalone-contract-error error)}
+          (fail error)))
 
       (= :config-failure op)
       (tool/kernel-agent-config-failure (get cmd :payload))
@@ -255,10 +355,10 @@
   refusals, aggregate-budget refusals, and alias-resolution protocol errors
   return as `:provider-failure` so a workflow that called this entry can
   inspect `kind` and `reason`. Fail-fast entries still abort those envelopes."
-  [task cfg projector-kind]
+  [task cfg projector-kind failure-mode]
   (let [started (agent.machine/start task (loop-context cfg projector-kind))]
     (if (not= :ok (get started :op))
-      (execute-command started)
+      (execute-command started failure-mode)
       (loop [machine (get started :machine)
              event {:type :boot}]
         (let [cmd (agent.machine/advance machine event)
@@ -304,38 +404,66 @@
                            :projected projected
                            :validation validation}))
 
+            (= :validate-phase op)
+            (let [next (get cmd :machine)
+                  value (get cmd :value)
+                  evaluation (get cmd :evaluation)
+                  action (get cmd :action)
+                  phase (machine-phase next)
+                  validation (kernel/validate-phase-return (get phase "return_contract") value)]
+              (recur next {:type :phase-validation
+                           :action action
+                           :value value
+                           :evaluation evaluation
+                           :validation validation}))
+
+            (= :validate-standalone op)
+            (let [next (get cmd :machine)
+                  value (get cmd :value)
+                  action (get cmd :action)
+                  contract (get (get next :context) :standalone-return-contract)
+                  validation (kernel/validate-phase-return (get contract :name) value)]
+              (recur next {:type :standalone-validation
+                           :action action
+                           :value value
+                           :validation validation}))
+
             (= :done op)
             (get cmd :outcome)
 
             :else
-            (execute-command cmd)))))))
+            (execute-command cmd failure-mode)))))))
 
 (defn run-outcome
   "Runs the agent loop and distinguishes model-authored completion from a
   bounded subject-attributable failure or a bounded provider failure. The
   returned outcome is workflow data; this entry does not validate against the
-  manifest result contract.
+  manifest result contract. Set `return_contract` to a name declared under
+  `contracts.phase_return_schemas` to validate each explicit return inside this
+  standalone loop while correction turns remain.
 
   Provider failures return `{:status :provider-failure :error error :model alias}`
   with the complete bounded LLM envelope. The closed `kind` and `reason` are
   facts for workflow policy; this entry does not choose retry, failover, or
   abort. Restarting with another alias starts another loop and does not resume
   the previous transcript."
-  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
-  (run-outcome* task cfg :none))
+  (run-outcome* task cfg :none :outcome))
 
 (defn run-value
   "Runs the agent loop and returns its model-authored value to the calling
   PTC-Lisp function. Unlike `run`, this does not terminate the outer program
   and does not validate against the manifest result contract, so an application
-  can validate or score the answer before returning.
+  can validate or score the answer before returning. Set `return_contract` to
+  a declared named phase-return contract when the value crossing back to the
+  workflow must be checked and corrected inside this standalone loop.
 
   Subject failures and provider failures retain the historical fail behavior.
   Evaluators that need to record those attempts use `run-outcome`."
-  {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
-  (propagate-outcome (run-outcome task cfg)))
+  (propagate-outcome (run-outcome* task cfg :none :fail-fast)))
 
 (defn run-result-value
   "Runs the agent loop and validates the raw model-authored value against the
@@ -344,7 +472,7 @@
   result."
   {:signature "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
-  (propagate-outcome (run-outcome* task cfg :identity)))
+  (propagate-outcome (run-outcome* task cfg :identity :fail-fast)))
 
 (defn run-phased-result-value
   "Runs a sequence of bounded mission phases while retaining the exact
@@ -355,9 +483,9 @@
   the agent with a contract-valid result. A terminal-only phase rejects any
   parsed program whose single top-level form is not return or fail before
   mission evaluation, and only the final phase may declare terminal_only."
-  {:signature "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?, terminal_only :bool?}], max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
+  {:signature "(task :string, cfg {model :string?, phases [{mission :string, max_turns :int, instruction :string?, terminal_only :bool?, return_contract :string?}], max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
   [task cfg]
-  (propagate-outcome (run-outcome* task cfg :identity)))
+  (propagate-outcome (run-outcome* task cfg :identity :fail-fast)))
 
 (defn run
   "Runs the agent loop as a terminal workflow entry.
@@ -378,4 +506,5 @@
         cfg
         (if (false? (get cfg "result_envelope"))
           :identity
-          :ok-envelope)))))
+          :ok-envelope)
+        :fail-fast))))

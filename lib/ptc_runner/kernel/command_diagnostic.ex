@@ -36,6 +36,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.ExplicitFailureDiagnostic
+  alias PtcRunner.Kernel.LimitCapacityDiagnostic
   alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
@@ -288,7 +289,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: kind, name: name, contract_authority: nil},
          %{phase: :application, code: :contract_invalid}
        )
-       when kind in [:input_contract, :result_contract],
+       when kind in [:input_contract, :result_contract, :phase_return_contract],
        do: true
 
   defp valid_path_authority?(
@@ -311,7 +312,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: kind, contract_authority: authority},
          %{phase: :application, code: code}
        )
-       when kind in [:input_contract, :result_contract] and
+       when kind in [:input_contract, :result_contract, :phase_return_contract] and
               code in [:invalid_json, :duplicate_property, :contract_invalid],
        do: true
 
@@ -319,6 +320,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          {:contract, authority},
          %CommandSource{kind: :result_contract, contract_authority: authority},
          %{phase: :result_cleanup, code: :result_contract_failed}
+       ),
+       do: true
+
+  defp valid_path_authority?(
+         {:contract, authority},
+         %CommandSource{kind: :phase_return_contract, contract_authority: authority},
+         %{phase: :execution, code: :phase_return_contract_failed}
        ),
        do: true
 
@@ -395,7 +403,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %{phase: :application, code: :contract_invalid},
          %CommandSource{kind: kind}
        )
-       when kind in [:input_contract, :result_contract],
+       when kind in [:input_contract, :result_contract, :phase_return_contract],
        do: ContractSchemaDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
@@ -532,6 +540,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          %CommandSource{kind: :application}
        ),
        do: LimitConfigurationDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :application, code: :limit_capacity_invalid},
+         %CommandSource{kind: :application}
+       ),
+       do: LimitCapacityDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          _message,

@@ -43,19 +43,20 @@ defmodule PtcRunner.Kernel.ExecutionSessionOwnerPrivacyTest do
     assert inspect(status) =~ "redacted"
   end
 
-  test "crash-report projections redact state, message, reason, and log" do
+  test "both status callbacks return closed redacted projections" do
     fixture = provider_fixture()
     owner = own_execution(fixture)
     state = :sys.get_state(ExecutionSessionOwner.pid(owner))
 
-    assert %{state: :redacted, message: :redacted, reason: :redacted, log: []} =
-             ExecutionSessionOwner.format_status(%{
-               state: state,
-               message:
-                 {:"$gen_call", {self(), make_ref()}, {:resource, :put, :memory, @credential}},
-               reason: {:badmatch, @host_secret},
-               log: [{:error, @authorization_url}]
-             })
+    assert ExecutionSessionOwner.format_status(%{
+             state: state,
+             authority: @credential,
+             message:
+               {:"$gen_call", {self(), make_ref()}, {:resource, :put, :memory, @credential}},
+             reason: {:badmatch, @host_secret},
+             log: [{:error, @authorization_url}],
+             unexpected_private_field: @host_secret
+           }) == %{state: :redacted, message: :redacted, reason: :redacted, log: []}
 
     assert ExecutionSessionOwner.format_status(:terminate, [[], state]) ==
              [data: [{~c"State", :redacted}]]

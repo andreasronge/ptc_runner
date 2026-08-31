@@ -14,7 +14,7 @@ reference in `docs/ptc-lisp-specification.md`, and built-ins in
 To debug the runtime itself (not a manifest under it) — query canonical
 traces or private inspection records (model exchanges, generated source,
 capability payloads) non-interactively — use `mix ptc repl --profile
-private-run-analysis-v1 --private-unattended`. See ["Private analysis without a
+private-run-analysis-v2 --private-unattended`. See ["Private analysis without a
 terminal"](docs/reference/repl.md#private-analysis-without-a-terminal).
 
 ## Working Style
@@ -122,10 +122,13 @@ how it was verified.
 Never start work in the shared checkout — create a worktree before the first
 edit, even for a plan-only document. `scripts/worktree.sh new <branch> [issue]`
 branches from `origin/main`, and with an issue number claims it: assign,
-comment, refuse one already taken. `scripts/worktree.sh gc` removes worktrees
-merged into `origin/main` that are clean and a day idle (`--yes` to act); it
-never deletes a branch, because the branch is the artifact and the checkout is
-a rebuildable cache. Run it before creating a new one.
+comment, refuse one already taken. It also seeds and initializes the worktree:
+install shared hooks, install the pinned `mise` toolchain, fetch dependencies,
+and compile. Use `scripts/worktree.sh init [<dir>]` to repair or initialize an
+existing checkout. `scripts/worktree.sh gc` removes worktrees merged into
+`origin/main` that are clean and a day idle (`--yes` to act); it never deletes
+a branch, because the branch is the artifact and the checkout is a rebuildable
+cache. Run it before creating a new one.
 
 Setting up a fresh clone or worktree — toolchain, dependencies, git hooks,
 Dialyzer PLT, and the local MCP E2E server — is covered once in the
@@ -214,6 +217,11 @@ what is specific to running in the Cloud VM.
   a non-interactive script that is *not* sourced from `~/.bashrc`, prefix
   commands with `~/.local/bin/mise exec -- …` (for example
   `~/.local/bin/mise exec -- mix test`) so the pinned tools resolve.
+- **Cloud shells default to a group-writable umask.** `scripts/worktree.sh init`
+  removes unsafe write permissions from existing checkout directories, but a
+  child script cannot change its caller's umask. Prefix later build and test
+  commands with `umask 0022;` so temporary directories also satisfy private
+  destination safety checks.
 - **Reinstalling deps does not rebuild.** The startup update script only runs
   `mix deps.get`; run `mix compile` yourself after pulling changes or editing
   `mix.exs`/`mix.lock`/prelude sources. The bundled native launcher's C binary

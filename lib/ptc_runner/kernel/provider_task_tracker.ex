@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
   # connector closes and none can be attached behind it.
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   @enforce_keys [:pid, :token]
   defstruct [:pid, :token]
@@ -108,16 +109,6 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-    def format_status(status), do: redact_status(status)
-  else
-    def format_status(status), do: redact_status(status)
-  end
-
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
-
   # A killed task always yields the `:DOWN` this reaps, so the loop terminates
   # without its own timer. Only provider monitors are consumed; a lifecycle
   # notification that arrives mid-drain stays queued for the clause above.
@@ -143,13 +134,5 @@ defmodule PtcRunner.Kernel.ProviderTaskTracker do
     call(tracker, request)
   catch
     :exit, _reason -> {:error, :closed}
-  end
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
   end
 end

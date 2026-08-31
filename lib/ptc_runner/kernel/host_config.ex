@@ -541,8 +541,14 @@ defmodule PtcRunner.Kernel.HostConfig do
 
   defp command_schema_value(value), do: value
 
-  defp schema_minimum_violation?("normal_event_count", value) when is_integer(value) do
-    {:ok, row} = LimitCatalog.fetch(:normal_event_count)
+  # The two normal-trace floors exist because a trace that cannot record its own
+  # terminal events is not a trace, and both are published as schema minimums.
+  # A host value below one of them is pointed at the rule that states it; every
+  # other range failure keeps the closed installed-limit diagnostic.
+  defp schema_minimum_violation?(name, value)
+       when name in ["event_payload_bytes", "normal_event_count"] and is_integer(value) do
+    {:ok, field} = Limits.name(name)
+    {:ok, row} = LimitCatalog.fetch(field)
     value < row.minimum
   end
 

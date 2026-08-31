@@ -2,9 +2,10 @@
 
 This is the complete `ptc` command and process contract.
 
-Every installation
-exposes the same command grammar and runtime path.
-Run `ptc help COMMAND` for the exact switches accepted by an installed version.
+The runtime-included `ptc` frontend and the source-checkout `mix ptc` frontend
+share the command engine and runtime path, but frontend-owned switches may
+differ. Use `ptc help COMMAND` and `mix ptc help COMMAND` as the authoritative
+grammar for each frontend.
 
 ## Choose a command
 
@@ -24,8 +25,9 @@ Run `ptc help COMMAND` for the exact switches accepted by an installed version.
 | `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |
 | `ptc viewer PROJECT.json --env-file FILE` | Use one exact dotenv file for Viewer-started workflows and missions |
 
-Help is generated from the same declarations as the strict parser, so use
-`ptc help COMMAND` as the canonical command and option reference.
+Help is generated from the same declarations as the strict parser, so use the
+help command for the frontend you invoke as its canonical command and option
+reference.
 
 A provider-bearing manifest needs a host configuration. A project document can
 remember that path and its environment file. Before running it, active provider
@@ -253,7 +255,12 @@ for holding model responses fixed and comparing a baseline with that candidate.
 The [component reference](component-contracts.md#evaluate-one-replacement-component)
 defines every descriptor field. Candidate creation is not currently a
 standalone command; a source checkout provides `mix ptc.materialize` as
-documented in the repository's maintainer guide on embedding.
+shown in
+[Customize agent components](../guides/components-and-preludes.md#try-a-different-agent-prompt).
+
+Both `ptc validate` and `ptc run` accept the descriptor switch. Validation
+compiles and checks the replacement without provider acquisition; running uses
+the same verified candidate in the immutable workflow or mission bundle.
 
 ## Read results and failures
 
@@ -408,6 +415,11 @@ diagnostic behind it.
 
 Every classified diagnostic and the status it exits with:
 
+From shipped CLI input, `authorization_target_unknown` and
+`authorization_not_applicable` are reachable only through source-checkout
+`mix ptc run --authorize-mcp`; runtime-included `ptc` rejects that switch.
+Embedding runtimes can supply authorization targets directly.
+
 | Status | Phase | Code | Retryable | Message |
 | ---: | --- | --- | --- | --- |
 | 2 | `arguments` | `conflicting_arguments` | no | choose only one option from the conflicting argument group |
@@ -420,6 +432,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `application` | `application_not_found` | no | the application manifest does not exist |
 | 3 | `application` | `application_unavailable` | no | the application is unavailable |
 | 3 | `application` | `contract_invalid` | no | an application value contract is invalid |
+| 3 | `application` | `contract_projection_limit_exceeded` | no | application contract prompt projections exceed their bounded admission limit |
 | 3 | `application` | `document_limit_exceeded` | no | the application document closure exceeds its limit |
 | 3 | `application` | `duplicate_property` | no | an application document contains a duplicate property |
 | 3 | `application` | `event_identity_conflict` | no | the command event identity conflicts with the application |
@@ -427,6 +440,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `application` | `input_invalid` | no | the selected input is not an admissible JSON object |
 | 3 | `application` | `installed_limit_exceeded` | no | an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling |
 | 3 | `application` | `invalid_json` | no | an application document is not valid JSON |
+| 3 | `application` | `limit_capacity_invalid` | no | event_payload_bytes effective limit 8211 is below the required 12000 bytes for this application's resolved terminal usage; raise limits.event_payload_bytes, and its installed host ceiling if it is lower, or declare fewer capabilities or missions |
 | 3 | `application` | `limit_configuration_invalid` | no | normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes |
 | 3 | `application` | `limit_unavailable` | no | an optional application limit is unavailable because the host has not enabled it |
 | 3 | `application` | `override_invalid` | no | the component override is invalid |
@@ -465,7 +479,7 @@ Every classified diagnostic and the status it exits with:
 | 3 | `provider_declaration` | `selection_unverifiable` | no | the provider selection cannot be verified declaratively |
 | 4 | `active_preflight` | `authentication_rejected` | no | provider authentication was rejected |
 | 4 | `active_preflight` | `authorization_rejected` | no | explicit provider authorization was rejected |
-| 4 | `active_preflight` | `authorization_required` | no | explicit provider authorization is required |
+| 4 | `active_preflight` | `authorization_required` | no | provider authorization is required; runtime-included ptc cannot initiate authorization; source-checkout mix ptc run ... --authorize-mcp NAME can initiate it, and embedding hosts may provide authorization |
 | 4 | `active_preflight` | `authorization_unavailable` | yes | the authorization service is temporarily unavailable |
 | 4 | `active_preflight` | `connectivity_outcome_unknown` | no | the connectivity outcome could not be committed safely |
 | 4 | `active_preflight` | `connectivity_protocol_error` | no | the provider returned an invalid connectivity response |
@@ -519,6 +533,7 @@ Every classified diagnostic and the status it exits with:
 | 5 | `execution` | `llm_tool_calling_unsupported` | no | the configured model does not support tool calling |
 | 5 | `execution` | `llm_usage_unavailable` | no | the LLM provider did not return the promised usage or cost metadata |
 | 5 | `execution` | `mission_failed` | no | a subordinate mission failed |
+| 5 | `execution` | `phase_return_contract_failed` | no | the standalone agent return does not satisfy its named contract |
 | 5 | `execution` | `provider_failed` | no | a provider failed during execution |
 | 5 | `execution` | `replay_fixture_missing` | no | no replay fixture matches the workflow request |
 | 5 | `execution` | `workflow_failed` | no | the workflow failed |
@@ -749,7 +764,7 @@ ptc repl --profile private-run-catalog-v1 \
   --private-unattended --format jsonl \
   -e '(analysis/catalog {"state" "admissible" "limit" 20})'
 
-ptc repl --profile private-run-analysis-v1 \
+ptc repl --profile private-run-analysis-v2 \
   --run cmd-00000000000000000000000001 \
   --run cmd-00000000000000000000000002 \
   --resource traces=.ptc/traces \
@@ -811,7 +826,7 @@ remain authoritative, and unrelated directory members are not listed, opened,
 sized, decoded, or counted toward directory or aggregate source limits. The
 selected files still keep their individual source, record, retained-memory,
 heap, deadline, and result ceilings. Whole-directory snapshots used by
-`private-run-analysis-v1` stay a distinct source variant: they admit only
+`private-run-analysis-v2` stay a distinct source variant: they admit only
 filename-bound one-run files, isolate a stable damaged connected component,
 and keep disjoint healthy runs queryable. Namespace or selected-file mutation
 still rejects the whole capture.
@@ -828,7 +843,7 @@ candidate, a selected identity or correlation mismatch, and ambiguous,
 incomplete, changed, unsupported, or oversized selected evidence fail without a
 partial output.
 
-Use `private-run-analysis-v1` when you need several correlated questions or
+Use `private-run-analysis-v2` when you need several correlated questions or
 custom PTC-Lisp analysis. Its results can include exact messages, generated
 source, effective components, capability payloads, prints, diagnostics, and
 terminal values. The attached-terminal and unattended switches are accident

@@ -18,6 +18,17 @@ defmodule PtcRunner.Kernel.Attestation do
 
   def valid?(_owner, _payload, _attestation), do: false
 
+  @doc false
+  @spec valid_struct?(module(), struct(), [atom()], (-> term())) :: boolean()
+  def valid_struct?(owner, value, expected_keys, payload)
+      when is_atom(owner) and is_struct(value) and is_list(expected_keys) and
+             is_function(payload, 0) do
+    Enum.sort(Map.keys(value)) == expected_keys and
+      valid?(owner, payload.(), Map.get(value, :attestation))
+  end
+
+  def valid_struct?(_owner, _value, _expected_keys, _payload), do: false
+
   defp secure_compare(left, right) when byte_size(left) == byte_size(right),
     do: :crypto.hash_equals(left, right)
 
