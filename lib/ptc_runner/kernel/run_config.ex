@@ -270,6 +270,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          limits
        ) do
     with true <- mission_name?(name),
+         true <- MissionEnvironment.valid?(environment),
          {:ok, inventory} <- MissionInventory.build(environment, limits) do
       retain_mission(name, environment, inventory, acc, inventory_bytes, model_bytes)
     else

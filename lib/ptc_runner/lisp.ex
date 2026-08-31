@@ -302,6 +302,19 @@ defmodule PtcRunner.Lisp do
       for selected overrides whose replacement source removed an export.
       Omitting the ownership map keeps the ordinary miss, so embedded callers
       are unchanged.
+    - `:shipped_library_ids` - Optional catalog of shipped library component IDs.
+      The Kernel passes `PtcRunner.Kernel.Library.component_ids/0` so `doc` and
+      `apropos` can name an unattached shipped library. The catalog contains
+      library IDs, not export refs, so a `doc` redirect does not assert that the
+      requested export exists.
+      `nil` (the default) keeps today's miss message, so embedded `run/2`
+      callers are unchanged.
+    - `:component_catalog` - Optional attested Kernel component catalog for the
+      selected environment. Public `run/2` strips this option so a direct
+      caller cannot inject a Kernel graph. Kernel evaluations pass it only
+      through `run_native/2` for the selected workflow or mission catalog. The
+      catalog is not projected into result stamps, traces, telemetry, or host
+      logs.
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
       SOURCE string, or a list of source-bearing selection maps accepted by
       `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code.
@@ -483,9 +496,13 @@ defmodule PtcRunner.Lisp do
   @spec run(String.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
   def run(source, opts \\ []) do
     source
-    |> instrumented_run(opts, :public)
+    |> instrumented_run(public_run_opts(opts), :public)
     |> public_result()
   end
+
+  @doc false
+  @spec public_run_opts(keyword()) :: keyword()
+  def public_run_opts(opts) when is_list(opts), do: Keyword.delete(opts, :component_catalog)
 
   @doc false
   @spec run_native(String.t(), keyword()) ::
@@ -822,6 +839,8 @@ defmodule PtcRunner.Lisp do
       strict_data: Keyword.get(opts, :strict_data, false),
       data_grants: Keyword.get(opts, :data_grants),
       missing_data_params_message: Keyword.get(opts, :missing_data_params_message),
+      shipped_library_ids: Keyword.get(opts, :shipped_library_ids),
+      component_catalog: Keyword.get(opts, :component_catalog),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
@@ -1245,6 +1264,8 @@ defmodule PtcRunner.Lisp do
       strict_data: strict_data,
       data_grants: data_grants,
       missing_data_params_message: missing_data_params_message,
+      shipped_library_ids: shipped_library_ids,
+      component_catalog: component_catalog,
       strict_transitive_calls: strict_transitive_calls,
       private_tool_authority?: private_tool_authority?,
       direct_namespaces: direct_namespaces,
@@ -1290,6 +1311,8 @@ defmodule PtcRunner.Lisp do
         strict_data: strict_data,
         data_grants: data_grants,
         missing_data_params_message: missing_data_params_message,
+        shipped_library_ids: shipped_library_ids,
+        component_catalog: component_catalog,
         strict_transitive_calls: strict_transitive_calls,
         private_tool_authority?: private_tool_authority?,
         direct_namespaces: direct_namespaces,

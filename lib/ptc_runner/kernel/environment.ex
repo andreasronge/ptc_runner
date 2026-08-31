@@ -131,6 +131,11 @@ defmodule PtcRunner.Kernel.Environment do
   def capability_view(name, %RoutedCapability{} = capability) when is_binary(name),
     do: %{capabilities: %{name => capability}}
 
+  @doc "Returns the attested component catalog for `environment`, if present."
+  @spec catalog(map()) :: PtcRunner.Kernel.ComponentCatalog.t() | nil
+  def catalog(%{catalog: catalog}), do: catalog
+  def catalog(_environment), do: nil
+
   @doc "Returns sorted model-visible capability metadata for one environment."
   def metadata(%{capabilities: capabilities}) do
     capabilities

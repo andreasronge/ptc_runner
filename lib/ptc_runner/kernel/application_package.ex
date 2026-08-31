@@ -9,8 +9,9 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   `application_content_digest`; it contains no application directory, file
   descriptor, reader callback, selected input, or input name.
 
-  Directory acquisition caches every referenced byte exactly once. Compilation
-  never reopens a captured path. This prevents time-of-check/time-of-use drift
+  Directory acquisition caches every referenced byte exactly once and interns
+  identical source binaries by qualified SHA-256 so workflow and mission
+  catalogs share one BEAM binary. Compilation never reopens a captured path. This prevents time-of-check/time-of-use drift
   within one acquired record, but it is not a transactional multi-file
   snapshot: trusted deployments must keep the application directory quiescent
   while its closure is acquired.
@@ -47,6 +48,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   alias PtcRunner.Kernel.ReplLimitProfile
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SemanticRevision
+  alias PtcRunner.Kernel.SourceIntern
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Kernel.TypedCanonicalJSON
   alias PtcRunner.Kernel.ValueContract
@@ -498,7 +500,8 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         Map.merge(identity, ComponentOverride.attribution(override))
       end)
 
-    with {:ok, records} <- content_records(manifest, override_pairs),
+    with {:ok, manifest} <- intern_manifest_sources(manifest),
+         {:ok, records} <- content_records(manifest, override_pairs),
          {:ok, contract_behavior_hashes} <- contract_behavior_hashes(manifest.contracts),
          {:ok, contract_prompt_projections, contract_prompt_hashes} <-
            contract_prompt_data(manifest.contracts),
@@ -530,6 +533,28 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
       {:ok, %{package | attestation: Attestation.attest(__MODULE__, payload(package))}}
     end
+  end
+
+  defp intern_manifest_sources(manifest) do
+    intern = SourceIntern.new()
+
+    with {:ok, intern, workflow} <-
+           SourceIntern.intern_components(intern, manifest.workflow_components),
+         {:ok, _intern, missions} <- intern_mission_sources(intern, manifest.missions) do
+      {:ok, %{manifest | workflow_components: workflow, missions: missions}}
+    end
+  end
+
+  defp intern_mission_sources(intern, missions) do
+    Enum.reduce_while(missions, {:ok, intern, %{}}, fn {name, spec}, {:ok, intern, acc} ->
+      case SourceIntern.intern_components(intern, spec.components) do
+        {:ok, intern, components} ->
+          {:cont, {:ok, intern, Map.put(acc, name, %{spec | components: components})}}
+
+        {:error, _reason} = error ->
+          {:halt, error}
+      end
+    end)
   end
 
   defp content_records(manifest, override_pairs) do
