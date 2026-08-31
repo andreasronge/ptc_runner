@@ -239,6 +239,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:execution, :evaluation_failed, 5, false, "the evaluation failed"},
     {:execution, :invalid_agent_config, 5, false,
      "an agent configuration option is outside its supported range"},
+    {:execution, :phase_return_contract_failed, 5, false,
+     "the standalone agent return does not satisfy its named contract"},
     {:execution, :llm_authentication_failed, 5, false,
      "the LLM provider rejected authentication; check the installed credential"},
     {:execution, :llm_payment_required, 5, false,
@@ -890,6 +892,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   def source_kinds(:bundle, _code), do: [:component]
   def source_kinds(:execution, :turn_limit_exceeded), do: []
+  def source_kinds(:execution, :phase_return_contract_failed), do: [:phase_return_contract]
   def source_kinds(:execution, code) when code != :provider_failed, do: [:runtime]
 
   def source_kinds(:result_cleanup, code)
@@ -998,6 +1001,10 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       do: :optional
 
   def path_policy(:result_cleanup, :result_contract_failed, :result_contract), do: :optional
+
+  def path_policy(:execution, :phase_return_contract_failed, :phase_return_contract),
+    do: :optional
+
   def path_policy(_phase, _code, _source_kind), do: :forbidden
 
   @spec subject_occurrence_policy(phase(), atom(), atom()) ::

@@ -45,8 +45,10 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.RuntimeLimitDiagnostic
+  alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractClassification
+  alias PtcRunner.Lisp.TrustedError
   alias PtcRunner.StandaloneCLI
   alias PtcRunner.TestSupport.MCPHTTPFixture
   alias PtcRunner.TestSupport.StreamingInspection
@@ -1886,6 +1888,91 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert fallback.envelope["error"]["message"] ==
              "an agent configuration option is outside its supported range"
+  end
+
+  test "standalone return-contract failures retain their authenticated source and path" do
+    {:ok, contract} =
+      ValueContract.compile(%{
+        "type" => "object",
+        "required" => ["sum"],
+        "properties" => %{"sum" => %{"type" => "integer", "minimum" => 100}}
+      })
+
+    failure =
+      RuntimeTools.phase_return_contract_failure(%{
+        "evidence" => %{contract: contract, source: "work.schema.json"}
+      })
+
+    assert %TrustedError{details: details} =
+             failure.(%{
+               "value" => %{"sum" => 3},
+               "completion" => "invalid_return",
+               "phase_index" => 1,
+               "mission" => "default",
+               "contract" => "evidence",
+               "max_turns" => 1,
+               "mode" => "fail"
+             })
+
+    usage = %{
+      remaining_ms: 0,
+      capability_calls: %{workflow: %{}, mission: %{}},
+      subordinate_evaluations: 1,
+      evaluations_by_mission: %{"default" => 1},
+      protocol_errors: 0,
+      agent_protocol_errors: 0,
+      evaluation_memory_bytes: 0,
+      evaluation_history_bytes: 0,
+      evaluation_continuation_bytes: 0,
+      events_dropped: %{},
+      llm_budget: %{"total_tokens" => nil, "cost" => nil},
+      llm_spend: %{"state" => "empty"}
+    }
+
+    evidence = %{
+      result:
+        {:error,
+         %Error{
+           kind: :workflow_failed,
+           reason: :phase_return_contract_failed,
+           details: details,
+           usage: usage
+         }}
+    }
+
+    settlement =
+      {:error,
+       %{
+         result_class: :normal,
+         artifact_state: %{
+           "trace" => "not_requested",
+           "inspection" => "not_requested",
+           "result" => "not_requested"
+         },
+         error: nil,
+         secondary_errors: []
+       }}
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandRunOutcome.project(
+               evidence,
+               settlement,
+               CommandRunRef.encode(@zero_entropy),
+               true
+             )
+
+    assert outcome.envelope["error"]
+           |> Map.take(~w(phase code source path)) == %{
+             "phase" => "execution",
+             "code" => "phase_return_contract_failed",
+             "source" => %{
+               "kind" => "phase_return_contract",
+               "name" => "work.schema.json"
+             },
+             "path" => "/sum"
+           }
+
+    assert_schema_valid(outcome.envelope)
   end
 
   test "transcript-ceiling diagnostics bind their bounded message to a null source" do

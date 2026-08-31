@@ -1293,6 +1293,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       :model_output_truncated,
       :invalid_agent_config,
       :result_contract_failed,
+      :phase_return_contract_failed,
       :llm_provider_failed
       | EvaluatorErrorCatalog.kinds()
     ]

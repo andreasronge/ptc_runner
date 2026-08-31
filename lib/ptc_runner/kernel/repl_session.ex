@@ -1117,6 +1117,12 @@ defmodule PtcRunner.Kernel.ReplSession do
       session.config.result_contract_source,
       session.config.workflow_environment
     )
+    |> RuntimeTools.maybe_put_phase_return_contract_failure(
+      session.state,
+      session.config.event_sink,
+      session.config.phase_return_contracts,
+      session.config.workflow_environment
+    )
     |> RuntimeTools.maybe_put_llm_provider_failure(
       session.state,
       session.config.event_sink,

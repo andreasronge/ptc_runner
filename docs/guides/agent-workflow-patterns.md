@@ -31,8 +31,8 @@ rules drag every intermediate value through the model's context.
 Give each stage a named mission and let one trusted workflow drive a loop per
 stage. The mission decides what a specialist can see; the workflow decides what
 crosses between stages. Use `agent.core/run-outcome` to handle a specialist's
-failure as data — choosing another alias starts a new loop rather than resuming
-the transcript.
+failure as data; select a named handoff contract when workflow code consumes
+its value.
 
 ## Plan, then act
 

@@ -236,6 +236,64 @@ defmodule PtcRunner.Kernel.AgentMachineTest do
     assert path(exhausted, ["agent-turns"]) == 1
   end
 
+  test "standalone named-return validation succeeds, retries, and exhausts in place" do
+    tool = tool_action()
+
+    validate =
+      start_and_advance(
+        %{type: :evaluation, action: tool, evaluation: %{outcome: :returned, value: 7}},
+        standalone_return_contract: true
+      )
+
+    assert name(path(validate, ["op"])) == "validate-standalone"
+    assert path(validate, ["value"]) == 7
+
+    valid =
+      advance_on(path(validate, ["machine"]), %{
+        type: :"standalone-validation",
+        action: tool,
+        value: 7,
+        validation: %{valid?: true}
+      })
+
+    assert name(path(valid, ["op"])) == "done"
+    assert name(path(valid, ["outcome", "status"])) == "returned"
+    assert path(valid, ["outcome", "value"]) == 7
+
+    retry =
+      advance_on(path(validate, ["machine"]), %{
+        type: :"standalone-validation",
+        action: tool,
+        value: 7,
+        validation: %{valid?: false}
+      })
+
+    assert name(path(retry, ["op"])) == "request"
+    assert path(retry, ["machine", "state", "phase-index"]) == 0
+    assert path(retry, ["machine", "state", "phase-turn"]) == 1
+
+    exhausted_validate =
+      start_and_advance(
+        %{type: :evaluation, action: tool, evaluation: %{outcome: :returned, value: 7}},
+        max_turns: 1,
+        standalone_return_contract: true
+      )
+
+    exhausted =
+      advance_on(path(exhausted_validate, ["machine"]), %{
+        type: :"standalone-validation",
+        action: tool,
+        value: 7,
+        validation: %{valid?: false}
+      })
+
+    assert name(path(exhausted, ["op"])) == "standalone-contract-failure"
+    assert name(path(exhausted, ["completion"])) == "invalid-return"
+    assert path(exhausted, ["phase-index"]) == 1
+    assert path(exhausted, ["max-turns"]) == 1
+    assert path(exhausted, ["value"]) == 7
+  end
+
   test "last-turn unsafe preserves closing? across a phase transition" do
     cmd =
       start_and_advance(
@@ -312,8 +370,21 @@ defmodule PtcRunner.Kernel.AgentMachineTest do
     model = Keyword.get(opts, :model)
     projector_kind = Keyword.get(opts, :projector_kind, :none)
 
-    phases =
-      Keyword.get(opts, :phases, [%{"mission" => "default", "max_turns" => max_turns}])
+    standalone_return_contract? = Keyword.get(opts, :standalone_return_contract, false)
+
+    default_phase =
+      if standalone_return_contract? do
+        %{
+          "mission" => "default",
+          "max_turns" => max_turns,
+          "return_contract" => "evidence",
+          "return_contract_projection" => %{"kind" => "integer"}
+        }
+      else
+        %{"mission" => "default", "max_turns" => max_turns}
+      end
+
+    phases = Keyword.get(opts, :phases, [default_phase])
 
     total = phases |> Enum.map(& &1["max_turns"]) |> Enum.sum()
 
@@ -325,6 +396,21 @@ defmodule PtcRunner.Kernel.AgentMachineTest do
         "max_transcript_chars" => 262_144
       }
       |> then(fn cfg -> if model, do: Map.put(cfg, "model", model), else: cfg end)
+      |> then(fn cfg ->
+        if standalone_return_contract? do
+          Map.put(cfg, "standalone_return_contract", %{
+            name: "evidence",
+            projection: %{"kind" => "integer"}
+          })
+        else
+          cfg
+        end
+      end)
+
+    standalone_return_contract =
+      if standalone_return_contract? do
+        %{name: "evidence", projection: %{"kind" => "integer"}}
+      end
 
     %{
       :"effective-cfg" => effective,
@@ -335,6 +421,8 @@ defmodule PtcRunner.Kernel.AgentMachineTest do
       :"max-observation-chars" => 2048,
       :"max-transcript-chars" => 262_144,
       :"projector-kind" => projector_kind,
+      :"standalone-return-contract" => standalone_return_contract,
+      :"standalone-return-contract?" => standalone_return_contract?,
       :phased? => length(phases) > 1 or Keyword.has_key?(opts, :phases)
     }
   end

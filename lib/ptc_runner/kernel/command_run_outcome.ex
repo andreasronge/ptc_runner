@@ -566,6 +566,20 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   end
 
   defp failure_diagnostic(
+         %Error{
+           kind: :workflow_failed,
+           reason: :phase_return_contract_failed,
+           details: details
+         },
+         provider_activity
+       ) do
+    case ResultContractDiagnostic.retain_phase_details(details) do
+      {:ok, retained} -> phase_return_contract_diagnostic(retained, provider_activity)
+      :error -> diagnostic(:execution, :workflow_failed, provider_activity)
+    end
+  end
+
+  defp failure_diagnostic(
          %Error{kind: :workflow_failed, details: %{result_projection: true}},
          provider_activity
        ),
@@ -761,6 +775,25 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   end
 
   defp result_contract_source(_details), do: nil
+
+  defp phase_return_contract_diagnostic(details, provider_activity) do
+    source = phase_return_contract_source(details)
+    {source, path} = ValueContractDiagnostic.diagnostic_parts(source, details)
+
+    diagnostic(:execution, :phase_return_contract_failed, provider_activity,
+      source: source,
+      path: path
+    )
+  end
+
+  defp phase_return_contract_source(%{contract_source: name}) when is_binary(name) do
+    case CommandSource.new(:phase_return_contract, name) do
+      {:ok, source} -> source
+      {:error, :invalid_command_source} -> nil
+    end
+  end
+
+  defp phase_return_contract_source(_details), do: nil
 
   defp publication_code(:trace), do: :trace_publication_failed
   defp publication_code(:inspection), do: :inspection_publication_failed

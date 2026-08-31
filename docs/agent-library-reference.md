@@ -70,6 +70,14 @@ outer workflow and without validating it against the manifest result contract.
 A subject failure or provider failure calls `fail`, so use this entry when the
 caller should continue only after a successful agent result.
 
+By default the returned value is raw and unvalidated. Set `return_contract` to
+the name of one application-declared `phase_return_schemas` entry to constrain
+the value crossing back to workflow code. The selected contract is rendered in
+the initial prompt, and each invalid explicit return consumes a turn and
+receives bounded correction feedback while another turn remains. Exhausting
+correction propagates an authenticated `phase_return_contract_failed` error;
+it does not expose the rejected value.
+
 ### `agent.core/run-outcome`
 
 ```clojure
@@ -102,6 +110,14 @@ can inspect the closed `kind` and `reason`. `:model` is the resolved
 installation alias after routing, including when the caller omitted `model`
 and a manifest default selected it. It is omitted only when no alias was
 resolved and none was requested.
+
+`run-outcome` also defaults to raw, non-validating returns. Its optional
+top-level `return_contract` selects one named `phase_return_schemas` entry for
+this standalone loop. A valid return keeps the existing `:returned` shape. An
+invalid final-turn return becomes candidate-free `:subject-failure` data with
+kind `:phase-return-contract-failed`; an ordinary turn limit remains
+`:turn-limit`. Selection is explicit: PtcRunner does not infer a contract from
+the mission name, the registry contents, or the application result schema.
 
 `kind` and `reason` are facts. This entry does not add a runtime
 `recovery: retry | choose-alternate | abort` axis; the workflow chooses a
@@ -195,6 +211,10 @@ phase. Raw-result entries state that the exact returned value is validated.
 Envelope-producing `agent.core/run` states that the host validates the success
 envelope and tells the model to return only its value, avoiding double
 wrapping. `run-value` and `run-outcome` render no application result obligation.
+When either raw standalone entry selects `return_contract`, it renders only
+that named handoff contract with standalone-loop wording. A top-level selector
+is incompatible with `run-result-value`, `run-phased-result-value`, and
+`agent.core/run`; those entries reject it before provider or mission activity.
 
 ### `agent.main/run`
 
@@ -220,6 +240,7 @@ it does not add task-specific prompt policy.
 | --- | --- | --- | --- |
 | `model` | selected installation default | string | Selects a manifest-installed workflow model alias. |
 | `mission` | `"default"` | non-empty string | Selects the mission whose API is rendered and whose environment evaluates programs. |
+| `return_contract` | omitted | declared contract name or `nil` | On `run-value` and `run-outcome`, selects one named `phase_return_schemas` contract for standalone in-loop validation. |
 | `max_turns` | `4` | integer, 1–128 | Bounds provider requests and generated programs in this loop. |
 | `max_program_chars` | `64000` | integer, 1–1,000,000 | Bounds one `run_ptc_lisp` program string. |
 | `max_observation_chars` | `2048` | integer, 1–65,536 | Bounds the untrusted structural preview and `println` body of one successful observation. |
@@ -239,6 +260,14 @@ the effective `max_turns`.
 
 Omitted or `nil` `mission` selects `default`. An empty, non-string, or unknown
 mission fails; the loop never falls back to a different environment.
+
+Omitted or `nil` `return_contract` preserves raw standalone behavior. A
+malformed name fails as `invalid-agent-config/invalid-return-contract`; a valid
+but undeclared name fails as
+`invalid-agent-config/unknown_phase_return_contract`. Both are resolved before
+provider or mission activity. Caller-authored projections, schemas, and
+validation objects are ignored as authority and cannot enter the prompt or
+validator.
 
 When one model installation is selected, `model` may be omitted. With several,
 omission uses the selection marked `"default": true`. Otherwise the request

@@ -17,7 +17,10 @@ defmodule PtcRunner.Kernel.Library do
   `%{"ok" => true, "value" => value}` success envelope by default.
   `agent.core/run-value` is the composable variant: it returns the same
   model-authored value to its PTC-Lisp caller without terminating the outer
-  workflow, allowing an evaluator to judge the answer before returning.
+  workflow, allowing an evaluator to judge the answer before returning. It and
+  `agent.core/run-outcome` remain raw by default; either may explicitly select
+  one application-declared named phase-return contract for in-loop standalone
+  handoff validation and bounded correction.
 
   `analysis` and `debug.nav` are the two navigation surfaces over one immutable
   run-evidence capture, and a mission installs one or the other. `analysis`

@@ -390,6 +390,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
                  "kernel-agent-config-failure",
                  "kernel-agent-protocol-error",
                  "kernel-llm-provider-failure",
+                 "kernel-phase-return-contract-failure",
                  "kernel-result-contract-failure",
                  "kernel-runtime-limit-failure"
                ]}} =
@@ -427,6 +428,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
                  "kernel-agent-config-failure",
                  "kernel-agent-protocol-error",
                  "kernel-llm-provider-failure",
+                 "kernel-phase-return-contract-failure",
                  "kernel-result-contract-failure",
                  "kernel-runtime-limit-failure"
                ]}} =
