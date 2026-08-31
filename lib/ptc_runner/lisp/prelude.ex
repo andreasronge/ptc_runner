@@ -28,7 +28,10 @@ defmodule PtcRunner.Lisp.Prelude do
       helpers transitively reachable from a public export; values are a
       labeled effective-metadata header plus the Formatter-rendered defining
       form (no closures or raw AST). Reveals implementation, not just
-      contract — keep secrets out of prelude bodies.
+      contract — keep secrets out of prelude bodies. Bundle composition merges
+      each component index so a composed workflow or mission prelude answers
+      `(source)` for attached exports the same way a single-source compile
+      does.
     * `form_graph` — `%{namespace => %{symbol => entry}}`, the compiled
       per-namespace sibling call graph. Each entry carries `visibility`
       (`:public`/`:private`, this
