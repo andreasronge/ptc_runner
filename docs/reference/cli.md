@@ -295,7 +295,11 @@ dependencies and belong to `doctor`.
 On success, the validate result includes `mission_grants`: for each named
 mission, the sorted parseable `data/<name>` grants, every public export ref,
 and selected mission provider names. This is the static grant declaration;
-validate does not acquire providers, so capability tool names remain unresolved.
+validate does not acquire providers. It can nevertheless prove that a mission
+with no selected provider cannot receive a non-implicit capability, so it
+rejects that case during bundle validation. Capability tool names remain
+unresolved for missions selecting one or more providers, and validation does
+not infer them from provider aliases or provider dependency services.
 `kernel/mission-inventory` lists model-visible capabilities once a run or REPL
 session has built the frozen inventory.
 
@@ -449,6 +453,7 @@ Embedding runtimes can supply authorization targets directly.
 | 3 | `bundle` | `compile_failed` | no | the component bundle could not be compiled |
 | 3 | `bundle` | `duplicate_definition` | no | the component bundle defines the same name more than once |
 | 3 | `bundle` | `entry_invalid` | no | the workflow entry is not a public bundle export |
+| 3 | `bundle` | `mission_capability_ungranted` | no | a mission with no providers requires a capability not supplied implicitly |
 | 3 | `bundle` | `mission_undeclared` | no | the workflow entry evaluates into a mission and the manifest declares none |
 | 3 | `bundle` | `syntax_invalid` | no | the component source is not valid PTC-Lisp |
 | 3 | `bundle` | `undefined_variable` | no | the component source contains an undefined variable reference |

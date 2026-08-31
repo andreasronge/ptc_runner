@@ -803,6 +803,11 @@ defmodule PtcRunner.Kernel.RunBuilder do
              workflow_bundle,
              request.package.entry,
              request.package.missions
+           ),
+         :ok <-
+           RunCoordinator.validate_mission_capabilities(
+             request.package.missions,
+             mission_bundles
            ) do
       assemble(
         request,

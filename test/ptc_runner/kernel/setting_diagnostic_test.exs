@@ -28,6 +28,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:application, :required_property_missing},
     {:application, :schema_violation},
     {:bundle, :duplicate_definition},
+    {:bundle, :mission_capability_ungranted},
     {:bundle, :undefined_variable},
     {:bundle, :unknown_namespace},
     {:execution, :explicit_failure},

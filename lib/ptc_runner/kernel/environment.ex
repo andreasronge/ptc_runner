@@ -106,12 +106,54 @@ defmodule PtcRunner.Kernel.Environment do
   @spec capability_requirements(FrozenBundle.t() | nil) :: [binary()]
   def capability_requirements(%FrozenBundle{prelude: %{exports: exports}}) do
     exports
-    |> Enum.flat_map(&Map.get(&1, :tool_refs, []))
+    |> Enum.flat_map(fn export ->
+      explicit =
+        export
+        |> Map.get(:requires, [])
+        |> Enum.map(fn "tool:" <> name -> name end)
+
+      explicit ++ Map.get(export, :tool_refs, [])
+    end)
     |> Enum.uniq()
     |> Enum.sort()
   end
 
   def capability_requirements(nil), do: []
+
+  @doc false
+  @spec missing_capability_requirements(FrozenBundle.t() | nil, [binary()], :workflow | :mission) ::
+          [binary()]
+  def missing_capability_requirements(bundle, capability_names, kind)
+      when is_list(capability_names) and kind in [:workflow, :mission] do
+    private_capabilities =
+      case kind do
+        :workflow -> workflow_private_capabilities(bundle, %{})
+        :mission -> []
+      end
+
+    missing_capability_requirements(bundle, capability_names, kind, private_capabilities)
+  end
+
+  @doc false
+  @spec missing_capability_requirements(
+          FrozenBundle.t() | nil,
+          [binary()],
+          :workflow | :mission,
+          [binary()]
+        ) :: [binary()]
+  def missing_capability_requirements(bundle, capability_names, kind, private_capabilities)
+      when is_list(capability_names) and is_list(private_capabilities) and
+             kind in [:workflow, :mission] do
+    granted_names =
+      Map.new(
+        capability_names ++ implicit_capabilities(kind, private_capabilities),
+        &{&1, true}
+      )
+
+    bundle
+    |> capability_requirements()
+    |> Enum.reject(&Map.has_key?(granted_names, &1))
+  end
 
   defp valid_bundle(nil), do: :ok
 
@@ -146,16 +188,13 @@ defmodule PtcRunner.Kernel.Environment do
   end
 
   defp bundle_requirements(%FrozenBundle{} = bundle, capabilities, kind, private_capabilities) do
-    granted_names =
-      Map.new(
-        Map.keys(capabilities) ++ implicit_capabilities(kind, private_capabilities),
-        &{&1, true}
-      )
-
     missing =
-      bundle
-      |> capability_requirements()
-      |> Enum.reject(&Map.has_key?(granted_names, &1))
+      missing_capability_requirements(
+        bundle,
+        Map.keys(capabilities),
+        kind,
+        private_capabilities
+      )
 
     if missing == [],
       do: :ok,

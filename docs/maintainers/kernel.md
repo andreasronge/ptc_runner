@@ -247,7 +247,12 @@ API projection, including mission data grants. `agent.prompt` renders model
 context from the compact secondary projection. Prompt visibility never changes
 the underlying environment grant. `ptc validate` reports parseable data forms,
 all public exports, and selected providers per mission under `mission_grants`
-without acquiring providers.
+without acquiring providers. Before provider declaration or work, validation
+also compares each provider-free mission bundle's transitive requirements with
+the mission environment's implicit grants and rejects a missing requirement.
+A mission selecting at least one provider remains unresolved at this stage:
+provider aliases and their dependency services do not attest the capability
+names that acquisition will supply.
 
 ## Evaluation, limits, and concurrency
 

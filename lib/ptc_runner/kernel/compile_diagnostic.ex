@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   retains the fixed catalog message.
   """
 
+  alias PtcRunner.Kernel.CapabilityRequirementDiagnostic
   alias PtcRunner.Lisp.CoreAST
   alias PtcRunner.Lisp.Format.SymbolRef
   alias PtcRunner.Lisp.NamespaceDiagnostic
@@ -110,18 +111,11 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   @doc false
   @spec capability_requirement_message(term()) :: {:ok, binary()} | :error
   def capability_requirement_message(names) do
-    case bounded_names(names, @max_names, []) do
-      {:ok, [name]} ->
-        {:ok, "Missing capability requirement: #{name}"}
-
-      {:ok, names} ->
-        if names == Enum.sort(Enum.uniq(names)),
-          do: {:ok, "Missing capability requirements: #{Enum.join(names, ", ")}"},
-          else: :error
-
-      :error ->
-        :error
-    end
+    CapabilityRequirementDiagnostic.message(
+      names,
+      "Missing capability requirement: ",
+      "Missing capability requirements: "
+    )
   end
 
   @doc false
@@ -151,7 +145,11 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   end
 
   def valid_message?(:capability_requirement_missing, message) when is_binary(message) do
-    byte_size(message) <= @max_message_bytes and valid_capability_requirement_message?(message)
+    CapabilityRequirementDiagnostic.valid_message?(
+      message,
+      "Missing capability requirement: ",
+      "Missing capability requirements: "
+    )
   end
 
   def valid_message?(_code, _message), do: false
@@ -200,17 +198,11 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   end
 
   def message_schema(:capability_requirement_missing, fallback) do
-    %{
-      "oneOf" => [
-        %{"const" => fallback},
-        dynamic_message_schema(
-          "^Missing capability requirement: #{@symbol_pattern}$(?![\\s\\S])"
-        ),
-        dynamic_message_schema(
-          "^Missing capability requirements: #{@symbol_pattern}(, #{@symbol_pattern}){1,7}$(?![\\s\\S])"
-        )
-      ]
-    }
+    CapabilityRequirementDiagnostic.message_schema(
+      fallback,
+      "Missing capability requirement: ",
+      "Missing capability requirements: "
+    )
   end
 
   def message_schema(_code, fallback), do: %{"const" => fallback}
@@ -228,7 +220,7 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   defp bounded_names(_names, _remaining, _bounded), do: :error
 
   defp valid_name?(name),
-    do: is_binary(name) and byte_size(name) <= @max_name_bytes and SymbolRef.valid_name?(name)
+    do: SymbolRef.valid_name?(name) and byte_size(name) <= @max_name_bytes
 
   defp valid_unqualified_name?(name),
     do: valid_name?(name) and not String.contains?(name, "/")
@@ -246,22 +238,6 @@ defmodule PtcRunner.Kernel.CompileDiagnostic do
   end
 
   defp valid_unbound_message?(_message), do: false
-
-  defp valid_capability_requirement_message?("Missing capability requirement: " <> name),
-    do: valid_name?(name)
-
-  defp valid_capability_requirement_message?("Missing capability requirements: " <> joined) do
-    case String.split(joined, ", ") do
-      [_one] ->
-        false
-
-      names ->
-        names == Enum.sort(Enum.uniq(names)) and
-          match?({:ok, _bounded}, bounded_names(names, @max_names, []))
-    end
-  end
-
-  defp valid_capability_requirement_message?(_message), do: false
 
   defp dynamic_message_schema(pattern) do
     %{

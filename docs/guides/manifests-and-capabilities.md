@@ -70,10 +70,10 @@ scopes to the manifest above:
 }
 ```
 
-A mission's own `providers` list can only narrow what `providers.mission`
-already selected; naming an alias there does not introduce it, and a name
-absent from `providers.mission` is rejected. Omitting a name is the point: the
-grant is then absent from that mission's environment.
+A mission can only narrow `providers.mission`; an absent alias is rejected. If
+it selects no providers, requirements outside implicit capabilities are also
+rejected. See [mission isolation](../reference/application-manifest.md#supply-input-and-named-missions)
+for the complete rule and remediation.
 
 ## How do I stop a long or expensive run?
 

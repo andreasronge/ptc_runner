@@ -269,9 +269,13 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     remote = Path.join(root, "origin.git")
     bin = Path.join(root, "bin")
     log = Path.join(root, "init.log")
-    worktree = main <> "-test-linux-bootstrap"
     File.mkdir_p!(main)
     File.mkdir_p!(bin)
+    # `git worktree list` and bash `cd` report the physical path; on macOS
+    # System.tmp_dir!/0 is often under /var while the real directory is
+    # /private/var.
+    main = physical_path(main)
+    worktree = main <> "-test-linux-bootstrap"
     on_exit(fn -> File.rm_rf!(root) end)
 
     git!(main, ["init", "--quiet"])
@@ -313,6 +317,13 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
       env: @git_env,
       stderr_to_stdout: true
     )
+  end
+
+  defp physical_path(path) do
+    case System.cmd("pwd", ["-P"], cd: path, stderr_to_stdout: true) do
+      {output, 0} -> String.trim(output)
+      {_output, _status} -> Path.expand(path)
+    end
   end
 
   # Real PLTs are one external term; the seed proves a staged copy decodes

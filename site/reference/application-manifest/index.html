@@ -154,6 +154,10 @@ model context, and continuation state:</p><pre><code class="json language-json">
   }
 }</code></pre><p>Mission provider names refer to unique occurrences already selected under
 <code class="inline">providers.mission</code>; a mission can narrow authority but cannot introduce it.
+When a mission selects no provider, validation rejects any compiled capability
+requirement that the mission environment does not supply implicitly. Add an
+appropriate provider selection or remove the requirement. Missions selecting
+one or more providers remain unresolved until those providers are acquired.
 <code class="inline">&quot;default&quot;</code> is an ordinary declared name, not an implicit fallback.
 Definitions and <code class="inline">*1</code>/<code class="inline">*2</code>/<code class="inline">*3</code> history never cross between missions.</p><p>Workflow code selects the mission explicitly with the <code class="inline">kernel/eval*</code>,
 <code class="inline">kernel/check-source</code>, or mission-introspection functions. The shipped

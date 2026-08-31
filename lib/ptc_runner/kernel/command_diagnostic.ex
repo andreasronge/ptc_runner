@@ -430,6 +430,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
 
   defp valid_message_source?(
          _message,
+         %{phase: :bundle, code: :mission_capability_ungranted},
+         nil
+       ),
+       do: true
+
+  defp valid_message_source?(
+         _message,
          %{phase: :provider_acquisition, code: :provider_tool_missing},
          nil
        ),
