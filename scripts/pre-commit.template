@@ -2,4 +2,5 @@
 
 # Compatibility entry point for clones installed with scripts/install-hooks.sh.
 # Keep the tracked implementation in one place.
-exec "$(git rev-parse --show-toplevel)/.githooks/pre-commit" "$@"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+exec bash "$REPO_ROOT/scripts/hook-runtime.sh" "$REPO_ROOT/.githooks/pre-commit" "$@"

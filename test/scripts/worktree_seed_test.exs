@@ -175,6 +175,63 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     assert output =~ "refusing to seed the main checkout from itself"
   end
 
+  test "gc reads worktree activity timestamps portably" do
+    %{main: main, worktree: worktree} = repo_with_worktree()
+    git!(main, ["update-ref", "refs/remotes/origin/main", "HEAD"])
+
+    {output, status} =
+      System.cmd(
+        "bash",
+        [@script, "gc", "--no-fetch", "--no-issues", "--idle-hours", "0"],
+        cd: main,
+        env: @git_env,
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    refute output =~ "integer expression expected"
+    assert output =~ "Reclaimable"
+    assert output =~ worktree
+  end
+
+  test "new initializes the worktree through mise by default" do
+    %{main: main, log: log, path: path, worktree: worktree} = repo_with_origin()
+
+    {output, status} =
+      System.cmd(
+        "bash",
+        [
+          "-c",
+          ~S|umask 0002; exec bash "$1" new test/linux-bootstrap|,
+          "worktree-bootstrap-test",
+          @script
+        ],
+        cd: main,
+        env:
+          GitEnv.clear(
+            PATH: path <> ":" <> System.fetch_env!("PATH"),
+            PTC_INIT_LOG: log
+          ),
+        stderr_to_stdout: true
+      )
+
+    assert status == 0, output
+    assert output =~ "Worktree initialized: #{worktree}"
+
+    for directory <- [worktree, Path.join(worktree, "ptc_viewer")] do
+      assert Bitwise.band(File.stat!(directory).mode, 0o022) == 0
+    end
+
+    assert log |> File.read!() |> String.split("\n", trim: true) == [
+             "hooks|#{worktree}|0022",
+             "mise|install|#{worktree}|0022",
+             "mise|exec -- mix deps.get|#{worktree}|0022",
+             "mise|exec -- mix deps.get|#{worktree}/ptc_viewer|0022",
+             "mise|exec -- mix deps.get|#{worktree}/ptc_runner_launcher|0022",
+             "mise|exec -- mix compile|#{worktree}|0022"
+           ]
+  end
+
   defp repo_with_worktree do
     root =
       Path.join(
@@ -201,6 +258,55 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     %{main: main, worktree: worktree}
   end
 
+  defp repo_with_origin do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "ptc-worktree-new-#{System.unique_integer([:positive, :monotonic])}"
+      )
+
+    main = Path.join(root, "main checkout")
+    remote = Path.join(root, "origin.git")
+    bin = Path.join(root, "bin")
+    log = Path.join(root, "init.log")
+    worktree = main <> "-test-linux-bootstrap"
+    File.mkdir_p!(main)
+    File.mkdir_p!(bin)
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    git!(main, ["init", "--quiet"])
+    git!(main, ["config", "user.email", "seed@example.test"])
+    git!(main, ["config", "user.name", "Seed Test"])
+
+    Enum.each(@key_files, &write!(main, &1, "pinned\n"))
+
+    write_executable!(
+      main,
+      "scripts/install-hooks.sh",
+      ~S"""
+      #!/usr/bin/env bash
+      printf 'hooks|%s|%s\n' "$PWD" "$(umask)" >> "$PTC_INIT_LOG"
+      """
+    )
+
+    write_executable!(
+      root,
+      "bin/mise",
+      ~S"""
+      #!/usr/bin/env bash
+      printf 'mise|%s|%s|%s\n' "$*" "$PWD" "$(umask)" >> "$PTC_INIT_LOG"
+      """
+    )
+
+    git!(main, ["add", "."])
+    git!(main, ["commit", "--quiet", "-m", "base"])
+    git!(root, ["init", "--quiet", "--bare", remote])
+    git!(main, ["remote", "add", "origin", remote])
+    git!(main, ["push", "--quiet", "origin", "HEAD:main"])
+
+    %{main: main, log: log, path: bin, worktree: worktree}
+  end
+
   defp seed(main, worktree) do
     System.cmd("bash", [@script, "seed", worktree],
       cd: main,
@@ -217,6 +323,11 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     full_path = Path.join(repo, path)
     File.mkdir_p!(Path.dirname(full_path))
     File.write!(full_path, contents)
+  end
+
+  defp write_executable!(repo, path, contents) do
+    write!(repo, path, contents)
+    File.chmod!(Path.join(repo, path), 0o755)
   end
 
   defp git!(repo, args) do
