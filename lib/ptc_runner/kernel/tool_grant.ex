@@ -68,6 +68,12 @@ defmodule PtcRunner.Kernel.ToolGrant do
     )
   end
 
+  @doc "Returns the bounded documentation contracts for installed capabilities."
+  @spec capability_contracts(map()) :: %{binary() => map()}
+  def capability_contracts(%{capabilities: capabilities}) when is_map(capabilities) do
+    Environment.capability_contracts(%{capabilities: capabilities})
+  end
+
   defp build_callbacks(
          state,
          kind,

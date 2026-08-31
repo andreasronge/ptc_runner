@@ -192,9 +192,9 @@ the transport, mapping, effect, snapshot policy, or server behavior changes.
 
 The required `effect` declaration in `ptc-host.json` is authoritative; server
 annotations cannot change it. `model_visible` on a host mapping is the default
-for prompt discovery, not a ceiling: a selecting manifest may still list that
+for model context, not a ceiling: a selecting manifest may still list that
 name in `config.model_visible`. Visibility never grants or denies call
-authority. `error_feedback: "bounded"` may expose up to 1,024 bytes of
+authority or runtime documentation. `error_feedback: "bounded"` may expose up to 1,024 bytes of
 validated server error text as untrusted model feedback, so enable it only when
 the server cannot return secrets, paths, or stack traces.
 
@@ -549,7 +549,7 @@ exercising this exact host-document and command path.
 Interactive authorization is currently available only from a source checkout:
 
 ```console
-ptc run ptc.json --host-config ptc-host.json \
+mix ptc run ptc.json --host-config ptc-host.json \
   --authorize-mcp workspace
 ```
 

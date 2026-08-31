@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.CoreContractTest do
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.SourceCheck
+  alias PtcRunner.Kernel.TerminalUsage
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -1184,29 +1185,32 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     {:ok, mission} = MissionEnvironment.new([])
 
     build = fn payload_bytes, close ->
-      {:ok, limits} =
-        Limits.new(
-          event_payload_bytes: payload_bytes,
-          normal_event_count: 4,
-          normal_event_bytes: 200_000
-        )
+      case Limits.new(
+             event_payload_bytes: payload_bytes,
+             normal_event_count: 4,
+             normal_event_bytes: 200_000
+           ) do
+        {:ok, limits} ->
+          case EventSink.start(:normal, limits) do
+            {:ok, sink} ->
+              result =
+                RunConfig.new(
+                  workflow_environment: workflow,
+                  missions: %{"default" => mission},
+                  input: %{},
+                  limits: limits,
+                  event_sink: sink,
+                  provider_session: ProviderSessionFixture.start([close], limits)
+                )
 
-      case EventSink.start(:normal, limits) do
-        {:ok, sink} ->
-          result =
-            RunConfig.new(
-              workflow_environment: workflow,
-              missions: %{"default" => mission},
-              input: %{},
-              limits: limits,
-              event_sink: sink,
-              provider_session: ProviderSessionFixture.start([close], limits)
-            )
+              {result, sink, limits}
 
-          {result, sink, limits}
+            {:error, :invalid_event_sink} ->
+              {{:error, :invalid_event_sink}, nil, limits}
+          end
 
-        {:error, :invalid_event_sink} ->
-          {{:error, :invalid_event_sink}, nil, limits}
+        {:error, :invalid_limits} ->
+          {{:error, :invalid_limits}, nil, nil}
       end
     end
 
@@ -1216,11 +1220,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
           EventSink.stop(sink)
           true
 
-        {{:error, :invalid_run_config}, sink, _limits} ->
-          EventSink.stop(sink)
-          false
-
-        {{:error, :invalid_event_sink}, nil, _limits} ->
+        {{:error, _reason}, sink, _limits} ->
+          if sink, do: EventSink.stop(sink)
           false
       end
     end
@@ -1238,16 +1239,16 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     end
 
     minimum = search.(search, 1, 50_000)
-    assert minimum > 1
+
+    # The catalog floor and the resolved terminal-usage gate now agree for an
+    # application this small: no payload is admitted by the schema and then
+    # refused when the run assembles its own `run-stopped` projection.
+    assert minimum == EventBudget.minimum_normal_payload_bytes()
+    assert {{:error, :invalid_limits}, nil, nil} = build.(minimum - 1, fn -> :ok end)
 
     {{:ok, accepted}, accepted_sink, _limits} = build.(minimum, fn -> :ok end)
+    assert EventSink.begin_capacity?(accepted_sink, accepted.run_started_metadata)
     EventSink.stop(accepted_sink)
-
-    {{:error, :invalid_run_config}, too_tight_sink, _limits} =
-      build.(minimum - 1, fn -> :ok end)
-
-    assert EventSink.begin_capacity?(too_tight_sink, accepted.run_started_metadata)
-    EventSink.stop(too_tight_sink)
 
     cleanup_failure = fn -> {:error, :fixture_cleanup_failed} end
     {{:ok, runner_config}, runner_sink, _limits} = build.(minimum, cleanup_failure)
@@ -1380,13 +1381,34 @@ defmodule PtcRunner.Kernel.CoreContractTest do
              )
   end
 
+  # A key present in a real terminal projection but missing from the maximum is a
+  # payload the sink admits at build time and cannot record at finalization —
+  # the shape of #1605 and #1708 both.
+  test "the maximum terminal usage covers every key a real terminal projection carries" do
+    {:ok, limits} = Limits.new()
+    {:ok, state} = RunState.start(limits)
+    runner_keys = state |> RunState.usage() |> Map.keys() |> MapSet.new()
+    repl_keys = MapSet.put(runner_keys, :errors)
+
+    maximum_keys =
+      %{}
+      |> TerminalUsage.maximum(%{}, [], limits)
+      |> Map.keys()
+      |> MapSet.new()
+
+    assert MapSet.subset?(repl_keys, maximum_keys),
+           "missing: #{inspect(MapSet.difference(repl_keys, maximum_keys))}"
+
+    assert MapSet.difference(maximum_keys, repl_keys) |> MapSet.to_list() == []
+  end
+
   test "terminal preflight counts only metered environment capabilities" do
     {:ok, workflow} = WorkflowEnvironment.new([])
     {:ok, mission} = MissionEnvironment.new([])
 
     {:ok, limits} =
       Limits.new(
-        event_payload_bytes: 7_000,
+        event_payload_bytes: EventBudget.minimum_normal_payload_bytes(),
         normal_event_count: 4,
         normal_event_bytes: 100_000
       )
@@ -1424,14 +1446,15 @@ defmodule PtcRunner.Kernel.CoreContractTest do
                )
     end
 
-    {:ok, base_limits} = Limits.new(normal_event_count: 3, event_payload_bytes: 5_000)
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, base_limits} = Limits.new(normal_event_count: 3, event_payload_bytes: payload_bytes)
     reserve = EventSink.terminal_reserve(:normal, base_limits)
 
     {:ok, tight_limits} =
       Limits.new(
         normal_event_count: 3,
         normal_event_bytes: reserve.bytes + 1,
-        event_payload_bytes: 5_000
+        event_payload_bytes: payload_bytes
       )
 
     {:ok, tight} = EventSink.start(:normal, tight_limits, run_id: "tight-run-started")

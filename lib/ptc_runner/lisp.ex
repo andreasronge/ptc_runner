@@ -295,6 +295,13 @@ defmodule PtcRunner.Lisp do
     - `:missing_data_params_message` - Optional diagnostic used when `data/params`
       is missing under `:strict_data`. The Kernel sets this so a no-params
       evaluation is not reported as a missing grant.
+    - `:shipped_library_ids` - Optional catalog of shipped library component IDs.
+      The Kernel passes `PtcRunner.Kernel.Library.component_ids/0` so `doc` and
+      `apropos` can name an unattached shipped library. The catalog contains
+      library IDs, not export refs, so a `doc` redirect does not assert that the
+      requested export exists.
+      `nil` (the default) keeps today's miss message, so embedded `run/2`
+      callers are unchanged.
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
       SOURCE string, or a list of source-bearing selection maps accepted by
       `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code.
@@ -815,6 +822,7 @@ defmodule PtcRunner.Lisp do
       strict_data: Keyword.get(opts, :strict_data, false),
       data_grants: Keyword.get(opts, :data_grants),
       missing_data_params_message: Keyword.get(opts, :missing_data_params_message),
+      shipped_library_ids: Keyword.get(opts, :shipped_library_ids),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
@@ -851,8 +859,14 @@ defmodule PtcRunner.Lisp do
          {:ok, parsed_signature} <- parse_signature(signature_str) do
       tool_failure_token = make_ref()
 
+      # Contracts are introspection data, not execution authority. Keep the
+      # bounded projection in tools_meta and strip it from the tool map captured
+      # by the executor so parallel workers do not copy every contract twice.
+      execution_tools =
+        Map.new(normalized_tools, fn {name, tool} -> {name, %{tool | contract: nil}} end)
+
       tool_executor = fn name, args, origin ->
-        execute_tool(normalized_tools, name, args, origin, tool_failure_token)
+        execute_tool(execution_tools, name, args, origin, tool_failure_token)
       end
 
       tools_meta =
@@ -862,17 +876,18 @@ defmodule PtcRunner.Lisp do
              cache: tool.cache,
              visibility: tool.visibility,
              signature: tool.signature,
+             contract: tool.contract,
              argument_projection: tool.argument_projection,
              ledger_arguments: tool.ledger_arguments
            }}
         end)
 
       private_tool_authority? =
-        Enum.any?(normalized_tools, fn {_name, tool} -> Tool.private?(tool) end)
+        Enum.any?(execution_tools, fn {_name, tool} -> Tool.private?(tool) end)
 
       opts =
         Map.merge(params, %{
-          normalized_tools: normalized_tools,
+          normalized_tools: execution_tools,
           tool_executor: tool_executor,
           parsed_signature: parsed_signature,
           signature_str: signature_str,
@@ -1229,6 +1244,7 @@ defmodule PtcRunner.Lisp do
       strict_data: strict_data,
       data_grants: data_grants,
       missing_data_params_message: missing_data_params_message,
+      shipped_library_ids: shipped_library_ids,
       strict_transitive_calls: strict_transitive_calls,
       private_tool_authority?: private_tool_authority?,
       direct_namespaces: direct_namespaces,
@@ -1272,6 +1288,7 @@ defmodule PtcRunner.Lisp do
         strict_data: strict_data,
         data_grants: data_grants,
         missing_data_params_message: missing_data_params_message,
+        shipped_library_ids: shipped_library_ids,
         strict_transitive_calls: strict_transitive_calls,
         private_tool_authority?: private_tool_authority?,
         direct_namespaces: direct_namespaces,
@@ -1660,11 +1677,12 @@ defmodule PtcRunner.Lisp do
     do: unsupported_java_member_message(namespace, member)
 
   def format_error({:unsupported_java_class, class}),
-    do: "Analysis error: unsupported Java class #{class}"
+    do:
+      "Analysis error: unsupported Java class #{class}. Admitted Java classes: " <>
+        Enum.join(admitted_java_class_names(), ", ")
 
   def format_error({:java_arity_error, reference_id, details}),
-    do:
-      "Analysis error: Java reference #{reference_id} expects arity #{inspect(details.expected)}, got #{details.actual}"
+    do: java_arity_error_message(reference_id, details)
 
   # Handle Eval errors with specific types
   def format_error({:unbound_var, name}) do
@@ -2363,15 +2381,8 @@ defmodule PtcRunner.Lisp do
       :ok
     else
       label = if length(vars) == 1, do: "Undefined variable", else: "Undefined variables"
-      message = "#{label}: #{Enum.join(vars, ", ")}#{definition_only_suffix(vars)}"
+      message = "#{label}: #{Enum.join(vars, ", ")}#{Helpers.unresolved_name_suffix(vars)}"
       {:error, Step.error(:unbound_var, message, %{}, %{unbound_names: vars})}
-    end
-  end
-
-  defp definition_only_suffix(vars) do
-    case Helpers.definition_only_hint(vars) do
-      nil -> ""
-      hint -> ". Hint: #{hint}"
     end
   end
 
@@ -3076,6 +3087,49 @@ defmodule PtcRunner.Lisp do
   end
 
   defp pattern_vars(_other), do: []
+
+  defp admitted_java_class_names do
+    JavaSurface.references()
+    |> Enum.map(& &1.class_id)
+    |> Enum.uniq()
+    |> Enum.flat_map(fn class_id ->
+      case JavaSurface.fetch_class(class_id) do
+        {:ok, %{name: name}} -> [name]
+        :error -> []
+      end
+    end)
+    |> Enum.sort()
+  end
+
+  defp java_arity_error_message(reference_id, %{expected: []}) do
+    spelling = java_reference_spelling(reference_id)
+
+    "Analysis error: #{spelling} is a Java field, not a callable; " <>
+      "reference it as #{spelling} without parentheses"
+  end
+
+  defp java_arity_error_message(reference_id, details) do
+    arities = details.expected |> List.wrap() |> Enum.join(", ")
+
+    "Analysis error: #{java_reference_spelling(reference_id)} accepts arity #{arities}, " <>
+      "got #{details.actual}"
+  end
+
+  defp java_reference_spelling(reference_id) do
+    with :error <- java_reference_spelling_from_reference(reference_id),
+         :error <- JavaSurface.member_family_source(reference_id) do
+      "Java reference #{reference_id}"
+    else
+      {:ok, spelling} -> spelling
+    end
+  end
+
+  defp java_reference_spelling_from_reference(reference_id) do
+    case JavaSurface.fetch_reference(reference_id) do
+      {:ok, %{spellings: [spelling | _]}} -> {:ok, spelling}
+      _unspelled -> :error
+    end
+  end
 
   defp unsupported_java_member_message(namespace, member) do
     members = JavaSurface.namespace_members(namespace)

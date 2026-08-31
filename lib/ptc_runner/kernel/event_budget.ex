@@ -7,11 +7,15 @@ defmodule PtcRunner.Kernel.EventBudget do
   @max_drop_type_prefix "e" <> String.duplicate("a", 124)
   @maximum_terminal_reason String.duplicate("r", 1_020)
   # Exact retained-size upper bound for the normalized maximum error terminal
-  # on the supported 64-bit runtime: sixteen reachable 128-byte type buckets,
-  # the overflow bucket, saturated counts, and the bounded terminal reason.
-  # Keep this explicit because sizing a constructed literal can undercount the
-  # ref-counted binaries retained by a real sink.
-  @minimum_normal_payload_bytes 4_826
+  # on the supported 64-bit runtime: the bounded terminal reason, the saturated
+  # reachable drop map at its conservative bound, and the complete fixed
+  # `run-stopped` usage projection with every integer field at its catalog
+  # maximum and an empty capability and mission inventory. The application-scaled
+  # part of that projection cannot be a catalog minimum, so it is admitted per
+  # run instead. Keep this explicit because sizing a constructed literal can
+  # undercount the ref-counted binaries retained by a real sink;
+  # `limit_catalog_test` re-derives it by measurement.
+  @minimum_normal_payload_bytes 8_211
   @maximum_dropped_bytes 3_449
 
   @doc false

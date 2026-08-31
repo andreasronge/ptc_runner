@@ -16,7 +16,7 @@ defmodule PtcRunner.Kernel.CommandParser do
   alias PtcRunner.Kernel.ViewerBinding
 
   @type frontend :: CommandDeclaration.frontend()
-  @private_output_profiles ~w(private-run-analysis-v1 private-run-catalog-v1)
+  @private_output_profiles ~w(private-run-analysis-v2 private-run-catalog-v1)
 
   @spec parse([binary()], frontend()) ::
           {:ok, CommandArguments.t()} | {:error, CommandRejection.t()}

@@ -3,6 +3,104 @@ defmodule PtcRunner.Kernel.ModelContractTest do
 
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.ModelContract
+  alias PtcRunner.Kernel.ValueContract
+
+  test "value contract projection covers and deterministically orders a documented tagged union" do
+    schema = %{
+      "title" => "Decision",
+      "description" => "One sealed outcome.",
+      "oneOf" => [
+        %{
+          "type" => "object",
+          "additionalProperties" => false,
+          "required" => ["kind", "reason"],
+          "properties" => %{
+            "reason" => %{"type" => "string", "description" => "Why it was rejected."},
+            "kind" => %{"type" => "string", "const" => "rejected"}
+          }
+        },
+        %{
+          "type" => "object",
+          "additionalProperties" => false,
+          "required" => ["kind", "digest"],
+          "properties" => %{
+            "kind" => %{"type" => "string", "const" => "accepted"},
+            "digest" => %{"type" => "string", "format" => "sha256"}
+          }
+        }
+      ]
+    }
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+    assert {:ok, {:object, projection}} = ModelContract.value_contract(contract)
+    assert {"kind", "tagged_union"} in projection
+    assert {"title", "Decision"} in projection
+    assert {"description", "One sealed outcome."} in projection
+    {"variants", [accepted, rejected]} = List.keyfind(projection, "variants", 0)
+
+    assert {:object,
+            [{"discriminator", {:object, [{"name", "kind"}, {"literal", "accepted"}]}}, _]} =
+             accepted
+
+    assert {:object,
+            [{"discriminator", {:object, [{"name", "kind"}, {"literal", "rejected"}]}}, _]} =
+             rejected
+
+    assert {:ok, "sha256:" <> <<_::binary-size(64)>>} =
+             ModelContract.projection_hash({:object, projection})
+  end
+
+  test "tagged union discriminator remains unambiguous with other const fields" do
+    schema = %{
+      "oneOf" =>
+        for kind <- ["accepted", "rejected"] do
+          %{
+            "type" => "object",
+            "additionalProperties" => false,
+            "required" => ["kind", "version"],
+            "properties" => %{
+              "kind" => %{"type" => "string", "const" => kind},
+              "version" => %{"type" => "integer", "const" => 1}
+            }
+          }
+        end
+    }
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+    assert {:ok, {:object, projection}} = ModelContract.value_contract(contract)
+    {"variants", variants} = List.keyfind(projection, "variants", 0)
+
+    assert Enum.map(variants, fn {:object, pairs} ->
+             {"discriminator", {:object, discriminator}} =
+               List.keyfind(pairs, "discriminator", 0)
+
+             List.keyfind(discriminator, "literal", 0)
+           end) == [{"literal", "accepted"}, {"literal", "rejected"}]
+  end
+
+  test "ignores invalid string-const discriminator candidates accepted as ordinary fields" do
+    schema = %{
+      "oneOf" =>
+        for kind <- ["accepted", "rejected"] do
+          %{
+            "type" => "object",
+            "additionalProperties" => false,
+            "required" => ["kind", "marker"],
+            "properties" => %{
+              "kind" => %{"type" => "string", "const" => kind},
+              "marker" => %{
+                "type" => "string",
+                "const" => if(kind == "accepted", do: "", else: "ready")
+              }
+            }
+          }
+        end
+    }
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+    assert {:ok, {:object, _projection}} = ModelContract.value_contract(contract)
+  end
+
   alias PtcRunner.Lisp.Signature
 
   test "keeps positional nullability and map-field presence separate" do

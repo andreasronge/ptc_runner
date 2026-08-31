@@ -295,19 +295,13 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   def max_calls_message?(_message), do: false
 
   defp max_calls_message_branch do
-    %{
-      "type" => "string",
-      "minLength" => 1,
-      "maxLength" => @max_calls_maximum_message_bytes,
-      "pattern" =>
-        DiagnosticPattern.exact(
-          DiagnosticPattern.escape(@max_calls_prefix) <>
-            @subordinate_limit_pattern <>
-            DiagnosticPattern.escape(@max_calls_middle) <>
-            @alias_schema_pattern <>
-            DiagnosticPattern.escape(@max_calls_suffix)
-        )
-    }
+    DiagnosticPattern.exact_message_schema(@max_calls_maximum_message_bytes, [
+      {:literal, @max_calls_prefix},
+      {:pattern, @subordinate_limit_pattern},
+      {:literal, @max_calls_middle},
+      {:pattern, @alias_schema_pattern},
+      {:literal, @max_calls_suffix}
+    ])
   end
 
   @doc false
@@ -913,16 +907,11 @@ defmodule PtcRunner.Kernel.RuntimeLimitDiagnostic do
   # ECMA-262 metacharacters, so the pattern keeps matching exactly the message
   # its builder produces.
   defp bounded_branch(maximum_bytes, prefix, value_pattern, suffix) do
-    %{
-      "type" => "string",
-      "minLength" => 1,
-      "maxLength" => maximum_bytes,
-      "pattern" =>
-        DiagnosticPattern.exact(
-          DiagnosticPattern.escape(prefix) <>
-            value_pattern <> DiagnosticPattern.escape(suffix)
-        )
-    }
+    DiagnosticPattern.exact_message_schema(maximum_bytes, [
+      {:literal, prefix},
+      {:pattern, value_pattern},
+      {:literal, suffix}
+    ])
   end
 
   defp valid_exact_timeout_message?(message, limit, phase) do

@@ -461,6 +461,12 @@ defmodule PtcRunner.Kernel.ProviderExecutionOAuthTest do
 
     assert diagnostic.phase == :active_preflight
     assert diagnostic.code == :authorization_required
+
+    assert diagnostic.message ==
+             "provider authorization is required; runtime-included ptc cannot initiate " <>
+               "authorization; source-checkout mix ptc run ... --authorize-mcp NAME can " <>
+               "initiate it, and embedding hosts may provide authorization"
+
     refute diagnostic.provider_activity
     assert diagnostic.subject.name == "fixture"
     assert diagnostic.subject.operation == :authorization

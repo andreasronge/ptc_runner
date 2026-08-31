@@ -452,20 +452,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Let bindings
   defp do_eval({:let, bindings, body}, %EvalContext{} = eval_ctx) do
-    new_ctx =
-      Enum.reduce(bindings, eval_ctx, fn {:binding, pattern, value_ast}, acc_ctx ->
-        {:ok, value, value_ctx} = eval_child(value_ast, acc_ctx)
-
-        case Patterns.match_pattern(pattern, value) do
-          {:ok, new_bindings} ->
-            new_bindings
-            |> maybe_mark_capability_result_binding(pattern, value_ast)
-            |> then(&EvalContext.merge_env(value_ctx, &1))
-
-          {:error, reason} ->
-            Abort.error!(reason, value_ctx)
-        end
-      end)
+    new_ctx = eval_sequential_bindings(bindings, eval_ctx)
 
     {:ok, value, final_ctx} = eval_child(body, new_ctx)
     {:ok, value, %{final_ctx | env: eval_ctx.env, locals: eval_ctx.locals}}
@@ -473,20 +460,7 @@ defmodule PtcRunner.Lisp.Eval do
 
   # Tail recursion: loop
   defp do_eval({:loop, bindings, body}, %EvalContext{} = eval_ctx) do
-    loop_ctx =
-      Enum.reduce(bindings, eval_ctx, fn {:binding, pattern, value_ast}, acc_ctx ->
-        {:ok, value, value_ctx} = eval_child(value_ast, acc_ctx)
-
-        case Patterns.match_pattern(pattern, value) do
-          {:ok, new_bindings} ->
-            new_bindings
-            |> maybe_mark_capability_result_binding(pattern, value_ast)
-            |> then(&EvalContext.merge_env(value_ctx, &1))
-
-          {:error, reason} ->
-            Abort.error!(reason, value_ctx)
-        end
-      end)
+    loop_ctx = eval_sequential_bindings(bindings, eval_ctx)
 
     {:ok, value, final_ctx} = execute_loop(body, loop_ctx, bindings)
     {:ok, value, %{final_ctx | env: eval_ctx.env, locals: eval_ctx.locals}}
@@ -974,6 +948,22 @@ defmodule PtcRunner.Lisp.Eval do
 
   defp unwrap_constant({:constant, value}), do: value
   defp unwrap_constant(other), do: other
+
+  defp eval_sequential_bindings(bindings, %EvalContext{} = eval_ctx) do
+    Enum.reduce(bindings, eval_ctx, fn {:binding, pattern, value_ast}, acc_ctx ->
+      {:ok, value, value_ctx} = eval_child(value_ast, acc_ctx)
+
+      case Patterns.match_pattern(pattern, value) do
+        {:ok, new_bindings} ->
+          new_bindings
+          |> maybe_mark_capability_result_binding(pattern, value_ast)
+          |> then(&EvalContext.merge_env(value_ctx, &1))
+
+        {:error, reason} ->
+          Abort.error!(reason, value_ctx)
+      end
+    end)
+  end
 
   defp maybe_mark_capability_result_binding(
          bindings,

@@ -72,12 +72,28 @@ defmodule PtcRunner.Kernel.CommandContract do
   ]
   @preclassification_only_phases @unclassified_run_phases -- [:internal]
 
+  # The application phase is otherwise decided before a run has a result class.
+  # `limit_capacity_invalid` is the exception: the terminal-usage requirement it
+  # reports scales with the resolved capability and mission inventory, which is
+  # not known until provider assembly, by which point the run already carries
+  # its result class. It gets its own branch rather than joining the general
+  # classified union, so the envelope keeps stating what the code means — the
+  # run never started and wrote nothing.
+  @capacity_pairs [{:application, :limit_capacity_invalid}]
+  @capacity_artifact_states ~w(not_requested not_written)
+
   @codes_by_phase DiagnosticCatalog.rows()
                   |> Enum.group_by(& &1.phase, & &1.code)
   @project_codes Map.fetch!(@codes_by_phase, :project)
   @host_codes Map.fetch!(@codes_by_phase, :host)
   @application_codes Map.fetch!(@codes_by_phase, :application)
-  @static_application_codes @application_codes -- [:override_invalid, :event_identity_conflict]
+  # Every other application code is decided before provider assembly, so only
+  # the capacity refusal can come from a run that already has a result class:
+  # `validate`, `doctor`, and the unclassified run branch must not admit it.
+  @capacity_codes Enum.map(@capacity_pairs, &elem(&1, 1))
+  @preassembly_application_codes @application_codes -- @capacity_codes
+  @static_application_codes @preassembly_application_codes --
+                              [:override_invalid, :event_identity_conflict]
   @bundle_codes Map.fetch!(@codes_by_phase, :bundle)
   @provider_declaration_codes Map.fetch!(@codes_by_phase, :provider_declaration)
   @destination_codes Map.fetch!(@codes_by_phase, :destination)
@@ -126,6 +142,7 @@ defmodule PtcRunner.Kernel.CommandContract do
               @artifact_states -- @recovery_artifact_states,
               "classified_diagnostic"
             ),
+            run_capacity_error_envelope("capacity_diagnostic"),
             run_recovery_error_envelope(
               "recovery_written",
               "recovery_written_diagnostic"
@@ -166,6 +183,8 @@ defmodule PtcRunner.Kernel.CommandContract do
               &(&1.phase in @preclassification_only_phases)
             )
           ),
+        "capacity_diagnostic" =>
+          diagnostic_schema(Enum.filter(DiagnosticCatalog.rows(), &capacity_pair?/1)),
         "recovery_written_diagnostic" =>
           recovery_diagnostic_schema(@recovery_written_publication_codes),
         "finalization_uncertain_diagnostic" =>
@@ -891,6 +910,8 @@ defmodule PtcRunner.Kernel.CommandContract do
     )
   end
 
+  defp capacity_pair?(%{phase: phase, code: code}), do: {phase, code} in @capacity_pairs
+
   defp diagnostic_rows(:run), do: DiagnosticCatalog.rows()
 
   defp diagnostic_rows(mode) do
@@ -975,7 +996,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: true
 
   defp diagnostic_pair_allowed?(:run_unclassified, :application, code)
-       when code in @application_codes,
+       when code in @preassembly_application_codes,
        do: true
 
   defp diagnostic_pair_allowed?(:run_unclassified, :destination, code)
@@ -1062,6 +1083,21 @@ defmodule PtcRunner.Kernel.CommandContract do
             states,
             execution_schema(artifact_class),
             diagnostic
+          )
+        end)
+    }
+  end
+
+  defp run_capacity_error_envelope(diagnostic) do
+    %{
+      "oneOf" =>
+        Enum.map(~w(normal private), fn artifact_class ->
+          run_error_envelope(
+            artifact_class,
+            @capacity_artifact_states,
+            unfinished_execution_schema(artifact_class),
+            diagnostic,
+            %{"const" => []}
           )
         end)
     }
@@ -1219,7 +1255,8 @@ defmodule PtcRunner.Kernel.CommandContract do
             ],
        do: source_branch(kind, %{"const" => CommandSource.fixed(kind).name})
 
-  defp source_schema(kind) when kind in [:component, :input_contract, :result_contract] do
+  defp source_schema(kind)
+       when kind in [:component, :input_contract, :result_contract, :phase_return_contract] do
     source_branch(kind, %{
       "type" => "string",
       "minLength" => 1,
@@ -1352,7 +1389,7 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{phase: :application, code: :contract_invalid} = row,
          %{"properties" => %{"kind" => %{"const" => kind}}}
        )
-       when kind in ["input_contract", "result_contract"],
+       when kind in ["input_contract", "result_contract", "phase_return_contract"],
        do: ContractSchemaDiagnostic.message_schema(row.message)
 
   defp diagnostic_message_schema(%{phase: :application, code: :contract_invalid} = row, _source),
@@ -1487,7 +1524,10 @@ defmodule PtcRunner.Kernel.CommandContract do
     })
   end
 
-  defp execution_schema(artifact_class) when artifact_class in ~w(normal private) do
+  # A run that failed before it could start reaches only these two states: the
+  # provider-free path never started, and the active path is conservatively
+  # incomplete because provider work already happened.
+  defp unfinished_execution_schema(artifact_class) when artifact_class in ~w(normal private) do
     %{
       "oneOf" => [
         closed(~w(state), %{"state" => %{"const" => "not_started"}}),
@@ -1496,17 +1536,26 @@ defmodule PtcRunner.Kernel.CommandContract do
           "usage" => nullable_ref("usage"),
           "evaluation_memory" => nullable_ref("evaluation_memory"),
           "last_evaluation_error" => last_evaluation_error_schema(artifact_class)
-        }),
-        finished_ok_execution_schema(),
-        closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
-          "state" => %{"const" => "finished"},
-          "outcome" => %{"const" => "error"},
-          "diagnostic" => ref("execution_diagnostic"),
-          "usage" => ref("usage"),
-          "evaluation_memory" => ref("evaluation_memory"),
-          "last_evaluation_error" => last_evaluation_error_schema(artifact_class)
         })
       ]
+    }
+  end
+
+  defp execution_schema(artifact_class) when artifact_class in ~w(normal private) do
+    %{
+      "oneOf" =>
+        Map.fetch!(unfinished_execution_schema(artifact_class), "oneOf") ++
+          [
+            finished_ok_execution_schema(),
+            closed(~w(state outcome diagnostic usage evaluation_memory last_evaluation_error), %{
+              "state" => %{"const" => "finished"},
+              "outcome" => %{"const" => "error"},
+              "diagnostic" => ref("execution_diagnostic"),
+              "usage" => ref("usage"),
+              "evaluation_memory" => ref("evaluation_memory"),
+              "last_evaluation_error" => last_evaluation_error_schema(artifact_class)
+            })
+          ]
     }
   end
 

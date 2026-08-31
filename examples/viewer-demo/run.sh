@@ -139,7 +139,7 @@ require_private_feedback() {
 
   if ! private_analysis="$(
     mix ptc repl \
-      --profile private-run-analysis-v1 \
+      --profile private-run-analysis-v2 \
       --resource "traces=$artifacts/traces" \
       --resource "inspection=$artifacts/inspection" \
       --private-unattended \

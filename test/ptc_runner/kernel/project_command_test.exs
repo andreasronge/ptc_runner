@@ -313,7 +313,7 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
                  "--project",
                  project_path,
                  "--profile",
-                 "private-run-analysis-v1",
+                 "private-run-analysis-v2",
                  "--private-unattended",
                  "--eval",
                  "(analysis/runs {})"

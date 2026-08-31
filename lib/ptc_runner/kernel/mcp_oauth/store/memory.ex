@@ -15,6 +15,7 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   """
 
   use GenServer
+  use PtcRunner.Kernel.OwnerStatusRedaction
 
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.MCPOAuth.Binding
@@ -700,16 +701,6 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   end
 
   def terminate(_reason, _state), do: :ok
-
-  if {:format_status, 1} in GenServer.behaviour_info(:callbacks) do
-    @impl GenServer
-    def format_status(status), do: redact_status(status)
-  else
-    def format_status(status), do: redact_status(status)
-  end
-
-  @impl GenServer
-  def format_status(_reason, _status), do: [data: [{~c"State", :redacted}]]
 
   defp validate_authority_batch(state, tenant_id, authorities)
        when is_binary(tenant_id) and is_list(authorities) and length(authorities) <= 128 do
@@ -1524,12 +1515,4 @@ defmodule PtcRunner.Kernel.MCPOAuth.Store.Memory do
   end
 
   defp now_ms, do: System.monotonic_time(:millisecond)
-
-  defp redact_status(status) do
-    Map.new(status, fn
-      {key, _value} when key in [:state, :message, :reason] -> {key, :redacted}
-      {:log, _value} -> {:log, []}
-      key_value -> key_value
-    end)
-  end
 end

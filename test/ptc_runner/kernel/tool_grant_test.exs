@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
+  alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.ToolGrant
   alias PtcRunner.Kernel.WorkflowEnvironment
@@ -17,6 +18,42 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
   # these tests measure flat word size directly with :erts_debug.flat_size/1,
   # the same primitive the original bug report's own measurements used.
   defp flat_words(term), do: :erts_debug.flat_size(term)
+
+  test "projects each installed capability contract once without filtering model visibility" do
+    visible = capability("visible", description: "Visible contract")
+    hidden = capability("hidden", description: "Hidden contract", model_visible: false)
+
+    contracts = ToolGrant.capability_contracts(environment_with([visible, hidden]))
+
+    assert contracts["visible"].description == "Visible contract"
+    assert contracts["hidden"].description == "Hidden contract"
+    assert contracts["hidden"].input_schema == @input_schema
+    assert contracts["hidden"].effect == :unknown
+
+    assert Map.keys(contracts["hidden"]) |> Enum.sort() ==
+             [:description, :effect, :input_schema, :name]
+  end
+
+  test "projects routed capability contracts used by workflow llm-request" do
+    route = capability("llm-request")
+
+    assert {:ok, routed} =
+             RoutedCapability.new(
+               name: "llm-request",
+               description: "Submit a routed model request.",
+               input_schema: @input_schema,
+               output_schema: nil,
+               routes: %{"default" => route},
+               resolve: fn _arguments -> {:error, :not_called, "not called"} end,
+               validation_arguments: & &1,
+               model_visible: false
+             )
+
+    contracts = ToolGrant.capability_contracts(environment_with([routed]))
+
+    assert contracts["llm-request"].description == "Submit a routed model request."
+    assert contracts["llm-request"].input_schema == @input_schema
+  end
 
   test "a callback's flat size does not depend on an unrelated capability's payload" do
     small = environment_with([capability("a"), capability("b")])
@@ -67,7 +104,7 @@ defmodule PtcRunner.Kernel.ToolGrantTest do
     assert ratio < 10, "expected roughly linear growth, got #{inspect(sizes)}"
   end
 
-  test "a thirteen-capability grant, shaped like private-run-analysis-v1, stays well under budget" do
+  test "a thirteen-capability grant, shaped like private-run-analysis-v2, stays well under budget" do
     capabilities =
       for i <- 1..13 do
         capability("inspection-cap-#{i}",

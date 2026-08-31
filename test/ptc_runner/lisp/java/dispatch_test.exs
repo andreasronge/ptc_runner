@@ -185,10 +185,12 @@ defmodule PtcRunner.Lisp.Java.DispatchTest do
                Lisp.run(~S|((fn [f] (f)) Boolean/parseBoolean)|)
 
       assert arity_step.fail.reason == :java_arity_error
+      assert arity_step.fail.message =~ "Boolean/parseBoolean"
 
       assert arity_step.fail.details == %{
                actual: 0,
                expected: [1],
+               name: "Boolean/parseBoolean",
                reference_id: :boolean_parse_boolean
              }
 
@@ -202,6 +204,12 @@ defmodule PtcRunner.Lisp.Java.DispatchTest do
                reference_id: :boolean_parse_boolean
              }
     end
+  end
+
+  test "a unique direct-dot family names a rejected receiver" do
+    assert {:error, step} = Lisp.run("(.toEpochDay 5)")
+    assert step.fail.reason == :java_type_error
+    assert step.fail.message =~ ".toEpochDay"
   end
 
   test "CoreAST consumers recurse through Java arguments" do
