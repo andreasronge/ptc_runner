@@ -687,6 +687,10 @@ defmodule PtcRunner.Lisp.Eval do
     end
   end
 
+  defp do_eval({:tool_call, _tool_name, _arg_asts}, %EvalContext{inspect_only: true}) do
+    {:error, {:inspect_only_unavailable, %{}}}
+  end
+
   defp do_eval({:tool_call, tool_name, arg_asts}, %EvalContext{tool_exec: tool_exec} = eval_ctx) do
     # Evaluate all arguments
     case eval_all(arg_asts, eval_ctx) do

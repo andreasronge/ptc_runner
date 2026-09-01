@@ -89,7 +89,7 @@ defmodule PtcRunner.Kernel.ReplSession do
   def new(opts \\ [])
 
   def new(opts) when is_list(opts) do
-    new_session(opts, [:config, :trace_path], fn -> config(Keyword.get(opts, :config)) end)
+    new_session(opts, [:config, :trace_path, :mode], fn -> config(Keyword.get(opts, :config)) end)
   end
 
   def new(_opts), do: {:error, :invalid_repl_session}
@@ -109,19 +109,40 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp new_session(opts, allowed_keys, config_builder) do
     with true <- Keyword.keyword?(opts) and Keyword.keys(opts) -- allowed_keys == [],
          {:ok, config} <- config_builder.(),
-         {:ok, trace_path} <- trace_path(config, Keyword.get(opts, :trace_path)) do
-      start_session(config, trace_path)
+         {:ok, trace_path} <- trace_path(config, Keyword.get(opts, :trace_path)),
+         {:ok, mode} <- session_mode(Keyword.get(opts, :mode, :direct)) do
+      start_session(config, trace_path, mode)
     else
       false -> {:error, :invalid_repl_session}
       {:error, _reason} = error -> error
     end
   end
 
+  defp session_mode(mode) when mode in [:direct, :workflow], do: {:ok, mode}
+
+  defp session_mode(%{kind: :workflow, declared_missions: names} = mode)
+       when is_list(names) do
+    if Enum.sort(Map.keys(mode)) == [:declared_missions, :kind] and
+         Enum.all?(names, &is_binary/1) do
+      {:ok, mode}
+    else
+      {:error, :invalid_repl_session}
+    end
+  end
+
+  defp session_mode(%{kind: :mission, name: name} = mode)
+       when is_binary(name) and is_map_key(mode, :component_ids) and
+              is_map_key(mode, :direct_provider_aliases),
+       do: {:ok, mode}
+
+  defp session_mode(_mode), do: {:error, :invalid_repl_session}
+
   @doc false
   @spec attach(pid(), reference()) :: {:ok, t()} | {:error, term()}
   def attach(owner_pid, owner_token) when is_pid(owner_pid) and is_reference(owner_token) do
     case ReplSessionOwner.session_resources(owner_pid, owner_token) do
-      {:ok, %RunConfig{}, %RunState{}, mode} when mode == :workflow or is_map(mode) ->
+      {:ok, %RunConfig{}, %RunState{}, mode}
+      when mode in [:direct, :workflow] or is_map(mode) ->
         register_access(owner_pid, owner_token, mode)
 
       {:error, _reason} = error ->
@@ -282,18 +303,11 @@ defmodule PtcRunner.Kernel.ReplSession do
     :exit, _reason -> session_closed(session)
   end
 
-  defp eval_open(%{mode: mode} = session, source) when mode in [:direct, :workflow] do
-    case RunState.reserve_workflow_evaluation(session.state) do
-      {:ok, memory, history, lease} ->
-        session = Map.merge(session, %{memory: memory, history: history})
-        eval_reserved(session, source, memory, history, lease)
+  defp eval_open(%{mode: %{kind: :workflow}} = session, source),
+    do: eval_workflow(session, source)
 
-      {:error, reason} ->
-        evaluation_reservation_failure(session, reason)
-    end
-  catch
-    :exit, _reason -> session_closed(session)
-  end
+  defp eval_open(%{mode: mode} = session, source) when mode in [:direct, :workflow],
+    do: eval_workflow(session, source)
 
   defp eval_open(%{mode: %{kind: :mission, name: name}} = session, source) do
     mission = Map.fetch!(session.config.missions, name)
@@ -309,7 +323,8 @@ defmodule PtcRunner.Kernel.ReplSession do
         limits.evaluation_timeout_ms,
         session.config.event_sink,
         session.config.inspection_sink,
-        result_limit_bytes: limits.terminal_result_bytes
+        result_limit_bytes: limits.terminal_result_bytes,
+        inspect_only: session.config.inspect_only
       )
 
     result =
@@ -318,6 +333,19 @@ defmodule PtcRunner.Kernel.ReplSession do
       |> name_mission_session_failure(session)
 
     mission_result(session, result)
+  catch
+    :exit, _reason -> session_closed(session)
+  end
+
+  defp eval_workflow(session, source) do
+    case RunState.reserve_workflow_evaluation(session.state) do
+      {:ok, memory, history, lease} ->
+        session = Map.merge(session, %{memory: memory, history: history})
+        eval_reserved(session, source, memory, history, lease)
+
+      {:error, reason} ->
+        evaluation_reservation_failure(session, reason)
+    end
   catch
     :exit, _reason -> session_closed(session)
   end
@@ -631,11 +659,11 @@ defmodule PtcRunner.Kernel.ReplSession do
     EventSink.claim(config.event_sink, config.claim_id, config.run_started_metadata)
   end
 
-  defp start_session(config, trace_path) do
+  defp start_session(config, trace_path, mode) do
     with {:ok, owner, token} <- ReplSessionOwner.start_pending(self()) do
       case emit_run_started(config) do
         :ok ->
-          start_claimed_session(config, trace_path, owner, token)
+          start_claimed_session(config, trace_path, owner, token, mode)
 
         {:error, :event_sink_already_claimed} ->
           ReplSessionOwner.release(owner, token)
@@ -665,12 +693,12 @@ defmodule PtcRunner.Kernel.ReplSession do
     end
   end
 
-  defp start_claimed_session(config, trace_path, owner, token) do
+  defp start_claimed_session(config, trace_path, owner, token, mode) do
     case RunState.start_repl(config.limits, config.event_sink, config.inspection_sink,
            run_deadline: config.run_deadline
          ) do
       {:ok, state} ->
-        start_session_with_state(config, state, trace_path, owner, token)
+        start_session_with_state(config, state, trace_path, owner, token, mode)
 
       {:error, reason} ->
         ReplSessionOwner.release(owner, token)
@@ -690,15 +718,15 @@ defmodule PtcRunner.Kernel.ReplSession do
     end
   end
 
-  defp start_session_with_state(config, state, trace_path, owner, token) do
+  defp start_session_with_state(config, state, trace_path, owner, token, mode) do
     with :ok <- EventSink.transfer_owner(config.event_sink, owner),
          :ok <- transfer_inspection_owner(config.inspection_sink, owner),
          config <- transferred_config(config, owner),
          {:ok, state} <- RunState.use_provider_session(state, config.provider_session),
          :ok <-
            RunConfig.bind_provider_session(config, owner, state.pid, state.provider_tracker),
-         :ok <- ReplSessionOwner.adopt_direct(owner, token, config, state, trace_path) do
-      register_access(owner, token, :direct)
+         :ok <- ReplSessionOwner.adopt_direct(owner, token, config, state, trace_path, mode) do
+      register_access(owner, token, mode)
     else
       {:error, reason} -> reject_pending_session(config, state, owner, token, reason)
     end
@@ -820,7 +848,8 @@ defmodule PtcRunner.Kernel.ReplSession do
         strict_data: true,
         data_grants: DataKeys.source_referenceable_forms(session.config.input),
         shipped_library_ids: Library.component_ids(),
-        component_catalog: Environment.catalog(session.config.workflow_environment)
+        component_catalog: Environment.catalog(session.config.workflow_environment),
+        inspect_only: session.config.inspect_only
       )
 
     name_timeout_limit(result, session, remaining_ms)
@@ -1022,6 +1051,8 @@ defmodule PtcRunner.Kernel.ReplSession do
           "(declared: #{Enum.join(names, ", ")})"
     end
   end
+
+  defp tools(%{config: %{inspect_only: true}}, _validation_deadline_ms), do: %{}
 
   defp tools(session, validation_deadline_ms) do
     timeout_ms = session.config.limits.evaluation_timeout_ms
@@ -1565,6 +1596,8 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp observed_memory(session), do: Map.get(session, :memory, %{})
 
+  defp public_result(result, %{kind: :workflow}), do: public_result(result, :workflow)
+
   defp public_result({status, step, session}, mode)
        when status in [:ok, :error] and mode in [:direct, :workflow] do
     {public_status, public_step} = Lisp.project_native_result({status, step})
@@ -1590,26 +1623,43 @@ defmodule PtcRunner.Kernel.ReplSession do
   # A workflow session reports the missions the manifest declares but this
   # session cannot reach, so a frontend can name the switch that would open one
   # instead of leaving the reader with the language's own namespace list.
-  defp owned_mode_info(%{mode: :workflow, config: %{missions: missions}})
-       when is_map(missions),
-       do: %{kind: :workflow, declared_missions: missions |> Map.keys() |> Enum.sort()}
+  defp owned_mode_info(%{mode: :workflow, config: %{missions: missions} = config})
+       when is_map(missions) do
+    maybe_inspect_only(
+      %{kind: :workflow, declared_missions: missions |> Map.keys() |> Enum.sort()},
+      config
+    )
+  end
 
-  defp owned_mode_info(%{mode: :workflow}), do: %{kind: :workflow, declared_missions: []}
+  defp owned_mode_info(%{mode: %{kind: :workflow, declared_missions: names}, config: config})
+       when is_list(names) do
+    maybe_inspect_only(%{kind: :workflow, declared_missions: Enum.sort(names)}, config)
+  end
 
-  defp owned_mode_info(%{mode: :direct}), do: %{kind: :workflow, declared_missions: []}
+  defp owned_mode_info(%{mode: :workflow, config: config}),
+    do: maybe_inspect_only(%{kind: :workflow, declared_missions: []}, config)
+
+  defp owned_mode_info(%{mode: :direct, config: config}),
+    do: maybe_inspect_only(%{kind: :workflow, declared_missions: []}, config)
 
   defp owned_mode_info(%{mode: %{kind: :mission, name: name} = mode, config: config}) do
     inventory = Map.fetch!(config.missions, name).inventory
 
-    %{
-      kind: :mission,
-      mission: name,
-      component_ids: mode.component_ids,
-      direct_provider_aliases: mode.direct_provider_aliases,
-      inventory_hash: inventory.hash,
-      model_context_hash: inventory.model_hash
-    }
+    maybe_inspect_only(
+      %{
+        kind: :mission,
+        mission: name,
+        component_ids: mode.component_ids,
+        direct_provider_aliases: mode.direct_provider_aliases,
+        inventory_hash: inventory.hash,
+        model_context_hash: inventory.model_hash
+      },
+      config
+    )
   end
+
+  defp maybe_inspect_only(info, %{inspect_only: true}), do: Map.put(info, :inspect_only, true)
+  defp maybe_inspect_only(info, _config), do: info
 
   defp mission_result(session, %{outcome: outcome, value: value} = result)
        when outcome in [:continued, :returned] do

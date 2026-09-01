@@ -291,6 +291,66 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
+  test "inspect-only project repl injects only the application manifest", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project_path = Path.join(target, "ptc-project.json")
+    project = Jason.decode!(File.read!(project_path))
+
+    project =
+      Map.put(project, "host", %{
+        "path" => "ptc-host.json",
+        "env_file" => %{"path" => "missing.env"}
+      })
+
+    File.write!(project_path, Jason.encode!(project))
+
+    File.write!(
+      Path.join(target, "ptc-host.json"),
+      Jason.encode!(%{
+        "credentials" => %{"key" => %{"env" => "PTC_INSPECT_ONLY_ABSENT_KEY"}},
+        "install" => %{}
+      })
+    )
+
+    assert {:ok, entry} =
+             CommandEntry.open_with_ref(
+               ["repl", "--project", project_path, "--inspect-only", "--eval", "(+ 1 2)"],
+               :mix,
+               "cmd-00000000000000000000000000"
+             )
+
+    assert entry.arguments.options.manifest == Path.join(target, "ptc.json")
+    assert entry.arguments.options.inspect_only == true
+    refute Map.has_key?(entry.arguments.options, :host_config)
+    refute Keyword.has_key?(entry.arguments.frontend_options, :env_file)
+  end
+
+  @tag :tmp_dir
+  test "inspect-only project repl rejects analysis profiles", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project = Path.join(target, "ptc-project.json")
+
+    assert {:error, entry} =
+             CommandEntry.open_with_ref(
+               [
+                 "repl",
+                 "--project",
+                 project,
+                 "--inspect-only",
+                 "--profile",
+                 "run-analysis-v1"
+               ],
+               :mix,
+               "cmd-00000000000000000000000000"
+             )
+
+    assert entry.rejection.command == :repl
+    assert entry.rejection.code == :conflicting_arguments
+  end
+
+  @tag :tmp_dir
   test "project-backed analysis derives artifact resources and preserves overrides", %{
     tmp_dir: directory
   } do

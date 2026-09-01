@@ -102,7 +102,8 @@ defmodule PtcRunner.Kernel.RunConfig do
     provider_warnings: [],
     session_profile: nil,
     labels: %{},
-    run_started_metadata: %{}
+    run_started_metadata: %{},
+    inspect_only: false
   ]
 
   @type t :: %__MODULE__{
@@ -125,7 +126,8 @@ defmodule PtcRunner.Kernel.RunConfig do
           provider_warnings: [CommandWarning.t()],
           session_profile: map() | nil,
           labels: map(),
-          run_started_metadata: map()
+          run_started_metadata: map(),
+          inspect_only: boolean()
         }
 
   @spec new(keyword()) ::
@@ -155,7 +157,8 @@ defmodule PtcRunner.Kernel.RunConfig do
                :provider_warnings,
                :session_profile,
                :labels,
-               :component_overrides
+               :component_overrides,
+               :inspect_only
              ] !=
              [],
          %WorkflowEnvironment{} = workflow <- Keyword.get(opts, :workflow_environment),
@@ -188,6 +191,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
          true <- provider_warnings?(Keyword.get(opts, :provider_warnings, [])),
          {:ok, session_profile} <- session_profile(Keyword.get(opts, :session_profile)),
+         true <- Keyword.get(opts, :inspect_only, false) in [true, false],
          {:ok, labels} <- SafeMetadata.normalize_labels(Keyword.get(opts, :labels, %{})),
          {:ok, component_overrides} <-
            component_overrides(Keyword.get(opts, :component_overrides, [])),
@@ -225,7 +229,8 @@ defmodule PtcRunner.Kernel.RunConfig do
          provider_warnings: Keyword.get(opts, :provider_warnings, []),
          session_profile: session_profile,
          labels: labels,
-         run_started_metadata: run_started_metadata
+         run_started_metadata: run_started_metadata,
+         inspect_only: Keyword.get(opts, :inspect_only, false)
        }}
     else
       {:error, :mission_inventory_exceeded} = error -> error

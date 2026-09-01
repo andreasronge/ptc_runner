@@ -12,7 +12,9 @@ defmodule PtcRunner.Kernel.MissionEnvironment do
   data, recorded tool requirements, and an optional source catalog attested
   with the bundle so source cannot be paired with a different compiled graph.
   `:shipped_component_ids` records the shipped library selections represented
-  by the bundle for exact diagnostic misses.
+  by the bundle for exact diagnostic misses. `:inspect_only` skips recorded
+  tool-requirement checks so compile-and-inspect sessions can attach source
+  without installing capabilities.
   """
   alias PtcRunner.Kernel.Attestation
   alias PtcRunner.Kernel.ComponentCatalog
@@ -32,20 +34,30 @@ defmodule PtcRunner.Kernel.MissionEnvironment do
   @spec new(keyword()) :: {:ok, t()} | {:error, term()}
   @doc """
   Assembles a mission environment from optional `:bundle`, `:capabilities`,
-  JSON-like `:data`, `:catalog`, and `:shipped_component_ids` options.
-  Unknown options are rejected.
+  JSON-like `:data`, `:catalog`, `:shipped_component_ids`, and `:inspect_only`
+  options. Unknown options are rejected. `:inspect_only` skips recorded
+  tool-requirement checks so a compile-and-inspect session can attach source
+  without installing capabilities.
   """
   def new(opts) when is_list(opts) do
     with false <-
            Keyword.keys(opts) --
-             [:bundle, :capabilities, :data, :catalog, :shipped_component_ids] != [],
+             [
+               :bundle,
+               :capabilities,
+               :data,
+               :catalog,
+               :shipped_component_ids,
+               :inspect_only
+             ] != [],
          {:ok, attributes} <-
            Environment.assemble(
              Keyword.get(opts, :bundle),
              Keyword.get(opts, :capabilities, []),
              Keyword.get(opts, :data, %{}),
              :mission,
-             shipped_component_ids: Keyword.get(opts, :shipped_component_ids)
+             shipped_component_ids: Keyword.get(opts, :shipped_component_ids),
+             inspect_only: Keyword.get(opts, :inspect_only) == true
            ),
          {:ok, catalog} <- ComponentCatalog.bind(Keyword.get(opts, :catalog), attributes.bundle) do
       environment = struct!(__MODULE__, Map.put(attributes, :catalog, catalog))

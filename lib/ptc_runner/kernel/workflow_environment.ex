@@ -13,7 +13,8 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
   be paired with a different compiled graph. It never imports capabilities
   from a mission environment. A verified workflow override of the shipped
   `agent.core` retains that library's fixed private diagnostic routes; other
-  local or replacement components cannot acquire them.
+  local or replacement components cannot acquire them. `:inspect_only` skips
+  recorded tool-requirement checks for compile-and-inspect sessions.
   """
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Attestation
@@ -43,9 +44,12 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
   @spec new(keyword()) :: {:ok, t()} | {:error, term()}
   @doc """
   Assembles a workflow environment from optional `:bundle`, `:capabilities`,
-  JSON-like `:data`, `:catalog`, and `:shipped_component_ids` options.
-  `:shipped_component_ids` records the shipped library selections represented
-  by the bundle for exact diagnostic misses. Unknown options are rejected.
+  JSON-like `:data`, `:catalog`, `:shipped_component_ids`, and `:inspect_only`
+  options. `:shipped_component_ids` records the shipped library selections
+  represented by the bundle for exact diagnostic misses. Unknown options are
+  rejected. `:inspect_only` skips recorded tool-requirement checks so a
+  compile-and-inspect session can attach source without installing
+  capabilities.
   """
   def new(opts) when is_list(opts), do: assemble(opts, %{})
 
@@ -84,7 +88,14 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
   defp assemble(opts, authorization) do
     with false <-
            Keyword.keys(opts) --
-             [:bundle, :capabilities, :data, :catalog, :shipped_component_ids] != [],
+             [
+               :bundle,
+               :capabilities,
+               :data,
+               :catalog,
+               :shipped_component_ids,
+               :inspect_only
+             ] != [],
          {:ok, attributes} <-
            Environment.assemble(
              Keyword.get(opts, :bundle),
@@ -92,7 +103,8 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
              Keyword.get(opts, :data, %{}),
              :workflow,
              authorization: authorization,
-             shipped_component_ids: Keyword.get(opts, :shipped_component_ids)
+             shipped_component_ids: Keyword.get(opts, :shipped_component_ids),
+             inspect_only: Keyword.get(opts, :inspect_only) == true
            ),
          {:ok, catalog} <- ComponentCatalog.bind(Keyword.get(opts, :catalog), attributes.bundle) do
       environment = struct!(__MODULE__, Map.put(attributes, :catalog, catalog))

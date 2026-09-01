@@ -223,6 +223,22 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   end
 
   defp expand_loaded_repl_project(project, option_arguments, positional_suffix) do
+    cond do
+      switch?(option_arguments, "--inspect-only") and
+          (switch?(option_arguments, "--profile") or
+             switch?(option_arguments, "--describe-profile")) ->
+        {:error, CommandRejection.generic(:repl, :conflicting_arguments)}
+
+      switch?(option_arguments, "--inspect-only") ->
+        argv = insert_options(["repl" | option_arguments], ["--manifest", project.application])
+        {:ok, argv ++ positional_suffix, project, [:manifest]}
+
+      true ->
+        expand_live_repl_project(project, option_arguments, positional_suffix)
+    end
+  end
+
+  defp expand_live_repl_project(project, option_arguments, positional_suffix) do
     case option_value(option_arguments, "--profile") do
       nil ->
         argv = insert_options(["repl" | option_arguments], ["--manifest", project.application])

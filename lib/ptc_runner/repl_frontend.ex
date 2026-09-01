@@ -12,6 +12,8 @@ defmodule PtcRunner.ReplFrontend do
       ptc repl --manifest ptc.json --host-config ptc-host.json
       ptc repl --project ptc-project.json --mission review
       ptc repl --manifest ptc.json --host-config ptc-host.json --mission review
+      ptc repl --manifest ptc.json --inspect-only
+      ptc repl --project ptc-project.json --inspect-only --mission analysis
       ptc repl --manifest ptc.json --trace trace.jsonl
       ptc repl --profile run-analysis-v1 --resource traces=tmp/traces
       ptc repl --profile private-run-analysis-v2 \
@@ -37,6 +39,9 @@ defmodule PtcRunner.ReplFrontend do
       capabilities, limits, input, labels, and event policy;
     * `--mission` — evaluate one manifest mission directly, with only its
       components, data, direct capabilities, and provider dependency closure;
+    * `--inspect-only` — compile the selected environment and inspect it
+      without host, credentials, providers, input, traces, or private-session
+      authority;
     * `--host-config` — manifest-only trusted provider installation document;
     * `-t, --trace` — append this session's canonical events to a JSONL file;
     * `--profile` — select a code-owned mission session profile;
@@ -113,6 +118,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.DirectorySeparation
+  alias PtcRunner.Kernel.InspectOnlyRepl
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
@@ -151,6 +157,14 @@ defmodule PtcRunner.ReplFrontend do
             Keyword.put(opts, :terminal_attached, terminal_attached?),
             arguments
           )
+
+        {:ok, :inspect_only} ->
+          opts =
+            opts
+            |> Keyword.put(:command_runtime, runtime)
+            |> Keyword.put(:terminal_attached, terminal_attached?)
+
+          run_inspect_only_session(opts, arguments)
 
         {:ok, :manifest} ->
           opts =
@@ -242,6 +256,9 @@ defmodule PtcRunner.ReplFrontend do
       opts[:describe_profile] ->
         validate_description(opts, arguments)
 
+      opts[:inspect_only] ->
+        validate_inspect_only_command(opts, resources, format)
+
       opts[:profile] ->
         validate_profile_command(
           opts,
@@ -269,6 +286,28 @@ defmodule PtcRunner.ReplFrontend do
 
       true ->
         {:ok, :direct}
+    end
+  end
+
+  defp validate_inspect_only_command(opts, resources, format) do
+    cond do
+      is_nil(opts[:manifest]) ->
+        {:error, "--inspect-only requires --project or --manifest"}
+
+      resources != [] or not is_nil(opts[:session_trace_dir]) or
+        Keyword.has_key?(opts, :continue_on_error) or
+        Keyword.has_key?(opts, :host_config) or not is_nil(opts[:trace]) or
+        Keyword.has_key?(opts, :private_terminal) or
+        Keyword.has_key?(opts, :private_unattended) or Keyword.has_key?(opts, :run) or
+        not is_nil(opts[:output]) or not is_nil(opts[:private_output]) or
+          not is_nil(opts[:profile]) ->
+        {:error, "--inspect-only cannot be combined with host, env, trace, or profile options"}
+
+      format == "jsonl" ->
+        {:error, "--format jsonl requires --profile or --describe-profile"}
+
+      true ->
+        {:ok, :inspect_only}
     end
   end
 
@@ -1351,6 +1390,31 @@ defmodule PtcRunner.ReplFrontend do
     end
   end
 
+  defp run_inspect_only_session(opts, arguments) do
+    case InspectOnlyRepl.open(opts[:manifest],
+           mission: opts[:mission],
+           interactive_loop: interactive_input?(opts, arguments)
+         ) do
+      {:ok, session} ->
+        run_workflow_session(session, opts, arguments)
+
+      {:error, %{code: :unknown_mission, declared: declared}} ->
+        fail("unknown mission #{inspect(opts[:mission])}; declared: #{Enum.join(declared, ", ")}")
+
+      {:error, %{code: code, diagnostic: diagnostic}} ->
+        case CommandDiagnosticRenderer.render(diagnostic) do
+          {:ok, rendered} -> fail(rendered)
+          {:error, :invalid_command_diagnostic} -> fail(manifest_repl_error(code))
+        end
+
+      {:error, %{code: code}} ->
+        fail(manifest_repl_error(code))
+
+      {:error, reason} ->
+        fail("ptc repl setup failed: #{inspect(reason)}")
+    end
+  end
+
   defp run_direct_session(opts, arguments) do
     constructor =
       if interactive_input?(opts, arguments),
@@ -1552,26 +1616,39 @@ defmodule PtcRunner.ReplFrontend do
     LineEditor.run(mode, banner, fn -> loop(session, render) end)
   end
 
-  defp session_banner(
-         %{
-           kind: :mission,
-           mission: name,
-           component_ids: component_ids,
-           direct_provider_aliases: provider_aliases,
-           inventory_hash: hash
-         },
-         terminal_attached?
-       ) do
+  defp session_banner(%{kind: :mission} = mode, terminal_attached?) do
+    inspect_only_prefix(mode) <>
+      mission_banner(mode) <>
+      terminal_hint(terminal_attached?)
+  end
+
+  defp session_banner(%{inspect_only: true} = mode, terminal_attached?) do
+    inspect_only_prefix(mode) <>
+      LineEditor.banner() <>
+      terminal_hint(terminal_attached?)
+  end
+
+  defp session_banner(_mode, terminal_attached?),
+    do: LineEditor.banner() <> terminal_hint(terminal_attached?)
+
+  defp mission_banner(%{
+         mission: name,
+         component_ids: component_ids,
+         direct_provider_aliases: provider_aliases,
+         inventory_hash: hash
+       }) do
     components = Enum.join(component_ids, ", ")
     providers = if provider_aliases == [], do: "none", else: Enum.join(provider_aliases, ", ")
 
     "PTC-Lisp mission REPL [#{name}; components: #{components}; providers: #{providers}; " <>
       "inventory #{String.slice(hash, 0, 12)}; no workflow/model access] " <>
-      "(:quit to exit; :help for commands)" <> terminal_hint(terminal_attached?)
+      "(:quit to exit; :help for commands)"
   end
 
-  defp session_banner(_mode, terminal_attached?),
-    do: LineEditor.banner() <> terminal_hint(terminal_attached?)
+  defp inspect_only_prefix(%{inspect_only: true}),
+    do: InspectOnlyRepl.startup_notice() <> "\n"
+
+  defp inspect_only_prefix(_mode), do: ""
 
   defp terminal_hint(true), do: "\n" <> introspection_hint()
   defp terminal_hint(false), do: ""

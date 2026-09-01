@@ -320,6 +320,14 @@ defmodule PtcRunner.Kernel.CommandParser do
       not env_file_manifest_repl?(options, frontend_options) ->
         reject(:repl, :invalid_arguments)
 
+      Map.get(options, :inspect_only, false) and
+          Keyword.has_key?(frontend_options, :env_file) ->
+        reject(:repl, :conflicting_arguments)
+
+      Map.get(options, :inspect_only, false) and
+          inspect_only_conflict?(options) ->
+        reject(:repl, :conflicting_arguments)
+
       Map.get(options, :private_terminal, false) and
           Map.get(options, :private_unattended, false) ->
         reject(:repl, :conflicting_arguments)
@@ -398,6 +406,9 @@ defmodule PtcRunner.Kernel.CommandParser do
         positional == [] and
           Map.keys(options) -- [:describe_profile, :format, :mission] == []
 
+      Map.get(options, :inspect_only, false) ->
+        inspect_only_arguments_valid?(options, format)
+
       Map.has_key?(options, :profile) ->
         profile_arguments_valid?(options, positional, evals, resources, format)
 
@@ -407,6 +418,34 @@ defmodule PtcRunner.Kernel.CommandParser do
       true ->
         direct_arguments_valid?(options, format)
     end
+  end
+
+  defp inspect_only_conflict?(options) do
+    Enum.any?(
+      [
+        :host_config,
+        :trace,
+        :profile,
+        :describe_profile,
+        :resource,
+        :run,
+        :session_trace_dir,
+        :output,
+        :private_output,
+        :continue_on_error,
+        :private_terminal,
+        :private_unattended
+      ],
+      &Map.has_key?(options, &1)
+    )
+  end
+
+  defp inspect_only_arguments_valid?(options, format) do
+    allowed = [:eval, :load, :manifest, :mission, :inspect_only, :format, :preview_chars]
+
+    format == "clojure" and Map.has_key?(options, :manifest) and
+      Map.keys(options) -- allowed == [] and
+      valid_optional_nonempty_string?(options, :mission)
   end
 
   defp profile_arguments_valid?(options, positional, evals, resources, format) do

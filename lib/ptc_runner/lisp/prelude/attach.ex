@@ -30,6 +30,10 @@ defmodule PtcRunner.Lisp.Prelude.Attach do
   """
   @spec attach(Prelude.t() | String.t() | [Bundle.selection()], AttachContext.t()) ::
           {:ok, Prelude.t()} | {:error, ValidationError.t()}
+  def attach(%Prelude{} = prelude, %AttachContext{validate_requires?: false}) do
+    {:ok, prelude}
+  end
+
   def attach(%Prelude{} = prelude, %AttachContext{} = context) do
     with :ok <- validate_requires(prelude, context) do
       {:ok, prelude}

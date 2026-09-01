@@ -278,6 +278,12 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "open one manifest-declared mission environment"
         },
         %{
+          key: :inspect_only,
+          type: :boolean,
+          syntax: ["--inspect-only"],
+          description: "compile and inspect without providers, input, or credentials"
+        },
+        %{
           key: :host_config,
           type: :string,
           syntax: ["--host-config HOST.json"],

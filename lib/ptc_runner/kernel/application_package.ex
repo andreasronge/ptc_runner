@@ -59,10 +59,11 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   @max_input_bytes 2_000_000
   @input_marker %{"$ptc_input" => "excluded"}
   @common_acquisition_options [:installed_limits, :input_authority, :input]
-  @directory_acquisition_options @common_acquisition_options ++
-                                   [:component_override_descriptor]
+  @directory_shared_options @common_acquisition_options ++ [:component_override_descriptor]
+  @directory_acquisition_options @directory_shared_options ++
+                                   [:repl_interactive_loop, :omit_input]
   @memory_acquisition_options @common_acquisition_options ++ [:component_override]
-  @directory_request_options @directory_acquisition_options ++
+  @directory_request_options @directory_shared_options ++
                                [:inspection_capture, :result_projection, :event_identity]
   @memory_request_options @memory_acquisition_options ++
                             [:inspection_capture, :result_projection, :event_identity]
@@ -133,9 +134,12 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   @doc """
   Acquires one confined-directory application into a path-free package.
 
-  Options are exactly `:installed_limits`, `:input_authority`, `:input`, and
-  `:component_override_descriptor`. Unknown and duplicate options fail before
-  the application source is opened.
+  Options are exactly `:installed_limits`, `:input_authority`, `:input`,
+  `:component_override_descriptor`, `:repl_interactive_loop`, and
+  `:omit_input`. Pass `omit_input: true` to skip declared or caller-selected
+  input. Unknown and duplicate options fail before the application source is
+  opened. Live run-request adapters reject `:omit_input` and
+  `:repl_interactive_loop`.
   """
   def acquire_directory(path, opts \\ [])
 
@@ -170,10 +174,12 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   @doc """
   Acquires and seals one complete directory-backed run request.
 
-  In addition to the directory-acquisition options, accepts exactly
-  `:inspection_capture`, `:result_projection`, and `:event_identity`. The
-  latter fixes both event IDs and is rejected when the manifest already owns
-  either identity.
+  In addition to `:installed_limits`, `:input_authority`, `:input`, and
+  `:component_override_descriptor`, accepts exactly `:inspection_capture`,
+  `:result_projection`, and `:event_identity`. The latter fixes both event
+  IDs and is rejected when the manifest already owns either identity.
+  `:omit_input` and `:repl_interactive_loop` are package-acquisition flags
+  and are rejected here.
   """
   def request_directory(path, opts \\ [])
 
@@ -260,6 +266,12 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         not valid_optional_installed_limits?(opts) ->
           {:error, :invalid_installed_limits}
 
+        not valid_optional_boolean?(opts, :repl_interactive_loop) ->
+          {:error, :invalid_application_options}
+
+        not valid_optional_boolean?(opts, :omit_input) ->
+          {:error, :invalid_application_options}
+
         true ->
           :ok
       end
@@ -272,6 +284,14 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
     case Keyword.fetch(opts, :installed_limits) do
       {:ok, limits} -> Limits.valid?(limits)
       :error -> true
+    end
+  end
+
+  defp valid_optional_boolean?(opts, key) do
+    case Keyword.fetch(opts, key) do
+      :error -> true
+      {:ok, value} when is_boolean(value) -> true
+      _other -> false
     end
   end
 
@@ -306,21 +326,25 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   defp select_input(source, manifest, opts) do
     authority = Keyword.get(opts, :input_authority, :normal)
 
-    case Keyword.get(opts, :input) do
-      nil ->
-        select_declared_input(source, manifest, authority)
+    if Keyword.get(opts, :omit_input) == true do
+      ExecutionInput.new(%{}, authority)
+    else
+      case Keyword.get(opts, :input) do
+        nil ->
+          select_declared_input(source, manifest, authority)
 
-      path when is_binary(path) ->
-        result =
-          with {:ok, raw} <- read_selected_input(source, path),
-               {:ok, value} <- StrictJSON.decode(raw) do
-            ExecutionInput.new(value, authority, manifest.contracts.input)
-          end
+        path when is_binary(path) ->
+          result =
+            with {:ok, raw} <- read_selected_input(source, path),
+                 {:ok, value} <- StrictJSON.decode(raw) do
+              ExecutionInput.new(value, authority, manifest.contracts.input)
+            end
 
-        source_error(result, :external_input)
+          source_error(result, :external_input)
 
-      _invalid ->
-        {:error, :invalid_input}
+        _invalid ->
+          {:error, :invalid_input}
+      end
     end
   end
 

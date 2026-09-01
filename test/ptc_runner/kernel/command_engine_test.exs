@@ -3841,11 +3841,27 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ["repl", "--session-trace-dir", "traces"],
           ["repl", "--continue-on-error"],
           ["repl", "--private-unattended"],
-          ["repl", "--format", "jsonl"]
+          ["repl", "--format", "jsonl"],
+          ["repl", "--inspect-only"]
         ] do
       assert {:error, rejection} = CommandParser.parse(argv)
       assert rejection.command == :repl
       assert rejection.code == :invalid_arguments
+    end
+  end
+
+  test "repl inspect-only conflicts are rejected by the shared parser" do
+    for argv <- [
+          ["repl", "--inspect-only", "--host-config", "host.json"],
+          ["repl", "--inspect-only", "--manifest", "ptc.json", "--host-config", "host.json"],
+          ["repl", "--inspect-only", "--manifest", "ptc.json", "--trace", "trace.jsonl"],
+          ["repl", "--inspect-only", "--manifest", "ptc.json", "--private-terminal"],
+          ["repl", "--inspect-only", "--profile", "run-analysis-v1"],
+          ["repl", "--inspect-only", "--manifest", "ptc.json", "--env-file", "missing.env"]
+        ] do
+      assert {:error, rejection} = CommandParser.parse(argv)
+      assert rejection.command == :repl
+      assert rejection.code == :conflicting_arguments
     end
   end
 

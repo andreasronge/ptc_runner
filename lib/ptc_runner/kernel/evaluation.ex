@@ -103,7 +103,12 @@ defmodule PtcRunner.Kernel.Evaluation do
         mission_environment,
         source,
         timeout_ms,
-        %{event_sink: event_sink, inspection_sink: inspection_sink, admission: admission},
+        %{
+          event_sink: event_sink,
+          inspection_sink: inspection_sink,
+          admission: admission,
+          inspect_only: Keyword.get(opts, :inspect_only, false)
+        },
         {
           evaluation_id,
           started_ms,
@@ -405,7 +410,8 @@ defmodule PtcRunner.Kernel.Evaluation do
       data_grants: DataKeys.source_referenceable_forms(environment.data),
       missing_data_params_message: @missing_data_params_message,
       shipped_library_ids: Library.component_ids(),
-      component_catalog: Environment.catalog(environment)
+      component_catalog: Environment.catalog(environment),
+      inspect_only: Map.get(capture, :inspect_only, false)
     ]
 
     mission_calls_before = mission_capability_calls(state)

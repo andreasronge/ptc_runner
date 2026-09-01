@@ -53,8 +53,12 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   @doc false
   @spec adopt_direct(pid(), reference(), RunConfig.t(), RunState.t(), binary() | nil) ::
           :ok | {:error, :session_owner_mismatch}
-  def adopt_direct(pid, token, config, run_state, trace_path) do
-    GenServer.call(pid, {token, {:adopt_direct, config, run_state, trace_path}}, :infinity)
+  def adopt_direct(pid, token, config, run_state, trace_path, mode \\ :direct) do
+    GenServer.call(
+      pid,
+      {token, {:adopt_direct, config, run_state, trace_path, mode}},
+      :infinity
+    )
   catch
     :exit, _reason -> {:error, :session_owner_mismatch}
   end
@@ -217,15 +221,16 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   end
 
   def handle_call(
-        {token, {:adopt_direct, %RunConfig{} = config, %RunState{} = run_state, trace_path}},
+        {token,
+         {:adopt_direct, %RunConfig{} = config, %RunState{} = run_state, trace_path, mode}},
         {caller, _tag},
         %{token: token, owner: caller, config: nil, run_state: nil} = state
       ) do
-    if direct_adoption?(config, run_state, trace_path) do
+    if direct_adoption?(config, run_state, trace_path) and valid_direct_mode?(mode, config) do
       Process.link(run_state.pid)
 
       next =
-        %{state | config: config, run_state: run_state, trace_path: trace_path, mode: :direct}
+        %{state | config: config, run_state: run_state, trace_path: trace_path, mode: mode}
 
       {:reply, :ok, arm_deadline(next)}
     else
@@ -405,7 +410,16 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
     :exit, _reason -> false
   end
 
+  defp valid_mode?(:direct, %RunConfig{}), do: true
   defp valid_mode?(:workflow, %RunConfig{}), do: true
+
+  defp valid_mode?(
+         %{kind: :workflow, declared_missions: names} = mode,
+         %RunConfig{inspect_only: true}
+       )
+       when is_list(names) do
+    Enum.sort(Map.keys(mode)) == [:declared_missions, :kind] and Enum.all?(names, &is_binary/1)
+  end
 
   defp valid_mode?(
          %{
@@ -424,6 +438,8 @@ defmodule PtcRunner.Kernel.ReplSessionOwner do
   end
 
   defp valid_mode?(_mode, _config), do: false
+
+  defp valid_direct_mode?(mode, config), do: valid_mode?(mode, config)
 
   defp close_provider_session(%{provider_cleanup: nil, config: nil} = state),
     do: {:ok, %{state | provider_cleanup: :ok}}

@@ -119,6 +119,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
     shipped_library_ids: nil,
     # Selected Kernel environment component catalog. `nil` for direct Lisp.run/2.
     component_catalog: nil,
+    # When true, tool/Kernel/provider routes fail with inspect_only_unavailable.
+    inspect_only: false,
     # When true, session-authored code may only name prelude namespaces that
     # were directly attached. Prelude-internal calls remain allowed because the
     # compiler already validated their declared namespace deps.
@@ -224,6 +226,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
           missing_data_params_message: String.t() | nil,
           shipped_library_ids: MapSet.t(String.t()) | nil,
           component_catalog: term() | nil,
+          inspect_only: boolean(),
           strict_transitive_calls: boolean(),
           private_tool_authority?: boolean(),
           direct_namespaces: MapSet.t(String.t()),
@@ -315,6 +318,7 @@ defmodule PtcRunner.Lisp.Eval.Context do
         normalize_missing_params_message(Keyword.get(opts, :missing_data_params_message)),
       shipped_library_ids: normalize_shipped_library_ids(Keyword.get(opts, :shipped_library_ids)),
       component_catalog: Keyword.get(opts, :component_catalog),
+      inspect_only: Keyword.get(opts, :inspect_only, false),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       private_tool_authority?: Keyword.get(opts, :private_tool_authority?, false),
       direct_namespaces: namespace_set(Keyword.get(opts, :direct_namespaces, [])),
@@ -648,7 +652,8 @@ defmodule PtcRunner.Lisp.Eval.Context do
         data_grants: source.data_grants,
         missing_data_params_message: source.missing_data_params_message,
         shipped_library_ids: source.shipped_library_ids,
-        component_catalog: source.component_catalog
+        component_catalog: source.component_catalog,
+        inspect_only: source.inspect_only
     }
   end
 
