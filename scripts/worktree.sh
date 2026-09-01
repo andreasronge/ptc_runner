@@ -64,6 +64,11 @@ initialize_worktree() {
     # were normalized above; create later artifacts with the permissions
     # expected by local and GitHub private-destination safety gates too.
     umask 0022
+    # The caller has already chosen to execute this repository-owned lifecycle
+    # script. Trust the same checked-in toolchain config explicitly so fresh,
+    # path-unique Herdr worktrees do not stop at mise's interactive trust gate.
+    "$mise_bin" trust --yes "$dst/mise.toml" >/dev/null ||
+      die "could not trust the pinned mise configuration in $dst"
     bash scripts/install-hooks.sh
     "$mise_bin" install
     "$mise_bin" exec -- mix deps.get

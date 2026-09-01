@@ -1,0 +1,4 @@
+version: 1
+bootstrap:
+  command: ./scripts/ptc/bootstrap
+  timeout_minutes: 30

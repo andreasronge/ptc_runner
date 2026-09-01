@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Herdr creates the worktree. Reuse compatible build artifacts from the main
+# checkout, then let PtcRunner's existing worktree initializer install hooks,
+# fetch dependencies, and validate the pinned toolchain before an agent starts.
+./scripts/worktree.sh seed .
+./scripts/worktree.sh init .
