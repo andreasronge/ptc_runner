@@ -48,7 +48,7 @@ code. The shapes compose — a real design usually combines two or three.">
 <li><a href="/guides/using-models/">Use a model</a></li>
 <li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
 <li><a href="/guides/building-agents/">Customize an agent</a></li>
-<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
 </ul>
 
 <h2>Design</h2>
@@ -61,6 +61,7 @@ code. The shapes compose — a real design usually combines two or three.">
 <ul>
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
 <li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
@@ -88,6 +89,7 @@ code. The shapes compose — a real design usually combines two or three.">
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
 </ul>
 
@@ -103,7 +105,7 @@ tools or adding stages only adds surface.</p><h2 id="domain-rules-as-mission-cod
 text or one-call-per-rule tools. The model composes the functions in one
 program and the rules stay reviewable. Prompt-stated rules drift; tool-relayed
 rules drag every intermediate value through the model's context.
-<a href="/guides/components-and-preludes/">Customize agent components</a> has the contract.</p><h2 id="specialists-as-missions">Specialists as missions</h2><p>Give each stage a named mission and let one trusted workflow drive a loop per
+<a href="/guides/components-and-preludes/">the customization guide</a> has the contract.</p><h2 id="specialists-as-missions">Specialists as missions</h2><p>Give each stage a named mission and let one trusted workflow drive a loop per
 stage. The mission decides what a specialist can see; the workflow decides what
 crosses between stages. Use <code class="inline">agent.core/run-outcome</code> to handle a specialist's
 failure as data; select a named handoff contract when workflow code consumes

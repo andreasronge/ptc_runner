@@ -94,7 +94,7 @@ score, sort, return — and the scores are exactly what the deterministic
 policy computes. The model
 decides *how to use* the rules; it cannot *reinterpret* them. That split is
 the core of code-mode design: judgment in the model, policy in reviewable
-code. [Customize agent components](components-and-preludes.md) covers the
+code. [The customization guide](components-and-preludes.md) covers the
 component and signature rules this step relies on.
 
 ## Step 3: give each specialist only what it needs

@@ -91,6 +91,6 @@ shows how to materialize and run an `agent.prompt` candidate.
 
 Use the [agent library reference](../agent-library-reference.md#agent-core-run) for exact entry
 functions, options, outcomes, turn protocol, feedback, retry behavior, and
-concurrency limits. See [Customize agent components](components-and-preludes.md)
+concurrency limits. See [the customization guide](components-and-preludes.md)
 for dependency and replacement rules, and [Evaluate changes with
 replay](evaluating-with-replay.md) for the comparison workflow.

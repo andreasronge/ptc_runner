@@ -46,7 +46,7 @@
 <li><a href="/guides/using-models/">Use a model</a></li>
 <li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
 <li><a href="/guides/building-agents/">Customize an agent</a></li>
-<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
 </ul>
 
 <h2>Design</h2>
@@ -59,6 +59,7 @@
 <ul>
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
 <li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
@@ -86,6 +87,7 @@
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/" class="current" aria-current="page">Debug-navigation reference</a></li>
 </ul>
 
@@ -122,7 +124,10 @@ failures. Raised capability callbacks can include their bounded exception
 message and formatted stacktrace here, but never in the correlated trace.
 Those strings may contain secrets or local paths and cannot be reliably
 redacted. Read the artifact only through an authorized private sink, and never
-publish it alongside a normal trace.</p><p>A project document captures both:</p><pre><code class="json language-json">&quot;artifacts&quot;: {&quot;root&quot;: &quot;target/.ptc&quot;, &quot;trace&quot;: true, &quot;inspection&quot;: true, &quot;result&quot;: true, &quot;envelope&quot;: true}</code></pre><p>The equivalent low-level form is <code class="inline">--trace-dir</code> plus <code class="inline">--inspect</code>. See
+publish it alongside a normal trace.</p><p>Active <code class="inline">(component)</code> inspection and in-run <code class="inline">retain_programs</code> answer questions
+about the current environment or a still-running caller. This page owns only
+completed-run collections and relationships. See the
+<a href="/reference/source-inspection/">source-inspection reference</a>.</p><p>A project document captures both:</p><pre><code class="json language-json">&quot;artifacts&quot;: {&quot;root&quot;: &quot;target/.ptc&quot;, &quot;trace&quot;: true, &quot;inspection&quot;: true, &quot;result&quot;: true, &quot;envelope&quot;: true}</code></pre><p>The equivalent low-level form is <code class="inline">--trace-dir</code> plus <code class="inline">--inspect</code>. See
 <a href="/reference/cli/">Running and debugging</a> for every switch and
 <a href="/reference/project-files/">Project configuration</a> for the artifact layout.</p><p>Inspection requires a trace, because every private record is validated against
 the run it claims to describe.</p><h3 id="publish-one-conversation-with-ptc-transcript">Publish one conversation with ptc transcript</h3><p>For one certified conversation, avoid a REPL. Create a sibling directory
@@ -383,7 +388,7 @@ filter, relationship, and completeness field.</li><li><a href="/reference/cli/">
 diagnostics, and the transcript command.</li><li><a href="/reference/component-contracts/">Components and preludes</a> explains component
 identity, dependencies, and the shipped libraries.</li></ul>
 </article>
-<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/repl/">&larr; REPL reference</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/source-inspection/">&larr; Source-inspection reference</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/debug-navigation.md">Edit this
   page on GitHub</a>.

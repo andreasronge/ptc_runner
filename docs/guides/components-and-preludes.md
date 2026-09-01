@@ -1,20 +1,31 @@
-# Customize agent components
+# Inspect and customize components
 
-Try a changed prompt or agent loop without changing `ptc.json`. If you keep the
-change, give your permanent components new IDs.
+Inspect the installed prompt, then try a changed copy without editing the
+manifest. If you keep the change, give your permanent components new IDs.
 
 A prelude is the compiled set of components used by one workflow or mission.
-It is immutable during a run. You do not replace the whole prelude. You replace
-one selected component when the next run starts.
+You replace one selected component when the next run starts.
+
+## Inspect the installed prompt
+
+Open a compile-and-inspect project REPL. It needs no API key:
+
+```console
+ptc repl --project ptc-project.json --inspect-only
+```
+
+```clojure
+(component "agent.prompt")
+```
+
+Selecting the shipped agent loop also selects its prompt, so that prompt is an
+override target even when it is not listed in the manifest.
 
 ## Try a different agent prompt
 
-Selecting `agent.core` also selects `agent.prompt`. The prompt is therefore an
-override target even when it is not listed directly in the manifest.
-
 Export the installed prompt, edit the copy, then publish a gated candidate.
-`--source-out` and `--source`/`--out` are separate steps because a descriptor
-hashes the exact candidate beside it:
+The two materialize modes are separate because a descriptor hashes the exact
+candidate beside it:
 
 ```console
 mkdir -p private
@@ -26,26 +37,16 @@ ptc materialize ptc-project.json --workflow \
   --out private/agent-prompt-candidate
 ```
 
-The second command checks the source and creates the candidate and descriptor
-files. Neither destination may already exist.
-
-Validate the candidate without acquiring a provider:
+Neither destination may already exist. Validate, then run the candidate:
 
 ```console
-mix ptc validate ptc.json \
+ptc validate ptc-project.json \
+  --component-override-descriptor private/agent-prompt-candidate/descriptor.json
+ptc run ptc-project.json \
   --component-override-descriptor private/agent-prompt-candidate/descriptor.json
 ```
 
-Run the normal version first. Then run the candidate:
-
-```console
-mix ptc run ptc.json
-mix ptc run ptc.json \
-  --component-override-descriptor private/agent-prompt-candidate/descriptor.json
-```
-
-The override applies only to that command. It does not edit the manifest or
-install the candidate. Use
+The override applies only to that command. Use
 [replay](evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
 when you need a fair comparison with the same model responses.
 
@@ -55,8 +56,7 @@ Use new component IDs for permanent application code. A local component cannot
 reuse a shipped library ID. If you replace a prompt or policy permanently,
 select a loop whose dependencies point to your new components.
 
-The [components-and-preludes reference](../reference/component-contracts.md)
-defines dependencies, mission targets, descriptor fields, hashes, effect
-widening, failure messages, and security boundaries. The
-[agent library reference](../agent-library-reference.md) documents the shipped
-agent components and their options.
+The [source-inspection reference](../reference/source-inspection.md) chooses a
+retrieval surface. The
+[components-and-preludes reference](../reference/component-contracts.md)
+defines replacement rules, descriptor fields, and hashes.

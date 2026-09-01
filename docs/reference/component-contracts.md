@@ -128,6 +128,41 @@ ID. A hash-checked
 can evaluate replacement source for one selected component on a run, but it is
 an invocation option rather than a permanent manifest library installation.
 
+## Export installed source or publish a candidate
+
+`ptc materialize` (and `mix ptc.materialize` from a source checkout) has two
+exclusive modes. `--source-out` writes interned installed effective bytes.
+`--source`/`--out` then hashes authored bytes into `{candidate.clj,
+descriptor.json}`. The modes are exclusive because a descriptor hashes the
+exact candidate published beside it.
+
+```console
+ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source-out private/agent.prompt.clj
+ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source private/agent.prompt.clj \
+  --out private/agent-prompt-candidate
+```
+
+The command accepts a project or application manifest. `--workflow` selects the
+workflow occurrence; `--target-mission NAME` selects one declared mission.
+Supplying neither or both is invalid. `--source-out` does not acquire a host,
+providers, or input. It writes one new owner-only file and refuses an existing
+destination. `--out` publishes a new owner-only directory. A refused candidate
+leaves nothing behind.
+
+Candidate mode keeps the existing 1 MiB replacement bound. Installed
+inspection and `--source-out` can return a larger accepted component; submitting
+those bytes as a candidate is refused with the existing too-large diagnostic.
+`--from-result` reads one string through an RFC 6901 pointer instead of
+`--source`. Provenance switches (`--origin-run-id`, `--origin-prompt-hash`,
+`--origin-authored-at`, `--accept-widened-effect`) apply only to candidate
+mode.
+
+The [Inspect and customize components](../guides/components-and-preludes.md) guide walks
+the edit loop. The [source-inspection reference](source-inspection.md) chooses
+a retrieval surface.
+
 ## Evaluate one replacement component
 
 `--component-override-descriptor` replaces one component already selected by

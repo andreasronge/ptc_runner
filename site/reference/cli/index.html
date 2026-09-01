@@ -46,7 +46,7 @@
 <li><a href="/guides/using-models/">Use a model</a></li>
 <li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
 <li><a href="/guides/building-agents/">Customize an agent</a></li>
-<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
 </ul>
 
 <h2>Design</h2>
@@ -59,6 +59,7 @@
 <ul>
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
 <li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
@@ -86,6 +87,7 @@
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/" class="current" aria-current="page">Command-line reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
 </ul>
 
@@ -247,7 +249,7 @@ The <a href="/reference/component-contracts/#evaluate-one-replacement-component"
 defines every descriptor field. <code class="inline">ptc materialize</code> (and <code class="inline">mix ptc.materialize</code>
 from a source checkout) exports installed source with <code class="inline">--source-out</code> and
 publishes a gated candidate with <code class="inline">--source</code>/<code class="inline">--out</code>, as shown in
-<a href="/guides/components-and-preludes/#try-a-different-agent-prompt">Customize agent components</a>.</p><p>Both <code class="inline">ptc validate</code> and <code class="inline">ptc run</code> accept the descriptor switch. Validation
+<a href="/guides/components-and-preludes/#try-a-different-agent-prompt">Inspect and customize components</a>.</p><p>Both <code class="inline">ptc validate</code> and <code class="inline">ptc run</code> accept the descriptor switch. Validation
 compiles and checks the replacement without provider acquisition; running uses
 the same verified candidate in the immutable workflow or mission bundle.</p><h2 id="read-results-and-failures">Read results and failures</h2><p>A successful normal run prints the compact JSON result value. A private run
 does not print its value. The V4 envelope records the result class, artifact

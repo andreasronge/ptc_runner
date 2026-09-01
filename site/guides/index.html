@@ -46,7 +46,7 @@
 <li><a href="/guides/using-models/">Use a model</a></li>
 <li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
 <li><a href="/guides/building-agents/">Customize an agent</a></li>
-<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
 </ul>
 
 <h2>Design</h2>
@@ -59,6 +59,7 @@
 <ul>
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
 <li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
@@ -86,6 +87,7 @@
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
 </ul>
 
@@ -153,9 +155,9 @@ implementation.</span></li>
   <span class="desc">Configure the shipped agent loop or replace its prompt, policy, mission
 composition, or complete implementation.</span></li>
 
-<li><a href="/guides/components-and-preludes/">Customize agent components</a>
-  <span class="desc">Try a changed prompt or agent loop without changing ptc.json. If you keep the
-change, give your permanent components new IDs.</span></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a>
+  <span class="desc">Inspect the installed prompt, then try a changed copy without editing the
+manifest. If you keep the change, give your permanent components new IDs.</span></li>
 
 </ul>
 
@@ -179,6 +181,10 @@ code. The shapes compose — a real design usually combines two or three.</span>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a>
   <span class="desc">Inspect a workflow, mission, or immutable run capture from an interactive or
 unattended REPL session.</span></li>
+
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a>
+  <span class="desc">The model's narration states intent; the admitted PTC-Lisp program is the
+executable decision you can inspect.</span></li>
 
 <li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a>
   <span class="desc">Follow a failed run from its immutable trace into private inspection only when
@@ -257,6 +263,10 @@ lifecycle contract.</span></li>
 <li><a href="/reference/repl/">REPL reference</a>
   <span class="desc">This is the complete interactive, unattended, analysis-profile, and
 private-session contract.</span></li>
+
+<li><a href="/reference/source-inspection/">Source-inspection reference</a>
+  <span class="desc">This page says where each kind of source can be retrieved, and which surface
+owns the details.</span></li>
 
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a>
   <span class="desc">This is the complete frozen-evidence graph and debug.nav contract.</span></li>

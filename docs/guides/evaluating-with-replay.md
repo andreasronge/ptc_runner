@@ -116,10 +116,10 @@ sentence. See the
 [component reference](../reference/component-contracts.md#evaluate-one-replacement-component)
 for every descriptor field and validation rule.
 
-Candidate creation is a trusted build step and is not currently exposed by the
-standalone executable. In a source checkout, follow
-[Customize agent components](components-and-preludes.md#try-a-different-agent-prompt)
-to create and check a candidate.
+Create the candidate with the standalone command rather than a source
+checkout helper, then follow
+[the customization guide](components-and-preludes.md#try-a-different-agent-prompt)
+to validate and compare it.
 
 The active bundle stays immutable for the whole run. A run may author source,
 but only a later host invocation can materialize it and start with the newly

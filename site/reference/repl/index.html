@@ -48,7 +48,7 @@ private-session contract.">
 <li><a href="/guides/using-models/">Use a model</a></li>
 <li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
 <li><a href="/guides/building-agents/">Customize an agent</a></li>
-<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
 </ul>
 
 <h2>Design</h2>
@@ -61,6 +61,7 @@ private-session contract.">
 <ul>
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
 <li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
@@ -88,6 +89,7 @@ private-session contract.">
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
 <li><a href="/reference/repl/" class="current" aria-current="page">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
 </ul>
 
@@ -176,7 +178,19 @@ discover those names with <code class="inline">:context</code>. A workflow sessi
 <code class="inline">PtcRunner.Lisp.run/2</code>, keeps the permissive <code class="inline">nil</code> default.</p><p>The interactive banner names the selected mission, components, and direct
 provider aliases. Mission sessions add one meta-command:</p><pre><code class="text language-text">:context          Show the exact frozen model context and its SHA-256 hash</code></pre><p><code class="inline">--mission</code> requires a manifest (directly or after project expansion) and
 cannot be combined with <code class="inline">--profile</code> or <code class="inline">--describe-profile</code>. An unknown name
-lists declared missions in sorted order before sinks or provider activity.</p><p>Interactive meta-commands are deliberately small:</p><pre><code class="text language-text">:help             List session commands
+lists declared missions in sorted order before sinks or provider activity.</p><h2 id="inspect-without-providers">Inspect without providers</h2><pre><code class="console language-console">ptc repl --project ptc-project.json --inspect-only
+ptc repl --project ptc-project.json --inspect-only --mission analysis
+ptc repl --manifest ptc.json --inspect-only</code></pre><p><code class="inline">--inspect-only</code> requires <code class="inline">--project</code> or <code class="inline">--manifest</code>. It compiles the selected
+workflow or named mission and attaches its component catalog without a host
+document, environment file, input, provider, or capability. A startup notice
+states that this is a compile-and-inspect environment, not a runnable
+application environment.</p><p>It may be combined with <code class="inline">--mission</code>, <code class="inline">--eval</code>, <code class="inline">--load</code>, a script, stdin, and
+<code class="inline">--preview-chars</code>. It conflicts with <code class="inline">--host-config</code>, <code class="inline">--env-file</code>, <code class="inline">--trace</code>,
+<code class="inline">--profile</code>, <code class="inline">--describe-profile</code>, <code class="inline">--resource</code>, <code class="inline">--run</code>, <code class="inline">--session-trace-dir</code>,
+<code class="inline">--output</code>, <code class="inline">--private-output</code>, <code class="inline">--continue-on-error</code>, <code class="inline">--private-terminal</code>,
+<code class="inline">--private-unattended</code>, and JSON Lines output.</p><p>Pure attached functions may evaluate. Kernel, provider, and capability routes
+fail closed with <code class="inline">inspect_only_unavailable</code>. Omitting the flag leaves live REPL
+authority unchanged.</p><p>See the <a href="/reference/source-inspection/">source-inspection reference</a>.</p><p>Interactive meta-commands are deliberately small:</p><pre><code class="text language-text">:help             List session commands
 :quit             Leave the REPL</code></pre><p>Mission sessions additionally provide <code class="inline">:context</code>, shown above. Profile
 sessions explain that <code class="inline">:context</code> requires a manifest mission instead of
 attempting to use a manifest session internally.</p><p>The language functions are the canonical discovery interface in every input
@@ -190,7 +204,10 @@ only, not runtime discovery or authority. Uninstalled capabilities and private
 Lisp runtime tools are not exposed. <code class="inline">(dir)</code> and
 <code class="inline">(export-meta &quot;ns/name&quot;)</code> / <code class="inline">(export-meta ns/name)</code> inspect the attached
 prelude API specifically, and <code class="inline">(source ns/name)</code> prints an attached prelude
-defining form when available. For <code class="inline">doc</code>/<code class="inline">dir</code>/<code class="inline">export-meta</code>/<code class="inline">source</code>, unquoted
+defining form when available. <code class="inline">(components)</code> lists attached component IDs for
+the selected workflow or mission environment; <code class="inline">(component id)</code> returns that
+component's identity, direct dependencies, namespaces, hash, and exact source,
+or <code class="inline">nil</code>. For <code class="inline">doc</code>/<code class="inline">dir</code>/<code class="inline">export-meta</code>/<code class="inline">source</code>/<code class="inline">component</code>, unquoted
 and quoted symbols are accepted the same way as strings; <code class="inline">apropos</code> accepts
 quoted symbols or strings (an unquoted query evaluates normally). An attached interactive terminal prints
 this guidance in its startup banner, and <code class="inline">:help</code> repeats it. Detached input,
@@ -202,7 +219,9 @@ diagnostic metadata, not a discovery or authority surface: <code class="inline">
 searches it, and typos, masked exports, and exports removed by an attached
 component override keep the ordinary not-found response. Embedded
 <code class="inline">PtcRunner.Lisp.run/2</code> calls without the index do likewise.</p><p>See the <a href="/reference/ptc-lisp-specification/">PTC-Lisp specification</a> and <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">function
-reference</a> for the full language surface.</p><p>Persist canonical session events with <code class="inline">--trace</code>:</p><pre><code class="console language-console">ptc repl --trace trace.jsonl
+reference</a> for the full language surface.</p><p>See the <a href="/reference/source-inspection/">source-inspection reference</a> for the retrieval
+matrix, the <a href="/reference/ptc-lisp-specification/">PTC-Lisp specification</a> for language
+rules, and the <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">function reference</a> for signatures.</p><p>Persist canonical session events with <code class="inline">--trace</code>:</p><pre><code class="console language-console">ptc repl --trace trace.jsonl
 ptc repl --manifest ptc.json --trace trace.jsonl</code></pre><p>A private manifest requires an attached terminal and
 <code class="inline">--private-terminal</code> before provider activity. It rejects scripts, stdin,
 <code class="inline">--eval</code>, <code class="inline">--load</code>, JSON Lines, and detached execution; private values and
@@ -527,11 +546,12 @@ expressions while preserving the final nonzero status with:</p><pre><code class=
   -e '(count (get runs &quot;items&quot;))'</code></pre><p><code class="inline">--output</code> and <code class="inline">--private-output</code> may atomically publish the value of exactly
 one non-interactive public or private profile evaluation. They do not replace
 existing files.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/cli/">Running and debugging</a> covers run artifacts and
-the Viewer.</li><li><a href="/reference/application-manifest/">Manifests and capabilities</a> covers attached
+the Viewer.</li><li><a href="/reference/source-inspection/">Source inspection</a> covers attached components,
+<code class="inline">--inspect-only</code>, and admitted programs.</li><li><a href="/reference/application-manifest/">Manifests and capabilities</a> covers attached
 manifests and snapshot providers.</li><li><a href="/reference/component-contracts/">Components and preludes</a> explains the profile's
 bundled analysis components.</li></ul>
 </article>
-<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/cli/">&larr; Command-line reference</a><a class="pager-next" href="/reference/debug-navigation/">Debug-navigation reference &rarr;</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/cli/">&larr; Command-line reference</a><a class="pager-next" href="/reference/source-inspection/">Source-inspection reference &rarr;</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/repl.md">Edit this
   page on GitHub</a>.

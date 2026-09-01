@@ -23,10 +23,10 @@ Use the run ID to open its activity, terminal reason, evaluations, tool use,
 limits, and completeness flags. Public traces deliberately omit prompts,
 responses, generated source, and tool payloads.
 
-If the run was configured to retain private inspection, authorize the private
-profile separately and write unattended output to an owner-controlled file.
-Private inspection is for questions that public evidence cannot answer; it is
-not the default debugging path.
+If the run retained private inspection, authorize that profile separately and
+write unattended output to an owner-controlled file. That path is not the
+default. For live attached source, see
+[Inspect source and generated programs](inspecting-source-and-programs.md).
 
 ## Can another run inspect the failure?
 

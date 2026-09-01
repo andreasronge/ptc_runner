@@ -61,6 +61,20 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert guide =~ "ptc repl"
   end
 
+  test "the inspect-source guide routes four tasks and never copies shipped prelude files" do
+    assert {:ok, content} = DocumentationLibrary.fetch("inspect-source")
+    assert content =~ "(source "
+    assert content =~ "(component "
+    assert content =~ "retain_programs"
+    assert content =~ "analysis/read"
+
+    assert {:ok, customize} = DocumentationLibrary.fetch("components-and-preludes")
+    refute customize =~ "cp priv/preludes"
+    assert customize =~ "ptc materialize"
+    assert customize =~ "inspect-only"
+    assert customize =~ "source-out"
+  end
+
   test "the debug page names both transcript destination rules before they can be violated" do
     assert {:ok, content} = DocumentationLibrary.fetch("debug")
     assert content =~ "symbolic link"

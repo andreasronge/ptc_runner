@@ -23,8 +23,9 @@ Inspect one mission with its own components, data, and direct provider closure:
 ptc repl --project ptc-project.json --mission default
 ```
 
-Mission sessions do not inherit workflow model access or other missions. They
-are useful for checking exactly what a generated program can see.
+Mission sessions do not inherit workflow model access. Inspect-only mode
+compiles without an API key; see
+[Inspect source and generated programs](inspecting-source-and-programs.md).
 
 ## How do I query past runs?
 

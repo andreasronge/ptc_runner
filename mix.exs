@@ -544,6 +544,7 @@ defmodule PtcRunner.MixProject do
           "docs/guides/agent-workflow-patterns.md",
           "docs/guides/running-and-debugging.md",
           "docs/guides/kernel-repl.md",
+          "docs/guides/inspecting-source-and-programs.md",
           "docs/guides/debugging-a-failed-run.md",
           "docs/guides/evaluating-with-replay.md",
           "docs/installation/standalone.md",
@@ -556,6 +557,7 @@ defmodule PtcRunner.MixProject do
           "docs/reference/mcp.md",
           "docs/reference/cli.md",
           "docs/reference/repl.md",
+          "docs/reference/source-inspection.md",
           "docs/reference/debug-navigation.md",
           "docs/maintainers/embedding.md",
           "docs/maintainers/coding-agent-review.md",
@@ -594,6 +596,7 @@ defmodule PtcRunner.MixProject do
         "Run and debug": [
           "docs/guides/running-and-debugging.md",
           "docs/guides/kernel-repl.md",
+          "docs/guides/inspecting-source-and-programs.md",
           "docs/guides/debugging-a-failed-run.md",
           "docs/guides/evaluating-with-replay.md"
         ],

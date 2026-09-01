@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inspect source and generated programs · PtcRunner</title>
+<meta name="description" content="The model's narration states intent; the admitted PTC-Lisp program is the
+executable decision you can inspect.">
+<link rel="canonical" href="https://ptc-runner.dev/guides/inspecting-source-and-programs/">
+<meta property="og:title" content="Inspect source and generated programs · PtcRunner">
+<meta property="og:description" content="The model's narration states intent; the admitted PTC-Lisp program is the
+executable decision you can inspect.">
+<meta property="og:url" content="https://ptc-runner.dev/guides/inspecting-source-and-programs/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/" class="current" aria-current="page">Inspect source and generated programs</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="inspect-source-and-generated-programs">Inspect source and generated programs</h1><p>The model's narration states intent; the admitted PTC-Lisp program is the
+executable decision you can inspect.</p><p>That program shows the functions, tools, data, and return or failure path that
+were actually chosen. Reviewing it helps debug a surprising result, check
+authority use, accept or reject a candidate, and improve a prompt.</p><p>Inspection does not mutate the active bundle or promote a replacement. Use an
+explicit inspect, edit, replay, and compare cycle instead.</p><h2 id="how-do-i-choose-a-retrieval-surface">How do I choose a retrieval surface?</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Need</th><th style="text-align: left;">Start here</th><th style="text-align: left;">Details</th></tr></thead><tbody><tr><td style="text-align: left;">One attached definition</td><td style="text-align: left;"><code class="inline">(source agent.prompt/render)</code></td><td style="text-align: left;"><a href="/reference/repl/">REPL</a> and <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/function-reference.md">function</a> references</td></tr><tr><td style="text-align: left;">One attached component and its direct dependencies</td><td style="text-align: left;"><code class="inline">(component &quot;agent.prompt&quot;)</code></td><td style="text-align: left;"><a href="/reference/source-inspection/">Source inspection</a> and <a href="/reference/component-contracts/">component</a> references</td></tr><tr><td style="text-align: left;">Programs a nested loop admitted before the workflow ends</td><td style="text-align: left;"><code class="inline">run-outcome</code> with <code class="inline">&quot;retain_programs&quot;</code></td><td style="text-align: left;"><a href="/reference/agent-library-reference/">Agent library</a> and <a href="/reference/source-inspection/">source inspection</a></td></tr><tr><td style="text-align: left;">Exact programs and component source from a completed run</td><td style="text-align: left;"><code class="inline">analysis/read</code> on private inspection</td><td style="text-align: left;"><a href="/reference/debug-navigation/">Debug navigation</a></td></tr></tbody></table></div><h2 id="what-is-public-versus-private">What is public versus private?</h2><p>Public traces carry identities, hashes, dependency projections, and outcomes,
+but not source. Host logs and telemetry are not source-export surfaces. Exact
+historical source requires explicitly enabled private inspection.</p><p>Use the <a href="/reference/source-inspection/">source-inspection reference</a> for
+the full selection matrix, return shapes, limits, and privacy rules.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/kernel-repl/">&larr; Explore a project interactively</a><a class="pager-next" href="/guides/debugging-a-failed-run/">Debug a failed run &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/inspecting-source-and-programs.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

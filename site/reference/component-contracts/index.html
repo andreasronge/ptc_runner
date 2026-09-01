@@ -48,7 +48,7 @@ contract.">
 <li><a href="/guides/using-models/">Use a model</a></li>
 <li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
 <li><a href="/guides/building-agents/">Customize an agent</a></li>
-<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
 </ul>
 
 <h2>Design</h2>
@@ -61,6 +61,7 @@ contract.">
 <ul>
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
 <li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
@@ -88,6 +89,7 @@ contract.">
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
 </ul>
 
@@ -160,7 +162,27 @@ history across resumptions.</p><p><a href="/guides/building-agents/">Building ag
 ID. A hash-checked
 <a href="/guides/evaluating-with-replay/#evaluate-the-candidate-without-installing-it">component override</a>
 can evaluate replacement source for one selected component on a run, but it is
-an invocation option rather than a permanent manifest library installation.</p><h2 id="evaluate-one-replacement-component">Evaluate one replacement component</h2><p><code class="inline">--component-override-descriptor</code> replaces one component already selected by
+an invocation option rather than a permanent manifest library installation.</p><h2 id="export-installed-source-or-publish-a-candidate">Export installed source or publish a candidate</h2><p><code class="inline">ptc materialize</code> (and <code class="inline">mix ptc.materialize</code> from a source checkout) has two
+exclusive modes. <code class="inline">--source-out</code> writes interned installed effective bytes.
+<code class="inline">--source</code>/<code class="inline">--out</code> then hashes authored bytes into <code class="inline">{candidate.clj, descriptor.json}</code>. The modes are exclusive because a descriptor hashes the
+exact candidate published beside it.</p><pre><code class="console language-console">ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source-out private/agent.prompt.clj
+ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source private/agent.prompt.clj \
+  --out private/agent-prompt-candidate</code></pre><p>The command accepts a project or application manifest. <code class="inline">--workflow</code> selects the
+workflow occurrence; <code class="inline">--target-mission NAME</code> selects one declared mission.
+Supplying neither or both is invalid. <code class="inline">--source-out</code> does not acquire a host,
+providers, or input. It writes one new owner-only file and refuses an existing
+destination. <code class="inline">--out</code> publishes a new owner-only directory. A refused candidate
+leaves nothing behind.</p><p>Candidate mode keeps the existing 1 MiB replacement bound. Installed
+inspection and <code class="inline">--source-out</code> can return a larger accepted component; submitting
+those bytes as a candidate is refused with the existing too-large diagnostic.
+<code class="inline">--from-result</code> reads one string through an RFC 6901 pointer instead of
+<code class="inline">--source</code>. Provenance switches (<code class="inline">--origin-run-id</code>, <code class="inline">--origin-prompt-hash</code>,
+<code class="inline">--origin-authored-at</code>, <code class="inline">--accept-widened-effect</code>) apply only to candidate
+mode.</p><p>The <a href="/guides/components-and-preludes/">Inspect and customize components</a> guide walks
+the edit loop. The <a href="/reference/source-inspection/">source-inspection reference</a> chooses
+a retrieval surface.</p><h2 id="evaluate-one-replacement-component">Evaluate one replacement component</h2><p><code class="inline">--component-override-descriptor</code> replaces one component already selected by
 the manifest. A transitively selected component is also eligible. The
 descriptor contains the replacement instruction, not the source itself:</p><pre><code class="json language-json">{
   &quot;target&quot;: {&quot;environment&quot;: &quot;workflow&quot;},

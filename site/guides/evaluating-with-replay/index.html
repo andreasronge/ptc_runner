@@ -48,7 +48,7 @@ deciding whether to promote it.">
 <li><a href="/guides/using-models/">Use a model</a></li>
 <li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
 <li><a href="/guides/building-agents/">Customize an agent</a></li>
-<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
 </ul>
 
 <h2>Design</h2>
@@ -61,6 +61,7 @@ deciding whether to promote it.">
 <ul>
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
 <li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
 <li><a href="/guides/evaluating-with-replay/" class="current" aria-current="page">Evaluate changes with replay</a></li>
 </ul>
@@ -88,6 +89,7 @@ deciding whether to promote it.">
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
 </ul>
 
@@ -138,10 +140,10 @@ descriptor names the field it broke (<code class="inline">base_source_hash</code
 <code class="inline">component_id</code>, or <code class="inline">path</code>) rather than collapsing every mistake into one
 sentence. See the
 <a href="/reference/component-contracts/#evaluate-one-replacement-component">component reference</a>
-for every descriptor field and validation rule.</p><p>Candidate creation is a trusted build step and is not currently exposed by the
-standalone executable. In a source checkout, follow
-<a href="/guides/components-and-preludes/#try-a-different-agent-prompt">Customize agent components</a>
-to create and check a candidate.</p><p>The active bundle stays immutable for the whole run. A run may author source,
+for every descriptor field and validation rule.</p><p>Create the candidate with the standalone command rather than a source
+checkout helper, then follow
+<a href="/guides/components-and-preludes/#try-a-different-agent-prompt">the customization guide</a>
+to validate and compare it.</p><p>The active bundle stays immutable for the whole run. A run may author source,
 but only a later host invocation can materialize it and start with the newly
 compiled bundle. Component-override switches are invocation-only and are not
 stored in <code class="inline">ptc-project.json</code>.</p><p>Run the unchanged baseline and the override with the same replay installation,

@@ -53,6 +53,11 @@ Those strings may contain secrets or local paths and cannot be reliably
 redacted. Read the artifact only through an authorized private sink, and never
 publish it alongside a normal trace.
 
+Active `(component)` inspection and in-run `retain_programs` answer questions
+about the current environment or a still-running caller. This page owns only
+completed-run collections and relationships. See the
+[source-inspection reference](source-inspection.md).
+
 A project document captures both:
 
 ```json
