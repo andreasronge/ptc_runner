@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.Materialize do
   alias PtcRunner.Kernel.CandidateArtifact
   alias PtcRunner.Kernel.CandidatePromotion
   alias PtcRunner.Kernel.ComponentOverride
+  alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.PrivateDirectory
   alias PtcRunner.Kernel.StrictJSON
 
@@ -30,7 +31,13 @@ defmodule PtcRunner.Kernel.Materialize do
           | {:error, term()}
 
   @doc """
-  Runs one materialize invocation against a project or application path.
+  Runs one materialize invocation against an application manifest path.
+
+  Project command callers pass the non-secret installed limits decoded from
+  the project's host document when present; direct callers and hostless projects
+  use installed defaults. Neither
+  source-export nor candidate acquisition resolves credentials or starts a
+  provider.
 
   `:source_out` writes interned installed effective bytes for one selected
   component to a new owner-only file (mode 0600). `:out` plus `:source` or
@@ -95,7 +102,7 @@ defmodule PtcRunner.Kernel.Materialize do
   defp export_source(application, target, component_id, opts) do
     with {:ok, path} <- required(opts, :source_out),
          {:ok, fault_hook} <- optional_fault_hook(opts),
-         {:ok, package} <- acquire_export(application),
+         {:ok, package} <- acquire_export(application, opts),
          {:ok, source} <- installed_source(package, target, component_id),
          {:ok, written} <- publish_source_out(path, source, fault_hook) do
       {:ok, {:source_out, written}}
@@ -105,7 +112,7 @@ defmodule PtcRunner.Kernel.Materialize do
   defp materialize_candidate(application, target, component_id, opts) do
     with {:ok, out} <- required(opts, :out),
          {:ok, source} <- candidate_source(opts),
-         {:ok, base} <- acquire_candidate(application, []),
+         {:ok, base} <- acquire_candidate(application, opts, []),
          {:ok, base_source} <- installed_source(base, target, component_id),
          {:ok, published} <-
            CandidateArtifact.publish(
@@ -113,7 +120,7 @@ defmodule PtcRunner.Kernel.Materialize do
              source,
              descriptor(target, component_id, base_source, opts)
            ),
-         {:ok, candidate} <- gate_acquire(application, published),
+         {:ok, candidate} <- gate_acquire(application, published, opts),
          report <- evaluate(base, candidate, opts) do
       finish(report, published)
     end
@@ -134,8 +141,8 @@ defmodule PtcRunner.Kernel.Materialize do
     )
   end
 
-  defp gate_acquire(application, published) do
-    case acquire_candidate(application, component_override_descriptor: published.descriptor) do
+  defp gate_acquire(application, published, opts) do
+    case acquire_candidate(application, opts, component_override_descriptor: published.descriptor) do
       {:ok, package} ->
         {:ok, package}
 
@@ -147,17 +154,24 @@ defmodule PtcRunner.Kernel.Materialize do
     end
   end
 
-  defp acquire_export(application) do
-    case ApplicationPackage.acquire_directory(application, omit_input: true) do
+  defp acquire_export(application, opts) do
+    case ApplicationPackage.acquire_directory(application,
+           omit_input: true,
+           installed_limits: Keyword.get(opts, :installed_limits, Limits.installed_defaults())
+         ) do
       {:ok, package, _input} -> {:ok, package}
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp acquire_candidate(application, opts) do
+  defp acquire_candidate(application, materialize_opts, acquisition_opts) do
     case ApplicationPackage.request_directory(
            application,
-           [result_projection: :native] ++ opts
+           [
+             result_projection: :native,
+             installed_limits:
+               Keyword.get(materialize_opts, :installed_limits, Limits.installed_defaults())
+           ] ++ acquisition_opts
          ) do
       {:ok, request} -> {:ok, request.package}
       {:error, reason} -> {:error, reason}

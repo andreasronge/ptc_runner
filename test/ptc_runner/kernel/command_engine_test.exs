@@ -5113,8 +5113,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       {:validate, diagnostic_for_row(DiagnosticCatalog.fetch!(:application, :override_invalid))},
       {:validate,
        diagnostic_for_row(DiagnosticCatalog.fetch!(:application, :event_identity_conflict))},
-      {:help, diagnostic_for_row(DiagnosticCatalog.fetch!(:arguments, :conflicting_arguments))},
-      {:materialize, diagnostic_for_row(DiagnosticCatalog.fetch!(:host, :host_unavailable))}
+      {:help, diagnostic_for_row(DiagnosticCatalog.fetch!(:arguments, :conflicting_arguments))}
     ]
 
     for {command_mode, diagnostic} <- impossible_pairs do
