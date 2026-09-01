@@ -31,6 +31,23 @@ model alias. Follow `ptc docs quickstart` once before running them. Example 03
 launches `ptc-fs-mcp@0.1.0` through `npx`; the first run may download that
 package. Node.js and `npx` are required.
 
+Example 06 is a deliberate cost-budget refusal. It uses a separate host
+document so its 1 microUSD installed ceiling cannot affect the successful live
+examples, and repeats that ceiling in the application manifest:
+
+```console
+ptc run kernel-tutorial/06-cost-budget.ptc-project.json
+echo $? # 6
+```
+
+With a valid `OPENROUTER_API_KEY`, the run fails before provider dispatch with
+an `execution/runtime_limit_exceeded` envelope naming
+`llm_cost_microusd`. Its `reservation_tariff.id` value,
+`openrouter-model-pricing-v1`, is an operator-chosen opaque identity for the
+pricing basis prepared with this installation; it is not an ID issued by
+OpenRouter. Raise both copies of `llm_cost_microusd` to turn this starting point
+into a budget suitable for a real workflow.
+
 Example 04 requests explicit 120-second `run_duration_ms` and
 `workflow_timeout_ms` limits for its live, two-turn model loop. Its
 `max_turns` setting bounds the agent protocol; it is not a time allowance.
@@ -49,7 +66,8 @@ for the model-driven steps, the program the model generated for each
 evaluation. That evidence contains prompts, responses, and tool payloads; a
 project that should not retain it sets both settings back to `false`.
 
-`ptc-host.json` is the shared operator document these examples install from;
+`ptc-host.json` is the shared operator document for Examples 02 through 04;
+`ptc-host-cost-budget.json` isolates Example 06's deliberate ceiling.
 `ptc docs host-configuration` explains its fields.
 
 The Quickstart (`ptc docs quickstart`) owns the shortest live path; the MCP

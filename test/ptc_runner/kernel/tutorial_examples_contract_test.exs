@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
 
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
   @host Path.join(@examples, "ptc-host.json")
+  @cost_budget_host Path.join(@examples, "ptc-host-cost-budget.json")
   @viewer_examples Path.expand("../../../examples/viewer-demo", __DIR__)
   @named_missions Path.expand("../../../examples/named-mission-reader-writer", __DIR__)
   @support_triage Path.expand("../../../examples/support-triage", __DIR__)
@@ -10,6 +11,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
   test "models in shipped runnable examples belong to ReqLLM's catalog" do
     installations = [
       {@host, "deepseek"},
+      {@cost_budget_host, "deepseek"},
       {Path.join(@viewer_examples, "ptc-host.json"), "deepseek"},
       {Path.join(@named_missions, "ptc-host.json"), "agent_model"},
       {Path.join(@support_triage, "ptc-host.json"), "deepseek"}
@@ -19,6 +21,13 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
       model = host |> decode!() |> get_in(["install", alias_name, "model"])
       assert {:ok, _catalog_model} = LLMDB.model(model), host
     end
+  end
+
+  test "the cost-budget tutorial label reports its dedicated host model" do
+    model = @cost_budget_host |> decode!() |> get_in(["install", "deepseek", "model"])
+    manifest = decode!(Path.join([@examples, "06-cost-budget", "ptc.json"]))
+
+    assert manifest["labels"]["model"] == model
   end
 
   test "live tutorial labels report the model installed by the host" do
