@@ -127,6 +127,17 @@ ID. A hash-checked
 [component override](../guides/evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
 can evaluate replacement source for one selected component on a run, but it is
 an invocation option rather than a permanent manifest library installation.
+The project file does not store it, and repeating
+`--component-override-descriptor` is rejected: one command carries one
+descriptor and one `component_id`.
+
+## Install a custom prompt
+
+For a custom prompt in ordinary composition, do not keep selecting shipped
+`agent.core`. That library's dependency remains shipped `agent.prompt`. Give
+the prompt a new ID and select a loop whose dependencies name that ID. Copy
+`agent.core` and `agent.machine` for that rewiring; they are the shipped
+callers of `agent.prompt`. The other shipped agent libraries stay selected.
 
 ## Export installed source or publish a candidate
 

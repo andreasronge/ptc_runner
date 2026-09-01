@@ -118,7 +118,7 @@ for every descriptor field and validation rule.
 
 Create the candidate with the standalone command rather than a source
 checkout helper, then follow
-[the customization guide](components-and-preludes.md#try-a-different-agent-prompt)
+[the customization guide](components-and-preludes.md#change-the-prompt-on-a-run)
 to validate and compare it.
 
 The active bundle stays immutable for the whole run. A run may author source,

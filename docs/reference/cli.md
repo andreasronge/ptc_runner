@@ -257,7 +257,7 @@ The [component reference](component-contracts.md#evaluate-one-replacement-compon
 defines every descriptor field. `ptc materialize` (and `mix ptc.materialize`
 from a source checkout) exports installed source with `--source-out` and
 publishes a gated candidate with `--source`/`--out`, as shown in
-[Inspect and customize components](../guides/components-and-preludes.md#try-a-different-agent-prompt).
+[Inspect and customize components](../guides/components-and-preludes.md#change-the-prompt-on-a-run).
 
 Both `ptc validate` and `ptc run` accept the descriptor switch. Validation
 compiles and checks the replacement without provider acquisition; running uses

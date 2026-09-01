@@ -1,10 +1,9 @@
 # Inspect and customize components
 
-Inspect the installed prompt, then try a changed copy without editing the
-manifest. If you keep the change, give your permanent components new IDs.
+Change the shipped agent prompt on a run without editing the manifest.
+Installing that prompt as application code is a separate graph change.
 
 A prelude is the compiled set of components used by one workflow or mission.
-You replace one selected component when the next run starts.
 
 ## Inspect the installed prompt
 
@@ -21,11 +20,9 @@ ptc repl --project ptc-project.json --inspect-only
 Selecting the shipped agent loop also selects its prompt, so that prompt is an
 override target even when it is not listed in the manifest.
 
-## Try a different agent prompt
+## Change the prompt on a run
 
-Export the installed prompt, edit the copy, then publish a gated candidate.
-The two materialize modes are separate because a descriptor hashes the exact
-candidate beside it:
+Export the installed prompt, edit the copy, then publish a gated candidate:
 
 ```console
 mkdir -p private
@@ -37,7 +34,7 @@ ptc materialize ptc-project.json --workflow \
   --out private/agent-prompt-candidate
 ```
 
-Neither destination may already exist. Validate, then run the candidate:
+Validate, then run the candidate:
 
 ```console
 ptc validate ptc-project.json \
@@ -46,15 +43,25 @@ ptc run ptc-project.json \
   --component-override-descriptor private/agent-prompt-candidate/descriptor.json
 ```
 
-The override applies only to that command. Use
+Pass the descriptor on each command that should use the candidate. The project
+file does not store it.
+
+- One selected component's source is replaced; the loop wiring is not.
+- The override cannot add a component, rename one, or change dependencies.
+- If the shipped prompt source changes, publish a new candidate from the new
+  base.
+
+Use
 [replay](evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
 when you need a fair comparison with the same model responses.
 
-## Keep a change
+## Install a prompt in the application
 
-Use new component IDs for permanent application code. A local component cannot
-reuse a shipped library ID. If you replace a prompt or policy permanently,
-select a loop whose dependencies point to your new components.
+A local component cannot reuse a shipped library ID, so selecting the shipped
+loop still installs the shipped prompt. Give the custom prompt a new ID and
+select a loop whose dependencies name that ID. The
+[component reference](../reference/component-contracts.md#install-a-custom-prompt)
+covers which shipped callers to copy.
 
 The [source-inspection reference](../reference/source-inspection.md) chooses a
 retrieval surface. The

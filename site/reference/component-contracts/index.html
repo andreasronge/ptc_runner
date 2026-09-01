@@ -162,7 +162,14 @@ history across resumptions.</p><p><a href="/guides/building-agents/">Building ag
 ID. A hash-checked
 <a href="/guides/evaluating-with-replay/#evaluate-the-candidate-without-installing-it">component override</a>
 can evaluate replacement source for one selected component on a run, but it is
-an invocation option rather than a permanent manifest library installation.</p><h2 id="export-installed-source-or-publish-a-candidate">Export installed source or publish a candidate</h2><p><code class="inline">ptc materialize</code> (and <code class="inline">mix ptc.materialize</code> from a source checkout) has two
+an invocation option rather than a permanent manifest library installation.
+The project file does not store it, and repeating
+<code class="inline">--component-override-descriptor</code> is rejected: one command carries one
+descriptor and one <code class="inline">component_id</code>.</p><h2 id="install-a-custom-prompt">Install a custom prompt</h2><p>For a custom prompt in ordinary composition, do not keep selecting shipped
+<code class="inline">agent.core</code>. That library's dependency remains shipped <code class="inline">agent.prompt</code>. Give
+the prompt a new ID and select a loop whose dependencies name that ID. Copy
+<code class="inline">agent.core</code> and <code class="inline">agent.machine</code> for that rewiring; they are the shipped
+callers of <code class="inline">agent.prompt</code>. The other shipped agent libraries stay selected.</p><h2 id="export-installed-source-or-publish-a-candidate">Export installed source or publish a candidate</h2><p><code class="inline">ptc materialize</code> (and <code class="inline">mix ptc.materialize</code> from a source checkout) has two
 exclusive modes. <code class="inline">--source-out</code> writes interned installed effective bytes.
 <code class="inline">--source</code>/<code class="inline">--out</code> then hashes authored bytes into <code class="inline">{candidate.clj, descriptor.json}</code>. The modes are exclusive because a descriptor hashes the
 exact candidate published beside it.</p><pre><code class="console language-console">ptc materialize ptc-project.json --workflow \

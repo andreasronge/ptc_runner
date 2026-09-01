@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Inspect and customize components · PtcRunner</title>
-<meta name="description" content="Inspect the installed prompt, then try a changed copy without editing the
-manifest. If you keep the change, give your permanent components new IDs.">
+<meta name="description" content="Change the shipped agent prompt on a run without editing the manifest.
+Installing that prompt as application code is a separate graph change.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/components-and-preludes/">
 <meta property="og:title" content="Inspect and customize components · PtcRunner">
-<meta property="og:description" content="Inspect the installed prompt, then try a changed copy without editing the
-manifest. If you keep the change, give your permanent components new IDs.">
+<meta property="og:description" content="Change the shipped agent prompt on a run without editing the manifest.
+Installing that prompt as application code is a separate graph change.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/components-and-preludes/">
 <meta property="og:type" content="article">
 <link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
@@ -99,25 +99,26 @@ manifest. If you keep the change, give your permanent components new IDs.">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="inspect-and-customize-components">Inspect and customize components</h1><p>Inspect the installed prompt, then try a changed copy without editing the
-manifest. If you keep the change, give your permanent components new IDs.</p><p>A prelude is the compiled set of components used by one workflow or mission.
-You replace one selected component when the next run starts.</p><h2 id="inspect-the-installed-prompt">Inspect the installed prompt</h2><p>Open a compile-and-inspect project REPL. It needs no API key:</p><pre><code class="console language-console">ptc repl --project ptc-project.json --inspect-only</code></pre><pre><code class="clojure language-clojure">(component &quot;agent.prompt&quot;)</code></pre><p>Selecting the shipped agent loop also selects its prompt, so that prompt is an
-override target even when it is not listed in the manifest.</p><h2 id="try-a-different-agent-prompt">Try a different agent prompt</h2><p>Export the installed prompt, edit the copy, then publish a gated candidate.
-The two materialize modes are separate because a descriptor hashes the exact
-candidate beside it:</p><pre><code class="console language-console">mkdir -p private
+<h1 id="inspect-and-customize-components">Inspect and customize components</h1><p>Change the shipped agent prompt on a run without editing the manifest.
+Installing that prompt as application code is a separate graph change.</p><p>A prelude is the compiled set of components used by one workflow or mission.</p><h2 id="inspect-the-installed-prompt">Inspect the installed prompt</h2><p>Open a compile-and-inspect project REPL. It needs no API key:</p><pre><code class="console language-console">ptc repl --project ptc-project.json --inspect-only</code></pre><pre><code class="clojure language-clojure">(component &quot;agent.prompt&quot;)</code></pre><p>Selecting the shipped agent loop also selects its prompt, so that prompt is an
+override target even when it is not listed in the manifest.</p><h2 id="change-the-prompt-on-a-run">Change the prompt on a run</h2><p>Export the installed prompt, edit the copy, then publish a gated candidate:</p><pre><code class="console language-console">mkdir -p private
 ptc materialize ptc-project.json --workflow \
   --component agent.prompt --source-out private/agent.prompt.clj
 # edit private/agent.prompt.clj
 ptc materialize ptc-project.json --workflow \
   --component agent.prompt --source private/agent.prompt.clj \
-  --out private/agent-prompt-candidate</code></pre><p>Neither destination may already exist. Validate, then run the candidate:</p><pre><code class="console language-console">ptc validate ptc-project.json \
+  --out private/agent-prompt-candidate</code></pre><p>Validate, then run the candidate:</p><pre><code class="console language-console">ptc validate ptc-project.json \
   --component-override-descriptor private/agent-prompt-candidate/descriptor.json
 ptc run ptc-project.json \
-  --component-override-descriptor private/agent-prompt-candidate/descriptor.json</code></pre><p>The override applies only to that command. Use
+  --component-override-descriptor private/agent-prompt-candidate/descriptor.json</code></pre><p>Pass the descriptor on each command that should use the candidate. The project
+file does not store it.</p><ul><li>One selected component's source is replaced; the loop wiring is not.</li><li>The override cannot add a component, rename one, or change dependencies.</li><li>If the shipped prompt source changes, publish a new candidate from the new
+base.</li></ul><p>Use
 <a href="/guides/evaluating-with-replay/#evaluate-the-candidate-without-installing-it">replay</a>
-when you need a fair comparison with the same model responses.</p><h2 id="keep-a-change">Keep a change</h2><p>Use new component IDs for permanent application code. A local component cannot
-reuse a shipped library ID. If you replace a prompt or policy permanently,
-select a loop whose dependencies point to your new components.</p><p>The <a href="/reference/source-inspection/">source-inspection reference</a> chooses a
+when you need a fair comparison with the same model responses.</p><h2 id="install-a-prompt-in-the-application">Install a prompt in the application</h2><p>A local component cannot reuse a shipped library ID, so selecting the shipped
+loop still installs the shipped prompt. Give the custom prompt a new ID and
+select a loop whose dependencies name that ID. The
+<a href="/reference/component-contracts/#install-a-custom-prompt">component reference</a>
+covers which shipped callers to copy.</p><p>The <a href="/reference/source-inspection/">source-inspection reference</a> chooses a
 retrieval surface. The
 <a href="/reference/component-contracts/">components-and-preludes reference</a>
 defines replacement rules, descriptor fields, and hashes.</p>
