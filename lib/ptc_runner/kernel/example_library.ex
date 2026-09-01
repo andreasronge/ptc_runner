@@ -21,10 +21,10 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
   # One entry per self-contained walkthrough. A tree is the unit rather than a
   # single project because these walkthroughs are multi-project by design: the
   # debug example's host document reads the trace directory the failing project
-  # writes, and the tutorial's five steps share one host document.
+  # writes, and the tutorial's live success steps share one host document.
   @catalog [
     {"kernel-tutorial", "examples/kernel-tutorial",
-     "Five numbered projects: deterministic workflow, model extraction, file agent, multi-turn agent, signature feedback"},
+     "Six numbered projects: deterministic workflow, model extraction, file agent, multi-turn agent, signature feedback, deliberate cost-budget refusal"},
     {"support-triage", "examples/support-triage",
      "Three numbered projects growing one support-inbox scenario: one bounded question, a triage policy as a mission API, two specialist missions with a result contract"},
     {"debug-a-failed-run", "examples/debug-a-failed-run",

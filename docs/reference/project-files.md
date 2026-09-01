@@ -29,10 +29,11 @@ ptc run kernel-tutorial/01-orders.ptc-project.json
 ptc viewer kernel-tutorial/01-orders.ptc-project.json
 ```
 
-The provider-backed examples additionally reference the shared host document
-and `kernel-tutorial/.env` from their project files. After creating
-that explicitly named environment file, their run commands have the same
-single-argument shape:
+Provider-backed Examples 02 through 04 additionally reference the shared host
+document and `kernel-tutorial/.env` from their project files. Example 06 uses a
+dedicated host document so its deliberate cost ceiling cannot affect the
+successful examples. After creating the explicitly named environment file,
+their run commands have the same single-argument shape:
 
 ```console
 ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
