@@ -99,16 +99,20 @@ defmodule PtcRunner.LLM.Requirements do
     do: :error
 
   @spec probe(map(), usage_guarantees()) :: {:ok, t()} | :error
-  def probe(params, usage_guarantees) when is_map(params) do
+  def probe(params, usage_guarantees),
+    do: probe(params, usage_guarantees, %{total_tokens?: false, cost_tariff: nil})
+
+  @spec probe(map(), usage_guarantees(), reservation()) :: {:ok, t()} | :error
+  def probe(params, usage_guarantees, reservation) when is_map(params) do
     canonical(%{
       exact_options: authorized_options(params, 1),
       structured_output_mode: :unsupported,
       usage_guarantees: usage_guarantees,
-      reservation: %{total_tokens?: false, cost_tariff: nil}
+      reservation: reservation
     })
   end
 
-  def probe(_params, _usage_guarantees), do: :error
+  def probe(_params, _usage_guarantees, _reservation), do: :error
 
   @spec canonical(term()) :: {:ok, t()} | :error
   def canonical(requirements) when is_map(requirements) and not is_struct(requirements) do
@@ -137,6 +141,15 @@ defmodule PtcRunner.LLM.Requirements do
   @doc false
   @spec valid_cost_tariff?(term()) :: boolean()
   def valid_cost_tariff?(tariff), do: match?({:ok, _canonical}, canonical_tariff(tariff))
+
+  @doc false
+  @spec cost_reservation?(term()) :: boolean()
+  def cost_reservation?(requirements) do
+    case canonical(requirements) do
+      {:ok, %{reservation: %{cost_tariff: tariff}}} -> not is_nil(tariff)
+      :error -> false
+    end
+  end
 
   defp authorized_options(params, max_tokens) do
     params

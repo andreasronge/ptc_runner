@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
+  alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.StandaloneCLI
   alias PtcRunner.TestSupport.LLMSupport
@@ -904,5 +905,149 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
       |> Enum.find(&(&1["type"] == "run-started"))
 
     assert started["data"]["warnings"] == [warning]
+  end
+
+  @tag :tmp_dir
+  test "an uncataloged cost-budget refusal explains pricing in run and doctor", %{
+    tmp_dir: directory
+  } do
+    keys = [
+      :llm_adapter,
+      :host_llm_test_owner,
+      :host_llm_test_prepare_error,
+      :host_llm_test_public_model
+    ]
+
+    previous = Map.new(keys, &{&1, Application.fetch_env(:ptc_runner, &1)})
+
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_prepare_error,
+      :uncataloged_cost_reservation_pricing_unavailable
+    )
+
+    Application.put_env(:ptc_runner, :host_llm_test_public_model, true)
+
+    on_exit(fn ->
+      Enum.each(previous, fn
+        {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
+        {key, :error} -> Application.delete_env(:ptc_runner, key)
+      end)
+    end)
+
+    model = "openrouter:future-vendor/future-priced-model-1724"
+
+    host = uncataloged_cost_host(model)
+
+    host_path = write_host_config(directory, "uncataloged-cost", host)
+
+    manifest =
+      valid_manifest(%{
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "main.clj"}],
+          "entry" => "app/run"
+        },
+        "providers" => %{
+          "workflow" => [%{"name" => "model", "config" => %{}}],
+          "mission" => []
+        }
+      })
+
+    application =
+      write_application(directory, "uncataloged-cost", manifest, %{
+        "main.clj" => ~S|(ns app) (defn run [_input] true)|
+      })
+
+    assert {:error, %CommandOutcome{} = run} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert run.exit_status == 4, inspect(run.envelope)
+    assert run.envelope["error"]["phase"] == "local_preflight", inspect(run.envelope)
+    assert run.envelope["error"]["code"] == "model_contract_unsupported"
+    assert run.envelope["error"]["provider_activity"] == true
+    assert run.envelope["error"]["notes"] == []
+    assert run.envelope["error"]["subject"]["name"] == "model"
+    assert run.envelope["error"]["message"] =~ "llm_cost_microusd"
+    assert run.envelope["error"]["message"] =~ model
+    assert run.envelope["error"]["message"] =~ "supported USD reservation pricing"
+
+    assert run.envelope["warnings"] == [
+             %{
+               "code" => "model_uncataloged",
+               "message" =>
+                 "the configured model is not an exact catalog entry; pricing, limits, token estimation, and capability detection may be incomplete",
+               "provider" => "model",
+               "model" => model
+             }
+           ]
+
+    assert {:stderr, run_stderr} = CommandRenderer.render(run)
+    assert run_stderr =~ "warning: model_uncataloged"
+    assert run_stderr =~ model
+
+    assert_schema_valid(run.envelope)
+
+    message_prefix = "llm_cost_microusd requires supported USD reservation pricing for "
+
+    message_suffix =
+      "; remove limits.llm_cost_microusd, or select a model with supported USD reservation pricing"
+
+    for invalid_message <- [
+          message_prefix <> ~S("invalid\qescape") <> message_suffix,
+          message_prefix <> ~S("\u0061") <> message_suffix,
+          message_prefix <> ~S("\/") <> message_suffix,
+          message_prefix <> Jason.encode!(String.duplicate("a", 257)) <> message_suffix,
+          message_prefix <> Jason.encode!(String.duplicate("é", 129)) <> message_suffix,
+          run.envelope["error"]["message"] <> "\n"
+        ] do
+      assert_schema_invalid(put_in(run.envelope, ["error", "message"], invalid_message))
+    end
+
+    Application.put_env(:ptc_runner, :host_llm_test_public_model, false)
+
+    assert {:error, %CommandOutcome{} = private_run} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    refute private_run.envelope["error"]["message"] =~ model
+    assert private_run.envelope["error"]["message"] =~ "the selected model"
+    assert [%{"code" => "model_uncataloged", "model" => nil}] = private_run.envelope["warnings"]
+    assert_schema_valid(private_run.envelope)
+
+    Application.put_env(:ptc_runner, :host_llm_test_public_model, true)
+
+    assert {:error, %CommandOutcome{} = doctor} =
+             CommandEngine.dispatch([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert {:stdio, _doctor_stdout, doctor_stderr} = CommandRenderer.render(doctor)
+
+    assert doctor_stderr =~ "warning: model_uncataloged"
+    assert doctor_stderr =~ model
+    assert doctor_stderr =~ "pricing"
+
+    assert doctor.exit_status == 4
+    assert doctor.envelope["result"]["readiness"] == "failed", inspect(doctor.envelope)
+    assert doctor.envelope["result"]["provider_activity"] == true
+    assert doctor.envelope["warnings"] == []
+    assert doctor.envelope["error"]["code"] == "model_contract_unsupported"
+
+    assert Enum.any?(doctor.envelope["result"]["checks"], fn check ->
+             check == %{
+               "name" => "provider/model/local",
+               "status" => "fail",
+               "code" => "model_contract_unsupported"
+             }
+           end)
+
+    refute_received {:host_llm_request, _, _}
+    assert_schema_valid(doctor.envelope)
   end
 end

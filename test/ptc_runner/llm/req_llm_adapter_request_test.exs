@@ -255,6 +255,23 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
             }} = capability.callback.(%{messages: [], tools: [tool_schema()]})
   end
 
+  test "distinguishes missing uncataloged reservation pricing from other contract failures" do
+    requirements = %{
+      Requirements.interim(%{max_tokens: 2_000})
+      | usage_guarantees: %{tokens: true, cost_currency: "USD"},
+        reservation: %{
+          total_tokens?: true,
+          cost_tariff: %{currency: "USD", id: "declared-tariff-v1"}
+        }
+    }
+
+    assert {:error, :uncataloged_cost_reservation_pricing_unavailable} =
+             ReqLLMAdapter.prepare_model(
+               "openrouter:future-vendor/future-priced-model-1724",
+               requirements
+             )
+  end
+
   test "prefers OpenRouter's reported charge over catalog pricing", %{test: test} do
     Req.Test.expect(
       test,

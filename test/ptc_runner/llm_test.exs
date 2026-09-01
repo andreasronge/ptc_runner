@@ -96,6 +96,32 @@ defmodule PtcRunner.LLMTest do
     def call(_target, _invocation), do: raise("an unsupported contract must not reach call/2")
   end
 
+  defmodule RawPricingPayloadAdapter do
+    use PtcRunner.LLMTest.StubAdapter
+
+    @impl true
+    def prepare_model(_model, _requirements),
+      do: {:error, {:uncataloged_cost_reservation_pricing_unavailable, "PRIVATE ENDPOINT"}}
+
+    @impl true
+    def call(_target, _invocation), do: raise("a forged pricing cause must not reach call/2")
+  end
+
+  defmodule PricingUnavailableAdapter do
+    use PtcRunner.LLMTest.StubAdapter
+
+    @impl true
+    def prepare_model(_model, _requirements),
+      do: {:error, :uncataloged_cost_reservation_pricing_unavailable}
+  end
+
+  defmodule GenericPricingUnavailableAdapter do
+    use PtcRunner.LLMTest.StubAdapter
+
+    @impl true
+    def prepare_model(_model, _requirements), do: {:error, :cost_reservation_pricing_unavailable}
+  end
+
   defmodule MismatchingAttestationAdapter do
     use PtcRunner.LLMTest.StubAdapter
 
@@ -226,6 +252,28 @@ defmodule PtcRunner.LLMTest do
     test "returns adapter unsupported-option failures before constructing a requester" do
       assert {:error, :unsupported_model_option} =
                PtcRunner.LLM.prepare("provider:model", requirements(), UnsupportedOptionAdapter)
+    end
+
+    test "rejects an adapter-supplied pricing payload instead of publishing it" do
+      assert {:error, :invalid_model_preparation} =
+               PtcRunner.LLM.prepare("provider:model", requirements(), RawPricingPayloadAdapter)
+    end
+
+    test "rejects a pricing sentinel when no cost reservation was requested" do
+      assert {:error, :invalid_model_preparation} =
+               PtcRunner.LLM.prepare("provider:model", requirements(), PricingUnavailableAdapter)
+    end
+
+    test "does not classify a generic adapter pricing miss as uncataloged" do
+      tariff = %{currency: "USD", id: "test-v1"}
+      requested = put_in(requirements(), [:reservation, :cost_tariff], tariff)
+
+      assert {:error, :cost_reservation_pricing_unavailable} =
+               PtcRunner.LLM.prepare(
+                 "provider:model",
+                 requested,
+                 GenericPricingUnavailableAdapter
+               )
     end
 
     test "returns preparation failures before constructing a requester" do

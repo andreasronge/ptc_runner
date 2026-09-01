@@ -1907,7 +1907,7 @@ if Code.ensure_loaded?(ReqLLM) do
                canonical.structured_output_mode
              ),
            :ok <- attest_prepared_json_schema(prepared, canonical.structured_output_mode) do
-        with :ok <- attest_prepared_reservation(prepared, canonical.reservation) do
+        with :ok <- attest_prepared_reservation(prepared, status, canonical.reservation) do
           {:ok,
            %{
              prepared
@@ -1920,15 +1920,22 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
-    defp attest_prepared_reservation(_prepared, %{cost_tariff: nil}), do: :ok
+    defp attest_prepared_reservation(_prepared, _status, %{cost_tariff: nil}), do: :ok
 
     defp attest_prepared_reservation(
            %ReqLLMPreparedModel{} = prepared,
+           status,
            %{cost_tariff: %{currency: "USD", id: _id}}
          ) do
       case reservation_cost_rates(prepared) do
-        {:ok, _token_rates, _request_rate} -> :ok
-        :error -> {:error, :unsupported_model_option}
+        {:ok, _token_rates, _request_rate} ->
+          :ok
+
+        :error when status == :uncataloged ->
+          {:error, :uncataloged_cost_reservation_pricing_unavailable}
+
+        :error ->
+          {:error, :unsupported_model_option}
       end
     end
 

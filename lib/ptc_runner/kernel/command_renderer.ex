@@ -25,9 +25,10 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.ModelContractDiagnostic
 
   @spec render(CommandOutcome.t(), CommandRejection.t() | nil) ::
-          {:stdout | :stderr, binary()}
+          {:stdout | :stderr, binary()} | {:stdio, binary(), binary()}
   def render(%CommandOutcome{} = outcome, rejection \\ nil) do
     envelope = CommandOutcome.to_map(outcome)
 
@@ -73,11 +74,16 @@ defmodule PtcRunner.Kernel.CommandRenderer do
         "status" => "error",
         "command" => "doctor",
         "result" => %{"readiness" => "failed"} = result
-      } ->
-        {:stdout, json_line(result)}
+      } = envelope ->
+        case model_contract_warning(envelope) do
+          "" -> {:stdout, json_line(result)}
+          warning -> {:stdio, json_line(result), warning}
+        end
 
       %{"status" => "error", "run_ref" => run_ref} = envelope ->
-        {:stderr, failure_line(outcome, run_ref, rejection) <> evaluation_line(envelope)}
+        {:stderr,
+         model_contract_warning(envelope) <>
+           failure_line(outcome, run_ref, rejection) <> evaluation_line(envelope)}
     end
   rescue
     _exception ->
@@ -85,6 +91,18 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        "error: internal/internal_error: internal command failure " <>
          "(run_ref: #{outcome_run_ref(outcome)})\n"}
   end
+
+  defp model_contract_warning(%{
+         "error" => %{
+           "phase" => "local_preflight",
+           "code" => "model_contract_unsupported",
+           "message" => message
+         }
+       }) do
+    ModelContractDiagnostic.warning_line(message)
+  end
+
+  defp model_contract_warning(_envelope), do: ""
 
   @spec envelope_failure(binary()) :: binary()
   def envelope_failure(run_ref) when is_binary(run_ref),

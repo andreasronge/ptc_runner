@@ -38,6 +38,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:host, :installed_limit_invalid},
     {:local_preflight, :environment_unavailable},
     {:local_preflight, :fixtures_unreadable},
+    {:local_preflight, :model_contract_unsupported},
     {:project, :project_schema_invalid},
     {:provider_acquisition, :capability_requirement_missing},
     {:provider_acquisition, :provider_protocol_version_unsupported},

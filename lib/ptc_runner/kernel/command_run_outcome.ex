@@ -162,7 +162,8 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
        diagnostic,
        [],
        artifact_state,
-       execution
+       execution,
+       Enum.map(diagnostic.warnings, &CommandWarning.to_map/1)
      )}
   rescue
     _exception ->

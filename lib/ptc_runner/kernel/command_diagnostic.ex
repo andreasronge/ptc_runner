@@ -11,6 +11,8 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   ceiling or optional-limit request, a closed host budget prerequisite, a
   bounded agent turn ceiling, an opaque replay request hash, a closed
   component-override field rule, or closed candidate-gate criterion IDs.
+  A cost-reservation contract refusal may name only an adapter-attested public
+  model selector; an unattested selector is replaced by “the selected model”.
   Compile messages require component-source provenance; a missing capability
   message is rebuilt from the frozen bundle's sorted tool requirements. A missing MCP tool message may
   retain only the validated, declaration-owned upstream name and carries no
@@ -33,6 +35,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
   alias PtcRunner.Kernel.DiagnosticCatalog
@@ -40,6 +43,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   alias PtcRunner.Kernel.LimitCapacityDiagnostic
   alias PtcRunner.Kernel.LimitConfigurationDiagnostic
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
+  alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
@@ -58,6 +62,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
     :notes,
     :retryable,
     :provider_activity,
+    :warnings,
     :exit_status
   ]
   defstruct @enforce_keys
@@ -75,6 +80,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
           notes: [],
           retryable: boolean(),
           provider_activity: boolean(),
+          warnings: [CommandWarning.t()],
           exit_status: 2 | 3 | 4 | 5 | 6 | 7 | 70
         }
 
@@ -83,7 +89,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   def new(phase, code, opts \\ [])
 
   def new(phase, code, opts) when is_list(opts) do
-    allowed = [:message, :source, :path, :span, :subject, :provider_activity]
+    allowed = [:message, :source, :path, :span, :subject, :provider_activity, :warnings]
 
     with true <- Keyword.keyword?(opts),
          keys = Keyword.keys(opts),
@@ -95,6 +101,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          span <- Keyword.get(opts, :span),
          subject <- Keyword.get(opts, :subject),
          activity <- Keyword.get(opts, :provider_activity, false),
+         warnings <- Keyword.get(opts, :warnings, []),
          true <- DiagnosticCatalog.valid_message?(phase, code, message),
          true <- valid_source?(source),
          true <- valid_source_for_row?(source, row),
@@ -104,7 +111,10 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          true <- valid_span?(span, source),
          true <- valid_subject?(subject),
          true <- valid_subject_for_row?(subject, row),
+         true <- valid_warnings_for_row?(warnings, row, message, subject),
          true <- valid_activity_for_row?(activity, row) do
+      warnings = CommandWarning.sort(warnings)
+
       {:ok,
        %__MODULE__{
          phase: row.phase,
@@ -117,6 +127,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
          notes: [],
          retryable: row.retryable,
          provider_activity: activity,
+         warnings: warnings,
          exit_status: row.exit_status
        }}
     else
@@ -140,7 +151,8 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
       path: diagnostic.path,
       span: diagnostic.span,
       subject: diagnostic.subject,
-      provider_activity: diagnostic.provider_activity
+      provider_activity: diagnostic.provider_activity,
+      warnings: diagnostic.warnings
     ]
 
     new(diagnostic.phase, diagnostic.code, opts) == {:ok, diagnostic}
@@ -198,6 +210,34 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
        do: CommandSubject.provider(name, operation, occurrence) == {:ok, subject}
 
   defp valid_subject?(_subject), do: false
+
+  defp valid_warnings_for_row?(
+         [
+           %CommandWarning{
+             code: :model_uncataloged,
+             provider: provider,
+             model: model
+           } = warning
+         ],
+         %{phase: :local_preflight, code: :model_contract_unsupported, message: fallback},
+         message,
+         %CommandSubject{name: provider}
+       ),
+       do:
+         CommandWarning.valid?(warning) and message != fallback and
+           ModelContractDiagnostic.valid_message?(message) and
+           message == ModelContractDiagnostic.cost_reservation_pricing_message(model)
+
+  defp valid_warnings_for_row?(
+         [],
+         %{phase: :local_preflight, code: :model_contract_unsupported, message: fallback},
+         message,
+         _subject
+       ),
+       do: message == fallback
+
+  defp valid_warnings_for_row?([], _row, _message, _subject), do: true
+  defp valid_warnings_for_row?(_warnings, _row, _message, _subject), do: false
 
   defp valid_source_for_row?(nil, _row), do: true
 
@@ -569,6 +609,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_message_source?(message, %{phase: :local_preflight, code: code}, nil)
        when code in [:environment_unavailable, :fixtures_unreadable],
        do: LLMReplayFixtureDiagnostic.valid_message?(message)
+
+  defp valid_message_source?(
+         message,
+         %{phase: :local_preflight, code: :model_contract_unsupported},
+         nil
+       ),
+       do: ModelContractDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          message,

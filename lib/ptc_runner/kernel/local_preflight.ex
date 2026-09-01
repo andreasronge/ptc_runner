@@ -126,10 +126,13 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MissionReplTarget
+  alias PtcRunner.Kernel.ModelContractDiagnostic
+  alias PtcRunner.Kernel.ModelContractPricingCause
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
@@ -658,6 +661,14 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   defp diagnostic(reason, occurrence, activity, _mode) when reason in @model_contract_reasons,
     do: local_diagnostic(:model_contract_unsupported, occurrence, activity)
 
+  defp diagnostic(
+         %ModelContractPricingCause{public_model: public_model} = cause,
+         occurrence,
+         activity,
+         _mode
+       ),
+       do: pricing_diagnostic(cause, public_model, occurrence, activity)
+
   defp diagnostic(:provider_destination_denied, occurrence, activity, _mode),
     do: declaration_diagnostic(:placement_denied, occurrence, activity)
 
@@ -665,6 +676,28 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     do: declaration_diagnostic(:selection_invalid, occurrence, activity)
 
   defp diagnostic(_reason, _occurrence, activity, _mode), do: internal_diagnostic(activity)
+
+  defp pricing_diagnostic(cause, public_model, occurrence, activity) do
+    case ModelContractPricingCause.valid?(cause) and
+           CommandWarning.model_uncataloged(occurrence.name, public_model) do
+      {:ok, warning} ->
+        subject_diagnostic(
+          :local_preflight,
+          :model_contract_unsupported,
+          :local,
+          occurrence,
+          activity,
+          ModelContractDiagnostic.cost_reservation_pricing_message(public_model),
+          [warning]
+        )
+
+      :error ->
+        internal_diagnostic(activity)
+
+      false ->
+        internal_diagnostic(activity)
+    end
+  end
 
   defp fixture_diagnostic(reason, occurrence, activity, mode) do
     case LLMReplayFixtureDiagnostic.message(reason) do
@@ -710,12 +743,20 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # Activity is cumulative attempted-work evidence supplied by the step that
   # knows what preceded this check. The same condition can therefore differ
   # before and after callback dispatch without borrowing the lifecycle marker.
-  defp subject_diagnostic(phase, code, operation, occurrence, activity, message \\ nil) do
+  defp subject_diagnostic(
+         phase,
+         code,
+         operation,
+         occurrence,
+         activity,
+         message \\ nil,
+         warnings \\ []
+       ) do
     site = %{destination: occurrence.destination, index: occurrence.index}
 
     case CommandSubject.provider(occurrence.name, operation, site) do
       {:ok, subject} ->
-        opts = [subject: subject, provider_activity: activity]
+        opts = [subject: subject, provider_activity: activity, warnings: warnings]
         opts = if is_binary(message), do: Keyword.put(opts, :message, message), else: opts
         CommandDiagnostic.new!(phase, code, opts)
 

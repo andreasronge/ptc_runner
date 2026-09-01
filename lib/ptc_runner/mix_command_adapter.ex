@@ -52,9 +52,9 @@ defmodule PtcRunner.MixCommandAdapter do
         write_output(presentation.stdout, presentation.stderr)
         presentation
 
-      %CommandPresentation{exit_status: status, stdout: stdout, stderr: ""}
+      %CommandPresentation{exit_status: status, stdout: stdout, stderr: stderr}
       when stdout != "" ->
-        write_output(stdout, "")
+        write_output(stdout, stderr)
         exit({:shutdown, status})
 
       %CommandPresentation{exit_status: status} ->

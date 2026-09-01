@@ -244,10 +244,11 @@ explicit so changing only its model selector retains the same request contract.
 
 The built-in adapter prepares the selected model once before constructing its
 requester. A selector absent from the bundled model catalog remains usable when
-ReqLLM supports its provider, but PtcRunner emits one `model_uncataloged`
-warning for that requester. Catalog metadata such as pricing, limits, token
-estimation, and capability detection may then be incomplete; the warning does
-not mean the provider request itself is known to fail. Run envelopes V4 publish
+ReqLLM supports its provider unless `llm_cost_microusd` requires reservation
+rates the catalog cannot supply. PtcRunner emits one `model_uncataloged` warning
+for that requester or refusal. Catalog metadata such as pricing, limits, token
+estimation, and capability detection may then be incomplete; the warning alone
+does not mean the provider request is known to fail. Run envelopes V4 publish
 the same fact in their closed `warnings` array, and canonical `run-started`
 metadata retains it for trace consumers; stderr remains the human presentation.
 
@@ -308,8 +309,10 @@ prepared adapter before admission, and every live installation must declare
 `usage_guarantees.tokens: true`. A cost budget additionally requires
 `usage_guarantees.cost_currency: "USD"` and an explicit
 `reservation_tariff: {"currency":"USD","id":"..."}`. Cost reservations bind
-to that prepared tariff identity; tariff details remain private. A token
-reservation must be at least the request's authorized output-token ceiling.
+to that prepared tariff identity, but its `id` does not supply model rates;
+supported USD reservation pricing for the selected model must also be
+available. Tariff details remain private. A token reservation must be at least
+the request's authorized output-token ceiling.
 Attestation performs no credential lookup or remote work. An absent, crashing,
 timed-out, undersized, or otherwise malformed attestation refuses the call
 before provider dispatch. Provider errors and

@@ -120,6 +120,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.DirectorySeparation
   alias PtcRunner.Kernel.InspectOnlyRepl
   alias PtcRunner.Kernel.ManifestRepl
+  alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.SelectedCanonicalSource
@@ -1402,10 +1403,7 @@ defmodule PtcRunner.ReplFrontend do
         fail("unknown mission #{inspect(opts[:mission])}; declared: #{Enum.join(declared, ", ")}")
 
       {:error, %{code: code, diagnostic: diagnostic}} ->
-        case CommandDiagnosticRenderer.render(diagnostic) do
-          {:ok, rendered} -> fail(rendered)
-          {:error, :invalid_command_diagnostic} -> fail(manifest_repl_error(code))
-        end
+        fail(render_setup_diagnostic(code, diagnostic))
 
       {:error, %{code: code}} ->
         fail(manifest_repl_error(code))
@@ -1445,10 +1443,7 @@ defmodule PtcRunner.ReplFrontend do
         fail("unknown mission #{inspect(opts[:mission])}; declared: #{Enum.join(declared, ", ")}")
 
       {:error, %{code: code, diagnostic: diagnostic}} ->
-        case CommandDiagnosticRenderer.render(diagnostic) do
-          {:ok, rendered} -> fail(rendered)
-          {:error, :invalid_command_diagnostic} -> fail(manifest_repl_error(code))
-        end
+        fail(render_setup_diagnostic(code, diagnostic))
 
       {:error, %{code: code}} ->
         fail(manifest_repl_error(code))
@@ -1527,6 +1522,18 @@ defmodule PtcRunner.ReplFrontend do
 
   defp manifest_repl_error(code) when is_atom(code),
     do: "ptc repl setup failed: #{code}"
+
+  defp render_setup_diagnostic(code, diagnostic) do
+    case CommandDiagnosticRenderer.render(diagnostic) do
+      {:ok, rendered} ->
+        warning = ModelContractDiagnostic.warning_line(diagnostic.message)
+        if warning != "", do: error(String.trim_trailing(warning, "\n"))
+        rendered
+
+      {:error, :invalid_command_diagnostic} ->
+        manifest_repl_error(code)
+    end
+  end
 
   defp evaluate_mode(session, opts, arguments, render) do
     with {:ok, session} <- maybe_load(session, opts[:load], render) do

@@ -68,12 +68,14 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   # probed occurrence, in the order the occurrences were probed, and a callback
   # answering a bare `:ok` produces an entry whose usage is absent.
 
+  alias PtcRunner.Kernel.AcquisitionReason
   alias PtcRunner.Kernel.BoundedWorker
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.LLMUsage
+  alias PtcRunner.Kernel.ModelContractPricingCause
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderRuntimeServices
 
@@ -263,6 +265,14 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
 
     BoundedWorker.classify_payload_callback(result)
   end
+
+  defp diagnostic(%ModelContractPricingCause{} = reason, occurrence),
+    do:
+      AcquisitionReason.diagnostic(reason, %{
+        provider: occurrence.name,
+        destination: occurrence.destination,
+        index: occurrence.index
+      })
 
   defp diagnostic(reason, occurrence) when reason in @unavailable_reasons do
     site = %{destination: occurrence.destination, index: occurrence.index}

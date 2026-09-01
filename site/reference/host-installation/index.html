@@ -241,10 +241,11 @@ the <code class="inline">xhigh</code> and <code class="inline">max</code> reason
 output budget than the effective Kernel limit. The tutorial keeps the value
 explicit so changing only its model selector retains the same request contract.</p><p>The built-in adapter prepares the selected model once before constructing its
 requester. A selector absent from the bundled model catalog remains usable when
-ReqLLM supports its provider, but PtcRunner emits one <code class="inline">model_uncataloged</code>
-warning for that requester. Catalog metadata such as pricing, limits, token
-estimation, and capability detection may then be incomplete; the warning does
-not mean the provider request itself is known to fail. Run envelopes V4 publish
+ReqLLM supports its provider unless <code class="inline">llm_cost_microusd</code> requires reservation
+rates the catalog cannot supply. PtcRunner emits one <code class="inline">model_uncataloged</code> warning
+for that requester or refusal. Catalog metadata such as pricing, limits, token
+estimation, and capability detection may then be incomplete; the warning alone
+does not mean the provider request is known to fail. Run envelopes V4 publish
 the same fact in their closed <code class="inline">warnings</code> array, and canonical <code class="inline">run-started</code>
 metadata retains it for trace consumers; stderr remains the human presentation.</p><p>Preparation seals the exact controls into the target and requires the adapter
 to attest the same canonical map. The built-in adapter uses ReqLLM's strict
@@ -293,8 +294,10 @@ prepared adapter before admission, and every live installation must declare
 <code class="inline">usage_guarantees.tokens: true</code>. A cost budget additionally requires
 <code class="inline">usage_guarantees.cost_currency: &quot;USD&quot;</code> and an explicit
 <code class="inline">reservation_tariff: {&quot;currency&quot;:&quot;USD&quot;,&quot;id&quot;:&quot;...&quot;}</code>. Cost reservations bind
-to that prepared tariff identity; tariff details remain private. A token
-reservation must be at least the request's authorized output-token ceiling.
+to that prepared tariff identity, but its <code class="inline">id</code> does not supply model rates;
+supported USD reservation pricing for the selected model must also be
+available. Tariff details remain private. A token reservation must be at least
+the request's authorized output-token ceiling.
 Attestation performs no credential lookup or remote work. An absent, crashing,
 timed-out, undersized, or otherwise malformed attestation refuses the call
 before provider dispatch. Provider errors and

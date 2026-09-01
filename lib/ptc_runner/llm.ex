@@ -9,6 +9,7 @@ defmodule PtcRunner.LLM do
   this transport adapter.
   """
 
+  alias PtcRunner.Kernel.ModelContractPricingCause
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.PreparedModel
@@ -163,7 +164,7 @@ defmodule PtcRunner.LLM do
   @doc false
   @spec attested_public_model(module(), String.t()) :: String.t() | nil
   def attested_public_model(adapter, model) when is_atom(adapter) and is_binary(model) do
-    if function_exported?(adapter, :public_model, 1) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :public_model, 1) do
       case adapter.public_model(model) do
         {:ok, ^model}
         when byte_size(model) in 1..256 ->
@@ -297,6 +298,25 @@ defmodule PtcRunner.LLM do
 
   defp seal_prepared(_adapter, _model, _canonical, {:error, :unsupported_model_option}),
     do: {:error, :unsupported_model_option}
+
+  defp seal_prepared(
+         adapter,
+         model,
+         canonical,
+         {:error, :uncataloged_cost_reservation_pricing_unavailable}
+       ) do
+    if Requirements.cost_reservation?(canonical),
+      do: {:error, ModelContractPricingCause.new(adapter, model)},
+      else: {:error, :invalid_model_preparation}
+  end
+
+  defp seal_prepared(
+         _adapter,
+         _model,
+         _canonical,
+         {:error, {:uncataloged_cost_reservation_pricing_unavailable, _payload}}
+       ),
+       do: {:error, :invalid_model_preparation}
 
   defp seal_prepared(_adapter, _model, _canonical, {:error, _reason} = error), do: error
 
