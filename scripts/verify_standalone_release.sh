@@ -149,7 +149,7 @@ grep -Eq \
 "$command_bin" help > "$release_tmp_dir/help.stdout"
 grep -q '^Usage:$' "$release_tmp_dir/help.stdout"
 grep -Fqx '  --help    — show root help' "$release_tmp_dir/help.stdout"
-for command in init docs validate run doctor models repl version viewer; do
+for command in init docs validate run doctor models repl version viewer materialize; do
   grep -q "ptc $command" "$release_tmp_dir/help.stdout"
   "$command_bin" help "$command" > "$release_tmp_dir/help-$command.stdout"
 done
@@ -166,6 +166,12 @@ grep -q '^Pages:$' "$release_tmp_dir/docs.stdout"
 grep -q '^  agent-guide ' "$release_tmp_dir/docs.stdout"
 "$command_bin" docs agent-guide > "$release_tmp_dir/docs-agent-guide.stdout"
 grep -qx '# Drive ptc as an agent' "$release_tmp_dir/docs-agent-guide.stdout"
+"$command_bin" docs inspect-source > "$release_tmp_dir/docs-inspect-source.stdout"
+grep -qx '# Inspect source and generated programs' \
+  "$release_tmp_dir/docs-inspect-source.stdout"
+"$command_bin" docs source-inspection > "$release_tmp_dir/docs-source-inspection.stdout"
+grep -qx '# Source-inspection reference' \
+  "$release_tmp_dir/docs-source-inspection.stdout"
 "$command_bin" docs schema-project > "$release_tmp_dir/docs-schema-project.stdout"
 grep -q 'ptc-project-config.schema.json' "$release_tmp_dir/docs-schema-project.stdout"
 "$command_bin" docs schema-mcp > "$release_tmp_dir/docs-schema-mcp.stdout"
@@ -264,6 +270,50 @@ grep -q '"installations"' "$release_tmp_dir/models.stdout"
 "$command_bin" repl -e -10 > "$release_tmp_dir/repl.stdout"
 printf '%s\n' '-10' > "$release_tmp_dir/repl.expected"
 cmp "$release_tmp_dir/repl.expected" "$release_tmp_dir/repl.stdout"
+
+"$command_bin" repl --manifest "$application_root/ptc.json" --inspect-only -e '(+ 1 2)' \
+  > "$release_tmp_dir/inspect-only.stdout"
+printf '%s\n' '3' > "$release_tmp_dir/inspect-only.expected"
+cmp "$release_tmp_dir/inspect-only.expected" "$release_tmp_dir/inspect-only.stdout"
+
+# Inspect-only must compile a provider-backed application without a host or
+# credentials. The provider fixture's credential is invalid on purpose.
+"$command_bin" repl --manifest "$fixture_root/provider-application.json" \
+  --inspect-only -e '(+ 1 2)' \
+  > "$release_tmp_dir/inspect-only-provider.stdout"
+cmp "$release_tmp_dir/inspect-only.expected" \
+  "$release_tmp_dir/inspect-only-provider.stdout"
+
+"$command_bin" materialize "$application_root/ptc.json" --workflow \
+  --component smoke.main --source-out "$release_tmp_dir/smoke.main.clj" \
+  > "$release_tmp_dir/source-out.stdout"
+cmp "$application_root/main.clj" "$release_tmp_dir/smoke.main.clj"
+grep -q 'source-out' "$release_tmp_dir/source-out.stdout"
+"$release_root/bin/ptc_runner" eval '
+  [path] = System.argv()
+  {:ok, %File.Stat{mode: mode}} = File.stat(path)
+  true = Bitwise.band(mode, 0o777) == 0o600
+' "$release_tmp_dir/smoke.main.clj"
+
+set +e
+"$command_bin" materialize "$application_root/ptc.json" --workflow \
+  --component smoke.main --source-out "$release_tmp_dir/smoke.main.clj" \
+  > "$release_tmp_dir/source-out-exists.stdout" \
+  2> "$release_tmp_dir/source-out-exists.stderr"
+source_out_exists_status=$?
+set -e
+test "$source_out_exists_status" -eq 7
+grep -q 'publication/source_out_destination_exists' \
+  "$release_tmp_dir/source-out-exists.stderr"
+
+"$command_bin" materialize "$application_root/ptc.json" --workflow \
+  --component smoke.main --out "$release_tmp_dir/candidate" \
+  --source "$application_root/main.clj" \
+  > "$release_tmp_dir/candidate.stdout"
+test -f "$release_tmp_dir/candidate/candidate.clj"
+test -f "$release_tmp_dir/candidate/descriptor.json"
+cmp "$application_root/main.clj" "$release_tmp_dir/candidate/candidate.clj"
+grep -q 'candidate' "$release_tmp_dir/candidate.stdout"
 
 # The interactive REPL installs OTP's line editor only when stdin is a
 # terminal, so every other check above runs the plain reader and none of them
