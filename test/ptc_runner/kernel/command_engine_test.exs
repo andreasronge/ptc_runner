@@ -7312,12 +7312,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:ok, registry} = ProviderRegistry.new()
     assert {:ok, prepared} = RunCoordinator.prepare(request, catalog_for(registry))
 
-    results =
-      1..2
-      |> Enum.map(fn _index ->
+    tasks =
+      Enum.map(1..2, fn _index ->
         Task.async(fn -> RunBuilder.build_prepared(prepared, registry) end)
       end)
-      |> Task.await_many()
+
+    results = Task.await_many(tasks)
+    Enum.each(tasks, &await_exit/1)
 
     assert Enum.count(results, &match?({:ok, _built}, &1)) == 1
     assert Enum.count(results, &(&1 == {:error, :invalid_prepared_run})) == 1
@@ -8830,6 +8831,16 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         }
       }
     }
+  end
+
+  defp await_exit(%Task{pid: pid}) do
+    ref = Process.monitor(pid)
+
+    receive do
+      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+    after
+      1_000 -> flunk("prepared-run consumer task did not exit")
+    end
   end
 
   defp manifest_error_path({:manifest_path, path, _reason}), do: path
