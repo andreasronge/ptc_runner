@@ -2843,7 +2843,7 @@
         "Only namespaces holding at least one visible public export are listed; a namespace of " <>
           "private `defn-` helpers does not appear. An unknown namespace returns an empty vector. " <>
           "The one-argument form is macro-like over its namespace ref: unquoted, quoted, or string.",
-      see_also: ["apropos", "doc", "export-meta", "source"],
+      see_also: ["apropos", "doc", "export-meta", "source", "components", "component"],
       clojure_var: nil,
       divergences: nil
     },
@@ -2868,7 +2868,7 @@
           "an empty vector. The shipped-export diagnostic index is not searched. Accepts a string or a quoted " <>
           "symbol (via symbol-ref normalization). An unquoted query evaluates normally — " <>
           "`apropos` is not macro-like.",
-      see_also: ["dir", "doc", "export-meta", "source"],
+      see_also: ["dir", "doc", "export-meta", "source", "components", "component"],
       clojure_var: nil,
       divergences: nil
     },
@@ -2896,7 +2896,7 @@
           "hidden or overridden-away attached exports, and embedded runs without the index " <>
           "print the ordinary not-found line. The index is diagnostic only and grants no " <>
           "documentation or call authority.",
-      see_also: ["apropos", "dir", "export-meta", "source"],
+      see_also: ["apropos", "dir", "export-meta", "source", "components", "component"],
       clojure_var: nil,
       divergences: nil
     },
@@ -2921,7 +2921,7 @@
           "over the ref: accepts an unquoted symbol, a quoted symbol, or a string. This is " <>
           "not `clojure.core/meta`, which takes an object rather than a reference and is not " <>
           "implemented.",
-      see_also: ["apropos", "dir", "doc", "source"],
+      see_also: ["apropos", "dir", "doc", "source", "components", "component"],
       clojure_var: nil,
       divergences: nil
     },
@@ -2943,7 +2943,53 @@
           "\"no source available\" and still returns nil. Covers public exports plus private " <>
           "helpers transitively reachable from a public export. Reveals implementation, not " <>
           "just contract. Macro-like over the ref: unquoted symbol, quoted symbol, or string.",
-      see_also: ["apropos", "dir", "doc", "export-meta"],
+      see_also: ["apropos", "dir", "doc", "export-meta", "components", "component"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "components",
+      description:
+        "Returns attached component IDs for the selected workflow or mission environment, in frozen dependency order.",
+      binding: :special,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(components)"],
+      since: nil,
+      section: "Introspection",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "Reads the Kernel component catalog for the current evaluation. Direct " <>
+          "`PtcRunner.Lisp.run/2` and a higher-order call from that environment return " <>
+          "an empty vector. IDs are the attached component graph, not namespaces.",
+      see_also: ["component", "dir", "source"],
+      clojure_var: nil,
+      divergences: nil
+    },
+    %{
+      name: "component",
+      description:
+        "Returns one attached component's identity, direct dependencies, namespaces, hash, and exact source, or `nil`.",
+      binding: :special,
+      category: :core,
+      dispatch: :env,
+      signatures: ["(component id)"],
+      since: nil,
+      section: "Introspection",
+      ptc_extension?: true,
+      examples: [],
+      notes:
+        "Resolves an exact component ID from the selected environment catalog. The result " <>
+          "map has `:id`, `:dependencies`, `:namespaces`, `:source-hash`, and `:source`. " <>
+          "`:source` is the complete effective source, including private helpers and an " <>
+          "active override. Returning that map or its `:source` is charged to the ordinary " <>
+          "`terminal_result_bytes` evaluation limit; bind the value and slice `:source` " <>
+          "when the source is large. There is no shipped-library or filesystem fallback. " <>
+          "Macro-like over the ID: unquoted symbol, quoted symbol, or string. A dotted ID " <>
+          "such as `agent.core` is one symbol, not a namespaced `ns/name` ref. Direct " <>
+          "`PtcRunner.Lisp.run/2` returns `nil`.",
+      see_also: ["components", "dir", "source"],
       clojure_var: nil,
       divergences: nil
     },

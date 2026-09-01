@@ -64,11 +64,14 @@ defmodule PtcRunner.Lisp.Analyze do
                       :quote,
                       # Discovery forms are env specials the analyzer rewrites
                       # for macro-like refs; keep them rebindable so a local
-                      # `doc`/`dir`/`export-meta`/`source` evaluates args normally.
+                      # `doc`/`dir`/`export-meta`/`source`/`component` evaluates
+                      # args normally.
                       :dir,
                       :doc,
                       :"export-meta",
-                      :source
+                      :source,
+                      :components,
+                      :component
                     ])
 
   @bindings_key :__ptc_analyze_bindings__
@@ -441,15 +444,17 @@ defmodule PtcRunner.Lisp.Analyze do
      {:invalid_arity, :quote, "(quote symbol) requires exactly 1 symbol, got #{length(args)}"}}
   end
 
-  # Discovery forms (`doc`/`dir`/`export-meta`/`source`) are ordinary env
-  # specials, but their *ref* argument is macro-like (clojure.repl/doc style,
-  # issue #1094): a bare or namespaced symbol is auto-quoted to a
-  # `{:symbol_ref, _}` instead of being evaluated to a closure/builtin first.
-  # `dir` with no args stays an ordinary zero-arity call. When the head is
-  # rebound as a local (`@shadowable_forms` + `mark_shadowed` / `with_bindings`),
-  # skip the rewrite so arguments evaluate normally.
+  # Discovery forms (`doc`/`dir`/`export-meta`/`source`/`component`) are
+  # ordinary env specials, but their *ref* argument is macro-like
+  # (clojure.repl/doc style, issue #1094): a bare or namespaced symbol is
+  # auto-quoted to a `{:symbol_ref, _}` instead of being evaluated to a
+  # closure/builtin first. A dotted component ID such as `agent.core` is one
+  # symbol, not `ns/name`. `dir`/`components` with no args stay ordinary
+  # zero-arity calls. When the head is rebound as a local
+  # (`@shadowable_forms` + `mark_shadowed` / `with_bindings`), skip the
+  # rewrite so arguments evaluate normally.
   defp dispatch_list_form({:symbol, head}, args, list, tail?)
-       when head in [:doc, :"export-meta", :source] do
+       when head in [:doc, :"export-meta", :source, :component] do
     if bound_local?(head) do
       analyze_call(list, tail?)
     else

@@ -16,6 +16,8 @@ defmodule PtcRunner.Lisp.SpecialBuiltin do
     doc: %{callable?: true, dispatch: :introspection, pcalls_thunk: {:arity, 1}},
     export_meta: %{callable?: true, dispatch: :introspection, pcalls_thunk: {:arity, 1}},
     source: %{callable?: true, dispatch: :introspection, pcalls_thunk: {:arity, 1}},
+    components: %{callable?: true, dispatch: :introspection, pcalls_thunk: :zero},
+    component: %{callable?: true, dispatch: :introspection, pcalls_thunk: {:arity, 1}},
     pmap: %{callable?: true, dispatch: :parallel, pcalls_thunk: {:minimum_arity, 2}},
     pcalls: %{callable?: true, dispatch: :parallel, pcalls_thunk: :zero}
   }

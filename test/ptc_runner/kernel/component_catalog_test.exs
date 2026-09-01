@@ -286,6 +286,232 @@ defmodule PtcRunner.Kernel.ComponentCatalogTest do
 
     {:ok, step} = Lisp.run("(return 1)", component_catalog: catalog)
     refute inspect(step) =~ @marker
+
+    assert {:ok, empty} = Lisp.run("(components)", component_catalog: catalog)
+    assert empty.return == []
+    assert {:ok, missing} = Lisp.run(~S|(component "app")|, component_catalog: catalog)
+    assert missing.return == nil
+  end
+
+  test "components and component return catalog data from the selected environment" do
+    {_components, bundle, catalog} = compiled_catalog()
+
+    assert {:ok, listed} =
+             Lisp.run_native("(components)",
+               prelude: bundle.prelude,
+               component_catalog: catalog
+             )
+
+    assert listed.return == ["app"]
+
+    assert {:ok, found} =
+             Lisp.run_native(~S|(component "app")|,
+               prelude: bundle.prelude,
+               component_catalog: catalog
+             )
+
+    assert found.return.id == "app"
+    assert found.return.dependencies == []
+    assert found.return.namespaces == ["app"]
+    assert found.return[:"source-hash"] == ComponentOverride.hash(hd(catalog.entries).source)
+    assert found.return.source =~ @marker
+
+    assert {:ok, missing} =
+             Lisp.run_native(~S|(component "missing")|,
+               prelude: bundle.prelude,
+               component_catalog: catalog
+             )
+
+    assert missing.return == nil
+
+    assert {:ok, higher_order} =
+             Lisp.run_native(~S|(map component (components))|,
+               prelude: bundle.prelude,
+               component_catalog: catalog
+             )
+
+    assert Enum.map(higher_order.return, & &1.id) == ["app"]
+  end
+
+  test "workflow and mission catalogs stay isolated through Kernel evaluation" do
+    workflow_source = """
+    (ns app)
+    (defn run [input] (return input))
+    ; #{@marker}
+    """
+
+    mission_source = """
+    (ns work)
+    (defn answer [] 1)
+    """
+
+    workflow_component = component!("app", workflow_source)
+    mission_component = component!("work", mission_source)
+    {:ok, workflow_bundle} = Kernel.compile_bundle([workflow_component])
+    {:ok, mission_bundle} = Kernel.compile_bundle([mission_component])
+
+    {:ok, _intern, workflow_catalog} =
+      ComponentCatalog.build([workflow_component], workflow_bundle)
+
+    {:ok, _intern, mission_catalog} = ComponentCatalog.build([mission_component], mission_bundle)
+
+    {:ok, workflow} =
+      WorkflowEnvironment.new(bundle: workflow_bundle, catalog: workflow_catalog)
+
+    {:ok, mission} = MissionEnvironment.new(bundle: mission_bundle, catalog: mission_catalog)
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "catalog-isolation")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"work" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: isolation}} =
+             Kernel.run(
+               ~S|(return {:workflow (components)
+                           :workflow-miss (component "work")
+                           :mission (tool/kernel-eval {:mission "work" :kind :source :source "(return (components))"})
+                           :mission-miss (tool/kernel-eval {:mission "work" :kind :source :source "(return (component \"app\"))"})})|,
+               config
+             )
+
+    assert isolation["workflow"] == ["app"]
+    assert isolation["workflow-miss"] == nil
+    assert isolation["mission"]["status"] == "ok"
+    assert isolation["mission"]["value"]["outcome"] == "returned"
+    assert isolation["mission"]["value"]["value"] == ["work"]
+    assert isolation["mission-miss"]["status"] == "ok"
+    assert isolation["mission-miss"]["value"]["value"] == nil
+    refute inspect(EventSink.events(sink)) =~ @marker
+  end
+
+  @tag :tmp_dir
+  test "component returns the active override bytes, not the base file", %{tmp_dir: directory} do
+    base = """
+    (ns app)
+    (defn run [input] (return :base))
+    """
+
+    override = """
+    (ns app)
+    (defn run [input] (return :override))
+    ; OVERRIDE-#{@marker}
+    """
+
+    documents = %{
+      "app.json" =>
+        Jason.encode!(%{
+          "version" => 1,
+          "workflow" => %{
+            "components" => [%{"id" => "app", "path" => "workflow.clj", "dependencies" => []}],
+            "entry" => "app/run"
+          },
+          "input" => %{"value" => %{}},
+          "providers" => %{"workflow" => [], "mission" => []}
+        }),
+      "workflow.clj" => base,
+      "override.json" =>
+        Jason.encode!(%{
+          "target" => %{"environment" => "workflow"},
+          "component_id" => "app",
+          "base_source_hash" => ComponentOverride.hash(base),
+          "source_hash" => ComponentOverride.hash(override),
+          "path" => "candidate.clj"
+        }),
+      "candidate.clj" => override
+    }
+
+    manifest_path = write_documents(directory, documents)
+
+    assert {:ok, request} =
+             ApplicationPackage.request_directory(manifest_path,
+               result_projection: :native,
+               component_override_descriptor: Path.join(directory, "override.json")
+             )
+
+    {:ok, registry} = ProviderRegistry.new()
+    assert {:ok, built} = RunBuilder.build(request, registry)
+
+    assert {:ok, found} =
+             Lisp.run_native(~S|(component "app")|,
+               prelude: built.config.workflow_environment.bundle.prelude,
+               component_catalog: built.config.workflow_environment.catalog
+             )
+
+    assert found.return.source == override
+    refute found.return.source =~ ":base"
+    assert found.return[:"source-hash"] == ComponentOverride.hash(override)
+    assert :ok = RunBuilder.close(built)
+  end
+
+  test "returning component source is subject to the terminal result limit" do
+    source = large_source("app", @marker, 4_096)
+    component = component!("app", source)
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, _intern, catalog} = ComponentCatalog.build([component], bundle)
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle, catalog: catalog)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(terminal_result_bytes: 64)
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "catalog-result-limit")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, %{kind: :limit_exceeded, reason: :terminal_result_exceeded}} =
+             Kernel.run(~S|(return (get (component "app") :source))|, config)
+  end
+
+  test "higher-order component calls from direct Lisp.run stay empty" do
+    assert {:ok, mapped} = Lisp.run(~S|(map component ["app" "missing"])|)
+    assert mapped.return == [nil, nil]
+  end
+
+  test "component accepts a bare dotted ID, a dynamic ID, and a local shadow" do
+    source = """
+    (ns agent.core)
+    (defn run [input] (return 1))
+    ; #{@marker}
+    """
+
+    component = component!("agent.core", source)
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, _intern, catalog} = ComponentCatalog.build([component], bundle)
+
+    opts = [prelude: bundle.prelude, component_catalog: catalog]
+
+    assert {:ok, bare} = Lisp.run_native("(component agent.core)", opts)
+    assert {:ok, quoted} = Lisp.run_native("(component 'agent.core)", opts)
+    assert {:ok, string} = Lisp.run_native(~S|(component "agent.core")|, opts)
+    assert bare.return.id == "agent.core"
+    assert quoted.return == bare.return
+    assert string.return == bare.return
+
+    assert {:ok, dynamic} =
+             Lisp.run_native(~S|(let [id "agent.core"] (component id))|, opts)
+
+    assert dynamic.return.id == "agent.core"
+
+    assert {:ok, namespaced} = Lisp.run_native("(component agent.core/run)", opts)
+    assert namespaced.return == nil
+
+    assert {:ok, shadowed} =
+             Lisp.run_native(
+               ~S|(let [component (fn [_x] "shadowed")] (component "agent.core"))|,
+               opts
+             )
+
+    assert shadowed.return == "shadowed"
   end
 
   test "a near-limit catalog evaluates through the sandbox as shared setup memory" do
