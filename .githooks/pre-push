@@ -18,6 +18,16 @@
 #
 set -e
 
+# A PtcManager-managed agent may reach the expensive verification gates through
+# an ordinary `git push`. Coordinate the whole hook once so every child gate is
+# covered by the same operation lease and process-tree memory boundary. Local
+# clones and CI do not receive the managed context, so their hook is unchanged.
+if [ -n "${PTC_MANAGED_OPERATION_CONTEXT:-}" ] &&
+   [ -z "${PTC_OPERATION_ACTIVE:-}" ]; then
+  : "${PTC_OPERATION_WRAPPER:?managed pre-push requires PTC_OPERATION_WRAPPER}"
+  exec "$PTC_OPERATION_WRAPPER" run --label verify -- "$0" "$@"
+fi
+
 HOOK_REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 run_docs_gate() {
