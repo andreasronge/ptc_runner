@@ -94,9 +94,10 @@ defmodule PtcRunner.Kernel.Materialize do
 
   defp export_source(application, target, component_id, opts) do
     with {:ok, path} <- required(opts, :source_out),
+         {:ok, fault_hook} <- optional_fault_hook(opts),
          {:ok, package} <- acquire_export(application),
          {:ok, source} <- installed_source(package, target, component_id),
-         {:ok, written} <- publish_source_out(path, source) do
+         {:ok, written} <- publish_source_out(path, source, fault_hook) do
       {:ok, {:source_out, written}}
     end
   end
@@ -369,11 +370,21 @@ defmodule PtcRunner.Kernel.Materialize do
     end
   end
 
-  defp publish_source_out(path, source) when is_binary(path) and is_binary(source) do
+  defp optional_fault_hook(opts) do
+    case Keyword.get(opts, :fault_hook) do
+      nil -> {:ok, nil}
+      hook when is_function(hook, 1) -> {:ok, hook}
+      _other -> {:error, :source_out_failed}
+    end
+  end
+
+  defp publish_source_out(path, source, fault_hook)
+       when is_binary(path) and is_binary(source) and
+              (is_nil(fault_hook) or is_function(fault_hook, 1)) do
     with {:ok, anchored} <- PrivateDirectory.anchor(path),
          :ok <- PrivateDirectory.preflight_writable_parent(anchored),
          :ok <- refuse_existing(anchored),
-         :ok <- publish_staged(anchored, source) do
+         :ok <- publish_staged(anchored, source, fault_hook) do
       {:ok, anchored}
     else
       {:error, :private_directory_parent_unavailable} ->
@@ -393,7 +404,7 @@ defmodule PtcRunner.Kernel.Materialize do
     end
   end
 
-  defp publish_source_out(_path, _source), do: {:error, :source_out_failed}
+  defp publish_source_out(_path, _source, _fault_hook), do: {:error, :source_out_failed}
 
   defp refuse_existing(path) do
     case File.lstat(path) do
@@ -403,11 +414,11 @@ defmodule PtcRunner.Kernel.Materialize do
     end
   end
 
-  defp publish_staged(path, source) do
+  defp publish_staged(path, source, fault_hook) do
     {temporary_directory, temporary} = PrivateDirectory.temporary_sibling(path, "source")
 
     case PrivateDirectory.create(temporary_directory) do
-      :ok -> persist_staged(path, temporary_directory, temporary, source)
+      :ok -> persist_staged(path, temporary_directory, temporary, source, fault_hook)
       {:error, :private_directory_parent_unavailable} -> {:error, :source_out_parent_unusable}
       {:error, :private_directory_parent_unsafe} -> {:error, :source_out_parent_unusable}
       {:error, :private_directory_unavailable} -> {:error, :source_out_parent_unusable}
@@ -415,7 +426,7 @@ defmodule PtcRunner.Kernel.Materialize do
     end
   end
 
-  defp persist_staged(path, temporary_directory, temporary, source) do
+  defp persist_staged(path, temporary_directory, temporary, source, fault_hook) do
     result =
       with :ok <- write_private(temporary, source),
            :ok <- File.ln(temporary, path) do
@@ -425,13 +436,25 @@ defmodule PtcRunner.Kernel.Materialize do
         {:error, _reason} -> {:error, :source_out_failed}
       end
 
+    if result == :ok, do: after_link(fault_hook, temporary_directory)
+
     case {result, cleanup_staging(temporary, temporary_directory)} do
-      {:ok, _cleanup} ->
+      {:ok, :ok} ->
         :ok
+
+      {:ok, :error} ->
+        {:error, :source_out_cleanup_failed}
 
       {{:error, reason}, _cleanup} ->
         {:error, reason}
     end
+  end
+
+  defp after_link(nil, _directory), do: :ok
+
+  defp after_link(hook, directory) when is_function(hook, 1) do
+    _ = hook.({:after_link, directory})
+    :ok
   end
 
   defp cleanup_staging(temporary, temporary_directory) do

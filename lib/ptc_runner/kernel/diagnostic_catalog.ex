@@ -8,6 +8,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   """
 
   alias PtcRunner.Kernel.AgentConfigDiagnostic
+  alias PtcRunner.Kernel.CandidateRefusedDiagnostic
   alias PtcRunner.Kernel.CompileDiagnostic
   alias PtcRunner.Kernel.ComponentOverrideDiagnostic
   alias PtcRunner.Kernel.ContractSchemaDiagnostic
@@ -303,6 +304,8 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
     {:publication, :source_out_parent_unusable, 7, false,
      "the --source-out parent directory is unusable"},
     {:publication, :source_out_failed, 7, false, "source export failed"},
+    {:publication, :source_out_cleanup_failed, 7, false,
+     "source export could not discard its staging directory"},
     {:publication, :candidate_refused, 7, false,
      "the candidate was refused by the promotion gate"},
     {:publication, :candidate_destination_exists, 7, false,
@@ -517,6 +520,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       }),
       do: SelectionRulesDiagnostic.message_schema(fallback)
 
+  def message_schema(%{phase: :publication, code: :candidate_refused, message: fallback}),
+    do: CandidateRefusedDiagnostic.message_schema(fallback)
+
   def message_schema(%{code: code, message: fallback}),
     do: CompileDiagnostic.message_schema(code, fallback)
 
@@ -614,6 +620,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:provider_declaration, :selection_invalid, message),
     do: SelectionRulesDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:publication, :candidate_refused, message),
+    do: CandidateRefusedDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(_phase, code, message),
     do: CompileDiagnostic.valid_message?(code, message)

@@ -43,6 +43,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
     {:provider_acquisition, :provider_protocol_version_unsupported},
     {:provider_acquisition, :provider_tool_missing},
     {:provider_declaration, :selection_invalid},
+    {:publication, :candidate_refused},
     {:result_cleanup, :result_contract_failed}
   ]
 
@@ -200,6 +201,28 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
       assert {:error, _refused} =
                JSV.validate(Map.put(sourced, "message", message), schema, cast: false)
     end
+  end
+
+  test "a candidate_refused message is admitted only as a complete gated sentence" do
+    assert {:ok, schema} =
+             JSV.build(CommandContract.catalog_diagnostic_schema(),
+               atoms: false,
+               warnings: :silent
+             )
+
+    message = "the candidate was refused by the promotion gate (G2)"
+
+    assert {:ok, diagnostic} =
+             CommandDiagnostic.new(:publication, :candidate_refused, message: message)
+
+    rendered = CommandDiagnostic.to_map(diagnostic)
+    assert {:ok, _validated} = JSV.validate(rendered, schema, cast: false)
+
+    assert {:error, _bare} =
+             JSV.validate(Map.put(rendered, "message", "G2"), schema, cast: false)
+
+    assert {:error, _suffix} =
+             JSV.validate(Map.put(rendered, "message", message <> "\n"), schema, cast: false)
   end
 
   test "every catalog row with a dynamic message either names a setting or is listed as prose" do

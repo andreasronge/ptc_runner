@@ -11,6 +11,7 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   alias PtcRunner.Kernel.AgentConfigDiagnostic
   alias PtcRunner.Kernel.ApplicationSource
+  alias PtcRunner.Kernel.CandidateRefusedDiagnostic
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandWarning
@@ -1007,6 +1008,7 @@ defmodule PtcRunner.Kernel.CommandContract do
               :source_out_destination_exists,
               :source_out_parent_unusable,
               :source_out_failed,
+              :source_out_cleanup_failed,
               :candidate_refused,
               :candidate_destination_exists,
               :candidate_publication_failed,
@@ -1468,6 +1470,12 @@ defmodule PtcRunner.Kernel.CommandContract do
          %{"type" => "null"}
        ),
        do: SelectionRulesDiagnostic.message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :publication, code: :candidate_refused} = row,
+         %{"type" => "null"}
+       ),
+       do: CandidateRefusedDiagnostic.message_schema(row.message)
 
   defp diagnostic_message_schema(row, %{"type" => "null"}), do: %{"const" => row.message}
   defp diagnostic_message_schema(row, _source_schema), do: DiagnosticCatalog.message_schema(row)

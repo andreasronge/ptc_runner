@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.CommandMaterializeTest do
 
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandEntry
+  alias PtcRunner.Kernel.CommandMaterialize
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandParser
 
@@ -191,6 +192,42 @@ defmodule PtcRunner.Kernel.CommandMaterializeTest do
   end
 
   @tag :tmp_dir
+  test "standalone candidate refusal names the failing gate criterion", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    authored = Path.join(dir, "authored.clj")
+
+    File.write!(authored, """
+    (ns helper "Generated helpers." {:visibility :prompt})
+
+    (defn double
+      "Doubles a number."
+      [n]
+      (* 2 n))
+    """)
+
+    assert {:error, outcome} =
+             CommandEngine.dispatch([
+               "materialize",
+               manifest,
+               "--workflow",
+               "--component",
+               "helper",
+               "--out",
+               Path.join(dir, "candidate"),
+               "--source",
+               authored
+             ])
+
+    assert outcome.envelope["error"]["phase"] == "publication"
+    assert outcome.envelope["error"]["code"] == "candidate_refused"
+
+    assert outcome.envelope["error"]["message"] ==
+             "the candidate was refused by the promotion gate (G2)"
+
+    refute File.exists?(Path.join(dir, "candidate"))
+  end
+
+  @tag :tmp_dir
   test "standalone candidate mode keeps the 1 MiB source bound", %{tmp_dir: dir} do
     manifest = write_application(dir)
     authored = Path.join(dir, "authored.clj")
@@ -232,6 +269,44 @@ defmodule PtcRunner.Kernel.CommandMaterializeTest do
     assert outcome.envelope["error"]["phase"] == "publication"
     assert outcome.envelope["error"]["code"] == "selected_component_missing"
     refute File.exists?(Path.join(dir, "exported.clj"))
+  end
+
+  @tag :tmp_dir
+  test "source-out cleanup failure is a publication diagnostic", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    exported = Path.join(dir, "exported.clj")
+
+    assert {:ok, arguments} =
+             CommandParser.parse([
+               "materialize",
+               manifest,
+               "--workflow",
+               "--component",
+               "helper",
+               "--source-out",
+               exported
+             ])
+
+    hook = fn {:after_link, staging} ->
+      File.write!(Path.join(staging, "blocker"), "x")
+      :ok
+    end
+
+    arguments = %{arguments | options: Map.put(arguments.options, :fault_hook, hook)}
+
+    assert {:error, outcome} =
+             CommandMaterialize.dispatch(arguments, "cmd-00000000000000000000000001")
+
+    assert outcome.envelope["error"]["phase"] == "publication"
+    assert outcome.envelope["error"]["code"] == "source_out_cleanup_failed"
+    assert File.exists?(exported)
+
+    leftover =
+      dir
+      |> File.ls!()
+      |> Enum.filter(&String.starts_with?(&1, ".ptc-private-"))
+
+    assert leftover != []
   end
 
   @tag :tmp_dir

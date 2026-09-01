@@ -582,6 +582,7 @@ Embedding runtimes can supply authorization targets directly.
 | 7 | `publication` | `result_pointer_invalid` | no | the result pointer does not resolve to a string |
 | 7 | `publication` | `result_publication_failed` | no | result publication failed |
 | 7 | `publication` | `selected_component_missing` | no | the selected component is not present in the chosen environment |
+| 7 | `publication` | `source_out_cleanup_failed` | no | source export could not discard its staging directory |
 | 7 | `publication` | `source_out_destination_exists` | no | ptc materialize --source-out publishes only to a new file; choose a path that does not already exist |
 | 7 | `publication` | `source_out_failed` | no | source export failed |
 | 7 | `publication` | `source_out_parent_unusable` | no | the --source-out parent directory is unusable |

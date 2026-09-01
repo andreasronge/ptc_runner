@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.CommandMaterialize do
   @moduledoc false
 
+  alias PtcRunner.Kernel.CandidateRefusedDiagnostic
   alias PtcRunner.Kernel.CommandApplicationDiagnostic
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandDiagnostic
@@ -23,8 +24,10 @@ defmodule PtcRunner.Kernel.CommandMaterialize do
            "directory" => published.directory
          })}
 
-      {:refused, _report} ->
-        publication_error(run_ref, :candidate_refused)
+      {:refused, report} ->
+        publication_error(run_ref, :candidate_refused,
+          message: CandidateRefusedDiagnostic.message(report)
+        )
 
       {:error, reason} ->
         materialize_error(run_ref, reason)
@@ -44,7 +47,8 @@ defmodule PtcRunner.Kernel.CommandMaterialize do
       origin_run_id: Map.get(options, :origin_run_id),
       origin_prompt_hash: Map.get(options, :origin_prompt_hash),
       origin_authored_at: Map.get(options, :origin_authored_at),
-      accept_widened_effect: Map.get(options, :accept_widened_effect)
+      accept_widened_effect: Map.get(options, :accept_widened_effect),
+      fault_hook: Map.get(options, :fault_hook)
     ]
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
   end
@@ -63,6 +67,7 @@ defmodule PtcRunner.Kernel.CommandMaterialize do
   defp publication_code(:source_out_destination_exists), do: {:ok, :source_out_destination_exists}
   defp publication_code(:source_out_parent_unusable), do: {:ok, :source_out_parent_unusable}
   defp publication_code(:source_out_failed), do: {:ok, :source_out_failed}
+  defp publication_code(:source_out_cleanup_failed), do: {:ok, :source_out_cleanup_failed}
   defp publication_code(:candidate_source_too_large), do: {:ok, :candidate_source_too_large}
   defp publication_code(:unreadable_candidate_source), do: {:ok, :unreadable_candidate_source}
   defp publication_code(:candidate_cleanup_failed), do: {:ok, :candidate_cleanup_failed}
@@ -86,8 +91,8 @@ defmodule PtcRunner.Kernel.CommandMaterialize do
 
   defp publication_code(_reason), do: :error
 
-  defp publication_error(run_ref, code) do
-    diagnostic = CommandDiagnostic.new!(:publication, code)
+  defp publication_error(run_ref, code, opts \\ []) do
+    diagnostic = CommandDiagnostic.new!(:publication, code, opts)
     {:error, CommandOutcome.error(:materialize, run_ref, diagnostic)}
   end
 end
