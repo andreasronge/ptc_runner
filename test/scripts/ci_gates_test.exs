@@ -207,6 +207,8 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     assert script =~ "--inspect-only"
     assert script =~ "--source-out"
     assert script =~ "--out \"$release_tmp_dir/candidate\""
+    assert script =~ "Returns the supplied input."
+    assert script =~ "(input :map) -> :map"
     assert script =~ "provider-application.json"
   end
 

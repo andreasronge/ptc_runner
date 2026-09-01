@@ -1,12 +1,17 @@
 defmodule PtcRunner.Kernel.InspectOnlyReplTest do
   use ExUnit.Case, async: true
 
+  alias PtcRunner.Kernel
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.BundleCompiler
+  alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.ComponentCatalog
+  alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectOnlyRepl
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ReplSession
+  alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.WorkflowEnvironment
   alias PtcRunner.Lisp
   alias PtcRunner.ReplDiagnosticCatalog
@@ -18,6 +23,41 @@ defmodule PtcRunner.Kernel.InspectOnlyReplTest do
              )
 
     assert blocked.fail.reason == :inspect_only_unavailable
+  end
+
+  test "Kernel.run inspect_only does not invoke capabilities" do
+    parent = self()
+
+    {:ok, add} =
+      Capability.new(
+        name: "add",
+        input_schema: %{"type" => "object", "additionalProperties" => true},
+        callback: fn _arguments ->
+          send(parent, :invoked)
+          {:ok, %{"sum" => 3}}
+        end
+      )
+
+    {:ok, workflow} = WorkflowEnvironment.new(capabilities: [add])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "inspect-only-kernel-run")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink,
+        inspect_only: true
+      )
+
+    assert {:error, error} =
+             Kernel.run("(return (tool/add {:left 1 :right 2}))", config)
+
+    assert error.reason == :inspect_only_unavailable
+    refute_received :invoked
   end
 
   @tag :tmp_dir
@@ -109,11 +149,25 @@ defmodule PtcRunner.Kernel.InspectOnlyReplTest do
     assert {:error, {:missing_capability_requirement, ["search"]}} =
              WorkflowEnvironment.new(bundle: bundle, catalog: catalog)
 
-    assert {:ok, _environment} =
+    assert {:ok, inspect_only} =
              WorkflowEnvironment.new(
                bundle: bundle,
                catalog: catalog,
                inspect_only: true
+             )
+
+    assert inspect_only.inspect_only
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "inspect-only-mismatch")
+
+    assert {:error, :invalid_run_config} =
+             RunConfig.new(
+               workflow_environment: inspect_only,
+               missions: %{"default" => mission},
+               input: %{},
+               limits: limits,
+               event_sink: sink
              )
   end
 
@@ -192,6 +246,7 @@ defmodule PtcRunner.Kernel.InspectOnlyReplTest do
     path
   end
 
+  # ex_dna:disable-for-next-line — Mix CLI and Kernel inspect-only tests keep independent fixtures
   defp write_mission_manifest(directory) do
     File.write!(
       Path.join(directory, "helpers.clj"),

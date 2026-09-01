@@ -66,7 +66,8 @@ defmodule PtcRunner.Kernel.Environment do
          bundle: bundle,
          capabilities: capability_map,
          data: data,
-         shipped_component_ids: shipped_component_ids
+         shipped_component_ids: shipped_component_ids,
+         inspect_only: skip_tool_requirements?(opts)
        }}
     else
       false -> {:error, :invalid_environment_data}

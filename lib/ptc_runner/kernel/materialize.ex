@@ -294,15 +294,37 @@ defmodule PtcRunner.Kernel.Materialize do
   defp pointer_segments(""), do: {:ok, []}
 
   defp pointer_segments("/" <> rest) do
-    segments =
-      rest
-      |> String.split("/")
-      |> Enum.map(&(&1 |> String.replace("~1", "/") |> String.replace("~0", "~")))
-
-    {:ok, segments}
+    rest
+    |> String.split("/")
+    |> Enum.reduce_while({:ok, []}, fn token, {:ok, acc} ->
+      case unescape_pointer_token(token) do
+        {:ok, decoded} -> {:cont, {:ok, [decoded | acc]}}
+        :error -> {:halt, {:error, :invalid_result_pointer}}
+      end
+    end)
+    |> case do
+      {:ok, segments} -> {:ok, Enum.reverse(segments)}
+      {:error, _reason} = error -> error
+    end
   end
 
   defp pointer_segments(_pointer), do: {:error, :invalid_result_pointer}
+
+  defp unescape_pointer_token(token), do: unescape_pointer_token(token, [])
+
+  defp unescape_pointer_token(<<>>, acc),
+    do: {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary()}
+
+  defp unescape_pointer_token(<<?~, ?0, rest::binary>>, acc),
+    do: unescape_pointer_token(rest, [?~ | acc])
+
+  defp unescape_pointer_token(<<?~, ?1, rest::binary>>, acc),
+    do: unescape_pointer_token(rest, [?/ | acc])
+
+  defp unescape_pointer_token(<<?~, _rest::binary>>, _acc), do: :error
+
+  defp unescape_pointer_token(<<char, rest::binary>>, acc),
+    do: unescape_pointer_token(rest, [char | acc])
 
   defp resolve(value, []), do: {:ok, value}
 
@@ -314,19 +336,31 @@ defmodule PtcRunner.Kernel.Materialize do
   end
 
   defp resolve(value, [segment | rest]) when is_list(value) do
-    case Integer.parse(segment) do
-      {index, ""} when index >= 0 ->
+    case array_index(segment) do
+      {:ok, index} ->
         case Enum.fetch(value, index) do
           {:ok, child} -> resolve(child, rest)
           :error -> {:error, :result_pointer_missing}
         end
 
-      _other ->
-        {:error, :result_pointer_missing}
+      :error ->
+        {:error, :invalid_result_pointer}
     end
   end
 
   defp resolve(_value, _segments), do: {:error, :result_pointer_missing}
+
+  defp array_index("0"), do: {:ok, 0}
+
+  defp array_index(<<first, _rest::binary>> = segment)
+       when first in ?1..?9 do
+    case Integer.parse(segment) do
+      {index, ""} -> {:ok, index}
+      _other -> :error
+    end
+  end
+
+  defp array_index(_segment), do: :error
 
   defp required(opts, key) do
     case Keyword.get(opts, key) do

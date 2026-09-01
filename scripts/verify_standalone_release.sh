@@ -55,7 +55,10 @@ mkdir -p "$application_root"
 cat > "$application_root/main.clj" <<'EOF'
 (ns smoke.main)
 
-(defn run [input]
+(defn run
+  "Returns the supplied input."
+  {:signature "(input :map) -> :map"}
+  [input]
   (return input))
 EOF
 

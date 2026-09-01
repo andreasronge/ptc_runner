@@ -635,14 +635,23 @@ defmodule PtcRunner.Kernel.CommandParser do
         :out,
         :source,
         :from_result,
-        :result_pointer,
         :origin_run_id,
         :origin_prompt_hash,
         :origin_authored_at
       ],
       &valid_optional_nonempty_string?(options, &1)
-    )
+    ) and valid_optional_result_pointer?(options)
   end
+
+  defp valid_optional_result_pointer?(options) do
+    case Map.fetch(options, :result_pointer) do
+      :error -> true
+      {:ok, value} -> valid_result_pointer_string?(value)
+    end
+  end
+
+  defp valid_result_pointer_string?(value),
+    do: is_binary(value) and byte_size(value) <= 4_096 and String.valid?(value)
 
   defp materialize_rejection_code(options) do
     source_out? = Map.has_key?(options, :source_out)

@@ -164,7 +164,7 @@ and keeps it off stdout.</li><li><code class="inline">--trace-dir DIR</code> wri
 <code class="inline">.ptcins</code> file.</li><li><code class="inline">--envelope FILE</code> atomically publishes a convenience copy of the stable V4
 command envelope. When a project enables <code class="inline">artifacts.envelope</code>, the project's
 <code class="inline">.ptc/envelopes/&lt;run_ref&gt;.json</code> ledger entry is still written for that run.
-<code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, and <code class="inline">init</code> all accept the flag; the
+<code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, <code class="inline">init</code>, and <code class="inline">materialize</code> all accept the flag; the
 document it publishes carries status, run reference, result or classified
 error, artifact state, and a closed <code class="inline">warnings</code> array. For <code class="inline">run</code>, an uncataloged
 installed model appears there as <code class="inline">model_uncataloged</code> with its provider alias
@@ -318,7 +318,7 @@ rather than paying for a run whose result it cannot receive. If envelope
 publication itself fails, the standalone command exits <code class="inline">74</code> and cannot report
 that failure through the missing envelope. Success exits <code class="inline">0</code>; classified
 failures use their diagnostic catalog status; caught internal failures use
-<code class="inline">70</code>.</p><p><code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, and <code class="inline">init</code> accept <code class="inline">--envelope</code>.
+<code class="inline">70</code>.</p><p><code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, <code class="inline">init</code>, and <code class="inline">materialize</code> accept <code class="inline">--envelope</code>.
 <code class="inline">repl</code>, <code class="inline">transcript</code>, <code class="inline">viewer</code>, <code class="inline">docs</code>, help, and version do not. A private run
 envelope omits the result value. Installation, packaging, and container
 commands live in the <a href="/installation/standalone/">installation documentation</a>,

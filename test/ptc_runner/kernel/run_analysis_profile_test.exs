@@ -92,6 +92,19 @@ defmodule PtcRunner.Kernel.PrivateRunAnalysisProfileTest do
   end
 
   @tag :tmp_dir
+  test "assembled analysis missions expose interned component catalogs", %{tmp_dir: root} do
+    fixture = PrivateInspectionFixture.create!(root)
+    {:ok, session, _info} = start_internal_session(fixture)
+    on_exit(fn -> AnalysisSession.stop(session) end)
+
+    assert {:ok, %{status: :ok, value: ids}} =
+             AnalysisSession.evaluate(session, "(return (components))")
+
+    assert Enum.sort(ids) == Enum.sort(PrivateRunAnalysisProfile.component_ids())
+    refute ids == []
+  end
+
+  @tag :tmp_dir
   test "analysis resources reject trace snapshots from the other authority", %{tmp_dir: root} do
     fixture = PrivateInspectionFixture.create!(root)
 

@@ -92,7 +92,7 @@ defmodule PtcRunner.ComponentCatalogSoakTest do
         refute_copied_catalog(step, empty_baseline_bytes, interned_source)
       end)
 
-    log_snapshot("catalog evaluation", iters, before, aft)
+    MemorySoak.log_snapshot("catalog evaluation", iters, before, aft)
 
     MemorySoak.assert_flat!(before, aft, :binary, tolerance_pct: 50)
     MemorySoak.assert_flat!(before, aft, :total, tolerance_pct: 30)
@@ -137,7 +137,7 @@ defmodule PtcRunner.ComponentCatalogSoakTest do
         refute_copied_catalog(step, empty_baseline_bytes, interned_source)
       end)
 
-    log_snapshot("catalog rebuild", iters, before, aft)
+    MemorySoak.log_snapshot("catalog rebuild", iters, before, aft)
 
     MemorySoak.assert_flat!(before, aft, :binary, tolerance_pct: 50)
     MemorySoak.assert_flat!(before, aft, :total, tolerance_pct: 30)
@@ -168,10 +168,5 @@ defmodule PtcRunner.ComponentCatalogSoakTest do
   defp large_source do
     padding = String.duplicate("x", @padding_bytes)
     "(ns soak)\n(def marker \"#{@marker}\")\n(def padding \"#{padding}\")\n"
-  end
-
-  defp log_snapshot(label, iters, before, aft) do
-    IO.puts("BEFORE (#{label}, n=#{iters}):\n#{MemorySoak.format(before)}")
-    IO.puts("AFTER  (#{label}, n=#{iters}):\n#{MemorySoak.format(aft)}")
   end
 end

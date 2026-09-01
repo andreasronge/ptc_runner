@@ -328,6 +328,33 @@ defmodule Mix.Tasks.Ptc.MaterializeTest do
   end
 
   @tag :tmp_dir
+  test "malformed RFC 6901 pointers are refused", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    File.write!(Path.join(dir, "array.json"), Jason.encode!(%{"value" => [@authored]}))
+
+    for pointer <- ["/~2", "/~", "/value/01"] do
+      assert_raise Mix.Error, ~r/invalid_result_pointer/, fn ->
+        capture_io(fn ->
+          Mix.Task.reenable("ptc.materialize")
+
+          Materialize.run([
+            manifest,
+            "--workflow",
+            "--component",
+            "helper",
+            "--out",
+            Path.join(dir, "candidate-bad"),
+            "--from-result",
+            Path.join(dir, "array.json"),
+            "--result-pointer",
+            pointer
+          ])
+        end)
+      end
+    end
+  end
+
+  @tag :tmp_dir
   test "source-out writes interned effective bytes and refuses an existing destination", %{
     tmp_dir: dir
   } do

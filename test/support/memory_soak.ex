@@ -327,6 +327,12 @@ defmodule PtcRunner.TestSupport.MemorySoak do
     """
   end
 
+  @doc "Print before/after soak snapshots for CI logs."
+  def log_snapshot(label, iters, before, aft) when is_binary(label) and is_integer(iters) do
+    IO.puts("BEFORE (#{label}, n=#{iters}):\n#{format(before)}")
+    IO.puts("AFTER  (#{label}, n=#{iters}):\n#{format(aft)}")
+  end
+
   defp format_top(top) do
     Enum.map_join(top, "\n", fn {pid, mem, info} ->
       name =

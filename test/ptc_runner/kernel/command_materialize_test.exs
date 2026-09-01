@@ -103,6 +103,25 @@ defmodule PtcRunner.Kernel.CommandMaterializeTest do
     assert rejection.code == :invalid_arguments
   end
 
+  test "standalone materialize accepts the RFC 6901 root pointer" do
+    assert {:ok, arguments} =
+             CommandParser.parse([
+               "materialize",
+               "ptc.json",
+               "--workflow",
+               "--component",
+               "helper",
+               "--out",
+               "candidate",
+               "--from-result",
+               "result.json",
+               "--result-pointer",
+               ""
+             ])
+
+    assert arguments.options.result_pointer == ""
+  end
+
   test "help materialize is generated from the command declaration" do
     assert {:ok, outcome} = CommandEngine.dispatch(["help", "materialize"])
     assert outcome.envelope["result"]["topic"] == "materialize"

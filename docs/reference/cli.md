@@ -152,7 +152,7 @@ Useful run switches are:
 - `--envelope FILE` atomically publishes a convenience copy of the stable V4
   command envelope. When a project enables `artifacts.envelope`, the project's
   `.ptc/envelopes/<run_ref>.json` ledger entry is still written for that run.
-  `run`, `validate`, `doctor`, `models`, and `init` all accept the flag; the
+  `run`, `validate`, `doctor`, `models`, `init`, and `materialize` all accept the flag; the
   document it publishes carries status, run reference, result or classified
   error, artifact state, and a closed `warnings` array. For `run`, an uncataloged
   installed model appears there as `model_uncataloged` with its provider alias
@@ -363,7 +363,7 @@ that failure through the missing envelope. Success exits `0`; classified
 failures use their diagnostic catalog status; caught internal failures use
 `70`.
 
-`run`, `validate`, `doctor`, `models`, and `init` accept `--envelope`.
+`run`, `validate`, `doctor`, `models`, `init`, and `materialize` accept `--envelope`.
 `repl`, `transcript`, `viewer`, `docs`, help, and version do not. A private run
 envelope omits the result value. Installation, packaging, and container
 commands live in the [installation documentation](../installation/standalone.md),

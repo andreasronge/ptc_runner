@@ -261,7 +261,8 @@ defmodule PtcRunner.Kernel.Runner do
       strict_data: true,
       data_grants: DataKeys.source_referenceable_forms(config.input),
       shipped_library_ids: Library.component_ids(),
-      component_catalog: Environment.catalog(config.workflow_environment)
+      component_catalog: Environment.catalog(config.workflow_environment),
+      inspect_only: config.inspect_only
     ]
 
     case Lisp.run_native(entry_source, opts) do
@@ -611,6 +612,9 @@ defmodule PtcRunner.Kernel.Runner do
       Map.new(config.missions, fn {name, mission} ->
         {name, Map.fetch!(mission.inventory, field)}
       end)
+
+  defp workflow_tools(%{inspect_only: true}, _state, _validation_deadline_ms, _evaluation_id),
+    do: %{}
 
   defp workflow_tools(config, state, validation_deadline_ms, evaluation_id) do
     state

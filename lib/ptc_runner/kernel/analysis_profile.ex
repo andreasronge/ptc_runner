@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
   """
 
   alias PtcRunner.Kernel.AnalysisResources
+  alias PtcRunner.Kernel.ComponentCatalog
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
@@ -18,6 +19,7 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RuntimeTools
   alias PtcRunner.Kernel.SessionTrace
+  alias PtcRunner.Kernel.SourceIntern
   alias PtcRunner.Kernel.WorkflowEnvironment
 
   @type recipe :: module()
@@ -34,12 +36,15 @@ defmodule PtcRunner.Kernel.AnalysisProfile do
          {:ok, bundle} <- PtcRunner.Kernel.compile_bundle(components),
          {:ok, capabilities} <- recipe.capabilities(resources),
          :ok <- validate_contract(recipe, bundle, capabilities),
+         {:ok, _intern, catalog} <-
+           ComponentCatalog.build(components, bundle, SourceIntern.new()),
          {:ok, mission} <-
            MissionEnvironment.new(
              bundle: bundle,
              capabilities: capabilities,
              data: %{},
-             shipped_component_ids: shipped_component_ids(recipe.component_selections())
+             shipped_component_ids: shipped_component_ids(recipe.component_selections()),
+             catalog: catalog
            ),
          {:ok, workflow} <- WorkflowEnvironment.new([]),
          {:ok, profile} <- descriptor(recipe, bundle, mission, limits),

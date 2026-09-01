@@ -10,11 +10,12 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
   Construction validates the bundle attestation, duplicate or reserved
   capability names, JSON-like data, and every tool requirement recorded by the
   bundle. An optional `:catalog` is attested with the bundle so source cannot
-  be paired with a different compiled graph. It never imports capabilities
-  from a mission environment. A verified workflow override of the shipped
-  `agent.core` retains that library's fixed private diagnostic routes; other
-  local or replacement components cannot acquire them. `:inspect_only` skips
-  recorded tool-requirement checks for compile-and-inspect sessions.
+  be paired with a different compiled graph. `:inspect_only` is attested with
+  the environment: a compile-and-inspect assembly that skipped tool
+  requirements cannot be placed in an ordinary runnable configuration. It
+  never imports capabilities from a mission environment. A verified workflow
+  override of the shipped `agent.core` retains that library's fixed private
+  diagnostic routes; other local or replacement components cannot acquire them.
   """
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Attestation
@@ -27,7 +28,8 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
     :data,
     :private_capabilities,
     :shipped_component_ids,
-    :catalog
+    :catalog,
+    :inspect_only
   ]
   defstruct @enforce_keys ++ [attestation: nil]
   @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
@@ -39,6 +41,7 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
           private_capabilities: [binary()],
           shipped_component_ids: [binary()],
           catalog: ComponentCatalog.t(),
+          inspect_only: boolean(),
           attestation: binary()
         }
   @spec new(keyword()) :: {:ok, t()} | {:error, term()}
@@ -49,7 +52,8 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
   represented by the bundle for exact diagnostic misses. Unknown options are
   rejected. `:inspect_only` skips recorded tool-requirement checks so a
   compile-and-inspect session can attach source without installing
-  capabilities.
+  capabilities. The resulting environment attests that mode; `RunConfig`
+  refuses it unless `inspect_only` is also true.
   """
   def new(opts) when is_list(opts), do: assemble(opts, %{})
 

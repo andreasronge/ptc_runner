@@ -304,6 +304,14 @@ defmodule PtcRunner.Kernel.ComponentCatalogTest do
 
     assert listed.return == ["app"]
 
+    assert {:ok, ignored} =
+             Lisp.run_native("(components)",
+               prelude: bundle.prelude,
+               component_catalog: %{entries: [%{id: "injected"}]}
+             )
+
+    assert ignored.return == []
+
     assert {:ok, found} =
              Lisp.run_native(~S|(component "app")|,
                prelude: bundle.prelude,
@@ -403,28 +411,19 @@ defmodule PtcRunner.Kernel.ComponentCatalogTest do
     ; OVERRIDE-#{@marker}
     """
 
-    documents = %{
-      "app.json" =>
-        Jason.encode!(%{
-          "version" => 1,
-          "workflow" => %{
-            "components" => [%{"id" => "app", "path" => "workflow.clj", "dependencies" => []}],
-            "entry" => "app/run"
-          },
-          "input" => %{"value" => %{}},
-          "providers" => %{"workflow" => [], "mission" => []}
-        }),
-      "workflow.clj" => base,
-      "override.json" =>
-        Jason.encode!(%{
-          "target" => %{"environment" => "workflow"},
-          "component_id" => "app",
-          "base_source_hash" => ComponentOverride.hash(base),
-          "source_hash" => ComponentOverride.hash(override),
-          "path" => "candidate.clj"
-        }),
-      "candidate.clj" => override
-    }
+    documents =
+      fixture_documents(base)
+      |> Map.merge(%{
+        "override.json" =>
+          Jason.encode!(%{
+            "target" => %{"environment" => "workflow"},
+            "component_id" => "app",
+            "base_source_hash" => ComponentOverride.hash(base),
+            "source_hash" => ComponentOverride.hash(override),
+            "path" => "candidate.clj"
+          }),
+        "candidate.clj" => override
+      })
 
     manifest_path = write_documents(directory, documents)
 
