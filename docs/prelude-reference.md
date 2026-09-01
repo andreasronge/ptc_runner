@@ -176,10 +176,16 @@ facts for workflow policy; this entry does not choose retry, failover, or
 abort. Restarting with another alias starts another loop and does not resume
 the previous transcript.
 
+Set `retain_programs` to an integer from 1 through 128 to attach admitted
+generated programs on the returned outcome. Omitted or nil keeps the current
+outcome shape. When set, every returned outcome includes `:programs` and
+`:programs-omitted`. Retention keeps the newest complete entries that fit
+both the requested count and a fixed 2,000,000 UTF-8-byte source ceiling.
+
 - **Kind:** `function`
 - **Visibility:** `prompt`
 - **Effect:** `unknown`
-- **Contract:** `(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any`
+- **Contract:** `(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, retain_programs :any?}) -> :any`
 - **Backing requirements:** `tool:kernel-agent-config-failure`, `tool:kernel-agent-protocol-error`, `tool:kernel-check-source`, `tool:kernel-eval`, `tool:kernel-llm-provider-failure`, `tool:kernel-mission-model-context`, `tool:kernel-phase-return-contract-failure`, `tool:kernel-result-contract`, `tool:kernel-result-contract-failure`, `tool:kernel-runtime-limit-failure`, `tool:llm-request`, `tool:workflow-annotate`
 
 ##### `agent.core/run-phased-result-value`

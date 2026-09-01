@@ -3092,7 +3092,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
             %{
               value: %{
                 "status" => "ok",
-                "value" => %{"outcome" => "returned", "value" => 42}
+                "value" => %{"outcome" => "returned", "value" => 42},
+                "admitted?" => true,
+                "source_bytes" => 11
               }
             }} =
              Kernel.run(
@@ -3109,6 +3111,76 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert mission_started.data.environment == :mission
     assert mission_stopped.data.environment == :mission
     assert workflow_stopped.data.environment == :workflow
+  end
+
+  test "kernel-eval marks only post-admission outcomes as admitted" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "kernel-eval-admitted")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    source = """
+    (let [ok (tool/kernel-eval {:mission "default" :kind :source :source "(return 1)"})
+          compile (tool/kernel-eval {:mission "default" :kind :source :source "(+"})
+          refused (tool/kernel-eval {:mission "default" :kind :source :source "#{String.duplicate("x", 131_073)}"})]
+      (return {"ok_admitted" (true? (get ok :admitted?))
+               "compile_admitted" (true? (get compile :admitted?))
+               "refused_admitted" (true? (get refused :admitted?))
+               "refused_has_flag" (contains? refused :admitted?)
+               "ok_bytes" (get ok :source_bytes)
+               "value_has_flag" (contains? (get ok :value) :admitted?)}))
+    """
+
+    assert {:ok, %{value: value}} = Kernel.run(source, config)
+    assert value["ok_admitted"] == true
+    assert value["compile_admitted"] == true
+    assert value["refused_admitted"] == false
+    assert value["refused_has_flag"] == false
+    assert value["ok_bytes"] == 10
+    assert value["value_has_flag"] == false
+  end
+
+  test "kernel-eval admits a source larger than the retention byte ceiling" do
+    huge = ";#{String.duplicate("€", 700_000)}\n(return 1)"
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, limits} =
+      Limits.new(
+        subordinate_source_bytes: 2_200_000,
+        capability_argument_bytes: 4_000_000,
+        evaluation_timeout_ms: 15_000
+      )
+
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "kernel-eval-huge")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{"program" => huge},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:ok, %{value: value}} =
+             Kernel.run(
+               ~S|(return (tool/kernel-eval {:mission "default" :kind :source :source data/program}))|,
+               config
+             )
+
+    assert value["admitted?"] == true
+    assert value["source_bytes"] > 2_000_000
+    assert value["value"]["outcome"] == "returned"
   end
 
   test "runner-added kernel-eval errors are not counted as capability refusals" do
@@ -3228,7 +3300,9 @@ defmodule PtcRunner.Kernel.CoreContractTest do
             %{
               value: %{
                 "status" => "ok",
-                "value" => %{"outcome" => "returned", "value" => 42}
+                "value" => %{"outcome" => "returned", "value" => 42},
+                "admitted?" => true,
+                "source_bytes" => 17
               }
             }} =
              Kernel.run(

@@ -119,6 +119,18 @@ kind `:phase-return-contract-failed`; an ordinary turn limit remains
 `:turn-limit`. Selection is explicit: PtcRunner does not infer a contract from
 the mission name, the registry contents, or the application result schema.
 
+Set `retain_programs` to an integer from 1 through 128 to attach admitted
+generated programs on that returned outcome. Omitted or `nil` keeps the shapes
+above. When set, every returned outcome — including subject and provider
+failures after earlier evaluations — also includes `:programs` and
+`:programs-omitted`. Entries are ordered by one-based global turn and contain
+only `:turn`, `:mission`, and exact `:source`. Retention keeps the newest
+complete entries that fit both the requested count and a fixed 2,000,000
+UTF-8-byte source ceiling; an individual admitted program larger than that
+ceiling is omitted in full. Protocol errors and source rejected before
+evaluation are not retained. Host and infrastructure failures that abort the
+outer workflow still have no outcome to annotate.
+
 `kind` and `reason` are facts. This entry does not add a runtime
 `recovery: retry | choose-alternate | abort` axis; the workflow chooses a
 disposition. Restarting with another alias starts another agent loop. It does
@@ -246,12 +258,15 @@ it does not add task-specific prompt policy.
 | `max_observation_chars` | `2048` | integer, 1–65,536 | Bounds the untrusted structural preview and `println` body of one successful observation. |
 | `max_transcript_chars` | `262144` | integer, 1–1,000,000 | Bounds the JSON-encoded prospective provider request. |
 | `consolidate_at_turns_remaining` | omitted | integer, 1–effective `max_turns` | Adds generic consolidation guidance at and below this remaining-turn count. |
+| `retain_programs` | omitted | integer, 1–128 | On `run-outcome` only, attaches admitted generated programs on the returned outcome. |
 | `result_envelope` | `true` | boolean | Changes only `agent.core/run`; `false` returns the raw value and validates that raw value against the result contract. |
 
 For the four `max_*` options, an omitted or `nil` value selects the documented
-default. An out-of-range integer or a non-integer fails with
-`invalid_agent_config` before any provider request or mission evaluation. The
-command diagnostic names the option and its inclusive range, and either the
+default. `retain_programs` is `run-outcome` only: omitted or `nil` means no
+retention, and a present value is an integer from 1 through 128. An
+out-of-range integer or a non-integer fails with `invalid_agent_config` before
+any provider request or mission evaluation. The command diagnostic names the
+option, its inclusive range, and the entry it belongs to, plus either the
 rejected integer or the received type — never the original non-integer
 content. Signature validation still rejects unknown configuration keys.
 `consolidate_at_turns_remaining` fails the same way with

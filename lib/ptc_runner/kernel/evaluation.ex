@@ -19,6 +19,12 @@ defmodule PtcRunner.Kernel.Evaluation do
   owner for sandbox hard stops, so a later expression failure, timeout, or heap
   kill cannot erase it.
 
+  After source and lease admission, `evaluation-started`, and private source
+  capture succeed — and before compile or execute — the returned map carries
+  `:admitted? true` and `:source_bytes`. Pre-admission refusals omit both
+  keys. `agent.core` authenticates that exact boolean and strips both keys
+  before observation rendering.
+
   Continued and returned evaluations atomically commit native memory and exact
   bounded history before exposing only an inert public value. Continued results
   additionally expose bounded chronological prints for the next agent turn.
@@ -288,7 +294,10 @@ defmodule PtcRunner.Kernel.Evaluation do
           )
         )
 
-      Map.put(result, :duration_ms, duration_ms)
+      result
+      |> Map.put(:duration_ms, duration_ms)
+      |> Map.put(:admitted?, true)
+      |> Map.put(:source_bytes, source_bytes)
     else
       {:error, :inspection_sink_error} ->
         :ok = RunState.release_evaluation(state, lease)

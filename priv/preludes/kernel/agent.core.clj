@@ -134,14 +134,28 @@
         [{"mission" mission "max_turns" default-max-turns}]
         (fail (result/error :invalid-agent-config :invalid-mission))))))
 
-(defn- loop-context [cfg projector-kind]
+(defn- retain-programs-option [cfg allowed?]
+  (let [value (get cfg "retain_programs")]
+    (cond
+      (nil? value)
+      nil
+
+      (not allowed?)
+      (fail (result/error :invalid-agent-config :incompatible-retain-programs))
+
+      :else
+      (bounded-option cfg "retain_programs" nil 128))))
+
+(defn- loop-context [cfg projector-kind retain-allowed?]
   (let [standalone-contract (resolve-standalone-contract cfg projector-kind)
+        retain-programs (retain-programs-option cfg retain-allowed?)
         trusted-cfg (dissoc cfg "result_contract" "result_contract_mode"
                             "return_contract" "phase_return_contract"
                             "return_contract_projection"
                             "standalone_return_contract"
                             "standalone_return_contract_name"
-                            "standalone_return_contract_projection")
+                            "standalone_return_contract_projection"
+                            "retain_programs")
         default-max-turns (bounded-option trusted-cfg "max_turns" 4 128)
         phases (resolve-phase-contracts (configured-phases trusted-cfg default-max-turns))
         total-max-turns (reduce + 0 (map #(get % "max_turns") phases))
@@ -170,7 +184,8 @@
      :projector-kind projector-kind
      :standalone-return-contract standalone-contract
      :standalone-return-contract? (map? standalone-contract)
-     :phased? (contains? trusted-cfg "phases")}))
+     :phased? (contains? trusted-cfg "phases")
+     :retain-programs retain-programs}))
 
 (defn- machine-phase [machine]
   (get (get (get machine :context) :phases)
@@ -239,8 +254,65 @@
                            :mission mission-name
                            :observation_chars max-observation-chars})]
     (if (= :ok (get response :status))
-      (get response :value)
-      response)))
+      (let [evaluation (get response :value)]
+        {:evaluation (dissoc (dissoc evaluation :admitted?) :source_bytes)
+         :admitted? (true? (get response :admitted?))
+         :source-bytes (get response :source_bytes)})
+      {:evaluation response
+       :admitted? false
+       :source-bytes nil})))
+
+(defn- program-retention-bytes [] 2000000)
+
+(defn- empty-program-ring [limit]
+  {:limit limit :entries [] :bytes 0 :omitted 0})
+
+(defn- public-program [entry]
+  {:turn (get entry :turn)
+   :mission (get entry :mission)
+   :source (get entry :source)})
+
+(defn- drop-oldest-program [ring]
+  (let [oldest (first (get ring :entries))]
+    {:limit (get ring :limit)
+     :entries (into [] (rest (get ring :entries)))
+     :bytes (- (get ring :bytes) (get oldest :bytes))
+     :omitted (inc (get ring :omitted))}))
+
+(defn- program-fits? [ring bytes]
+  (and (<= (inc (count (get ring :entries))) (get ring :limit))
+       (<= (+ (get ring :bytes) bytes) (program-retention-bytes))))
+
+(defn- evict-programs-until-fit [ring bytes]
+  (if (or (empty? (get ring :entries)) (program-fits? ring bytes))
+    ring
+    (evict-programs-until-fit (drop-oldest-program ring) bytes)))
+
+(defn- retain-admitted-program [ring source mission turn bytes]
+  (if (nil? (get ring :limit))
+    ring
+    (if (or (not (string? source))
+            (not (integer? bytes))
+            (not (pos? bytes))
+            (> bytes (program-retention-bytes)))
+      (assoc ring :omitted (inc (get ring :omitted)))
+      (let [next (evict-programs-until-fit ring bytes)]
+        (if (program-fits? next bytes)
+          {:limit (get next :limit)
+           :entries (conj (get next :entries)
+                          {:turn turn
+                           :mission mission
+                           :source source
+                           :bytes bytes})
+           :bytes (+ (get next :bytes) bytes)
+           :omitted (get next :omitted)}
+          (assoc next :omitted (inc (get next :omitted))))))))
+
+(defn- attach-programs [outcome ring]
+  (if (and (map? outcome) (get ring :limit) (contains? outcome :status))
+    (assoc (assoc outcome :programs (mapv public-program (get ring :entries)))
+           :programs-omitted (get ring :omitted))
+    outcome))
 
 (defn- terminal-source-check [phase mission-name source]
   (if (true? (get phase "terminal_only"))
@@ -356,11 +428,14 @@
   return as `:provider-failure` so a workflow that called this entry can
   inspect `kind` and `reason`. Fail-fast entries still abort those envelopes."
   [task cfg projector-kind failure-mode]
-  (let [started (agent.machine/start task (loop-context cfg projector-kind))]
+  (let [context (loop-context cfg projector-kind (= failure-mode :outcome))
+        started (agent.machine/start task context)
+        ring (empty-program-ring (get context :retain-programs))]
     (if (not= :ok (get started :op))
       (execute-command started failure-mode)
       (loop [machine (get started :machine)
-             event {:type :boot}]
+             event {:type :boot}
+             ring ring]
         (let [cmd (agent.machine/advance machine event)
               op (get cmd :op)]
           (cond
@@ -369,7 +444,7 @@
                   action (dispatch-request next)
                   _counted (when (= :protocol-error (get action :kind))
                              (tool/kernel-agent-protocol-error {}))]
-              (recur next {:type :action :action action}))
+              (recur next {:type :action :action action} ring))
 
             (= :check-source op)
             (let [next (get cmd :machine)
@@ -379,17 +454,27 @@
                           phase
                           (get phase "mission")
                           (get action :program))]
-              (recur next {:type :source-check :action action :check check}))
+              (recur next {:type :source-check :action action :check check} ring))
 
             (= :evaluate op)
             (let [next (get cmd :machine)
                   action (get cmd :action)
                   phase (machine-phase next)
-                  evaluation (evaluate-agent-source
-                               (get phase "mission")
-                               (get action :program)
-                               (get (get next :context) :max-observation-chars))]
-              (recur next {:type :evaluation :action action :evaluation evaluation}))
+                  authenticated (evaluate-agent-source
+                                  (get phase "mission")
+                                  (get action :program)
+                                  (get (get next :context) :max-observation-chars))
+                  evaluation (get authenticated :evaluation)
+                  next-ring
+                  (if (true? (get authenticated :admitted?))
+                    (retain-admitted-program
+                      ring
+                      (get action :program)
+                      (get phase "mission")
+                      (inc (get (get next :state) :agent-turn))
+                      (get authenticated :source-bytes))
+                    ring)]
+              (recur next {:type :evaluation :action action :evaluation evaluation} next-ring))
 
             (= :validate op)
             (let [next (get cmd :machine)
@@ -402,7 +487,8 @@
               (recur next {:type :validation
                            :action action
                            :projected projected
-                           :validation validation}))
+                           :validation validation}
+                     ring))
 
             (= :validate-phase op)
             (let [next (get cmd :machine)
@@ -415,7 +501,8 @@
                            :action action
                            :value value
                            :evaluation evaluation
-                           :validation validation}))
+                           :validation validation}
+                     ring))
 
             (= :validate-standalone op)
             (let [next (get cmd :machine)
@@ -426,13 +513,14 @@
               (recur next {:type :standalone-validation
                            :action action
                            :value value
-                           :validation validation}))
+                           :validation validation}
+                     ring))
 
             (= :done op)
-            (get cmd :outcome)
+            (attach-programs (get cmd :outcome) ring)
 
             :else
-            (execute-command cmd failure-mode)))))))
+            (attach-programs (execute-command cmd failure-mode) ring)))))))
 
 (defn run-outcome
   "Runs the agent loop and distinguishes model-authored completion from a
@@ -446,8 +534,14 @@
   with the complete bounded LLM envelope. The closed `kind` and `reason` are
   facts for workflow policy; this entry does not choose retry, failover, or
   abort. Restarting with another alias starts another loop and does not resume
-  the previous transcript."
-  {:signature "(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"}
+  the previous transcript.
+
+  Set `retain_programs` to an integer from 1 through 128 to attach admitted
+  generated programs on the returned outcome. Omitted or nil keeps the current
+  outcome shape. When set, every returned outcome includes `:programs` and
+  `:programs-omitted`. Retention keeps the newest complete entries that fit
+  both the requested count and a fixed 2,000,000 UTF-8-byte source ceiling."
+  {:signature "(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, retain_programs :any?}) -> :any"}
   [task cfg]
   (run-outcome* task cfg :none :outcome))
 
