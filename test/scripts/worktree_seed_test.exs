@@ -223,6 +223,7 @@ defmodule PtcRunner.Scripts.WorktreeSeedTest do
     end
 
     assert log |> File.read!() |> String.split("\n", trim: true) == [
+             "mise|trust --yes #{worktree}/mise.toml|#{worktree}|0022",
              "hooks|#{worktree}|0022",
              "mise|install|#{worktree}|0022",
              "mise|exec -- mix deps.get|#{worktree}|0022",
