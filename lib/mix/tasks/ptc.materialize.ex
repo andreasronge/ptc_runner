@@ -14,7 +14,8 @@ defmodule Mix.Tasks.Ptc.Materialize do
   `--source-out` writes the currently installed effective bytes for later
   editing. `--source`/`--out` (or `--from-result`) is a separate candidate-gate
   step; the two modes are mutually exclusive because a descriptor hashes the
-  exact candidate published beside it.
+  exact candidate published beside it. The standalone `ptc materialize`
+  command is the same implementation; this Mix task is a thin entry.
 
   A model can author a working library inside a run, but a runtime `defn` dies
   at end of run: it is not in the frozen bundle, not covered by a component
@@ -67,8 +68,8 @@ defmodule Mix.Tasks.Ptc.Materialize do
   ## Provenance
 
   `--origin-run-id`, `--origin-prompt-hash`, and `--origin-authored-at` record
-  who authored the candidate. These are **operator-asserted and verified by
-  nothing**: a run id is a claim about origin, not evidence of it. There is no
+  who authored the candidate. These are **unverified claims**: a run id is a
+  claim about origin, not evidence of it. There is no
   model-id option, because a descriptor is a published artifact and the raw
   model selector must not be published; the authoring model is reachable
   through the run id.

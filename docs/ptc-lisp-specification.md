@@ -3612,12 +3612,15 @@ publishing an exact call that runtime validation cannot accept.
 
 ### 9.9 Introspection
 
-Five builtins provide one language-level discovery interface. They answer
+Seven builtins provide one language-level discovery interface. They answer
 identically in the REPL, in generated workflow or mission source, and inside a
 prelude export reading another prelude's documentation. `dir`, `export-meta`,
 and `source` describe the attached prelude API; `apropos` and `doc` also cover
 installed callable capabilities, fixed built-ins, and the bounded Java surface.
-When a Kernel session supplies the generated exact shipped-export index, `doc`
+`components` and `component` read the selected Kernel environment's attested
+component catalog — shipped libraries, local components, and active overrides
+alike — rather than prelude metadata or a filesystem. When a Kernel session
+supplies the generated exact shipped-export index, `doc`
 can redirect an indexed miss to its unattached owning library. The index is not
 searched by `apropos` and grants no documentation or call authority.
 
@@ -3629,11 +3632,16 @@ searched by `apropos` and grants no documentation or call authority.
 | `(doc "name")` | Prints prelude, installed capability, or fixed-function documentation; returns `nil` |
 | `(export-meta "ns/name")` | Metadata map, or `nil` when unknown |
 | `(source "ns/name")` | Prints the attached prelude defining form, or a miss notice; returns `nil` |
+| `(components)` | Vector of attached component IDs in frozen dependency order |
+| `(component id)` | Map with `:id`, `:dependencies`, `:namespaces`, `:source-hash`, and exact `:source`, or `nil` |
 
-For `dir`/`doc`/`export-meta`/`source`, references accept a string, a quoted
+For `dir`/`doc`/`export-meta`/`source`/`component`, references accept a string, a quoted
 symbol, or an unquoted symbol (the analyzer auto-quotes bare and namespaced
-symbols in those call positions, matching `clojure.repl/doc`). `apropos`
-accepts a string or a quoted symbol; an unquoted query evaluates normally.
+symbols in those call positions, matching `clojure.repl/doc`). A dotted
+component ID such as `agent.core` is one symbol, not a namespaced `ns/name`
+ref. `apropos` accepts a string or a quoted symbol; an unquoted query evaluates
+normally. `(components)` takes no argument.
+
 Computed arguments still evaluate normally, so `(doc (str "ns/" "name"))` and
 `#(doc %)` over string refs keep working. `clojure.core/meta` is unchanged and
 is not part of this family.
@@ -3713,8 +3721,21 @@ Both `:prompt` and `:discoverable` exports are visible to `dir`/`doc`/
 `export-meta`/`apropos`, which is how a `:discoverable` export is found at
 all. Private `defn-` helpers have no export record and never appear there, and
 a namespace holding only private helpers is absent from `(dir)`. `source` is
-the exception for implementation inspection: it also reveals private helpers
-that are transitively reachable from a public export.
+the exception for definition-level implementation inspection: it also reveals
+private helpers that are transitively reachable from a public export.
+
+`components` and `component` are data, not print forms. They inspect only the
+selected workflow or mission catalog: a workflow evaluation cannot see a
+mission component, and a mission evaluation cannot see the workflow's
+`agent.core`. `:dependencies` are direct edges; `:source` is the complete
+effective component source, including private helpers and an active override;
+`:origin` is omitted. There is no shipped-library or filesystem fallback for an
+unattached ID. Direct `PtcRunner.Lisp.run/2` has no Kernel component graph, even
+when it receives a source prelude, so `(components)` returns `[]` and
+`(component id)` returns `nil`; higher-order calls from that environment answer
+the same way. Returning a component map or its `:source` is charged to the
+ordinary `terminal_result_bytes` evaluation limit. The catalog is never copied
+into result stamps, traces, telemetry, or host logs.
 
 Attached prelude results for `dir`/`doc`/`apropos`/`export-meta` are filtered
 to what the running program may actually call. A miss is not a failure:

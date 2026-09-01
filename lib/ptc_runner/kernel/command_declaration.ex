@@ -461,19 +461,19 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :origin_run_id,
           type: :string,
           syntax: ["--origin-run-id ID"],
-          description: "operator-asserted origin run id"
+          description: "unverified origin run id"
         },
         %{
           key: :origin_prompt_hash,
           type: :string,
           syntax: ["--origin-prompt-hash sha256:..."],
-          description: "operator-asserted origin prompt hash"
+          description: "unverified origin prompt hash"
         },
         %{
           key: :origin_authored_at,
           type: :string,
           syntax: ["--origin-authored-at RFC3339"],
-          description: "operator-asserted authorship timestamp"
+          description: "unverified authorship timestamp"
         },
         %{
           key: :accept_widened_effect,

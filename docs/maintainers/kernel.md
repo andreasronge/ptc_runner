@@ -202,7 +202,14 @@ dependency order against only its declared namespace scope. The bundle
 compiler rejects namespace collisions explicitly and composes those validated
 Core artifacts into the aggregate prelude; it does not recompile concatenated
 source. `FrozenBundle.components` retains only each component's ID, direct
-dependencies, origin, source hash, and namespaces. Callable per-component
+dependencies, origin, source hash, and namespaces. Exact effective source is
+not reconstructed from that graph. Package preparation interns source binaries
+and attests a per-environment `PtcRunner.Kernel.ComponentCatalog` against the
+compiled bundle. Environments carry that catalog for `(components)`,
+`(component id)`, and inspect-only REPL sessions. `ptc materialize --source-out`
+reads interned package bytes for the selected occurrence without assembling an
+environment or catalog. The catalog is not prelude metadata and is not copied
+into traces, telemetry, host logs, or result stamps. Callable per-component
 preludes exist only during bounded compilation, so bundle attestation does not
 serialize a duplicate callable graph.
 
@@ -615,12 +622,12 @@ or paths.
 | Public run API | `Kernel`, `RunConfig`, `Result`, `Error` |
 | Acquisition and sealing | `ApplicationSource`, `Manifest`, `ApplicationPackage`, `ExecutionInput`, `ExecutionPolicy`, `RunRequest` |
 | Command lifecycle | `CommandEntry`, `CommandEngine`, `RunCoordinator`, `ExecutionSessionOwner`, `PublicationAuthority`, `ArtifactPublisher` |
-| Components and authority | `Component`, `FrozenBundle`, `Library`, `Capability`, `WorkflowEnvironment`, `MissionEnvironment`, `MissionInventory` |
+| Components and authority | `Component`, `FrozenBundle`, `ComponentCatalog`, `SourceIntern`, `Library`, `Capability`, `WorkflowEnvironment`, `MissionEnvironment`, `MissionInventory` |
 | Mutable run state | `Limits`, `LimitCatalog`, `RunState`, `BoundedWorker`, `Dispatcher` |
 | Subordinate execution | `Runner`, `Evaluation`, `RuntimeTools`, `Lisp.Eval.*` |
 | Providers | `InstallationCatalog`, `ProviderRegistry`, `ProviderAcquisition`, `ProviderSession`, `MCPSource`, `MCPProtocol` |
 | Evidence | `EventSink`, `TraceLog`, `InspectionSink`, `InspectionArtifact`, `RunAnalysis` |
-| Interactive evaluation | `ManifestRepl`, `ReplSession`, `AnalysisProfileRegistry`, `AnalysisSession` |
+| Interactive evaluation | `ManifestRepl`, `InspectOnlyRepl`, `ReplSession`, `AnalysisProfileRegistry`, `AnalysisSession` |
 
 Modules grouped as Kernel internals in ExDoc remain documented for maintenance
 and review. They are not alternative supported entry points.

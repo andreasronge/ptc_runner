@@ -31,6 +31,18 @@ defmodule PtcRunner.Kernel.Materialize do
 
   @doc """
   Runs one materialize invocation against a project or application path.
+
+  `:source_out` writes interned installed effective bytes for one selected
+  component to a new owner-only file (mode 0600). `:out` plus `:source` or
+  `:from_result` publishes a gated `{candidate.clj, descriptor.json}` directory.
+  The modes are exclusive because a descriptor hashes the exact candidate
+  published beside it.
+
+  Candidate mode keeps the existing 1_048_576-byte replacement bound.
+  `--source-out` writes interned acquired package bytes for the selected
+  occurrence without compiling a bundle or assembling an environment. Those
+  installed bytes can already exceed the candidate bound; submitting them as a
+  replacement is refused with the existing too-large diagnostic.
   """
   @spec run(binary(), opts()) :: result()
   def run(application, opts) when is_binary(application) and is_list(opts) do

@@ -2960,9 +2960,11 @@
       ptc_extension?: true,
       examples: [],
       notes:
-        "Reads the Kernel component catalog for the current evaluation. Direct " <>
-          "`PtcRunner.Lisp.run/2` and a higher-order call from that environment return " <>
-          "an empty vector. IDs are the attached component graph, not namespaces.",
+        "Reads the Kernel component catalog for the current evaluation. A workflow " <>
+          "evaluation lists the workflow graph; a mission evaluation lists only that " <>
+          "mission. Direct `PtcRunner.Lisp.run/2` and a higher-order call from that " <>
+          "environment return an empty vector. IDs are the attached component graph, " <>
+          "not namespaces.",
       see_also: ["component", "dir", "source"],
       clojure_var: nil,
       divergences: nil
@@ -2983,12 +2985,14 @@
         "Resolves an exact component ID from the selected environment catalog. The result " <>
           "map has `:id`, `:dependencies`, `:namespaces`, `:source-hash`, and `:source`. " <>
           "`:source` is the complete effective source, including private helpers and an " <>
-          "active override. Returning that map or its `:source` is charged to the ordinary " <>
+          "active override. `:dependencies` are direct edges only; `:origin` is omitted. " <>
+          "Returning that map or its `:source` is charged to the ordinary " <>
           "`terminal_result_bytes` evaluation limit; bind the value and slice `:source` " <>
           "when the source is large. There is no shipped-library or filesystem fallback. " <>
-          "Macro-like over the ID: unquoted symbol, quoted symbol, or string. A dotted ID " <>
-          "such as `agent.core` is one symbol, not a namespaced `ns/name` ref. Direct " <>
-          "`PtcRunner.Lisp.run/2` returns `nil`.",
+          "A workflow evaluation cannot read a mission component, and a mission cannot " <>
+          "read the workflow graph. Macro-like over the ID: unquoted symbol, quoted " <>
+          "symbol, or string. A dotted ID such as `agent.core` is one symbol, not a " <>
+          "namespaced `ns/name` ref. Direct `PtcRunner.Lisp.run/2` returns `nil`.",
       see_also: ["components", "dir", "source"],
       clojure_var: nil,
       divergences: nil

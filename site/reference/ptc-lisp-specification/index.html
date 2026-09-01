@@ -1455,18 +1455,21 @@ result validation remains governed by the host capability's JSON Schema.
 Capability input-property names must be stable under the tool boundary's
 hyphen-to-underscore normalization, as must object keys nested in input
 <code class="inline">const</code>/<code class="inline">enum</code> values; the host rejects incompatible schemas rather than
-publishing an exact call that runtime validation cannot accept.</p><h3 id="9-9-introspection">9.9 Introspection</h3><p>Five builtins provide one language-level discovery interface. They answer
+publishing an exact call that runtime validation cannot accept.</p><h3 id="9-9-introspection">9.9 Introspection</h3><p>Seven builtins provide one language-level discovery interface. They answer
 identically in the REPL, in generated workflow or mission source, and inside a
 prelude export reading another prelude's documentation. <code class="inline">dir</code>, <code class="inline">export-meta</code>,
 and <code class="inline">source</code> describe the attached prelude API; <code class="inline">apropos</code> and <code class="inline">doc</code> also cover
 installed callable capabilities, fixed built-ins, and the bounded Java surface.
-When a Kernel session supplies the generated exact shipped-export index, <code class="inline">doc</code>
+<code class="inline">components</code> and <code class="inline">component</code> read the selected Kernel environment's attested
+component catalog — shipped libraries, local components, and active overrides
+alike — rather than prelude metadata or a filesystem. When a Kernel session supplies the generated exact shipped-export index, <code class="inline">doc</code>
 can redirect an indexed miss to its unattached owning library. The index is not
-searched by <code class="inline">apropos</code> and grants no documentation or call authority.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Form</th><th style="text-align: left;">Result</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">(dir)</code></td><td style="text-align: left;">Sorted vector of namespace names holding public exports</td></tr><tr><td style="text-align: left;"><code class="inline">(dir &quot;ns&quot;)</code></td><td style="text-align: left;">Sorted vector of export refs in <code class="inline">ns</code></td></tr><tr><td style="text-align: left;"><code class="inline">(apropos &quot;term&quot;)</code></td><td style="text-align: left;">Sorted vector of matching prelude refs, installed capability refs, and canonical fixed-function names</td></tr><tr><td style="text-align: left;"><code class="inline">(doc &quot;name&quot;)</code></td><td style="text-align: left;">Prints prelude, installed capability, or fixed-function documentation; returns <code class="inline">nil</code></td></tr><tr><td style="text-align: left;"><code class="inline">(export-meta &quot;ns/name&quot;)</code></td><td style="text-align: left;">Metadata map, or <code class="inline">nil</code> when unknown</td></tr><tr><td style="text-align: left;"><code class="inline">(source &quot;ns/name&quot;)</code></td><td style="text-align: left;">Prints the attached prelude defining form, or a miss notice; returns <code class="inline">nil</code></td></tr></tbody></table></div><p>For <code class="inline">dir</code>/<code class="inline">doc</code>/<code class="inline">export-meta</code>/<code class="inline">source</code>, references accept a string, a quoted
+searched by <code class="inline">apropos</code> and grants no documentation or call authority.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Form</th><th style="text-align: left;">Result</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">(dir)</code></td><td style="text-align: left;">Sorted vector of namespace names holding public exports</td></tr><tr><td style="text-align: left;"><code class="inline">(dir &quot;ns&quot;)</code></td><td style="text-align: left;">Sorted vector of export refs in <code class="inline">ns</code></td></tr><tr><td style="text-align: left;"><code class="inline">(apropos &quot;term&quot;)</code></td><td style="text-align: left;">Sorted vector of matching prelude refs, installed capability refs, and canonical fixed-function names</td></tr><tr><td style="text-align: left;"><code class="inline">(doc &quot;name&quot;)</code></td><td style="text-align: left;">Prints prelude, installed capability, or fixed-function documentation; returns <code class="inline">nil</code></td></tr><tr><td style="text-align: left;"><code class="inline">(export-meta &quot;ns/name&quot;)</code></td><td style="text-align: left;">Metadata map, or <code class="inline">nil</code> when unknown</td></tr><tr><td style="text-align: left;"><code class="inline">(source &quot;ns/name&quot;)</code></td><td style="text-align: left;">Prints the attached prelude defining form, or a miss notice; returns <code class="inline">nil</code></td></tr><tr><td style="text-align: left;"><code class="inline">(components)</code></td><td style="text-align: left;">Vector of attached component IDs in frozen dependency order</td></tr><tr><td style="text-align: left;"><code class="inline">(component id)</code></td><td style="text-align: left;">Map with <code class="inline">:id</code>, <code class="inline">:dependencies</code>, <code class="inline">:namespaces</code>, <code class="inline">:source-hash</code>, and exact <code class="inline">:source</code>, or <code class="inline">nil</code></td></tr></tbody></table></div><p>For <code class="inline">dir</code>/<code class="inline">doc</code>/<code class="inline">export-meta</code>/<code class="inline">source</code>/<code class="inline">component</code>, references accept a string, a quoted
 symbol, or an unquoted symbol (the analyzer auto-quotes bare and namespaced
-symbols in those call positions, matching <code class="inline">clojure.repl/doc</code>). <code class="inline">apropos</code>
-accepts a string or a quoted symbol; an unquoted query evaluates normally.
-Computed arguments still evaluate normally, so <code class="inline">(doc (str &quot;ns/&quot; &quot;name&quot;))</code> and
+symbols in those call positions, matching <code class="inline">clojure.repl/doc</code>). A dotted
+component ID such as <code class="inline">agent.core</code> is one symbol, not a namespaced <code class="inline">ns/name</code>
+ref. <code class="inline">apropos</code> accepts a string or a quoted symbol; an unquoted query evaluates
+normally. <code class="inline">(components)</code> takes no argument.</p><p>Computed arguments still evaluate normally, so <code class="inline">(doc (str &quot;ns/&quot; &quot;name&quot;))</code> and
 <code class="inline">#(doc %)</code> over string refs keep working. <code class="inline">clojure.core/meta</code> is unchanged and
 is not part of this family.</p><p>Answers depend on the prelude a given run attaches, so the results below are
 illustrative:</p><pre><code class="clojure language-clojure">(dir &quot;inspection&quot;)                    ; =&gt; ...
@@ -1521,8 +1524,19 @@ no registry fallthrough at all.</p><p>Both <code class="inline">:prompt</code> a
 <code class="inline">export-meta</code>/<code class="inline">apropos</code>, which is how a <code class="inline">:discoverable</code> export is found at
 all. Private <code class="inline">defn-</code> helpers have no export record and never appear there, and
 a namespace holding only private helpers is absent from <code class="inline">(dir)</code>. <code class="inline">source</code> is
-the exception for implementation inspection: it also reveals private helpers
-that are transitively reachable from a public export.</p><p>Attached prelude results for <code class="inline">dir</code>/<code class="inline">doc</code>/<code class="inline">apropos</code>/<code class="inline">export-meta</code> are filtered
+the exception for definition-level implementation inspection: it also reveals
+private helpers that are transitively reachable from a public export.</p><p><code class="inline">components</code> and <code class="inline">component</code> are data, not print forms. They inspect only the
+selected workflow or mission catalog: a workflow evaluation cannot see a
+mission component, and a mission evaluation cannot see the workflow's
+<code class="inline">agent.core</code>. <code class="inline">:dependencies</code> are direct edges; <code class="inline">:source</code> is the complete
+effective component source, including private helpers and an active override;
+<code class="inline">:origin</code> is omitted. There is no shipped-library or filesystem fallback for an
+unattached ID. Direct <code class="inline">PtcRunner.Lisp.run/2</code> has no Kernel component graph, even
+when it receives a source prelude, so <code class="inline">(components)</code> returns <code class="inline">[]</code> and
+<code class="inline">(component id)</code> returns <code class="inline">nil</code>; higher-order calls from that environment answer
+the same way. Returning a component map or its <code class="inline">:source</code> is charged to the
+ordinary <code class="inline">terminal_result_bytes</code> evaluation limit. The catalog is never copied
+into result stamps, traces, telemetry, or host logs.</p><p>Attached prelude results for <code class="inline">dir</code>/<code class="inline">doc</code>/<code class="inline">apropos</code>/<code class="inline">export-meta</code> are filtered
 to what the running program may actually call. A miss is not a failure:
 <code class="inline">export-meta</code> returns <code class="inline">nil</code>, <code class="inline">doc</code> and <code class="inline">source</code> print a not-found line (or, for
 <code class="inline">doc</code> on an exact indexed export of an unattached shipped library, an attachment redirect), and

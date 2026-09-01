@@ -51,6 +51,10 @@ defmodule PtcRunner.Kernel.RunConfig do
   Constructing a config validates shape, recorder readiness, and ownership
   objects but performs no execution and grants no authority beyond the supplied
   environments.
+
+  `inspect_only` is a compile-and-inspect session flag. When true, Kernel,
+  provider, and capability routes fail closed; public `PtcRunner.Lisp.run/2`
+  cannot set it.
   """
 
   alias PtcRunner.Kernel.ApplicationSource
