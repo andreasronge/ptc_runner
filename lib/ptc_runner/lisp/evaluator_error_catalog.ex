@@ -19,7 +19,8 @@ defmodule PtcRunner.Lisp.EvaluatorErrorCatalog do
     :java_type_error,
     :java_domain_error,
     :invalid_java_string,
-    :java_handler_contract_error
+    :java_handler_contract_error,
+    :inspect_only_unavailable
   ]
 
   @wire_names Enum.map(@kinds, &Atom.to_string/1)
@@ -35,7 +36,9 @@ defmodule PtcRunner.Lisp.EvaluatorErrorCatalog do
     java_type_error: "Java member argument does not match an admitted overload",
     java_domain_error: "Java member rejected an admitted argument for a domain reason",
     invalid_java_string: "Java string argument is not valid UTF-8",
-    java_handler_contract_error: "Java handler violated its closed contract"
+    java_handler_contract_error: "Java handler violated its closed contract",
+    inspect_only_unavailable:
+      "An inspect-only session cannot use Kernel, provider, or capability routes"
   }
 
   @spec kinds() :: [atom()]

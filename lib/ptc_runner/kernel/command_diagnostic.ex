@@ -9,10 +9,10 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   message shapes contain only fixed literals plus bounded PTC-Lisp symbol
   names, sealed provider-selection field names, a catalog-validated runtime
   ceiling or optional-limit request, a closed host budget prerequisite, a
-  bounded agent turn ceiling, an opaque replay request hash, or a closed
-  component-override field rule. Compile messages require
-  component-source provenance; a missing capability message is rebuilt from
-  the frozen bundle's sorted tool requirements. A missing MCP tool message may
+  bounded agent turn ceiling, an opaque replay request hash, a closed
+  component-override field rule, or closed candidate-gate criterion IDs.
+  Compile messages require component-source provenance; a missing capability
+  message is rebuilt from the frozen bundle's sorted tool requirements. A missing MCP tool message may
   retain only the validated, declaration-owned upstream name and carries no
   provider catalog payload. Kernel runtime and replay messages require fixed
   runtime provenance. An agent turn-limit message and an out-of-range agent
@@ -29,6 +29,7 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   """
 
   alias PtcRunner.Kernel.AgentConfigDiagnostic
+  alias PtcRunner.Kernel.CandidateRefusedDiagnostic
   alias PtcRunner.Kernel.CommandPath
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
@@ -346,6 +347,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
   defp valid_span?(_span, _source), do: false
 
   defp valid_message_source?(message, %{message: message}, _source), do: true
+
+  defp valid_message_source?(
+         message,
+         %{phase: :publication, code: :candidate_refused},
+         nil
+       ),
+       do: CandidateRefusedDiagnostic.valid_message?(message)
 
   defp valid_message_source?(
          message,

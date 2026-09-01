@@ -60,7 +60,7 @@ defmodule PtcRunner.ClosureCaptureSoakTest do
         assert is_integer(n) and n > 0
       end)
 
-    log_snapshot("build", iters, before, aft)
+    MemorySoak.log_snapshot("build", iters, before, aft)
 
     MemorySoak.assert_flat!(before, aft, :binary, tolerance_pct: 50)
     MemorySoak.assert_flat!(before, aft, :total, tolerance_pct: 30)
@@ -83,7 +83,7 @@ defmodule PtcRunner.ClosureCaptureSoakTest do
         assert {:ok, %{return: _}} = Lisp.run(program)
       end)
 
-    log_snapshot("return_closure", iters, before, aft)
+    MemorySoak.log_snapshot("return_closure", iters, before, aft)
 
     MemorySoak.assert_flat!(before, aft, :binary, tolerance_pct: 50)
     MemorySoak.assert_flat!(before, aft, :processes, tolerance_pct: 50)
@@ -96,15 +96,10 @@ defmodule PtcRunner.ClosureCaptureSoakTest do
         assert {:ok, %{return: 6}} = Lisp.run("(+ 1 2 3)")
       end)
 
-    log_snapshot("tool_loop", iters, before, aft)
+    MemorySoak.log_snapshot("tool_loop", iters, before, aft)
 
     MemorySoak.assert_flat!(before, aft, :total, tolerance_pct: 20)
     MemorySoak.assert_atoms_per_iter!(before, aft, iters)
     MemorySoak.assert_procs_stable!(before, aft, tolerance: 5)
-  end
-
-  defp log_snapshot(label, iters, before, aft) do
-    IO.puts("BEFORE (#{label}, n=#{iters}):\n#{MemorySoak.format(before)}")
-    IO.puts("AFTER  (#{label}, n=#{iters}):\n#{MemorySoak.format(aft)}")
   end
 end

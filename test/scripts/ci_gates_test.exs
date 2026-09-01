@@ -198,6 +198,20 @@ defmodule PtcRunner.Scripts.CIGatesTest do
     refute workflow =~ "replace=true"
   end
 
+  test "the packaged release smoke covers inspect-only and both materialize modes" do
+    script = File.read!(Path.join(@root, "scripts/verify_standalone_release.sh"))
+
+    assert script =~ ~r/for command in .* materialize;/
+    assert script =~ "docs inspect-source"
+    assert script =~ "docs source-inspection"
+    assert script =~ "--inspect-only"
+    assert script =~ "--source-out"
+    assert script =~ "--out \"$release_tmp_dir/candidate\""
+    assert script =~ "Returns the supplied input."
+    assert script =~ "(input :map) -> :map"
+    assert script =~ "provider-application.json"
+  end
+
   test "the interactive REPL PTY check is a Nightly gate, not a PR core-release gate" do
     workflow = File.read!(Path.join(@root, ".github/workflows/test.yml"))
     nightly = File.read!(Path.join(@root, ".github/workflows/nightly.yml"))

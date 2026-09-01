@@ -259,7 +259,43 @@ defmodule PtcRunner.Kernel.CommandEntry do
     end
   end
 
+  defp distinct?(
+         %CommandArguments{command: :materialize, options: options},
+         _destinations,
+         _run_ref,
+         envelope
+       ) do
+    [:source_out, :out]
+    |> Enum.find_value(fn key ->
+      case materialize_destination(options, key) do
+        {:ok, path} ->
+          if materialize_envelope_collision?(key, path, envelope),
+            do: {:error, {:destination_collision, key}}
+
+        _other ->
+          nil
+      end
+    end)
+    |> case do
+      {:error, _reason} = error -> error
+      nil -> :ok
+    end
+  end
+
   defp distinct?(_arguments, _destinations, _run_ref, _envelope), do: :ok
+
+  defp materialize_destination(options, key) do
+    case Map.fetch(options, key) do
+      {:ok, path} -> anchor_path(path)
+      :error -> :error
+    end
+  end
+
+  defp materialize_envelope_collision?(:out, directory, envelope),
+    do: DestinationIdentity.within?(envelope, directory)
+
+  defp materialize_envelope_collision?(:source_out, path, envelope),
+    do: DestinationIdentity.key(path) == DestinationIdentity.key(envelope)
 
   defp destination_collision(arguments, run_ref, frontend, first, second) do
     {:error,

@@ -48,7 +48,7 @@ the trace cannot answer the question.">
 <li><a href="/guides/using-models/">Use a model</a></li>
 <li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
 <li><a href="/guides/building-agents/">Customize an agent</a></li>
-<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
 </ul>
 
 <h2>Design</h2>
@@ -61,6 +61,7 @@ the trace cannot answer the question.">
 <ul>
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
 <li><a href="/guides/debugging-a-failed-run/" class="current" aria-current="page">Debug a failed run</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
@@ -88,6 +89,7 @@ the trace cannot answer the question.">
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
 </ul>
 
@@ -102,10 +104,10 @@ the trace cannot answer the question.</p><h2 id="what-failed">What failed?</h2><
   --profile run-analysis-v1 \
   -e '(analysis/runs {&quot;status&quot; &quot;error&quot;})'</code></pre><p>Use the run ID to open its activity, terminal reason, evaluations, tool use,
 limits, and completeness flags. Public traces deliberately omit prompts,
-responses, generated source, and tool payloads.</p><p>If the run was configured to retain private inspection, authorize the private
-profile separately and write unattended output to an owner-controlled file.
-Private inspection is for questions that public evidence cannot answer; it is
-not the default debugging path.</p><h2 id="can-another-run-inspect-the-failure">Can another run inspect the failure?</h2><p>The checked-in debugging example demonstrates another useful pattern: one
+responses, generated source, and tool payloads.</p><p>If the run retained private inspection, authorize that profile separately and
+write unattended output to an owner-controlled file. That path is not the
+default. For live attached source, see
+<a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a>.</p><h2 id="can-another-run-inspect-the-failure">Can another run inspect the failure?</h2><p>The checked-in debugging example demonstrates another useful pattern: one
 ordinary PtcRunner application can navigate a frozen failed capture through the
 shipped <code class="inline">debug.nav</code> library without gaining filesystem, network, model, or
 nested-evaluation access.</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
@@ -119,7 +121,7 @@ private-inspection rules, and model-assisted navigation contract. The
 <a href="https://github.com/andreasronge/ptc_runner/blob/main/docs/maintainers/trace-log-contract.md">TraceLog and run-analysis reference</a> owns
 the event schema.</p>
 </article>
-<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/kernel-repl/">&larr; Explore a project interactively</a><a class="pager-next" href="/guides/evaluating-with-replay/">Evaluate changes with replay &rarr;</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/inspecting-source-and-programs/">&larr; Inspect source and generated programs</a><a class="pager-next" href="/guides/evaluating-with-replay/">Evaluate changes with replay &rarr;</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/debugging-a-failed-run.md">Edit this
   page on GitHub</a>.

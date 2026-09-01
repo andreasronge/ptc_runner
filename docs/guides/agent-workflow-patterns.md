@@ -24,7 +24,7 @@ Ship deterministic policy as a prompt-visible mission component, not as prompt
 text or one-call-per-rule tools. The model composes the functions in one
 program and the rules stay reviewable. Prompt-stated rules drift; tool-relayed
 rules drag every intermediate value through the model's context.
-[Customize agent components](components-and-preludes.md) has the contract.
+[the customization guide](components-and-preludes.md) has the contract.
 
 ## Specialists as missions
 

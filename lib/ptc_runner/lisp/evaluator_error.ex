@@ -320,6 +320,10 @@ defmodule PtcRunner.Lisp.EvaluatorError do
     end
   end
 
+  defp public_message(:inspect_only_unavailable, _details) do
+    ok_message("this inspect-only session cannot use Kernel, provider, or capability routes")
+  end
+
   defp public_message(reason, _details) do
     case Map.fetch(@java_messages, reason) do
       {:ok, message} -> ok_message(message)

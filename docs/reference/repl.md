@@ -158,6 +158,32 @@ provider aliases. Mission sessions add one meta-command:
 cannot be combined with `--profile` or `--describe-profile`. An unknown name
 lists declared missions in sorted order before sinks or provider activity.
 
+## Inspect without providers
+
+```console
+ptc repl --project ptc-project.json --inspect-only
+ptc repl --project ptc-project.json --inspect-only --mission analysis
+ptc repl --manifest ptc.json --inspect-only
+```
+
+`--inspect-only` requires `--project` or `--manifest`. It compiles the selected
+workflow or named mission and attaches its component catalog without a host
+document, environment file, input, provider, or capability. A startup notice
+states that this is a compile-and-inspect environment, not a runnable
+application environment.
+
+It may be combined with `--mission`, `--eval`, `--load`, a script, stdin, and
+`--preview-chars`. It conflicts with `--host-config`, `--env-file`, `--trace`,
+`--profile`, `--describe-profile`, `--resource`, `--run`, `--session-trace-dir`,
+`--output`, `--private-output`, `--continue-on-error`, `--private-terminal`,
+`--private-unattended`, and JSON Lines output.
+
+Pure attached functions may evaluate. Kernel, provider, and capability routes
+fail closed with `inspect_only_unavailable`. Omitting the flag leaves live REPL
+authority unchanged.
+
+See the [source-inspection reference](source-inspection.md).
+
 Interactive meta-commands are deliberately small:
 
 ```text
@@ -180,7 +206,10 @@ only, not runtime discovery or authority. Uninstalled capabilities and private
 Lisp runtime tools are not exposed. `(dir)` and
 `(export-meta "ns/name")` / `(export-meta ns/name)` inspect the attached
 prelude API specifically, and `(source ns/name)` prints an attached prelude
-defining form when available. For `doc`/`dir`/`export-meta`/`source`, unquoted
+defining form when available. `(components)` lists attached component IDs for
+the selected workflow or mission environment; `(component id)` returns that
+component's identity, direct dependencies, namespaces, hash, and exact source,
+or `nil`. For `doc`/`dir`/`export-meta`/`source`/`component`, unquoted
 and quoted symbols are accepted the same way as strings; `apropos` accepts
 quoted symbols or strings (an unquoted query evaluates normally). An attached interactive terminal prints
 this guidance in its startup banner, and `:help` repeats it. Detached input,
@@ -195,8 +224,9 @@ searches it, and typos, masked exports, and exports removed by an attached
 component override keep the ordinary not-found response. Embedded
 `PtcRunner.Lisp.run/2` calls without the index do likewise.
 
-See the [PTC-Lisp specification](../ptc-lisp-specification.md) and [function
-reference](../function-reference.md) for the full language surface.
+See the [source-inspection reference](source-inspection.md) for the retrieval
+matrix, the [PTC-Lisp specification](../ptc-lisp-specification.md) for language
+rules, and the [function reference](../function-reference.md) for signatures.
 
 Persist canonical session events with `--trace`:
 
@@ -761,6 +791,8 @@ existing files.
 
 - [Running and debugging](cli.md) covers run artifacts and
   the Viewer.
+- [Source inspection](source-inspection.md) covers attached components,
+  `--inspect-only`, and admitted programs.
 - [Manifests and capabilities](application-manifest.md) covers attached
   manifests and snapshot providers.
 - [Components and preludes](component-contracts.md) explains the profile's

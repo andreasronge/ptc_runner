@@ -15,7 +15,7 @@ defmodule PtcRunner.Kernel.CommandApplicationDiagnostic do
   alias PtcRunner.Kernel.SchemaViolationDiagnostic
   alias PtcRunner.Kernel.ValueContractDiagnostic
 
-  @spec project(:validate | :run | :doctor, term()) :: CommandDiagnostic.t()
+  @spec project(:validate | :run | :doctor | :materialize, term()) :: CommandDiagnostic.t()
   def project(_command, reason) do
     {source_role, source_name, reason} = source_role(reason)
     {code, path_value} = projection(source_role, reason)

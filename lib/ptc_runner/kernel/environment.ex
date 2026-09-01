@@ -21,8 +21,9 @@ defmodule PtcRunner.Kernel.Environment do
   Validates common environment fields and returns normalized attributes.
 
   `opts` carries `:authorization`, the workflow package authority that decides
-  private diagnostic routes, and `:shipped_component_ids`, the shipped library
-  selections the bundle represents.
+  private diagnostic routes; `:shipped_component_ids`, the shipped library
+  selections the bundle represents; and `:inspect_only`, which skips recorded
+  tool-requirement checks for compile-and-inspect sessions.
   """
   def assemble(bundle, capabilities, data, kind, opts \\ [])
 
@@ -42,12 +43,22 @@ defmodule PtcRunner.Kernel.Environment do
   def assemble(bundle, capabilities, data, :mission, opts) when is_list(opts),
     do: do_assemble(bundle, capabilities, data, :mission, [], opts)
 
+  defp skip_tool_requirements?(opts) when is_list(opts),
+    do: Keyword.get(opts, :inspect_only) == true
+
   defp do_assemble(bundle, capabilities, data, kind, private_capabilities, opts) do
     with :ok <- valid_bundle(bundle),
          true <- JSONValue.map?(data),
          {:ok, capability_map} <- capability_map(capabilities),
          :ok <- reserved_names(kind, capability_map),
-         :ok <- bundle_requirements(bundle, capability_map, kind, private_capabilities),
+         :ok <-
+           maybe_bundle_requirements(
+             bundle,
+             capability_map,
+             kind,
+             private_capabilities,
+             skip_tool_requirements?(opts)
+           ),
          {:ok, shipped_component_ids} <-
            normalize_shipped_component_ids(bundle, Keyword.get(opts, :shipped_component_ids)) do
       {:ok,
@@ -55,13 +66,19 @@ defmodule PtcRunner.Kernel.Environment do
          bundle: bundle,
          capabilities: capability_map,
          data: data,
-         shipped_component_ids: shipped_component_ids
+         shipped_component_ids: shipped_component_ids,
+         inspect_only: skip_tool_requirements?(opts)
        }}
     else
       false -> {:error, :invalid_environment_data}
       error -> error
     end
   end
+
+  defp maybe_bundle_requirements(_bundle, _capabilities, _kind, _private, true), do: :ok
+
+  defp maybe_bundle_requirements(bundle, capabilities, kind, private_capabilities, false),
+    do: bundle_requirements(bundle, capabilities, kind, private_capabilities)
 
   @doc false
   @spec component_ids(%{bundle: FrozenBundle.t() | nil}) :: [binary()]
@@ -130,6 +147,11 @@ defmodule PtcRunner.Kernel.Environment do
 
   def capability_view(name, %RoutedCapability{} = capability) when is_binary(name),
     do: %{capabilities: %{name => capability}}
+
+  @doc "Returns the attested component catalog for `environment`, if present."
+  @spec catalog(map()) :: PtcRunner.Kernel.ComponentCatalog.t() | nil
+  def catalog(%{catalog: catalog}), do: catalog
+  def catalog(_environment), do: nil
 
   @doc "Returns sorted model-visible capability metadata for one environment."
   def metadata(%{capabilities: capabilities}) do

@@ -1567,6 +1567,277 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute_receive {:agent_request, _outcome_second}
   end
 
+  test "run-outcome retain_programs is opt-in and keeps the current outcome shape when omitted" do
+    response = agent_return("sum", ~S|(return {"sum" 42})|)
+    {:ok, omitted} = agent_config([response])
+
+    assert {:ok, %{value: value}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Return a sum" {"max_turns" 1}))|,
+               omitted
+             )
+
+    assert value == %{"status" => "returned", "value" => %{"sum" => 42}}
+    refute Map.has_key?(value, "programs")
+    refute Map.has_key?(value, "programs-omitted")
+
+    {:ok, empty} = agent_config([%{content: "prose", tool_calls: []}])
+
+    assert {:ok, %{value: empty_value}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Exhaust" {"max_turns" 1 "retain_programs" 2}))|,
+               empty
+             )
+
+    assert empty_value["status"] == "subject-failure"
+    assert empty_value["programs"] == []
+    assert empty_value["programs-omitted"] == 0
+  end
+
+  test "run-outcome retain_programs validates before provider activity and is rejected elsewhere" do
+    response = agent_return("sum", "(return 1)")
+
+    {:ok, invalid} = agent_config([response])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :invalid_agent_config,
+              details: %{option: "retain_programs", min: 1, max: 128, value: 0}
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Compute" {"retain_programs" 0}))|,
+               invalid
+             )
+
+    refute_receive {:agent_request, _invalid}
+
+    assert {:ok, message} = AgentConfigDiagnostic.integer_message("retain_programs", 1, 128, 0)
+    assert message =~ "for agent.core/run-outcome;"
+    refute message =~ "for agent.core/run;"
+
+    assert {:ok, typed} =
+             AgentConfigDiagnostic.type_message("retain_programs", 1, 128, :string)
+
+    assert typed =~ "for agent.core/run-outcome;"
+    refute typed =~ "for agent.core/run;"
+
+    {:ok, mistyped} = agent_config([response])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :invalid_agent_config,
+              details: %{option: "retain_programs", min: 1, max: 128, type: :string}
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Compute" {"retain_programs" "nope"}))|,
+               mistyped
+             )
+
+    refute_receive {:agent_request, _mistyped}
+
+    {:ok, incompatible} = agent_config([response])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :explicit_failure,
+              details: %{failure_kind: "invalid-agent-config"}
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/run-value "Compute" {"retain_programs" 2}))|,
+               incompatible
+             )
+
+    refute_receive {:agent_request, _incompatible}
+  end
+
+  test "run-outcome retain_programs keeps admitted newest programs and excludes pre-admission refusals" do
+    oversize = String.duplicate("x", 131_073)
+
+    responses = [
+      agent_return("oversize", oversize),
+      agent_return("one", "(+ 1 1)"),
+      agent_return("compile", "(+"),
+      agent_return("done", "(return 3)")
+    ]
+
+    {:ok, config} = agent_config(responses)
+
+    assert {:ok, %{value: value}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Collect" {"max_turns" 4 "retain_programs" 2 "max_program_chars" 200000}))|,
+               config
+             )
+
+    assert value["status"] == "returned"
+    assert value["value"] == 3
+    assert value["programs-omitted"] == 1
+
+    assert [
+             %{"turn" => 3, "mission" => "default", "source" => "(+"},
+             %{"turn" => 4, "mission" => "default", "source" => "(return 3)"}
+           ] = value["programs"]
+
+    refute Enum.any?(value["programs"], &String.contains?(&1["source"], oversize))
+  end
+
+  test "run-outcome retain_programs uses global turns across phases" do
+    {:ok, mission} = MissionEnvironment.new([])
+
+    {:ok, config} =
+      agent_config(
+        [agent_return("explore", "(return 1)"), agent_return("synthesize", "(return 2)")],
+        [],
+        missions: %{"explore" => mission, "synthesize" => mission}
+      )
+
+    source = ~S"""
+    (return
+      (agent.core/run-outcome
+        "Decide."
+        {"retain_programs" 8
+         "phases"
+         [{"mission" "explore" "max_turns" 1}
+          {"mission" "synthesize" "max_turns" 1}]}))
+    """
+
+    assert {:ok, %{value: value}} = Kernel.run(source, config)
+    assert value["status"] == "returned"
+    assert value["value"] == 2
+
+    assert [
+             %{"turn" => 1, "mission" => "explore", "source" => "(return 1)"},
+             %{"turn" => 2, "mission" => "synthesize", "source" => "(return 2)"}
+           ] = value["programs"]
+
+    assert value["programs-omitted"] == 0
+  end
+
+  test "run-outcome retain_programs strips the admission marker before model-visible observations" do
+    responses = [
+      agent_return("continue", "(+ 1 1)"),
+      agent_return("done", "(return 2)")
+    ]
+
+    {:ok, config} = agent_config(responses)
+
+    assert {:ok, %{value: value}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Observe" {"max_turns" 2 "retain_programs" 4}))|,
+               config
+             )
+
+    assert value["programs-omitted"] == 0
+    assert_receive {:agent_request, _first}
+    assert_receive {:agent_request, second}
+
+    encoded = Jason.encode!(second)
+
+    refute encoded =~ "admitted?"
+    refute encoded =~ "source_bytes"
+  end
+
+  test "run-outcome retain_programs attaches prior programs to subject and provider failures" do
+    subject_responses = [
+      agent_return("continue", "(+ 1 1)"),
+      agent_return("fail", ~S|(fail "declined")|)
+    ]
+
+    {:ok, subject_config} = agent_config(subject_responses)
+
+    assert {:ok, %{value: subject}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Fail after work" {"max_turns" 2 "retain_programs" 8}))|,
+               subject_config
+             )
+
+    assert subject["status"] == "subject-failure"
+    assert subject["programs-omitted"] == 0
+
+    assert [
+             %{"turn" => 1, "mission" => "default", "source" => "(+ 1 1)"},
+             %{"turn" => 2, "mission" => "default", "source" => ~S|(fail "declined")|}
+           ] = subject["programs"]
+
+    provider_responses = [
+      agent_return("continue", "(+ 2 2)"),
+      {:error, :transport_down}
+    ]
+
+    {:ok, provider_config} = agent_config(provider_responses)
+
+    assert {:ok, %{value: provider}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Provider after work" {"max_turns" 2 "retain_programs" 8}))|,
+               provider_config
+             )
+
+    assert provider["status"] == "provider-failure"
+    assert provider["programs-omitted"] == 0
+
+    assert [
+             %{"turn" => 1, "mission" => "default", "source" => "(+ 2 2)"}
+           ] = provider["programs"]
+  end
+
+  test "run-outcome retain_programs omits an admitted program larger than the byte ceiling" do
+    huge = ";#{String.duplicate("€", 700_000)}\n(return 1)"
+
+    {:ok, config} =
+      agent_config(
+        [agent_return("huge", huge)],
+        retention_byte_limits(subordinate_source_bytes: 2_200_000),
+        llm_max_request_bytes: 4_000_000,
+        llm_max_response_bytes: 4_000_000
+      )
+
+    assert {:ok, %{value: value}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Huge" {"max_turns" 1 "retain_programs" 8 "max_program_chars" 1000000}))|,
+               config
+             )
+
+    assert value["status"] == "returned"
+    assert value["value"] == 1
+    assert value["programs-omitted"] == 1
+    assert value["programs"] == []
+  end
+
+  test "run-outcome retain_programs evicts oldest complete entries to stay under the byte ceiling" do
+    first = padded_multibyte_program("(+ 1 1)", 230_000)
+    second = padded_multibyte_program("(+ 2 2)", 230_000)
+    third = padded_multibyte_program("(return 3)", 230_000)
+
+    {:ok, config} =
+      agent_config(
+        [
+          agent_return("first", first),
+          agent_return("second", second),
+          agent_return("third", third)
+        ],
+        retention_byte_limits(subordinate_source_bytes: 1_000_000),
+        llm_max_request_bytes: 4_000_000,
+        llm_max_response_bytes: 4_000_000
+      )
+
+    assert {:ok, %{value: value}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Ring" {"max_turns" 3 "retain_programs" 8 "max_program_chars" 1000000 "max_transcript_chars" 1000000}))|,
+               config
+             )
+
+    assert value["status"] == "returned"
+    assert value["value"] == 3
+    assert value["programs-omitted"] == 1
+
+    assert [
+             %{"turn" => 2, "mission" => "default", "source" => ^second},
+             %{"turn" => 3, "mission" => "default", "source" => ^third}
+           ] = value["programs"]
+  end
+
   test "only validating entries render the active enum result contract" do
     {:ok, result_contract} =
       ValueContract.compile(%{
@@ -5705,6 +5976,21 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     }
   end
 
+  defp padded_multibyte_program(form, euro_count) do
+    ";" <> String.duplicate("€", euro_count) <> "\n" <> form
+  end
+
+  defp retention_byte_limits(overrides) do
+    [
+      capability_argument_bytes: 4_000_000,
+      capability_result_bytes: 4_000_000,
+      terminal_result_bytes: 4_000_000,
+      evaluation_memory_bytes: 32_000_000,
+      evaluation_timeout_ms: 15_000
+    ]
+    |> Keyword.merge(overrides)
+  end
+
   defp country_enum_values do
     ["A. NL", "B. BE", "C. ES", "D. FR", "Not Applicable"]
   end
@@ -5753,7 +6039,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     {:ok, llm} =
       LLMCapability.new(
         requester: requester,
-        max_request_bytes: Keyword.get(opts, :llm_max_request_bytes, 1_000_000)
+        max_request_bytes: Keyword.get(opts, :llm_max_request_bytes, 1_000_000),
+        max_response_bytes: Keyword.get(opts, :llm_max_response_bytes, 1_000_000)
       )
 
     {:ok, bundle} = agent_bundle(opts)

@@ -171,7 +171,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end)
 
     assert topics ==
-             ~w(docs doctor init models repl root run run transcript validate version viewer)
+             ~w(docs doctor init materialize models repl root run run transcript validate version viewer)
 
     run_options =
       help_branch
@@ -3841,11 +3841,27 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ["repl", "--session-trace-dir", "traces"],
           ["repl", "--continue-on-error"],
           ["repl", "--private-unattended"],
-          ["repl", "--format", "jsonl"]
+          ["repl", "--format", "jsonl"],
+          ["repl", "--inspect-only"]
         ] do
       assert {:error, rejection} = CommandParser.parse(argv)
       assert rejection.command == :repl
       assert rejection.code == :invalid_arguments
+    end
+  end
+
+  test "repl inspect-only conflicts are rejected by the shared parser" do
+    for argv <- [
+          ["repl", "--inspect-only", "--host-config", "host.json"],
+          ["repl", "--inspect-only", "--manifest", "ptc.json", "--host-config", "host.json"],
+          ["repl", "--inspect-only", "--manifest", "ptc.json", "--trace", "trace.jsonl"],
+          ["repl", "--inspect-only", "--manifest", "ptc.json", "--private-terminal"],
+          ["repl", "--inspect-only", "--profile", "run-analysis-v1"],
+          ["repl", "--inspect-only", "--manifest", "ptc.json", "--env-file", "missing.env"]
+        ] do
+      assert {:error, rejection} = CommandParser.parse(argv)
+      assert rejection.command == :repl
+      assert rejection.code == :conflicting_arguments
     end
   end
 
@@ -5068,7 +5084,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         provider_activity: true
       )
 
-    for command <- [:help, :version, :init, :validate, :models, :doctor] do
+    for command <- [:help, :version, :init, :validate, :models, :doctor, :materialize] do
       assert_raise ArgumentError, fn -> CommandOutcome.error(command, run_ref, active) end
     end
 
@@ -5097,7 +5113,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       {:validate, diagnostic_for_row(DiagnosticCatalog.fetch!(:application, :override_invalid))},
       {:validate,
        diagnostic_for_row(DiagnosticCatalog.fetch!(:application, :event_identity_conflict))},
-      {:help, diagnostic_for_row(DiagnosticCatalog.fetch!(:arguments, :conflicting_arguments))}
+      {:help, diagnostic_for_row(DiagnosticCatalog.fetch!(:arguments, :conflicting_arguments))},
+      {:materialize, diagnostic_for_row(DiagnosticCatalog.fetch!(:host, :host_unavailable))}
     ]
 
     for {command_mode, diagnostic} <- impossible_pairs do
@@ -7295,12 +7312,13 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert {:ok, registry} = ProviderRegistry.new()
     assert {:ok, prepared} = RunCoordinator.prepare(request, catalog_for(registry))
 
-    results =
-      1..2
-      |> Enum.map(fn _index ->
+    tasks =
+      Enum.map(1..2, fn _index ->
         Task.async(fn -> RunBuilder.build_prepared(prepared, registry) end)
       end)
-      |> Task.await_many()
+
+    results = Task.await_many(tasks)
+    Enum.each(tasks, &await_exit/1)
 
     assert Enum.count(results, &match?({:ok, _built}, &1)) == 1
     assert Enum.count(results, &(&1 == {:error, :invalid_prepared_run})) == 1
@@ -8813,6 +8831,16 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         }
       }
     }
+  end
+
+  defp await_exit(%Task{pid: pid}) do
+    ref = Process.monitor(pid)
+
+    receive do
+      {:DOWN, ^ref, :process, ^pid, _reason} -> :ok
+    after
+      1_000 -> flunk("prepared-run consumer task did not exit")
+    end
   end
 
   defp manifest_error_path({:manifest_path, path, _reason}), do: path

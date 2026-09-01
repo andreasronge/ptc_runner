@@ -780,9 +780,9 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          evaluation_opts,
          observation_chars \\ nil
        ) do
-    evaluation =
-      state
-      |> Evaluation.evaluate_source(
+    kernel_eval_response(
+      Evaluation.evaluate_source(
+        state,
         mission_name,
         mission,
         source,
@@ -790,13 +790,26 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         event_sink,
         inspection_sink,
         evaluation_opts
-      )
+      ),
+      observation_chars
+    )
+  end
+
+  defp kernel_eval_response(evaluation, observation_chars \\ nil) do
+    admitted? = Map.get(evaluation, :admitted?) == true
+    source_bytes = Map.get(evaluation, :source_bytes)
+
+    value =
+      evaluation
+      |> Map.delete(:admitted?)
+      |> Map.delete(:source_bytes)
       |> maybe_project_observation(observation_chars)
 
-    %{
-      status: :ok,
-      value: evaluation
-    }
+    if admitted? do
+      %{status: :ok, value: value, admitted?: true, source_bytes: source_bytes}
+    else
+      %{status: :ok, value: value}
+    end
   end
 
   defp maybe_project_observation(evaluation, max_chars) when is_integer(max_chars),
@@ -816,20 +829,18 @@ defmodule PtcRunner.Kernel.RuntimeTools do
        ) do
     case normalize_params(params, limits.capability_argument_bytes) do
       {:ok, params} ->
-        %{
-          status: :ok,
-          value:
-            state
-            |> Evaluation.evaluate_source(
-              mission_name,
-              mission,
-              source,
-              limits.evaluation_timeout_ms,
-              event_sink,
-              inspection_sink,
-              Keyword.put(evaluation_opts, :params, params)
-            )
-        }
+        kernel_eval_response(
+          Evaluation.evaluate_source(
+            state,
+            mission_name,
+            mission,
+            source,
+            limits.evaluation_timeout_ms,
+            event_sink,
+            inspection_sink,
+            Keyword.put(evaluation_opts, :params, params)
+          )
+        )
 
       {:error, _reason} ->
         invalid_kernel_eval_request(state, event_sink)

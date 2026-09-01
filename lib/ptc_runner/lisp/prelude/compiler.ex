@@ -167,6 +167,9 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
   end
 
   @doc false
+  # Merges compiled component preludes in frozen dependency order. The composed
+  # `source_index` is the union of each component index so `(source)` can
+  # resolve attached exports after bundle compilation.
   @spec compose([Prelude.t()], String.t(), [map()]) ::
           {:ok, Prelude.t()} | {:error, ValidationError.t()}
   def compose(preludes, aggregate_source, components)
@@ -178,6 +181,7 @@ defmodule PtcRunner.Lisp.Prelude.Compiler do
          exports: Enum.flat_map(preludes, & &1.exports),
          private_env: merge_prelude_map(preludes, :private_env),
          source_hash: source_hash(aggregate_source),
+         source_index: merge_prelude_map(preludes, :source_index),
          form_graph: merge_prelude_map(preludes, :form_graph),
          metadata: %{
            namespaces: merge_namespace_metadata(preludes),

@@ -46,7 +46,7 @@
 <li><a href="/guides/using-models/">Use a model</a></li>
 <li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
 <li><a href="/guides/building-agents/">Customize an agent</a></li>
-<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
 </ul>
 
 <h2>Design</h2>
@@ -59,6 +59,7 @@
 <ul>
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
 <li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
@@ -86,6 +87,7 @@
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
 </ul>
 
@@ -119,7 +121,11 @@ standalone loop while correction turns remain.</p><p>Provider failures return <c
 with the complete bounded LLM envelope. The closed <code class="inline">kind</code> and <code class="inline">reason</code> are
 facts for workflow policy; this entry does not choose retry, failover, or
 abort. Restarting with another alias starts another loop and does not resume
-the previous transcript.</p><ul><li><strong>Kind:</strong> <code class="inline">function</code></li><li><strong>Visibility:</strong> <code class="inline">prompt</code></li><li><strong>Effect:</strong> <code class="inline">unknown</code></li><li><strong>Contract:</strong> <code class="inline">(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -&gt; :any</code></li><li><strong>Backing requirements:</strong> <code class="inline">tool:kernel-agent-config-failure</code>, <code class="inline">tool:kernel-agent-protocol-error</code>, <code class="inline">tool:kernel-check-source</code>, <code class="inline">tool:kernel-eval</code>, <code class="inline">tool:kernel-llm-provider-failure</code>, <code class="inline">tool:kernel-mission-model-context</code>, <code class="inline">tool:kernel-phase-return-contract-failure</code>, <code class="inline">tool:kernel-result-contract</code>, <code class="inline">tool:kernel-result-contract-failure</code>, <code class="inline">tool:kernel-runtime-limit-failure</code>, <code class="inline">tool:llm-request</code>, <code class="inline">tool:workflow-annotate</code></li></ul><h5 id="agent-core-run-phased-result-value"><code class="inline">agent.core/run-phased-result-value</code></h5><pre><code class="clojure language-clojure">(agent.core/run-phased-result-value task cfg)</code></pre><p>Runs a sequence of bounded mission phases while retaining the exact
+the previous transcript.</p><p>Set <code class="inline">retain_programs</code> to an integer from 1 through 128 to attach admitted
+generated programs on the returned outcome. Omitted or nil keeps the current
+outcome shape. When set, every returned outcome includes <code class="inline">:programs</code> and
+<code class="inline">:programs-omitted</code>. Retention keeps the newest complete entries that fit
+both the requested count and a fixed 2,000,000 UTF-8-byte source ceiling.</p><ul><li><strong>Kind:</strong> <code class="inline">function</code></li><li><strong>Visibility:</strong> <code class="inline">prompt</code></li><li><strong>Effect:</strong> <code class="inline">unknown</code></li><li><strong>Contract:</strong> <code class="inline">(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, retain_programs :any?}) -&gt; :any</code></li><li><strong>Backing requirements:</strong> <code class="inline">tool:kernel-agent-config-failure</code>, <code class="inline">tool:kernel-agent-protocol-error</code>, <code class="inline">tool:kernel-check-source</code>, <code class="inline">tool:kernel-eval</code>, <code class="inline">tool:kernel-llm-provider-failure</code>, <code class="inline">tool:kernel-mission-model-context</code>, <code class="inline">tool:kernel-phase-return-contract-failure</code>, <code class="inline">tool:kernel-result-contract</code>, <code class="inline">tool:kernel-result-contract-failure</code>, <code class="inline">tool:kernel-runtime-limit-failure</code>, <code class="inline">tool:llm-request</code>, <code class="inline">tool:workflow-annotate</code></li></ul><h5 id="agent-core-run-phased-result-value"><code class="inline">agent.core/run-phased-result-value</code></h5><pre><code class="clojure language-clojure">(agent.core/run-phased-result-value task cfg)</code></pre><p>Runs a sequence of bounded mission phases while retaining the exact
 correlated model and evaluation transcript. At each host-controlled phase
 boundary, the system prompt is rebuilt from the next mission's authority and
 that phase's instruction is appended as a user message. A return closes any

@@ -359,6 +359,63 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   end
 
   @tag :tmp_dir
+  test "composed workflow and mission sessions return reachable definition source", %{
+    tmp_dir: directory
+  } do
+    {manifest, _host} = write_provider_free_mission_application(directory)
+
+    assert {:ok, workflow} =
+             ManifestRepl.open(manifest, nil,
+               input_mode: :interactive,
+               terminal_attached: true
+             )
+
+    assert {:ok, workflow_source, workflow} =
+             ReplSession.eval(workflow, "(source app/run)")
+
+    assert workflow_source.return == nil
+    assert Enum.join(workflow_source.prints, "\n") =~ "(defn run"
+
+    assert {:ok, helper_source, workflow} =
+             ReplSession.eval(workflow, "(source app/offset)")
+
+    assert Enum.join(helper_source.prints, "\n") =~ "(defn- offset"
+
+    assert {:ok, dead_source, workflow} =
+             ReplSession.eval(workflow, "(source app/dead-helper)")
+
+    assert Enum.join(dead_source.prints, "\n") =~ ~s(No source available for "app/dead-helper")
+
+    assert {:ok, unattached, workflow} =
+             ReplSession.eval(workflow, "(source review/score)")
+
+    assert Enum.join(unattached.prints, "\n") =~ ~s(No source available for "review/score")
+
+    assert {:ok, _events} = ReplSession.close(workflow)
+
+    assert {:ok, mission} =
+             ManifestRepl.open(manifest, nil,
+               mission: "review",
+               input_mode: :interactive,
+               terminal_attached: true
+             )
+
+    assert {:ok, mission_source, mission} =
+             ReplSession.eval(mission, "(source review/score)")
+
+    assert mission_source.return == nil
+    assert Enum.join(mission_source.prints, "\n") =~ "(defn score"
+
+    assert {:ok, workflow_unattached, mission} =
+             ReplSession.eval(mission, "(source app/run)")
+
+    assert Enum.join(workflow_unattached.prints, "\n") =~
+             ~s(No source available for "app/run")
+
+    assert {:ok, _events} = ReplSession.close(mission)
+  end
+
+  @tag :tmp_dir
   test "an authorized private provider-free session preserves private trace permissions", %{
     tmp_dir: directory
   } do
@@ -845,6 +902,42 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     manifest = Path.join(directory, "provider-free-#{policy}.json")
     File.write!(manifest, Jason.encode!(manifest_document(policy, %{})))
     manifest
+  end
+
+  defp write_provider_free_mission_application(directory) do
+    File.write!(
+      Path.join(directory, "main.clj"),
+      """
+      (ns app)
+
+      (defn- offset [value] (+ value 2))
+      (defn- dead-helper [value] value)
+      (defn run [input] (return (offset (get input "value" 40))))
+      """
+    )
+
+    File.write!(
+      Path.join(directory, "review.clj"),
+      """
+      (ns review)
+
+      (defn score [input] (+ (get input "value" 0) 1))
+      """
+    )
+
+    manifest = Path.join(directory, "provider-free-source.json")
+
+    document =
+      manifest_document(:normal, %{})
+      |> Map.put("missions", %{
+        "review" => %{
+          "components" => [%{"id" => "review", "path" => "review.clj"}],
+          "data" => %{}
+        }
+      })
+
+    File.write!(manifest, Jason.encode!(document))
+    {manifest, nil}
   end
 
   defp write_llm_application(directory, policy) do

@@ -51,6 +51,12 @@ defmodule PtcRunner.Kernel.RunConfig do
   Constructing a config validates shape, recorder readiness, and ownership
   objects but performs no execution and grants no authority beyond the supplied
   environments.
+
+  `inspect_only` is a compile-and-inspect session flag. When true, Kernel,
+  provider, and capability routes fail closed; public `PtcRunner.Lisp.run/2`
+  cannot set it. An environment assembled with `inspect_only: true` is
+  attested as such and is refused by an ordinary (non-inspect-only)
+  configuration.
   """
 
   alias PtcRunner.Kernel.ApplicationSource
@@ -102,7 +108,8 @@ defmodule PtcRunner.Kernel.RunConfig do
     provider_warnings: [],
     session_profile: nil,
     labels: %{},
-    run_started_metadata: %{}
+    run_started_metadata: %{},
+    inspect_only: false
   ]
 
   @type t :: %__MODULE__{
@@ -125,7 +132,8 @@ defmodule PtcRunner.Kernel.RunConfig do
           provider_warnings: [CommandWarning.t()],
           session_profile: map() | nil,
           labels: map(),
-          run_started_metadata: map()
+          run_started_metadata: map(),
+          inspect_only: boolean()
         }
 
   @spec new(keyword()) ::
@@ -155,7 +163,8 @@ defmodule PtcRunner.Kernel.RunConfig do
                :provider_warnings,
                :session_profile,
                :labels,
-               :component_overrides
+               :component_overrides,
+               :inspect_only
              ] !=
              [],
          %WorkflowEnvironment{} = workflow <- Keyword.get(opts, :workflow_environment),
@@ -188,6 +197,13 @@ defmodule PtcRunner.Kernel.RunConfig do
          true <- connector_snapshots?(Keyword.get(opts, :connector_snapshots, [])),
          true <- provider_warnings?(Keyword.get(opts, :provider_warnings, [])),
          {:ok, session_profile} <- session_profile(Keyword.get(opts, :session_profile)),
+         true <- Keyword.get(opts, :inspect_only, false) in [true, false],
+         true <-
+           inspect_only_environments_allowed?(
+             Keyword.get(opts, :inspect_only, false),
+             workflow,
+             missions
+           ),
          {:ok, labels} <- SafeMetadata.normalize_labels(Keyword.get(opts, :labels, %{})),
          {:ok, component_overrides} <-
            component_overrides(Keyword.get(opts, :component_overrides, [])),
@@ -225,7 +241,8 @@ defmodule PtcRunner.Kernel.RunConfig do
          provider_warnings: Keyword.get(opts, :provider_warnings, []),
          session_profile: session_profile,
          labels: labels,
-         run_started_metadata: run_started_metadata
+         run_started_metadata: run_started_metadata,
+         inspect_only: Keyword.get(opts, :inspect_only, false)
        }}
     else
       {:error, :mission_inventory_exceeded} = error -> error
@@ -233,6 +250,15 @@ defmodule PtcRunner.Kernel.RunConfig do
       {:error, {:terminal_payload_capacity_exceeded, _payload, _required}} = error -> error
       _ -> {:error, :invalid_run_config}
     end
+  end
+
+  defp inspect_only_environments_allowed?(true, _workflow, _missions), do: true
+
+  defp inspect_only_environments_allowed?(false, workflow, missions) do
+    workflow.inspect_only != true and
+      Enum.all?(missions, fn {_name, %{environment: environment}} ->
+        environment.inspect_only != true
+      end)
   end
 
   # A payload ceiling that cannot hold this application's own `run-stopped`
@@ -270,6 +296,7 @@ defmodule PtcRunner.Kernel.RunConfig do
          limits
        ) do
     with true <- mission_name?(name),
+         true <- MissionEnvironment.valid?(environment),
          {:ok, inventory} <- MissionInventory.build(environment, limits) do
       retain_mission(name, environment, inventory, acc, inventory_bytes, model_bytes)
     else

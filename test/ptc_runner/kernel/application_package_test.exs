@@ -388,6 +388,18 @@ defmodule PtcRunner.Kernel.ApplicationPackageTest do
 
     assert {:error, :invalid_application_options} =
              ApplicationPackage.request_memory("app.json", documents, duplicate)
+
+    assert {:error, :invalid_application_options} =
+             ApplicationPackage.acquire_directory(manifest_path, repl_interactive_loop: :yes)
+
+    assert {:error, :invalid_application_options} =
+             ApplicationPackage.acquire_directory(manifest_path, omit_input: :yes)
+
+    assert {:error, :invalid_application_options} =
+             ApplicationPackage.request_directory(manifest_path, omit_input: true)
+
+    assert {:error, :invalid_application_options} =
+             ApplicationPackage.request_directory(manifest_path, repl_interactive_loop: true)
   end
 
   test "sealed Kernel runs ignore the ambient default compile heap" do

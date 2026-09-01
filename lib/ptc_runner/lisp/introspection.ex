@@ -2,7 +2,8 @@ defmodule PtcRunner.Lisp.Introspection do
   @moduledoc """
   Read-only introspection over the callable PTC-Lisp surface.
 
-  Backs the `dir`, `apropos`, `doc`, `export-meta`, and `source` builtins.
+  Backs the `dir`, `apropos`, `doc`, `export-meta`, `source`, `components`,
+  and `component` builtins.
   `dir`, `export-meta`, and `source` describe the attached prelude. `apropos`
   and `doc` additionally expose installed callable capability contracts, fixed
   built-ins, and the bounded Java surface from `PtcRunner.Lisp.Registry`.
@@ -14,6 +15,12 @@ defmodule PtcRunner.Lisp.Introspection do
   The same answers are produced in the REPL, in workflow and mission source,
   and inside a prelude export reading another prelude's documentation — there
   is no REPL-only path.
+
+  `components` and `component` read the selected Kernel environment catalog
+  threaded into the evaluation context. Direct `PtcRunner.Lisp.run/2` has no
+  catalog, so those forms return `[]` and `nil`. They return data rather than
+  printing: IDs in frozen dependency order, or one map with `:id`,
+  `:dependencies`, `:namespaces`, `:source-hash`, and exact `:source`.
 
   Ref arguments accept a string or a `{:symbol_ref, name}` runtime value (from
   a quoted symbol, or from the analyzer's bare-symbol rewrite on these forms).
@@ -90,16 +97,27 @@ defmodule PtcRunner.Lisp.Introspection do
   alias PtcRunner.Lisp.Registry
 
   @type visible :: (Export.t() -> boolean())
-  @type operation :: :dir | :apropos | :doc | :export_meta | :source
+  @type operation ::
+          :dir | :apropos | :doc | :export_meta | :source | :components | :component
 
-  @operations [:dir, :apropos, :doc, :export_meta, :source]
-  @arities %{dir: [0, 1], apropos: [1], doc: [1], export_meta: [1], source: [1]}
+  @operations [:dir, :apropos, :doc, :export_meta, :source, :components, :component]
+  @arities %{
+    dir: [0, 1],
+    apropos: [1],
+    doc: [1],
+    export_meta: [1],
+    source: [1],
+    components: [0],
+    component: [1]
+  }
   @names %{
     dir: "dir",
     apropos: "apropos",
     doc: "doc",
     export_meta: "export-meta",
-    source: "source"
+    source: "source",
+    components: "components",
+    component: "component"
   }
 
   @doc "The introspection operations bound as `{:special, op}` builtins."
@@ -140,6 +158,12 @@ defmodule PtcRunner.Lisp.Introspection do
 
   defp invoke_normalized(:source, [ref], %EvalContext{} = context) when is_binary(ref),
     do: {:print, render_source(context.prelude, ref, filter(context))}
+
+  defp invoke_normalized(:components, [], %EvalContext{} = context),
+    do: {:ok, component_ids(context.component_catalog)}
+
+  defp invoke_normalized(:component, [id], %EvalContext{} = context) when is_binary(id),
+    do: {:ok, component_entry(context.component_catalog, id)}
 
   defp invoke_normalized(op, args, %EvalContext{}) when op in @operations do
     name = Map.fetch!(@names, op)
@@ -582,4 +606,54 @@ defmodule PtcRunner.Lisp.Introspection do
       line -> "  " <> line
     end)
   end
+
+  defp component_ids(catalog) when is_map(catalog) do
+    case catalog_mod(catalog) do
+      nil -> []
+      mod -> mod.ids(catalog)
+    end
+  end
+
+  defp component_ids(_catalog), do: []
+
+  defp component_entry(catalog, id) when is_map(catalog) and is_binary(id) do
+    case catalog_mod(catalog) do
+      nil ->
+        nil
+
+      mod ->
+        case mod.fetch(catalog, id) do
+          {:ok,
+           %{
+             id: ^id,
+             dependencies: dependencies,
+             namespaces: namespaces,
+             source_hash: source_hash,
+             source: source
+           }} ->
+            %{
+              :id => id,
+              :dependencies => dependencies,
+              :namespaces => namespaces,
+              :"source-hash" => source_hash,
+              :source => source
+            }
+
+          _missing ->
+            nil
+        end
+    end
+  end
+
+  defp component_entry(_catalog, _id), do: nil
+
+  # Compare the struct module name as a string so this Lisp module does not
+  # compile-connect to `PtcRunner.Kernel.ComponentCatalog`.
+  defp catalog_mod(%{__struct__: mod}) when is_atom(mod) do
+    if Atom.to_string(mod) == "Elixir.PtcRunner.Kernel.ComponentCatalog",
+      do: mod,
+      else: nil
+  end
+
+  defp catalog_mod(_catalog), do: nil
 end

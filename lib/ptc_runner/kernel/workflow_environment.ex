@@ -9,13 +9,17 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
 
   Construction validates the bundle attestation, duplicate or reserved
   capability names, JSON-like data, and every tool requirement recorded by the
-  bundle. It never imports capabilities from a mission environment. A verified
-  workflow override of the shipped `agent.core` retains that library's fixed
-  private diagnostic routes; other local or replacement components cannot
-  acquire them.
+  bundle. An optional `:catalog` is attested with the bundle so source cannot
+  be paired with a different compiled graph. `:inspect_only` is attested with
+  the environment: a compile-and-inspect assembly that skipped tool
+  requirements cannot be placed in an ordinary runnable configuration. It
+  never imports capabilities from a mission environment. A verified workflow
+  override of the shipped `agent.core` retains that library's fixed private
+  diagnostic routes; other local or replacement components cannot acquire them.
   """
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.Attestation
+  alias PtcRunner.Kernel.ComponentCatalog
   alias PtcRunner.Kernel.Environment
 
   @enforce_keys [
@@ -23,7 +27,9 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
     :capabilities,
     :data,
     :private_capabilities,
-    :shipped_component_ids
+    :shipped_component_ids,
+    :catalog,
+    :inspect_only
   ]
   defstruct @enforce_keys ++ [attestation: nil]
   @field_keys Enum.sort([:__struct__, :attestation | @enforce_keys])
@@ -34,15 +40,20 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
           data: map(),
           private_capabilities: [binary()],
           shipped_component_ids: [binary()],
+          catalog: ComponentCatalog.t(),
+          inspect_only: boolean(),
           attestation: binary()
         }
   @spec new(keyword()) :: {:ok, t()} | {:error, term()}
   @doc """
   Assembles a workflow environment from optional `:bundle`, `:capabilities`,
-  and JSON-like `:data` options. `:shipped_component_ids` records the shipped
-  library selections represented by the bundle for exact diagnostic misses;
-  it is validated against both the bundle and installed library catalog.
-  Unknown options are rejected.
+  JSON-like `:data`, `:catalog`, `:shipped_component_ids`, and `:inspect_only`
+  options. `:shipped_component_ids` records the shipped library selections
+  represented by the bundle for exact diagnostic misses. Unknown options are
+  rejected. `:inspect_only` skips recorded tool-requirement checks so a
+  compile-and-inspect session can attach source without installing
+  capabilities. The resulting environment attests that mode; `RunConfig`
+  refuses it unless `inspect_only` is also true.
   """
   def new(opts) when is_list(opts), do: assemble(opts, %{})
 
@@ -80,7 +91,15 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
 
   defp assemble(opts, authorization) do
     with false <-
-           Keyword.keys(opts) -- [:bundle, :capabilities, :data, :shipped_component_ids] != [],
+           Keyword.keys(opts) --
+             [
+               :bundle,
+               :capabilities,
+               :data,
+               :catalog,
+               :shipped_component_ids,
+               :inspect_only
+             ] != [],
          {:ok, attributes} <-
            Environment.assemble(
              Keyword.get(opts, :bundle),
@@ -88,9 +107,11 @@ defmodule PtcRunner.Kernel.WorkflowEnvironment do
              Keyword.get(opts, :data, %{}),
              :workflow,
              authorization: authorization,
-             shipped_component_ids: Keyword.get(opts, :shipped_component_ids)
-           ) do
-      environment = struct!(__MODULE__, attributes)
+             shipped_component_ids: Keyword.get(opts, :shipped_component_ids),
+             inspect_only: Keyword.get(opts, :inspect_only) == true
+           ),
+         {:ok, catalog} <- ComponentCatalog.bind(Keyword.get(opts, :catalog), attributes.bundle) do
+      environment = struct!(__MODULE__, Map.put(attributes, :catalog, catalog))
       {:ok, %{environment | attestation: Attestation.attest(__MODULE__, payload(environment))}}
     else
       true -> {:error, :unknown_environment_field}

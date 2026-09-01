@@ -1,66 +1,69 @@
-# Customize agent components
+# Inspect and customize components
 
-Try a changed prompt or agent loop without changing `ptc.json`. If you keep the
-change, give your permanent components new IDs.
+Change the shipped agent prompt on a run without editing the manifest.
+Installing that prompt as application code is a separate graph change.
 
 A prelude is the compiled set of components used by one workflow or mission.
-It is immutable during a run. You do not replace the whole prelude. You replace
-one selected component when the next run starts.
 
-## Try a different agent prompt
+## Inspect the installed prompt
 
-Selecting `agent.core` also selects `agent.prompt`. The prompt is therefore an
-override target even when it is not listed directly in the manifest.
+Open a compile-and-inspect project REPL. It needs no API key:
 
-Candidate creation requires a source checkout. Copy the shipped prompt, then
-edit the copy:
+```console
+ptc repl --project ptc-project.json --inspect-only
+```
+
+```clojure
+(component "agent.prompt")
+```
+
+Selecting the shipped agent loop also selects its prompt, so that prompt is an
+override target even when it is not listed in the manifest.
+
+## Change the prompt on a run
+
+Export the installed prompt, edit the copy, then publish a gated candidate:
 
 ```console
 mkdir -p private
-cp priv/preludes/kernel/agent.prompt.clj private/agent.prompt.clj
+ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source-out private/agent.prompt.clj
+# edit private/agent.prompt.clj
+ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source private/agent.prompt.clj \
+  --out private/agent-prompt-candidate
 ```
 
-Turn the edited source into a checked candidate:
+Validate, then run the candidate:
 
 ```console
-mix ptc.materialize ptc.json \
-  --workflow \
-  --component agent.prompt \
-  --out private/agent-prompt-candidate \
-  --source private/agent.prompt.clj
-```
-
-The command checks the source and creates the candidate and descriptor files.
-The output directory must not already exist.
-
-Validate the candidate without acquiring a provider:
-
-```console
-mix ptc validate ptc.json \
+ptc validate ptc-project.json \
+  --component-override-descriptor private/agent-prompt-candidate/descriptor.json
+ptc run ptc-project.json \
   --component-override-descriptor private/agent-prompt-candidate/descriptor.json
 ```
 
-Run the normal version first. Then run the candidate:
+Pass the descriptor on each command that should use the candidate. The project
+file does not store it.
 
-```console
-mix ptc run ptc.json
-mix ptc run ptc.json \
-  --component-override-descriptor private/agent-prompt-candidate/descriptor.json
-```
+- One selected component's source is replaced; the loop wiring is not.
+- The override cannot add a component, rename one, or change dependencies.
+- If the shipped prompt source changes, publish a new candidate from the new
+  base.
 
-The override applies only to that command. It does not edit the manifest or
-install the candidate. Use
+Use
 [replay](evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
 when you need a fair comparison with the same model responses.
 
-## Keep a change
+## Install a prompt in the application
 
-Use new component IDs for permanent application code. A local component cannot
-reuse a shipped library ID. If you replace a prompt or policy permanently,
-select a loop whose dependencies point to your new components.
+A local component cannot reuse a shipped library ID, so selecting the shipped
+loop still installs the shipped prompt. Give the custom prompt a new ID and
+select a loop whose dependencies name that ID. The
+[component reference](../reference/component-contracts.md#install-a-custom-prompt)
+covers which shipped callers to copy.
 
-The [components-and-preludes reference](../reference/component-contracts.md)
-defines dependencies, mission targets, descriptor fields, hashes, effect
-widening, failure messages, and security boundaries. The
-[agent library reference](../agent-library-reference.md) documents the shipped
-agent components and their options.
+The [source-inspection reference](../reference/source-inspection.md) chooses a
+retrieval surface. The
+[components-and-preludes reference](../reference/component-contracts.md)
+defines replacement rules, descriptor fields, and hashes.

@@ -11,7 +11,8 @@ defmodule PtcRunner.Kernel.AgentConfigDiagnostic do
     {"max_turns", 1, 128},
     {"max_program_chars", 1, 1_000_000},
     {"max_observation_chars", 1, 65_536},
-    {"max_transcript_chars", 1, 1_000_000}
+    {"max_transcript_chars", 1, 1_000_000},
+    {"retain_programs", 1, 128}
   ]
 
   @types [:string, :float, :bool, :map, :vector, nil, :other]
@@ -179,11 +180,11 @@ defmodule PtcRunner.Kernel.AgentConfigDiagnostic do
 
   defp integer_text(option, minimum, maximum, value),
     do:
-      "#{option} #{value} is outside the supported range #{minimum}#{@range_separator}#{maximum} for agent.core/run; lower it"
+      "#{option} #{value} is outside the supported range #{minimum}#{@range_separator}#{maximum} for #{option_api(option)}; lower it"
 
   defp type_text(option, minimum, maximum, type),
     do:
-      "#{option} must be an integer in #{minimum}#{@range_separator}#{maximum} for agent.core/run; received #{@type_phrases[type]}"
+      "#{option} must be an integer in #{minimum}#{@range_separator}#{maximum} for #{option_api(option)}; received #{@type_phrases[type]}"
 
   defp integer_examples do
     Enum.flat_map(@options, fn {option, minimum, maximum} ->
@@ -206,7 +207,7 @@ defmodule PtcRunner.Kernel.AgentConfigDiagnostic do
 
   defp integer_branch({option, minimum, maximum}) do
     prefix = "#{option} "
-    suffix = integer_suffix(minimum, maximum)
+    suffix = integer_suffix(option, minimum, maximum)
     escaped_prefix = DiagnosticPattern.escape(prefix)
     escaped_suffix = DiagnosticPattern.escape(suffix)
     range_pattern = Map.fetch!(@accepted_range_patterns, {minimum, maximum})
@@ -227,14 +228,18 @@ defmodule PtcRunner.Kernel.AgentConfigDiagnostic do
     %{"const" => message}
   end
 
-  defp integer_suffix(minimum, maximum),
+  defp integer_suffix(option, minimum, maximum),
     do:
-      " is outside the supported range #{minimum}#{@range_separator}#{maximum} for agent.core/run; lower it"
+      " is outside the supported range #{minimum}#{@range_separator}#{maximum} for #{option_api(option)}; lower it"
+
+  defp option_api("retain_programs"), do: "agent.core/run-outcome"
+
+  defp option_api(_option), do: "agent.core/run"
 
   defp integer_pattern_match?(message) do
     Enum.any?(@options, fn {option, minimum, maximum} ->
       prefix = "#{option} "
-      suffix = integer_suffix(minimum, maximum)
+      suffix = integer_suffix(option, minimum, maximum)
 
       with true <- String.starts_with?(message, prefix),
            true <- String.ends_with?(message, suffix),

@@ -55,6 +55,20 @@ defmodule PtcRunner.Kernel.BundleCompositionTest do
       assert {:ok, step} = Lisp.run("(consumer/answer)", prelude: prelude)
       assert step.return == 42
     end
+
+    composed_index = bundle.prelude.source_index
+    assert composed_index["consumer/answer"] == fresh.source_index["consumer/answer"]
+    assert composed_index["base/make-adder"] == fresh.source_index["base/make-adder"]
+    assert composed_index["base/offset"] == fresh.source_index["base/offset"]
+
+    assert {:ok, public} = Lisp.run("(source consumer/answer)", prelude: bundle.prelude)
+    assert public.return == nil
+    assert Enum.join(public.prints, "\n") =~ "(defn answer"
+
+    assert {:ok, reachable_private} =
+             Lisp.run("(source base/offset)", prelude: bundle.prelude)
+
+    assert Enum.join(reachable_private.prints, "\n") =~ "(defn- offset"
   end
 
   test "preparation-local reuse still honors the shared absolute deadline" do

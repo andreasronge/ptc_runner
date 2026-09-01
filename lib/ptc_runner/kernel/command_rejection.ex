@@ -181,7 +181,8 @@ defmodule PtcRunner.Kernel.CommandRejection do
           CommandDeclaration.frontend()
         ) :: t()
   def invalid_destination(command, destination, frontend)
-      when (destination == :envelope and command in [:validate, :run, :doctor, :models, :init]) or
+      when (destination == :envelope and
+              command in [:validate, :run, :doctor, :models, :init, :materialize]) or
              (command == :transcript and destination == :private_output) or
              (command == :repl and destination in [:output, :private_output]) do
     %__MODULE__{
@@ -209,7 +210,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
           CommandDeclaration.frontend()
         ) :: t()
   def envelope_destination_exists(command, frontend)
-      when command in [:validate, :run, :doctor, :models, :init] do
+      when command in [:validate, :run, :doctor, :models, :init, :materialize] do
     %__MODULE__{
       command: command,
       code: :envelope_destination_exists,
@@ -227,6 +228,22 @@ defmodule PtcRunner.Kernel.CommandRejection do
           atom(),
           CommandDeclaration.frontend()
         ) :: t()
+  def destination_collision(:materialize, first, :envelope, frontend)
+      when first in [:source_out, :out] do
+    first = CommandDeclaration.option_switch!(:materialize, frontend, first)
+    second = CommandDeclaration.option_switch!(:materialize, frontend, :envelope)
+
+    %__MODULE__{
+      command: :materialize,
+      code: :conflicting_arguments,
+      kind: :destination_collision,
+      accepted: [],
+      option: nil,
+      destination: nil,
+      conflicts: [first, second]
+    }
+  end
+
   def destination_collision(command, first, second, frontend)
       when command == :run and first in [:envelope | @destination_keys] and
              second in [:envelope | @destination_keys] and first != second do

@@ -48,7 +48,7 @@ move the rules into code, then split the work between specialists.">
 <li><a href="/guides/using-models/">Use a model</a></li>
 <li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
 <li><a href="/guides/building-agents/">Customize an agent</a></li>
-<li><a href="/guides/components-and-preludes/">Customize agent components</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
 </ul>
 
 <h2>Design</h2>
@@ -61,6 +61,7 @@ move the rules into code, then split the work between specialists.">
 <ul>
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
 <li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
@@ -88,6 +89,7 @@ move the rules into code, then split the work between specialists.">
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
 </ul>
 
@@ -133,7 +135,7 @@ score, sort, return — and the scores are exactly what the deterministic
 policy computes. The model
 decides <em>how to use</em> the rules; it cannot <em>reinterpret</em> them. That split is
 the core of code-mode design: judgment in the model, policy in reviewable
-code. <a href="/guides/components-and-preludes/">Customize agent components</a> covers the
+code. <a href="/guides/components-and-preludes/">The customization guide</a> covers the
 component and signature rules this step relies on.</p><h2 id="step-3-give-each-specialist-only-what-it-needs">Step 3: give each specialist only what it needs</h2><p>The final step routes each breached ticket to a team. Classification is
 model judgment, but routing is policy — and the routing stage needs none of
 the raw ticket pool. So the third manifest declares two named missions with
@@ -198,7 +200,7 @@ the loop's prompts and policy. For a longer course that builds a
 multi-specialist agent scenario chapter by chapter, see the
 <a href="https://github.com/andreasronge/ptc_runner_tutorial">PtcRunner tutorial series</a>.</p>
 </article>
-<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/components-and-preludes/">&larr; Customize agent components</a><a class="pager-next" href="/guides/agent-workflow-patterns/">Choose a workflow shape &rarr;</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/components-and-preludes/">&larr; Inspect and customize components</a><a class="pager-next" href="/guides/agent-workflow-patterns/">Choose a workflow shape &rarr;</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/designing-agent-workflows.md">Edit this
   page on GitHub</a>.

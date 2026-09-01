@@ -55,6 +55,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CompileDiagnostic
+  alias PtcRunner.Kernel.ComponentCatalog
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.ExecutionOutcome
@@ -75,6 +76,7 @@ defmodule PtcRunner.Kernel.RunBuilder do
   alias PtcRunner.Kernel.RunConfig
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.Kernel.RunRequest
+  alias PtcRunner.Kernel.SourceIntern
   alias PtcRunner.Kernel.TraceLog
   alias PtcRunner.Kernel.WorkflowEnvironment
 
@@ -768,11 +770,14 @@ defmodule PtcRunner.Kernel.RunBuilder do
       |> Enum.flat_map(&Map.get(by_occurrence, &1.index, []))
 
     with {:ok, workflow} <- WorkflowEnvironment.new([]),
+         {:ok, _intern, catalog} <-
+           environment_catalog(spec.components, bundle, SourceIntern.new()),
          {:ok, mission} <-
            MissionEnvironment.new(
              bundle: bundle,
              capabilities: capabilities,
              data: spec.data,
+             catalog: catalog,
              shipped_component_ids: library_component_ids(spec.kinds)
            ) do
       build_config(
@@ -877,30 +882,44 @@ defmodule PtcRunner.Kernel.RunBuilder do
   # A grant a mission did not name is simply absent from its environment, so
   # authority is enforced by assembly rather than by anything the model is
   # asked to respect.
-  defp mission_environments(package, mission_bundles, providers) do
+  defp mission_environments(package, mission_bundles, providers, intern) do
     by_occurrence = Map.get(providers.mission, :by_occurrence, %{})
 
-    Enum.reduce_while(Map.get(package, :missions) || %{}, {:ok, %{}}, fn {name, spec},
-                                                                         {:ok, acc} ->
+    Enum.reduce_while(Map.get(package, :missions) || %{}, {:ok, intern, %{}}, fn {name, spec},
+                                                                                 {:ok, intern,
+                                                                                  acc} ->
       capabilities =
         spec.provider_occurrences
         |> Enum.flat_map(&Map.get(by_occurrence, &1, []))
 
       with {:ok, bundle} <- Map.fetch(mission_bundles, name),
+           {:ok, intern, catalog} <- environment_catalog(spec.components, bundle, intern),
            {:ok, environment} <-
              MissionEnvironment.new(
                bundle: bundle,
                capabilities: capabilities,
                data: spec.data,
+               catalog: catalog,
                shipped_component_ids: library_component_ids(spec.kinds)
              ) do
-        {:cont, {:ok, Map.put(acc, name, environment)}}
+        {:cont, {:ok, intern, Map.put(acc, name, environment)}}
       else
         {:error, {:missing_capability_requirement, _names}} = error -> {:halt, error}
+        {:error, :source_hash_collision} = error -> {:halt, error}
+        {:error, :catalog_bundle_mismatch} = error -> {:halt, error}
         _error -> {:halt, {:error, :invalid_mission_environment}}
       end
     end)
+    |> case do
+      {:ok, _intern, environments} -> {:ok, environments}
+      {:error, _reason} = error -> error
+    end
   end
+
+  defp environment_catalog([], nil, intern), do: {:ok, intern, ComponentCatalog.empty()}
+
+  defp environment_catalog(components, bundle, intern),
+    do: ComponentCatalog.build(components, bundle, intern)
 
   defp mission_bundles(missions, deadline, initial_bytes, workflow_components, workflow_bundle) do
     case BundleCompiler.compile_named(
@@ -927,16 +946,24 @@ defmodule PtcRunner.Kernel.RunBuilder do
     package = request.package
 
     result =
-      with {:ok, workflow} <-
+      with {:ok, intern, workflow_catalog} <-
+             environment_catalog(
+               package.workflow_components,
+               workflow_bundle,
+               SourceIntern.new()
+             ),
+           {:ok, workflow} <-
              WorkflowEnvironment.new_for_package(
                [
                  bundle: workflow_bundle,
                  capabilities: providers.workflow.capabilities,
+                 catalog: workflow_catalog,
                  shipped_component_ids: library_component_ids(package.workflow_component_kinds)
                ],
                package
              ),
-           {:ok, missions} <- mission_environments(package, mission_bundles, providers),
+           {:ok, missions} <-
+             mission_environments(package, mission_bundles, providers, intern),
            {:ok, publication_authority, sink, inspection_sink} <-
              execution_sinks(request, providers, opts, failure_mode, sink_source),
            :ok <-

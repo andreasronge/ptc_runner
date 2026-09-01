@@ -26,6 +26,8 @@ defmodule PtcRunner.Lisp.Runtime.Builtins do
       {:doc, {:special, :doc}},
       {:"export-meta", {:special, :export_meta}},
       {:source, {:special, :source}},
+      {:components, {:special, :components}},
+      {:component, {:special, :component}},
       # ============================================================
       # Collection operations (normal arity)
       # ============================================================

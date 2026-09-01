@@ -215,15 +215,21 @@ establishes native authority or enforces the sandbox boundary.
 
 ## Materialize candidate source
 
-The standalone executable can evaluate a candidate descriptor but does not
-create one. In a source checkout, materialize model-authored source with:
+The standalone executable exports installed source and publishes a gated
+candidate with `ptc materialize`. In a source checkout, `mix ptc.materialize`
+is the same implementation:
 
 ```console
-mix ptc.materialize ptc.json \
+ptc materialize ptc-project.json \
+  --workflow \
+  --component my.helper \
+  --source-out private/helper.clj
+# edit private/helper.clj
+ptc materialize ptc-project.json \
   --workflow \
   --component my.helper \
   --out private/candidate \
-  --source authored.clj \
+  --source private/helper.clj \
   --origin-run-id run-2026-08-03-0001
 ```
 

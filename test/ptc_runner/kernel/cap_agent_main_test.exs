@@ -38,10 +38,11 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
 
       signatures = Map.new(bundle.prelude.exports, &{&1.ref, &1.signature})
 
-      for ref <- ~w(agent.core/run-value agent.core/run-outcome) do
-        assert signatures[ref] ==
-                 "(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"
-      end
+      assert signatures["agent.core/run-value"] ==
+               "(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"
+
+      assert signatures["agent.core/run-outcome"] ==
+               "(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, retain_programs :any?}) -> :any"
 
       assert signatures["agent.core/run-result-value"] ==
                "(task :string, cfg {model :string?, mission :string?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?}) -> :any"

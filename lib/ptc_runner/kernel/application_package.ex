@@ -9,8 +9,9 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   `application_content_digest`; it contains no application directory, file
   descriptor, reader callback, selected input, or input name.
 
-  Directory acquisition caches every referenced byte exactly once. Compilation
-  never reopens a captured path. This prevents time-of-check/time-of-use drift
+  Directory acquisition caches every referenced byte exactly once and interns
+  identical source binaries by qualified SHA-256 so workflow and mission
+  catalogs share one BEAM binary. Compilation never reopens a captured path. This prevents time-of-check/time-of-use drift
   within one acquired record, but it is not a transactional multi-file
   snapshot: trusted deployments must keep the application directory quiescent
   while its closure is acquired.
@@ -47,6 +48,7 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   alias PtcRunner.Kernel.ReplLimitProfile
   alias PtcRunner.Kernel.RunRequest
   alias PtcRunner.Kernel.SemanticRevision
+  alias PtcRunner.Kernel.SourceIntern
   alias PtcRunner.Kernel.StrictJSON
   alias PtcRunner.Kernel.TypedCanonicalJSON
   alias PtcRunner.Kernel.ValueContract
@@ -57,10 +59,11 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   @max_input_bytes 2_000_000
   @input_marker %{"$ptc_input" => "excluded"}
   @common_acquisition_options [:installed_limits, :input_authority, :input]
-  @directory_acquisition_options @common_acquisition_options ++
-                                   [:component_override_descriptor]
+  @directory_shared_options @common_acquisition_options ++ [:component_override_descriptor]
+  @directory_acquisition_options @directory_shared_options ++
+                                   [:repl_interactive_loop, :omit_input]
   @memory_acquisition_options @common_acquisition_options ++ [:component_override]
-  @directory_request_options @directory_acquisition_options ++
+  @directory_request_options @directory_shared_options ++
                                [:inspection_capture, :result_projection, :event_identity]
   @memory_request_options @memory_acquisition_options ++
                             [:inspection_capture, :result_projection, :event_identity]
@@ -131,9 +134,12 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   @doc """
   Acquires one confined-directory application into a path-free package.
 
-  Options are exactly `:installed_limits`, `:input_authority`, `:input`, and
-  `:component_override_descriptor`. Unknown and duplicate options fail before
-  the application source is opened.
+  Options are exactly `:installed_limits`, `:input_authority`, `:input`,
+  `:component_override_descriptor`, `:repl_interactive_loop`, and
+  `:omit_input`. Pass `omit_input: true` to skip declared or caller-selected
+  input. Unknown and duplicate options fail before the application source is
+  opened. Live run-request adapters reject `:omit_input` and
+  `:repl_interactive_loop`.
   """
   def acquire_directory(path, opts \\ [])
 
@@ -168,10 +174,12 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   @doc """
   Acquires and seals one complete directory-backed run request.
 
-  In addition to the directory-acquisition options, accepts exactly
-  `:inspection_capture`, `:result_projection`, and `:event_identity`. The
-  latter fixes both event IDs and is rejected when the manifest already owns
-  either identity.
+  In addition to `:installed_limits`, `:input_authority`, `:input`, and
+  `:component_override_descriptor`, accepts exactly `:inspection_capture`,
+  `:result_projection`, and `:event_identity`. The latter fixes both event
+  IDs and is rejected when the manifest already owns either identity.
+  `:omit_input` and `:repl_interactive_loop` are package-acquisition flags
+  and are rejected here.
   """
   def request_directory(path, opts \\ [])
 
@@ -258,6 +266,12 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         not valid_optional_installed_limits?(opts) ->
           {:error, :invalid_installed_limits}
 
+        not valid_optional_boolean?(opts, :repl_interactive_loop) ->
+          {:error, :invalid_application_options}
+
+        not valid_optional_boolean?(opts, :omit_input) ->
+          {:error, :invalid_application_options}
+
         true ->
           :ok
       end
@@ -270,6 +284,14 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
     case Keyword.fetch(opts, :installed_limits) do
       {:ok, limits} -> Limits.valid?(limits)
       :error -> true
+    end
+  end
+
+  defp valid_optional_boolean?(opts, key) do
+    case Keyword.fetch(opts, key) do
+      :error -> true
+      {:ok, value} when is_boolean(value) -> true
+      _other -> false
     end
   end
 
@@ -304,21 +326,25 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
   defp select_input(source, manifest, opts) do
     authority = Keyword.get(opts, :input_authority, :normal)
 
-    case Keyword.get(opts, :input) do
-      nil ->
-        select_declared_input(source, manifest, authority)
+    if Keyword.get(opts, :omit_input) == true do
+      ExecutionInput.new(%{}, authority)
+    else
+      case Keyword.get(opts, :input) do
+        nil ->
+          select_declared_input(source, manifest, authority)
 
-      path when is_binary(path) ->
-        result =
-          with {:ok, raw} <- read_selected_input(source, path),
-               {:ok, value} <- StrictJSON.decode(raw) do
-            ExecutionInput.new(value, authority, manifest.contracts.input)
-          end
+        path when is_binary(path) ->
+          result =
+            with {:ok, raw} <- read_selected_input(source, path),
+                 {:ok, value} <- StrictJSON.decode(raw) do
+              ExecutionInput.new(value, authority, manifest.contracts.input)
+            end
 
-        source_error(result, :external_input)
+          source_error(result, :external_input)
 
-      _invalid ->
-        {:error, :invalid_input}
+        _invalid ->
+          {:error, :invalid_input}
+      end
     end
   end
 
@@ -498,7 +524,8 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
         Map.merge(identity, ComponentOverride.attribution(override))
       end)
 
-    with {:ok, records} <- content_records(manifest, override_pairs),
+    with {:ok, manifest} <- intern_manifest_sources(manifest),
+         {:ok, records} <- content_records(manifest, override_pairs),
          {:ok, contract_behavior_hashes} <- contract_behavior_hashes(manifest.contracts),
          {:ok, contract_prompt_projections, contract_prompt_hashes} <-
            contract_prompt_data(manifest.contracts),
@@ -530,6 +557,28 @@ defmodule PtcRunner.Kernel.ApplicationPackage do
 
       {:ok, %{package | attestation: Attestation.attest(__MODULE__, payload(package))}}
     end
+  end
+
+  defp intern_manifest_sources(manifest) do
+    intern = SourceIntern.new()
+
+    with {:ok, intern, workflow} <-
+           SourceIntern.intern_components(intern, manifest.workflow_components),
+         {:ok, _intern, missions} <- intern_mission_sources(intern, manifest.missions) do
+      {:ok, %{manifest | workflow_components: workflow, missions: missions}}
+    end
+  end
+
+  defp intern_mission_sources(intern, missions) do
+    Enum.reduce_while(missions, {:ok, intern, %{}}, fn {name, spec}, {:ok, intern, acc} ->
+      case SourceIntern.intern_components(intern, spec.components) do
+        {:ok, intern, components} ->
+          {:cont, {:ok, intern, Map.put(acc, name, %{spec | components: components})}}
+
+        {:error, _reason} = error ->
+          {:halt, error}
+      end
+    end)
   end
 
   defp content_records(manifest, override_pairs) do

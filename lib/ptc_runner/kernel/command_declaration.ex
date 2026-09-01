@@ -54,6 +54,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE",
         "ptc repl [OPTIONS] [SCRIPT|-]",
         "ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]",
+        "ptc materialize MANIFEST.json|PROJECT.json (--workflow | --target-mission NAME) --component ID (--source-out PATH | --out DIR (--source PATH | --from-result PATH --result-pointer POINTER))",
         "ptc version [--envelope ENVELOPE.json]",
         "ptc --version"
       ],
@@ -278,6 +279,12 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description: "open one manifest-declared mission environment"
         },
         %{
+          key: :inspect_only,
+          type: :boolean,
+          syntax: ["--inspect-only"],
+          description: "compile and inspect without providers, input, or credentials"
+        },
+        %{
           key: :host_config,
           type: :string,
           syntax: ["--host-config HOST.json"],
@@ -394,6 +401,89 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         @env_file_option,
         @help_option
       ]
+    },
+    materialize: %{
+      usage: [
+        "ptc materialize MANIFEST.json|PROJECT.json (--workflow | --target-mission NAME) --component ID --source-out PATH",
+        "ptc materialize MANIFEST.json|PROJECT.json (--workflow | --target-mission NAME) --component ID --out DIR --source PATH",
+        "ptc materialize MANIFEST.json|PROJECT.json (--workflow | --target-mission NAME) --component ID --out DIR --from-result PATH --result-pointer POINTER"
+      ],
+      options: [
+        %{
+          key: :workflow,
+          type: :boolean,
+          syntax: ["--workflow"],
+          description: "select the workflow occurrence"
+        },
+        %{
+          key: :target_mission,
+          type: :string,
+          syntax: ["--target-mission NAME"],
+          description: "select one declared mission"
+        },
+        %{
+          key: :component,
+          type: :string,
+          syntax: ["--component ID"],
+          description: "component id to export or replace"
+        },
+        %{
+          key: :source_out,
+          type: :string,
+          syntax: ["--source-out PATH"],
+          description: "write installed effective source as one owner-only file"
+        },
+        %{
+          key: :out,
+          type: :string,
+          syntax: ["--out DIR"],
+          description: "publish a gated {candidate.clj, descriptor.json} directory"
+        },
+        %{
+          key: :source,
+          type: :string,
+          syntax: ["--source PATH"],
+          description: "authored candidate source file"
+        },
+        %{
+          key: :from_result,
+          type: :string,
+          syntax: ["--from-result PATH"],
+          description: "result artifact containing authored source"
+        },
+        %{
+          key: :result_pointer,
+          type: :string,
+          syntax: ["--result-pointer POINTER"],
+          description: "RFC 6901 pointer to one string in the result artifact"
+        },
+        %{
+          key: :origin_run_id,
+          type: :string,
+          syntax: ["--origin-run-id ID"],
+          description: "unverified origin run id"
+        },
+        %{
+          key: :origin_prompt_hash,
+          type: :string,
+          syntax: ["--origin-prompt-hash sha256:..."],
+          description: "unverified origin prompt hash"
+        },
+        %{
+          key: :origin_authored_at,
+          type: :string,
+          syntax: ["--origin-authored-at RFC3339"],
+          description: "unverified authorship timestamp"
+        },
+        %{
+          key: :accept_widened_effect,
+          type: :boolean,
+          syntax: ["--accept-widened-effect"],
+          description: "acknowledge that the candidate widens an export effect"
+        },
+        @envelope_option,
+        @help_option
+      ]
     }
   }
 
@@ -407,7 +497,8 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     :models,
     :transcript,
     :repl,
-    :viewer
+    :viewer,
+    :materialize
   ]
   @topics [:root | @commands]
   # Commands the shared engine never dispatches: their frontend owns the
@@ -425,6 +516,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           | :transcript
           | :repl
           | :viewer
+          | :materialize
   @type topic :: :root | command()
   @type frontend :: :standalone | :mix
 

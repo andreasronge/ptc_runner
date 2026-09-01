@@ -19,6 +19,12 @@ defmodule PtcRunner.Kernel.Evaluation do
   owner for sandbox hard stops, so a later expression failure, timeout, or heap
   kill cannot erase it.
 
+  After source and lease admission, `evaluation-started`, and private source
+  capture succeed — and before compile or execute — the returned map carries
+  `:admitted? true` and `:source_bytes`. Pre-admission refusals omit both
+  keys. `agent.core` authenticates that exact boolean and strips both keys
+  before observation rendering.
+
   Continued and returned evaluations atomically commit native memory and exact
   bounded history before exposing only an inert public value. Continued results
   additionally expose bounded chronological prints for the next agent turn.
@@ -37,6 +43,7 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.InspectionSink
+  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
@@ -102,7 +109,12 @@ defmodule PtcRunner.Kernel.Evaluation do
         mission_environment,
         source,
         timeout_ms,
-        %{event_sink: event_sink, inspection_sink: inspection_sink, admission: admission},
+        %{
+          event_sink: event_sink,
+          inspection_sink: inspection_sink,
+          admission: admission,
+          inspect_only: Keyword.get(opts, :inspect_only, false)
+        },
         {
           evaluation_id,
           started_ms,
@@ -282,7 +294,10 @@ defmodule PtcRunner.Kernel.Evaluation do
           )
         )
 
-      Map.put(result, :duration_ms, duration_ms)
+      result
+      |> Map.put(:duration_ms, duration_ms)
+      |> Map.put(:admitted?, true)
+      |> Map.put(:source_bytes, source_bytes)
     else
       {:error, :inspection_sink_error} ->
         :ok = RunState.release_evaluation(state, lease)
@@ -402,7 +417,10 @@ defmodule PtcRunner.Kernel.Evaluation do
       link: true,
       strict_data: true,
       data_grants: DataKeys.source_referenceable_forms(environment.data),
-      missing_data_params_message: @missing_data_params_message
+      missing_data_params_message: @missing_data_params_message,
+      shipped_library_ids: Library.component_ids(),
+      component_catalog: Environment.catalog(environment),
+      inspect_only: Map.get(capture, :inspect_only, false)
     ]
 
     mission_calls_before = mission_capability_calls(state)

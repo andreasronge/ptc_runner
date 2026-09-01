@@ -5,14 +5,20 @@ defmodule PtcRunner.Lisp.Prelude.AttachContext do
   Tool names are strings, matching `PtcRunner.Lisp.run/2` execution lookup.
   """
 
-  @type t :: %__MODULE__{tools: %{optional(String.t()) => term()}}
+  @type t :: %__MODULE__{
+          tools: %{optional(String.t()) => term()},
+          validate_requires?: boolean()
+        }
 
-  defstruct tools: %{}
+  defstruct tools: %{}, validate_requires?: true
 
   @doc "Builds an attach context from a map or tuple-list `:tools` option."
   @spec new(keyword()) :: t()
   def new(opts \\ []) when is_list(opts) do
-    %__MODULE__{tools: Map.new(Keyword.get(opts, :tools, %{}))}
+    %__MODULE__{
+      tools: Map.new(Keyword.get(opts, :tools, %{})),
+      validate_requires?: Keyword.get(opts, :validate_requires?, true) == true
+    }
   end
 
   @doc "True when the granted tools map contains a typed tool named `name`."

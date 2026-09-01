@@ -756,6 +756,136 @@ defmodule PtcRunner.ReplFrontendTest do
   end
 
   @tag :tmp_dir
+  test "inspect-only compiles a provider-backed manifest without credentials", %{
+    tmp_dir: directory
+  } do
+    {manifest_path, _host_path} = write_missing_credential_repl(directory)
+
+    output =
+      capture_io(fn ->
+        run_repl(["--manifest", manifest_path, "--inspect-only", "-e", "(+ 1 2)"])
+      end)
+
+    assert output == "3\n"
+  end
+
+  @tag :tmp_dir
+  test "inspect-only evaluates attached functions and lists components", %{tmp_dir: directory} do
+    component_path = Path.join(directory, "helpers.clj")
+    manifest_path = Path.join(directory, "ptc.json")
+
+    File.write!(
+      component_path,
+      "(ns helpers) (defn answer [] 42) (defn run [input] (return input))"
+    )
+
+    File.write!(
+      manifest_path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "helpers", "path" => "helpers.clj"}],
+          "entry" => "helpers/run"
+        },
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    output =
+      capture_io(fn ->
+        run_repl([
+          "--manifest",
+          manifest_path,
+          "--inspect-only",
+          "-e",
+          "(helpers/answer)",
+          "-e",
+          "(components)",
+          "-e",
+          ~S|(get (component "helpers") :id)|
+        ])
+      end)
+
+    assert output =~ "42\n"
+    assert output =~ "helpers"
+  end
+
+  @tag :tmp_dir
+  test "inspect-only rejects a Kernel route with one closed diagnostic", %{tmp_dir: directory} do
+    manifest_path = write_workflow_repl_manifest(directory)
+
+    output =
+      capture_io(:stderr, fn ->
+        error =
+          assert_raise Mix.Error, fn ->
+            run_repl([
+              "--manifest",
+              manifest_path,
+              "--inspect-only",
+              "-e",
+              ~S|(tool/kernel-eval {:mission "review" :kind :source :source "(return 1)"})|
+            ])
+          end
+
+        assert error.message =~ "inspect_only_unavailable"
+        assert error.message =~ "cannot use Kernel, provider, or capability routes"
+      end)
+
+    assert output =~ "inspect_only_unavailable"
+  end
+
+  @tag :tmp_dir
+  test "inspect-only mission CLI isolates the selected component catalog", %{tmp_dir: directory} do
+    manifest_path = write_inspect_only_mission_manifest(directory)
+
+    output =
+      capture_io(fn ->
+        run_repl([
+          "--manifest",
+          manifest_path,
+          "--mission",
+          "review",
+          "--inspect-only",
+          "-e",
+          "(components)"
+        ])
+      end)
+
+    assert output =~ "review"
+    refute output =~ "helpers"
+  end
+
+  @tag :tmp_dir
+  test "inspect-only project form compiles without injecting host or env", %{tmp_dir: directory} do
+    project_path = write_inspect_only_project(directory)
+
+    output =
+      capture_io(fn ->
+        run_repl(["--project", project_path, "--inspect-only", "-e", "(+ 1 2)"])
+      end)
+
+    assert output == "3\n"
+  end
+
+  test "inspect-only conflicts with host, trace, and profile switches" do
+    assert_raise Mix.Error, ~r/conflicting_arguments|cannot be combined/, fn ->
+      run_repl([
+        "--inspect-only",
+        "--manifest",
+        "ptc.json",
+        "--host-config",
+        "host.json",
+        "-e",
+        "1"
+      ])
+    end
+
+    assert_raise Mix.Error, ~r/invalid_arguments|requires --project or --manifest/, fn ->
+      run_repl(["--inspect-only", "-e", "1"])
+    end
+  end
+
+  @tag :tmp_dir
   test "a private manifest rejects eval before authorizing its trace", %{tmp_dir: directory} do
     component_path = Path.join(directory, "helpers.clj")
     manifest_path = Path.join(directory, "private.json")
@@ -2451,6 +2581,75 @@ defmodule PtcRunner.ReplFrontendTest do
     )
 
     {manifest_path, host_path}
+  end
+
+  defp write_inspect_only_mission_manifest(directory) do
+    File.write!(
+      Path.join(directory, "helpers.clj"),
+      "(ns helpers) (defn answer [] 42) (defn run [input] (return input))"
+    )
+
+    File.write!(Path.join(directory, "review.clj"), "(ns review) (defn answer [] 1)")
+    path = Path.join(directory, "ptc.json")
+
+    File.write!(
+      path,
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "helpers", "path" => "helpers.clj"}],
+          "entry" => "helpers/run"
+        },
+        "missions" => %{
+          "review" => %{
+            "components" => [%{"id" => "review", "path" => "review.clj"}]
+          }
+        },
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    path
+  end
+
+  defp write_inspect_only_project(directory) do
+    File.write!(Path.join(directory, "app.clj"), "(ns app) (defn run [x] (return x))")
+
+    File.write!(
+      Path.join(directory, "ptc.json"),
+      Jason.encode!(%{
+        "version" => 1,
+        "workflow" => %{
+          "components" => [%{"id" => "app", "path" => "app.clj"}],
+          "entry" => "app/run"
+        },
+        "input" => %{"value" => %{}}
+      })
+    )
+
+    File.write!(
+      Path.join(directory, "ptc-host.json"),
+      Jason.encode!(%{
+        "credentials" => %{"key" => %{"env" => "PTC_INSPECT_ONLY_ABSENT_KEY"}},
+        "install" => %{
+          "model" => repl_llm_installation("key")
+        }
+      })
+    )
+
+    project_path = Path.join(directory, "ptc-project.json")
+
+    File.write!(
+      project_path,
+      Jason.encode!(%{
+        "kind" => "ptc-project",
+        "version" => 1,
+        "application" => %{"path" => "ptc.json"},
+        "host" => %{"path" => "ptc-host.json"}
+      })
+    )
+
+    project_path
   end
 
   defp repl_llm_installation(credential) do

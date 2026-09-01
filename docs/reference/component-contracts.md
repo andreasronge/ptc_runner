@@ -127,6 +127,52 @@ ID. A hash-checked
 [component override](../guides/evaluating-with-replay.md#evaluate-the-candidate-without-installing-it)
 can evaluate replacement source for one selected component on a run, but it is
 an invocation option rather than a permanent manifest library installation.
+The project file does not store it, and repeating
+`--component-override-descriptor` is rejected: one command carries one
+descriptor and one `component_id`.
+
+## Install a custom prompt
+
+For a custom prompt in ordinary composition, do not keep selecting shipped
+`agent.core`. That library's dependency remains shipped `agent.prompt`. Give
+the prompt a new ID and select a loop whose dependencies name that ID. Copy
+`agent.core` and `agent.machine` for that rewiring; they are the shipped
+callers of `agent.prompt`. The other shipped agent libraries stay selected.
+
+## Export installed source or publish a candidate
+
+`ptc materialize` (and `mix ptc.materialize` from a source checkout) has two
+exclusive modes. `--source-out` writes interned installed effective bytes.
+`--source`/`--out` then hashes authored bytes into `{candidate.clj,
+descriptor.json}`. The modes are exclusive because a descriptor hashes the
+exact candidate published beside it.
+
+```console
+ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source-out private/agent.prompt.clj
+ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source private/agent.prompt.clj \
+  --out private/agent-prompt-candidate
+```
+
+The command accepts a project or application manifest. `--workflow` selects the
+workflow occurrence; `--target-mission NAME` selects one declared mission.
+Supplying neither or both is invalid. `--source-out` does not acquire a host,
+providers, or input. It writes one new owner-only file and refuses an existing
+destination. `--out` publishes a new owner-only directory. A refused candidate
+leaves nothing behind.
+
+Candidate mode keeps the existing 1 MiB replacement bound. Installed
+inspection and `--source-out` can return a larger accepted component; submitting
+those bytes as a candidate is refused with the existing too-large diagnostic.
+`--from-result` reads one string through an RFC 6901 pointer instead of
+`--source`. Provenance switches (`--origin-run-id`, `--origin-prompt-hash`,
+`--origin-authored-at`, `--accept-widened-effect`) apply only to candidate
+mode.
+
+The [Inspect and customize components](../guides/components-and-preludes.md) guide walks
+the edit loop. The [source-inspection reference](source-inspection.md) chooses
+a retrieval surface.
 
 ## Evaluate one replacement component
 

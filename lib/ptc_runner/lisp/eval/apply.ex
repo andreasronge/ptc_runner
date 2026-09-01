@@ -1274,6 +1274,7 @@ defmodule PtcRunner.Lisp.Eval.Apply do
   defp passthrough_hof_error_kinds do
     [
       @hof_callback_error,
+      :inspect_only_unavailable,
       :tool_error,
       :type_error,
       :unknown_tool,

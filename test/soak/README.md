@@ -30,6 +30,7 @@ is long-running and its signal is a trend across runs.
 | `lifecycle/provider_session_soak_test.exs` | Provider acquire/close: scopes, committed closers, `ProviderTaskTracker` |
 | `lifecycle/analysis_session_soak_test.exs` | `AnalysisSession` + `SessionTrace` owner pair |
 | `lifecycle/oauth_local_fences_soak_test.exs` | `LocalFences` growth characterization — **non-gating**, reports a slope |
+| `component_catalog_soak_test.exs` | Interned component-catalog transport: live concurrent evaluators share one source-sized binary, host binary stays flat, rebuilds reuse one interned binary |
 
 ## Two harnesses
 

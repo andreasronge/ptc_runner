@@ -302,6 +302,23 @@ defmodule PtcRunner.Lisp do
       for selected overrides whose replacement source removed an export.
       Omitting the ownership map keeps the ordinary miss, so embedded callers
       are unchanged.
+    - `:shipped_library_ids` - Optional catalog of shipped library component IDs.
+      The Kernel passes `PtcRunner.Kernel.Library.component_ids/0` so `doc` and
+      `apropos` can name an unattached shipped library. The catalog contains
+      library IDs, not export refs, so a `doc` redirect does not assert that the
+      requested export exists.
+      `nil` (the default) keeps today's miss message, so embedded `run/2`
+      callers are unchanged.
+    - `:component_catalog` - Optional attested Kernel component catalog for the
+      selected environment. Public `run/2` strips this option so a direct
+      caller cannot inject a Kernel graph. Kernel evaluations pass it only
+      through `run_native/2` for the selected workflow or mission catalog. The
+      catalog is not projected into result stamps, traces, telemetry, or host
+      logs.
+    - `:inspect_only` - When true, tool, Kernel, provider, and capability
+      routes fail closed with `inspect_only_unavailable`. Public `run/2`
+      strips this option. Kernel and inspect-only REPL evaluations pass it
+      only through `run_native/2`.
     - `:prelude` - A compiled `%PtcRunner.Lisp.Prelude{}` artifact, a prelude
       SOURCE string, or a list of source-bearing selection maps accepted by
       `PtcRunner.Lisp.Prelude.Bundle.compile/1` to attach before user code.
@@ -483,8 +500,16 @@ defmodule PtcRunner.Lisp do
   @spec run(String.t(), keyword()) :: {:ok, Step.t()} | {:error, Step.t()}
   def run(source, opts \\ []) do
     source
-    |> instrumented_run(opts, :public)
+    |> instrumented_run(public_run_opts(opts), :public)
     |> public_result()
+  end
+
+  @doc false
+  @spec public_run_opts(keyword()) :: keyword()
+  def public_run_opts(opts) when is_list(opts) do
+    opts
+    |> Keyword.delete(:component_catalog)
+    |> Keyword.delete(:inspect_only)
   end
 
   @doc false
@@ -756,7 +781,7 @@ defmodule PtcRunner.Lisp do
   end
 
   defp attach_and_run(source, params, prelude_opt, tools, memory) do
-    case attach_prelude(prelude_opt, tools, memory) do
+    case attach_prelude(prelude_opt, tools, memory, params.inspect_only) do
       {:ok, prelude} ->
         source
         |> do_run_inner(Map.put(params, :prelude, prelude))
@@ -822,6 +847,9 @@ defmodule PtcRunner.Lisp do
       strict_data: Keyword.get(opts, :strict_data, false),
       data_grants: Keyword.get(opts, :data_grants),
       missing_data_params_message: Keyword.get(opts, :missing_data_params_message),
+      shipped_library_ids: Keyword.get(opts, :shipped_library_ids),
+      component_catalog: Keyword.get(opts, :component_catalog),
+      inspect_only: Keyword.get(opts, :inspect_only, false),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
       direct_namespaces: Keyword.get(opts, :direct_namespaces, []),
       transitive_namespace_requirers: Keyword.get(opts, :transitive_namespace_requirers, %{}),
@@ -836,10 +864,14 @@ defmodule PtcRunner.Lisp do
 
   # Resolve the `:prelude` option (compiled artifact or source) and run
   # attach-time requires validation against the granted tools map.
-  defp attach_prelude(nil, _tools, _memory), do: {:ok, nil}
+  defp attach_prelude(nil, _tools, _memory, _inspect_only), do: {:ok, nil}
 
-  defp attach_prelude(prelude_opt, tools, memory) do
-    context = PreludeAttachContext.new(tools: tools)
+  defp attach_prelude(prelude_opt, tools, memory, inspect_only) do
+    context =
+      PreludeAttachContext.new(
+        tools: tools,
+        validate_requires?: inspect_only != true
+      )
 
     case PreludeAttach.attach(prelude_opt, context) do
       {:ok, prelude} ->
@@ -1031,7 +1063,13 @@ defmodule PtcRunner.Lisp do
          %{}
        )}
     else
-      with {:ok, prelude} <- attach_prelude(Keyword.get(opts, :prelude), tools, memory),
+      with {:ok, prelude} <-
+             attach_prelude(
+               Keyword.get(opts, :prelude),
+               tools,
+               memory,
+               Keyword.get(opts, :inspect_only, false)
+             ),
            :ok <- validate_parallel_config(params.worker_max_heap, params.max_parallel_workers),
            {:ok, normalized_tools} <- normalize_tools(tools) do
         compile_opts =
@@ -1061,7 +1099,12 @@ defmodule PtcRunner.Lisp do
   end
 
   defp execute_program(source, opts) do
-    case compile_program(source, Map.put(opts, :check_tool_resolution, true)) do
+    # Inspect-only sessions install no tools. The compile-time unknown-tool
+    # check would otherwise hide the closed `inspect_only_unavailable`
+    # diagnostic that eval emits for Kernel, provider, and capability routes.
+    check_tool_resolution? = Map.get(opts, :inspect_only, false) != true
+
+    case compile_program(source, Map.put(opts, :check_tool_resolution, check_tool_resolution?)) do
       {:ok, core_ast, prelude_calls} ->
         core_ast
         |> execute_eval(apply_run_deadline(opts))
@@ -1245,6 +1288,9 @@ defmodule PtcRunner.Lisp do
       strict_data: strict_data,
       data_grants: data_grants,
       missing_data_params_message: missing_data_params_message,
+      shipped_library_ids: shipped_library_ids,
+      component_catalog: component_catalog,
+      inspect_only: inspect_only,
       strict_transitive_calls: strict_transitive_calls,
       private_tool_authority?: private_tool_authority?,
       direct_namespaces: direct_namespaces,
@@ -1290,6 +1336,9 @@ defmodule PtcRunner.Lisp do
         strict_data: strict_data,
         data_grants: data_grants,
         missing_data_params_message: missing_data_params_message,
+        shipped_library_ids: shipped_library_ids,
+        component_catalog: component_catalog,
+        inspect_only: inspect_only,
         strict_transitive_calls: strict_transitive_calls,
         private_tool_authority?: private_tool_authority?,
         direct_namespaces: direct_namespaces,
@@ -1762,6 +1811,13 @@ defmodule PtcRunner.Lisp do
     case EvaluatorError.lisp_message(:loop_limit_exceeded, %{limit: n}) do
       {:ok, message} -> message
       :error -> "loop limit exceeded"
+    end
+  end
+
+  def format_error({:inspect_only_unavailable, _details}) do
+    case EvaluatorError.lisp_message(:inspect_only_unavailable, %{}) do
+      {:ok, message} -> message
+      :error -> "this inspect-only session cannot use Kernel, provider, or capability routes"
     end
   end
 
