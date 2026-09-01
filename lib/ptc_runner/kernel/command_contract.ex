@@ -38,6 +38,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     {"validate", :validate, false, false},
     {"doctor", {:doctor, :connect}, :catalog, true},
     {"models", :models, false, false},
+    {"materialize", :materialize, false, false},
     {"unknown", :unknown, false, false}
   ]
   @run_ref "^cmd-[0-7][0-9abcdefghjkmnpqrstvwxyz]{25}$(?![\\s\\S])"
@@ -168,7 +169,8 @@ defmodule PtcRunner.Kernel.CommandContract do
               closed(~w(result_class), %{"result_class" => %{"const" => "private"}})
             ),
             success_envelope("doctor", doctor_success_result()),
-            success_envelope("models", models_result())
+            success_envelope("models", models_result()),
+            success_envelope("materialize", materialize_result())
           ],
       "$defs" => %{
         "unclassified_diagnostic" =>
@@ -255,7 +257,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   @doc false
   @spec valid_success_result?(atom(), term()) :: boolean()
   def valid_success_result?(command, result)
-      when command in [:help, :version, :docs, :init, :validate, :doctor, :models] do
+      when command in [:help, :version, :docs, :init, :validate, :doctor, :models, :materialize] do
     with true <- JSONValue.value?(result),
          {:ok, root} <-
            compiled_jsv_root({__MODULE__, :success_root, command}, fn ->
@@ -274,10 +276,10 @@ defmodule PtcRunner.Kernel.CommandContract do
   def valid_success_result?(_command, _result), do: false
 
   @doc """
-  Validates deterministic success-result ordering not fully expressible in JSON Schema.
+  Validates deterministic success-result constraints not fully expressible in JSON Schema.
 
   Callers that consume the generated schema must apply this predicate after
-  ordinary schema validation for `doctor` and `models` results.
+  ordinary schema validation for `doctor`, `models`, and `materialize` results.
   """
   @spec valid_success_semantics?(atom(), term()) :: boolean()
   def valid_success_semantics?(
@@ -345,6 +347,14 @@ defmodule PtcRunner.Kernel.CommandContract do
           ordered_subset?(installation["destinations"], ~w(workflow mission))
       end)
   end
+
+  def valid_success_semantics?(:materialize, %{"mode" => "source-out", "path" => path})
+      when is_binary(path),
+      do: Path.type(path) == :absolute
+
+  def valid_success_semantics?(:materialize, %{"mode" => "candidate", "directory" => directory})
+      when is_binary(directory),
+      do: Path.type(directory) == :absolute
 
   def valid_success_semantics?(command, _result)
       when command in [:help, :version, :docs, :init, :validate],
@@ -925,7 +935,8 @@ defmodule PtcRunner.Kernel.CommandContract do
               :validate,
               :models,
               :doctor,
-              {:doctor, :connect}
+              {:doctor, :connect},
+              :materialize
             ] and code in [:invalid_arguments, :conflicting_arguments],
        do: true
 
@@ -945,7 +956,8 @@ defmodule PtcRunner.Kernel.CommandContract do
               :models,
               :doctor,
               {:doctor, :connect},
-              :run_unclassified
+              :run_unclassified,
+              :materialize
             ],
        do: true
 
@@ -965,7 +977,17 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: true
 
   defp diagnostic_pair_allowed?(mode, :internal, :internal_error)
-       when mode in [:help, :version, :docs, :init, :validate, :models, :doctor, :unknown],
+       when mode in [
+              :help,
+              :version,
+              :docs,
+              :init,
+              :validate,
+              :models,
+              :doctor,
+              :materialize,
+              :unknown
+            ],
        do: true
 
   defp diagnostic_pair_allowed?({:doctor, :connect}, :internal, :internal_error), do: true
@@ -980,18 +1002,52 @@ defmodule PtcRunner.Kernel.CommandContract do
             ],
        do: true
 
+  defp diagnostic_pair_allowed?(:materialize, :publication, code)
+       when code in [
+              :source_out_destination_exists,
+              :source_out_parent_unusable,
+              :source_out_failed,
+              :candidate_refused,
+              :candidate_destination_exists,
+              :candidate_publication_failed,
+              :invalid_candidate_destination,
+              :descriptor_too_large,
+              :candidate_source_too_large,
+              :unreadable_candidate_source,
+              :candidate_cleanup_failed,
+              :result_artifact_too_large,
+              :unreadable_result_artifact,
+              :result_pointer_invalid,
+              :result_artifact_invalid,
+              :selected_component_missing
+            ],
+       do: true
+
   defp diagnostic_pair_allowed?(mode, :host, code)
-       when mode in [:validate, :models, :doctor, {:doctor, :connect}, :run_unclassified] and
+       when mode in [
+              :validate,
+              :models,
+              :doctor,
+              {:doctor, :connect},
+              :run_unclassified
+            ] and
               code in @host_codes,
        do: true
 
   defp diagnostic_pair_allowed?(mode, :project, code)
-       when mode in [:validate, :models, :doctor, {:doctor, :connect}, :run_unclassified] and
+       when mode in [
+              :validate,
+              :models,
+              :doctor,
+              {:doctor, :connect},
+              :run_unclassified,
+              :materialize
+            ] and
               code in @project_codes,
        do: true
 
   defp diagnostic_pair_allowed?(mode, :application, code)
-       when mode in [:validate, :doctor, {:doctor, :connect}] and
+       when mode in [:validate, :doctor, {:doctor, :connect}, :materialize] and
               code in @static_application_codes,
        do: true
 
@@ -1004,7 +1060,7 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: true
 
   defp diagnostic_pair_allowed?(mode, :bundle, code)
-       when mode in [:validate, :doctor, {:doctor, :connect}, :run_unclassified] and
+       when mode in [:validate, :doctor, {:doctor, :connect}, :run_unclassified, :materialize] and
               code in @bundle_codes,
        do: true
 
@@ -2128,6 +2184,21 @@ defmodule PtcRunner.Kernel.CommandContract do
     })
   end
 
+  defp materialize_result do
+    %{
+      "oneOf" => [
+        closed(~w(mode path), %{
+          "mode" => %{"const" => "source-out"},
+          "path" => %{"type" => "string", "minLength" => 1, "maxLength" => 4096}
+        }),
+        closed(~w(mode directory), %{
+          "mode" => %{"const" => "candidate"},
+          "directory" => %{"type" => "string", "minLength" => 1, "maxLength" => 4096}
+        })
+      ]
+    }
+  end
+
   # `ModelSelectorDisclosure` withholds endpoint-bearing selectors; the closed
   # envelope refuses one rather than trusting every producer to remember.
   defp model_selector_schema do
@@ -2145,6 +2216,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp success_result_schema(:validate), do: validate_result()
   defp success_result_schema(:doctor), do: doctor_success_result()
   defp success_result_schema(:models), do: models_result()
+  defp success_result_schema(:materialize), do: materialize_result()
 
   defp nullable_ref(name),
     do: %{"oneOf" => [%{"type" => "null"}, ref(name)]}

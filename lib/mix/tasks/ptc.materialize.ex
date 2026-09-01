@@ -1,18 +1,24 @@
 defmodule Mix.Tasks.Ptc.Materialize do
-  @shortdoc "Materializes model-authored source as a gated candidate component"
+  @shortdoc "Exports installed component source or materializes a gated candidate"
   @moduledoc """
-  Turns model-authored source into `{candidate.clj, descriptor.json}` and
-  reports whether it is fit to promote.
+  Exports installed effective source, or turns authored source into
+  `{candidate.clj, descriptor.json}` and reports whether it is fit to promote.
 
+      mix ptc.materialize MANIFEST --workflow --component ID --source-out PATH
       mix ptc.materialize MANIFEST --workflow --component ID --out DIR --source authored.clj
       mix ptc.materialize MANIFEST --target-mission NAME --component ID --out DIR \\
         --from-result results/run.json --result-pointer /value/source
       mix ptc.materialize MANIFEST --workflow --component ID --out DIR --source authored.clj \\
         --origin-run-id run-2026-08-03-0001 --accept-widened-effect
 
+  `--source-out` writes the currently installed effective bytes for later
+  editing. `--source`/`--out` (or `--from-result`) is a separate candidate-gate
+  step; the two modes are mutually exclusive because a descriptor hashes the
+  exact candidate published beside it.
+
   A model can author a working library inside a run, but a runtime `defn` dies
   at end of run: it is not in the frozen bundle, not covered by a component
-  source hash, and absent from the mission inventory. This task closes that
+  source hash, and absent from the mission inventory. Candidate mode closes that
   loop by making the authored bytes a real component candidate, which a later
   run can evaluate through `mix ptc run --component-override-descriptor`.
 
@@ -21,6 +27,7 @@ defmodule Mix.Tasks.Ptc.Materialize do
 
   ## Source acquisition
 
+  `--source-out` reads interned package bytes for the selected environment.
   `--source` reads raw candidate bytes. `--from-result` reads a result artifact
   written by `mix ptc run --output`/`--private-output` and resolves one RFC 6901
   JSON pointer to one string, because a result artifact is JSON, not raw Lisp.
@@ -32,6 +39,7 @@ defmodule Mix.Tasks.Ptc.Materialize do
 
   ## Publication
 
+  `--source-out` must not exist. It is created exclusively at mode 0600.
   `--out` must not exist. It is created exclusively at mode 0700 with both
   files restricted to 0600 before content is written, because a candidate
   extracted from a private artifact must not be declassified by publishing it.
@@ -68,19 +76,12 @@ defmodule Mix.Tasks.Ptc.Materialize do
 
   use Mix.Task
 
-  alias PtcRunner.Kernel.ApplicationPackage
-  alias PtcRunner.Kernel.CandidateArtifact
-  alias PtcRunner.Kernel.CandidatePromotion
-  alias PtcRunner.Kernel.ComponentOverride
-  alias PtcRunner.Kernel.StrictJSON
+  alias PtcRunner.Kernel.Materialize
 
-  @usage "usage: mix ptc.materialize MANIFEST (--workflow | --target-mission NAME) --component ID --out DIR " <>
-           "(--source PATH | --from-result PATH --result-pointer POINTER) " <>
+  @usage "usage: mix ptc.materialize MANIFEST (--workflow | --target-mission NAME) --component ID " <>
+           "(--source-out PATH | --out DIR (--source PATH | --from-result PATH --result-pointer POINTER)) " <>
            "[--origin-run-id ID] [--origin-prompt-hash sha256:...] " <>
            "[--origin-authored-at RFC3339] [--accept-widened-effect]"
-
-  @max_result_bytes 1_048_576
-  @max_source_bytes 1_048_576
 
   @impl Mix.Task
   def run(argv) do
@@ -92,6 +93,7 @@ defmodule Mix.Tasks.Ptc.Materialize do
              workflow: :boolean,
              target_mission: :string,
              out: :string,
+             source_out: :string,
              source: :string,
              from_result: :string,
              result_pointer: :string,
@@ -102,7 +104,7 @@ defmodule Mix.Tasks.Ptc.Materialize do
            ]
          ) do
       {opts, [manifest], []} ->
-        opts |> materialize(manifest) |> report()
+        manifest |> Materialize.run(opts) |> report()
 
       {_opts, _arguments, invalid} when invalid != [] ->
         Mix.raise("invalid ptc.materialize options: #{inspect(invalid)}")
@@ -112,229 +114,11 @@ defmodule Mix.Tasks.Ptc.Materialize do
     end
   end
 
-  defp materialize(opts, manifest) do
-    with {:ok, component_id} <- required(opts, :component),
-         {:ok, target} <- target(opts),
-         {:ok, out} <- required(opts, :out),
-         {:ok, source} <- candidate_source(opts),
-         {:ok, base} <- acquire(manifest, []),
-         {:ok, base_source} <- installed_source(base, target, component_id),
-         {:ok, published} <-
-           publish(out, source, descriptor(target, component_id, base_source, opts)),
-         {:ok, candidate} <- gate_acquire(manifest, published),
-         report <- evaluate(base, candidate, opts) do
-      finish(report, published)
-    end
+  defp report({:ok, {:source_out, path}}) do
+    Mix.shell().info("source written: #{path}")
   end
 
-  defp finish(%{outcome: :pass} = report, published), do: {:ok, report, published}
-
-  defp finish(report, published) do
-    case CandidateArtifact.discard(published) do
-      :ok -> {:refused, report}
-      {:error, :candidate_cleanup_failed} -> {:error, :candidate_cleanup_failed}
-    end
-  end
-
-  defp evaluate(base, candidate, opts) do
-    CandidatePromotion.evaluate(base, candidate,
-      accept_widened_effect: Keyword.get(opts, :accept_widened_effect, false)
-    )
-  end
-
-  defp gate_acquire(manifest, published) do
-    case acquire(manifest, component_override_descriptor: published.descriptor) do
-      {:ok, package} ->
-        {:ok, package}
-
-      {:error, reason} ->
-        case CandidateArtifact.discard(published) do
-          :ok -> {:error, reason}
-          {:error, :candidate_cleanup_failed} -> {:error, :candidate_cleanup_failed}
-        end
-    end
-  end
-
-  defp acquire(manifest, opts) do
-    case ApplicationPackage.request_directory(manifest, [result_projection: :native] ++ opts) do
-      {:ok, request} -> {:ok, request.package}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp publish(out, source, descriptor), do: CandidateArtifact.publish(out, source, descriptor)
-
-  defp descriptor(target, component_id, base_source, opts) do
-    # source_hash and path are derived by CandidateArtifact from the bytes it
-    # actually writes, so a descriptor cannot name source published beside it.
-    %{
-      "target" => target,
-      "component_id" => component_id,
-      "base_source_hash" => ComponentOverride.hash(base_source)
-    }
-    |> maybe_put_provenance(opts)
-  end
-
-  defp maybe_put_provenance(descriptor, opts) do
-    provenance =
-      %{}
-      |> put_present("run_id", Keyword.get(opts, :origin_run_id))
-      |> put_present("prompt_hash", Keyword.get(opts, :origin_prompt_hash))
-      |> put_present("authored_at", Keyword.get(opts, :origin_authored_at))
-      |> put_acceptance(Keyword.get(opts, :accept_widened_effect, false))
-
-    if provenance == %{},
-      do: descriptor,
-      else: Map.put(descriptor, "provenance", provenance)
-  end
-
-  defp put_present(map, _key, nil), do: map
-  defp put_present(map, key, value), do: Map.put(map, key, value)
-
-  defp put_acceptance(map, false), do: map
-  defp put_acceptance(map, true), do: Map.put(map, "accept_widened_effect", true)
-
-  defp installed_source(package, %{"environment" => "workflow"}, component_id) do
-    case CandidatePromotion.component_source(package, "workflow", component_id) do
-      {:ok, source} -> {:ok, source}
-      :error -> {:error, :override_component_not_selected}
-    end
-  end
-
-  defp installed_source(package, %{"environment" => "mission", "mission" => name}, component_id) do
-    case CandidatePromotion.component_source(package, {:mission, name}, component_id) do
-      {:ok, source} -> {:ok, source}
-      :error -> {:error, :override_component_not_selected}
-    end
-  end
-
-  defp target(opts) do
-    case {Keyword.get(opts, :workflow, false), Keyword.get(opts, :target_mission)} do
-      {true, nil} ->
-        {:ok, %{"environment" => "workflow"}}
-
-      {false, name} when is_binary(name) ->
-        {:ok, %{"environment" => "mission", "mission" => name}}
-
-      _ ->
-        {:error, :invalid_override_target}
-    end
-  end
-
-  defp candidate_source(opts) do
-    case {Keyword.get(opts, :source), Keyword.get(opts, :from_result)} do
-      {nil, nil} ->
-        {:error, :missing_candidate_source}
-
-      {source, nil} ->
-        read_bounded_source(
-          source,
-          @max_source_bytes,
-          :candidate_source_too_large,
-          :unreadable_candidate_source
-        )
-
-      {nil, result} ->
-        extract_source(result, Keyword.get(opts, :result_pointer))
-
-      {_source, _result} ->
-        {:error, :conflicting_candidate_source}
-    end
-  end
-
-  # Read at most the applicable limit plus one byte. Reading the whole file and
-  # checking its size afterwards lets an oversized input exhaust the VM before
-  # the documented size error is ever returned, and a stat-then-read pair races
-  # against a file that grows in between.
-  defp read_bounded_source(path, limit, too_large, unreadable) do
-    case File.open(path, [:read, :binary]) do
-      {:ok, device} ->
-        try do
-          case IO.binread(device, limit + 1) do
-            data when is_binary(data) and byte_size(data) > limit -> {:error, too_large}
-            data when is_binary(data) -> {:ok, data}
-            :eof -> {:ok, ""}
-            _other -> {:error, unreadable}
-          end
-        after
-          File.close(device)
-        end
-
-      {:error, _reason} ->
-        {:error, unreadable}
-    end
-  end
-
-  # A result artifact is JSON, so extraction is explicit and bounded: one
-  # pointer, one string, no search for something source-shaped.
-  defp extract_source(_path, nil), do: {:error, :missing_result_pointer}
-
-  defp extract_source(path, pointer) do
-    with {:ok, raw} <- read_bounded(path),
-         {:ok, decoded} <- StrictJSON.decode(raw),
-         {:ok, segments} <- pointer_segments(pointer),
-         {:ok, value} <- resolve(decoded, segments) do
-      if is_binary(value), do: {:ok, value}, else: {:error, :result_pointer_not_a_string}
-    end
-  end
-
-  defp read_bounded(path) do
-    read_bounded_source(
-      path,
-      @max_result_bytes,
-      :result_artifact_too_large,
-      :unreadable_result_artifact
-    )
-  end
-
-  # RFC 6901: the empty string points at the whole document.
-  defp pointer_segments(""), do: {:ok, []}
-
-  defp pointer_segments("/" <> rest) do
-    segments =
-      rest
-      |> String.split("/")
-      |> Enum.map(&(&1 |> String.replace("~1", "/") |> String.replace("~0", "~")))
-
-    {:ok, segments}
-  end
-
-  defp pointer_segments(_pointer), do: {:error, :invalid_result_pointer}
-
-  defp resolve(value, []), do: {:ok, value}
-
-  defp resolve(value, [segment | rest]) when is_map(value) do
-    case Map.fetch(value, segment) do
-      {:ok, child} -> resolve(child, rest)
-      :error -> {:error, :result_pointer_missing}
-    end
-  end
-
-  # Array indices are part of RFC 6901 evaluation, so a result whose source sits
-  # under a list is reachable.
-  defp resolve(value, [segment | rest]) when is_list(value) do
-    case Integer.parse(segment) do
-      {index, ""} when index >= 0 ->
-        case Enum.fetch(value, index) do
-          {:ok, child} -> resolve(child, rest)
-          :error -> {:error, :result_pointer_missing}
-        end
-
-      _other ->
-        {:error, :result_pointer_missing}
-    end
-  end
-
-  defp resolve(_value, _segments), do: {:error, :result_pointer_missing}
-
-  defp required(opts, key) do
-    case Keyword.get(opts, key) do
-      nil -> {:error, {:missing_option, key}}
-      value -> {:ok, value}
-    end
-  end
-
-  defp report({:ok, report, published}) do
+  defp report({:ok, {:candidate, report, published}}) do
     Mix.shell().info("candidate ready: #{published.directory}")
     print_criteria(report)
 

@@ -171,7 +171,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       end)
 
     assert topics ==
-             ~w(docs doctor init models repl root run run transcript validate version viewer)
+             ~w(docs doctor init materialize models repl root run run transcript validate version viewer)
 
     run_options =
       help_branch
@@ -5084,7 +5084,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
         provider_activity: true
       )
 
-    for command <- [:help, :version, :init, :validate, :models, :doctor] do
+    for command <- [:help, :version, :init, :validate, :models, :doctor, :materialize] do
       assert_raise ArgumentError, fn -> CommandOutcome.error(command, run_ref, active) end
     end
 
@@ -5113,7 +5113,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       {:validate, diagnostic_for_row(DiagnosticCatalog.fetch!(:application, :override_invalid))},
       {:validate,
        diagnostic_for_row(DiagnosticCatalog.fetch!(:application, :event_identity_conflict))},
-      {:help, diagnostic_for_row(DiagnosticCatalog.fetch!(:arguments, :conflicting_arguments))}
+      {:help, diagnostic_for_row(DiagnosticCatalog.fetch!(:arguments, :conflicting_arguments))},
+      {:materialize, diagnostic_for_row(DiagnosticCatalog.fetch!(:host, :host_unavailable))}
     ]
 
     for {command_mode, diagnostic} <- impossible_pairs do

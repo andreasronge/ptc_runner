@@ -364,8 +364,22 @@ defmodule PtcRunner.Kernel.CommandParser do
     end
   end
 
+  defp validate_command(:materialize, [application], options, ordered, frontend_options, frontend) do
+    if materialize_arguments_valid?(options, frontend) do
+      arguments(:materialize,
+        application: application,
+        options: options,
+        ordered_options: ordered,
+        frontend_options: frontend_options,
+        frontend: frontend
+      )
+    else
+      reject(:materialize, materialize_rejection_code(options))
+    end
+  end
+
   defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend)
-       when command in [:init, :validate, :run, :viewer],
+       when command in [:init, :validate, :run, :viewer, :materialize],
        do: {:error, CommandRejection.positional_arity(command)}
 
   defp validate_command(command, _positional, _options, _ordered, _frontend_options, _frontend),
@@ -554,6 +568,93 @@ defmodule PtcRunner.Kernel.CommandParser do
 
   defp conflicting?(options, left, right),
     do: Keyword.has_key?(options, left) and Keyword.has_key?(options, right)
+
+  defp materialize_arguments_valid?(options, frontend) do
+    allowed?(:materialize, options, frontend) and
+      valid_nonempty_string?(Map.get(options, :component)) and
+      materialize_target_valid?(options) and
+      materialize_mode_valid?(options) and
+      materialize_strings_valid?(options)
+  end
+
+  defp materialize_target_valid?(options) do
+    case {Map.has_key?(options, :workflow), Map.get(options, :target_mission)} do
+      {true, nil} -> Map.get(options, :workflow) == true
+      {false, name} when is_binary(name) -> valid_nonempty_string?(name)
+      _other -> false
+    end
+  end
+
+  defp materialize_mode_valid?(options) do
+    source_out? = Map.has_key?(options, :source_out)
+    candidate? = Map.has_key?(options, :out)
+
+    cond do
+      source_out? and candidate? ->
+        false
+
+      source_out? ->
+        source_out_exclusive?(options)
+
+      candidate? ->
+        materialize_candidate_source_valid?(options)
+
+      true ->
+        false
+    end
+  end
+
+  defp source_out_exclusive?(options) do
+    Enum.all?(
+      [
+        :source,
+        :from_result,
+        :result_pointer,
+        :origin_run_id,
+        :origin_prompt_hash,
+        :origin_authored_at
+      ],
+      &(not Map.has_key?(options, &1))
+    ) and not Map.has_key?(options, :accept_widened_effect)
+  end
+
+  defp materialize_candidate_source_valid?(options) do
+    case {Map.has_key?(options, :source), Map.has_key?(options, :from_result)} do
+      {true, false} -> not Map.has_key?(options, :result_pointer)
+      {false, true} -> Map.has_key?(options, :result_pointer)
+      _other -> false
+    end
+  end
+
+  defp materialize_strings_valid?(options) do
+    Enum.all?(
+      [
+        :component,
+        :target_mission,
+        :source_out,
+        :out,
+        :source,
+        :from_result,
+        :result_pointer,
+        :origin_run_id,
+        :origin_prompt_hash,
+        :origin_authored_at
+      ],
+      &valid_optional_nonempty_string?(options, &1)
+    )
+  end
+
+  defp materialize_rejection_code(options) do
+    source_out? = Map.has_key?(options, :source_out)
+    candidate? = Map.has_key?(options, :out)
+
+    if (source_out? and candidate?) or
+         (source_out? and not source_out_exclusive?(options)) or
+         (Map.has_key?(options, :source) and Map.has_key?(options, :from_result)) or
+         (Map.has_key?(options, :workflow) and Map.has_key?(options, :target_mission)),
+       do: :conflicting_arguments,
+       else: :invalid_arguments
+  end
 
   defp enabled_if_present?(options, name),
     do: not Map.has_key?(options, name) or Map.fetch!(options, name) == true

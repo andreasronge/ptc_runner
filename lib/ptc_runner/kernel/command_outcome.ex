@@ -25,6 +25,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     :doctor,
     {:doctor, :connect},
     :models,
+    :materialize,
     :unknown
   ]
   @success_modes [
@@ -35,9 +36,20 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     :validate,
     :doctor,
     {:doctor, :connect},
-    :models
+    :models,
+    :materialize
   ]
-  @static_modes [:help, :version, :docs, :init, :validate, :doctor, :models, :unknown]
+  @static_modes [
+    :help,
+    :version,
+    :docs,
+    :init,
+    :validate,
+    :doctor,
+    :models,
+    :materialize,
+    :unknown
+  ]
   @exit_statuses [0, 2, 3, 4, 5, 6, 7, 70]
   @artifact_names ~w(trace inspection result)
   @unclassified_artifact_states ~w(not_requested not_written)
@@ -69,6 +81,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
           | :doctor
           | {:doctor, :connect}
           | :models
+          | :materialize
           | :unknown
   @type t :: %__MODULE__{
           command_mode: command_mode(),

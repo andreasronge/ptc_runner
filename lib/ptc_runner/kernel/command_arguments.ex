@@ -33,6 +33,7 @@ defmodule PtcRunner.Kernel.CommandArguments do
           | :transcript
           | :repl
           | :viewer
+          | :materialize
   @type t :: %__MODULE__{
           command: command(),
           application: binary() | nil,

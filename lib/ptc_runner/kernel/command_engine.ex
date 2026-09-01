@@ -30,6 +30,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandEnvelope
   alias PtcRunner.Kernel.CommandInitializer
+  alias PtcRunner.Kernel.CommandMaterialize
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPreparation
   alias PtcRunner.Kernel.CommandRejection
@@ -342,6 +343,9 @@ defmodule PtcRunner.Kernel.CommandEngine do
         CommandInitializer.initialize(arguments.directory, run_ref,
           example: Map.get(arguments.options, :example)
         )
+
+      :materialize ->
+        CommandMaterialize.dispatch(arguments, run_ref)
     end
   rescue
     _exception -> {:error, arguments_outcome(arguments, run_ref, :internal, :internal_error)}

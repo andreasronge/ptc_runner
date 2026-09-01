@@ -101,14 +101,16 @@ change, give your permanent components new IDs.">
 change, give your permanent components new IDs.</p><p>A prelude is the compiled set of components used by one workflow or mission.
 It is immutable during a run. You do not replace the whole prelude. You replace
 one selected component when the next run starts.</p><h2 id="try-a-different-agent-prompt">Try a different agent prompt</h2><p>Selecting <code class="inline">agent.core</code> also selects <code class="inline">agent.prompt</code>. The prompt is therefore an
-override target even when it is not listed directly in the manifest.</p><p>Candidate creation requires a source checkout. Copy the shipped prompt, then
-edit the copy:</p><pre><code class="console language-console">mkdir -p private
-cp priv/preludes/kernel/agent.prompt.clj private/agent.prompt.clj</code></pre><p>Turn the edited source into a checked candidate:</p><pre><code class="console language-console">mix ptc.materialize ptc.json \
-  --workflow \
-  --component agent.prompt \
-  --out private/agent-prompt-candidate \
-  --source private/agent.prompt.clj</code></pre><p>The command checks the source and creates the candidate and descriptor files.
-The output directory must not already exist.</p><p>Validate the candidate without acquiring a provider:</p><pre><code class="console language-console">mix ptc validate ptc.json \
+override target even when it is not listed directly in the manifest.</p><p>Export the installed prompt, edit the copy, then publish a gated candidate.
+<code class="inline">--source-out</code> and <code class="inline">--source</code>/<code class="inline">--out</code> are separate steps because a descriptor
+hashes the exact candidate beside it:</p><pre><code class="console language-console">mkdir -p private
+ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source-out private/agent.prompt.clj
+# edit private/agent.prompt.clj
+ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source private/agent.prompt.clj \
+  --out private/agent-prompt-candidate</code></pre><p>The second command checks the source and creates the candidate and descriptor
+files. Neither destination may already exist.</p><p>Validate the candidate without acquiring a provider:</p><pre><code class="console language-console">mix ptc validate ptc.json \
   --component-override-descriptor private/agent-prompt-candidate/descriptor.json</code></pre><p>Run the normal version first. Then run the candidate:</p><pre><code class="console language-console">mix ptc run ptc.json
 mix ptc run ptc.json \
   --component-override-descriptor private/agent-prompt-candidate/descriptor.json</code></pre><p>The override applies only to that command. It does not edit the manifest or

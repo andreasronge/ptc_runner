@@ -24,6 +24,7 @@ grammar for each frontend.
 | `ptc repl` | Open a direct, manifest-backed, or analysis session |
 | `ptc viewer PROJECT.json` | Browse a project's captured traces in a local web UI |
 | `ptc viewer PROJECT.json --env-file FILE` | Use one exact dotenv file for Viewer-started workflows and missions |
+| `ptc materialize MANIFEST or PROJECT` | Export installed component source, or publish a gated candidate |
 
 Help is generated from the same declarations as the strict parser, so use the
 help command for the frontend you invoke as its canonical command and option
@@ -253,9 +254,9 @@ candidate and descriptor from model-authored source. The
 [replay evaluation guide](../guides/evaluating-with-replay.md) owns the workflow
 for holding model responses fixed and comparing a baseline with that candidate.
 The [component reference](component-contracts.md#evaluate-one-replacement-component)
-defines every descriptor field. Candidate creation is not currently a
-standalone command; a source checkout provides `mix ptc.materialize` as
-shown in
+defines every descriptor field. `ptc materialize` (and `mix ptc.materialize`
+from a source checkout) exports installed source with `--source-out` and
+publishes a gated candidate with `--source`/`--out`, as shown in
 [Customize agent components](../guides/components-and-preludes.md#try-a-different-agent-prompt).
 
 Both `ptc validate` and `ptc run` accept the descriptor switch. Validation
@@ -562,15 +563,31 @@ Embedding runtimes can supply authorization targets directly.
 | 7 | `execution` | `event_sink_unavailable` | no | the trace event sink is unavailable |
 | 7 | `execution` | `inspection_capture_limit_exceeded` | no | the private inspection capture limit was exceeded |
 | 7 | `execution` | `inspection_sink_unavailable` | no | the private inspection sink is unavailable |
+| 7 | `publication` | `candidate_cleanup_failed` | no | a refused candidate could not be discarded |
+| 7 | `publication` | `candidate_destination_exists` | no | ptc materialize --out publishes only to a new directory; choose a path that does not already exist |
+| 7 | `publication` | `candidate_publication_failed` | no | candidate publication failed |
+| 7 | `publication` | `candidate_refused` | no | the candidate was refused by the promotion gate |
+| 7 | `publication` | `candidate_source_too_large` | no | the candidate source exceeds the 1 MiB publication bound |
+| 7 | `publication` | `descriptor_too_large` | no | the candidate descriptor exceeds its publication bound |
 | 7 | `publication` | `destination_collision` | no | an artifact destination appeared before publication |
 | 7 | `publication` | `initialization_failed` | no | project initialization failed |
 | 7 | `publication` | `initialization_parent_missing` | no | the initialization target's parent directory does not exist |
 | 7 | `publication` | `initialization_parent_unusable` | no | the initialization target's parent directory is unusable |
 | 7 | `publication` | `initialization_target_exists` | no | ptc init publishes only to a new directory; choose a target that does not already exist |
 | 7 | `publication` | `inspection_publication_failed` | no | inspection publication failed |
+| 7 | `publication` | `invalid_candidate_destination` | no | the candidate destination is invalid |
 | 7 | `publication` | `recovery_cleanup_failed` | no | private result recovery cleanup failed |
+| 7 | `publication` | `result_artifact_invalid` | no | the result artifact is not valid JSON |
+| 7 | `publication` | `result_artifact_too_large` | no | the result artifact exceeds the 1 MiB publication bound |
+| 7 | `publication` | `result_pointer_invalid` | no | the result pointer does not resolve to a string |
 | 7 | `publication` | `result_publication_failed` | no | result publication failed |
+| 7 | `publication` | `selected_component_missing` | no | the selected component is not present in the chosen environment |
+| 7 | `publication` | `source_out_destination_exists` | no | ptc materialize --source-out publishes only to a new file; choose a path that does not already exist |
+| 7 | `publication` | `source_out_failed` | no | source export failed |
+| 7 | `publication` | `source_out_parent_unusable` | no | the --source-out parent directory is unusable |
 | 7 | `publication` | `trace_publication_failed` | no | trace publication failed |
+| 7 | `publication` | `unreadable_candidate_source` | no | the candidate source file could not be read |
+| 7 | `publication` | `unreadable_result_artifact` | no | the result artifact could not be read |
 | 7 | `result_cleanup` | `provider_cleanup_failed` | no | provider cleanup failed |
 | 7 | `result_cleanup` | `provider_cleanup_timeout` | no | provider cleanup timed out |
 | 7 | `result_cleanup` | `result_contract_failed` | no | the workflow result does not satisfy its contract |

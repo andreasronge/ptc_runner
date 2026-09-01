@@ -12,26 +12,22 @@ one selected component when the next run starts.
 Selecting `agent.core` also selects `agent.prompt`. The prompt is therefore an
 override target even when it is not listed directly in the manifest.
 
-Candidate creation requires a source checkout. Copy the shipped prompt, then
-edit the copy:
+Export the installed prompt, edit the copy, then publish a gated candidate.
+`--source-out` and `--source`/`--out` are separate steps because a descriptor
+hashes the exact candidate beside it:
 
 ```console
 mkdir -p private
-cp priv/preludes/kernel/agent.prompt.clj private/agent.prompt.clj
+ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source-out private/agent.prompt.clj
+# edit private/agent.prompt.clj
+ptc materialize ptc-project.json --workflow \
+  --component agent.prompt --source private/agent.prompt.clj \
+  --out private/agent-prompt-candidate
 ```
 
-Turn the edited source into a checked candidate:
-
-```console
-mix ptc.materialize ptc.json \
-  --workflow \
-  --component agent.prompt \
-  --out private/agent-prompt-candidate \
-  --source private/agent.prompt.clj
-```
-
-The command checks the source and creates the candidate and descriptor files.
-The output directory must not already exist.
+The second command checks the source and creates the candidate and descriptor
+files. Neither destination may already exist.
 
 Validate the candidate without acquiring a provider:
 

@@ -9,7 +9,7 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.ProjectContext
 
-  @project_commands ~w(validate run doctor models)
+  @project_commands ~w(validate run doctor models materialize)
 
   @spec parse([binary()], :standalone | :mix, binary()) ::
           {:ok, CommandArguments.t()}
@@ -164,6 +164,10 @@ defmodule PtcRunner.Kernel.ProjectResolver do
       {:ok, insert_options(["models" | rest], ["--host-config", project.host]), project,
        [:host_config]}
     end
+  end
+
+  defp project_argv("materialize", rest, project, _run_ref) do
+    {:ok, ["materialize", project.application | rest], project, []}
   end
 
   defp project_argv(command, rest, project, run_ref) do
@@ -467,4 +471,5 @@ defmodule PtcRunner.Kernel.ProjectResolver do
   defp command_atom("run"), do: :run
   defp command_atom("doctor"), do: :doctor
   defp command_atom("models"), do: :models
+  defp command_atom("materialize"), do: :materialize
 end
