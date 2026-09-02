@@ -328,8 +328,32 @@ not in this process-contract reference.</p><h3 id="branch-on-the-exit-status">Br
 on the status to decide whether to retry, and read <code class="inline">error.code</code> from the
 envelope when the branch needs to know which failure it was.</p><p>A recoverable capability error does not change the exit status. Exhausting
 <code class="inline">workflow_capability_calls_per_name</code> returns
-<code class="inline">{&quot;status&quot;:&quot;error&quot;,&quot;kind&quot;:&quot;limit_exceeded&quot;,&quot;reason&quot;:&quot;capability_quota&quot;,&quot;details&quot;:{&quot;limit&quot;:&quot;workflow_capability_calls_per_name&quot;,&quot;name&quot;:&quot;llm-request&quot;,&quot;limit_value&quot;:2}}</code> as a
-value into PTC-Lisp; a workflow that reads past it can still <code class="inline">return</code> and the
+<code class="inline">{&quot;status&quot;:&quot;error&quot;,&quot;kind&quot;:&quot;limit_exceeded&quot;,&quot;reason&quot;:&quot;capability_quota&quot;,&quot;retryable?&quot;:false,&quot;model&quot;:&quot;primary&quot;,&quot;details&quot;:{&quot;limit&quot;:&quot;workflow_capability_calls_per_name&quot;,&quot;name&quot;:&quot;llm-request&quot;,&quot;limit_value&quot;:2}}</code> as a
+JSON boundary value; it is not an exact display of the value's PTC-Lisp types.
+The equivalent value inside the workflow uses keyword keys and keyword-valued
+<code class="inline">:status</code>, <code class="inline">:kind</code>, and <code class="inline">:reason</code> fields:</p><pre><code class="clojure language-clojure">{:status :error
+ :kind :limit_exceeded
+ :reason :capability_quota
+ :retryable? false
+ :model &quot;primary&quot;
+ :details {:limit :workflow_capability_calls_per_name
+           :name &quot;llm-request&quot;
+           :limit_value 2}}</code></pre><p>An aggregate cost-budget refusal has the same field types and this copyable
+PTC-Lisp shape:</p><pre><code class="clojure language-clojure">{:status :error
+ :kind :limit_exceeded
+ :reason :llm_cost_microusd
+ :retryable? false
+ :details {:limit :llm_cost_microusd
+           :limit_value 1
+           :remaining 1
+           :requested 8585}}</code></pre><p>PTC-Lisp equality is type-sensitive even though JSON projection renders a
+keyword value as its name string. Therefore
+<code class="inline">(= &quot;limit_exceeded&quot; (get response :kind))</code> is false, while
+<code class="inline">(= :limit_exceeded (get response :kind))</code> is true. Preserve the authenticated
+envelope when ending the run so the command retains its limit classification:</p><pre><code class="clojure language-clojure">(let [response (tool/llm-request request)]
+  (if (= :limit_exceeded (get response :kind))
+    (fail response)
+    response))</code></pre><p>A workflow that reads past a recoverable error can still <code class="inline">return</code> and the
 command exits <code class="inline">0</code>. Refusing an aggregate <code class="inline">llm_total_tokens</code> or
 <code class="inline">llm_cost_microusd</code> reservation is the same class of recoverable value, with
 <code class="inline">reason</code> naming the budget. Aborting that exact envelope reports

@@ -227,7 +227,10 @@ its name string before either native or JSON result handling. The Kernel
 rejects projection collisions rather than silently choosing between a
 keyword and string with the same name. Native projection can retain other
 non-JSON values; JSON projection rejects them. <code class="inline">ptc run</code> always selects
-JSON projection, whether or not it publishes a result artifact.</li><li><strong>Tool-call arguments:</strong> keys are recursively normalized to strings (e.g.
+JSON projection, whether or not it publishes a result artifact. Consequently,
+JSON boundary output cannot visibly distinguish the keyword <code class="inline">:ready</code> from the
+string <code class="inline">&quot;ready&quot;</code>; inside PTC-Lisp they remain distinct values and
+<code class="inline">(= :ready &quot;ready&quot;)</code> is false.</li><li><strong>Tool-call arguments:</strong> keys are recursively normalized to strings (e.g.
 <code class="inline">1</code> → <code class="inline">&quot;1&quot;</code>, <code class="inline">[:a :b]</code> → its inspected form). A projection collision or an
 invalid native Java value is rejected rather than silently losing data.</li><li><strong><code class="inline">json/generate-string</code>:</strong> keyword keys encode as their name verbatim (<code class="inline">{:max-turns 3}</code> → <code class="inline">{&quot;max-turns&quot;:3}</code>) and integer keys are stringified (<code class="inline">{1 &quot;a&quot;}</code> → <code class="inline">{&quot;1&quot;:&quot;a&quot;}</code>); vector and float keys, and any two keys that would encode to the same JSON key, are refused with a <code class="inline">type_error</code> naming the position (DIV-24).</li><li><strong><code class="inline">json/parse-lines</code>:</strong> line-delimited JSON helper; skips blank lines and parses each remaining line with <code class="inline">json/parse-string</code>.</li></ul><pre><code class="clojure language-clojure">{:name &quot;Alice&quot;}           ; OK - keyword key
 {&quot;name&quot; &quot;Alice&quot;}          ; OK - string key

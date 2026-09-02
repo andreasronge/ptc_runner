@@ -379,8 +379,50 @@ envelope when the branch needs to know which failure it was.
 
 A recoverable capability error does not change the exit status. Exhausting
 `workflow_capability_calls_per_name` returns
-`{"status":"error","kind":"limit_exceeded","reason":"capability_quota","details":{"limit":"workflow_capability_calls_per_name","name":"llm-request","limit_value":2}}` as a
-value into PTC-Lisp; a workflow that reads past it can still `return` and the
+`{"status":"error","kind":"limit_exceeded","reason":"capability_quota","retryable?":false,"model":"primary","details":{"limit":"workflow_capability_calls_per_name","name":"llm-request","limit_value":2}}` as a
+JSON boundary value; it is not an exact display of the value's PTC-Lisp types.
+The equivalent value inside the workflow uses keyword keys and keyword-valued
+`:status`, `:kind`, and `:reason` fields:
+
+```clojure
+{:status :error
+ :kind :limit_exceeded
+ :reason :capability_quota
+ :retryable? false
+ :model "primary"
+ :details {:limit :workflow_capability_calls_per_name
+           :name "llm-request"
+           :limit_value 2}}
+```
+
+An aggregate cost-budget refusal has the same field types and this copyable
+PTC-Lisp shape:
+
+```clojure
+{:status :error
+ :kind :limit_exceeded
+ :reason :llm_cost_microusd
+ :retryable? false
+ :details {:limit :llm_cost_microusd
+           :limit_value 1
+           :remaining 1
+           :requested 8585}}
+```
+
+PTC-Lisp equality is type-sensitive even though JSON projection renders a
+keyword value as its name string. Therefore
+`(= "limit_exceeded" (get response :kind))` is false, while
+`(= :limit_exceeded (get response :kind))` is true. Preserve the authenticated
+envelope when ending the run so the command retains its limit classification:
+
+```clojure
+(let [response (tool/llm-request request)]
+  (if (= :limit_exceeded (get response :kind))
+    (fail response)
+    response))
+```
+
+A workflow that reads past a recoverable error can still `return` and the
 command exits `0`. Refusing an aggregate `llm_total_tokens` or
 `llm_cost_microusd` reservation is the same class of recoverable value, with
 `reason` naming the budget. Aborting that exact envelope reports

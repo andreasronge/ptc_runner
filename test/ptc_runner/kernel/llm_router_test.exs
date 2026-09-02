@@ -1865,6 +1865,11 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
   test "capability discovery names aliases and the default" do
     leaf = capability(self(), :discover, %{content: "unused", tokens: %{}})
 
+    assert {:ok, direct} =
+             LLMCapability.new(requester: fn _request -> {:ok, %{content: "unused"}} end)
+
+    assert direct.description == LLMCapability.description()
+
     assert {:ok, router} =
              LLMRouter.new([
                route("deepseek", "llm_replay", "deepseek-v1", true, leaf),
@@ -1875,6 +1880,13 @@ defmodule PtcRunner.Kernel.LLMRouterTest do
 
     assert {:ok, %{value: metadata}} =
              Kernel.run(~S|(return (cap/describe "llm-request"))|, config)
+
+    assert metadata["description"] =~
+             "Error envelopes use PTC-Lisp keyword keys and keyword values for :status, :kind, and :reason"
+
+    assert metadata["description"] =~ ":retryable? has a boolean value"
+    assert metadata["description"] =~ "(= :limit_exceeded (get response :kind))"
+    assert metadata["description"] == direct.description
 
     assert metadata["model_aliases"] == [
              %{
