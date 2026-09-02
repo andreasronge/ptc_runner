@@ -104,13 +104,9 @@ artifact root, so traces and optional envelopes or results stay beside the
 project rather than depending on the caller's current directory.</p><h2 id="how-do-i-check-a-model-backed-project">How do I check a model-backed project?</h2><p>Materialize the tutorial projects, then check the multi-turn agent without
 network activity:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
 ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json
-ptc models kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>Use <code class="inline">--connect</code> only when an active provider probe is intended:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect</code></pre><h2 id="how-do-i-browse-completed-runs">How do I browse completed runs?</h2><p>Browse completed runs locally:</p><pre><code class="console language-console">ptc viewer hello-ptc/ptc-project.json</code></pre><p>The Runs list uses a matching project <code class="inline">labels.name</code> as its readable headline,
-keeps the command run ID underneath, and shows finite label tags. When every
-successful model call reported a metric, the row also shows full-run input and
-output tokens and provider-reported cost; missing prices or usage stay absent.
-Refresh includes runs that finished after this captured snapshot.</p><p>When the Live tab launches provider-backed work, pass an exact dotenv file
-with <code class="inline">--env-file FILE</code> or declare <code class="inline">host.env_file</code> in the project. The Viewer
-does not search implicitly for <code class="inline">.env</code>.</p><p>The Viewer binds to loopback by default, where Live controls need no token.
+ptc models kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>Use <code class="inline">--connect</code> only when an active provider probe is intended:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect</code></pre><h2 id="how-do-i-watch-a-run-while-it-is-running">How do I watch a run while it is running?</h2><p>Start the Viewer at a fixed port in one terminal:</p><pre><code class="console language-console">ptc viewer hello-ptc/ptc-project.json --port 4123</code></pre><p>In a second terminal, set the Viewer URL printed at startup:</p><pre><code class="console language-console">PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run hello-ptc/ptc-project.json</code></pre><p>Status appears in the Live tab. If the Viewer requires a token, set the same
+<code class="inline">PTC_VIEWER_TOKEN</code> for the run. See <code class="inline">ptc docs cli</code> for the full network and
+token contract.</p><h2 id="how-do-i-browse-completed-runs">How do I browse completed runs?</h2><p>Browse completed runs locally:</p><pre><code class="console language-console">ptc viewer hello-ptc/ptc-project.json</code></pre><p>The Viewer binds to loopback by default, where Live controls need no token.
 Do not expose it to a network without setting <code class="inline">PTC_VIEWER_TOKEN</code>, especially
 when a project grants access to private inspection records.</p><p>In Docker, publish the port on host loopback, bind the Viewer to the container
 wildcard, and set <code class="inline">PTC_VIEWER_TOKEN</code>. Open

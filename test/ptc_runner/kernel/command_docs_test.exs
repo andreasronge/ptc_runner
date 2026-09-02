@@ -84,6 +84,16 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert content =~ "--private-output"
   end
 
+  test "the running guide explains how to attach an external run to the Live tab" do
+    assert {:ok, content} = DocumentationLibrary.fetch("running-and-debugging")
+
+    assert content =~ "## How do I watch a run while it is running?"
+    assert content =~ "PTC_VIEWER_URL=http://127.0.0.1:4123"
+    assert content =~ "PTC_VIEWER_TOKEN"
+    assert content =~ "ptc docs cli"
+    assert content =~ "token does not authenticate the Runs trace browser"
+  end
+
   test "designing-agent-workflows locates returned-value and quarantined in the example" do
     assert {:ok, content} = DocumentationLibrary.fetch("designing-agent-workflows")
     assert content =~ "returned-value"
