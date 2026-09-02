@@ -144,9 +144,9 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   `opts` accepts `admission: :block | :fail_fast` (default `:fail_fast`) and an
   optional `parent_evaluation_id` for the enclosing workflow evaluation.
   The Runner's workflow route blocks, so concurrent agent loops queue behind
-  the single evaluation lease instead of failing. The REPL keeps fail-fast:
-  a REPL expression evaluates under the session's own lease, so a blocking
-  nested `kernel-eval` would park behind itself until the sandbox timeout.
+  the single evaluation lease instead of failing. The REPL keeps fail-fast so
+  concurrent nested evaluations do not park the outer form; its workflow
+  bridge yields and resumes the workflow-continuation lease around the form.
   """
   def kernel_eval(state, missions, limits, event_sink, inspection_sink \\ nil, opts \\ [])
       when is_map(missions) and not is_struct(missions) do

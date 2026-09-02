@@ -3,9 +3,10 @@ defmodule PtcRunner.Kernel.InspectOnlyRepl do
   Compile-and-inspect REPL preparation without providers or credentials.
 
   Acquires a package and compiles only the selected workflow or mission
-  bundle. It does not call `PtcRunner.Kernel.RunCoordinator.prepare/2`, load
-  a host document, start providers, grant workflow input, or install
-  capabilities.
+  bundle. A project caller may supply the non-secret installed limits already
+  decoded from its host document when present. This path does not call
+  `PtcRunner.Kernel.RunCoordinator.prepare/2`, start providers, resolve
+  credentials, grant workflow input, or install capabilities.
   """
 
   alias PtcRunner.Kernel.ApplicationPackage
@@ -34,7 +35,7 @@ defmodule PtcRunner.Kernel.InspectOnlyRepl do
     with :ok <- validate_opts(opts),
          {:ok, package, _input} <-
            ApplicationPackage.acquire_directory(manifest_path,
-             installed_limits: Limits.installed_defaults(),
+             installed_limits: opts[:installed_limits] || Limits.installed_defaults(),
              omit_input: true,
              repl_interactive_loop: opts[:interactive_loop] == true
            ),
@@ -74,7 +75,7 @@ defmodule PtcRunner.Kernel.InspectOnlyRepl do
   end
 
   defp validate_opts(opts) do
-    allowed = [:mission, :interactive_loop]
+    allowed = [:mission, :interactive_loop, :installed_limits]
 
     cond do
       not Keyword.keyword?(opts) ->
@@ -89,6 +90,9 @@ defmodule PtcRunner.Kernel.InspectOnlyRepl do
       opts[:interactive_loop] not in [nil, true, false] ->
         {:error, :invalid_inspect_only_repl}
 
+      not valid_optional_installed_limits?(opts[:installed_limits]) ->
+        {:error, :invalid_inspect_only_repl}
+
       true ->
         :ok
     end
@@ -97,6 +101,10 @@ defmodule PtcRunner.Kernel.InspectOnlyRepl do
   defp valid_optional_mission?(nil), do: true
   defp valid_optional_mission?(name) when is_binary(name) and name != "", do: true
   defp valid_optional_mission?(_name), do: false
+
+  defp valid_optional_installed_limits?(nil), do: true
+  defp valid_optional_installed_limits?(%Limits{} = limits), do: Limits.valid?(limits)
+  defp valid_optional_installed_limits?(_limits), do: false
 
   defp compile_selected(package, nil) do
     deadline = System.monotonic_time(:millisecond) + @compile_timeout_ms

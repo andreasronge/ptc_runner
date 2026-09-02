@@ -158,6 +158,10 @@ application, host configuration, and lazy environment-file paths, while
 duplicated in <code class="inline">ptc-project.json</code>. The manifest form is the equivalent low-level
 command. Omitting <code class="inline">--mission</code> keeps the workflow REPL behavior — which carries
 no mission namespaces, so a mission's own namespace is rejected as unknown.
+Workflow code may still call its attached <code class="inline">kernel/eval*</code> routes; the REPL
+yields its workflow-continuation lease while each outer form runs, so nested
+mission <code class="inline">return</code> and <code class="inline">fail</code> outcomes remain data for callers such as
+<code class="inline">agent.core/run-outcome</code>.
 A <code class="inline">data/&lt;name&gt;</code> form in that session answers from the language rather than as
 an unknown namespace, because <code class="inline">data/</code> is a language namespace the workflow
 environment carries: an ungranted name is a missing-grant runtime error, and
@@ -181,8 +185,10 @@ cannot be combined with <code class="inline">--profile</code> or <code class="in
 lists declared missions in sorted order before sinks or provider activity.</p><h2 id="inspect-without-providers">Inspect without providers</h2><pre><code class="console language-console">ptc repl --project ptc-project.json --inspect-only
 ptc repl --project ptc-project.json --inspect-only --mission analysis
 ptc repl --manifest ptc.json --inspect-only</code></pre><p><code class="inline">--inspect-only</code> requires <code class="inline">--project</code> or <code class="inline">--manifest</code>. It compiles the selected
-workflow or named mission and attaches its component catalog without a host
-document, environment file, input, provider, or capability. A startup notice
+workflow or named mission and attaches its component catalog without an
+environment file, input, provider, or capability. When a project declares a
+host, project mode reads and validates that document only to obtain its non-secret installed
+limit ceilings; it does not resolve credentials or acquire providers. A startup notice
 states that this is a compile-and-inspect environment, not a runnable
 application environment.</p><p>It may be combined with <code class="inline">--mission</code>, <code class="inline">--eval</code>, <code class="inline">--load</code>, a script, stdin, and
 <code class="inline">--preview-chars</code>. It conflicts with <code class="inline">--host-config</code>, <code class="inline">--env-file</code>, <code class="inline">--trace</code>,

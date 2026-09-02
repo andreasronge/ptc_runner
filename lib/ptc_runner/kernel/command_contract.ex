@@ -1031,7 +1031,8 @@ defmodule PtcRunner.Kernel.CommandContract do
               :models,
               :doctor,
               {:doctor, :connect},
-              :run_unclassified
+              :run_unclassified,
+              :materialize
             ] and
               code in @host_codes,
        do: true

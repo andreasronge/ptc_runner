@@ -798,12 +798,41 @@ defmodule PtcRunner.Kernel.ReplSession do
              environment: :workflow
            }) do
         :ok ->
-          result =
-            session
-            |> run_lisp(memory, history, source)
-            |> rewrite_workflow_subordinate_busy(session)
+          case RunState.yield_workflow_evaluation(session.state, lease) do
+            {:ok, revision} ->
+              result = run_lisp(session, memory, history, source, evaluation_id)
 
-          finish_evaluation(session, result, history, lease, evaluation_id, started_ms)
+              case RunState.resume_workflow_evaluation(session.state, revision) do
+                {:ok, resumed_lease} ->
+                  result = rewrite_workflow_subordinate_busy(result, session)
+
+                  finish_evaluation(
+                    session,
+                    result,
+                    history,
+                    resumed_lease,
+                    evaluation_id,
+                    started_ms
+                  )
+
+                {:error, reason} ->
+                  finish_yielded_evaluation(
+                    session,
+                    result,
+                    reason,
+                    evaluation_id,
+                    started_ms
+                  )
+              end
+
+            {:error, reason} ->
+              finish_started_reservation_failure(
+                session,
+                reason,
+                evaluation_id,
+                started_ms
+              )
+          end
 
         {:error, :event_sink_error} ->
           RunState.release_evaluation(session.state, lease)
@@ -816,7 +845,7 @@ defmodule PtcRunner.Kernel.ReplSession do
     end
   end
 
-  defp run_lisp(session, memory, history, source) do
+  defp run_lisp(session, memory, history, source, evaluation_id) do
     limits = session.config.limits
     remaining_ms = RunState.remaining_ms(session.state)
     timeout_ms = min(limits.evaluation_timeout_ms, remaining_ms)
@@ -828,7 +857,7 @@ defmodule PtcRunner.Kernel.ReplSession do
         context: session.config.input,
         memory: memory,
         turn_history: history,
-        tools: tools(session, deadline_ms),
+        tools: tools(session, deadline_ms, evaluation_id),
         prelude: prelude(session.config.workflow_environment),
         shipped_export_owners: ShippedExportCatalog.load(),
         attached_component_ids:
@@ -853,6 +882,48 @@ defmodule PtcRunner.Kernel.ReplSession do
       )
 
     name_timeout_limit(result, session, remaining_ms)
+  end
+
+  defp finish_yielded_evaluation(
+         session,
+         {:error, %Native{} = step},
+         _reason,
+         evaluation_id,
+         started_ms
+       ) do
+    next = increment_error(session)
+
+    case emit_evaluation_stopped(
+           session,
+           session.state,
+           evaluation_id,
+           started_ms,
+           :error,
+           step.fail.reason
+         ) do
+      :ok -> {:error, step, next}
+      {:error, :event_sink_error} -> event_sink_failure(session)
+    end
+  end
+
+  defp finish_yielded_evaluation(session, _result, reason, evaluation_id, started_ms),
+    do: finish_started_reservation_failure(session, reason, evaluation_id, started_ms)
+
+  defp finish_started_reservation_failure(session, reason, evaluation_id, started_ms) do
+    case evaluation_reservation_failure(session, reason) do
+      {:error, %Native{} = step, next} ->
+        case emit_evaluation_stopped(
+               session,
+               session.state,
+               evaluation_id,
+               started_ms,
+               :error,
+               step.fail.reason
+             ) do
+          :ok -> {:error, step, next}
+          {:error, :event_sink_error} -> event_sink_failure(session)
+        end
+    end
   end
 
   # The sandbox reports the milliseconds still left when it killed the worker,
@@ -1013,16 +1084,15 @@ defmodule PtcRunner.Kernel.ReplSession do
 
   defp parallel_timeout?(_message), do: false
 
-  # A workflow REPL expression already holds the single evaluation lease.
-  # Nested kernel/eval-source and check-source therefore fail-fast as :busy —
-  # which reads as a transient state worth retrying. Rewrite that self-deadlock
-  # into the same class of actionable refusal the unknown-namespace path uses.
+  # The workflow bridge yields its continuation lease while Lisp runs, but two
+  # concurrent nested evaluations can still contend for the single mission
+  # lease. Turn that transient internal state into an actionable REPL refusal.
   defp rewrite_workflow_subordinate_busy({:ok, %{return: value} = step}, session)
        when is_map(value) do
     if workflow_subordinate_busy?(value) do
       {:error,
        Native.error(
-         :mission_session_required,
+         :evaluation_in_progress,
          subordinate_mission_message(session),
          Map.get(step, :memory, %{}),
          %{}
@@ -1035,6 +1105,10 @@ defmodule PtcRunner.Kernel.ReplSession do
   defp rewrite_workflow_subordinate_busy(result, _session), do: result
 
   defp workflow_subordinate_busy?(%{outcome: :busy, reason: :evaluation_in_progress}), do: true
+
+  defp workflow_subordinate_busy?(%{status: :ok, value: value}),
+    do: workflow_subordinate_busy?(value)
+
   defp workflow_subordinate_busy?(_value), do: false
 
   defp subordinate_mission_message(%{config: %{missions: missions}}) when is_map(missions) do
@@ -1042,19 +1116,19 @@ defmodule PtcRunner.Kernel.ReplSession do
 
     case declared do
       [] ->
-        "this workflow REPL session holds the evaluation lease and cannot run " <>
-          "subordinate evaluations; pass --mission NAME to open a mission session instead"
+        "another subordinate evaluation is already in progress; run nested evaluations " <>
+          "sequentially"
 
       names ->
-        "this workflow REPL session holds the evaluation lease and cannot run " <>
-          "subordinate evaluations; pass --mission NAME to open a mission session instead " <>
+        "another subordinate evaluation is already in progress; run nested evaluations " <>
+          "sequentially, or pass --mission NAME to work in one mission directly " <>
           "(declared: #{Enum.join(names, ", ")})"
     end
   end
 
-  defp tools(%{config: %{inspect_only: true}}, _validation_deadline_ms), do: %{}
+  defp tools(%{config: %{inspect_only: true}}, _validation_deadline_ms, _evaluation_id), do: %{}
 
-  defp tools(session, validation_deadline_ms) do
+  defp tools(session, validation_deadline_ms, evaluation_id) do
     timeout_ms = session.config.limits.evaluation_timeout_ms
 
     ToolGrant.capability_callbacks(
@@ -1083,7 +1157,8 @@ defmodule PtcRunner.Kernel.ReplSession do
           Map.new(session.config.missions, fn {name, mission} -> {name, mission.environment} end),
           session.config.limits,
           session.config.event_sink,
-          session.config.inspection_sink
+          session.config.inspection_sink,
+          parent_evaluation_id: evaluation_id
         )
       )
     )
@@ -1365,6 +1440,9 @@ defmodule PtcRunner.Kernel.ReplSession do
 
     {:error, step, increment_error(session)}
   end
+
+  defp evaluation_reservation_failure(session, reason) when reason in [:stale, :stale_lease],
+    do: evaluation_reservation_failure(session, :busy)
 
   defp evaluation_reservation_failure(session, :limit_exceeded) do
     terminal_reservation_failure(
