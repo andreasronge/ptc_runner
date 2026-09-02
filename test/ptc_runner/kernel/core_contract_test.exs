@@ -3697,8 +3697,8 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert {:ok, %{kind: :arithmetic_error}} = RunState.last_evaluator_failure(state)
 
-    assert %{outcome: :evaluation_error, kind: :type_error} =
-             Evaluation.evaluate_source(state, "default", mission, "(> nil 1)", 1_000)
+    assert %{outcome: :evaluation_error, kind: :unbound_var} =
+             Evaluation.evaluate_source(state, "default", mission, "missing", 1_000)
 
     assert :error = RunState.last_evaluator_failure(state)
   end
