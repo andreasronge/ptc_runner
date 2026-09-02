@@ -1058,6 +1058,13 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
                 "provider/deepseek/credentials: a required provider credential is unavailable " <>
                 "(run_ref: #{@run_ref}); export it, pass --env-file PATH, or use a host file credential\n"}
 
+    assert CommandRenderer.render(credential_outcome, nil, named_env_file: true) ==
+             {:stderr,
+              "error: active_preflight/credential_unavailable: " <>
+                "provider/deepseek/credentials: a required provider credential is unavailable " <>
+                "(run_ref: #{@run_ref}); export it, pass --env-file PATH, or use a host file credential; " <>
+                "assignments in a named environment file override process values, including empty assignments\n"}
+
     assert CommandDiagnosticRenderer.render(credential_outcome.envelope["error"]) ==
              {:error, :invalid_command_diagnostic}
 

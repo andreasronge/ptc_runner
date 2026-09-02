@@ -110,12 +110,10 @@ generated files you want into the repository.</p><pre><code class="console langu
 ptc run hello-ptc/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;greeting&quot;:&quot;hello world&quot;}</code></pre><p><code class="inline">init</code> creates an application, a project document with local artifact settings,
 and ignore rules for public and private run artifacts. The first run contacts no
 model or external tool and records a trace and command envelope under
-<code class="inline">hello-ptc/.ptc</code>.</p><h2 id="run-a-model-authored-program">Run a model-authored program</h2><p>Materialize the tutorial projects and create their owner-only environment file:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
-printf 'OPENROUTER_API_KEY=\n' &gt; kernel-tutorial/.env
-chmod 600 kernel-tutorial/.env</code></pre><p>Set <code class="inline">OPENROUTER_API_KEY</code> in that exact file, then run:</p><pre><code class="console language-console">ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;ok&quot;:true,&quot;value&quot;:42}</code></pre><p>The project selects the shipped agent loop. The model receives a task, writes a
-bounded mission program, observes its result, and completes on the second turn.
-You configure the task, model alias, mission, tools, and limits; you do not need
-to read or edit the generated program. To read it anyway, open the Viewer:</p><pre><code class="console language-console">ptc viewer kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>The tutorial projects record private inspection and grant it to the Viewer, so
+<code class="inline">hello-ptc/.ptc</code>.</p><h2 id="run-a-model-authored-program">Run a model-authored program</h2><p>Materialize the tutorial; its comment-only environment file names the credential:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial</code></pre><p>Keep that comment and export a non-empty value, or add a non-empty assignment to
+the file. File assignments, including empty ones, override exports; see
+<a href="/reference/host-installation/">Host installation</a>.</p><pre><code class="console language-console">export OPENROUTER_API_KEY=...</code></pre><p>Then run:</p><pre><code class="console language-console">ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;ok&quot;:true,&quot;value&quot;:42}</code></pre><p>The model writes a bounded mission program, observes its result, and completes
+on the second turn. To read that program, open the Viewer:</p><pre><code class="console language-console">ptc viewer kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>The tutorial projects record private inspection and grant it to the Viewer, so
 each evaluation shows the PTC-Lisp the model wrote and each prelude component
 shows the source the run loaded.</p><p>Credentials belong in <code class="inline">ptc-host.json</code>, never in <code class="inline">ptc.json</code>, a generated
 program, or a trace. <code class="inline">ptc.json</code> can select the installed model alias but cannot

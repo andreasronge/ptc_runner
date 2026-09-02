@@ -21,13 +21,14 @@ single bounded question into a two-specialist workflow with a result contract:
    result contract.
 
 Each project has a project document in this directory. All three select the
-trusted `deepseek` model alias and require `OPENROUTER_API_KEY` in this
-directory's `.env`:
+trusted `deepseek` model alias and require a non-empty `OPENROUTER_API_KEY`.
+Keep the generated comment-only `.env` and export the variable, or replace its
+comment with a non-empty assignment in that file. Assigned file values override
+exported values, including empty assignments:
 
 ```console
 ptc init support-triage --example support-triage
-printf 'OPENROUTER_API_KEY=\n' > support-triage/.env
-chmod 600 support-triage/.env
+export OPENROUTER_API_KEY=...
 ptc run support-triage/01-one-question.ptc-project.json
 ptc run support-triage/02-domain-api.ptc-project.json
 ptc run support-triage/03-specialists.ptc-project.json

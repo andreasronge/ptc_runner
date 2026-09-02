@@ -533,6 +533,92 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   end
 
   @tag :tmp_dir
+  test "run stderr explains named env-file precedence only when a file is selected", %{
+    tmp_dir: directory
+  } do
+    environment_name = "PTC_TEST_RUN_MISSING_NAMED_ENV_CREDENTIAL"
+    previous_environment = System.get_env(environment_name)
+    System.delete_env(environment_name)
+
+    on_exit(fn ->
+      if previous_environment,
+        do: System.put_env(environment_name, previous_environment),
+        else: System.delete_env(environment_name)
+    end)
+
+    host_path =
+      write_host_config(
+        directory,
+        "run-missing-named-env",
+        stdio_credential_host(environment_name)
+      )
+
+    application = doctor_application(directory, "run-missing-named-env", mission: ["workspace"])
+
+    env_file = Path.join(directory, "model.env")
+    File.write!(env_file, "# #{environment_name}\n")
+
+    with_file =
+      StandaloneCLI.execute([
+        "run",
+        application,
+        "--host-config",
+        host_path,
+        "--env-file",
+        env_file
+      ])
+
+    without_file = StandaloneCLI.execute(["run", application, "--host-config", host_path])
+
+    file_credential_host =
+      stdio_credential_host(environment_name)
+      |> put_in(["credentials", "key"], %{"file" => "missing-token"})
+
+    file_credential_host_path =
+      write_host_config(directory, "run-missing-file-credential", file_credential_host)
+
+    unrelated_file =
+      StandaloneCLI.execute([
+        "run",
+        application,
+        "--host-config",
+        file_credential_host_path,
+        "--env-file",
+        env_file
+      ])
+
+    mixed_credential_host =
+      stdio_credential_host(environment_name)
+      |> put_in(["credentials", "file_key"], %{"file" => "missing-token"})
+      |> put_in(["install", "workspace", "transport", "env", "FILE_TOKEN"], %{
+        "binding" => "file_key"
+      })
+
+    mixed_credential_host_path =
+      write_host_config(directory, "run-mixed-credentials", mixed_credential_host)
+
+    mixed_sources =
+      StandaloneCLI.execute([
+        "run",
+        application,
+        "--host-config",
+        mixed_credential_host_path,
+        "--env-file",
+        env_file
+      ])
+
+    assert with_file.outcome.envelope["error"] == without_file.outcome.envelope["error"]
+    assert with_file.stderr =~ "assignments in a named environment file override process values"
+    assert with_file.stderr =~ "including empty assignments"
+    refute with_file.stderr =~ env_file
+    refute without_file.stderr =~ "assignments in a named environment file"
+    assert unrelated_file.outcome.envelope["error"]["code"] == "credential_unavailable"
+    refute unrelated_file.stderr =~ "assignments in a named environment file"
+    assert mixed_sources.outcome.envelope["error"]["code"] == "credential_unavailable"
+    assert mixed_sources.stderr =~ "assignments in a named environment file"
+  end
+
+  @tag :tmp_dir
   test "--env-file supplies an MCP transport credential, not only an LLM one", %{
     tmp_dir: directory
   } do

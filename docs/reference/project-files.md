@@ -152,13 +152,16 @@ replace their project defaults.
 
 Mission selection, input, and component-override switches remain
 invocation-only. Mission names stay in the application manifest rather than
-being duplicated as project defaults. A project environment file is loaded
-only when inert preparation proves that a selected mission provider or its
-dependency uses an environment-backed credential. Unrelated providers do not
-cause environment-backed credentials to be read. Runs without providers, passive
-doctor, Viewer startup, and file- or literal-backed credentials do not read it.
+being duplicated as project defaults. An environment file explicitly selected
+by the project or `--env-file` is loaded only when inert preparation proves that
+a selected mission provider or its dependency uses an environment-backed
+credential. Unrelated providers do not cause environment-backed credentials to
+be read. Runs without providers, passive doctor, Viewer startup, and file- or
+literal-backed credentials do not read it.
 Viewer-started workflows and missions read the selected file lazily through
-their ordinary command preparation.
+their ordinary command preparation. When the file is loaded, assigned keys
+override process values, including with empty values, while omitted keys retain
+their process values.
 
 Direct manifest invocation remains the low-level form for automation:
 

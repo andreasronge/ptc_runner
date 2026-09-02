@@ -3,10 +3,7 @@
 Design a small support-inbox agent in three runnable steps: provide the data,
 move the rules into code, then split the work between specialists.
 
-Each step answers one design question — where does the data live, where do
-the business rules live, and how is work divided between agents. The
-configuration guides explain each surface exhaustively; this page shows why a
-design uses them.
+The steps decide where data and rules live, then divide work between agents.
 
 Materialize the three projects and supply an
 [OpenRouter](https://openrouter.ai/keys) key:
@@ -15,8 +12,10 @@ Materialize the three projects and supply an
 ptc init support-triage --example support-triage
 ```
 
-Set `OPENROUTER_API_KEY` in the generated `support-triage/.env`. Each project
-costs well under a cent to run with the tutorial's `deepseek` alias.
+Keep the comment-only `.env` and export `OPENROUTER_API_KEY`, or add a non-empty
+assignment there. File assignments, including empty ones, override exports; see
+[Host installation](../reference/host-installation.md). Each project costs well
+under a cent.
 
 ## Step 1: ask one bounded question
 
