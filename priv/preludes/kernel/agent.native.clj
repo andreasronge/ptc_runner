@@ -189,7 +189,8 @@
 
 (defn- valid-output-limit? [limit]
   (let [bindings (when (map? limit) (get limit "bindings"))
-        canonical ["configured" "adapter_default" "model_output_limit" "remaining_context"]]
+        canonical ["application_limit" "installation_param" "configured"
+                   "adapter_default" "model_output_limit" "remaining_context"]]
     (and (map? limit)
          (= 3 (count limit))
          (= "max_tokens" (get limit "name"))

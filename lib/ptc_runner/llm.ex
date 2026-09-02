@@ -39,7 +39,12 @@ defmodule PtcRunner.LLM do
         }
 
   @type output_limit_binding ::
-          :configured | :adapter_default | :model_output_limit | :remaining_context
+          :application_limit
+          | :installation_param
+          | :configured
+          | :adapter_default
+          | :model_output_limit
+          | :remaining_context
   @type output_limit :: %{
           name: :max_tokens,
           value: pos_integer(),

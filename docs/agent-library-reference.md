@@ -364,12 +364,17 @@ a provider may silently enforce a lower ceiling. If ReqLLM rewrites, removes,
 or ambiguously resolves the cap, the response and terminal diagnostic omit the
 unprovable cap metadata while preserving the terminal truncation result.
 
-The cap's `bindings` list is closed and canonically ordered:
-`configured`, `adapter_default`, `model_output_limit`, and
-`remaining_context`. Every tied constraint is retained. The remedy follows the
-binding: raise the host installation's `params.max_tokens` when configured,
-choose a model with a larger output/context limit when catalog metadata binds,
-or reduce the requested output or retained transcript.
+The cap's `bindings` list is closed and canonically ordered. Live Kernel
+requests preserve `application_limit` for the effective
+`limits.llm_request_output_tokens`,
+`installation_param` for installation `params.max_tokens`, or both when their
+values tie. Direct adapter callers use `configured`; computed defaults use
+`adapter_default`, `model_output_limit`, and `remaining_context`. Every tied
+constraint is retained. The remedy follows the binding: raise the manifest
+limit (and its installed host ceiling if lower), the installation parameter,
+or both; increase the direct adapter option for `configured`; choose a model
+with a larger output/context limit when catalog metadata binds; or reduce the
+requested output or retained transcript.
 
 The canonical failed `run-stopped` event retains the bounded `agent_turns`
 limit name, its value, and the same `limit_reason`, so trace consumers can

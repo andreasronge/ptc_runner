@@ -12,6 +12,7 @@ if Code.ensure_loaded?(LLMDB.Model) do
     defstruct [
       :selector,
       :exact_options,
+      output_limit_bindings: [:configured],
       model: nil,
       request_options: nil,
       budgeted?: false,
@@ -21,6 +22,7 @@ if Code.ensure_loaded?(LLMDB.Model) do
     @type t :: %__MODULE__{
             selector: String.t(),
             exact_options: map(),
+            output_limit_bindings: [PtcRunner.LLM.output_limit_binding()],
             model: LLMDB.Model.t() | nil,
             request_options: map() | nil,
             budgeted?: boolean(),

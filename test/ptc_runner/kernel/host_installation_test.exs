@@ -1174,6 +1174,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
 
     assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", request}
     assert request.exact_options.max_tokens == 100
+    assert request.output_limit_bindings == [:application_limit]
     refute inspect(built.snapshot) =~ "max_tokens"
     refute inspect(built.snapshot) =~ "exact_options"
   end
