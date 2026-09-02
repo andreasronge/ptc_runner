@@ -19,6 +19,112 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   alias PtcRunner.TestSupport.LLMSupport
 
   @tag :tmp_dir
+  test "doctor attributes a reached LLM authentication refusal to credentials", %{
+    tmp_dir: directory
+  } do
+    keys = [:llm_adapter, :host_llm_test_owner, :host_llm_test_result]
+    previous = Map.new(keys, &{&1, Application.fetch_env(:ptc_runner, &1)})
+
+    Application.put_env(:ptc_runner, :llm_adapter, PtcRunner.TestSupport.HostLLMAdapter)
+    Application.put_env(:ptc_runner, :host_llm_test_owner, self())
+
+    on_exit(fn -> restore_application_env(previous) end)
+
+    host_path =
+      write_host_config(directory, "doctor-llm-auth", literal_credential_host("rejected-key"))
+
+    application = doctor_application(directory, "doctor-llm-auth", workflow: ["model"])
+
+    for kind <- [:authentication_failed, :denied] do
+      Application.put_env(
+        :ptc_runner,
+        :host_llm_test_result,
+        {:error,
+         ProviderError.new(kind, "PRIVATE PROVIDER MESSAGE", dispatch_provenance: :dispatched)}
+      )
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.prepare([
+                 "doctor",
+                 application,
+                 "--host-config",
+                 host_path,
+                 "--connect"
+               ])
+
+      assert outcome.envelope["error"]["phase"] == "active_preflight"
+      assert outcome.envelope["error"]["code"] == "authentication_rejected"
+      assert outcome.envelope["error"]["subject"]["operation"] == "credentials"
+      refute Jason.encode!(outcome.envelope) =~ "PRIVATE PROVIDER MESSAGE"
+
+      checks = outcome.envelope["result"]["checks"]
+
+      assert %{"status" => "fail", "code" => "authentication_rejected"} =
+               Enum.find(checks, &(&1["name"] == "provider/model/credentials"))
+
+      assert %{"status" => "pass", "code" => "available"} =
+               Enum.find(checks, &(&1["name"] == "provider/model/connectivity"))
+
+      assert_schema_valid(outcome.envelope)
+      assert_receive {:host_llm_request, "openrouter:test/model", _request}
+    end
+
+    for provenance <- [nil, :not_dispatched] do
+      Application.put_env(
+        :ptc_runner,
+        :host_llm_test_result,
+        {:error,
+         ProviderError.new(:authentication_failed, "PRIVATE PROVIDER MESSAGE",
+           dispatch_provenance: provenance
+         )}
+      )
+
+      assert {:error, %CommandOutcome{} = outcome} =
+               CommandEngine.prepare([
+                 "doctor",
+                 application,
+                 "--host-config",
+                 host_path,
+                 "--connect"
+               ])
+
+      assert outcome.envelope["error"]["code"] == "connectivity_unavailable"
+      assert outcome.envelope["error"]["subject"]["operation"] == "connectivity"
+      refute Jason.encode!(outcome.envelope) =~ "PRIVATE PROVIDER MESSAGE"
+      assert_schema_valid(outcome.envelope)
+      assert_receive {:host_llm_request, "openrouter:test/model", _request}
+    end
+
+    Application.put_env(
+      :ptc_runner,
+      :host_llm_test_result,
+      {:error, ProviderError.new(:transport_error, "PRIVATE TRANSPORT MESSAGE")}
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.prepare([
+               "doctor",
+               application,
+               "--host-config",
+               host_path,
+               "--connect"
+             ])
+
+    assert outcome.envelope["error"]["code"] == "connectivity_unavailable"
+    assert outcome.envelope["error"]["subject"]["operation"] == "connectivity"
+
+    assert %{"status" => "fail", "code" => "connectivity_unavailable"} =
+             Enum.find(
+               outcome.envelope["result"]["checks"],
+               &(&1["name"] == "provider/model/connectivity")
+             )
+
+    refute Jason.encode!(outcome.envelope) =~ "PRIVATE TRANSPORT MESSAGE"
+    assert_schema_valid(outcome.envelope)
+    assert_receive {:host_llm_request, "openrouter:test/model", _request}
+  end
+
+  @tag :tmp_dir
   test "agent LLM failures publish a bounded provider class", %{tmp_dir: directory} do
     keys = [:llm_adapter, :host_llm_test_owner, :host_llm_test_result]
     previous = Map.new(keys, &{&1, Application.fetch_env(:ptc_runner, &1)})
@@ -1049,5 +1155,12 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
 
     refute_received {:host_llm_request, _, _}
     assert_schema_valid(doctor.envelope)
+  end
+
+  defp restore_application_env(previous) do
+    Enum.each(previous, fn
+      {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
+      {key, :error} -> Application.delete_env(:ptc_runner, key)
+    end)
   end
 end

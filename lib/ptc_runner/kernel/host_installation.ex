@@ -1209,6 +1209,9 @@ defmodule PtcRunner.Kernel.HostInstallation do
           {:ok, {:ok, response}} when is_map(response) ->
             normalize_probe_usage(response, probe.usage_guarantees)
 
+          {:ok, {:error, %ProviderError{} = error}} ->
+            normalize_llm_probe_error(error)
+
           _failure ->
             {:error, :llm_connectivity_unavailable}
         end
@@ -1220,6 +1223,12 @@ defmodule PtcRunner.Kernel.HostInstallation do
     _exception -> {:error, :llm_connectivity_unavailable}
   catch
     _kind, _reason -> {:error, :llm_connectivity_unavailable}
+  end
+
+  defp normalize_llm_probe_error(%ProviderError{} = error) do
+    if ProviderError.valid?(error),
+      do: {:error, error},
+      else: {:error, :llm_connectivity_unavailable}
   end
 
   defp normalize_probe_usage(response, guarantees) do
