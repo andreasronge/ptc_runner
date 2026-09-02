@@ -18,6 +18,7 @@ import { html, mount, rawHtml, toMarkup } from './preact.js';
 import { highlightLisp } from './highlight.js';
 import { privateEvidenceAbsence } from './private-evidence.js';
 import { evaluationPresentation } from './evaluation-evidence.js';
+import { modelSessionDomId } from './semantic-conversation.js';
 
 const SUCCESS = new Set(['ok', 'continued', 'returned', 'completed', 'success']);
 const FAILURE = new Set([
@@ -50,14 +51,16 @@ export function renderKernelTranscriptMarkup(data) {
 function KernelTranscript({
   metadata = {}, turns = {}, conversation = null, preludes = null,
   execution_errors = null, explicit_failure_values = null,
-  last_evaluation_error = null, options = {}
+  result = null, last_evaluation_error = null, options = {}
 }) {
   const events = [...(turns.items || [])].sort((left, right) => left.sequence - right.sequence);
   const transcript = buildTranscript(events);
-  const partial = Boolean(turns.next_cursor);
+  const eventsDropped = metadata.truncated === true || events.some(event => event.type === 'events-dropped');
+  const partial = Boolean(turns.next_cursor) || eventsDropped;
   const preludeIndex = buildPreludeIndex(preludes);
   const privatePrograms = new Map();
   const privateResults = new Map();
+  const modelSessions = new Map();
 
   for (const stream of conversation?.streams || []) {
     const streamTurns = stream.turns || [];
@@ -65,7 +68,18 @@ function KernelTranscript({
     streamTurns.forEach((turn, index) => {
       const generated = turn.generated || [];
       generated.forEach(program => {
-        if (program?.evaluation_id) privatePrograms.set(program.evaluation_id, program);
+        if (program?.evaluation_id) {
+          privatePrograms.set(program.evaluation_id, program);
+          if (program['association_ambiguous?'] !== true) {
+            modelSessions.set(program.evaluation_id, {
+              streamId: stream.stream_id || '',
+              turn: turn.turn ?? index + 1,
+              turnCount: streamTurns.length,
+              terminalTurn: index === streamTurns.length - 1,
+              conversationComplete: conversation?.['complete?'] !== false
+            });
+          }
+        }
       });
 
       const feedback = streamTurns[index + 1]?.feedback || [];
@@ -89,6 +103,7 @@ function KernelTranscript({
   transcript.evaluations.forEach(evaluation => {
     evaluation.privateProgram = privatePrograms.get(evaluation.id) || null;
     evaluation.privateResult = privateResults.get(evaluation.id) || null;
+    evaluation.modelSession = modelSessions.get(evaluation.id) || null;
   });
 
   return html`
@@ -97,8 +112,13 @@ function KernelTranscript({
                eventCount=${events.length} truncatedPage=${partial}
                lastEvaluationError=${last_evaluation_error}
                executionErrors=${execution_errors}
-               explicitFailureValues=${explicit_failure_values} />
+               explicitFailureValues=${explicit_failure_values}
+               result=${result} />
       <${Provenance} />
+      <${ObservedExecution} transcript=${transcript} partial=${partial}
+                            eventsDropped=${eventsDropped}
+                            moreEvents=${Boolean(turns.next_cursor)}
+                            modelSessionCount=${conversation?.streams?.length || 0} />
       <${Reference} metadata=${metadata} transcript=${transcript}
                     preludeIndex=${preludeIndex} options=${options} />
       ${turns.next_cursor && html`
@@ -110,11 +130,74 @@ function KernelTranscript({
   `;
 }
 
+function ObservedExecution({ transcript, partial, eventsDropped, moreEvents, modelSessionCount }) {
+  if (!transcript.evaluations.length) return null;
+  const modelEvaluationCount = transcript.evaluations.filter(evaluation => evaluation.modelSession).length;
+
+  return html`
+    <section class="kt-observed" aria-label="Observed execution">
+      <div class="kt-observed-heading">
+        <div><span>Observed run</span><h3>${eventsDropped && moreEvents
+          ? 'What is visible so far'
+          : eventsDropped
+          ? 'What is visible in recorded events'
+          : partial ? 'What is visible in loaded events' : 'What actually ran'}</h3></div>
+        <strong>${transcript.evaluations.length} evaluation${transcript.evaluations.length === 1 ? '' : 's'}${moreEvents ? ' loaded' : eventsDropped ? ' recorded' : ''}</strong>
+      </div>
+      <p>${eventsDropped && moreEvents
+        ? 'This is a partial summary. More retained events can be loaded, while the trace also reports dropped events that cannot be recovered.'
+        : eventsDropped
+        ? 'This summary is incomplete because the trace reports dropped events; those missing events cannot be loaded.'
+        : moreEvents
+          ? 'This is a partial summary. Load the remaining events before treating it as the complete run.'
+        : 'Evaluations appear in recorded start order. A model session generates a program; the Kernel then evaluates it inside the named mission environment.'}</p>
+      <ol class="kt-observed-steps">
+        ${transcript.evaluations.map((evaluation, index) => {
+          const environment = environmentOf(evaluation) || 'unknown';
+          const missionName = missionNameOf(evaluation);
+          const groups = capabilityGroups(evaluation.capabilities);
+          const session = evaluation.modelSession;
+          return html`
+            <li class=${`kt-observed-step kt-observed-${safeClass(environment)}`} key=${evaluation.id}>
+              <span class="kt-observed-number">${index + 1}</span>
+              <span class="kt-observed-main">
+                <strong>${environment === 'mission' ? missionName || 'Mission' : capitalize(environment)}</strong>
+                <small>${session
+                  ? `Model turn ${session.turn} generated a program for this mission`
+                  : environment === 'workflow' && modelEvaluationCount
+                    ? `Orchestrated ${modelSessionCount} model session${modelSessionCount === 1 ? '' : 's'} across ${modelEvaluationCount} mission evaluation${modelEvaluationCount === 1 ? '' : 's'}`
+                    : environment === 'mission' ? 'mission evaluation' : `${environment} evaluation`}</small>
+                ${session?.streamId && html`
+                  <a class="kt-model-session-link" href=${`#${modelSessionDomId(session.streamId)}`}
+                     onClick=${revealModelSession}>Open prompt, response & program</a>`}
+              </span>
+              <span class="kt-observed-calls">
+                ${groups.map(group => html`<span key=${group.name}>${overviewCapabilityName(group.name)} × ${group.count}</span>`)}
+                ${groups.length === 0 && html`<span>no capability calls</span>`}
+              </span>
+              <${StatusBadge} status=${statusOf(evaluation)} />
+            </li>`;
+        })}
+      </ol>
+    </section>
+  `;
+}
+
+function overviewCapabilityName(name) {
+  return {
+    'llm-request': 'model calls',
+    'kernel-eval': 'mission programs evaluated',
+    'kernel-mission-model-context': 'mission prompts prepared',
+    'kernel-result-contract': 'result checks',
+    'workflow-annotate': 'agent lifecycle markers'
+  }[name] || name;
+}
+
 // --- Identity and summary -------------------------------------------------
 
 function Hero({
   metadata, transcript, title: displayTitle, eventCount, truncatedPage,
-  lastEvaluationError, executionErrors, explicitFailureValues
+  lastEvaluationError, executionErrors, explicitFailureValues, result
 }) {
   const status = metadata.status || (metadata.complete ? 'complete' : 'incomplete');
   const bundle = metadata.workflow_prelude?.hash;
@@ -155,6 +238,7 @@ function Hero({
       <${Tags} tags=${metadata.tags || metadata.labels?.tags} />
     </div>
     <${TerminalCause} event=${transcript.terminal} lastEvaluationError=${lastEvaluationError} />
+    <${ApplicationResult} result=${result} />
     <${AuthorizedEvaluatorEvidence} executionErrors=${executionErrors}
                                     explicitFailureValues=${explicitFailureValues} />
     <div class="kt-metrics" aria-label="Run summary">
@@ -165,6 +249,23 @@ function Hero({
       <${Metric} value=${errorCount} label="errors" tone=${errorCount > 0 ? 'error' : ''} />
       <${Metric} value=${eventCount} label=${truncatedPage ? 'events loaded' : 'events'} />
     </div>
+  `;
+}
+
+function ApplicationResult({ result }) {
+  if (!result || result['available?'] === false || !Object.prototype.hasOwnProperty.call(result, 'value')) {
+    return null;
+  }
+
+  const value = json(result.value);
+  return html`
+    <details class="kt-application-result" open=${value.length <= 500}>
+      <summary>
+        <strong>Application result</strong>
+        <span class="kt-private-badge">private evidence</span>
+      </summary>
+      <pre>${value}</pre>
+    </details>
   `;
 }
 
@@ -279,7 +380,7 @@ function Reference({ metadata, transcript, preludeIndex, options }) {
       <//>
       <${Disclosure} className="kt-reference-panel" summary="Execution transcript"
                      hint=${`${transcript.evaluations.length} evaluations · ${transcript.capabilities.length} capability calls`}
-                     open=${true}>
+                     open=${false}>
         <div class="kt-toolbar">
           <span>Evaluations in canonical order</span>
           <div>
@@ -591,7 +692,14 @@ function EvaluationSource({ evaluation, preludeIndex }) {
           <pre class="kt-code" key=${message?.tool_call_id || index}>${message?.content ?? json(message)}</pre>`)}
       </details>
     `
-    : null;
+    : evaluation.privateProgram && evaluation.modelSession?.terminalTurn &&
+        evaluation.modelSession?.conversationComplete && SUCCESS.has(statusOf(evaluation))
+      ? html`
+        <p class="kt-evaluation-result-note">
+          <strong>Returned to the workflow.</strong>
+          ${' '}No later model turn was made, so the exact mission return value is not duplicated as model feedback.
+        </p>`
+      : null;
 
   return html`${sourceBlock}${resultBlock}`;
 }
@@ -629,15 +737,40 @@ function Capabilities({ capabilities }) {
     return html`<div class="kt-subsection-empty">No capability calls in this environment.</div>`;
   }
 
+  const groups = capabilityGroups(capabilities);
+  const hasFailure = capabilities.some(capability => isFailure(statusOf(capability)));
+
   return html`
     <section class="kt-subsection">
       <h4>Capability calls <span>${capabilities.length}</span></h4>
-      <div class="kt-call-list">
-        ${capabilities.map(capability => html`
-          <${Capability} key=${capability.id} capability=${capability} />`)}
+      <div class="kt-capability-summary">
+        ${groups.map(group => html`
+          <span class=${group.failures ? 'kt-capability-group kt-capability-group-error' : 'kt-capability-group'}
+                key=${group.name}>
+            <strong>${group.name}</strong> × ${group.count}${group.failures ? ` · ${group.failures} failed` : ''}
+          </span>`)}
       </div>
+      <details class="kt-capability-details" open=${hasFailure}>
+        <summary>${capabilities.length} individual call${capabilities.length === 1 ? '' : 's'}</summary>
+        <div class="kt-call-list">
+          ${capabilities.map(capability => html`
+            <${Capability} key=${capability.id} capability=${capability} />`)}
+        </div>
+      </details>
     </section>
   `;
+}
+
+function capabilityGroups(capabilities) {
+  const groups = new Map();
+  for (const capability of capabilities || []) {
+    const name = nameOf(capability) || 'unknown capability';
+    const group = groups.get(name) || { name, count: 0, failures: 0 };
+    group.count += 1;
+    if (isFailure(statusOf(capability))) group.failures += 1;
+    groups.set(name, group);
+  }
+  return [...groups.values()];
 }
 
 function Capability({ capability }) {
@@ -675,14 +808,55 @@ function Annotations({ annotations }) {
       ${annotations.map(event => html`
         <details class="kt-annotation" key=${event.sequence}>
           <summary>
-            <strong>${String(event.data?.annotation_type || 'annotation')}</strong>
+            <strong>${annotationSummary(event)}</strong>
             <span>#${event.sequence}</span>
           </summary>
-          <pre>${json(event.data?.data)}</pre>
+          <div class="kt-annotation-body">
+            <p>${annotationExplanation(event)}</p>
+            <details>
+              <summary>Raw annotation</summary>
+              <pre>${json(event.data?.data)}</pre>
+            </details>
+          </div>
         </details>
       `)}
     </section>
   `;
+}
+
+function annotationSummary(event) {
+  const type = event.data?.annotation_type;
+  const data = event.data?.data;
+  if (type !== 'agent-action' || !Number.isInteger(data?.turn)) {
+    return String(type || 'annotation');
+  }
+
+  const turn = data.turn + 1;
+  const limit = Number.isInteger(data.max_turns) ? ` of ${data.max_turns}` : '';
+  const mission = typeof data.mission === 'string' ? ` · ${data.mission}` : '';
+  const action = data.kind === 'tool-call' ? 'program requested' : String(data.kind || 'agent action');
+  return `Model turn ${turn}${limit}${mission} · ${action}`;
+}
+
+function annotationExplanation(event) {
+  const type = event.data?.annotation_type;
+  const data = event.data?.data;
+  if (type === 'agent-action' && data?.kind === 'tool-call') {
+    return 'The model returned a PTC-Lisp program for evaluation. Its source, prompt and response are private evidence linked from the observed mission above.';
+  }
+  return 'A workflow-authored lifecycle marker. The raw record is retained below for exact inspection.';
+}
+
+function revealModelSession(event) {
+  const targetId = event.currentTarget?.getAttribute('href')?.slice(1);
+  const target = targetId ? document.getElementById(targetId) : null;
+  if (!target) return;
+
+  event.preventDefault();
+  target.open = true;
+  target.querySelector(':scope > .semantic-stream-body > .semantic-turn')?.setAttribute('open', '');
+  target.querySelector('.kt-system-prompt')?.setAttribute('open', '');
+  target.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 function Limits({ limits }) {

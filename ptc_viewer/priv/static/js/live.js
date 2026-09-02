@@ -264,13 +264,16 @@ async function initLaunch(root, project, mutationNonce, liveToken) {
   root.innerHTML = `
     <div class="live-launch-card">
       <div class="live-launch-head">
-        <span class="live-section-label">Launch a run</span>
+        <span class="live-section-label" data-role="mode">Run application</span>
         <span class="live-launch-target" data-role="target"></span>
       </div>
       <div class="live-launch-envs" data-role="envs" hidden></div>
-      <label class="live-launch-label" data-role="input-label">Input object — the only thing the browser controls; passed to the project's run input</label>
+      <p class="live-launch-mode-note" data-role="mode-note" hidden>
+        Workflow runs the application. A mission selection tests one expression in that mission sandbox; it does not run a workflow stage.
+      </p>
+      <label class="live-launch-label" data-role="input-label">Application input (JSON)</label>
       <textarea class="live-launch-input" data-role="editor" spellcheck="false" rows="10"></textarea>
-      <label class="live-launch-label" data-role="expr-label" hidden>Expression — evaluated once in this mission session; no live frames yet, the result is the output tail below</label>
+      <label class="live-launch-label" data-role="expr-label" hidden>PTC-Lisp expression to evaluate once in this mission sandbox</label>
       <input type="text" class="live-launch-expr" data-role="expr" spellcheck="false" placeholder="(dir)" hidden />
       <div class="live-launch-foot">
         <span class="live-launch-validity" data-role="validity"></span>
@@ -292,7 +295,7 @@ async function initLaunch(root, project, mutationNonce, liveToken) {
   const validate = () => {
     if (state.mission) {
       const expression = fields.expr.value.trim();
-      fields.validity.textContent = expression ? `mission ${state.mission}` : 'expression required';
+      fields.validity.textContent = expression ? `ready to test ${state.mission}` : 'enter an expression';
       fields.validity.dataset.state = expression ? 'ok' : 'bad';
       fields.run.disabled = !expression || state.running;
       return expression || null;
@@ -324,16 +327,21 @@ async function initLaunch(root, project, mutationNonce, liveToken) {
     fields.editor.hidden = Boolean(mission);
     fields['expr-label'].hidden = !mission;
     fields.expr.hidden = !mission;
+    fields.mode.textContent = mission ? `Test mission: ${mission}` : 'Run application';
+    fields.run.textContent = mission ? '▶ Evaluate expression' : '▶ Run application';
     validate();
   };
 
   renderEnvironmentChips(fields.envs, project, selectEnvironment);
+  fields['mode-note'].hidden = fields.envs.hidden;
 
   const setStatus = (status) => {
     state.running = status?.status === 'running';
     fields.run.disabled = state.running || fields.validity.dataset.state === 'bad';
     for (const chip of fields.envs.querySelectorAll('button')) chip.disabled = state.running;
-    fields.run.textContent = state.running ? 'Running…' : '▶ Run';
+    fields.run.textContent = state.running
+      ? 'Running…'
+      : state.mission ? '▶ Evaluate expression' : '▶ Run application';
     if (!status || status.status === 'idle') {
       fields.status.hidden = true;
       return;
@@ -492,6 +500,7 @@ function initProject(root, project) {
       <span class="live-project-entry" data-role="entry"></span>
       <button type="button" class="live-project-disclose" data-role="disclose" aria-expanded="false">Details ▸</button>
     </div>
+    <section class="live-application-map" data-role="application-map"></section>
     <div class="live-project-panel" data-role="panel" hidden>
       <section class="live-project-section">
         <button type="button" class="live-project-head" data-role="env-head" aria-expanded="false">
@@ -541,6 +550,7 @@ function initProject(root, project) {
     f['source-body'].textContent = component.source || '(source unavailable)';
   };
 
+  renderApplicationMap(f['application-map'], project);
   f['env-count'].textContent = plural(environments.length, 'environment');
   f['comp-count'].textContent = plural(components.length, 'component');
   const leading = leadingLimitRows(limits);
@@ -567,6 +577,79 @@ function initProject(root, project) {
   ]) {
     head.addEventListener('click', () => toggleSection(head, body));
   }
+}
+
+export function applicationOverview(project) {
+  const environmentsAvailable = Array.isArray(project?.environments);
+  const environments = environmentsAvailable ? project.environments : [];
+  const workflow = environments.find(environment => environment?.kind === 'workflow') || null;
+  const missions = environments.filter(environment => environment?.kind === 'mission');
+  return {
+    available: environmentsAvailable && workflow !== null,
+    entry: project?.entry || '',
+    workflow,
+    missions,
+  };
+}
+
+function renderApplicationMap(container, project) {
+  const overview = applicationOverview(project);
+  if (!overview.available) {
+    container.hidden = true;
+    return;
+  }
+
+  container.hidden = false;
+  const heading = el('div', 'live-application-map-head');
+  heading.append(
+    el('span', 'live-section-label', 'Declared application'),
+    el('span', 'live-application-map-note', 'Configuration, not execution history'),
+  );
+
+  const body = el('div', 'live-application-map-body');
+  const workflow = el('div', 'live-application-group');
+  workflow.append(el('div', 'live-application-group-label', 'Application entry'));
+  workflow.append(applicationEnvironmentCard(overview.workflow, overview.entry, 'workflow'));
+  body.append(workflow);
+
+  const missions = el('div', 'live-application-group');
+  missions.append(el('div', 'live-application-group-label', 'Available mission environments'));
+  const missionCards = el('div', 'live-application-missions');
+  if (overview.missions.length) {
+    missionCards.append(...overview.missions.map(environment =>
+      applicationEnvironmentCard(environment, '', 'mission')
+    ));
+  } else {
+    missionCards.append(el('span', 'live-application-empty', 'No missions declared'));
+  }
+  missions.append(missionCards);
+  body.append(missions);
+
+  const explanation = el(
+    'p',
+    'live-application-explanation',
+    'Missions are available to the workflow. This map does not claim that every mission runs.',
+  );
+  container.replaceChildren(heading, body, explanation);
+}
+
+function applicationEnvironmentCard(environment, entry, fallbackKind) {
+  const card = el('article', 'live-application-card');
+  const kind = environment?.kind || fallbackKind;
+  card.dataset.kind = kind;
+  card.append(
+    el('span', 'live-application-kind', kind),
+    el('strong', 'live-application-name', environment?.name || kind),
+  );
+  if (entry) card.append(el('code', 'live-application-entry', entry));
+
+  const counts = [
+    plural(countOf(environment?.components), 'component'),
+    plural(countOf(environment?.providers), 'provider'),
+  ];
+  if (countOf(environment?.tools)) counts.push(plural(countOf(environment.tools), 'tool'));
+  card.append(el('span', 'live-application-counts', counts.join(' · ')));
+  return card;
 }
 
 function toggleSection(head, body) {

@@ -121,6 +121,10 @@ defmodule PtcViewer.Router do
     send_analysis(conn, PtcViewer.Api.conversation(viewer_config(conn), run_id))
   end
 
+  get "/api/analysis/runs/:run_id/result" do
+    send_analysis(conn, PtcViewer.Api.result(viewer_config(conn), run_id))
+  end
+
   get "/api/analysis/runs/:run_id/preludes" do
     send_analysis(conn, PtcViewer.Api.preludes(viewer_config(conn), run_id))
   end
@@ -741,6 +745,9 @@ defmodule PtcViewer.Router do
       # The first two are about the run, the last two about the project.
       {:error, :not_found} ->
         send_resp(conn, 404, "inspection_run_not_recorded")
+
+      {:error, :result_not_found} ->
+        send_resp(conn, 404, "inspection_result_not_recorded")
 
       {:error, :inspection_run_mismatch} ->
         send_resp(conn, 404, "inspection_run_mismatch")
