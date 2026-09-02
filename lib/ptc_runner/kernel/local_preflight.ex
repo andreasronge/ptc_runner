@@ -89,7 +89,10 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   #   * `:local_preflight` / `:launcher_unavailable` —
   #     `mcp_stdio_launcher_unavailable`, `unsupported_mcp_stdio_platform`
   #   * `:local_preflight` / `:adapter_unavailable` — `invalid_llm_model`
-  #   * `:local_preflight` / `:model_contract_unsupported` — `unsupported_model_option`
+  #   * `:local_preflight` / `:model_contract_unsupported` —
+  #     `unsupported_model_option`, or the sealed `ModelContractPricingCause`
+  #     produced from the exact payload-free uncataloged-pricing sentinel. The
+  #     latter retains the matching `model_uncataloged` warning.
   #
   # Doctor refines `mcp_command_not_found` to `command_not_found`, an existing
   # but unusable executable to `executable_unavailable`, and every replay-fixture

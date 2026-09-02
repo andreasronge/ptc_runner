@@ -4,6 +4,7 @@ defmodule PtcRunner.LLMTest do
   # test can clobber the adapter mid-run.
   use ExUnit.Case, async: false
 
+  alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.LLM.Invocation
   alias PtcRunner.LLM.PreparedModel
   alias PtcRunner.LLM.Requirements
@@ -399,21 +400,28 @@ defmodule PtcRunner.LLMTest do
 
       assert public_warning =~ "model_uncataloged"
       assert public_warning =~ "provider:public"
+
+      assert String.trim_trailing(public_warning) ==
+               "warning: " <>
+                 ModelContractDiagnostic.model_uncataloged_message("provider:public")
+
       assert private_warning =~ "model_uncataloged"
       refute private_warning =~ "provider:private"
     end
 
-    test "escapes control characters in an attested selector" do
-      selector = "provider:public\nwarning: forged"
+    test "withholds selectors outside the refusal warning's printable ASCII grammar" do
+      for selector <- ["provider:public\nwarning: forged", "provider:café"] do
+        warning =
+          ExUnit.CaptureIO.capture_io(:stderr, fn ->
+            prepared = prepare!(selector, %{}, UncatalogedPublicAdapter)
+            assert {:ok, _requester} = PtcRunner.LLM.callback(prepared, LLMSupport.llm_binding())
+          end)
 
-      warning =
-        ExUnit.CaptureIO.capture_io(:stderr, fn ->
-          prepared = prepare!(selector, %{}, UncatalogedPublicAdapter)
-          assert {:ok, _requester} = PtcRunner.LLM.callback(prepared, LLMSupport.llm_binding())
-        end)
+        assert String.trim_trailing(warning) ==
+                 "warning: " <> ModelContractDiagnostic.model_uncataloged_message(nil)
 
-      assert warning =~ inspect(selector)
-      refute warning =~ "public\nwarning: forged"
+        refute warning =~ selector
+      end
     end
 
     test "returns a function that calls the adapter" do

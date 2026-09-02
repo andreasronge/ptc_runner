@@ -47,14 +47,20 @@ defmodule PtcRunner.Kernel.ModelContractDiagnostic do
   def pricing_model(_message), do: :error
 
   @doc false
+  @spec model_uncataloged_message(binary() | nil) :: binary()
+  def model_uncataloged_message(public_model) do
+    identity = if publishable_model?(public_model), do: " #{inspect(public_model)}", else: ""
+
+    "model_uncataloged: configured model#{identity} is not an exact catalog entry; " <>
+      "pricing, limits, token estimation, and capability detection may be incomplete"
+  end
+
+  @doc false
   @spec warning_line(term()) :: binary()
   def warning_line(message) do
     case pricing_model(message) do
       {:ok, public_model} ->
-        identity = if public_model, do: " #{inspect(public_model)}", else: ""
-
-        "warning: model_uncataloged: configured model#{identity} is not an exact catalog entry; " <>
-          "pricing, limits, token estimation, and capability detection may be incomplete\n"
+        "warning: " <> model_uncataloged_message(public_model) <> "\n"
 
       :error ->
         ""
@@ -98,8 +104,10 @@ defmodule PtcRunner.Kernel.ModelContractDiagnostic do
     end
   end
 
-  defp publishable_model?(model) do
+  defp publishable_model?(model) when is_binary(model) do
     byte_size(model) in 1..@max_model_bytes and
       :binary.bin_to_list(model) |> Enum.all?(&(&1 in 0x20..0x7E))
   end
+
+  defp publishable_model?(_model), do: false
 end

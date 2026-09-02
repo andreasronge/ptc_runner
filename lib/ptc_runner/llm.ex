@@ -9,6 +9,7 @@ defmodule PtcRunner.LLM do
   this transport adapter.
   """
 
+  alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.ModelContractPricingCause
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.LLM.Invocation
@@ -85,6 +86,13 @@ defmodule PtcRunner.LLM do
   The returned attestation must be exactly the canonical requirements map. An
   adapter that cannot preserve the requested options, mode, reporting
   guarantees, or reservation authority returns `{:error, :unsupported_model_option}`.
+  An adapter that has positively established an uncataloged target and cannot
+  supply the USD rates required by a requested cost reservation returns the
+  payload-free sentinel
+  `{:error, :uncataloged_cost_reservation_pricing_unavailable}`. The Kernel
+  maps only that exact sentinel to the pricing-specific
+  `model_contract_unsupported` diagnostic and `model_uncataloged` warning;
+  payload-bearing variants fail closed.
   """
   @callback prepare_model(model :: String.t(), requirements :: Requirements.t()) ::
               {:ok, target :: term(), catalog_status(), Requirements.t()} | {:error, term()}
@@ -363,13 +371,7 @@ defmodule PtcRunner.LLM do
 
   defp warn_catalog_status(%PreparedModel{catalog_status: :uncataloged} = prepared) do
     {:model_uncataloged, public_model} = catalog_warning(prepared)
-    identity = if public_model, do: " #{inspect(public_model)}", else: ""
-
-    IO.warn(
-      "model_uncataloged: configured model#{identity} is not an exact catalog entry; " <>
-        "pricing, limits, token estimation, and capability detection may be incomplete",
-      []
-    )
+    IO.warn(ModelContractDiagnostic.model_uncataloged_message(public_model), [])
   end
 
   defp warn_catalog_status(%PreparedModel{}), do: :ok

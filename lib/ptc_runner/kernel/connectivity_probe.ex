@@ -43,6 +43,9 @@ defmodule PtcRunner.Kernel.ConnectivityProbe do
   #
   #   * `:active_preflight` / `:connectivity_unavailable` —
   #     `llm_connectivity_unavailable`
+  #   * `:local_preflight` / `:model_contract_unsupported` — the sealed
+  #     `ModelContractPricingCause` produced only from the adapter's exact,
+  #     payload-free uncataloged-pricing sentinel.
   #
   # An exhausted budget reports `:active_preflight` / `:connectivity_timeout`
   # and carries no subject, because that budget belongs to the operation: it can

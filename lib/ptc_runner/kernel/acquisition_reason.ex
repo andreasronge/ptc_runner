@@ -4,8 +4,13 @@ defmodule PtcRunner.Kernel.AcquisitionReason do
   # Translates a provider callback's bare reason into a closed diagnostic while
   # the occurrence that produced it is still in scope.
   #
-  # A prepare, preflight, or acquire callback answers `{:error, reason}` with an
-  # atom and nothing else. Every acquisition diagnostic produced here requires
+  # A prepare, preflight, or acquire callback normally answers `{:error, reason}`
+  # with an atom and nothing else. Closed tuple forms preserve details for a
+  # small set of catalogued reasons handled below. The sole sealed struct is
+  # `ModelContractPricingCause`, produced from the exact payload-free
+  # uncataloged-pricing sentinel; it maps to the pricing-specific
+  # `model_contract_unsupported` diagnostic and matching `model_uncataloged`
+  # warning. Every acquisition diagnostic produced here requires
   # a subject bearing an occurrence, so a bare reason cannot be classified once
   # it has left the loop that knows which occurrence produced it: it reaches the command
   # boundary carrying no subject and fails closed as `internal_error`, reporting
