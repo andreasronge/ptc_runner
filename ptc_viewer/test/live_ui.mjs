@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  activityPresentation,
   fmtLimit,
   formatLiveSpend,
   evaluationPresentation,
@@ -20,6 +21,15 @@ import {
   runRoute,
   uniqueComponents
 } from '../priv/static/js/live.js';
+
+assert.deepEqual(
+  activityPresentation({kind: 'agent', name: 'agent-a1', status: 'tool-call', turn: 1, max_turns: 6}),
+  {name: 'agent-a1', status: 'turn 2 of 6 · tool-call'}
+);
+assert.deepEqual(
+  activityPresentation({kind: 'agent', name: 'agent-b2', status: 'provider-error', turn: 0, max_turns: 2}),
+  {name: 'agent-b2', status: 'turn 1 of 2 · provider-error'}
+);
 
 // Limits arrive as raw catalog rows; the panel is responsible for making them
 // readable without inventing units it was not given.

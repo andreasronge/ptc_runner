@@ -495,7 +495,15 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert [annotation] = Enum.filter(events, &(&1.type == "workflow-annotation"))
     assert annotation.data.annotation_type == "agent-action"
-    assert annotation.data.data == %{"turn" => 0, "kind" => "tool-call"}
+
+    assert annotation.data.data == %{
+             "turn" => 0,
+             "max_turns" => 2,
+             "invocation" => annotation.data.data["invocation"],
+             "kind" => "tool-call"
+           }
+
+    assert annotation.data.data["invocation"] =~ ~r/\Aagent-[0-9a-f]{16}\z/
     assert_receive {:provider_closed, :terminal_success}
     refute_receive {:provider_closed, :terminal_success}
   end
@@ -580,6 +588,8 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert explore_annotation == %{
              "turn" => 0,
+             "max_turns" => 2,
+             "invocation" => explore_annotation["invocation"],
              "kind" => "tool-call",
              "phase" => 0,
              "phase_turn" => 0,
@@ -588,6 +598,64 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert synthesize_annotation["phase"] == 1
     assert synthesize_annotation["mission"] == "synthesize"
+    assert synthesize_annotation["max_turns"] == 2
+    assert synthesize_annotation["invocation"] == explore_annotation["invocation"]
+  end
+
+  test "concurrent agent invocations publish distinct turn budgets" do
+    response = fn id ->
+      %{
+        content: nil,
+        tool_calls: [
+          %{id: id, name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+    end
+
+    {:ok, config} = agent_config([response.("one"), response.("two")])
+
+    assert {:ok, %{value: [42, 42]}} =
+             Kernel.run(
+               ~S|(return (pmap (fn [limit] (agent.core/run-value "Compute" {"max_turns" limit})) [1 2]))|,
+               config
+             )
+
+    progress =
+      config.event_sink
+      |> EventSink.events()
+      |> Enum.filter(&(&1.type == "workflow-annotation"))
+      |> Enum.map(& &1.data.data)
+
+    assert Enum.sort(Enum.map(progress, & &1["max_turns"])) == [1, 2]
+    assert progress |> Enum.map(& &1["invocation"]) |> Enum.uniq() |> length() == 2
+  end
+
+  test "sequential agent invocations receive distinct correlation identifiers" do
+    response = fn id ->
+      %{
+        content: nil,
+        tool_calls: [
+          %{id: id, name: "run_ptc_lisp", args: %{"program" => "(return 42)"}}
+        ]
+      }
+    end
+
+    {:ok, config} = agent_config([response.("one"), response.("two")])
+
+    assert {:ok, %{value: [42, 42]}} =
+             Kernel.run(
+               ~S|(return [(agent.core/run-value "First" {"max_turns" 1}) (agent.core/run-value "Second" {"max_turns" 2})])|,
+               config
+             )
+
+    progress =
+      config.event_sink
+      |> EventSink.events()
+      |> Enum.filter(&(&1.type == "workflow-annotation"))
+      |> Enum.map(& &1.data.data)
+
+    assert Enum.sort(Enum.map(progress, & &1["max_turns"])) == [1, 2]
+    assert progress |> Enum.map(& &1["invocation"]) |> Enum.uniq() |> length() == 2
   end
 
   # A non-final terminal-only phase would hand off to the next phase when it

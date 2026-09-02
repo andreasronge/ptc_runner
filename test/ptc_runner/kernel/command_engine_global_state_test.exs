@@ -16,6 +16,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.StandaloneCLI
+  alias PtcRunner.TestSupport.HTTPRequest
   alias PtcRunner.TestSupport.LLMSupport
 
   @tag :tmp_dir
@@ -276,12 +277,14 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
   end
 
   @tag :tmp_dir
-  test "doctor --connect sets up selected environment credentials before active work", %{
+  test "commands resolve deferred environment before active work and live reporting", %{
     tmp_dir: directory
   } do
     environment_name = "PTC_TEST_DOCTOR_CONNECT_TOKEN"
     previous_environment = System.get_env(environment_name)
+    previous_viewer_url = System.get_env("PTC_VIEWER_URL")
     System.put_env(environment_name, "ambient-secret")
+    System.put_env("PTC_VIEWER_URL", "http://127.0.0.1:1")
 
     provider_applications = LLMSupport.snapshot_provider_applications()
 
@@ -315,6 +318,10 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
         do: System.put_env(environment_name, previous_environment),
         else: System.delete_env(environment_name)
 
+      if previous_viewer_url,
+        do: System.put_env("PTC_VIEWER_URL", previous_viewer_url),
+        else: System.delete_env("PTC_VIEWER_URL")
+
       Enum.each(previous, fn
         {key, {:ok, value}} -> Application.put_env(:ptc_runner, key, value)
         {key, :error} -> Application.delete_env(:ptc_runner, key)
@@ -340,7 +347,23 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
 
     application = doctor_application(directory, "command-owned-model", workflow: ["model"])
     env_file = Path.join(directory, "model.env")
-    File.write!(env_file, "#{environment_name}=test-secret\n")
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true])
+    {:ok, port} = :inet.port(listener)
+    parent = self()
+
+    _server =
+      spawn(fn ->
+        {:ok, socket} = :gen_tcp.accept(listener)
+        {:ok, request} = HTTPRequest.receive_complete(socket)
+        send(parent, {:deferred_viewer_request, request})
+        :ok = :gen_tcp.send(socket, "HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n")
+        :ok = :gen_tcp.close(socket)
+      end)
+
+    File.write!(
+      env_file,
+      "#{environment_name}=test-secret\nPTC_VIEWER_URL=http://127.0.0.1:#{port}\n"
+    )
 
     presentation =
       StandaloneCLI.execute([
@@ -384,6 +407,20 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
                }
              ]
            }
+
+    assert %{exit_status: 0} =
+             StandaloneCLI.execute([
+               "run",
+               application,
+               "--host-config",
+               host_path,
+               "--env-file",
+               env_file
+             ])
+
+    assert_receive {:deferred_viewer_request, request}, 2_000
+    assert request =~ ~s|"label":"ptc.json · app/run"|
+    :ok = :gen_tcp.close(listener)
   end
 
   @tag :tmp_dir

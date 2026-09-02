@@ -42,6 +42,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.ProjectArtifactRoot
   alias PtcRunner.Kernel.ProjectResolver
   alias PtcRunner.Kernel.PublicationAuthority
+  alias PtcRunner.LiveStatus
 
   @fallback_run_ref "cmd-00000000000000000000000000"
   @frontend_commands CommandDeclaration.frontend_commands()
@@ -157,7 +158,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
                runtime
              ) do
           {:ok, %CommandPreparation{} = preparation} ->
-            dispatch_preparation(preparation, runtime, entry, presentation?)
+            dispatch_preparation(preparation, runtime, entry, arguments, presentation?)
 
           terminal ->
             with_rejection(terminal)
@@ -168,11 +169,13 @@ defmodule PtcRunner.Kernel.CommandEngine do
     end
   end
 
-  defp dispatch_preparation(preparation, runtime, entry, true) do
-    CommandRunDispatch.dispatch_frontend(preparation, runtime, entry.frontend)
+  defp dispatch_preparation(preparation, runtime, entry, arguments, true) do
+    package = preparation.prepared_run.request.package
+    label = LiveStatus.application_label_for(package, arguments.application)
+    CommandRunDispatch.dispatch_frontend(preparation, runtime, entry.frontend, label)
   end
 
-  defp dispatch_preparation(preparation, runtime, _entry, false),
+  defp dispatch_preparation(preparation, runtime, _entry, _arguments, false),
     do: with_rejection(CommandRunDispatch.dispatch(preparation, runtime))
 
   defp with_rejection({status, %CommandOutcome{} = outcome}) when status in [:ok, :error],

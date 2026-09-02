@@ -47,8 +47,10 @@ defmodule PtcRunner.LiveStatus.Target do
   @spec report(term(), binary(), map()) :: :ok | :error
   def report(%__MODULE__{} = target, run_id, frame)
       when is_binary(run_id) and is_map(frame) do
-    _result = target.report.(run_id, frame)
-    :ok
+    case target.report.(run_id, frame) do
+      :error -> :error
+      _result -> :ok
+    end
   rescue
     _exception -> :error
   catch

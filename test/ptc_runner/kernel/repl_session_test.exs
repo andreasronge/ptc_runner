@@ -99,7 +99,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     assert {:ok, step, session} =
              ReplSession.eval(
                session,
-               ~S|(workflow.event/annotate "agent-action" {:turn 0 :kind "tool-call"})|
+               ~S|(workflow.event/annotate "agent-action" {:turn 0 :max-turns 1 :kind "tool-call"})|
              )
 
     assert step.return[:status] == :ok or step.return["status"] == "ok"

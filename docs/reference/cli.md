@@ -1017,9 +1017,12 @@ manifest, working directory, or command:
 ptc viewer ptc-project.json --env-file .env
 ```
 
-Viewer-launched workflow cards use the manifest label and workflow entry as
-their human-facing title, while retaining the `cmd-...` value as the stable run
-identifier. The Live tab and `GET /api/live/runs` list newest first, and each
+Viewer-launched workflows and CLI runs attached through `PTC_VIEWER_URL` use
+the manifest label and workflow entry as their human-facing title, while
+retaining the `cmd-...` value as the stable run identifier. That exact label
+(or the manifest filename when no label is declared) and entry are sent in
+plaintext only to the explicitly configured Viewer; the trace keeps its
+fingerprinted label. The Live tab and `GET /api/live/runs` list newest first, and each
 card shows when the Viewer first saw that run, so an edited ceiling cannot be
 read off an older card as a stale enforcement.
 

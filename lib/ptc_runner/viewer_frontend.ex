@@ -42,6 +42,7 @@ defmodule PtcRunner.ViewerFrontend do
   alias PtcRunner.Kernel.ProjectConfig
   alias PtcRunner.Kernel.ViewerBinding
   alias PtcRunner.Kernel.ViewerProjectAdapter
+  alias PtcRunner.LiveStatus
   alias PtcRunner.ViewerLaunchAdapter
   alias PtcRunner.ViewerSnapshotStore
 
@@ -435,9 +436,7 @@ defmodule PtcRunner.ViewerFrontend do
   defp workflow_label(project) do
     case describe_project(project) do
       {:ok, %{name: name, entry: entry}} when is_binary(name) ->
-        [name, entry]
-        |> Enum.join(" · ")
-        |> String.slice(0, 256)
+        LiveStatus.application_label(name, entry)
 
       _unavailable ->
         "workflow"
