@@ -363,8 +363,9 @@ network-free example, candidate materialization, and component overrides.
 Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another `request_hash` rather than silently consuming
 unrelated evidence. A structured-output fixture uses the public
-`structured_output` object rather than encoded `content`. A miss is a provider error — `kind` `provider_error`,
-`reason` `not_found` — and `llm/request` returns that envelope as a value with
+`structured_output` object rather than encoded `content`. A miss is a provider
+error with `:kind :provider_error` and `:reason :not_found`, and `llm/request`
+returns that envelope as a value with
 `:status :error` rather than failing the evaluation, so a workflow that wants a
 miss to be fatal calls `cap/unwrap!` on the raw `tool/llm-request` envelope. The
 run envelope records the miss in usage: that alias's `successful_calls` stays 0

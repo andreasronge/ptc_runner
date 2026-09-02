@@ -327,8 +327,9 @@ private targets remain absent, while alias/revision usage stays attributable.</p
 network-free example, candidate materialization, and component overrides.</p><p>Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another <code class="inline">request_hash</code> rather than silently consuming
 unrelated evidence. A structured-output fixture uses the public
-<code class="inline">structured_output</code> object rather than encoded <code class="inline">content</code>. A miss is a provider error — <code class="inline">kind</code> <code class="inline">provider_error</code>,
-<code class="inline">reason</code> <code class="inline">not_found</code> — and <code class="inline">llm/request</code> returns that envelope as a value with
+<code class="inline">structured_output</code> object rather than encoded <code class="inline">content</code>. A miss is a provider
+error with <code class="inline">:kind :provider_error</code> and <code class="inline">:reason :not_found</code>, and <code class="inline">llm/request</code>
+returns that envelope as a value with
 <code class="inline">:status :error</code> rather than failing the evaluation, so a workflow that wants a
 miss to be fatal calls <code class="inline">cap/unwrap!</code> on the raw <code class="inline">tool/llm-request</code> envelope. The
 run envelope records the miss in usage: that alias's <code class="inline">successful_calls</code> stays 0

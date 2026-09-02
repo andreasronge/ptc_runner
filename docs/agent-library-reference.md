@@ -131,20 +131,27 @@ ceiling is omitted in full. Protocol errors and source rejected before
 evaluation are not retained. Host and infrastructure failures that abort the
 outer workflow still have no outcome to annotate.
 
-`kind` and `reason` are facts. This entry does not add a runtime
+The envelope keys are PTC-Lisp keywords. The values of `:status`, `:kind`, and
+`:reason` are also keywords; the value of the `:retryable?` field is a boolean.
+The table spells keyword values with their leading `:` to preserve their
+in-workflow types. Comparing one of these values with its JSON-projected name
+string is false: use `(= :limit_exceeded (get response :kind))`, not
+`(= "limit_exceeded" (get response :kind))`.
+
+`:kind` and `:reason` are facts. This entry does not add a runtime
 `recovery: retry | choose-alternate | abort` axis; the workflow chooses a
 disposition. Restarting with another alias starts another agent loop. It does
 not resume the previous transcript.
 
-| Observation | Envelope `kind` | Envelope `reason` | Typical policy |
+| Observation | Envelope `:kind` value | Envelope `:reason` value | Typical policy |
 | --- | --- | --- | --- |
-| Transient transport or provider failure | `provider-error` | `timeout`, `unavailable`, `rate-limited`, or `transport-error` with `retryable?` true | retry the same alias |
-| Whole-call live LLM deadline | `timeout` | `llm-request-timeout` / `llm_request_timeout` with `retryable?` true | retry the same alias or choose another |
-| Permanent per-alias provider refusal | `provider-error` | `authentication-failed`, `payment-required`, `denied`, `not-found`, `invalid-request`, `tool-calling-unsupported`, and other non-retryable provider reasons | try another alias or abort |
-| Per-alias `max_calls` exhaustion | `limit-exceeded` | `capability-quota` with `details.limit` `max-calls` | another alias may still run |
-| Global LLM capability quota | `limit-exceeded` | `capability-quota` with a workflow or mission capability-call limit | no selected alias can run |
-| Aggregate LLM token or cost budget | `limit-exceeded` | `llm-total-tokens` or `llm-cost-microusd` with the refused reservation | inspect remaining, raise the limit, or abort |
-| Invalid or unknown alias | `protocol-error` | `unknown-model-alias`, `invalid-model-alias`, or `model-alias-required` | correct the request; no provider attempt occurred |
+| Transient transport or provider failure | `:provider_error` | `:timeout`, `:unavailable`, `:rate_limited`, or `:transport_error` with boolean `:retryable?` value `true` | retry the same alias |
+| Whole-call live LLM deadline | `:timeout` | `:llm_request_timeout` with boolean `:retryable?` value `true` | retry the same alias or choose another |
+| Permanent per-alias provider refusal | `:provider_error` | `:authentication_failed`, `:payment_required`, `:denied`, `:not_found`, `:invalid_request`, `:tool_calling_unsupported`, and other non-retryable provider reasons | try another alias or abort |
+| Per-alias `max_calls` exhaustion | `:limit_exceeded` | `:capability_quota` with `:details` field `:limit` value `:max_calls` | another alias may still run |
+| Global LLM capability quota | `:limit_exceeded` | `:capability_quota` with a workflow or mission capability-call limit | no selected alias can run |
+| Aggregate LLM token or cost budget | `:limit_exceeded` | `:llm_total_tokens` or `:llm_cost_microusd` with the refused reservation | inspect remaining, raise the limit, or abort |
+| Invalid or unknown alias | `:protocol_error` | `:unknown_model_alias`, `:invalid_model_alias`, or `:model_alias_required` | correct the request; no provider attempt occurred |
 
 A spent per-alias `max_calls` is a named quota refusal, not a subject failure
 and not a transport error. `run-value`, `run-result-value`, `run-phased-result-value`,

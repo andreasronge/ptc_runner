@@ -4,6 +4,7 @@ defmodule PtcRunner.Kernel.LLMRouter do
   alias PtcRunner.Kernel.Capability
   alias PtcRunner.Kernel.CapabilityInvocation
   alias PtcRunner.Kernel.LimitCatalog
+  alias PtcRunner.Kernel.LLMCapability
   alias PtcRunner.Kernel.RoutedCapability
   alias PtcRunner.LLM.Requirements
 
@@ -52,7 +53,7 @@ defmodule PtcRunner.Kernel.LLMRouter do
          {:ok, routed} <-
            RoutedCapability.new(
              name: "llm-request",
-             description: "Submit one provider-neutral bounded language-model request",
+             description: LLMCapability.description(),
              input_schema: advertised_input_schema,
              output_schema: first.capability.output_schema,
              routes: route_map,
