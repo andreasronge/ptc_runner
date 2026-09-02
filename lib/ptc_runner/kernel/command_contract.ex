@@ -1478,6 +1478,12 @@ defmodule PtcRunner.Kernel.CommandContract do
        ),
        do: CandidateRefusedDiagnostic.message_schema(row.message)
 
+  defp diagnostic_message_schema(
+         %{phase: :local_preflight, code: :model_contract_unsupported} = row,
+         %{"type" => "null"}
+       ),
+       do: DiagnosticCatalog.message_schema(row)
+
   defp diagnostic_message_schema(row, %{"type" => "null"}), do: %{"const" => row.message}
   defp diagnostic_message_schema(row, _source_schema), do: DiagnosticCatalog.message_schema(row)
 

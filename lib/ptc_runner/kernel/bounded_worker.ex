@@ -12,6 +12,7 @@ defmodule PtcRunner.Kernel.BoundedWorker do
   callback execution. A caller may also supply a `:cancel_with` process; its
   termination cancels the worker without coupling the two owners.
   """
+  alias PtcRunner.Kernel.ModelContractPricingCause
 
   @doc """
   Classifies the result of a bounded provider callback that answers `:ok`.
@@ -26,18 +27,28 @@ defmodule PtcRunner.Kernel.BoundedWorker do
   drifted, so there is one copy.
 
   A reason may also carry one positive integer position — the line of a
-  declared input file the callback refused. Nothing else is admitted, because
-  the position is the only per-instance detail a caller may publish and a wider
-  grammar would let a callback hand its caller an arbitrary payload.
+  declared input file the callback refused. The other closed exception is a
+  cost-reservation pricing miss, which may carry only an adapter-attested
+  public model selector or `nil`. A wider grammar would let a callback hand its
+  caller an arbitrary payload.
   """
   @spec classify_callback(term()) ::
-          :ok | :timed_out | {:error, atom() | {atom(), pos_integer()}}
+          :ok
+          | :timed_out
+          | {:error,
+             atom()
+             | {atom(), pos_integer()}
+             | struct()}
   def classify_callback({:ok, :ok}), do: :ok
   def classify_callback({:ok, {:error, reason}}) when is_atom(reason), do: {:error, reason}
 
   def classify_callback({:ok, {:error, {reason, position}}})
       when is_atom(reason) and is_integer(position) and position > 0,
       do: {:error, {reason, position}}
+
+  def classify_callback({:ok, {:error, %ModelContractPricingCause{} = cause}}) do
+    if ModelContractPricingCause.valid?(cause), do: {:error, cause}, else: {:error, :internal}
+  end
 
   def classify_callback({:error, :timeout}), do: :timed_out
   def classify_callback(_unrecognised), do: {:error, :internal}
@@ -53,7 +64,13 @@ defmodule PtcRunner.Kernel.BoundedWorker do
   before publishing it, on the same terms as the position above.
   """
   @spec classify_payload_callback(term()) ::
-          :ok | {:ok, term()} | :timed_out | {:error, atom() | {atom(), pos_integer()}}
+          :ok
+          | {:ok, term()}
+          | :timed_out
+          | {:error,
+             atom()
+             | {atom(), pos_integer()}
+             | struct()}
   def classify_payload_callback({:ok, {:ok, payload}}), do: {:ok, payload}
   def classify_payload_callback(result), do: classify_callback(result)
 

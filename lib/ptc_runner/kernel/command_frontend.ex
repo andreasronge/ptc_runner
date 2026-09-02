@@ -132,6 +132,9 @@ defmodule PtcRunner.Kernel.CommandFrontend do
 
       {:stderr, bytes} ->
         presentation(outcome, envelope_path, "", bytes, outcome.exit_status)
+
+      {:stdio, stdout, stderr} ->
+        presentation(outcome, envelope_path, stdout, stderr, outcome.exit_status)
     end
   end
 

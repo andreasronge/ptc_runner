@@ -371,6 +371,24 @@ defmodule PtcRunner.TestSupport.CommandEngineFixtures do
     }
   end
 
+  def uncataloged_cost_host(model) do
+    %{
+      "credentials" => %{"key" => %{"literal" => "offline-test-key"}},
+      "install" => %{
+        "model" => %{
+          "source" => "llm",
+          "structured_output_mode" => "unsupported",
+          "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
+          "reservation_tariff" => %{"currency" => "USD", "id" => "declared-v1"},
+          "installation_revision" => "model-v1",
+          "model" => model,
+          "credential" => "key"
+        }
+      },
+      "limits" => %{"llm_cost_microusd" => 100_000}
+    }
+  end
+
   def provider_entries(names) do
     Enum.map(names, fn
       {name, config} -> %{"name" => name, "config" => config}

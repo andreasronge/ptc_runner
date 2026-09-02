@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   alias PtcRunner.Kernel.LLMReplayFixtureDiagnostic
   alias PtcRunner.Kernel.MCPAcquisitionDiagnostic
   alias PtcRunner.Kernel.MissionCapabilityDiagnostic
+  alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.ModelOutputDiagnostic
   alias PtcRunner.Kernel.OptionalBudgetDiagnostic
   alias PtcRunner.Kernel.ResultContractDiagnostic
@@ -480,6 +481,13 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       do: LLMReplayFixtureDiagnostic.message_schema(fallback)
 
   def message_schema(%{
+        phase: :local_preflight,
+        code: :model_contract_unsupported,
+        message: fallback
+      }),
+      do: ModelContractDiagnostic.message_schema(fallback)
+
+  def message_schema(%{
         phase: :result_cleanup,
         code: :result_contract_failed,
         message: fallback
@@ -595,6 +603,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
 
   defp valid_dynamic_message?(:local_preflight, code, message) when code in @fixture_codes,
     do: LLMReplayFixtureDiagnostic.valid_message?(message)
+
+  defp valid_dynamic_message?(:local_preflight, :model_contract_unsupported, message),
+    do: ModelContractDiagnostic.valid_message?(message)
 
   defp valid_dynamic_message?(:result_cleanup, :result_contract_failed, message),
     do: ResultContractDiagnostic.valid_message?(message)

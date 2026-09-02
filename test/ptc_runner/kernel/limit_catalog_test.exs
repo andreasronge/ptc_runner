@@ -153,7 +153,7 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
                         :reservation_tariff
                       ],
                       prerequisite_description:
-                        "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", and an explicit USD reservation_tariff on every live LLM installation."
+                        "Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: \"USD\", an explicit USD reservation_tariff on every live LLM installation, and supported USD reservation pricing for each selected model. reservation_tariff.id identifies the declared tariff but does not supply model rates."
                     })
                     |> Map.put("workflow_loop_iterations", %{
                       field: :workflow_loop_iterations,

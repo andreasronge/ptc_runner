@@ -78,7 +78,7 @@ These limits are disabled by an omitted host value. A positive host value enable
 | Name | Meaning | Unit | Disabled default | Inclusive range |
 | --- | --- | --- | --- | ---: |
 | `evaluation_loop_iterations` | Optional per-activation loop/tail-recur bound for one subordinate mission evaluation and one interactive REPL form. | count | `null` | 1–2,592,000,000 |
-| `llm_cost_microusd` | Pre-dispatch USD reservation ceiling, in microunits, across live language-model calls in one run. Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: "USD", and an explicit USD reservation_tariff on every live LLM installation. | count | `null` | 1–9,007,199,254,740,991 |
+| `llm_cost_microusd` | Pre-dispatch USD reservation ceiling, in microunits, across live language-model calls in one run. Requires usage_guarantees.tokens: true, usage_guarantees.cost_currency: "USD", an explicit USD reservation_tariff on every live LLM installation, and supported USD reservation pricing for each selected model. reservation_tariff.id identifies the declared tariff but does not supply model rates. | count | `null` | 1–9,007,199,254,740,991 |
 | `llm_total_tokens` | Aggregate provider-counted input and output tokens authorized across live language-model calls in one run. Requires usage_guarantees.tokens: true on every live LLM installation. | count | `null` | 1–9,007,199,254,740,991 |
 | `workflow_loop_iterations` | Optional per-activation loop/tail-recur bound for one workflow evaluation. | count | `null` | 1–2,592,000,000 |
 

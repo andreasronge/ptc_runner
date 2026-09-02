@@ -8,13 +8,19 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
 
   @impl true
   def prepare_model(model, requirements) do
-    case Requirements.canonical(requirements) do
-      {:ok, canonical} ->
-        status = Application.get_env(:ptc_runner, :host_llm_test_catalog_status, :unavailable)
-        {:ok, %{selector: model, exact_options: canonical.exact_options}, status, canonical}
+    case Application.get_env(:ptc_runner, :host_llm_test_prepare_error) do
+      nil ->
+        case Requirements.canonical(requirements) do
+          {:ok, canonical} ->
+            status = Application.get_env(:ptc_runner, :host_llm_test_catalog_status, :unavailable)
+            {:ok, %{selector: model, exact_options: canonical.exact_options}, status, canonical}
 
-      :error ->
-        {:error, :unsupported_model_option}
+          :error ->
+            {:error, :unsupported_model_option}
+        end
+
+      reason ->
+        {:error, reason}
     end
   end
 

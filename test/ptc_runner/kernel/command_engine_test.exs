@@ -22,6 +22,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.ComponentOverride
   alias PtcRunner.Kernel.Deadline
   alias PtcRunner.Kernel.DiagnosticCatalog
@@ -37,6 +38,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   alias PtcRunner.Kernel.LimitCatalog
   alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.Limits
+  alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.PreparedRun
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderRegistry
@@ -5047,6 +5049,42 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           cleanup
         )
       end
+    end
+  end
+
+  test "pricing diagnostics bind their warning to the subject and message" do
+    {:ok, subject} =
+      CommandSubject.provider("model", :local, %{destination: :workflow, index: 0})
+
+    {:ok, warning} = CommandWarning.model_uncataloged("model", "provider:model")
+
+    message =
+      ModelContractDiagnostic.cost_reservation_pricing_message("provider:model")
+
+    assert {:ok, _diagnostic} =
+             CommandDiagnostic.new(:local_preflight, :model_contract_unsupported,
+               subject: subject,
+               provider_activity: true,
+               message: message,
+               warnings: [warning]
+             )
+
+    {:ok, other_provider} = CommandWarning.model_uncataloged("other", "provider:model")
+    {:ok, other_model} = CommandWarning.model_uncataloged("model", "provider:other")
+    malformed_model = %{warning | model: :invalid}
+
+    for opts <- [
+          [subject: subject, message: message],
+          [subject: subject, message: message, warnings: [other_provider]],
+          [subject: subject, message: message, warnings: [other_model]],
+          [subject: subject, message: message, warnings: [malformed_model]]
+        ] do
+      assert {:error, :invalid_command_diagnostic} =
+               CommandDiagnostic.new(
+                 :local_preflight,
+                 :model_contract_unsupported,
+                 Keyword.put(opts, :provider_activity, true)
+               )
     end
   end
 
