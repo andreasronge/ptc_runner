@@ -368,6 +368,19 @@ Use `source: "llm_replay"` when responses must be deterministic. The
 [replay evaluation guide](../guides/evaluating-with-replay.md) owns fixture authoring, the
 network-free example, candidate materialization, and component overrides.
 
+A fixture file is JSON Lines. Every line sets `schema_version` to `1`, a
+`request_hash` computed from the provider-neutral request, and exactly one of
+`response` or an ordered `responses` list for a request the workflow makes
+more than once. Plain `doctor` and `validate` parse the selected file under
+the installed ceilings without starting the provider, so a manifest and host
+document that validate cannot fail on the fixture when `run` reaches it. A
+missing, empty, malformed, duplicate, or oversized fixture set fails the
+local provider check as `fixtures_unreadable`; the message names the rule the
+file broke and, for a line-level rejection, the line number counted with
+blank lines. Nothing the line contains is published. The other local checks
+(an installed model's adapter, an MCP server's executable) stay out of
+`validate`.
+
 Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another `request_hash` rather than silently consuming
 unrelated evidence. A structured-output fixture uses the public

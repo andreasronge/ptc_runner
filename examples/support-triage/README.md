@@ -50,3 +50,13 @@ to see exactly what a design decision added.
 
 `ptc-host.json` is the shared operator document these examples install from;
 `ptc docs host-configuration` explains its fields.
+
+`03-specialists/workflow.clj` wraps the ranked tickets in an
+`<untrusted_tickets>` block before they enter the escalation task, because
+ticket text is customer-authored. The block tells the model to treat that text
+as data; it does not stop a misleading ticket from producing a wrong team or
+priority. The mission grant is what holds: the escalation mission has no
+tickets and no tools, so injected text cannot reach a capability or the wider
+pool. The scheduled live test for this example checks each escalation's id,
+priority, team, and first action against the policy; only the summary prose
+goes unchecked.

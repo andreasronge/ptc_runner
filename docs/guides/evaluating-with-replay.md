@@ -1,19 +1,15 @@
 # Evaluate changes with replay
 
-Compare an agent prompt or prelude change against fixed model responses before
-deciding whether to promote it.
+Compare a prompt or prelude change against fixed model responses before you
+decide whether to keep it.
 
-Live model output drifts between runs, while
-the `llm_replay` provider holds model
-responses fixed so a difference between a baseline and candidate run can be
-attributed to the candidate component rather than another model sample.
-
-Replay changes neither the manifest grammar nor the application's model alias.
-Replace the installed provider behind that alias in `ptc-host.json`.
+Live model output changes between runs. The `llm_replay` provider answers each
+request from a fixture instead, so a difference between a baseline run and a
+candidate run comes from the candidate rather than from another model sample.
+Replay changes nothing in the manifest: you replace the provider behind the
+model alias in `ptc-host.json`.
 
 ## Run the network-free example
-
-The checked-in example needs no credential or network access:
 
 <!-- ptc-guide-e2e: id=guide-replay-frozen-answer frontend=mix scratch=replay-example -->
 ```console
@@ -25,7 +21,7 @@ ptc run replay-example/ptc-project.json
 {"content":"Frozen answer","model":"frozen-model"}
 ```
 
-The project records private inspection and grants it to the Viewer:
+The project retains private inspection and grants it to the Viewer:
 
 ```console
 ptc viewer replay-example/ptc-project.json
@@ -33,7 +29,7 @@ ptc viewer replay-example/ptc-project.json
 
 ## Install a replay model
 
-The host document names a JSON Lines fixture:
+The host document points the alias at a JSON Lines fixture file:
 
 ```json
 "frozen-model": {
@@ -43,100 +39,64 @@ The host document names a JSON Lines fixture:
 }
 ```
 
-Every fixture line has `schema_version` 1, a deterministic hash of the
-provider-neutral request, and exactly one `response` or ordered `responses`
-field:
+Each line carries `schema_version` 1, the hash of the request it answers, and
+one `response`, or an ordered list of `responses` for a request the workflow
+makes more than once:
 
 ```json
 {"schema_version":1,"request_hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","response":{"content":"frozen"}}
 ```
 
-Plain doctor parses the selected fixture under installed ceilings without
-starting the provider:
+`ptc doctor` and `ptc validate` both read the fixture file, so a broken file
+fails before a run starts. The
+[host reference](../reference/host-installation.md#choose-a-provider-source)
+lists the rules a fixture file must follow.
 
-```console
-ptc doctor replay-example/ptc-project.json
-```
+## Write a fixture from a real request
 
-A missing, empty, malformed, duplicate, or oversized fixture set fails its
-local provider check as `fixtures_unreadable`, and the message names the rule
-the file broke. A line-level rejection names the line as well:
-
-```text
-replay fixture line 3 must set schema_version to 1
-```
-
-The line number is the number in the file, counting blank lines. Nothing the
-line contains is published — only which rule it broke.
-
-`ptc validate` reads the same file under the same ceilings, so a manifest and
-host document that validate cannot fail on the fixture when `run` reaches it.
-The remaining local checks — an installed model's adapter, an MCP server's
-executable — stay out of `validate`: whether they are present says nothing
-about whether the documents are well formed.
-
-## Author fixtures from exact requests
-
-Start with any schema-valid placeholder hash and the response shape the
-workflow expects. A normal-data miss reports:
+Start with a placeholder hash and the response shape you want. The first run
+misses and prints the hash it looked for:
 
 ```text
 no replay fixture matches this request (request_hash: sha256:...)
 ```
 
-Copy that hash into the fixture and rerun. For private-data requests, follow
+Copy that hash into the fixture and run again. Matching is exact, so an edited
+prompt misses instead of reusing an old answer. When the request carries
+private data the hash is not printed; follow
 [Inspect a private model conversation](../reference/cli.md#inspect-a-private-model-conversation)
-and copy the selected turn's replay hash; the public diagnostic omits that
-unsalted value.
+to read it from the private record.
 
-Matching is exact, so an edited request misses rather than quietly reusing the
-wrong response. A miss is a provider error returned as a value, not a failed
-evaluation — the shipped `llm-replay` example calls `cap/unwrap!` so a miss
-still exits non-zero. The [host-configuration
-reference](../reference/host-installation.md#choose-a-provider-source) states
-what a miss records.
-
-An ordered `responses` sequence supports workflows that make the same request
-more than once.
+A miss reaches the workflow as a provider error value. The shipped
+`llm-replay` example calls `cap/unwrap!` so a miss still fails the run.
 
 ## Evaluate the candidate without installing it
 
-`--component-override-descriptor` replaces one component already selected by
-the manifest. A transitively selected component is also eligible, so selecting
-`agent.core` makes its `agent.prompt` dependency available as a workflow
-override target.
+Export the component you want to change, edit the copy, and publish it as a
+candidate, as shown in
+[Inspect and customize components](components-and-preludes.md#change-the-prompt-on-a-run).
+Then run the baseline and the candidate with the same replay installation,
+input, host ceilings, and content snapshots:
 
-The descriptor binds the candidate to the installed source it replaces and to
-the exact candidate bytes. It cannot add a component, change dependencies, or
-grant a provider. The replacement still passes compilation, dependency,
-signature, export, capability-requirement, and bundle checks. A refused
-descriptor names the field it broke (`base_source_hash`, `source_hash`,
-`component_id`, or `path`) rather than collapsing every mistake into one
-sentence. See the
+```console
+ptc run ptc-project.json
+ptc run ptc-project.json \
+  --component-override-descriptor private/agent-prompt-candidate/descriptor.json
+```
+
+Compare the values, envelopes, usage, and traces. The descriptor replaces one
+component the manifest already selects, including one selected through a
+dependency such as `agent.prompt`. It cannot add a component, change
+dependencies, or grant a provider; the
 [component reference](../reference/component-contracts.md#evaluate-one-replacement-component)
-for every descriptor field and validation rule.
+lists its fields and validation rules.
 
-Create the candidate with the standalone command rather than a source
-checkout helper, then follow
-[the customization guide](components-and-preludes.md#change-the-prompt-on-a-run)
-to validate and compare it.
-
-The active bundle stays immutable for the whole run. A run may author source,
-but only a later host invocation can materialize it and start with the newly
-compiled bundle. Component-override switches are invocation-only and are not
-stored in `ptc-project.json`.
-
-Run the unchanged baseline and the override with the same replay installation,
-inputs, host ceilings, and content snapshots. Compare their values, envelopes,
-usage, and traces. Replay removes model sampling as a variable; it
-does not make external MCP content deterministic unless that content is also
-frozen and identified.
+Replay removes model sampling as a variable. It does not make MCP content
+deterministic unless that content is frozen as well.
 
 ## Next steps
 
-- [Components and preludes](components-and-preludes.md) defines component
-  identity, dependencies, exports, and signatures.
-- [Running and debugging](running-and-debugging.md) documents override switches,
-  artifacts, traces, and private inspection.
-- [Kernel limits](../kernel-limits-reference.md) lists every run ceiling that
-  must remain comparable between evaluations.
+- [Inspect and customize components](components-and-preludes.md) has the
+  materialize and validate commands.
+- [Kernel limits](../kernel-limits-reference.md) lists the ceilings that must
+  stay equal between the two runs.
