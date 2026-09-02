@@ -1709,6 +1709,11 @@ defmodule PtcRunner.Lisp do
   def format_error({:memory_exceeded, info}),
     do: "Memory exceeded: #{memory_exceeded_message(info)}"
 
+  # Normal REPL diagnostics intentionally retain useful evaluator detail;
+  # command-envelope evidence uses the fixed public-safe renderer instead.
+  def format_error({:type_error, message, _details}) when is_binary(message),
+    do: "type_error: #{strip_typed_prefix(message, :type_error)}"
+
   def format_error({category, message, details})
       when category in [
              :unsupported_java_class,

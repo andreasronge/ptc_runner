@@ -10,6 +10,7 @@ defmodule PtcRunner.Lisp.EvaluatorErrorCatalog do
 
   @kinds [
     :arithmetic_error,
+    :type_error,
     :arity_error,
     :not_callable,
     :loop_limit_exceeded,
@@ -27,6 +28,7 @@ defmodule PtcRunner.Lisp.EvaluatorErrorCatalog do
 
   @descriptions %{
     arithmetic_error: "Arithmetic operation error (for example integer division by zero)",
+    type_error: "PTC-Lisp operation received a value of the wrong type",
     arity_error: "Wrong number of arguments to a function or builtin",
     not_callable: "Attempt to call a non-callable value",
     loop_limit_exceeded: "loop/recur iteration limit exceeded",

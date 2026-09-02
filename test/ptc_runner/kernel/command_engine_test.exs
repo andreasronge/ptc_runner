@@ -581,6 +581,40 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "a type evaluator failure publishes only fixed V4 evidence", %{tmp_dir: directory} do
+    application = write_application(directory, "type-error-dispatch", valid_manifest())
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return (count 5)))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.exit_status == 5
+    assert outcome.envelope["error"]["phase"] == "execution"
+    assert outcome.envelope["error"]["code"] == "evaluation_failed"
+
+    assert outcome.envelope["execution"]["last_evaluation_error"] == %{
+             "kind" => "type_error",
+             "message" => "a PTC-Lisp operation received a value of the wrong type"
+           }
+
+    encoded = Jason.encode!(outcome.envelope)
+    refute encoded =~ "main/run"
+    refute encoded =~ "count"
+    refute encoded =~ "invalid argument types"
+    assert_schema_valid(outcome.envelope)
+
+    assert {:stderr, rendered} = CommandRenderer.render(outcome)
+    assert rendered =~ "error: execution/evaluation_failed: the evaluation failed"
+
+    assert rendered =~
+             "evaluation: type_error: a PTC-Lisp operation received a value of the wrong type"
+  end
+
+  @tag :tmp_dir
   test "arity, not_callable, and loop evaluator failures publish exact public kinds", %{
     tmp_dir: directory
   } do
@@ -626,15 +660,15 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
-  test "a private evaluator failure keeps last_evaluation_error null", %{tmp_dir: directory} do
-    application = write_application(directory, "private-arithmetic", valid_manifest())
+  test "a private type evaluator failure keeps last_evaluation_error null", %{tmp_dir: directory} do
+    application = write_application(directory, "private-type-error", valid_manifest())
     input = Path.join(Path.dirname(application), "private-input.json")
     output = Path.join(directory, "private-result.json")
     File.write!(input, ~s({}))
 
     File.write!(
       Path.join(Path.dirname(application), "main.clj"),
-      ~S|(ns app) (defn run [_input] (return (/ 1 0)))|
+      ~S|(ns app) (defn run [_input] (return (count 5)))|
     )
 
     assert {:error, %CommandOutcome{} = outcome} =
@@ -650,8 +684,9 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["artifact_class"] == "private"
     assert outcome.envelope["error"]["code"] == "workflow_failed"
     assert outcome.envelope["execution"]["last_evaluation_error"] == nil
-    refute Jason.encode!(outcome.envelope) =~ "arithmetic_error"
-    refute Jason.encode!(outcome.envelope) =~ "division by zero"
+    refute Jason.encode!(outcome.envelope) =~ "type_error"
+    refute Jason.encode!(outcome.envelope) =~ "wrong type"
+    refute Jason.encode!(outcome.envelope) =~ "count"
     assert_schema_valid(outcome.envelope)
   end
 
@@ -758,6 +793,28 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["execution"]["last_evaluation_error"] == %{
              "kind" => "arithmetic_error",
              "message" => "division by zero"
+           }
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
+  test "a higher-order callback type failure publishes fixed evidence", %{tmp_dir: directory} do
+    application = write_application(directory, "hof-type-error", valid_manifest())
+
+    File.write!(
+      Path.join(Path.dirname(application), "main.clj"),
+      ~S|(ns app) (defn run [_input] (return (map count [5])))|
+    )
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application])
+
+    assert outcome.envelope["error"]["code"] == "evaluation_failed"
+
+    assert outcome.envelope["execution"]["last_evaluation_error"] == %{
+             "kind" => "type_error",
+             "message" => "a PTC-Lisp operation received a value of the wrong type"
            }
 
     assert_schema_valid(outcome.envelope)

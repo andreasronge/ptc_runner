@@ -1797,6 +1797,16 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   defp format_error(
+         %{fail: %{reason: :type_error, message: message}} = step,
+         session,
+         render
+       )
+       when is_binary(message) do
+    body = String.replace_prefix(message, "type_error: ", "")
+    "Error (type_error): " <> mission_hint(step, session, render) <> body
+  end
+
+  defp format_error(
          %{fail: %{reason: reason, message: message, details: details}} = step,
          session,
          render
