@@ -290,11 +290,11 @@ inspection artifact; a manifest cannot enable or choose that destination.</p><p>
   &quot;provider&quot;: &quot;openrouter&quot;,
   &quot;tags&quot;: {&quot;mode&quot;: &quot;agent&quot;, &quot;environment&quot;: &quot;staging&quot;}
 }</code></pre><p>Labels do not affect execution, authority, prompts, results, or provider
-selection. <code class="inline">name</code>, <code class="inline">model</code>, and <code class="inline">provider</code> are fingerprinted in traces; tag
-keys and values come from a small fixed vocabulary. Labels are application
-claims, not authoritative provider identity. Use the provider snapshot and
-canonical usage for accounting, and never put prompts, results, credentials,
-paths, or arbitrary user text in labels.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/host-installation/">Host configuration</a> defines the selected aliases.</li><li><a href="/guides/building-agents/">Building agents</a> puts model policy behind the grants.</li><li><a href="/reference/cli/">Running and debugging</a> validates, runs, and
+selection. <code class="inline">name</code>, <code class="inline">model</code>, and <code class="inline">provider</code> are fingerprinted in traces.
+<code class="inline">labels.tags</code> is closed to these keys and values:</p><ul><li><code class="inline">environment</code>: <code class="inline">development</code>, <code class="inline">test</code>, <code class="inline">staging</code>, or <code class="inline">production</code></li><li><code class="inline">mode</code>: <code class="inline">agent</code>, <code class="inline">deterministic</code>, <code class="inline">direct</code>, <code class="inline">wrapper</code>, or <code class="inline">repl</code></li><li><code class="inline">stage</code>: <code class="inline">started</code>, <code class="inline">planning</code>, <code class="inline">executing</code>, <code class="inline">validating</code>, <code class="inline">completed</code>, or
+<code class="inline">failed</code></li><li><code class="inline">suite</code>: <code class="inline">unit</code>, <code class="inline">integration</code>, <code class="inline">e2e</code>, <code class="inline">conformance</code>, or <code class="inline">privacy</code></li></ul><p>Labels are application claims, not authoritative provider identity. Use the
+provider snapshot and canonical usage for accounting, and never put prompts,
+results, credentials, paths, or arbitrary user text in labels.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/host-installation/">Host configuration</a> defines the selected aliases.</li><li><a href="/guides/building-agents/">Building agents</a> puts model policy behind the grants.</li><li><a href="/reference/cli/">Running and debugging</a> validates, runs, and
 inspects the manifest.</li><li><a href="/reference/component-contracts/">Components and preludes</a> explains bundle
 composition.</li></ul><p>The generated application-manifest schema is the exact field reference; this
 guide documents the additional semantic and authority rules applied at load.</p>
