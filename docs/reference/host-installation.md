@@ -140,6 +140,12 @@ missing, empty, or unreadable value fails with `credential_unavailable`; there
 is no ambient provider-specific fallback. Never put credentials in a manifest,
 PTC-Lisp, traces, or committed files.
 
+With `doctor --connect`, an LLM endpoint that answers by rejecting the supplied
+credential fails the provider's credentials check with
+`authentication_rejected`. Its connectivity check passes because the HTTP
+response proves the endpoint was reached. Transport failures, timeouts, and
+invalid or unavailable provider responses continue to fail connectivity.
+
 Surrounding whitespace is not part of a secret and is trimmed from every
 source, so `gh auth token > vendor.token` and an editor that adds a trailing
 newline both work. Interior structure is preserved: a PEM block or a JSON
@@ -363,8 +369,9 @@ network-free example, candidate materialization, and component overrides.
 Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another `request_hash` rather than silently consuming
 unrelated evidence. A structured-output fixture uses the public
-`structured_output` object rather than encoded `content`. A miss is a provider error — `kind` `provider_error`,
-`reason` `not_found` — and `llm/request` returns that envelope as a value with
+`structured_output` object rather than encoded `content`. A miss is a provider
+error with `:kind :provider_error` and `:reason :not_found`, and `llm/request`
+returns that envelope as a value with
 `:status :error` rather than failing the evaluation, so a workflow that wants a
 miss to be fatal calls `cap/unwrap!` on the raw `tool/llm-request` envelope. The
 run envelope records the miss in usage: that alias's `successful_calls` stays 0

@@ -501,7 +501,8 @@ defmodule PtcRunner.Kernel.CommandContract do
              "code" => expected_code
            } do
       Enum.all?(checks, fn check ->
-        check == failed or indeterminate_provider_check?(check) or static_connect_check?(check)
+        check == failed or indeterminate_provider_check?(check) or static_connect_check?(check) or
+          failure_evidence_check?(check, failed)
       end)
     else
       _invalid -> false
@@ -577,6 +578,19 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: String.ends_with?(name, "/selection")
 
   defp static_connect_check?(_check), do: false
+
+  defp failure_evidence_check?(
+         %{"name" => connectivity, "status" => "pass", "code" => "available"},
+         %{
+           "name" => credentials,
+           "status" => "fail",
+           "code" => "authentication_rejected"
+         }
+       ) do
+    String.replace_suffix(credentials, "/credentials", "/connectivity") == connectivity
+  end
+
+  defp failure_evidence_check?(_check, _failed), do: false
 
   defp diagnostic_activity(diagnostics) do
     if Enum.all?(diagnostics, &is_boolean(&1["provider_activity"])),
@@ -2142,7 +2156,10 @@ defmodule PtcRunner.Kernel.CommandContract do
         "selection" ->
           [{"pass", "declarative"}, {"skipped", "active_check_required"}]
 
-        operation when operation in ["credentials", "authorization", "connectivity"] ->
+        "connectivity" ->
+          [{"pass", "available"}, {"skipped", "requires_connect"}]
+
+        operation when operation in ["credentials", "authorization"] ->
           [{"skipped", "requires_connect"}]
       end
 

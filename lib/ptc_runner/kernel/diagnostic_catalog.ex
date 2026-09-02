@@ -821,7 +821,7 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
       do: [:authorization]
 
   def subject_operations(:active_preflight, :authentication_rejected),
-    do: [:authorization, :connectivity, :acquisition]
+    do: [:credentials, :authorization, :connectivity, :acquisition]
 
   def subject_operations(:active_preflight, code)
       when code in [
@@ -1090,6 +1090,9 @@ defmodule PtcRunner.Kernel.DiagnosticCatalog do
   def subject_occurrence_policy(:active_preflight, code, _operation)
       when code in [:provider_application_unavailable, :credential_unavailable],
       do: :forbidden
+
+  def subject_occurrence_policy(:active_preflight, :authentication_rejected, :credentials),
+    do: :forbidden
 
   def subject_occurrence_policy(:active_preflight, code, _operation)
       when code in [

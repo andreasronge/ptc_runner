@@ -319,8 +319,10 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   names from standing in for the sealed identities they happen to name.
 
   Only the row identified by the diagnostic becomes a failure. Other pending
-  rows become `skipped/not_verified_due_to_failure`, which records the absence
-  of retained evidence without claiming that the operation did or did not run.
+  rows become `skipped/not_verified_due_to_failure`, except that an
+  `authentication_rejected` credential failure passes the same alias's
+  connectivity row because the provider response is retained reachability
+  evidence.
   """
   @spec settle_failure(
           t(),
@@ -485,10 +487,20 @@ defmodule PtcRunner.Kernel.DoctorPlan do
   defp settle_failure_row(row, target, code) do
     cond do
       pending_target?(row, target) -> %{row | outcome: {:fail, code}}
+      reached_authentication_target?(row, target, code) -> %{row | outcome: {:pass, :available}}
       row.outcome == :pending -> %{row | outcome: {:skipped, :not_verified_due_to_failure}}
       true -> row
     end
   end
+
+  defp reached_authentication_target?(
+         %{alias: name, operation: :connectivity, outcome: :pending},
+         {name, :credentials},
+         :authentication_rejected
+       ),
+       do: true
+
+  defp reached_authentication_target?(_row, _target, _code), do: false
 
   defp local_failures(findings, prepared, catalog) do
     Enum.reduce_while(findings, {:ok, %{}}, fn diagnostic, {:ok, failures} ->

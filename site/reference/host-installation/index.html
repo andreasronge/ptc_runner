@@ -182,7 +182,11 @@ directory; absolute paths are canonicalized.</li><li><code class="inline">litera
 rendered by a secret manager.</li></ul><p>Credentials are resolved once and passed explicitly to the provider. A
 missing, empty, or unreadable value fails with <code class="inline">credential_unavailable</code>; there
 is no ambient provider-specific fallback. Never put credentials in a manifest,
-PTC-Lisp, traces, or committed files.</p><p>Surrounding whitespace is not part of a secret and is trimmed from every
+PTC-Lisp, traces, or committed files.</p><p>With <code class="inline">doctor --connect</code>, an LLM endpoint that answers by rejecting the supplied
+credential fails the provider's credentials check with
+<code class="inline">authentication_rejected</code>. Its connectivity check passes because the HTTP
+response proves the endpoint was reached. Transport failures, timeouts, and
+invalid or unavailable provider responses continue to fail connectivity.</p><p>Surrounding whitespace is not part of a secret and is trimmed from every
 source, so <code class="inline">gh auth token &gt; vendor.token</code> and an editor that adds a trailing
 newline both work. Interior structure is preserved: a PEM block or a JSON
 service-account key is one credential, and <code class="inline">transport.env</code> hands it to the
@@ -327,8 +331,9 @@ private targets remain absent, while alias/revision usage stays attributable.</p
 network-free example, candidate materialization, and component overrides.</p><p>Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another <code class="inline">request_hash</code> rather than silently consuming
 unrelated evidence. A structured-output fixture uses the public
-<code class="inline">structured_output</code> object rather than encoded <code class="inline">content</code>. A miss is a provider error — <code class="inline">kind</code> <code class="inline">provider_error</code>,
-<code class="inline">reason</code> <code class="inline">not_found</code> — and <code class="inline">llm/request</code> returns that envelope as a value with
+<code class="inline">structured_output</code> object rather than encoded <code class="inline">content</code>. A miss is a provider
+error with <code class="inline">:kind :provider_error</code> and <code class="inline">:reason :not_found</code>, and <code class="inline">llm/request</code>
+returns that envelope as a value with
 <code class="inline">:status :error</code> rather than failing the evaluation, so a workflow that wants a
 miss to be fatal calls <code class="inline">cap/unwrap!</code> on the raw <code class="inline">tool/llm-request</code> envelope. The
 run envelope records the miss in usage: that alias's <code class="inline">successful_calls</code> stays 0

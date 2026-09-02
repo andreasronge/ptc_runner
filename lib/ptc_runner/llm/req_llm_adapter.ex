@@ -693,7 +693,8 @@ if Code.ensure_loaded?(ReqLLM) do
       ProviderError.new(
         http_error_kind(status),
         http_error_details(status, error.reason),
-        retryable?: http_retryable?(status, error.retryable)
+        retryable?: http_retryable?(status, error.retryable),
+        dispatch_provenance: :dispatched
       )
     end
 
@@ -710,7 +711,8 @@ if Code.ensure_loaded?(ReqLLM) do
       ProviderError.new(
         http_error_kind(status),
         http_error_details(status, error.reason),
-        retryable?: http_retryable?(status, nil)
+        retryable?: http_retryable?(status, nil),
+        dispatch_provenance: :dispatched
       )
     end
 
@@ -725,7 +727,8 @@ if Code.ensure_loaded?(ReqLLM) do
       ProviderError.new(
         http_error_kind(status),
         direct_http_error_details(status, Map.get(error, :body)),
-        retryable?: http_retryable?(status, nil)
+        retryable?: http_retryable?(status, nil),
+        dispatch_provenance: :dispatched
       )
     end
 

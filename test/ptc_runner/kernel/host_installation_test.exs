@@ -63,6 +63,7 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.ProviderCallbackBoundary
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderRegistry
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
@@ -1501,6 +1502,17 @@ defmodule PtcRunner.Kernel.HostInstallationTest do
     Application.put_env(:ptc_runner, :host_llm_test_result, {:error, :unavailable})
 
     assert {:error, :llm_connectivity_unavailable} =
+             implementation.connectivity_probe.(selection, probe_context, runtime_services)
+
+    assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", _request}
+    refute_receive {:host_llm_request, _, _}
+
+    rejected =
+      ProviderError.new(:authentication_failed, "rejected", dispatch_provenance: :dispatched)
+
+    Application.put_env(:ptc_runner, :host_llm_test_result, {:error, rejected})
+
+    assert {:error, ^rejected} =
              implementation.connectivity_probe.(selection, probe_context, runtime_services)
 
     assert_receive {:host_llm_request, "openrouter:deepseek/deepseek-v4-flash-0731", _request}
