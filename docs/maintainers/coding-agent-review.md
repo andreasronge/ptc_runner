@@ -2,11 +2,13 @@
 
 > **Audience:** people and coding agents changing PtcRunner itself.
 
-This guide describes how this repository reviews its own changes.
-
 Use this workflow when a change requires independent Codex review. Review
 complements design, tests, Dialyzer, and repository gates; it does not replace
-them.
+them. The review cycle itself — one fresh `review`, `followup` by session ID,
+when a clean follow-up approves a tree, when to start over — is defined once in
+the `codex-review` skill. This page adds what is specific to this repository:
+what a reviewable slice is, what must be true before review, and how the
+change is delivered.
 
 ## Define a reviewable slice
 
@@ -36,8 +38,6 @@ request concrete counterexamples.
 
 ## Stabilize the tree before review
 
-Before the fresh review:
-
 1. Format changed files and compile with warnings as errors.
 2. Run the focused tests, including the failure-path matrix.
 3. Regenerate ordinary generated artifacts when their checks report staleness.
@@ -56,64 +56,38 @@ representation, reconsider the design before adding it. Repeated systemic
 ownership or deadline findings usually mean the slice should shrink or be
 redesigned from its fault matrix.
 
-## Run one incremental review cycle
+## Review and deliver
 
-Run one fresh review for the complete draft:
+Run one fresh review of the complete draft and follow it through its session:
 
 ```bash
 ~/.codex/skills/codex-review/scripts/codex-independent-review review
-```
-
-Validate findings against the code, batch related repairs, and resume the same
-session:
-
-```bash
 ~/.codex/skills/codex-review/scripts/codex-independent-review followup \
   --session REVIEW_SESSION_ID
 ```
 
-Use focused follow-ups only while the session has actionable findings. A clean
-follow-up covers the slice when:
+Then run the gates on the reviewed tree: `mix precommit`, plus
+`MIX_ENV=dev mix docs --warnings-as-errors` when documentation changed. The
+suite, Dialyzer, ExDoc HTML, Viewer, launcher, and release run on `git push`;
+do not follow `mix precommit` with `git push --no-verify`. Return in-scope
+source or generated-artifact repairs to the same session.
 
-- the fresh pass covered its complete original delta;
-- later edits only addressed that session's findings;
-- the base, scope, and reviewed bytes did not otherwise change; and
-- relevant focused tests pass.
-
-Commit and push that exact tree. Staging reviewed bytes, creating a commit,
-changing only its message, or pushing it does not justify another cold review.
-
-Start a fresh review after a rebase, unrelated edit, changed base, expanded
-scope, or material redesign. Prefer rebasing before review or at a checkpoint.
-
-## Verify and deliver
-
-After the incremental review is clean, run gates on the reviewed tree:
-
-```bash
-mix precommit
-MIX_ENV=dev mix docs --warnings-as-errors  # when documentation changed
-```
-
-`mix precommit` is quality only. The suite, Dialyzer, ExDoc HTML, Viewer,
-launcher, and release run on `git push`. Do not follow `mix precommit` with
-`git push --no-verify`.
-
-Return source or generated-artifact repairs to the same session when they stay
-within its scope. Start fresh only if a repair materially expands the slice.
-Correct tool-invocation mistakes and rerun the authoritative command in the
-repository's expected environment.
-
-Before declaring a branch or pull request ready, run one cumulative,
-base-guarded review:
+Before declaring the branch ready, rebase onto `origin/main`, rerun the gates,
+and run one cumulative, base-guarded review:
 
 ```bash
 ~/.codex/skills/codex-review/scripts/codex-independent-review review \
   --base origin/main --fetch-base
 ```
 
-Use that session for cumulative follow-up. Run another fresh cumulative review
-only if the base advances or repairs materially expand scope.
+Start a fresh review only after a rebase, unrelated edit, changed base,
+expanded scope, or material redesign. Staging, committing, amending a message,
+or pushing reviewed bytes never justifies another cold review of the same
+tree.
+
+When a PtcManager task states a review count, it counts these cold sessions:
+`1` is the cumulative review alone, `2` adds the incremental review of the
+draft, and `3` adds a `challenge` of the finished change.
 
 ## Review checklist
 
@@ -126,5 +100,5 @@ only if the base advances or repairs materially expand scope.
 - [ ] One fresh incremental review, followed only through its explicit session
       ID.
 - [ ] No cold re-review of byte-identical content.
-- [ ] Full repository gates pass on the reviewed tree.
+- [ ] Full repository gates pass on the rebased, reviewed tree.
 - [ ] One cumulative base-guarded review at the checkpoint or PR boundary.

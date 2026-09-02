@@ -1,5 +1,5 @@
-# Heap baseline for the PtcRunner embedding units — use-case rows 1..9 of
-# docs/plans/memory-observability.md.
+# Heap baseline for the PtcRunner embedding units (the nine embedding use
+# cases of the retired memory-observability plan).
 #
 # Run:  mix run bench/heap_baseline.exs             # measure and report
 #       mix run bench/heap_baseline.exs --write     # re-record the baseline

@@ -1,19 +1,11 @@
 # Implementation plans
 
-This directory contains active, partially completed, and explicitly
-trigger-gated future plans. Completed implementation records are removed; Git
-history preserves them. Current architecture belongs in the
+Work is tracked in GitHub issues. A large issue may keep its plan here while
+it is implemented; the pull request that completes it deletes the plan, and
+Git history preserves it. Current architecture belongs in the
 [Kernel maintainer guide](../maintainers/kernel.md), exact runtime
 contracts belong in the owning module documentation, and user-facing behavior
 belongs in guides or retained specifications.
-
-## Local gates
-
-- [`faster-hooks.md`](faster-hooks.md)
-  records measured warm times for the git pre-commit hook, `mix precommit`,
-  and git pre-push, and the slices that can still shrink them. `mix precommit`
-  is quality-only (slice 3). The serial test floor is the remaining way to
-  make push substantially faster; `command_engine_test.exs` is split.
 
 ## Remaining Kernel product work
 
