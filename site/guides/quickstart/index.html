@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Quickstart · PtcRunner</title>
-<meta name="description" content="Install ptc, verify it without an API key, then run a model-authored program
-without writing PTC-Lisp yourself.">
+<meta name="description" content="Install ptc, run a project that needs no API key, then run one where the
+model writes the program.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/quickstart/">
 <meta property="og:title" content="Quickstart · PtcRunner">
-<meta property="og:description" content="Install ptc, verify it without an API key, then run a model-authored program
-without writing PTC-Lisp yourself.">
+<meta property="og:description" content="Install ptc, run a project that needs no API key, then run one where the
+model writes the program.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/quickstart/">
 <meta property="og:type" content="article">
 <link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
@@ -99,29 +99,26 @@ without writing PTC-Lisp yourself.">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="quickstart">Quickstart</h1><p>Install <code class="inline">ptc</code>, verify it without an API key, then run a model-authored program
-without writing PTC-Lisp yourself.</p><p>Download the executable as described under
-<a href="/installation/standalone/">Standalone installation</a>. Starting with the
-next root release, the <a href="/installation/docker/">Docker image</a> provides the
-same command interface; its installation page gives the complete mounted-file
-and ownership form.</p><h2 id="run-without-a-credential">Run without a credential</h2><p>Create and run a project that needs no API key:</p><p>The <code class="inline">ptc init</code> target must not already exist. For an existing repository,
-initialize a new sibling or subdirectory and deliberately copy or move the
-generated files you want into the repository.</p><pre><code class="console language-console">ptc init hello-ptc
-ptc run hello-ptc/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;greeting&quot;:&quot;hello world&quot;}</code></pre><p><code class="inline">init</code> creates an application, a project document with local artifact settings,
-and ignore rules for public and private run artifacts. The first run contacts no
-model or external tool and records a trace and command envelope under
-<code class="inline">hello-ptc/.ptc</code>.</p><h2 id="run-a-model-authored-program">Run a model-authored program</h2><p>Materialize the tutorial; its comment-only environment file names the credential:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial</code></pre><p>Keep that comment and export a non-empty value, or add a non-empty assignment to
-the file. File assignments, including empty ones, override exports; see
-<a href="/reference/host-installation/">Host installation</a>.</p><pre><code class="console language-console">export OPENROUTER_API_KEY=...</code></pre><p>Then run:</p><pre><code class="console language-console">ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;ok&quot;:true,&quot;value&quot;:42}</code></pre><p>The model writes a bounded mission program, observes its result, and completes
-on the second turn. To read that program, open the Viewer:</p><pre><code class="console language-console">ptc viewer kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>The tutorial projects record private inspection and grant it to the Viewer, so
-each evaluation shows the PTC-Lisp the model wrote and each prelude component
-shows the source the run loaded.</p><p>Credentials belong in <code class="inline">ptc-host.json</code>, never in <code class="inline">ptc.json</code>, a generated
-program, or a trace. <code class="inline">ptc.json</code> can select the installed model alias but cannot
-name its endpoint or key.</p><h2 id="diagnose-readiness">Diagnose readiness</h2><p>Check configuration without contacting the provider:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>Probe credentials and connectivity only when remote work and possible cost are
-intended:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect</code></pre><p>Continue with <a href="/guides/getting-started/">Understand a generated project</a>, <a href="/guides/using-models/">Use a
-model</a>, or <a href="/guides/building-agents/">Customize an agent</a>. The
-<a href="/reference/cli/">command-line reference</a> owns the exact command and failure
-contract.</p>
+<h1 id="quickstart">Quickstart</h1><p>Install <code class="inline">ptc</code>, run a project that needs no API key, then run one where the
+model writes the program.</p><p>Download the executable as described in
+<a href="/installation/standalone/">Standalone installation</a>.</p><h2 id="run-without-a-credential">Run without a credential</h2><pre><code class="console language-console">ptc init hello-ptc
+ptc run hello-ptc/ptc-project.json</code></pre><pre><code class="json language-json">{&quot;greeting&quot;:&quot;hello world&quot;}</code></pre><p><code class="inline">init</code> writes a small application, a project document, and ignore rules for
+run artifacts into a directory that must not exist yet. The run contacts no
+model or tool and records a trace under <code class="inline">hello-ptc/.ptc</code>.</p><h2 id="run-a-model-authored-program">Run a model-authored program</h2><p>Materialize the tutorial, export an OpenRouter key, and run the multi-turn
+agent:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
+export OPENROUTER_API_KEY=...
+ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;ok&quot;:true,&quot;value&quot;:42}</code></pre><p>The model writes a small mission program, sees its result, and finishes on the
+second turn. Open the Viewer to read the program it wrote:</p><pre><code class="console language-console">ptc viewer kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>The tutorial projects retain private inspection and grant it to the Viewer, so
+you see the PTC-Lisp behind each evaluation and the source of each prelude
+component.</p><p>The generated <code class="inline">.env</code> file names the credential in a comment. Either export the
+variable, as above, or write a non-empty value into that file. Credentials
+belong in <code class="inline">ptc-host.json</code> or the environment, never in <code class="inline">ptc.json</code>, a program,
+or a trace. The
+<a href="/reference/host-installation/#declare-credentials-once">host reference</a>
+has the loading rules.</p><h2 id="check-readiness-before-spending">Check readiness before spending</h2><p><code class="inline">doctor</code> checks the configuration without contacting the provider. Add
+<code class="inline">--connect</code> when you want to probe the credential and the network too:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json
+ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect</code></pre><p>Continue with <a href="/guides/getting-started/">Understand a generated project</a>,
+<a href="/guides/using-models/">Use a model</a>, or <a href="/guides/building-agents/">Customize an agent</a>.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-next" href="/guides/getting-started/">Understand a generated project &rarr;</a></nav>
 <footer>

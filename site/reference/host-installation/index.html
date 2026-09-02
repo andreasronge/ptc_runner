@@ -330,7 +330,18 @@ the adapter attests that the resolved model is safe public identity, provider
 snapshots and model-grouped usage include it. Endpoint-bearing or otherwise
 private targets remain absent, while alias/revision usage stays attributable.</p><p>Use <code class="inline">source: &quot;llm_replay&quot;</code> when responses must be deterministic. The
 <a href="/guides/evaluating-with-replay/">replay evaluation guide</a> owns fixture authoring, the
-network-free example, candidate materialization, and component overrides.</p><p>Fixture matching is exact: changed messages, tools, schema, or provider-neutral
+network-free example, candidate materialization, and component overrides.</p><p>A fixture file is JSON Lines. Every line sets <code class="inline">schema_version</code> to <code class="inline">1</code>, a
+<code class="inline">request_hash</code> computed from the provider-neutral request, and exactly one of
+<code class="inline">response</code> or an ordered <code class="inline">responses</code> list for a request the workflow makes
+more than once. Plain <code class="inline">doctor</code> and <code class="inline">validate</code> parse the selected file under
+the installed ceilings without starting the provider, so a manifest and host
+document that validate cannot fail on the fixture when <code class="inline">run</code> reaches it. A
+missing, empty, malformed, duplicate, or oversized fixture set fails the
+local provider check as <code class="inline">fixtures_unreadable</code>; the message names the rule the
+file broke and, for a line-level rejection, the line number counted with
+blank lines. Nothing the line contains is published. The other local checks
+(an installed model's adapter, an MCP server's executable) stay out of
+<code class="inline">validate</code>.</p><p>Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another <code class="inline">request_hash</code> rather than silently consuming
 unrelated evidence. A structured-output fixture uses the public
 <code class="inline">structured_output</code> object rather than encoded <code class="inline">content</code>. A miss is a provider

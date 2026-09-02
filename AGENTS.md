@@ -89,6 +89,17 @@ labels, and an open issue carries at most one of them. Remove the legacy
 update. A dependency is the canonical `Blocked by #<number>` line in the issue
 body. An assignee marks the issue as taken.
 
+## Documentation
+
+- Any edit under `docs/guides/`, including a one-line fix, starts by reading
+  `.claude/skills/write-guide/SKILL.md` and ends with its checklist. The file
+  path is the contract, so Claude Code, Codex, and Cursor all follow it.
+- A bug fix may correct a wrong sentence in a guide but never adds one. New
+  explanation goes to the reference page that owns the surface; the guide
+  gets at most a link.
+- Which layer owns what (module docs, guides, references, specifications,
+  plans) is in `docs/maintainers/documentation.md`.
+
 ## Commands
 
 - `mix compile` — run once after changing `mix.exs`, `mix.lock`, dependency
