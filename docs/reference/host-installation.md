@@ -140,6 +140,12 @@ missing, empty, or unreadable value fails with `credential_unavailable`; there
 is no ambient provider-specific fallback. Never put credentials in a manifest,
 PTC-Lisp, traces, or committed files.
 
+With `doctor --connect`, an LLM endpoint that answers by rejecting the supplied
+credential fails the provider's credentials check with
+`authentication_rejected`. Its connectivity check passes because the HTTP
+response proves the endpoint was reached. Transport failures, timeouts, and
+invalid or unavailable provider responses continue to fail connectivity.
+
 Surrounding whitespace is not part of a secret and is trimmed from every
 source, so `gh auth token > vendor.token` and an editor that adds a trailing
 newline both work. Interior structure is preserved: a PEM block or a JSON

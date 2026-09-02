@@ -151,7 +151,8 @@ defmodule PtcRunner.LLM.ReqLLMAdapterTest do
                 %ProviderError{
                   kind: ^kind,
                   details: details,
-                  retryable?: ^retryable?
+                  retryable?: ^retryable?,
+                  dispatch_provenance: :dispatched
                 }} = call_http_failure(status, "provider failure #{status}")
 
         assert details =~ "HTTP #{status}"
