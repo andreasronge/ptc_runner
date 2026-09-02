@@ -14,6 +14,7 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
   alias PtcRunner.Kernel.DiagnosticCatalog
+  alias PtcRunner.Kernel.ExampleLibrary
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractDiagnostic
   import PtcRunner.TestSupport.CommandEngineFixtures, only: [validate_success_result: 0]
@@ -40,6 +41,15 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     end
 
     refute_received :unexpected_bootstrap
+  end
+
+  test "init help lists every embedded example for both frontends" do
+    for frontend <- [:standalone, :mix] do
+      help = CommandContract.help_result(:init, frontend)
+      description = get_in(help, ["options", Access.at(0), "description"])
+
+      assert description =~ "examples: " <> Enum.join(ExampleLibrary.names(), ", ")
+    end
   end
 
   test "repl structural rejections occur before bootstrap without echoing values" do
