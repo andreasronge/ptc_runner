@@ -50,6 +50,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     {"kernel-repl", "docs/guides/kernel-repl.md"},
     {"inspect-source", "docs/guides/inspecting-source-and-programs.md"},
     {"cli", "docs/reference/cli.md"},
+    {"viewer", "docs/reference/viewer.md"},
     {"ptc-lisp", "docs/ptc-lisp-specification.md"},
     {"functions", "docs/function-reference.md"},
     {"preludes", "docs/prelude-reference.md"},

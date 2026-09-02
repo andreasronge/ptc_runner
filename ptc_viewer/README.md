@@ -186,38 +186,10 @@ live ingestion and controls, not the trace browser as a whole.
 
 ## HTTP API
 
-| Endpoint | Shared Kernel operation |
-| --- | --- |
-| `GET /api/kernel/runs` | `list_runs` with bounded filters and pagination |
-| `POST /api/kernel/refresh` | Recapture the host snapshot without requiring a run id |
-| `GET /api/kernel/runs/:run_id` | `get_run` |
-| `GET /api/kernel/runs/:run_id/turns` | `list_turns` with bounded filters and pagination |
-| `GET /api/kernel/counters` | `counters` |
-| `GET /api/analysis/runs/:run_id/conversation` | Presentation over the bounded `turns` collection |
-| `GET /api/analysis/runs/:run_id/preludes` | Bounded effective prelude sources from the pinned inspection projection |
-| `GET /api/analysis/runs/:run_id/execution-errors` | Authorized workflow execution-error records from the pinned inspection projection |
-| `GET /api/analysis/runs/:run_id/explicit-failure-values` | Dedicated explicit-failure-value records from the pinned inspection projection |
-| `GET /api/repl` | Bootstrap or refresh the server-owned analysis session |
-| `POST /api/repl/evaluations` | Evaluate one bounded PTC-Lisp form |
-| `POST /api/repl/templates` | Format an inert `analysis/open` or `analysis/read` editor template |
-| `POST /api/repl/reset` | Persist the current session and capture a replacement |
-| `DELETE /api/repl` | Close and persist the current analysis session |
-| `POST /api/live/runs/:run_id` | Accept a correlated self-contained live frame |
-| `GET /api/live/runs` | Snapshot retained live runs, newest first, each stamped with `first_seen_at` |
-| `GET /api/live/stream` | Stream frames as server-sent events |
-| `DELETE /api/live/runs/:run_id` | Forget one retained run |
-| `POST /api/live/runs/:run_id/inspect` | Refresh the pinned host snapshot for a completed run |
-| `GET /api/live/project` | Describe host-injected project details |
-| `GET /api/live/launch` | Describe the fixed launch target and current status |
-| `POST /api/live/launch` | Launch the fixed workflow or one declared mission |
-
-Query parameters are passed to `Kernel.TraceLog`; `limit` is decoded as an
-integer and `tags` as a JSON object. The routes preserve not-found, invalid
-query, unavailable-adapter, and adapter-failure classifications. Run listings
-render the Kernel's bounded `isolation` object as a damaged-source notice while
-retaining any separate source-kind exclusion notice. An isolated run claim is
-returned as `422 run_isolated`; direct retained-size refusal is returned as
-`413 Trace source retained size exceeded`.
+The durable [Viewer HTTP API reference](../docs/reference/viewer.md) is the
+complete public route and security contract. It is also embedded in packaged
+executables as `ptc docs viewer`; keep route details there instead of copying
+the table into this development README.
 
 ## Architecture
 

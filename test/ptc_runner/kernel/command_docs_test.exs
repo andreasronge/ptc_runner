@@ -26,6 +26,16 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     end
   end
 
+  test "the Viewer HTTP reference is listed and served offline" do
+    assert "viewer" in DocumentationLibrary.names()
+
+    assert {:ok, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["docs", "viewer"])
+
+    assert %{"page" => "viewer", "content" => "# Viewer HTTP API" <> _rest} =
+             envelope["result"]
+  end
+
   test "every listed page serves its source document verbatim" do
     for name <- DocumentationLibrary.names() do
       assert {:ok, %CommandOutcome{envelope: envelope}} = CommandEngine.dispatch(["docs", name])

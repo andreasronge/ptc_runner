@@ -38,6 +38,13 @@ defmodule PtcRunner.CLIReferenceTest do
            """
   end
 
+  test "the served CLI page keeps the complete Viewer API offline" do
+    {:ok, page} = DocumentationLibrary.fetch("cli")
+
+    assert page =~ "Viewer documentation (`ptc docs viewer`)"
+    refute page =~ "github.com/andreasronge/ptc_runner/tree/main/ptc_viewer"
+  end
+
   test "the served MCP page uses the source-checkout authorization frontend" do
     {:ok, page} = DocumentationLibrary.fetch("mcp")
 

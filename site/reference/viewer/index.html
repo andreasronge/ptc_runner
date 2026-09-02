@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Viewer HTTP API · PtcRunner</title>
+<meta name="description" content="This reference inventories the Viewer's public HTTP routes, their availability, important failures, and security boundaries.">
+<link rel="canonical" href="https://ptc-runner.dev/reference/viewer/">
+<meta property="og:title" content="Viewer HTTP API · PtcRunner">
+<meta property="og:description" content="This reference inventories the Viewer's public HTTP routes, their availability, important failures, and security boundaries.">
+<meta property="og:url" content="https://ptc-runner.dev/reference/viewer/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/" class="current" aria-current="page">Viewer HTTP API</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="viewer-http-api">Viewer HTTP API</h1><p>This reference inventories the Viewer's public HTTP routes, their availability, important failures, and security boundaries.</p><p>The Viewer is included in the standalone executable and container image. It is
+an optional companion that is absent from the published library package. Start
+it with <code class="inline">ptc viewer PROJECT</code>; the project selects the trace and private
+inspection sources and whether the REPL is available. Normal Viewer startup
+provides Live ingestion; project details and launch controls appear only when
+their corresponding host configuration is available.</p><h2 id="network-and-security-boundary">Network and security boundary</h2><p>The server binds <code class="inline">127.0.0.1</code> by default. <code class="inline">--listen 0.0.0.0</code> is the only
+non-loopback bind and prints an exposure warning. The Viewer has no general
+authentication layer: anyone who can reach it can browse the selected traces
+and any private inspection records the project grants. In a container, bind
+the server to <code class="inline">0.0.0.0</code> but publish the host port on loopback, for example
+<code class="inline">-p 127.0.0.1:4123:4123</code>. Publishing an unrestricted host port exposes the
+trace browser.</p><p>These route families have separate boundaries:</p><ul><li><strong>Trace browsing</strong> (<code class="inline">/api/kernel/*</code>) reads the pinned trace snapshot. It has
+no per-request authentication. Refresh is available only when the host
+supplies a refresh callback.</li><li><strong>Private analysis</strong> (<code class="inline">/api/analysis/*</code>) reads only inspection records that
+the project selected and explicitly granted as private. The routes return
+<code class="inline">404</code> reason codes when the run, project configuration, or private grant does
+not authorize evidence. They have no additional HTTP authentication.</li><li><strong>REPL</strong> (<code class="inline">/api/repl*</code>) exists only when the project enables the analysis
+REPL. Bootstrap requires a page loaded from the same Viewer and its
+page nonce. Mutations require the exact <code class="inline">localhost</code> or <code class="inline">127.0.0.1</code> host and
+Viewer port, an exact same-origin <code class="inline">Origin</code>, the session precondition, and the
+session mutation nonce. These checks prevent another browser origin from
+driving the local REPL; they do not make it a remote authenticated API.</li><li><strong>Live browser controls</strong> (<code class="inline">/api/live/*</code>, except ingestion) require a browser
+host of <code class="inline">localhost</code>, <code class="inline">127.0.0.1</code>, or <code class="inline">::1</code>. Mutations also require an exact
+same-origin <code class="inline">Origin</code> and the page's <code class="inline">X-PTC-Viewer-Live-Nonce</code>. A loopback peer
+is accepted directly. A non-loopback peer must authenticate with the Live
+token.</li><li><strong>Live reporters</strong> use <code class="inline">POST /api/live/runs/:run_id</code>. Loopback reporters need
+no token when none is configured. When <code class="inline">PTC_VIEWER_TOKEN</code> configures a token,
+reporters send it as <code class="inline">Authorization: Bearer ...</code>; non-loopback reporters
+always need the configured token.</li></ul><p><code class="inline">PTC_VIEWER_URL</code> on <code class="inline">ptc run</code> names the Viewer that receives best-effort Live
+frames. <code class="inline">PTC_VIEWER_TOKEN</code> configures the Viewer token and is also read by an
+external reporter. Tokens must contain at least 32 bytes. For a browser whose
+network peer is not loopback, open <code class="inline">/?live_token=TOKEN#/live</code> once; the page
+removes the query parameter and uses the token for Live reads and mutations.
+The server-sent-event request retains an encoded query token because browser
+<code class="inline">EventSource</code> cannot set an authorization header.</p><p>The Live token protects Live ingestion and controls only. It does <strong>not</strong>
+protect the Runs tab, trace routes, private-analysis routes, static assets, or
+the Viewer as a whole. Do not treat it as authentication for remote hosting.</p><p>Security failures on configured REPL and Live routes return <code class="inline">403</code>. Unsupported
+methods on configured REPL routes return <code class="inline">405</code>. A disabled REPL returns <code class="inline">404</code>;
+unavailable Live features generally return <code class="inline">503</code>. Successful JSON responses
+use <code class="inline">application/json</code>; successful private-analysis responses and all REPL
+responses are non-cacheable. Route-specific behavior follows.</p><h2 id="trace-and-private-analysis-routes">Trace and private-analysis routes</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Route</th><th style="text-align: left;">Purpose, availability, and important behavior</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">GET /api/kernel/runs</code></td><td style="text-align: left;">List the pinned runs with bounded filters and pagination. <code class="inline">limit</code> is decoded as an integer and <code class="inline">tags</code> as a JSON object before all query parameters are passed to <code class="inline">Kernel.TraceLog</code>. Invalid queries return <code class="inline">400</code>; adapter faults return <code class="inline">500</code>; unavailable or changing sources return <code class="inline">503</code> or <code class="inline">409</code>; oversized or unsupported sources return <code class="inline">413</code> or <code class="inline">422</code>.</td></tr><tr><td style="text-align: left;"><code class="inline">POST /api/kernel/refresh</code></td><td style="text-align: left;">Recapture the host snapshot without a run ID. Returns <code class="inline">503</code> when refresh is unavailable, <code class="inline">404</code> when the selected source is not found, and <code class="inline">500</code> when refresh fails.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /api/kernel/runs/:run_id</code></td><td style="text-align: left;">Return one run. Returns <code class="inline">404</code> when absent and otherwise uses the trace-query failure statuses above.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /api/kernel/runs/:run_id/turns</code></td><td style="text-align: left;">List one run's turns with bounded filters and pagination. Uses the trace-query failure statuses above.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /api/kernel/counters</code></td><td style="text-align: left;">Return bounded counters for the pinned snapshot. Uses the trace-query failure statuses above.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /api/analysis/runs/:run_id/conversation</code></td><td style="text-align: left;">Present the bounded conversation derived from turns. Requires a selected private inspection projection.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /api/analysis/runs/:run_id/preludes</code></td><td style="text-align: left;">Return bounded effective prelude sources from the pinned private inspection projection.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /api/analysis/runs/:run_id/execution-errors</code></td><td style="text-align: left;">Return authorized workflow execution-error records from the pinned private inspection projection.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /api/analysis/runs/:run_id/explicit-failure-values</code></td><td style="text-align: left;">Return dedicated explicit-failure-value records from the pinned private inspection projection.</td></tr></tbody></table></div><p>Private-analysis routes distinguish unrecorded or mismatched runs, missing
+inspection configuration, and a missing private grant with specific <code class="inline">404</code>
+reason bodies. They return <code class="inline">503</code> for unavailable sources, <code class="inline">409</code> if a source
+changes, <code class="inline">413</code> if it exceeds its bound, <code class="inline">422</code> for an unsupported artifact,
+<code class="inline">500</code> for adapter failure, and <code class="inline">400</code> for another invalid query.</p><p>The kernel routes preserve the TraceLog's not-found, invalid-query,
+unavailable-adapter, and adapter-failure classifications. Run listings render
+the Kernel's bounded <code class="inline">isolation</code> object as a damaged-source notice while
+retaining any separate source-kind exclusion notice. An isolated run claim is
+returned as <code class="inline">422 run_isolated</code>; direct retained-size refusal is returned as
+<code class="inline">413 Trace source retained size exceeded</code>.</p><h2 id="analysis-repl-routes">Analysis REPL routes</h2><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Route</th><th style="text-align: left;">Purpose, availability, and important behavior</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">GET /api/repl</code></td><td style="text-align: left;">Bootstrap or refresh the server-owned analysis session. Requires the REPL, exact Viewer host and port, <code class="inline">Sec-Fetch-Site: same-origin</code>, and the page's <code class="inline">X-PTC-Viewer-Page-Nonce</code>. Returns the session ID and mutation nonce; returns <code class="inline">404</code> when the REPL is disabled.</td></tr><tr><td style="text-align: left;"><code class="inline">POST /api/repl/evaluations</code></td><td style="text-align: left;">Evaluate one bounded PTC-Lisp form in the current session. Requires <code class="inline">Content-Type: application/json</code> and exactly <code class="inline">{&quot;source&quot;:&quot;FORM&quot;}</code>, plus the mutation headers below.</td></tr><tr><td style="text-align: left;"><code class="inline">POST /api/repl/templates</code></td><td style="text-align: left;">Format an inert <code class="inline">analysis/open</code> or <code class="inline">analysis/read</code> editor template. It does not evaluate the template. Requires JSON with exactly <code class="inline">{&quot;kind&quot;:&quot;run&quot;,&quot;run_id&quot;:&quot;ID&quot;}</code> or <code class="inline">{&quot;kind&quot;:&quot;turns&quot;,&quot;run_id&quot;:&quot;ID&quot;}</code>, plus the mutation headers below.</td></tr><tr><td style="text-align: left;"><code class="inline">POST /api/repl/reset</code></td><td style="text-align: left;">Persist the current session and capture its replacement. Requires the JSON object <code class="inline">{}</code> and the mutation headers below.</td></tr><tr><td style="text-align: left;"><code class="inline">DELETE /api/repl</code></td><td style="text-align: left;">Close and persist the current session. Requires an empty body and the mutation headers below.</td></tr></tbody></table></div><p>Every REPL mutation sends the exact Viewer <code class="inline">Origin</code>, the current
+<code class="inline">X-PTC-Viewer-Session</code>, and the session's <code class="inline">X-PTC-Viewer-Nonce</code>. Successful
+responses repeat the current session ID in <code class="inline">X-PTC-Viewer-Session</code> and in the
+JSON body. JSON mutation bodies accept no unlisted fields.</p><p>REPL responses use stable JSON error codes. Besides <code class="inline">403</code> and <code class="inline">405</code>, important
+statuses include <code class="inline">400</code> for malformed requests, <code class="inline">409</code> for an active operation,
+terminal or closed session, or changed trace, <code class="inline">412</code> when the session changed, <code class="inline">413</code>
+for request, source, or trace bounds, <code class="inline">415</code> for a non-JSON content type, <code class="inline">422</code>
+for an unsupported trace, <code class="inline">428</code> when the session precondition is missing,
+<code class="inline">503</code> when the trace is unavailable, and <code class="inline">500</code> for startup, persistence, or
+adapter failures.</p><h2 id="live-routes">Live routes</h2><p>Live routes require the host-injected Live store. Project details and launch
+controls also require their corresponding project or launch configuration.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Route</th><th style="text-align: left;">Purpose, availability, and important behavior</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">POST /api/live/runs/:run_id</code></td><td style="text-align: left;">Accept one correlated, self-contained JSON object as the reporter frame. The path supplies <code class="inline">run_id</code>; the store overwrites any body <code class="inline">run_id</code> and <code class="inline">first_seen_at</code>. The object must be JSON-encodable. Requires reporter security and <code class="inline">Content-Type: application/json</code>; returns <code class="inline">503</code> when Live is disabled and <code class="inline">400</code> for invalid input.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /api/live/runs</code></td><td style="text-align: left;">Snapshot retained runs newest first, including <code class="inline">first_seen_at</code>. Requires Live browser-read security; returns <code class="inline">503</code> when Live is disabled.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /api/live/stream</code></td><td style="text-align: left;">Stream the current snapshot and later frames as server-sent events, with heartbeat comments. Requires Live browser-read security; returns <code class="inline">503</code> when Live is disabled.</td></tr><tr><td style="text-align: left;"><code class="inline">DELETE /api/live/runs/:run_id</code></td><td style="text-align: left;">Forget one retained run. Requires Live browser-mutation security; returns <code class="inline">404</code> for an unknown run and <code class="inline">503</code> when Live is disabled.</td></tr><tr><td style="text-align: left;"><code class="inline">POST /api/live/runs/:run_id/inspect</code></td><td style="text-align: left;">Refresh the pinned trace snapshot for a completed run. Requires Live browser-mutation security; returns <code class="inline">404</code> when the run is absent, <code class="inline">503</code> when refresh is unavailable, and <code class="inline">500</code> when refresh fails.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /api/live/project</code></td><td style="text-align: left;">Describe host-injected project details. Requires Live browser-read security and the Live store; returns <code class="inline">200 {&quot;enabled&quot;:false}</code> when the project adapter is absent or fails, and <code class="inline">503</code> when Live is disabled.</td></tr><tr><td style="text-align: left;"><code class="inline">GET /api/live/launch</code></td><td style="text-align: left;">Describe the fixed launch target and current status. Requires Live browser-read security. Returns <code class="inline">{&quot;enabled&quot;:false}</code> when no target is configured and <code class="inline">503</code> when Live is disabled.</td></tr><tr><td style="text-align: left;"><code class="inline">POST /api/live/launch</code></td><td style="text-align: left;">Launch the fixed workflow with <code class="inline">{&quot;input&quot;:{...}}</code>, or a declared mission with <code class="inline">{&quot;mission&quot;:&quot;NAME&quot;,&quot;expression&quot;:&quot;FORM&quot;}</code>. Requires Live browser-mutation security and JSON. Returns <code class="inline">202</code> when accepted, <code class="inline">409</code> while another launch runs, <code class="inline">503</code> when Live is disabled, and <code class="inline">400</code> for invalid or oversized input or a missing launch target.</td></tr></tbody></table></div><h2 id="route-inventory-ownership">Route inventory ownership</h2><p>This table is the public route catalog. The Viewer test suite compares every
+<code class="inline">/api/kernel/*</code>, <code class="inline">/api/analysis/*</code>, <code class="inline">/api/repl*</code>, and <code class="inline">/api/live/*</code> router
+declaration with the routes written here, so either side changing alone fails
+the test. Browser entry, static-asset, redirect, and catch-all routes are not
+part of this API inventory.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/cli/">&larr; Command-line reference</a><a class="pager-next" href="/reference/repl/">REPL reference &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/viewer.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>

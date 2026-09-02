@@ -948,9 +948,7 @@ actually requires an environment credential.
 The Viewer ships inside the standalone release and the container image. It is
 not part of the published Hex package, where `ptc doctor` reports it as an
 unavailable optional companion and `ptc viewer` says so rather than failing
-obscurely. See the
-[Viewer documentation](https://github.com/andreasronge/ptc_runner/tree/main/ptc_viewer)
-for its complete HTTP API.
+obscurely. See the [Viewer documentation](viewer.md) for its complete HTTP API.
 
 ### Expose it deliberately, or not at all
 

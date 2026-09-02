@@ -86,6 +86,7 @@
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/" class="current" aria-current="page">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer HTTP API</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -525,9 +526,7 @@ mission launched from its Live tab. It is read only when the selected provider
 actually requires an environment credential.</p><p>The Viewer ships inside the standalone release and the container image. It is
 not part of the published Hex package, where <code class="inline">ptc doctor</code> reports it as an
 unavailable optional companion and <code class="inline">ptc viewer</code> says so rather than failing
-obscurely. See the
-<a href="https://github.com/andreasronge/ptc_runner/tree/main/ptc_viewer">Viewer documentation</a>
-for its complete HTTP API.</p><h3 id="expose-it-deliberately-or-not-at-all">Expose it deliberately, or not at all</h3><p>The Viewer has no authentication and can display private inspection records
+obscurely. See the <a href="/reference/viewer/">Viewer documentation</a> for its complete HTTP API.</p><h3 id="expose-it-deliberately-or-not-at-all">Expose it deliberately, or not at all</h3><p>The Viewer has no authentication and can display private inspection records
 when the project grants them, so it binds <code class="inline">127.0.0.1</code> and reaches nothing else.
 <code class="inline">--listen 0.0.0.0</code> is the only way to change that, it accepts no other address,
 and it prints a warning when used. Authenticated remote Viewer hosting is not a
@@ -599,7 +598,7 @@ path; the <a href="/guides/quickstart/">Quickstart</a> keeps one deliberately sm
 application boundary these commands enforce.</li><li><a href="/reference/host-installation/">Host configuration</a> defines provider installation.</li><li><a href="/guides/building-agents/">Building agents</a> explains the agent policy producing
 the runs.</li></ul>
 </article>
-<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/mcp/">&larr; MCP reference</a><a class="pager-next" href="/reference/repl/">REPL reference &rarr;</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/mcp/">&larr; MCP reference</a><a class="pager-next" href="/reference/viewer/">Viewer HTTP API &rarr;</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/cli.md">Edit this
   page on GitHub</a>.

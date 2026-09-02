@@ -10,6 +10,54 @@ defmodule PtcViewer.RouterTest do
     %{trace_dir: trace_dir, router_opts: [trace_dir: trace_dir, kernel_trace_adapter: nil]}
   end
 
+  test "the public API route table matches the offline Viewer reference" do
+    router_source = File.read!("lib/ptc_viewer/router.ex")
+    reference = File.read!("../docs/reference/viewer.md")
+
+    router_routes = public_router_routes(router_source)
+
+    documented_routes =
+      ~r/^\| `([A-Z]+) (\/api\/(?:kernel|analysis|repl|live)[^`]*)` \|/m
+      |> Regex.scan(reference)
+      |> Enum.map(fn [_match, method, path] -> {method, path} end)
+
+    assert Enum.uniq(router_routes) == router_routes, "router declares a public route twice"
+
+    assert Enum.uniq(documented_routes) == documented_routes,
+           "offline reference documents a public route twice"
+
+    assert MapSet.new(documented_routes) == MapSet.new(router_routes)
+  end
+
+  defp public_router_routes(source) do
+    source
+    |> Code.string_to_quoted!()
+    |> Macro.prewalk([], &collect_route/2)
+    |> elem(1)
+    |> Enum.filter(fn {_method, path} ->
+      String.match?(path, ~r{^/api/(?:kernel|analysis|repl|live)(?:/|$)})
+    end)
+    |> Enum.reverse()
+  end
+
+  defp collect_route({verb, _meta, [path | _rest]} = node, routes)
+       when verb in [:get, :head, :post, :put, :patch, :delete, :options] and is_binary(path) do
+    {node, [{verb |> Atom.to_string() |> String.upcase(), path} | routes]}
+  end
+
+  defp collect_route({:match, _meta, [path | options]} = node, routes) when is_binary(path) do
+    methods =
+      options
+      |> Enum.find([], &Keyword.keyword?/1)
+      |> Keyword.get(:via, [])
+      |> List.wrap()
+      |> Enum.map(&(&1 |> Atom.to_string() |> String.upcase()))
+
+    {node, Enum.map(methods, &{&1, path}) ++ routes}
+  end
+
+  defp collect_route(node, routes), do: {node, routes}
+
   test "legacy raw trace routes are absent", %{router_opts: router_opts} do
     assert (conn(:get, "/api/traces") |> call_router(router_opts)).status == 404
     assert (conn(:get, "/api/traces/trace1.jsonl") |> call_router(router_opts)).status == 404
