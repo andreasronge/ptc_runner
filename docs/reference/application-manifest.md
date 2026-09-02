@@ -328,11 +328,18 @@ Optional labels support trace grouping:
 ```
 
 Labels do not affect execution, authority, prompts, results, or provider
-selection. `name`, `model`, and `provider` are fingerprinted in traces; tag
-keys and values come from a small fixed vocabulary. Labels are application
-claims, not authoritative provider identity. Use the provider snapshot and
-canonical usage for accounting, and never put prompts, results, credentials,
-paths, or arbitrary user text in labels.
+selection. `name`, `model`, and `provider` are fingerprinted in traces.
+`labels.tags` is closed to these keys and values:
+
+- `environment`: `development`, `test`, `staging`, or `production`
+- `mode`: `agent`, `deterministic`, `direct`, `wrapper`, or `repl`
+- `stage`: `started`, `planning`, `executing`, `validating`, `completed`, or
+  `failed`
+- `suite`: `unit`, `integration`, `e2e`, `conformance`, or `privacy`
+
+Labels are application claims, not authoritative provider identity. Use the
+provider snapshot and canonical usage for accounting, and never put prompts,
+results, credentials, paths, or arbitrary user text in labels.
 
 ## Next steps
 
