@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   activityPresentation,
+  applicationOverview,
   fmtLimit,
   formatLiveSpend,
   evaluationPresentation,
@@ -21,6 +22,21 @@ import {
   runRoute,
   uniqueComponents
 } from '../priv/static/js/live.js';
+
+const application = applicationOverview({
+  entry: 'demo.workflow/run',
+  environments: [
+    { name: 'workflow', kind: 'workflow', components: [] },
+    { name: 'analysis', kind: 'mission', components: [] },
+    { name: 'review', kind: 'mission', components: [] }
+  ]
+});
+assert.equal(application.available, true);
+assert.equal(application.entry, 'demo.workflow/run');
+assert.equal(application.workflow.name, 'workflow');
+assert.deepEqual(application.missions.map(environment => environment.name), ['analysis', 'review']);
+assert.equal(applicationOverview({name: 'opaque host project'}).available, false);
+assert.equal(applicationOverview({environments: []}).available, false);
 
 assert.deepEqual(
   activityPresentation({kind: 'agent', name: 'agent-a1', status: 'tool-call', turn: 1, max_turns: 6}),

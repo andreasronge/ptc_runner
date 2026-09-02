@@ -20,6 +20,9 @@ defmodule PtcViewer.Api do
   @doc "Delegates semantic private conversation reconstruction to the configured host adapter."
   def conversation(config, run_id), do: inspection_query(config, :conversation, run_id)
 
+  @doc "Delegates authorized terminal application-result retrieval to the configured host adapter."
+  def result(config, run_id), do: inspection_query(config, :result, run_id)
+
   @doc "Delegates private effective-prelude source retrieval to the configured host adapter."
   def preludes(config, run_id), do: inspection_query(config, :preludes, run_id)
 

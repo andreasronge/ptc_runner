@@ -166,7 +166,7 @@ defmodule PtcRunner.Kernel.InspectionLabTest do
         )
 
       assert rendered =~ "Private analysis"
-      assert rendered =~ "Model conversation"
+      assert rendered =~ "Model sessions &amp; programs"
       assert rendered =~ "Turn 1"
       assert rendered =~ "Canonical Kernel trace"
       assert rendered =~ "Mission inventory"

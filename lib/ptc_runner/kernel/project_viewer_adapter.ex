@@ -43,6 +43,20 @@ defmodule PtcRunner.Kernel.ProjectViewerAdapter do
 
   def conversation(_source, _run_id), do: {:error, :invalid_inspection_query}
 
+  @spec result(
+          {:inspection_snapshot, InspectionSnapshot.t()}
+          | {:viewer_snapshot_store, ViewerSnapshotStore.t()},
+          binary()
+        ) ::
+          {:ok, map()} | {:error, atom()}
+  def result({:inspection_snapshot, snapshot}, run_id),
+    do: InspectionSnapshot.query(snapshot, :result, %{"run_id" => run_id})
+
+  def result({:viewer_snapshot_store, store}, run_id),
+    do: ViewerSnapshotStore.result(store, run_id)
+
+  def result(_source, _run_id), do: {:error, :invalid_inspection_query}
+
   @spec preludes(
           {:inspection_snapshot, InspectionSnapshot.t()}
           | {:viewer_snapshot_store, ViewerSnapshotStore.t()},

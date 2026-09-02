@@ -289,6 +289,34 @@ defmodule PtcViewer.RouterTest do
     end)
   end
 
+  test "result route delegates the pinned inspection source", %{trace_dir: trace_dir} do
+    source = {:pinned, "fixed.ptcins"}
+    {:ok, store} = PtcViewer.InspectionStore.start(source)
+    on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
+
+    response =
+      conn(:get, "/api/analysis/runs/run-1/result")
+      |> call_router(
+        trace_dir: trace_dir,
+        inspection_store: store,
+        inspection_adapter: PtcViewer.PinningInspectionTestAdapter
+      )
+
+    assert response.status == 200
+    assert Jason.decode!(response.resp_body)["value"] == "done"
+
+    missing =
+      conn(:get, "/api/analysis/runs/run-1/result")
+      |> call_router(
+        trace_dir: trace_dir,
+        inspection_store: store,
+        inspection_adapter: PtcViewer.MissingResultInspectionTestAdapter
+      )
+
+    assert missing.status == 404
+    assert missing.resp_body == "inspection_result_not_recorded"
+  end
+
   test "prelude route delegates only the pinned inspection grant", %{trace_dir: trace_dir} do
     source = {:pinned, "fixed.ptcins"}
     {:ok, store} = PtcViewer.InspectionStore.start(source)
