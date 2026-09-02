@@ -790,7 +790,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   def adapter_request(request) do
     request
     |> Map.take(~w(system messages tools cache schema))
-    |> Map.new(fn {key, value} -> {String.to_existing_atom(key), adapter_value(key, value)} end)
+    |> Map.new(fn {key, value} -> {adapter_field(key), adapter_value(key, value)} end)
   end
 
   defp adapter_value("messages", messages) when is_list(messages),
@@ -812,7 +812,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
             true -> value
           end
 
-        Map.put(map, String.to_existing_atom(key), value)
+        Map.put(map, adapter_field(key), value)
 
       _field, map ->
         map
@@ -827,7 +827,7 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
       {key, value}, map
       when key in ["id", "type", "function", "name", "args", "args_error"] ->
         value = if key == "function", do: adapter_function(value), else: value
-        Map.put(map, String.to_existing_atom(key), value)
+        Map.put(map, adapter_field(key), value)
 
       _field, map ->
         map
@@ -839,10 +839,26 @@ defmodule PtcRunner.Kernel.ProviderRegistry do
   defp adapter_function(function) when is_map(function) do
     function
     |> Map.take(~w(name arguments))
-    |> Map.new(fn {key, value} -> {String.to_existing_atom(key), value} end)
+    |> Map.new(fn {key, value} -> {adapter_field(key), value} end)
   end
 
   defp adapter_function(function), do: function
+  defp adapter_field("system"), do: :system
+  defp adapter_field("messages"), do: :messages
+  defp adapter_field("tools"), do: :tools
+  defp adapter_field("cache"), do: :cache
+  defp adapter_field("schema"), do: :schema
+  defp adapter_field("role"), do: :role
+  defp adapter_field("content"), do: :content
+  defp adapter_field("tool_calls"), do: :tool_calls
+  defp adapter_field("tool_call_id"), do: :tool_call_id
+  defp adapter_field("id"), do: :id
+  defp adapter_field("type"), do: :type
+  defp adapter_field("function"), do: :function
+  defp adapter_field("name"), do: :name
+  defp adapter_field("args"), do: :args
+  defp adapter_field("args_error"), do: :args_error
+  defp adapter_field("arguments"), do: :arguments
   defp role("system"), do: :system
   defp role("user"), do: :user
   defp role("assistant"), do: :assistant
