@@ -401,9 +401,10 @@ defmodule PtcRunner.LLMTest do
       assert public_warning =~ "model_uncataloged"
       assert public_warning =~ "provider:public"
 
-      assert String.trim_trailing(public_warning) ==
-               "warning: " <>
+      assert public_warning ==
+               captured_warning(
                  ModelContractDiagnostic.model_uncataloged_message("provider:public")
+               )
 
       assert private_warning =~ "model_uncataloged"
       refute private_warning =~ "provider:private"
@@ -417,8 +418,7 @@ defmodule PtcRunner.LLMTest do
             assert {:ok, _requester} = PtcRunner.LLM.callback(prepared, LLMSupport.llm_binding())
           end)
 
-        assert String.trim_trailing(warning) ==
-                 "warning: " <> ModelContractDiagnostic.model_uncataloged_message(nil)
+        assert warning == captured_warning(ModelContractDiagnostic.model_uncataloged_message(nil))
 
         refute warning =~ selector
       end
@@ -600,5 +600,9 @@ defmodule PtcRunner.LLMTest do
         PtcRunner.LLM.adapter!()
       end
     end
+  end
+
+  defp captured_warning(message) do
+    ExUnit.CaptureIO.capture_io(:stderr, fn -> IO.warn(message, []) end)
   end
 end
