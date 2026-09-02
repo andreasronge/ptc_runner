@@ -151,6 +151,95 @@ defmodule PtcRunner.TestSupport.PrivateInspectionFixture do
     fixture
   end
 
+  @doc "Builds a complete two-turn capture whose turns emit identical source bytes."
+  def create_repeated_source!(root, run_id \\ "repeated-source-private-run") do
+    %{traces: traces, inspection: inspection} = fixture = create_directories(root, run_id)
+    capability_ids = ["llm-1-#{run_id}", "llm-2-#{run_id}"]
+
+    events =
+      [
+        event(run_id, 1, "run-started", %{"missions" => %{"default" => %{}}}),
+        workflow_evaluation_event(run_id, 2)
+      ] ++
+        Enum.flat_map(Enum.with_index(capability_ids, 1), fn {capability_id, index} ->
+          evaluation_id = "eval-#{index}-#{run_id}"
+
+          [
+            event(run_id, index * 4 - 1, "capability-started", %{
+              "capability_id" => capability_id,
+              "environment" => "workflow",
+              "name" => "llm-request"
+            }),
+            event(run_id, index * 4, "capability-stopped", %{
+              "capability_id" => capability_id,
+              "environment" => "workflow",
+              "name" => "llm-request",
+              "status" => "ok"
+            }),
+            event(run_id, index * 4 + 1, "evaluation-started", %{
+              "evaluation_id" => evaluation_id,
+              "parent_evaluation_id" => "workflow-eval-#{run_id}",
+              "environment" => "mission",
+              "mission_name" => "default",
+              "program_kind" => "ptc-lisp",
+              "source_hash" => @source_hash,
+              "source_bytes" => byte_size(@source)
+            }),
+            event(run_id, index * 4 + 2, "evaluation-stopped", %{
+              "evaluation_id" => evaluation_id,
+              "parent_evaluation_id" => "workflow-eval-#{run_id}",
+              "environment" => "mission",
+              "mission_name" => "default",
+              "status" => "returned"
+            })
+          ]
+        end) ++
+        [
+          event(run_id, 11, "evaluation-stopped", %{
+            "evaluation_id" => "workflow-eval-#{run_id}",
+            "environment" => "workflow",
+            "status" => "returned"
+          }),
+          event(run_id, 12, "run-stopped", %{"outcome" => "ok"})
+        ]
+
+    File.write!(Path.join(traces, "#{run_id}.jsonl"), encode_jsonl(events))
+    {sink, handle} = start_sink!(inspection, run_id)
+    user = %{"role" => "user", "content" => "run it twice"}
+    call = %{"id" => "program", "args" => %{"program" => @source}}
+    assistant = %{"role" => "assistant", "content" => nil, "tool_calls" => [call]}
+
+    _messages =
+      Enum.reduce(Enum.with_index(capability_ids, 1), [user], fn {capability_id, index},
+                                                                 messages ->
+        emit!(
+          sink,
+          "capability-input",
+          %{capability_id: capability_id},
+          llm_input(%{"messages" => messages, "system" => "private-system-#{run_id}"})
+        )
+
+        emit!(sink, "capability-output", %{capability_id: capability_id}, %{
+          environment: :workflow,
+          name: "llm-request",
+          result: %{status: :ok, value: Map.delete(assistant, "role")}
+        })
+
+        emit!(
+          sink,
+          "evaluation-source",
+          %{evaluation_id: "eval-#{index}-#{run_id}"},
+          evaluation_source_payload()
+        )
+
+        messages ++
+          [assistant, %{"role" => "tool", "tool_call_id" => "program", "content" => "ok"}]
+      end)
+
+    persist_inspection!(sink, handle)
+    fixture
+  end
+
   def create_result!(root, value, run_id \\ "private-result-run") do
     %{traces: traces, inspection: inspection} = fixture = create_directories(root, run_id)
     {:ok, result_hash} = ResultIdentity.strict_json_hash(value)
