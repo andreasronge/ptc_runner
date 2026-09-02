@@ -39,9 +39,10 @@ defmodule PtcRunner.ReplFrontend do
       capabilities, limits, input, labels, and event policy;
     * `--mission` — evaluate one manifest mission directly, with only its
       components, data, direct capabilities, and provider dependency closure;
-    * `--inspect-only` — compile the selected environment and inspect it
-      without host, credentials, providers, input, traces, or private-session
-      authority;
+    * `--inspect-only` — compile the selected environment and inspect it. A
+      project-declared host is decoded only for installed limit ceilings;
+      credentials, providers, input, traces, and private-session authority are
+      not acquired;
     * `--host-config` — manifest-only trusted provider installation document;
     * `-t, --trace` — append this session's canonical events to a JSONL file;
     * `--profile` — select a code-owned mission session profile;
@@ -114,6 +115,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.AnalysisSessionBuilder
   alias PtcRunner.Kernel.AnalysisTerminal
   alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandDiagnosticRenderer
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.DeterministicJSON
@@ -121,6 +123,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.InspectOnlyRepl
   alias PtcRunner.Kernel.ManifestRepl
   alias PtcRunner.Kernel.ModelContractDiagnostic
+  alias PtcRunner.Kernel.ProjectContext
   alias PtcRunner.Kernel.PublicationHandle
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.SelectedCanonicalSource
@@ -140,7 +143,12 @@ defmodule PtcRunner.ReplFrontend do
   @spec run(CommandArguments.t(), CommandRuntime.t(), keyword()) ::
           :ok | {:error, binary()} | {:error, atom(), binary()}
   def run(
-        %CommandArguments{command: :repl, application: script, ordered_options: opts},
+        %CommandArguments{
+          command: :repl,
+          application: script,
+          ordered_options: opts,
+          project: project
+        },
         %CommandRuntime{} = runtime,
         frontend_opts
       ) do
@@ -160,12 +168,19 @@ defmodule PtcRunner.ReplFrontend do
           )
 
         {:ok, :inspect_only} ->
-          opts =
-            opts
-            |> Keyword.put(:command_runtime, runtime)
-            |> Keyword.put(:terminal_attached, terminal_attached?)
+          case ProjectContext.installed_limits(project) do
+            {:ok, installed_limits} ->
+              opts =
+                opts
+                |> Keyword.put(:command_runtime, runtime)
+                |> Keyword.put(:terminal_attached, terminal_attached?)
+                |> Keyword.put(:installed_limits, installed_limits)
 
-          run_inspect_only_session(opts, arguments)
+              run_inspect_only_session(opts, arguments)
+
+            {:error, %CommandDiagnostic{} = diagnostic} ->
+              fail_command_diagnostic(diagnostic)
+          end
 
         {:ok, :manifest} ->
           opts =
@@ -197,6 +212,14 @@ defmodule PtcRunner.ReplFrontend do
   end
 
   def run(_arguments, _runtime, _frontend_opts), do: {:error, "invalid repl frontend options"}
+
+  @spec fail_command_diagnostic(CommandDiagnostic.t()) :: no_return()
+  defp fail_command_diagnostic(diagnostic) do
+    case CommandDiagnosticRenderer.render(diagnostic) do
+      {:ok, rendered} -> fail(rendered)
+      {:error, :invalid_command_diagnostic} -> fail("ptc repl setup failed")
+    end
+  end
 
   defp valid_frontend_opts?(opts) do
     Keyword.keyword?(opts) and Keyword.keys(opts) -- [:terminal_attached] == [] and
@@ -1394,7 +1417,8 @@ defmodule PtcRunner.ReplFrontend do
   defp run_inspect_only_session(opts, arguments) do
     case InspectOnlyRepl.open(opts[:manifest],
            mission: opts[:mission],
-           interactive_loop: interactive_input?(opts, arguments)
+           interactive_loop: interactive_input?(opts, arguments),
+           installed_limits: opts[:installed_limits]
          ) do
       {:ok, session} ->
         run_workflow_session(session, opts, arguments)

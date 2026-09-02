@@ -117,8 +117,10 @@ and slice <code class="inline">:source</code> when it is large.</p><p>The catalo
 traces, telemetry, or host logs. Only an explicit <code class="inline">component</code> call moves
 attached source into ordinary workflow data. Component files must not contain
 credentials.</p><p><code class="inline">ptc repl --inspect-only</code> compiles the selected project or manifest environment
-and attaches that catalog without a host document, environment file, input,
-provider, or capability. Pure attached functions may run; Kernel, provider, and
+and attaches that catalog without an environment file, input, provider, or
+capability. When a project declares a host, project mode reads that document
+only for non-secret installed limit ceilings; credentials remain unresolved and providers remain inactive.
+Pure attached functions may run; Kernel, provider, and
 capability routes fail closed. See the <a href="/reference/repl/#inspect-without-providers">REPL reference</a>.</p><h2 id="admitted-programs">Admitted programs</h2><p><code class="inline">retain_programs</code> exists only on <code class="inline">agent.core/run-outcome</code>. Omitted or <code class="inline">nil</code>
 keeps the historical outcome shape. When set, every returned outcome includes
 <code class="inline">:programs</code> and <code class="inline">:programs-omitted</code>. Entries keep <code class="inline">:turn</code>, <code class="inline">:mission</code>, and

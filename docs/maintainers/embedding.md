@@ -216,8 +216,9 @@ establishes native authority or enforces the sandbox boundary.
 ## Materialize candidate source
 
 The standalone executable exports installed source and publishes a gated
-candidate with `ptc materialize`. In a source checkout, `mix ptc.materialize`
-is the same implementation:
+candidate with `ptc materialize`; it accepts either a project or application
+manifest. The lower-level `mix ptc.materialize` task in a source checkout
+accepts an application manifest directly.
 
 ```console
 ptc materialize ptc-project.json \

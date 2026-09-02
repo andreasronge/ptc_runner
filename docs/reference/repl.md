@@ -124,6 +124,10 @@ application, host configuration, and lazy environment-file paths, while
 duplicated in `ptc-project.json`. The manifest form is the equivalent low-level
 command. Omitting `--mission` keeps the workflow REPL behavior — which carries
 no mission namespaces, so a mission's own namespace is rejected as unknown.
+Workflow code may still call its attached `kernel/eval*` routes; the REPL
+yields its workflow-continuation lease while each outer form runs, so nested
+mission `return` and `fail` outcomes remain data for callers such as
+`agent.core/run-outcome`.
 A `data/<name>` form in that session answers from the language rather than as
 an unknown namespace, because `data/` is a language namespace the workflow
 environment carries: an ungranted name is a missing-grant runtime error, and
@@ -167,8 +171,10 @@ ptc repl --manifest ptc.json --inspect-only
 ```
 
 `--inspect-only` requires `--project` or `--manifest`. It compiles the selected
-workflow or named mission and attaches its component catalog without a host
-document, environment file, input, provider, or capability. A startup notice
+workflow or named mission and attaches its component catalog without an
+environment file, input, provider, or capability. When a project declares a
+host, project mode reads and validates that document only to obtain its non-secret installed
+limit ceilings; it does not resolve credentials or acquire providers. A startup notice
 states that this is a compile-and-inspect environment, not a runnable
 application environment.
 

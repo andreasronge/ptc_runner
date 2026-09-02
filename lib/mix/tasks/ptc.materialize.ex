@@ -15,7 +15,9 @@ defmodule Mix.Tasks.Ptc.Materialize do
   editing. `--source`/`--out` (or `--from-result`) is a separate candidate-gate
   step; the two modes are mutually exclusive because a descriptor hashes the
   exact candidate published beside it. The standalone `ptc materialize`
-  command is the same implementation; this Mix task is a thin entry.
+  command also accepts a project document and applies its project-selected
+  host limit ceilings. This source-checkout Mix task accepts an application
+  manifest directly.
 
   A model can author a working library inside a run, but a runtime `defn` dies
   at end of run: it is not in the frozen bundle, not covered by a component

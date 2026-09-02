@@ -398,6 +398,17 @@ defmodule PtcRunner.Kernel.RunState do
   def reserve_workflow_evaluation(state),
     do: reserve_evaluation(state, @workflow_continuation, :fail_fast)
 
+  @doc false
+  @spec yield_workflow_evaluation(t(), reference()) :: {:ok, non_neg_integer()} | {:error, atom()}
+  def yield_workflow_evaluation(state, lease),
+    do: call(state, {:yield_workflow_evaluation, lease})
+
+  @doc false
+  @spec resume_workflow_evaluation(t(), non_neg_integer()) ::
+          {:ok, reference()} | {:error, atom()}
+  def resume_workflow_evaluation(state, revision) when is_integer(revision) and revision >= 0,
+    do: call(state, {:resume_workflow_evaluation, revision})
+
   @doc """
   Reserves the evaluation lease with the chosen admission mode.
 
@@ -986,6 +997,55 @@ defmodule PtcRunner.Kernel.RunState do
       )
       when is_integer(requested_at),
       do: reserve_evaluation_blocking(state, mission, requested_at, from, true)
+
+  def handle_call(
+        {token, {:yield_workflow_evaluation, lease}},
+        {caller, _tag},
+        %{token: token} = state
+      ) do
+    case {state.evaluation_lease, state.evaluation_mission} do
+      {{^lease, ^caller, monitor_ref}, @workflow_continuation} ->
+        Process.demonitor(monitor_ref, [:flush])
+        revision = continuation(state, @workflow_continuation).revision
+        {:reply, {:ok, revision}, clear_evaluation(state)}
+
+      _other ->
+        {:reply, {:error, :stale_lease}, state}
+    end
+  end
+
+  def handle_call(
+        {token, {:resume_workflow_evaluation, revision}},
+        {caller, _tag},
+        %{token: token} = state
+      ) do
+    cond do
+      state.closed? ->
+        {:reply, {:error, :run_closed}, state}
+
+      deadline_expired?(state) ->
+        {:reply, {:error, :deadline_expired}, state}
+
+      not grantable?(state) or not :queue.is_empty(state.admission_queue) ->
+        {:reply, {:error, :busy}, state}
+
+      continuation(state, @workflow_continuation).revision != revision ->
+        {:reply, {:error, :stale}, state}
+
+      true ->
+        lease = {make_ref(), caller, Process.monitor(caller)}
+
+        {:reply, {:ok, elem(lease, 0)},
+         %{
+           state
+           | evaluation_lease: lease,
+             evaluation_mission: @workflow_continuation,
+             evaluation_release_waiter: nil,
+             evaluation_terminal_provider_failure?: false,
+             evaluation_terminal_host_failure?: false
+         }}
+    end
+  end
 
   def handle_call(
         {token, {:consume_evaluation_limit_proof, proof}},
