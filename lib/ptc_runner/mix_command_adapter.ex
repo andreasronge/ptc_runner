@@ -22,7 +22,8 @@ defmodule PtcRunner.MixCommandAdapter do
         fn arguments -> bootstrap(arguments, frontend_opts) end,
         fn arguments, runtime ->
           OneShotFrontend.run(arguments, runtime, repl_frontend_opts(frontend_opts))
-        end
+        end,
+        frontend_opts
       )
 
   def execute(_args, _frontend_opts), do: execute([], [])

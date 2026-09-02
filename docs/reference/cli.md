@@ -136,6 +136,11 @@ ptc run ptc.json \
 
 Useful run switches are:
 
+- `--progress` writes best-effort live status only to stderr; stdout remains the
+  workflow result. On an interactive stderr it updates one ASCII line. When
+  stderr is redirected or its width is unavailable, it writes bounded
+  newline-delimited milestones and at most one unchanged heartbeat every ten
+  seconds. It remains opt-in and works alongside `PTC_VIEWER_URL`.
 - `--input INPUT.json` replaces the manifest input with another normal object.
   Resolve the path as an application-relative document first; otherwise treat it
   as absolute or relative to the process working directory (same rule as

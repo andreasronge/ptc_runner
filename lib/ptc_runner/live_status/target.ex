@@ -9,11 +9,12 @@ defmodule PtcRunner.LiveStatus.Target do
   """
 
   @enforce_keys [:report]
-  defstruct [:report, :label]
+  defstruct [:report, :label, append_external?: false]
 
   @opaque t :: %__MODULE__{
             report: (binary(), map() -> term()),
-            label: binary() | nil
+            label: binary() | nil,
+            append_external?: boolean()
           }
 
   @spec new((binary(), map() -> term()), keyword()) ::
@@ -22,9 +23,14 @@ defmodule PtcRunner.LiveStatus.Target do
 
   def new(report, opts) when is_function(report, 2) and is_list(opts) do
     keys = Keyword.keys(opts)
-    target = %__MODULE__{report: report, label: Keyword.get(opts, :label)}
 
-    if Keyword.keyword?(opts) and keys -- [:label] == [] and
+    target = %__MODULE__{
+      report: report,
+      label: Keyword.get(opts, :label),
+      append_external?: Keyword.get(opts, :append_external?, false)
+    }
+
+    if Keyword.keyword?(opts) and keys -- [:label, :append_external?] == [] and
          length(keys) == MapSet.size(MapSet.new(keys)) and valid?(target),
        do: {:ok, target},
        else: {:error, :invalid_live_status_target}
@@ -34,8 +40,8 @@ defmodule PtcRunner.LiveStatus.Target do
 
   @spec valid?(term()) :: boolean()
   def valid?(%__MODULE__{report: report, label: label} = target) do
-    Enum.sort(Map.keys(target)) == [:__struct__, :label, :report] and is_function(report, 2) and
-      valid_label?(label)
+    Enum.sort(Map.keys(target)) == [:__struct__, :append_external?, :label, :report] and
+      is_function(report, 2) and valid_label?(label) and is_boolean(target.append_external?)
   end
 
   def valid?(_target), do: false
@@ -43,6 +49,10 @@ defmodule PtcRunner.LiveStatus.Target do
   @spec label(term()) :: binary() | nil
   def label(%__MODULE__{label: label}), do: label
   def label(_target), do: nil
+
+  @doc false
+  def append_external?(%__MODULE__{append_external?: value}), do: value
+  def append_external?(_target), do: false
 
   @spec report(term(), binary(), map()) :: :ok | :error
   def report(%__MODULE__{} = target, run_id, frame)
@@ -58,6 +68,25 @@ defmodule PtcRunner.LiveStatus.Target do
   end
 
   def report(_target, _run_id, _frame), do: :error
+
+  @doc false
+  @spec compose([t()]) :: {:ok, t()} | {:error, :invalid_live_status_target}
+  def compose(targets) when is_list(targets) and targets != [] do
+    if Enum.all?(targets, &valid?/1) do
+      new(
+        fn run_id, frame ->
+          results = Enum.map(targets, &report(&1, run_id, frame))
+          if Enum.all?(results, &(&1 == :ok)), do: :ok, else: :error
+        end,
+        label: Enum.find_value(targets, &label/1),
+        append_external?: Enum.all?(targets, &append_external?/1)
+      )
+    else
+      {:error, :invalid_live_status_target}
+    end
+  end
+
+  def compose(_targets), do: {:error, :invalid_live_status_target}
 
   defp valid_label?(nil), do: true
 

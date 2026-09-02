@@ -154,7 +154,11 @@ ptc run ptc.json \
   --host-config ptc-host.json \
   --trace-dir traces \
   --inspect traces/run.ptcins \
-  --envelope results/command.json</code></pre><p>Useful run switches are:</p><ul><li><code class="inline">--input INPUT.json</code> replaces the manifest input with another normal object.
+  --envelope results/command.json</code></pre><p>Useful run switches are:</p><ul><li><code class="inline">--progress</code> writes best-effort live status only to stderr; stdout remains the
+workflow result. On an interactive stderr it updates one ASCII line. When
+stderr is redirected or its width is unavailable, it writes bounded
+newline-delimited milestones and at most one unchanged heartbeat every ten
+seconds. It remains opt-in and works alongside <code class="inline">PTC_VIEWER_URL</code>.</li><li><code class="inline">--input INPUT.json</code> replaces the manifest input with another normal object.
 Resolve the path as an application-relative document first; otherwise treat it
 as absolute or relative to the process working directory (same rule as
 <code class="inline">--component-override-descriptor</code> host paths).</li><li><code class="inline">--private-input INPUT.json</code> does the same and classifies the run as private.</li><li><code class="inline">--output VALUE.json</code> publishes a normal result value without replacing an
