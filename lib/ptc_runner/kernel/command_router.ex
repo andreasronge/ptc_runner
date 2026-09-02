@@ -1,6 +1,7 @@
 defmodule PtcRunner.Kernel.CommandRouter do
   @moduledoc false
 
+  alias PtcRunner.CLIProgress
   alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandEntry
@@ -15,11 +16,11 @@ defmodule PtcRunner.Kernel.CommandRouter do
   @type one_shot_runner :: (PtcRunner.Kernel.CommandArguments.t(), CommandRuntime.t() ->
                               :ok | {:error, binary()} | {:error, atom(), binary()})
 
-  @spec execute([binary()], :standalone | :mix, bootstrap(), one_shot_runner()) ::
+  @spec execute([binary()], :standalone | :mix, bootstrap(), one_shot_runner(), keyword()) ::
           CommandPresentation.t()
-  def execute(argv, frontend, bootstrap, repl_runner)
+  def execute(argv, frontend, bootstrap, repl_runner, frontend_opts \\ [])
       when is_list(argv) and frontend in [:standalone, :mix] and is_function(bootstrap, 1) and
-             is_function(repl_runner, 2) do
+             is_function(repl_runner, 2) and is_list(frontend_opts) do
     case CommandEntry.open(argv, frontend) do
       {:error, %CommandEntry{rejection: %{command: command}} = entry}
       when command in @frontend_commands ->
@@ -32,8 +33,33 @@ defmodule PtcRunner.Kernel.CommandRouter do
       when command in @frontend_commands ->
         run_one_shot(entry, bootstrap, repl_runner)
 
+      {:ok, %CommandEntry{arguments: %{command: :run} = arguments} = entry} ->
+        with_progress(arguments, frontend_opts, fn progress ->
+          present_run(entry, bootstrap, progress)
+        end)
+
       {:ok, %CommandEntry{} = entry} ->
         CommandFrontend.present_entry(entry, bootstrap)
+    end
+  end
+
+  defp present_run(entry, bootstrap, progress) do
+    presentation =
+      CommandFrontend.present_entry(entry, fn parsed ->
+        with {:ok, runtime} <- bootstrap.(parsed),
+             do: CLIProgress.attach(runtime, progress)
+      end)
+
+    CLIProgress.finish(progress, presentation)
+    presentation
+  end
+
+  defp with_progress(arguments, frontend_opts, fun) do
+    if Keyword.get(arguments.frontend_options, :progress, false) do
+      progress = CLIProgress.start(arguments, frontend_opts)
+      fun.(progress)
+    else
+      fun.(nil)
     end
   end
 

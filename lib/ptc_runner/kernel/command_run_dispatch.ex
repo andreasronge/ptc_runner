@@ -13,6 +13,7 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
   alias PtcRunner.Kernel.PublicationAuthority
   alias PtcRunner.Kernel.RunCoordinator
   alias PtcRunner.LiveStatus
+  alias PtcRunner.LiveStatus.Target
 
   @spec dispatch(CommandPreparation.t(), CommandRuntime.t()) ::
           {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
@@ -118,7 +119,25 @@ defmodule PtcRunner.Kernel.CommandRunDispatch do
     end
   end
 
+  defp attach_external_live_status(%{live_status: local} = runtime, label)
+       when is_binary(label) do
+    if Target.append_external?(local),
+      do: append_external_live_status(runtime, local, label),
+      else: runtime
+  end
+
   defp attach_external_live_status(runtime, _label), do: runtime
+
+  defp append_external_live_status(runtime, local, label) do
+    case LiveStatus.external_target(label) do
+      nil ->
+        runtime
+
+      external ->
+        {:ok, target} = Target.compose([local, external])
+        elem(CommandRuntime.with_live_status(runtime, target), 1)
+    end
+  end
 
   defp execute_started(preparation, runtime, authority, execution) do
     case execute_run(preparation, authority, execution, runtime) do

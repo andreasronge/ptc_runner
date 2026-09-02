@@ -3718,6 +3718,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "--component-override-descriptor",
              "--env-file",
              "--envelope",
+             "--progress",
              "--help"
            ]
 
@@ -3782,6 +3783,15 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
 
     assert rejection.accepted ==
              CommandDeclaration.accepted_switches(:run, :standalone)
+  end
+
+  test "progress is a shared frontend-owned run switch" do
+    for frontend <- [:standalone, :mix] do
+      assert {:ok, arguments} = CommandParser.parse(["run", "ptc.json", "--progress"], frontend)
+      assert arguments.frontend_options == [progress: true]
+      refute Map.has_key?(arguments.options, :progress)
+      assert "--progress" in CommandDeclaration.accepted_switches(:run, frontend)
+    end
   end
 
   test "undeclared raw spellings are unknown rather than normalized by OptionParser" do

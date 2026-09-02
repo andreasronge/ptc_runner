@@ -26,7 +26,8 @@ defmodule PtcRunner.StandaloneCLI do
             runtime,
             Keyword.delete(frontend_opts, :live_status)
           )
-        end
+        end,
+        frontend_opts
       )
 
   defp bootstrap(arguments, frontend_opts) do

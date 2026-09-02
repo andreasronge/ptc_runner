@@ -197,6 +197,31 @@ defmodule PtcRunner.LiveStatusTest do
     assert :ok = RunState.stop(run_state)
   end
 
+  test "ordered fan-out reaches terminal progress before a blocked Viewer" do
+    parent = self()
+
+    {:ok, terminal} =
+      Target.new(fn _run_id, frame -> send(parent, {:terminal_frame, frame.phase}) end)
+
+    {:ok, viewer} =
+      Target.new(fn _run_id, _frame ->
+        send(parent, :viewer_started)
+        receive do: (:never -> :ok)
+      end)
+
+    {:ok, limits} = Limits.new()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "fanout-live-target")
+    {:ok, config} = run_config(limits, sink, %{})
+    {:ok, run_state} = RunState.start(limits)
+    {:ok, fanout} = Target.compose([terminal, viewer])
+    {:ok, reporter} = Reporter.start(fanout, config, run_state)
+
+    assert_receive {:terminal_frame, "running"}, 1_000
+    assert_receive :viewer_started
+    assert :ok = Reporter.stop(reporter)
+    assert :ok = RunState.stop(run_state)
+  end
+
   test "an exiting execution owner does not cancel its terminal frame" do
     test_process = self()
 
