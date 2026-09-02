@@ -1,0 +1,71 @@
+{
+  "case_id": "off-by-one",
+  "task": "What is the top country (ip_country) for fraud? A. NL, B. BE, C. ES, D. FR",
+  "guidelines": "Answer must be in the form 'X. Y' where X is the option's letter chosen and Y is the option's country code. If a question does not have a relevant or applicable answer for the task, please respond with 'Not Applicable'",
+  "review_task": "Review the REPL session below for the given task and input. It records trial-and-error discovery, so intermediate steps may fail or be exploratory. Check the programs and independently solve the task with run_ptc_lisp. Compare your result with the analyzer result before approving. Return any problems that could make the final result wrong.",
+  "reviewer_model": "luna",
+  "review_turns": 4,
+  "options": {"NL": "A. NL", "BE": "B. BE", "ES": "C. ES", "FR": "D. FR"},
+  "analyzer_result": {
+    "derivations": [{
+      "mission": "analysis",
+      "countries": [
+        {"ip_country": "BE", "fraudulent_volume": 263724.1900000002, "total_volume": 2149606.160000013},
+        {"ip_country": "ES", "fraudulent_volume": 43531.87, "total_volume": 644883.1700000011},
+        {"ip_country": "FR", "fraudulent_volume": 89135.0299999999, "total_volume": 1291952.649999998},
+        {"ip_country": "GR", "fraudulent_volume": 39916.73, "total_volume": 640607.0699999993},
+        {"ip_country": "IT", "fraudulent_volume": 182231.7199999998, "total_volume": 2598262.179999996},
+        {"ip_country": "LU", "fraudulent_volume": 44628.44, "total_volume": 664973.6699999999},
+        {"ip_country": "NL", "fraudulent_volume": 329088.04, "total_volume": 2701006.090000015},
+        {"ip_country": "SE", "fraudulent_volume": 169918.9599999999, "total_volume": 2001783.420000003}
+      ]
+    }, {
+      "mission": "recheck",
+      "countries": [
+        {"ip_country": "BE", "fraudulent_volume": 263724.1900000002, "total_volume": 2149606.160000013},
+        {"ip_country": "ES", "fraudulent_volume": 43531.87, "total_volume": 644883.1700000011},
+        {"ip_country": "FR", "fraudulent_volume": 89135.0299999999, "total_volume": 1291952.649999998},
+        {"ip_country": "GR", "fraudulent_volume": 39916.73, "total_volume": 640607.0699999993},
+        {"ip_country": "IT", "fraudulent_volume": 182231.7199999998, "total_volume": 2598262.179999996},
+        {"ip_country": "LU", "fraudulent_volume": 44628.44, "total_volume": 664973.6699999999},
+        {"ip_country": "NL", "fraudulent_volume": 329088.04, "total_volume": 2701006.090000015},
+        {"ip_country": "SE", "fraudulent_volume": 169918.9599999999, "total_volume": 2001783.420000003}
+      ]
+    }],
+    "candidate_answer": "B. BE"
+  },
+  "programs": [
+    {
+      "turn": 1,
+      "mission": "analysis",
+      "source": "(dabstep.payments/fraud-definition)",
+      "execution": {
+        "outcome": "continued",
+        "observation": "user=> \"Fraud is defined as the ratio of fraudulent volume over total volume.\"",
+        "observation-truncated?": false
+      }
+    },
+    {
+      "turn": 2,
+      "mission": "analysis",
+      "source": "(let [stats (loop [cursor nil totals {}]\n              (let [page (dabstep.payments/read-page cursor [\"ip_country\" \"eur_amount\" \"has_fraudulent_dispute\"])\n                    totals2 (reduce (fn [acc row]\n                                      (let [country (nth row 0) amount (or (nth row 1) 0) fraudulent (nth row 2) prior (get acc country [0 0])]\n                                        (assoc acc country [(+ (nth prior 0) (if fraudulent amount 0)) (+ (nth prior 1) amount)])))\n                                    totals\n                                    (rest (get page \"rows\")))]\n                (if (get page \"next_cursor\") (recur (get page \"next_cursor\") totals2) totals2)))]\n  (return {\"countries\" (mapv (fn [[country volumes]] {\"ip_country\" country \"fraudulent_volume\" (nth volumes 0) \"total_volume\" (nth volumes 1)}) stats)}))",
+      "execution": {"outcome": "returned"}
+    },
+    {
+      "turn": 3,
+      "mission": "recheck",
+      "source": "(dabstep.payments/fraud-definition)",
+      "execution": {
+        "outcome": "continued",
+        "observation": "user=> \"Fraud is defined as the ratio of fraudulent volume over total volume.\"",
+        "observation-truncated?": false
+      }
+    },
+    {
+      "turn": 4,
+      "mission": "recheck",
+      "source": "(let [stats (loop [cursor nil totals {}]\n              (let [page (dabstep.payments/read-page cursor [\"ip_country\" \"eur_amount\" \"has_fraudulent_dispute\"])\n                    totals2 (reduce (fn [acc row]\n                                      (let [country (nth row 0) amount (or (nth row 1) 0) fraudulent (nth row 2) prior (get acc country [0 0])]\n                                        (assoc acc country [(+ (nth prior 0) (if fraudulent amount 0)) (+ (nth prior 1) amount)])))\n                                    totals\n                                    (rest (get page \"rows\")))]\n                (if (get page \"next_cursor\") (recur (get page \"next_cursor\") totals2) totals2)))]\n  (return {\"countries\" (mapv (fn [[country volumes]] {\"ip_country\" country \"fraudulent_volume\" (nth volumes 0) \"total_volume\" (nth volumes 1)}) stats)}))",
+      "execution": {"outcome": "returned"}
+    }
+  ]
+}

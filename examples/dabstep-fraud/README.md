@@ -18,10 +18,16 @@ moment you take a model's answer seriously:
    the model saw. Here a 23 MB source becomes a 74 MB record — nearly twice the
    memory the program itself was allowed to use.
 
+The workflow makes two analyzer runs that are blind to each other, retains the
+exact PTC-Lisp programs from both, and gives those programs, the original
+input, their returned evidence, and the candidate answer to a fresh reviewer.
+The reviewer has the same read-only data functions, so it can copy or adapt a
+program and test the work itself.
+
 ## Run it
 
 Requirements: a current `ptc` build, Node/npm for the pinned filesystem MCP
-server, `curl`, `jq`, and an OpenRouter key for live runs.
+server, `curl`, and an OpenRouter key for live runs.
 
 ```console
 ./fetch-data.sh
@@ -30,13 +36,14 @@ ptc run ptc-project.json \
   --input inputs/deepseek.json \
   --env-file /absolute/path/to/private.env \
   --envelope out.json
-jq '.result.value' out.json
 ```
 
 The environment file must define `OPENROUTER_API_KEY`. Keep it outside the
-repository, owner-readable only, and pass its exact path. Use
-`inputs/luna.json` for GPT-5.6 Luna. The result is an object because PtcRunner
-requires an object-root result contract:
+repository, owner-readable only, and pass its exact path.
+`inputs/deepseek.json` uses DeepSeek for both blind analyzers and GPT-5.6 Luna
+for the independent review. Use `inputs/luna.json` to run all three stages with
+Luna. The result is an object because PtcRunner requires an object-root result
+contract:
 
 ```json
 {"ok": true, "value": "B. BE"}
@@ -46,20 +53,52 @@ requires an object-root result contract:
 
 ```console
 ./fetch-data.sh
-ptc run ptc-project.replay.json --input inputs/luna.json --envelope out-replay.json
+ptc run ptc-project.replay.json --input inputs/deepseek.json --envelope out-replay.json
 ```
 
-The checked-in fixture holds all five turns of a live Luna run: an exploratory
-read, a malformed `defn` the model then corrected, the corrected scan, its
-execution, and `(return "B. BE")`. Replay executes every one of those programs
-and performs all 50 reads against the checksum-pinned `data/payments.csv`.
-Matching is exact, so editing the task, tools, or prompt causes a fixture miss
-rather than silently reusing unrelated output.
+This exercises the same DeepSeek, DeepSeek, Luna stage assignment without a
+network call. The fixture contains three model responses: one program for each
+blind analyzer, then one reviewer program. Each program independently scans all
+49 pages of the checksum-pinned `data/payments.csv`; the reviewer uses a
+different reduction to check the winning fraud ratio. The run therefore makes
+147 read-only mission calls and returns:
 
-One edit was made to the recording. The model's exploratory program printed
-`next_cursor`, and `ptc-fs-mcp` signs each cursor with a per-process key, so
-that value differs on every server start and no fixture could match the next
-request. The preview keeps `:rows` and `:read_calls` and drops the cursor.
+```json
+{"ok": true, "value": "B. BE"}
+```
+
+The reviewer prompt is intentionally short. It identifies the programs as a
+trial-and-error REPL session rather than a collection of final submissions.
+The workflow adds four labeled sections — `TASK`, `INPUT`, `ANALYZER RESULT`,
+and `REPL SESSION` — and records the bounded execution outcome beside each
+source. Rolled-back failures remain available in the retained outcome and
+private trace but are omitted from the correctness review because this example
+grants only read effects. Matching is exact, so editing the task, tools, prompt,
+retained source, or execution evidence causes a fixture miss rather than
+silently reusing unrelated output.
+
+### Reviewer regressions
+
+Two fixed bad sessions test the independent reviewer without waiting for a
+model to make the same mistake again:
+
+```console
+ptc run ptc-project.reviewer-replay.json \
+  --input inputs/reviewer-wrong-metric.json --envelope wrong-metric.json
+ptc run ptc-project.reviewer-replay.json \
+  --input inputs/reviewer-off-by-one.json --envelope off-by-one.json
+```
+
+The first case is reduced from DeepSeek run
+`cmd-40vw2hcbwe10tw74g84hqddg0d`: it calculates the country volumes but ranks
+absolute fraudulent volume and chooses `A. NL`. The second uses a real
+execution of a pagination program that applies `rest` to every page and
+therefore drops the first data row of each page. The recorded Luna review must
+name the ratio error in the first case and the row/page error in the second.
+
+Use `ptc-project.reviewer.json` with `--env-file` to run the same cases against
+live Luna. The replay fixture was recorded only after Luna independently read
+the data and found each defect. `mix nightly` executes both replay regressions.
 
 ## Did the model actually do the work?
 
@@ -79,7 +118,9 @@ Computed correctly, that gives:
 | GR | 640,705.29 | 39,916.73 | 6.230% |
 
 A run that answers `B. BE` may or may not have produced that table. PtcRunner
-keeps three things that let you tell the difference.
+keeps three things that let you tell the difference. In the current workflow,
+`agent.core/run-outcome` also returns the exact admitted programs to the
+workflow, which passes them directly to the same-run reviewer.
 
 **The program the model wrote.** Preserved verbatim in
 [`evidence/luna-01.clj`](evidence/luna-01.clj), from Luna run
@@ -234,9 +275,9 @@ exactly that size and identity — and because `payments.csv` is checksum-pinned
 the content is reproducible and the identity confirms it is the same one.
 Rejected responses, error envelopes, and MCP stderr keep their bodies.
 
-Evaluation is bounded to 40 MB, 600 seconds, 256 mission capability calls, and
-six agent turns; the turn ceiling is enforced by `input.schema.json`, not merely
-set by the shipped inputs.
+Each evaluation is bounded to 40 MB and 600 seconds. The shipped inputs allow
+up to 16 turns for each analyzer and 4 for the reviewer; those ceilings are
+enforced by `input.schema.json`, not merely set by the input files.
 
 ## Inspect a run
 
@@ -252,13 +293,16 @@ fail with `envelope/publication_failed: … is incomplete`. Send transcripts
 somewhere you own:
 
 ```console
-run_ref=$(jq -r '.run_ref' out.json)
+ptc repl --profile private-run-analysis-v2 --private-unattended \
+  --resource traces=.ptc/traces --resource inspection=.ptc/inspection \
+  --format jsonl -e '(analysis/runs {"limit" 1})'
+
 mkdir -p .ptc-transcripts && chmod 700 .ptc-transcripts
-ptc transcript "$run_ref" \
+ptc transcript RUN_REF \
   --traces .ptc/traces \
   --inspection .ptc/inspection \
   --private-unattended \
-  --private-output ".ptc-transcripts/${run_ref}.private.json"
+  --private-output .ptc-transcripts/run.private.json
 ptc viewer ptc-project.json
 ```
 

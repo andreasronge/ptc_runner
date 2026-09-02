@@ -124,12 +124,25 @@ generated programs on that returned outcome. Omitted or `nil` keeps the shapes
 above. When set, every returned outcome — including subject and provider
 failures after earlier evaluations — also includes `:programs` and
 `:programs-omitted`. Entries are ordered by one-based global turn and contain
-only `:turn`, `:mission`, and exact `:source`. Retention keeps the newest
-complete entries that fit both the requested count and a fixed 2,000,000
-UTF-8-byte source ceiling; an individual admitted program larger than that
-ceiling is omitted in full. Protocol errors and source rejected before
-evaluation are not retained. Host and infrastructure failures that abort the
-outer workflow still have no outcome to annotate.
+`:turn`, `:mission`, exact `:source`, and a bounded `:execution` summary. A
+continued execution includes its model-visible observation preview and whether
+that preview was truncated; a returned execution records only `:returned`
+because the outcome already carries its value. Failed executions retain their
+closed outcome, kind, reason, and a bounded message without returning the raw
+evaluation value. Each retained observation is independently capped at 2,048
+characters.
+
+Enabling retention explicitly discloses these model-visible observations to
+the calling workflow. A later reviewer may omit rolled-back failures when all
+granted effects are read-only, as in the DABStep example. A workflow with write
+or otherwise irreversible effects must not assume that a failed evaluation had
+no external effect.
+
+Retention keeps the newest complete entries that fit both the requested count
+and a fixed 2,000,000 UTF-8-byte source ceiling; an individual admitted program
+larger than that ceiling is omitted in full. Protocol errors and source
+rejected before evaluation are not retained. Host and infrastructure failures
+that abort the outer workflow still have no outcome to annotate.
 
 The envelope keys are PTC-Lisp keywords. The values of `:status`, `:kind`, and
 `:reason` are also keywords; the value of the `:retryable?` field is a boolean.

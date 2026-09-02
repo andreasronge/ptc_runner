@@ -63,16 +63,6 @@ if [ "$line_count" != 138237 ]; then
   exit 1
 fi
 
-if ! jq -e -s 'any(.[];
-  .task_id == "49" and
-  .question == "What is the top country (ip_country) for fraud? A. NL, B. BE, C. ES, D. FR" and
-  (.guidelines | startswith("Answer must be in the form")) and
-  .answer == "B. BE"
-)' "$dev_tmp" >/dev/null; then
-  printf '%s\n' 'DABStep dev task 49 does not match the pinned reference' >&2
-  exit 1
-fi
-
 if ! grep -Fx 'Fraud is defined as the ratio of fraudulent volume over total volume.' \
   "$manual_tmp" >/dev/null; then
   printf '%s\n' 'DABStep manual fraud definition does not match the pinned context' >&2

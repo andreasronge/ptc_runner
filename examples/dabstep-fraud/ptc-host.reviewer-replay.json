@@ -3,16 +3,10 @@
     "evaluation_heap_words": 5000000
   },
   "install": {
-    "deepseek": {
-      "source": "llm_replay",
-      "installation_revision": "dabstep-evidence-replay-v4",
-      "fixtures": "replay.jsonl",
-      "accepts_data": ["normal", "private_inspection"]
-    },
     "luna": {
       "source": "llm_replay",
-      "installation_revision": "dabstep-evidence-replay-v4",
-      "fixtures": "replay.jsonl",
+      "installation_revision": "dabstep-reviewer-regression-v1",
+      "fixtures": "reviewer-replay.jsonl",
       "accepts_data": ["normal", "private_inspection"]
     },
     "payments_data": {

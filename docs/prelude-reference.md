@@ -65,9 +65,9 @@ The resolved prelude is frozen for the run. Changed component source must be com
 | Component | Purpose | Visibility | Direct dependencies | Directly used by |
 | --- | --- | --- | --- | --- |
 | `agent.main` | Generic workflow entry for scripted agents. | `prompt` | `agent.core` | — |
-| `agent.core` | Provider-neutral scripted PTC-Lisp agent loop. | `prompt` | `agent.machine`, `agent.native`, `agent.prompt`, `kernel`, `llm`, `result`, `workflow.event` | `agent.main` |
+| `agent.core` | Provider-neutral scripted PTC-Lisp agent loop. | `prompt` | `agent.feedback`, `agent.machine`, `agent.native`, `agent.prompt`, `kernel`, `llm`, `result`, `workflow.event` | `agent.main` |
 | `agent.prompt` | Domain-blind system-prompt policy for agent.core. | `discoverable` | `kernel` | `agent.core`, `agent.machine` |
-| `agent.feedback` | Bounded correction messages for agent workflows. | `prompt` | — | `agent.machine` |
+| `agent.feedback` | Bounded correction messages for agent workflows. | `prompt` | — | `agent.core`, `agent.machine` |
 | `agent.retry` | Small deterministic agent retry policy. | `prompt` | — | `agent.machine` |
 | `agent.native` | Strict run_ptc_lisp model-action protocol. | `prompt` | — | `agent.core` |
 | `agent.failure` | Closed classification of admitted LLM provider, protocol, and whole-request timeout envelopes. | `discoverable` | — | `agent.machine` |
@@ -125,7 +125,7 @@ describes that value rather than agent.core's default success envelope.
 Provider-neutral scripted PTC-Lisp agent loop.
 
 - **Visibility:** `prompt`
-- **Direct dependencies:** `agent.machine`, `agent.native`, `agent.prompt`, `kernel`, `llm`, `result`, `workflow.event`
+- **Direct dependencies:** `agent.feedback`, `agent.machine`, `agent.native`, `agent.prompt`, `kernel`, `llm`, `result`, `workflow.event`
 - **Selecting it also installs:** `agent.failure`, `agent.feedback`, `agent.machine`, `agent.native`, `agent.prompt`, `agent.retry`, `kernel`, `llm`, `result`, `workflow.event`
 - **Directly used by:** `agent.main`
 
@@ -181,6 +181,8 @@ generated programs on the returned outcome. Omitted or nil keeps the current
 outcome shape. When set, every returned outcome includes `:programs` and
 `:programs-omitted`. Retention keeps the newest complete entries that fit
 both the requested count and a fixed 2,000,000 UTF-8-byte source ceiling.
+Each entry also carries a bounded execution summary; ordinary observations
+are capped at 2,048 characters and raw evaluation values are never retained.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`
@@ -311,7 +313,7 @@ Bounded correction messages for agent workflows.
 - **Visibility:** `prompt`
 - **Direct dependencies:** —
 - **Selecting it also installs:** —
-- **Directly used by:** `agent.machine`
+- **Directly used by:** `agent.core`, `agent.machine`
 
 ```json
 {"library": "agent.feedback"}

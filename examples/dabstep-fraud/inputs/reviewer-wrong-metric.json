@@ -1,0 +1,71 @@
+{
+  "case_id": "wrong-metric",
+  "task": "What is the top country (ip_country) for fraud? A. NL, B. BE, C. ES, D. FR",
+  "guidelines": "Answer must be in the form 'X. Y' where X is the option's letter chosen and Y is the option's country code. If a question does not have a relevant or applicable answer for the task, please respond with 'Not Applicable'",
+  "review_task": "Review the REPL session below for the given task and input. It records trial-and-error discovery, so intermediate steps may fail or be exploratory. Check the programs and independently solve the task with run_ptc_lisp. Compare your result with the analyzer result before approving. Return any problems that could make the final result wrong.",
+  "reviewer_model": "luna",
+  "review_turns": 4,
+  "options": {"NL": "A. NL", "BE": "B. BE", "ES": "C. ES", "FR": "D. FR"},
+  "analyzer_result": {
+    "derivations": [{
+      "mission": "analysis",
+      "countries": [
+        {"ip_country": "BE", "fraudulent_volume": 263833.8500000002, "total_volume": 2150473.540000013},
+        {"ip_country": "ES", "fraudulent_volume": 43531.87, "total_volume": 644883.1700000011},
+        {"ip_country": "FR", "fraudulent_volume": 89135.0299999999, "total_volume": 1292201.829999998},
+        {"ip_country": "GR", "fraudulent_volume": 39916.73, "total_volume": 640705.2899999991},
+        {"ip_country": "IT", "fraudulent_volume": 182231.7199999998, "total_volume": 2599613.799999996},
+        {"ip_country": "LU", "fraudulent_volume": 44628.44, "total_volume": 665077.9599999998},
+        {"ip_country": "NL", "fraudulent_volume": 329134.08, "total_volume": 2701907.130000014},
+        {"ip_country": "SE", "fraudulent_volume": 169937.7899999999, "total_volume": 2002434.740000003}
+      ]
+    }, {
+      "mission": "recheck",
+      "countries": [
+        {"ip_country": "BE", "fraudulent_volume": 263833.8500000002, "total_volume": 2150473.540000013},
+        {"ip_country": "ES", "fraudulent_volume": 43531.87, "total_volume": 644883.1700000011},
+        {"ip_country": "FR", "fraudulent_volume": 89135.0299999999, "total_volume": 1292201.829999998},
+        {"ip_country": "GR", "fraudulent_volume": 39916.73, "total_volume": 640705.2899999991},
+        {"ip_country": "IT", "fraudulent_volume": 182231.7199999998, "total_volume": 2599613.799999996},
+        {"ip_country": "LU", "fraudulent_volume": 44628.44, "total_volume": 665077.9599999998},
+        {"ip_country": "NL", "fraudulent_volume": 329134.08, "total_volume": 2701907.130000014},
+        {"ip_country": "SE", "fraudulent_volume": 169937.7899999999, "total_volume": 2002434.740000003}
+      ]
+    }],
+    "candidate_answer": "A. NL"
+  },
+  "programs": [
+    {
+      "turn": 1,
+      "mission": "analysis",
+      "source": "(defn aggregate-pages []\n  (loop [cursor nil agg {}]\n    (let [page (dabstep.payments/read-page cursor [\"ip_country\" \"eur_amount\" \"has_fraudulent_dispute\"])\n          rows (get page \"rows\")\n          nc (get page \"next_cursor\")\n          new-agg (reduce (fn [m row]\n                            (let [country (get row 0) amount (or (get row 1) 0.0) fraudulent (get row 2) current (get m country {:total 0.0 :fraud 0.0})]\n                              (assoc m country {:total (+ (:total current) amount) :fraud (+ (:fraud current) (if fraudulent amount 0.0))})))\n                          agg rows)]\n      (if nc (recur nc new-agg) new-agg))))\n(def result (aggregate-pages))\nresult",
+      "execution": {
+        "outcome": "continued",
+        "observation": "user=> {\"BE\" {:fraud 263833.8500000002 :total 2150473.5400000131} \"ES\" {:fraud 43531.87 :total 644883.1700000011} \"FR\" {:fraud 89135.0299999999 :total 1292201.829999998} \"GR\" {:fraud 39916.73 :total 640705.2899999991} \"IT\" {:fraud 182231.7199999998 :total 2599613.7999999961} \"LU\" {:fraud 44628.44 :total 665077.9599999998} \"NL\" {:fraud 329134.08 :total 2701907.1300000139} \"SE\" {:fraud 169937.7899999999 :total 2002434.7400000028}}",
+        "observation-truncated?": false
+      }
+    },
+    {
+      "turn": 2,
+      "mission": "analysis",
+      "source": "(let [ratios (map (fn [[country values]] [country (/ (:fraud values) (:total values))]) result)]\n  (sort-by second > ratios))",
+      "execution": {
+        "outcome": "continued",
+        "observation": "user=> ([\"BE\" 0.12268407121859802] [\"NL\" 0.12181546715724839] [\"SE\" 0.0848655730672787] [\"IT\" 0.070100055577634] [\"FR\" 0.068979183830228] [\"ES\" 0.067501946173786] [\"LU\" 0.067103937142704] [\"GR\" 0.062299680765486])",
+        "observation-truncated?": false
+      }
+    },
+    {
+      "turn": 3,
+      "mission": "analysis",
+      "source": "(return {\"countries\" (mapv (fn [[country values]] {\"ip_country\" country \"fraudulent_volume\" (:fraud values) \"total_volume\" (:total values)}) result)})",
+      "execution": {"outcome": "returned"}
+    },
+    {
+      "turn": 4,
+      "mission": "recheck",
+      "source": "(let [raw (read-all)\n      countries (mapv (fn [[country values]] {\"ip_country\" country \"fraudulent_volume\" (:fraud values) \"total_volume\" (:total values)}) raw)\n      top (first (sort-by (fn [[country values]] (- (:fraud values))) raw))]\n  (println \"Top:\" top)\n  (return {\"countries\" countries}))",
+      "execution": {"outcome": "returned"}
+    }
+  ]
+}

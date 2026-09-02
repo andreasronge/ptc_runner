@@ -3,13 +3,9 @@
   "workflow": {
     "components": [
       {
-        "id": "dabstep.workflow",
-        "path": "workflow.clj",
-        "dependencies": [
-          "agent.core",
-          "dabstep.review",
-          "kernel"
-        ]
+        "id": "dabstep.reviewer-regression",
+        "path": "reviewer-workflow.clj",
+        "dependencies": ["agent.core", "dabstep.review"]
       },
       {
         "id": "dabstep.review",
@@ -17,55 +13,27 @@
       },
       {
         "library": "agent.core"
-      },
-      {
-        "library": "kernel"
       }
     ],
-    "entry": "dabstep.workflow/run"
+    "entry": "dabstep.reviewer-regression/run"
   },
   "contracts": {
     "input_schema": {
-      "path": "input.schema.json"
+      "path": "reviewer-input.schema.json"
     },
     "result_schema": {
-      "path": "result.schema.json"
+      "path": "reviewer-result.schema.json"
     },
     "phase_return_schemas": {
-      "evidence": {
-        "path": "work.schema.json"
-      },
       "findings": {
         "path": "findings.schema.json"
       }
     }
   },
   "input": {
-    "path": "inputs/deepseek.json"
+    "path": "inputs/reviewer-wrong-metric.json"
   },
   "missions": {
-    "analysis": {
-      "components": [
-        {
-          "id": "dabstep.payments",
-          "path": "payments.clj"
-        }
-      ],
-      "providers": [
-        "payments_data"
-      ]
-    },
-    "recheck": {
-      "components": [
-        {
-          "id": "dabstep.payments",
-          "path": "payments.clj"
-        }
-      ],
-      "providers": [
-        "payments_data"
-      ]
-    },
     "review": {
       "components": [
         {
@@ -73,16 +41,11 @@
           "path": "payments.clj"
         }
       ],
-      "providers": [
-        "payments_data"
-      ]
+      "providers": ["payments_data"]
     }
   },
   "providers": {
     "workflow": [
-      {
-        "name": "deepseek"
-      },
       {
         "name": "luna"
       }
@@ -105,7 +68,7 @@
     "llm_request_output_tokens": 8192
   },
   "labels": {
-    "name": "dabstep-fraud-analysis",
+    "name": "dabstep-reviewer-regression",
     "provider": "openrouter",
     "tags": {
       "mode": "agent"

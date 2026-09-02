@@ -2,12 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["task", "guidelines", "model", "work_turns", "review_turns", "review_task", "options"],
+  "required": ["task", "guidelines", "analyzer_model", "reviewer_model", "work_turns", "review_turns", "review_task", "options"],
   "properties": {
     "task": {"type": "string", "minLength": 1, "maxLength": 1000},
     "guidelines": {"type": "string", "minLength": 1, "maxLength": 2000},
     "review_task": {"type": "string", "minLength": 1, "maxLength": 2000},
-    "model": {"type": "string", "enum": ["deepseek", "luna"]},
+    "analyzer_model": {"type": "string", "enum": ["deepseek", "luna"]},
+    "reviewer_model": {"type": "string", "enum": ["deepseek", "luna"]},
     "work_turns": {"type": "integer", "minimum": 1, "maximum": 16},
     "review_turns": {"type": "integer", "minimum": 1, "maximum": 8},
     "options": {

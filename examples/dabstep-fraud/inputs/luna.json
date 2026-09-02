@@ -1,9 +1,10 @@
 {
   "task": "What is the top country (ip_country) for fraud? A. NL, B. BE, C. ES, D. FR",
   "guidelines": "Answer must be in the form 'X. Y' where X is the option's letter chosen and Y is the option's country code. If a question does not have a relevant or applicable answer for the task, please respond with 'Not Applicable'",
-  "model": "luna",
-  "review_task": "You are reviewing PTC-Lisp programs submitted by an earlier process. You have no data access and cannot execute anything. For each program, judge whether it correctly computes what it claims to compute. Report only defects you are confident about.",
-  "work_turns": 7,
+  "analyzer_model": "luna",
+  "reviewer_model": "luna",
+  "review_task": "Review the REPL session below for the given task and input. It records trial-and-error discovery, so intermediate steps may fail or be exploratory. Check the programs and independently solve the task with run_ptc_lisp. Compare your result with the analyzer result before approving. Return any problems that could make the final result wrong.",
+  "work_turns": 16,
   "review_turns": 4,
   "options": {
     "NL": "A. NL",

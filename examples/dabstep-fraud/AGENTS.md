@@ -16,7 +16,7 @@ and need no network. Inside this repository the same commands are `mix ptc …`.
 - `ptc.json` — the application: workflow, input, providers, missions, limits.
 - `workflow.clj` — the workflow entry (`dabstep.workflow/run`), a thin wrapper
   over the shipped `agent.core` loop.
-- `payments.clj` — the `analysis` mission component. It grants exactly two
+- `payments.clj` — the shared analysis/recheck/review mission component. It grants exactly two
   prompt-visible functions, `fraud-definition` and `read-page`; the raw MCP
   read is mapped `"model_visible": false`.
 - `ptc-project.json` / `ptc-host.json` — live paths, artifacts, and the
@@ -25,8 +25,11 @@ and need no network. Inside this repository the same commands are `mix ptc …`.
   current directory.
 - `ptc-project.replay.json` / `ptc-host.replay.json` — the same application
   against `replay.jsonl`, so it runs with no model credential.
+- `reviewer.ptc.json` and the `ptc-project.reviewer*.json` projects — fixed
+  wrong-metric and off-by-one sessions for live or replayed reviewer checks.
 - `input.schema.json`, `result.schema.json`, `inputs/*.json` — the contracts
-  and the two shipped inputs.
+  and two shipped model assignments: DeepSeek analyzers with a Luna reviewer,
+  or Luna for all three stages.
 - `fetch-data.sh` — downloads and checksum-verifies `data/payments.csv` and
   the reference files. It does not reshape the data.
 - `evidence/` — committed run records. Read `README.md` before citing them.
@@ -50,13 +53,13 @@ through `ptc`, which knows the query vocabulary the raw files do not expose.
 Both resources are required:
 
 ```console
-ptc repl --profile private-run-analysis-v1 --private-unattended \
+ptc repl --profile private-run-analysis-v2 --private-unattended \
   --resource traces=.ptc/traces --resource inspection=.ptc/inspection \
   --format jsonl -e '(analysis/runs {})'
 ```
 
 `analysis/open`, `analysis/read`, and `analysis/counters` take a run id from
-that listing; `ptc repl --describe-profile private-run-analysis-v1` prints the
+that listing; `ptc repl --describe-profile private-run-analysis-v2` prints the
 contract. Use `ptc transcript RUN_REF` for one run's private transcript, and
 send its `--private-output` outside `.ptc/` — `ptc` owns that whole directory
 and writing into it makes later runs fail `envelope/publication_failed`.
@@ -73,7 +76,8 @@ note in `evidence/current-main-smoke.json`.
 Run the example live once, then read both halves of each turn from that run's
 private inspection: `analysis/read RUN {"collection" "model_exchanges"}` projects
 `request_hash` alongside the model's `result`. Write one fixture line per
-exchange, in `input_sequence` order.
+distinct hash. When the same request occurs more than once, put its results in
+one ordered `responses` array in `input_sequence` order.
 
 One edit is required. `ptc-fs-mcp` signs each cursor with a per-process key, so
 a recorded program that prints `next_cursor` puts a value in the conversation
