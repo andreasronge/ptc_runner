@@ -116,6 +116,8 @@ defmodule PtcRunner.Kernel.CommandContract do
                                     |> Enum.map(& &1.code)
                                     |> Enum.map(&Atom.to_string/1)
   @doctor_notice "doctor --connect may perform one or more real provider requests and may incur provider cost"
+  @run_notice "set PTC_VIEWER_URL; it reports an externally started run to a Viewer Live tab"
+  @viewer_notice "for an externally started run, use the Viewer URL printed at startup as PTC_VIEWER_URL when it is loopback; otherwise use an address that reaches the Viewer"
   @init_notices [
     "DIRECTORY must not already exist",
     "init assembles the complete scaffold or selected example tree and publishes it atomically without replacing anything",
@@ -873,6 +875,8 @@ defmodule PtcRunner.Kernel.CommandContract do
 
   defp help_notices(:doctor), do: [@doctor_notice]
   defp help_notices(:init), do: @init_notices
+  defp help_notices(:run), do: [@run_notice]
+  defp help_notices(:viewer), do: [@viewer_notice]
   defp help_notices(_topic), do: []
 
   @spec version_result() :: map()

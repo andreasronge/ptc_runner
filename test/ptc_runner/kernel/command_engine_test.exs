@@ -186,6 +186,28 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
            end) == 1
   end
 
+  test "run and viewer help expose externally attached live runs" do
+    for {topic, expected_guidance} <- [
+          {:run, "reports an externally started run to a Viewer Live tab"},
+          {:viewer, "use the Viewer URL printed at startup"}
+        ] do
+      assert {:ok, %CommandOutcome{} = help} =
+               CommandEngine.prepare(["help", Atom.to_string(topic)])
+
+      assert [notice] = help.envelope["result"]["notices"]
+      assert notice =~ "PTC_VIEWER_URL"
+      assert notice =~ expected_guidance
+
+      assert {:stdout, rendered} = CommandRenderer.render(help)
+      assert rendered =~ "PTC_VIEWER_URL"
+      assert rendered =~ expected_guidance
+    end
+
+    viewer_notice = CommandContract.help_result(:viewer)["notices"] |> List.first()
+    assert viewer_notice =~ "when it is loopback"
+    assert viewer_notice =~ "otherwise use an address that reaches the Viewer"
+  end
+
   test "the production command engine owns run-reference entropy" do
     assert Code.ensure_loaded?(CommandEngine)
     assert function_exported?(CommandEngine, :prepare, 1)
