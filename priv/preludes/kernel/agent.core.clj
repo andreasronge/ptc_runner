@@ -332,11 +332,14 @@
       "agent-action"
       (if (get context :phased?)
         {:turn (get state :agent-turn)
+         :max-turns (get context :total-max-turns)
          :phase (get state :phase-index)
          :phase-turn (get state :phase-turn)
          :mission (get phase "mission")
          :kind (get action :kind)}
-        {:turn (get state :phase-turn) :kind (get action :kind)}))))
+        {:turn (get state :phase-turn)
+         :max-turns (get phase "max_turns")
+         :kind (get action :kind)}))))
 
 (defn- native-contract-violation [violation]
   (let [native {:kind (keyword (get violation "kind"))

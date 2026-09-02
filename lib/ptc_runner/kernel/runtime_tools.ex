@@ -27,6 +27,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Kernel.ValueContract
   alias PtcRunner.Kernel.ValueContractDiagnostic
   alias PtcRunner.Kernel.WorkflowEnvironment
+
   alias PtcRunner.Lisp
   alias PtcRunner.Lisp.EvaluatorErrorCatalog
   alias PtcRunner.Lisp.Keyword, as: LispKeyword
@@ -35,6 +36,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   alias PtcRunner.Lisp.TrustedTool
   alias PtcRunner.LLM.OutputLimit
 
+  @agent_invocation_key {__MODULE__, :agent_invocation}
   @mission_contract_version 1
   @mission_routes [
     {"cap-describe", :capability_description},
@@ -1506,13 +1508,18 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   defp annotate(state, event_sink, %{"type" => type, "data" => data})
        when is_binary(type) do
     limit = RunState.limits(state).event_payload_bytes
+    data = enrich_agent_action(type, data)
     payload = %{annotation_type: type, data: data, provenance: :workflow}
     bytes = RetainedSize.bytes_with_cap(payload, limit)
 
     if SafeMetadata.annotation?(type, data) and is_integer(bytes) and bytes <= limit do
       case Events.emit(state, event_sink, "workflow-annotation", payload) do
-        :ok -> %{status: :ok}
-        {:error, :event_sink_error} -> %{status: :error, kind: :event_sink_error}
+        :ok ->
+          relay_agent_action(state, type, data)
+          %{status: :ok}
+
+        {:error, :event_sink_error} ->
+          %{status: :error, kind: :event_sink_error}
       end
     else
       %{
@@ -1525,6 +1532,45 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   defp annotate(state, event_sink, _arguments),
     do: protocol_error(state, event_sink, :invalid_workflow_annotation)
+
+  defp enrich_agent_action("agent-action", data) when is_map(data) do
+    invocation =
+      case {Map.get(data, "turn"), Process.get(@agent_invocation_key)} do
+        {0, _previous} -> mint_agent_invocation_id()
+        {_turn, nil} -> mint_agent_invocation_id()
+        {_turn, current} -> current
+      end
+
+    Process.put(@agent_invocation_key, invocation)
+    Map.put(data, "invocation", invocation)
+  end
+
+  defp enrich_agent_action(_type, data), do: data
+
+  defp mint_agent_invocation_id do
+    {self(), System.unique_integer([:positive, :monotonic])}
+    |> :erlang.term_to_binary()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> binary_part(0, 8)
+    |> Base.encode16(case: :lower)
+    |> then(&("agent-" <> &1))
+  end
+
+  defp relay_agent_action(state, "agent-action", data) do
+    :telemetry.execute(
+      [:ptc_runner, :agent, :action],
+      %{},
+      %{
+        live_run: state.pid,
+        invocation: data["invocation"],
+        turn: data["turn"],
+        max_turns: data["max_turns"],
+        kind: data["kind"]
+      }
+    )
+  end
+
+  defp relay_agent_action(_state, _type, _data), do: :ok
 
   defp protocol_error(state, event_sink, reason) do
     case RunState.protocol_error(state) do

@@ -1031,12 +1031,24 @@ function sparkPath(samples) {
 
 /* ---------- activity feed ---------- */
 
+export function activityPresentation(entry) {
+  if (entry?.kind === 'agent' && Number.isInteger(entry.turn) && Number.isInteger(entry.max_turns)) {
+    return {
+      name: entry.name || 'agent',
+      status: `turn ${entry.turn + 1} of ${entry.max_turns} · ${entry.status}`
+    };
+  }
+  return {
+    name: entry.name || (entry.kind === 'evaluation' ? 'evaluation' : entry.kind),
+    status: entry.status === 'start' ? 'started' : entry.status
+  };
+}
+
 function renderActivity(list, entries) {
   const rows = entries.slice(0, 14).map(entry => {
     const li = document.createElement('li');
     li.className = `live-event kind-${entry.kind || 'other'}`;
-    const name = entry.name || (entry.kind === 'evaluation' ? 'evaluation' : entry.kind);
-    const status = entry.status === 'start' ? 'started' : entry.status;
+    const { name, status } = activityPresentation(entry);
     const duration = entry.duration_ms != null ? fmtSeconds(entry.duration_ms) : '';
     li.innerHTML = `
       <span class="live-event-t"></span>
