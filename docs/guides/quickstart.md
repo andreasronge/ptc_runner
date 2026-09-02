@@ -34,15 +34,21 @@ model or external tool and records a trace and command envelope under
 
 ## Run a model-authored program
 
-Materialize the tutorial projects and create their owner-only environment file:
+Materialize the tutorial; its comment-only environment file names the credential:
 
 ```console
 ptc init kernel-tutorial --example kernel-tutorial
-printf 'OPENROUTER_API_KEY=\n' > kernel-tutorial/.env
-chmod 600 kernel-tutorial/.env
 ```
 
-Set `OPENROUTER_API_KEY` in that exact file, then run:
+Keep that comment and export a non-empty value, or add a non-empty assignment to
+the file. File assignments, including empty ones, override exports; see
+[Host installation](../reference/host-installation.md).
+
+```console
+export OPENROUTER_API_KEY=...
+```
+
+Then run:
 
 ```console
 ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
@@ -52,10 +58,8 @@ ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 {"ok":true,"value":42}
 ```
 
-The project selects the shipped agent loop. The model receives a task, writes a
-bounded mission program, observes its result, and completes on the second turn.
-You configure the task, model alias, mission, tools, and limits; you do not need
-to read or edit the generated program. To read it anyway, open the Viewer:
+The model writes a bounded mission program, observes its result, and completes
+on the second turn. To read that program, open the Viewer:
 
 ```console
 ptc viewer kernel-tutorial/04-multi-turn-agent.ptc-project.json

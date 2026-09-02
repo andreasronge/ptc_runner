@@ -27,9 +27,9 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.ModelContractDiagnostic
 
-  @spec render(CommandOutcome.t(), CommandRejection.t() | nil) ::
+  @spec render(CommandOutcome.t(), CommandRejection.t() | nil, keyword()) ::
           {:stdout | :stderr, binary()} | {:stdio, binary(), binary()}
-  def render(%CommandOutcome{} = outcome, rejection \\ nil) do
+  def render(%CommandOutcome{} = outcome, rejection \\ nil, opts \\ []) do
     envelope = CommandOutcome.to_map(outcome)
 
     case envelope do
@@ -83,7 +83,9 @@ defmodule PtcRunner.Kernel.CommandRenderer do
       %{"status" => "error", "run_ref" => run_ref} = envelope ->
         {:stderr,
          model_contract_warning(envelope) <>
-           failure_line(outcome, run_ref, rejection) <> evaluation_line(envelope)}
+           (failure_line(outcome, run_ref, rejection)
+            |> append_named_env_file_hint(envelope, opts)) <>
+           evaluation_line(envelope)}
     end
   rescue
     _exception ->
@@ -156,6 +158,18 @@ defmodule PtcRunner.Kernel.CommandRenderer do
        do: "evaluation: #{kind}: #{message}\n"
 
   defp evaluation_line(_envelope), do: ""
+
+  defp append_named_env_file_hint(line, envelope, opts) do
+    if Keyword.get(opts, :named_env_file, false) and
+         get_in(envelope, ["error", "phase"]) == "active_preflight" and
+         get_in(envelope, ["error", "code"]) == "credential_unavailable" do
+      String.trim_trailing(line, "\n") <>
+        "; assignments in a named environment file override process values, " <>
+        "including empty assignments\n"
+    else
+      line
+    end
+  end
 
   defp rejection_suffix(%CommandRejection{kind: :unknown_switch, accepted: accepted}),
     do: "; unknown switch; accepted: " <> Enum.join(accepted, ", ")

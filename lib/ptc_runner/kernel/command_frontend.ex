@@ -62,42 +62,52 @@ defmodule PtcRunner.Kernel.CommandFrontend do
   end
 
   def present_entry(%CommandEntry{} = entry, bootstrap) when is_function(bootstrap, 1) do
-    {outcome, rejection} = execute_entry(entry, bootstrap)
-    present(entry, outcome, rejection)
+    {outcome, rejection, named_env_file?} = execute_entry(entry, bootstrap)
+    present(entry, outcome, rejection, named_env_file?)
   end
 
   defp execute_entry(%CommandEntry{arguments: %{command: command}} = entry, _bootstrap)
        when command in [:help, :version] do
-    {_status, outcome, rejection} =
-      CommandEngine.dispatch_frontend_entry(entry, CommandRuntime.standalone())
+    {_status, outcome, rejection, named_env_file?} =
+      CommandEngine.dispatch_frontend_entry_with_context(entry, CommandRuntime.standalone())
 
-    {outcome, rejection}
+    {outcome, rejection, named_env_file?}
   end
 
   defp execute_entry(%CommandEntry{} = entry, bootstrap) do
     case bootstrap.(entry.arguments) do
       {:ok, %CommandRuntime{} = runtime} ->
-        {_status, outcome, rejection} = CommandEngine.dispatch_frontend_entry(entry, runtime)
-        {outcome, rejection}
+        {_status, outcome, rejection, named_env_file?} =
+          CommandEngine.dispatch_frontend_entry_with_context(entry, runtime)
+
+        {outcome, rejection, named_env_file?}
 
       _failure ->
         {:error, outcome} = CommandEngine.startup_failure(entry)
-        {outcome, nil}
+        {outcome, nil, false}
     end
   rescue
     _exception ->
       {:error, outcome} = CommandEngine.startup_failure(entry)
-      {outcome, nil}
+      {outcome, nil, false}
   catch
     _kind, _reason ->
       {:error, outcome} = CommandEngine.startup_failure(entry)
-      {outcome, nil}
+      {outcome, nil, false}
   end
+
+  defp present(
+         entry,
+         outcome,
+         rejection
+       ),
+       do: present(entry, outcome, rejection, false)
 
   defp present(
          %CommandEntry{envelope_path: path} = entry,
          %CommandOutcome{} = outcome,
-         rejection
+         rejection,
+         named_env_file?
        )
        when is_binary(path) do
     paths = CommandEnvelope.destinations(entry.arguments, path, entry.run_ref)
@@ -108,7 +118,7 @@ defmodule PtcRunner.Kernel.CommandFrontend do
 
     case result do
       :ok ->
-        rendered_presentation(outcome, path, rejection)
+        rendered_presentation(outcome, path, rejection, named_env_file?)
 
       {:error, reason} ->
         presentation(
@@ -121,12 +131,14 @@ defmodule PtcRunner.Kernel.CommandFrontend do
     end
   end
 
-  defp present(%CommandEntry{}, %CommandOutcome{} = outcome, rejection) do
-    rendered_presentation(outcome, nil, rejection)
+  defp present(%CommandEntry{}, %CommandOutcome{} = outcome, rejection, named_env_file?) do
+    rendered_presentation(outcome, nil, rejection, named_env_file?)
   end
 
-  defp rendered_presentation(outcome, envelope_path, rejection) do
-    case CommandRenderer.render(outcome, rejection) do
+  defp rendered_presentation(outcome, envelope_path, rejection, named_env_file?) do
+    render_options = [named_env_file: named_env_file?]
+
+    case CommandRenderer.render(outcome, rejection, render_options) do
       {:stdout, bytes} ->
         presentation(outcome, envelope_path, bytes, "", outcome.exit_status)
 

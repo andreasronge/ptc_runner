@@ -159,8 +159,10 @@ reports — rather than an internal fault.
 manifest-backed `repl`. When any selected installation binds an `env`
 credential — an LLM through `credential`, or an MCP transport through
 `transport.env` or `transport.auth` — the frontend loads that exact file before
-provider activity; it never searches for one. Embedded hosts load no dotenv
-file implicitly.
+provider activity; it never searches for one. When loaded, every key assigned
+in the file overrides its process value, including when the assignment is
+empty; keys omitted from the file retain their process values. Embedded hosts
+load no dotenv file implicitly.
 
 ## Choose a provider source
 

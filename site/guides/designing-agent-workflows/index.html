@@ -100,12 +100,11 @@ move the rules into code, then split the work between specialists.">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
 <h1 id="design-an-agent-workflow">Design an agent workflow</h1><p>Design a small support-inbox agent in three runnable steps: provide the data,
-move the rules into code, then split the work between specialists.</p><p>Each step answers one design question — where does the data live, where do
-the business rules live, and how is work divided between agents. The
-configuration guides explain each surface exhaustively; this page shows why a
-design uses them.</p><p>Materialize the three projects and supply an
-<a href="https://openrouter.ai/keys">OpenRouter</a> key:</p><pre><code class="console language-console">ptc init support-triage --example support-triage</code></pre><p>Set <code class="inline">OPENROUTER_API_KEY</code> in the generated <code class="inline">support-triage/.env</code>. Each project
-costs well under a cent to run with the tutorial's <code class="inline">deepseek</code> alias.</p><h2 id="step-1-ask-one-bounded-question">Step 1: ask one bounded question</h2><p>The smallest agent shape is a single bounded run: grant the data, ask the
+move the rules into code, then split the work between specialists.</p><p>The steps decide where data and rules live, then divide work between agents.</p><p>Materialize the three projects and supply an
+<a href="https://openrouter.ai/keys">OpenRouter</a> key:</p><pre><code class="console language-console">ptc init support-triage --example support-triage</code></pre><p>Keep the comment-only <code class="inline">.env</code> and export <code class="inline">OPENROUTER_API_KEY</code>, or add a non-empty
+assignment there. File assignments, including empty ones, override exports; see
+<a href="/reference/host-installation/">Host installation</a>. Each project costs well
+under a cent.</p><h2 id="step-1-ask-one-bounded-question">Step 1: ask one bounded question</h2><p>The smallest agent shape is a single bounded run: grant the data, ask the
 question, read the answer. The first manifest declares no tools at all — the
 tickets are granted as mission <code class="inline">data</code>:</p><pre><code class="json language-json">&quot;missions&quot;: {
   &quot;default&quot;: {

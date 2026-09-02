@@ -81,8 +81,8 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
       "# Local environment for this example.\n"
 
     names ->
-      "# Local credentials for this example. Fill in values; do not commit secrets.\n" <>
-        Enum.map_join(names, "", &"#{&1}=\n")
+      "# Local credentials for this example. Export them or add non-empty assignments here; do not commit secrets.\n" <>
+        Enum.map_join(names, "", &"# #{&1}\n")
   end
 
   with_generated_files = fn files ->

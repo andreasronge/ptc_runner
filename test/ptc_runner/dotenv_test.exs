@@ -99,6 +99,21 @@ defmodule PtcRunner.DotenvTest do
 
       assert System.get_env("PTC_DOTENV_TEST_EXISTING") == "from_file"
     end
+
+    test "empty assignments shadow inherited values while commented names do not", %{tmp_dir: dir} do
+      key = "PTC_DOTENV_TEST_EMPTY_PRECEDENCE"
+      track_env([key])
+      System.put_env(key, "inherited")
+      path = Path.join(dir, ".env")
+
+      File.write!(path, "# #{key}\n")
+      assert :ok = Dotenv.load_file(path)
+      assert System.get_env(key) == "inherited"
+
+      File.write!(path, "#{key}=\n")
+      assert :ok = Dotenv.load_file(path)
+      assert System.get_env(key) == ""
+    end
   end
 
   describe "with_file_scope/2" do
