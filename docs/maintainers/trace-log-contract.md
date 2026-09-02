@@ -481,8 +481,18 @@ Generated programs carry `prelude_calls_available?` and a sorted
 `prelude_calls` list of `{ref, component_id}` entries. Exact
 `prelude_call`/`prelude_component` filters work on both `generated_sources` and
 `turns`. The association between a turn and generated source is explicitly
-`source_match`; duplicate identical sources are marked ambiguous rather than
-given a fabricated causal identity.
+`source_match`. Matching partitions retained tool-call occurrences and
+generated-source records by source. A source can match only an earlier model
+response, and an association is exact only when every complete chronology-
+respecting one-to-one assignment puts that evaluation on the same turn.
+Repeated identical programs are therefore distinct occurrences;
+multiple identical calls in one response retain multiple evaluation records on
+that turn. Delayed evaluation may cross later model requests without losing its
+candidate producer. If the retained occurrence counts differ, or multiple
+complete assignments put an evaluation on different turns, every still-
+possible evaluation retains one chronology-respecting match marked ambiguous,
+rather than being multiplied across candidate turns or given a fabricated
+causal identity.
 
 Private execution errors, generated programs, and effective prelude sources may
 carry a `relationships` list. Each relationship has this closed shape:

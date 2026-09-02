@@ -102,6 +102,31 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   end
 
   @tag :tmp_dir
+  test "a complete transcript accepts identical programs from different turns", %{tmp_dir: root} do
+    fixture =
+      PrivateInspectionFixture.create_repeated_source!(
+        root,
+        PrivateInspectionFixture.command_run_ref()
+      )
+
+    output = Path.join(fixture.output, "repeated.private.json")
+    presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
+
+    assert presentation.exit_status == 0
+    assert presentation.stderr == ""
+
+    assert %{"conversation" => %{"complete?" => true, "streams" => [%{"turns" => turns}]}} =
+             output |> File.read!() |> Jason.decode!()
+
+    assert Enum.map(turns, fn turn ->
+             Enum.map(turn["generated"], & &1["evaluation_id"])
+           end) == [
+             ["eval-1-#{fixture.run_id}"],
+             ["eval-2-#{fixture.run_id}"]
+           ]
+  end
+
+  @tag :tmp_dir
   test "an uncaptured model exchange reports incompleteness and its count", %{tmp_dir: root} do
     fixture =
       PrivateInspectionFixture.create_interrupted!(

@@ -842,15 +842,15 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
              ConversationProjection.streams(exchanges)
   end
 
-  test "turn projection labels duplicate source matches without inventing an exact edge" do
+  test "turn projection keeps multiple identical calls on their producing turn" do
     assistant = %{
       "role" => "assistant",
-      "tool_calls" => [%{"args" => %{"program" => "(return 42)"}}]
+      "tool_calls" => List.duplicate(%{"args" => %{"program" => "(return 42)"}}, 2)
     }
 
     programs = [
-      %{"evaluation_id" => "evaluation-1", "source" => "(return 42)"},
-      %{"evaluation_id" => "evaluation-2", "source" => "(return 42)"}
+      %{"evaluation_id" => "evaluation-1", "sequence" => 3, "source" => "(return 42)"},
+      %{"evaluation_id" => "evaluation-2", "sequence" => 4, "source" => "(return 42)"}
     ]
 
     projection =
@@ -862,9 +862,247 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
 
     assert [turn] = projection.items
     assert Enum.map(turn["generated"], & &1["association"]) == ["source_match", "source_match"]
+    refute Enum.any?(turn["generated"], & &1["association_ambiguous?"])
+    assert projection.evidence["complete?"]
+    assert projection.evidence["ambiguity_count"] == 0
+  end
+
+  test "turn projection preserves ambiguity when occurrence counts do not prove identity" do
+    source = "(return 42)"
+
+    assistant = %{
+      "role" => "assistant",
+      "tool_calls" => [%{"args" => %{"program" => source}}]
+    }
+
+    programs = [
+      %{"evaluation_id" => "evaluation-1", "sequence" => 3, "source" => source},
+      %{"evaluation_id" => "evaluation-2", "sequence" => 4, "source" => source}
+    ]
+
+    projection =
+      ConversationProjection.compile(
+        [exchange(1, [%{"role" => "user", "content" => "run it"}], assistant)],
+        programs,
+        %{"terminal?" => true, "events_dropped?" => false}
+      )
+
+    assert [turn] = projection.items
+
+    assert Enum.map(turn["generated"], & &1["evaluation_id"]) ==
+             ~w(evaluation-1 evaluation-2)
+
     assert Enum.all?(turn["generated"], & &1["association_ambiguous?"])
     refute projection.evidence["complete?"]
     assert projection.evidence["ambiguity_count"] == 1
+  end
+
+  test "ambiguous mismatched calls embed each evaluation at most once per turn" do
+    source = "(return 42)"
+    call = %{"args" => %{"program" => source}}
+    assistant = %{"role" => "assistant", "tool_calls" => [call, call]}
+    programs = [%{"evaluation_id" => "evaluation-1", "sequence" => 3, "source" => source}]
+
+    projection =
+      ConversationProjection.compile(
+        [exchange(1, [%{"role" => "user", "content" => "run it"}], assistant)],
+        programs,
+        %{"terminal?" => true, "events_dropped?" => false}
+      )
+
+    assert [%{"generated" => [generated]}] = projection.items
+    assert generated["evaluation_id"] == "evaluation-1"
+    assert generated["association_ambiguous?"]
+  end
+
+  test "concurrent identical turn responses remain ambiguous" do
+    source = "(return 42)"
+    assistant = %{"role" => "assistant", "tool_calls" => [%{"args" => %{"program" => source}}]}
+
+    exchanges = [
+      exchange(1, [%{"role" => "user", "content" => "first stream"}], assistant, "first"),
+      exchange(3, [%{"role" => "user", "content" => "second stream"}], assistant, "second")
+    ]
+
+    programs = [
+      %{"evaluation_id" => "evaluation-1", "sequence" => 5, "source" => source},
+      %{"evaluation_id" => "evaluation-2", "sequence" => 6, "source" => source}
+    ]
+
+    projection =
+      ConversationProjection.compile(exchanges, programs, %{
+        "terminal?" => true,
+        "events_dropped?" => false
+      })
+
+    assert Enum.all?(projection.items, fn turn ->
+             match?([%{"association_ambiguous?" => true}], turn["generated"])
+           end)
+
+    refute projection.evidence["complete?"]
+    assert projection.evidence["ambiguity_count"] == 2
+  end
+
+  test "identical programs in different turns are paired by chronology" do
+    source = "(return 42)"
+    call = %{"args" => %{"program" => source}}
+    first_assistant = %{"role" => "assistant", "content" => "one", "tool_calls" => [call]}
+    second_assistant = %{"role" => "assistant", "content" => "two", "tool_calls" => [call]}
+
+    exchanges = [
+      exchange(1, [%{"role" => "user", "content" => "first"}], first_assistant),
+      exchange(
+        5,
+        [
+          %{"role" => "user", "content" => "first"},
+          first_assistant,
+          %{"role" => "tool", "content" => "retry"}
+        ],
+        second_assistant
+      )
+    ]
+
+    programs = [
+      %{"evaluation_id" => "evaluation-1", "sequence" => 3, "source" => source},
+      %{"evaluation_id" => "evaluation-2", "sequence" => 7, "source" => source}
+    ]
+
+    projection =
+      ConversationProjection.compile(exchanges, programs, %{
+        "terminal?" => true,
+        "events_dropped?" => false
+      })
+
+    assert Enum.map(projection.items, fn turn ->
+             Enum.map(turn["generated"], & &1["evaluation_id"])
+           end) == [["evaluation-1"], ["evaluation-2"]]
+
+    assert projection.evidence["complete?"]
+  end
+
+  test "a delayed evaluation remains attached after a later model request" do
+    source = "(return 42)"
+
+    first_assistant = %{
+      "role" => "assistant",
+      "tool_calls" => [%{"args" => %{"program" => source}}]
+    }
+
+    exchanges = [
+      exchange(1, [%{"role" => "user", "content" => "first"}], first_assistant),
+      exchange(3, [%{"role" => "user", "content" => "unrelated"}], %{
+        "role" => "assistant",
+        "content" => "later"
+      })
+    ]
+
+    projection =
+      ConversationProjection.compile(
+        exchanges,
+        [%{"evaluation_id" => "delayed", "sequence" => 5, "source" => source}],
+        %{"terminal?" => true, "events_dropped?" => false}
+      )
+
+    assert [["delayed"], []] ==
+             Enum.map(projection.items, fn turn ->
+               Enum.map(turn["generated"], & &1["evaluation_id"])
+             end)
+
+    assert projection.evidence["complete?"]
+  end
+
+  test "a source captured before the model emitted those bytes is not conversation evidence" do
+    source = "(return 42)"
+    assistant = %{"role" => "assistant", "tool_calls" => [%{"args" => %{"program" => source}}]}
+
+    projection =
+      ConversationProjection.compile(
+        [exchange(3, [%{"role" => "user", "content" => "later"}], assistant)],
+        [%{"evaluation_id" => "too-early", "sequence" => 2, "source" => source}],
+        %{"terminal?" => true, "events_dropped?" => false}
+      )
+
+    assert [%{"generated" => []}] = projection.items
+    assert projection.evidence["complete?"]
+    assert projection.evidence["ambiguity_count"] == 0
+  end
+
+  test "a directly evaluated source absent from model output is not conversation evidence" do
+    assistant = %{"role" => "assistant", "content" => "no program"}
+
+    projection =
+      ConversationProjection.compile(
+        [exchange(1, [%{"role" => "user", "content" => "answer"}], assistant)],
+        [%{"evaluation_id" => "direct", "sequence" => 3, "source" => "(return :direct)"}],
+        %{"terminal?" => true, "events_dropped?" => false}
+      )
+
+    assert [%{"generated" => []}] = projection.items
+    assert projection.evidence["complete?"]
+    assert projection.evidence["ambiguity_count"] == 0
+  end
+
+  test "sequential identical calls remain ambiguous when both evaluations happen later" do
+    source = "(return 42)"
+    assistant = %{"role" => "assistant", "tool_calls" => [%{"args" => %{"program" => source}}]}
+
+    exchanges = [
+      exchange(1, [%{"role" => "user", "content" => "first"}], assistant),
+      exchange(3, [%{"role" => "user", "content" => "second"}], assistant)
+    ]
+
+    programs = [
+      %{"evaluation_id" => "evaluation-1", "sequence" => 5, "source" => source},
+      %{"evaluation_id" => "evaluation-2", "sequence" => 6, "source" => source}
+    ]
+
+    projection =
+      ConversationProjection.compile(exchanges, programs, %{
+        "terminal?" => true,
+        "events_dropped?" => false
+      })
+
+    assert Enum.all?(projection.items, fn turn ->
+             match?([%{"association_ambiguous?" => true}], turn["generated"])
+           end)
+
+    refute projection.evidence["complete?"]
+    assert projection.evidence["ambiguity_count"] == 2
+  end
+
+  test "turn capacity does not overmark an evaluation fixed to one turn" do
+    source = "(return 42)"
+    call = %{"args" => %{"program" => source}}
+
+    exchanges = [
+      exchange(1, [%{"role" => "user", "content" => "two"}], %{
+        "role" => "assistant",
+        "tool_calls" => [call, call]
+      }),
+      exchange(4, [%{"role" => "user", "content" => "one"}], %{
+        "role" => "assistant",
+        "tool_calls" => [call]
+      })
+    ]
+
+    programs =
+      Enum.map([3, 6, 7], fn sequence ->
+        %{"evaluation_id" => "evaluation-#{sequence}", "sequence" => sequence, "source" => source}
+      end)
+
+    projection =
+      ConversationProjection.compile(exchanges, programs, %{
+        "terminal?" => true,
+        "events_dropped?" => false
+      })
+
+    [first, second] = projection.items
+
+    assert [%{"evaluation_id" => "evaluation-3", "association_ambiguous?" => false} | _] =
+             first["generated"]
+
+    assert Enum.any?(first["generated"], & &1["association_ambiguous?"])
+    assert [%{"association_ambiguous?" => true}] = second["generated"]
   end
 
   @tag :tmp_dir

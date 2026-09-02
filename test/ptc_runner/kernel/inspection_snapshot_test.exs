@@ -207,8 +207,8 @@ defmodule PtcRunner.Kernel.InspectionSnapshotTest do
              InspectionSnapshot.query(snapshot, :turns, %{"run_id" => run_id})
 
     assert Enum.map(generated, & &1["evaluation_id"]) == ["eval-one", "eval-two"]
-    assert Enum.all?(generated, & &1["association_ambiguous?"])
-    assert evidence["ambiguity_count"] == 1
+    refute Enum.any?(generated, & &1["association_ambiguous?"])
+    assert evidence["ambiguity_count"] == 0
   end
 
   test "query workers carry one copy of retained admission metadata" do
