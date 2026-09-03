@@ -15,7 +15,7 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 demo_dir="$(cd "$(dirname "$0")" && pwd)"
-repo_root="$(cd "$demo_dir/../.." && pwd)"
+repo_root="$(cd "$demo_dir/../../.." && pwd)"
 out="${1:-$repo_root/tmp/viewer-demo}"
 # The conventional project artifact root: exactly these four children, each
 # owner-only, so `ptc viewer` can read the collected journeys directly.

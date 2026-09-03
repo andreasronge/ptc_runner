@@ -1,5 +1,6 @@
 # Viewer demo journeys
 
+This maintainer lab runs from a source checkout; it is not a shipped example.
 Five small manifest runs against the trusted `deepseek` model alias that
 together produce enough varied trace data to exercise `ptc_viewer` by hand:
 a mixed-status run picker, multi-turn model dialogue with error feedback and
@@ -13,8 +14,8 @@ and heap-budget error feedback for journeys 04/05), and fails on missing
 artifacts, so a passing run is a real smoke check.
 
 ```console
-examples/viewer-demo/run.sh            # outputs to tmp/viewer-demo
-examples/viewer-demo/run.sh /path/out  # or an explicit directory
+scripts/labs/viewer-demo/run.sh            # outputs to tmp/viewer-demo
+scripts/labs/viewer-demo/run.sh /path/out  # or an explicit directory
 ```
 
 The script regenerates the granted `files/` root, launches
@@ -50,7 +51,7 @@ installed per-name mission quota bounds capability volume), so the viewer's
 multi-page turn fetching and the partial-run labeling are exercised only by
 the synthetic fixtures in `ptc_viewer/test/ptc_viewer/dialogue_render_test.exs`.
 Connector (MCP) fingerprints and zero-token scripted models are covered by
-`examples/kernel-inspection-lab` instead.
+`scripts/labs/inspection-lab` instead.
 
 Canonical `timeout` and process-level `memory_exceeded` evaluation statuses
 are not reachable here: pure computation hits the deterministic loop and heap

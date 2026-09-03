@@ -35,21 +35,21 @@ ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect
 
 ## How do I watch a run while it is running?
 
-Start the Viewer at a fixed port in one terminal:
+Start the Viewer on the fan-out step, which runs long enough to watch:
 
 ```console
-ptc viewer hello-ptc/ptc-project.json --port 4123
+ptc viewer kernel-tutorial/07-parallel-fan-out.ptc-project.json --port 4123
 ```
 
-In a second terminal, set the Viewer URL printed at startup:
+In a second terminal, set the URL the Viewer printed:
 
 ```console
-PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run hello-ptc/ptc-project.json
+export OPENROUTER_API_KEY=...
+PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run kernel-tutorial/07-parallel-fan-out.ptc-project.json
 ```
 
 Status appears in the Live tab. If the Viewer requires a token, set the same
-`PTC_VIEWER_TOKEN` for the run. See `ptc docs cli` for the full network and
-token contract.
+`PTC_VIEWER_TOKEN` for the run.
 
 ## How do I browse completed runs?
 
@@ -77,7 +77,6 @@ diagnostics:
 ptc run hello-ptc/ptc-project.json --envelope command-envelope.json
 ```
 
-Use the [CLI reference](../reference/cli.md) for the complete command grammar,
-exit statuses, envelopes, artifact publication, diagnostics, transcripts,
-Viewer behavior, and process contract. Continue with [Debug a failed
+The [CLI reference](../reference/cli.md) has the complete command grammar,
+exit statuses, envelopes, and Viewer contract. Continue with [Debug a failed
 run](debugging-a-failed-run.md) when a trace needs deeper investigation.

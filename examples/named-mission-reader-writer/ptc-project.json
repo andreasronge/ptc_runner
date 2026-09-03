@@ -6,7 +6,10 @@
     "path": "ptc.json"
   },
   "host": {
-    "path": "ptc-host.json"
+    "path": "ptc-host.json",
+    "env_file": {
+      "path": ".env"
+    }
   },
   "artifacts": {
     "root": ".ptc",

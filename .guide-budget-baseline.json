@@ -14,7 +14,7 @@
       "tics": 1.0
     },
     "docs/guides/agent-workflow-patterns.md": {
-      "words": 592,
+      "words": 589,
       "density": 2.2,
       "blockers": 1,
       "tics": 1.2
@@ -110,8 +110,8 @@
       "tics": 0.0
     },
     "docs/guides/running-and-debugging.md": {
-      "words": 343,
-      "density": 2.4,
+      "words": 329,
+      "density": 2.2,
       "blockers": 0,
       "tics": 0.0
     },

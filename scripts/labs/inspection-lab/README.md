@@ -1,6 +1,7 @@
 # Kernel inspection lab
 
-This credential-free developer lab runs the shipped `agent.core` loop against
+This credential-free maintainer lab runs from a source checkout; it is not a
+shipped example. It drives the shipped `agent.core` loop against
 a scripted model, the published `ptc-fs-mcp@0.1.0` filesystem MCP server, one
 host-native read capability, and a protocol-faithful stateless MCP 2026-07-28
 server. The remote fixture exposes structured, text, and `isError: true`
@@ -20,7 +21,7 @@ and generated-program difference.
 Run it from the repository root:
 
 ```console
-mix run examples/kernel-inspection-lab/run.exs
+mix run scripts/labs/inspection-lab/run.exs
 ```
 
 The command prints its temporary artifact directory, writes one project
@@ -30,7 +31,7 @@ inspection artifacts, so treat the browser tab as a private sink. To keep
 artifacts at a chosen location, pass one new empty directory:
 
 ```console
-mix run examples/kernel-inspection-lab/run.exs /tmp/ptc-inspection-lab
+mix run scripts/labs/inspection-lab/run.exs /tmp/ptc-inspection-lab
 ```
 
 Each journey writes canonical artifacts under `artifacts/traces/` and private

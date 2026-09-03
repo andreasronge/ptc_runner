@@ -1,17 +1,16 @@
-(ns tutorial.extract "One bounded provider-neutral model request." {:visibility :prompt})
+(ns tutorial.extract "One model request with a structured-output schema." {:visibility :prompt})
 
 (defn extract [input]
-  (let [text (get input "text")
-        response
-        (tool/llm-request
-          {"system" (str "Extract project metadata. Reply with exactly one compact JSON "
-                         "object with string keys project, owner, and risk. Use null when "
-                         "the text does not provide a value. Do not use Markdown.")
-           "messages" [{"role" "user" "content" text}]})]
-    (if (= :ok (get response :status))
-      (return
-        {"model_output" (get-in response [:value "content"])
-         "note" "model_output is model text; validate or parse it before production use"})
-      (fail
-        {"kind" "llm-provider-error"
-         "provider_response" response}))))
+  (let [schema {"type" "object"
+                "properties" {"project" {"type" "string"}
+                              "owner" {"type" "string"}
+                              "risk" {"type" "string"}}
+                "required" ["project" "owner" "risk"]
+                "additionalProperties" false}
+        response (llm/request
+                   {"system" "Extract the project name, its owner, and the launch risk from the text."
+                    "messages" [{"role" "user" "content" (get input "text")}]
+                    "schema" schema})]
+    (if (= :error (get response :status))
+      (fail response)
+      (return (get response "structured_output")))))

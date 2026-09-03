@@ -2,7 +2,8 @@
   "version": 1,
   "workflow": {
     "components": [
-      {"id": "tutorial.extract", "path": "extract.clj"}
+      {"id": "tutorial.extract", "path": "extract.clj", "dependencies": ["llm"]},
+      {"library": "llm"}
     ],
     "entry": "tutorial.extract/extract"
   },

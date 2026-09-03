@@ -5,11 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Examples reference · PtcRunner</title>
 <meta name="description" content="This is the complete inventory of shipped example trees, the layout every tree
-follows, and the aspect each one demonstrates.">
+follows, and the aspect each one demonstrates. Read the trees in the order
+liste…">
 <link rel="canonical" href="https://ptc-runner.dev/reference/examples/">
 <meta property="og:title" content="Examples reference · PtcRunner">
 <meta property="og:description" content="This is the complete inventory of shipped example trees, the layout every tree
-follows, and the aspect each one demonstrates.">
+follows, and the aspect each one demonstrates. Read the trees in the order
+liste…">
 <meta property="og:url" content="https://ptc-runner.dev/reference/examples/">
 <meta property="og:type" content="article">
 <link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
@@ -101,14 +103,17 @@ follows, and the aspect each one demonstrates.">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
 <h1 id="examples-reference">Examples reference</h1><p>This is the complete inventory of shipped example trees, the layout every tree
-follows, and the aspect each one demonstrates.</p><p>Four trees are embedded in the executable and materialize anywhere:</p><pre><code class="console language-console">ptc init DIRECTORY --example kernel-tutorial
+follows, and the aspect each one demonstrates. Read the trees in the order
+listed: each one assumes the surface the one before it introduced.</p><p>Five trees are embedded in the executable and materialize anywhere:</p><pre><code class="console language-console">ptc init DIRECTORY --example kernel-tutorial
 ptc init DIRECTORY --example support-triage
+ptc init DIRECTORY --example named-mission-reader-writer
 ptc init DIRECTORY --example debug-a-failed-run
 ptc init DIRECTORY --example llm-replay</code></pre><p><code class="inline">ptc init</code> refuses a directory that already exists and writes the tree
 atomically. The copy is complete: it carries its own application manifests,
 host document, PTC-Lisp sources, and data, plus a generated <code class="inline">.env</code> stub when
 the tree names one. Nothing resolves back to a checkout, so the copy runs from
-wherever you put it.</p><p>The remaining trees are checkout-only and are listed at the end of this page.</p><h2 id="how-an-example-tree-is-laid-out">How an example tree is laid out</h2><p>Every runnable step is a pair: a project document beside a directory of the
+wherever you put it.</p><p>One tree, <code class="inline">dabstep-fraud</code>, downloads its dataset before it runs and is
+checkout-only. It is listed at the end of this page.</p><h2 id="how-an-example-tree-is-laid-out">How an example tree is laid out</h2><p>Every runnable step is a pair: a project document beside a directory of the
 same name.</p><pre><code>kernel-tutorial/
   ptc-host.json                     installed providers, shared by the steps
   01-orders.ptc-project.json        the thing you run
@@ -127,18 +132,26 @@ contract for each.</p><p>A tree has many step directories because each step dire
 project at that point. Later steps repeat earlier files rather than referencing
 them, so two steps can be diffed to see exactly what one design decision added:</p><pre><code class="console language-console">diff -ru support-triage/01-one-question support-triage/02-domain-api</code></pre><p>One <code class="inline">ptc-host.json</code> at the tree root serves the steps that select a provider. A
 step needing a different installed ceiling gets its own host document instead,
-which is why <code class="inline">kernel-tutorial</code> also ships <code class="inline">ptc-host-cost-budget.json</code>.</p><h2 id="what-each-step-demonstrates">What each step demonstrates</h2><p><code class="inline">kernel-tutorial</code> builds up the runtime surface. Steps 01 and 05 need no
-credential.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Step</th><th style="text-align: left;">Aspect</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">01-orders</code></td><td style="text-align: left;">A deterministic workflow that selects no provider</td></tr><tr><td style="text-align: left;"><code class="inline">02-deepseek-extract</code></td><td style="text-align: left;">One model call producing a structured value</td></tr><tr><td style="text-align: left;"><code class="inline">03-file-agent</code></td><td style="text-align: left;">An agent loop holding a filesystem tool over MCP</td></tr><tr><td style="text-align: left;"><code class="inline">04-multi-turn-agent</code></td><td style="text-align: left;">A two-turn agent loop under explicit Kernel clocks</td></tr><tr><td style="text-align: left;"><code class="inline">05-signature-feedback</code></td><td style="text-align: left;">Signatures, and the feedback a failed check returns</td></tr><tr><td style="text-align: left;"><code class="inline">06-cost-budget</code></td><td style="text-align: left;">A deliberate cost-limit refusal, exit status 6</td></tr></tbody></table></div><p><code class="inline">support-triage</code> grows one support-inbox scenario through three design
-decisions. Every step selects a provider.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Step</th><th style="text-align: left;">Aspect</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">01-one-question</code></td><td style="text-align: left;">Tickets granted as mission data, one bounded question, no tools</td></tr><tr><td style="text-align: left;"><code class="inline">02-domain-api</code></td><td style="text-align: left;">A prompt-visible mission API the model composes, instead of tool relay</td></tr><tr><td style="text-align: left;"><code class="inline">03-specialists</code></td><td style="text-align: left;">Two named missions with different grants, and a result contract</td></tr></tbody></table></div><p><code class="inline">debug-a-failed-run</code> pairs a failing target with the debuggers that read its
+which is why <code class="inline">kernel-tutorial</code> also ships <code class="inline">ptc-host-cost-budget.json</code>.</p><h2 id="what-each-tree-demonstrates">What each tree demonstrates</h2><p><code class="inline">kernel-tutorial</code> builds up the runtime surface one step at a time. Steps 01
+and 05 need no credential.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Step</th><th style="text-align: left;">Aspect</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">01-orders</code></td><td style="text-align: left;">A deterministic workflow that selects no provider</td></tr><tr><td style="text-align: left;"><code class="inline">02-deepseek-extract</code></td><td style="text-align: left;">One model request with a structured-output schema, returning the filled object</td></tr><tr><td style="text-align: left;"><code class="inline">03-file-agent</code></td><td style="text-align: left;">An agent loop holding a filesystem tool over MCP</td></tr><tr><td style="text-align: left;"><code class="inline">04-multi-turn-agent</code></td><td style="text-align: left;">A two-turn agent loop under explicit Kernel clocks</td></tr><tr><td style="text-align: left;"><code class="inline">05-signature-feedback</code></td><td style="text-align: left;">Signatures, and the feedback a failed check returns</td></tr><tr><td style="text-align: left;"><code class="inline">06-cost-budget</code></td><td style="text-align: left;">A deliberate cost-limit refusal, exit status 6</td></tr><tr><td style="text-align: left;"><code class="inline">07-parallel-fan-out</code></td><td style="text-align: left;">Twelve model requests through <code class="inline">pmap</code>, then one synthesis request</td></tr></tbody></table></div><p><code class="inline">support-triage</code> grows one support-inbox scenario through three design
+decisions. Every step selects a provider.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Step</th><th style="text-align: left;">Aspect</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">01-one-question</code></td><td style="text-align: left;">Tickets granted as mission data, one bounded question, no tools</td></tr><tr><td style="text-align: left;"><code class="inline">02-domain-api</code></td><td style="text-align: left;">A prompt-visible mission API the model composes, instead of tool relay</td></tr><tr><td style="text-align: left;"><code class="inline">03-specialists</code></td><td style="text-align: left;">Two named missions with different grants, and a result contract</td></tr></tbody></table></div><p><code class="inline">named-mission-reader-writer</code> is one workflow coordinating two agent loops.
+The <code class="inline">reader</code> mission holds only a read tool over one directory and the
+<code class="inline">writer</code> mission holds only a write tool over another, so a generated program
+in either mission cannot reach the other's authority. It is the runnable form
+of a write kept behind its own mission.</p><p><code class="inline">debug-a-failed-run</code> pairs a failing target with the debuggers that read its
 evidence. <code class="inline">target.ptc-project.json</code> fails on purpose;
 <code class="inline">debugger.ptc-project.json</code> walks the evidence deterministically and
-<code class="inline">debugger-agent.ptc-project.json</code> walks it with a model. The <code class="inline">-ambiguous</code> and
-<code class="inline">-workflow-control</code> variants change the failure so the same debuggers meet a
-different shape.</p><p><code class="inline">llm-replay</code> serves one recorded model response from <code class="inline">replay.jsonl</code>. It needs
+<code class="inline">debugger-agent.ptc-project.json</code> walks it with a model.
+<code class="inline">repair-agent.ptc-project.json</code> extends the incident into a phased agent run
+whose only terminal actions are to propose a replacement component or to
+abstain. The <code class="inline">-ambiguous</code> and <code class="inline">-workflow-control</code> variants change the failure
+so the same debuggers and repair agent meet a different shape.</p><p><code class="inline">llm-replay</code> serves one recorded model response from <code class="inline">replay.jsonl</code>. It needs
 no credential and performs no network activity, which makes it the tree to copy
-when building a test that must not call a provider.</p><h2 id="examples-that-need-a-checkout">Examples that need a checkout</h2><p>These trees are not embedded. Run them from a clone, or read them on GitHub.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Tree</th><th style="text-align: left;">Aspect</th></tr></thead><tbody><tr><td style="text-align: left;"><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer"><code class="inline">named-mission-reader-writer</code></a></td><td style="text-align: left;">Two missions holding separate tool authority over separate roots</td></tr><tr><td style="text-align: left;"><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud"><code class="inline">dabstep-fraud</code></a></td><td style="text-align: left;">A stage's answer reviewed in workflow code before anyone acts on it</td></tr><tr><td style="text-align: left;"><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/viewer-demo"><code class="inline">viewer-demo</code></a></td><td style="text-align: left;">Five journeys producing varied trace data to exercise the Viewer</td></tr><tr><td style="text-align: left;"><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/viewer-live-dashboard"><code class="inline">viewer-live-dashboard</code></a></td><td style="text-align: left;">A parallel model fan-out and synthesis pass, long enough to watch live</td></tr><tr><td style="text-align: left;"><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-inspection-lab"><code class="inline">kernel-inspection-lab</code></a></td><td style="text-align: left;">A trace and a private inspection record from one credential-free run</td></tr></tbody></table></div><p><code class="inline">kernel-inspection-lab</code> and <code class="inline">viewer-demo</code> are driven by a script rather than a
-project document, and <code class="inline">dabstep-fraud</code> downloads a dataset before it runs. Each
-tree's <code class="inline">README.md</code> states its own prerequisites.</p>
+when building a test that must not call a provider.</p><h2 id="the-example-that-needs-a-checkout">The example that needs a checkout</h2><p><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud"><code class="inline">dabstep-fraud</code></a>
+runs three agent loops over 138,236 payment rows and reviews a stage's answer
+in workflow code before anyone acts on it. Its <code class="inline">fetch-data.sh</code> downloads the
+dataset before the first run, so the tree is not embedded. Run it from a clone,
+or read it on GitHub; its <code class="inline">README.md</code> states the prerequisites.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/project-files/">&larr; Project-configuration reference</a><a class="pager-next" href="/reference/component-contracts/">Components-and-preludes reference &rarr;</a></nav>
 <footer>

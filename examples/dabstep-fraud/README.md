@@ -149,7 +149,7 @@ in the shared-defect study below, two reviewers measured correctly and wrote
 nothing, and the comparison caught them anyway.
 
 Three such sessions are fixed inputs under `inputs/reviewer-*.json`, each with
-a recorded Luna review in `reviewer-replay.jsonl`, so `mix nightly` replays
+a recorded Luna review in `reviewer-replay.jsonl`, so the nightly suite replays
 them with no key:
 
 ```console
