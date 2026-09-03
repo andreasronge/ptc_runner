@@ -8,6 +8,8 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandSubject
+  alias PtcRunner.Kernel.CommandWarning
+  alias PtcRunner.Kernel.ModelContractDiagnostic
   alias PtcRunner.Kernel.OwnerFailure
 
   @run_ref CommandRunRef.encode(<<0::128>>)
@@ -59,6 +61,15 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
 
     result =
       failure_result(false)
+      |> Map.put("model_aliases", [
+        %{
+          "alias" => "model",
+          "source" => "llm",
+          "installation_revision" => "model-v1",
+          "default" => false,
+          "selected" => true
+        }
+      ])
       |> put_in(["checks", Access.at(3)], %{
         "name" => "provider/model/local",
         "status" => "fail",
@@ -79,6 +90,94 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
     assert_raise ArgumentError, fn ->
       CommandOutcome.doctor_failure(:doctor, @run_ref, result, diagnostic)
     end
+  end
+
+  test "doctor warning evidence must name a failed plain-doctor local row" do
+    {:ok, subject} =
+      CommandSubject.provider("other", :local, %{destination: :workflow, index: 0})
+
+    {:ok, warning} = CommandWarning.model_uncataloged("other", "openrouter:future/model")
+
+    warning_diagnostic =
+      CommandDiagnostic.new!(:local_preflight, :model_contract_unsupported,
+        subject: subject,
+        provider_activity: false,
+        message:
+          ModelContractDiagnostic.cost_reservation_pricing_message("openrouter:future/model"),
+        warnings: [warning]
+      )
+
+    connect_primary = credential_diagnostic(false)
+    connect_result = failure_result(false)
+
+    assert_raise ArgumentError, fn ->
+      CommandOutcome.doctor_failure(
+        {:doctor, :connect},
+        @run_ref,
+        connect_result,
+        connect_primary,
+        [],
+        [warning_diagnostic]
+      )
+    end
+  end
+
+  test "doctor warning evidence enforces the producer's model byte limit" do
+    {:ok, subject} =
+      CommandSubject.provider("model", :local, %{destination: :workflow, index: 0})
+
+    {:ok, valid_warning} =
+      CommandWarning.model_uncataloged("model", "openrouter:future/model")
+
+    diagnostic =
+      CommandDiagnostic.new!(:local_preflight, :model_contract_unsupported,
+        subject: subject,
+        provider_activity: false,
+        message:
+          ModelContractDiagnostic.cost_reservation_pricing_message("openrouter:future/model"),
+        warnings: [valid_warning]
+      )
+
+    result =
+      failure_result(false)
+      |> Map.put("model_aliases", [
+        %{
+          "alias" => "model",
+          "source" => "llm",
+          "installation_revision" => "model-v1",
+          "default" => false,
+          "selected" => true
+        }
+      ])
+      |> put_in(["checks", Access.at(3)], %{
+        "name" => "provider/model/local",
+        "status" => "fail",
+        "code" => "model_contract_unsupported"
+      })
+      |> put_in(["checks", Access.at(5)], %{
+        "name" => "provider/model/credentials",
+        "status" => "skipped",
+        "code" => "requires_connect"
+      })
+      |> put_in(["checks", Access.at(6)], %{
+        "name" => "provider/model/connectivity",
+        "status" => "skipped",
+        "code" => "requires_connect"
+      })
+
+    warning = %{
+      "code" => "model_uncataloged",
+      "message" => CommandWarning.message(),
+      "provider" => "model",
+      "model" => String.duplicate("é", 200)
+    }
+
+    envelope =
+      CommandOutcome.doctor_failure(:doctor, @run_ref, result, diagnostic, [], [diagnostic]).envelope
+      |> Map.put("warnings", [warning])
+
+    refute CommandWarning.valid_map?(warning)
+    refute CommandContract.valid_envelope?(envelope)
   end
 
   test "doctor failure result semantics reject every diagnostic correlation mismatch" do

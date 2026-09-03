@@ -258,7 +258,9 @@ for that requester or refusal. Catalog metadata such as pricing, limits, token
 estimation, and capability detection may then be incomplete; the warning alone
 does not mean the provider request is known to fail. Run envelopes V4 publish
 the same fact in their closed `warnings` array, and canonical `run-started`
-metadata retains it for trace consumers; stderr remains the human presentation.
+metadata retains it for trace consumers. Failed plain-doctor envelopes publish
+the same locally derived warning for each affected provider check without
+claiming provider activity; stderr remains the human presentation.
 
 Preparation seals the exact controls into the target and requires the adapter
 to attest the same canonical map. The built-in adapter uses ReqLLM's strict

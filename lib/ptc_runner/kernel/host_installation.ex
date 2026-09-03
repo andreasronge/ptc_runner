@@ -884,28 +884,15 @@ defmodule PtcRunner.Kernel.HostInstallation do
     end
   end
 
-  # Contract attestation must not load a provider catalog or call ensure_ready
-  # inside the audited-local worker. Doctor and other declaration checks still
-  # report adapter availability from the selector/module. Preparing here is only
-  # for a positive unsupported-contract refusal that does not need the catalog:
-  # openai_codex drops max_tokens, and test adapters can attest without warmup.
-  # An adapter that cannot resolve the target yet is not a new local failure.
+  # Contract attestation runs inside the audited-local worker and its anchored
+  # deadline. A shipped adapter may load bundled, process-independent metadata
+  # here when it needs that local fact to decide whether the sealed contract can
+  # run. It must not resolve credentials, start provider applications or other
+  # processes, open ports, or perform network work.
   defp maybe_prepare_llm_contract(installation, context, model, adapter) do
     case live_llm_requirements(installation, context) do
       {:ok, requirements} ->
-        case attest_or_skip_local_contract(requirements, model, adapter) do
-          # Catalog pricing belongs to active preparation: credential resolution
-          # and the lifecycle marker must precede this refusal. Local checking
-          # only proves contract shape, so it deliberately defers this one
-          # normalized cause instead of collapsing it into adapter availability.
-          {:error, %ModelContractPricingCause{} = cause} ->
-            if ModelContractPricingCause.valid?(cause),
-              do: :ok,
-              else: {:error, :invalid_llm_model}
-
-          result ->
-            result
-        end
+        attest_or_skip_local_contract(requirements, model, adapter)
 
       {:error, _reason} = error ->
         error

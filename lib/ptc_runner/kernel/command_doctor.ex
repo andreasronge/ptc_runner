@@ -61,7 +61,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
                 usage: inert_usage()
               })
 
-            {:finding, checks, %CommandDiagnostic{} = diagnostic} ->
+            {:finding, checks, [%CommandDiagnostic{} = diagnostic | _rest] = findings} ->
               doctor_failure(
                 :doctor,
                 arguments,
@@ -70,7 +70,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
                 catalog,
                 prepared,
                 checks,
-                {diagnostic, []}
+                {diagnostic, [], Enum.filter(findings, &(&1.warnings != []))}
               )
 
             {:error, diagnostic} ->
@@ -104,7 +104,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
          {:ok, checks} <- DoctorPlan.checks(settled) do
       case findings do
         [] -> {:ok, checks}
-        [primary | _rest] -> {:finding, checks, primary}
+        [_primary | _rest] -> {:finding, checks, findings}
       end
     else
       {:error, %CommandDiagnostic{} = diagnostic} -> {:error, diagnostic}
@@ -152,7 +152,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
           catalog,
           prepared,
           checks,
-          {diagnostic, secondary}
+          {diagnostic, secondary, []}
         )
 
       {:error, %CommandDiagnostic{} = diagnostic} ->
@@ -200,7 +200,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
          catalog,
          prepared,
          checks,
-         {diagnostic, secondary}
+         {diagnostic, secondary, warning_diagnostics}
        ) do
     provider_activity =
       Enum.any?([diagnostic | secondary], & &1.provider_activity)
@@ -222,7 +222,8 @@ defmodule PtcRunner.Kernel.CommandDoctor do
          run_ref,
          result,
          diagnostic,
-         secondary
+         secondary,
+         warning_diagnostics
        )}
     end
   rescue

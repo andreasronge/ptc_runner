@@ -6,10 +6,12 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # `run/4` and `collect/4` are the only places an `:audited_local` callback
   # runs. Both execute before the marker and enable no provider activity: a
   # shipped audited-local check may inspect decoded configuration and loaded
-  # adapter, executable, or fixture availability, but may not resolve a
-  # credential, start an application, process, or port, contact a provider, or
-  # perform network work. Reaching a host installation is a process-free
-  # decrypt of the sealed payload, not an activation.
+  # adapter, executable, fixture availability, or bundled process-independent
+  # metadata. That includes loading the bundled LLM catalog inside this bounded
+  # worker to attest reservation pricing. It may not resolve a credential,
+  # start an application, process, or port, contact a provider, or perform
+  # network work. Reaching a host installation is a process-free decrypt of the
+  # sealed payload, not an activation.
   #
   # `run_unverified/5` is the only place an `:unverified` callback runs, and it
   # is past the marker where none of those limits apply. The two steps are
@@ -174,8 +176,10 @@ defmodule PtcRunner.Kernel.LocalPreflight do
   # Five million words matches the installed provider-work ceiling and leaves
   # room for the raw fixture, detached decoded values, and the retained entry
   # map to coexist without making phase 7 depend on an application-narrowable
-  # limit.
+  # limit. The bundled LLM catalog's one-time decode peaks above that ceiling,
+  # so only the shipped live-LLM callback receives the larger allowance.
   @max_heap_words 5_000_000
+  @llm_max_heap_words 32_000_000
 
   @doc """
   Runs every applicable audited-local check for one prepared run.
@@ -513,7 +517,15 @@ defmodule PtcRunner.Kernel.LocalPreflight do
                  activity = prior_activity or step.activity
 
                  {:attempted, activity,
-                  invoke(callback, occurrence.config, context, services, timeout_ms, step)}
+                  invoke(
+                    callback,
+                    occurrence,
+                    catalog.implementations[occurrence.name],
+                    context,
+                    services,
+                    timeout_ms,
+                    step
+                  )}
              end
            end) do
       case result do
@@ -619,11 +631,11 @@ defmodule PtcRunner.Kernel.LocalPreflight do
     end
   end
 
-  defp invoke(callback, selection, context, services, timeout_ms, step) do
+  defp invoke(callback, occurrence, implementation, context, services, timeout_ms, step) do
     result =
-      BoundedWorker.run(fn -> callback.(selection, context, services) end,
+      BoundedWorker.run(fn -> callback.(occurrence.config, context, services) end,
         timeout_ms: timeout_ms,
-        max_heap_words: step.max_heap_words,
+        max_heap_words: max_heap_words(implementation, step),
         cancel_with_caller: true,
         # Linking to the caller alone is not enough for active work. The
         # executor can outlive the session, so a callback blocked in network or
@@ -635,6 +647,11 @@ defmodule PtcRunner.Kernel.LocalPreflight do
 
     BoundedWorker.classify_callback(result)
   end
+
+  defp max_heap_words(%{provider_application: :req_llm}, %{activity: false}),
+    do: @llm_max_heap_words
+
+  defp max_heap_words(_implementation, step), do: step.max_heap_words
 
   # A refused fixture file states the rule it broke, and a line-level rejection
   # states which line. Both are part of the published fixture contract, so

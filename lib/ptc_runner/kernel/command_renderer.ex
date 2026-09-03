@@ -23,6 +23,7 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRejection
   alias PtcRunner.Kernel.CommandRunRef
+  alias PtcRunner.Kernel.CommandWarning
   alias PtcRunner.Kernel.DeterministicJSON
   alias PtcRunner.Kernel.DiagnosticCatalog
   alias PtcRunner.Kernel.ModelContractDiagnostic
@@ -75,14 +76,14 @@ defmodule PtcRunner.Kernel.CommandRenderer do
         "command" => "doctor",
         "result" => %{"readiness" => "failed"} = result
       } = envelope ->
-        case model_contract_warning(envelope) do
+        case warning_lines(envelope) do
           "" -> {:stdout, json_line(result)}
           warning -> {:stdio, json_line(result), warning}
         end
 
       %{"status" => "error", "run_ref" => run_ref} = envelope ->
         {:stderr,
-         model_contract_warning(envelope) <>
+         warning_lines(envelope) <>
            (failure_line(outcome, run_ref, rejection)
             |> append_named_env_file_hint(envelope, opts)) <>
            evaluation_line(envelope)}
@@ -94,17 +95,28 @@ defmodule PtcRunner.Kernel.CommandRenderer do
          "(run_ref: #{outcome_run_ref(outcome)})\n"}
   end
 
-  defp model_contract_warning(%{
+  defp warning_lines(%{"warnings" => [_warning | _rest] = warnings}) do
+    Enum.map_join(warnings, fn warning ->
+      if CommandWarning.valid_map?(warning) do
+        "warning: " <> ModelContractDiagnostic.model_uncataloged_message(warning["model"]) <> "\n"
+      else
+        ""
+      end
+    end)
+  end
+
+  # `doctor --connect` intentionally keeps its envelope warning array empty,
+  # but preserves this established human-only notice on stderr.
+  defp warning_lines(%{
          "error" => %{
            "phase" => "local_preflight",
            "code" => "model_contract_unsupported",
            "message" => message
          }
-       }) do
-    ModelContractDiagnostic.warning_line(message)
-  end
+       }),
+       do: ModelContractDiagnostic.warning_line(message)
 
-  defp model_contract_warning(_envelope), do: ""
+  defp warning_lines(_envelope), do: ""
 
   @spec envelope_failure(binary()) :: binary()
   def envelope_failure(run_ref) when is_binary(run_ref),

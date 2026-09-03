@@ -126,8 +126,8 @@ if Code.ensure_loaded?(ReqLLM) do
     Loads the `llm_db` model catalog into its VM-global `:persistent_term`
     store so per-request provider workers read it copy-free instead of
     triggering a large one-time decode inside their bounded heap. Idempotent;
-    called during provider-application admission and at capability build for
-    direct embedding paths.
+    called during audited local contract attestation, provider-application
+    admission, and capability build for direct embedding paths.
     """
     @spec ensure_ready() :: :ok
     def ensure_ready do
@@ -207,26 +207,114 @@ if Code.ensure_loaded?(ReqLLM) do
 
     def reservation_bound(_target, _request, _tariff), do: %{}
 
-    # Catalog-free local preflight: refuse contracts this adapter already knows
-    # it cannot honor, without loading llm_db inside the audited-local worker.
+    # Local preflight may load the bundled llm_db catalog inside its bounded
+    # worker when cost reservation makes catalog pricing part of the contract.
+    # This performs no provider, credential, application, process, or network
+    # activity.
     @doc false
     @spec local_contract_attestation(String.t(), Requirements.t()) ::
-            :ok | {:error, :unsupported_model_option}
+            :ok
+            | {:error,
+               :unsupported_model_option
+               | :uncataloged_cost_reservation_pricing_unavailable}
     def local_contract_attestation(model, requirements) when is_binary(model) do
       with {:ok, canonical} <- Requirements.canonical(requirements),
            :ok <- attest_structured_requirements(model, canonical),
            :ok <- attest_inference_controls(model, canonical.exact_options) do
         case parse_provider(model) do
-          {:req_llm, selector} -> refuse_lossy_max_tokens(selector)
-          _direct_http -> :ok
+          {:req_llm, selector} -> attest_local_req_llm_contract(selector, canonical)
+          _direct_http -> attest_direct_reservation(canonical.reservation)
         end
       else
         :error -> {:error, :unsupported_model_option}
-        {:error, :unsupported_model_option} = error -> error
+        {:error, _reason} = error -> error
       end
     end
 
     def local_contract_attestation(_model, _requirements), do: :ok
+
+    defp attest_local_req_llm_contract(selector, canonical) do
+      with :ok <- refuse_lossy_max_tokens(selector) do
+        attest_local_req_llm_pricing(selector, canonical)
+      end
+    end
+
+    defp attest_local_req_llm_pricing(selector, canonical) do
+      if Requirements.cost_reservation?(canonical) do
+        ensure_ready()
+
+        case cataloged_req_llm_model(selector) do
+          {:ok, prepared} ->
+            attest_prepared_reservation(prepared, :cataloged, canonical.reservation)
+
+          :uncataloged ->
+            if supported_req_llm_provider?(selector),
+              do: {:error, :uncataloged_cost_reservation_pricing_unavailable},
+              else: :ok
+        end
+      else
+        :ok
+      end
+    end
+
+    defp supported_req_llm_provider?(selector) do
+      case String.split(selector, ":", parts: 2) do
+        [provider_name, model_id] when model_id != "" ->
+          provider_name = String.replace(provider_name, "-", "_")
+
+          registered_req_llm_provider?(provider_name) or
+            (not req_llm_started?() and packaged_req_llm_provider?(provider_name))
+
+        _invalid ->
+          false
+      end
+    end
+
+    defp registered_req_llm_provider?(provider_name) do
+      provider = String.to_existing_atom(provider_name)
+      match?({:ok, _module}, ReqLLM.provider(provider))
+    rescue
+      ArgumentError -> false
+    end
+
+    defp req_llm_started? do
+      Enum.any?(Application.started_applications(), &(elem(&1, 0) == :req_llm))
+    end
+
+    defp packaged_req_llm_provider?(provider_name) do
+      _ = Application.load(:req_llm)
+
+      case :application.get_key(:req_llm, :modules) do
+        {:ok, modules} -> Enum.any?(modules, &provider_module?(&1, provider_name))
+        :undefined -> false
+      end
+    end
+
+    defp provider_module?(module, provider_name) do
+      Code.ensure_loaded?(module) and
+        ReqLLM.Provider in (module.__info__(:attributes)[:behaviour] || []) and
+        function_exported?(module, :provider_id, 0) and
+        Atom.to_string(module.provider_id()) == provider_name
+    rescue
+      _exception -> false
+    end
+
+    defp cataloged_req_llm_model(selector) do
+      {effective_selector, provider_model_id} = inference_profile_resolution(selector)
+
+      case LLMDB.model(effective_selector) do
+        {:ok, %LLMDB.Model{} = model} ->
+          model =
+            if provider_model_id,
+              do: %{model | provider_model_id: provider_model_id},
+              else: model
+
+          {:ok, %ReqLLMPreparedModel{selector: selector, exact_options: %{}, model: model}}
+
+        _missing ->
+          :uncataloged
+      end
+    end
 
     @impl true
     @spec call(ReqLLMPreparedModel.t(), Invocation.t()) ::
