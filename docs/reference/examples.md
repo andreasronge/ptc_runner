@@ -16,9 +16,9 @@ ptc init DIRECTORY --example llm-replay
 
 `ptc init` refuses a directory that already exists and writes the tree
 atomically. The copy is complete: it carries its own application manifests,
-host document, PTC-Lisp sources, and data, plus a generated `.env` stub when
-the tree names one. Nothing resolves back to a checkout, so the copy runs from
-wherever you put it.
+host document, PTC-Lisp sources, and data, plus the same `AGENTS.md` routing
+card the scaffold ships and a generated `.env` stub when the tree names one.
+Nothing resolves back to a checkout, so the copy runs from wherever you put it.
 
 One tree, `dabstep-fraud`, downloads its dataset before it runs and is
 checkout-only. It is listed at the end of this page.

@@ -11,10 +11,13 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
 
   A tree is embedded from its checked-in files. `.env` stubs are generated from
   host credential declarations when a project names an `env_file`, and a
-  `.gitignore` is generated when the tree has none, so a materialized copy can
-  run without a checkout. Paths inside the tree stay valid because nothing is
-  rewritten and nothing is flattened.
+  `.gitignore` and an `AGENTS.md` routing card are generated when the tree has
+  none, so a materialized copy can run without a checkout and a coding agent
+  finds the same card the scaffold ships. Paths inside the tree stay valid
+  because nothing is rewritten and nothing is flattened.
   """
+
+  alias PtcRunner.Kernel.AgentsCard
 
   @root Path.expand("../../..", __DIR__)
 
@@ -92,6 +95,11 @@ defmodule PtcRunner.Kernel.ExampleLibrary do
       if Map.has_key?(files, ".gitignore"),
         do: files,
         else: Map.put(files, ".gitignore", @gitignore)
+
+    files =
+      if Map.has_key?(files, "AGENTS.md"),
+        do: files,
+        else: Map.put(files, "AGENTS.md", AgentsCard.example())
 
     stub = env_stub.(credential_env_names.(files))
 

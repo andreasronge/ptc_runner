@@ -110,9 +110,9 @@ ptc init DIRECTORY --example named-mission-reader-writer
 ptc init DIRECTORY --example debug-a-failed-run
 ptc init DIRECTORY --example llm-replay</code></pre><p><code class="inline">ptc init</code> refuses a directory that already exists and writes the tree
 atomically. The copy is complete: it carries its own application manifests,
-host document, PTC-Lisp sources, and data, plus a generated <code class="inline">.env</code> stub when
-the tree names one. Nothing resolves back to a checkout, so the copy runs from
-wherever you put it.</p><p>One tree, <code class="inline">dabstep-fraud</code>, downloads its dataset before it runs and is
+host document, PTC-Lisp sources, and data, plus the same <code class="inline">AGENTS.md</code> routing
+card the scaffold ships and a generated <code class="inline">.env</code> stub when the tree names one.
+Nothing resolves back to a checkout, so the copy runs from wherever you put it.</p><p>One tree, <code class="inline">dabstep-fraud</code>, downloads its dataset before it runs and is
 checkout-only. It is listed at the end of this page.</p><h2 id="how-an-example-tree-is-laid-out">How an example tree is laid out</h2><p>Every runnable step is a pair: a project document beside a directory of the
 same name.</p><pre><code>kernel-tutorial/
   ptc-host.json                     installed providers, shared by the steps
