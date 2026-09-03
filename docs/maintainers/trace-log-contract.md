@@ -780,6 +780,13 @@ provider request normalization, `output_limit` records `name: "max_tokens"`,
 the positive effective request value, and the canonically ordered binding
 list. This is the cap PtcRunner sent, not an assertion about a provider's
 private ceiling. A rewritten, removed, or ambiguously resolved cap is omitted.
+For live Kernel requests, the closed binding vocabulary distinguishes the
+effective application `llm_request_output_tokens` ceiling (`application_limit`)
+from installation `params.max_tokens` (`installation_param`) and retains both
+when they tie. The application value may be the manifest request or its
+compiled default, each capped by a lower installed host ceiling. This provenance
+is sealed during model preparation rather than
+reconstructed from the effective value after the request.
 
 When proven truncation prevents a usable shipped-agent action, the failed
 `run-stopped` records `reason: "model_output_truncated"` and the authenticated

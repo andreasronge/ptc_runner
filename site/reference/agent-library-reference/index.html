@@ -295,12 +295,17 @@ selected router alias. When the adapter can authenticate the effective
 also names that cap and its bindings. It describes the cap as request metadata:
 a provider may silently enforce a lower ceiling. If ReqLLM rewrites, removes,
 or ambiguously resolves the cap, the response and terminal diagnostic omit the
-unprovable cap metadata while preserving the terminal truncation result.</p><p>The cap's <code class="inline">bindings</code> list is closed and canonically ordered:
-<code class="inline">configured</code>, <code class="inline">adapter_default</code>, <code class="inline">model_output_limit</code>, and
-<code class="inline">remaining_context</code>. Every tied constraint is retained. The remedy follows the
-binding: raise the host installation's <code class="inline">params.max_tokens</code> when configured,
-choose a model with a larger output/context limit when catalog metadata binds,
-or reduce the requested output or retained transcript.</p><p>The canonical failed <code class="inline">run-stopped</code> event retains the bounded <code class="inline">agent_turns</code>
+unprovable cap metadata while preserving the terminal truncation result.</p><p>The cap's <code class="inline">bindings</code> list is closed and canonically ordered. Live Kernel
+requests preserve <code class="inline">application_limit</code> for the effective
+<code class="inline">limits.llm_request_output_tokens</code>,
+<code class="inline">installation_param</code> for installation <code class="inline">params.max_tokens</code>, or both when their
+values tie. Direct adapter callers use <code class="inline">configured</code>; computed defaults use
+<code class="inline">adapter_default</code>, <code class="inline">model_output_limit</code>, and <code class="inline">remaining_context</code>. Every tied
+constraint is retained. The remedy follows the binding: raise the manifest
+limit (and its installed host ceiling if lower), the installation parameter,
+or both; increase the direct adapter option for <code class="inline">configured</code>; choose a model
+with a larger output/context limit when catalog metadata binds; or reduce the
+requested output or retained transcript.</p><p>The canonical failed <code class="inline">run-stopped</code> event retains the bounded <code class="inline">agent_turns</code>
 limit name, its value, and the same <code class="inline">limit_reason</code>, so trace consumers can
 present the same cause.</p><p>Before dispatch, the loop JSON-encodes the complete prospective request:
 system prompt, accumulated messages, tool schema, and optional model alias. A

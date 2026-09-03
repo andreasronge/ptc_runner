@@ -1,7 +1,14 @@
 defmodule PtcRunner.LLM.OutputLimit do
   @moduledoc false
 
-  @bindings [:configured, :adapter_default, :model_output_limit, :remaining_context]
+  @bindings [
+    :application_limit,
+    :installation_param,
+    :configured,
+    :adapter_default,
+    :model_output_limit,
+    :remaining_context
+  ]
   @maximum 1_000_000
   @alias_pattern ~r/\A[a-z][a-z0-9._-]{0,127}\z/
 
@@ -50,6 +57,8 @@ defmodule PtcRunner.LLM.OutputLimit do
   defp token(value) when is_binary(value) do
     case value do
       "configured" -> :configured
+      "application_limit" -> :application_limit
+      "installation_param" -> :installation_param
       "adapter_default" -> :adapter_default
       "model_output_limit" -> :model_output_limit
       "remaining_context" -> :remaining_context

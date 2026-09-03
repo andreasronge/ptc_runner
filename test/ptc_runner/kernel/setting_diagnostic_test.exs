@@ -58,9 +58,62 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
 
     assert {:ok, message} = ModelOutputDiagnostic.message(details)
     assert message =~ "adapter_default and model_output_limit max_tokens 4096"
-    assert message =~ "Select a model with a larger output limit"
+    assert message =~ "select a model with a larger output limit"
     assert ModelOutputDiagnostic.valid_message?(message)
     refute ModelOutputDiagnostic.valid_message?(message <> "\n")
+  end
+
+  test "model output truncation names the actionable configured ceiling" do
+    cases = [
+      {[:application_limit], "application limit llm_request_output_tokens",
+       "Raise limits.llm_request_output_tokens"},
+      {[:installation_param], "installation params.max_tokens", "Raise params.max_tokens"},
+      {[:application_limit, :installation_param],
+       "application limit llm_request_output_tokens and installation params.max_tokens",
+       "Raise limits.llm_request_output_tokens in the application manifest and its installed host ceiling if lower and raise params.max_tokens"}
+    ]
+
+    for {bindings, source, remedy} <- cases do
+      details = %{
+        limit: :max_tokens,
+        limit_value: 4_096,
+        limit_bindings: bindings,
+        alias: "hy3"
+      }
+
+      assert {:ok, message} = ModelOutputDiagnostic.message(details)
+      assert message =~ "max_tokens 4096 from the #{source}"
+      assert message =~ remedy
+      assert ModelOutputDiagnostic.valid_message?(message)
+    end
+  end
+
+  test "model output truncation names every remedy for tied constraints" do
+    details = %{
+      limit: :max_tokens,
+      limit_value: 4_096,
+      limit_bindings: [:application_limit, :model_output_limit, :remaining_context],
+      alias: "hy3"
+    }
+
+    assert {:ok, message} = ModelOutputDiagnostic.message(details)
+    assert message =~ "Raise limits.llm_request_output_tokens"
+    assert message =~ "select a model with a larger output limit"
+    assert message =~ "reduce the prompt or transcript"
+    assert ModelOutputDiagnostic.valid_message?(message)
+  end
+
+  test "model output truncation message bounds max_tokens consistently" do
+    details = %{
+      limit: :max_tokens,
+      limit_value: 1_000_000,
+      limit_bindings: [:application_limit],
+      alias: "hy3"
+    }
+
+    assert {:ok, message} = ModelOutputDiagnostic.message(details)
+    assert ModelOutputDiagnostic.valid_message?(message)
+    refute ModelOutputDiagnostic.valid_message?(String.replace(message, "1000000", "1000001"))
   end
 
   test "model output truncation uses the stable generic message without cap provenance" do

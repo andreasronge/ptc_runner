@@ -437,6 +437,41 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
             }} = Kernel.run("(return (agent.native/normalize data/response 64000))", config)
   end
 
+  test "agent.native accepts live application and installation truncation bindings" do
+    {:ok, component} = Library.component("agent.native")
+    {:ok, bundle} = Kernel.compile_bundle([component])
+    {:ok, workflow} = WorkflowEnvironment.new(bundle: bundle)
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new()
+
+    for bindings <- [
+          ["application_limit"],
+          ["installation_param"],
+          ["application_limit", "installation_param"]
+        ] do
+      response =
+        truncated_response(%{"content" => ""})
+        |> put_in(["output_limit", "bindings"], bindings)
+
+      {:ok, sink} = EventSink.start(:normal, limits, run_id: "native-live-limit-bindings")
+
+      {:ok, config} =
+        RunConfig.new(
+          workflow_environment: workflow,
+          missions: %{"default" => mission},
+          input: %{"response" => response},
+          limits: limits,
+          event_sink: sink
+        )
+
+      assert {:ok,
+              %{value: %{"kind" => "model-output-truncated", "output-limit" => output_limit}}} =
+               Kernel.run("(return (agent.native/normalize data/response 64000))", config)
+
+      assert output_limit["bindings"] == bindings
+    end
+  end
+
   test "agent.native retains terminal truncation when request-cap provenance is unavailable" do
     {:ok, component} = Library.component("agent.native")
     {:ok, bundle} = Kernel.compile_bundle([component])

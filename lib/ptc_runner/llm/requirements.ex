@@ -4,8 +4,13 @@ defmodule PtcRunner.LLM.Requirements do
 
   Kernel constructs this map after manifest selection and before credentials.
   `PtcRunner.LLM.prepare/2` validates both the requested map and the adapter
-  attestation, then requires exact canonical equality.
+  attestation, then requires exact canonical equality. The output-limit binding
+  records whether the effective application limit, installation parameter, or
+  both selected the effective `max_tokens`; adapters carry that fact into
+  authenticated truncation metadata.
   """
+
+  alias PtcRunner.LLM.OutputLimit
 
   @max_tariff_id_bytes 128
   @max_tokens 1_000_000
@@ -19,7 +24,13 @@ defmodule PtcRunner.LLM.Requirements do
     :frequency_penalty,
     :reasoning_effort
   ]
-  @requirement_keys [:exact_options, :structured_output_mode, :usage_guarantees, :reservation]
+  @requirement_keys [
+    :exact_options,
+    :output_limit_bindings,
+    :structured_output_mode,
+    :usage_guarantees,
+    :reservation
+  ]
   @usage_keys [:tokens, :cost_currency]
   @reservation_keys [:total_tokens?, :cost_tariff]
   @structured_modes [:json_schema, :json_object, :unsupported]
@@ -46,8 +57,11 @@ defmodule PtcRunner.LLM.Requirements do
           cost_tariff: cost_tariff() | nil
         }
 
+  @type output_limit_binding :: :application_limit | :installation_param | :configured
+
   @type t :: %{
           exact_options: exact_options(),
+          output_limit_bindings: nonempty_list(output_limit_binding()),
           structured_output_mode: :json_schema | :json_object | :unsupported,
           usage_guarantees: usage_guarantees(),
           reservation: reservation()
@@ -65,6 +79,7 @@ defmodule PtcRunner.LLM.Requirements do
       when is_map(exact_options) and mode in @structured_modes do
     %{
       exact_options: exact_options,
+      output_limit_bindings: [:configured],
       structured_output_mode: mode,
       usage_guarantees: %{tokens: false, cost_currency: nil},
       reservation: %{total_tokens?: false, cost_tariff: nil}
@@ -81,18 +96,21 @@ defmodule PtcRunner.LLM.Requirements do
   def live(params, output_tokens, structured_output_mode, usage_guarantees, reservation)
       when is_map(params) and is_integer(output_tokens) and output_tokens in 1..@max_tokens and
              structured_output_mode in @structured_modes do
-    max_tokens =
-      case Map.get(params, :max_tokens) do
-        nil -> output_tokens
-        installed when is_integer(installed) -> min(output_tokens, installed)
-      end
+    with :ok <- valid_installed_max_tokens(params) do
+      {max_tokens, output_limit_bindings} =
+        OutputLimit.select([
+          {:application_limit, output_tokens},
+          {:installation_param, Map.get(params, :max_tokens)}
+        ])
 
-    canonical(%{
-      exact_options: authorized_options(params, max_tokens),
-      structured_output_mode: structured_output_mode,
-      usage_guarantees: usage_guarantees,
-      reservation: reservation
-    })
+      canonical(%{
+        exact_options: authorized_options(params, max_tokens),
+        output_limit_bindings: output_limit_bindings,
+        structured_output_mode: structured_output_mode,
+        usage_guarantees: usage_guarantees,
+        reservation: reservation
+      })
+    end
   end
 
   def live(_params, _output_tokens, _structured_output_mode, _usage_guarantees, _reservation),
@@ -106,6 +124,7 @@ defmodule PtcRunner.LLM.Requirements do
   def probe(params, usage_guarantees, reservation) when is_map(params) do
     canonical(%{
       exact_options: authorized_options(params, 1),
+      output_limit_bindings: [:configured],
       structured_output_mode: :unsupported,
       usage_guarantees: usage_guarantees,
       reservation: reservation
@@ -118,12 +137,15 @@ defmodule PtcRunner.LLM.Requirements do
   def canonical(requirements) when is_map(requirements) and not is_struct(requirements) do
     with :ok <- exact_keys(requirements, @requirement_keys),
          {:ok, exact_options} <- canonical_exact_options(requirements.exact_options),
+         {:ok, output_limit_bindings} <-
+           canonical_output_limit_bindings(requirements.output_limit_bindings),
          mode when mode in @structured_modes <- requirements.structured_output_mode,
          {:ok, usage_guarantees} <- canonical_usage(requirements.usage_guarantees),
          {:ok, reservation} <- canonical_reservation(requirements.reservation) do
       {:ok,
        %{
          exact_options: exact_options,
+         output_limit_bindings: output_limit_bindings,
          structured_output_mode: mode,
          usage_guarantees: usage_guarantees,
          reservation: reservation
@@ -134,6 +156,25 @@ defmodule PtcRunner.LLM.Requirements do
   end
 
   def canonical(_requirements), do: :error
+
+  defp canonical_output_limit_bindings(bindings) do
+    if bindings in [
+         [:application_limit],
+         [:installation_param],
+         [:application_limit, :installation_param],
+         [:configured]
+       ],
+       do: {:ok, bindings},
+       else: :error
+  end
+
+  defp valid_installed_max_tokens(params) do
+    case Map.fetch(params, :max_tokens) do
+      :error -> :ok
+      {:ok, value} when is_integer(value) and value in 1..@max_tokens -> :ok
+      {:ok, _invalid} -> :error
+    end
+  end
 
   @spec equal?(t(), t()) :: boolean()
   def equal?(left, right), do: left == right

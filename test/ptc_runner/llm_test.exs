@@ -463,6 +463,7 @@ defmodule PtcRunner.LLMTest do
                )
 
       assert authorized.exact_options == %{max_tokens: 2_048, temperature: 0.15}
+      assert authorized.output_limit_bindings == [:installation_param]
       assert authorized.structured_output_mode == :unsupported
       assert authorized.usage_guarantees == %{tokens: true, cost_currency: "USD"}
 
@@ -476,9 +477,41 @@ defmodule PtcRunner.LLMTest do
                )
 
       assert limited.exact_options == %{max_tokens: 4_096}
+      assert limited.output_limit_bindings == [:application_limit]
 
       assert {:ok, omitted} = Requirements.live(%{}, 1_024, :unsupported, guarantees, reservation)
       assert omitted.exact_options == %{max_tokens: 1_024}
+      assert omitted.output_limit_bindings == [:application_limit]
+
+      assert {:ok, tied} =
+               Requirements.live(
+                 %{max_tokens: 4_096},
+                 4_096,
+                 :unsupported,
+                 guarantees,
+                 reservation
+               )
+
+      assert tied.output_limit_bindings == [:application_limit, :installation_param]
+
+      for impossible <- [
+            [:application_limit, :configured],
+            [:installation_param, :configured],
+            [:application_limit, :installation_param, :configured]
+          ] do
+        assert :error = Requirements.canonical(%{tied | output_limit_bindings: impossible})
+      end
+
+      for invalid <- [0, -1, "4096", nil] do
+        assert :error =
+                 Requirements.live(
+                   %{max_tokens: invalid},
+                   4_096,
+                   :unsupported,
+                   guarantees,
+                   reservation
+                 )
+      end
 
       assert {:ok, structured} =
                Requirements.live(%{max_tokens: 256}, 4_096, :json_schema, guarantees, reservation)
