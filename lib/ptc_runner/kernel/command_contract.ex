@@ -244,9 +244,12 @@ defmodule PtcRunner.Kernel.CommandContract do
          "status" => "error",
          "error" => primary,
          "secondary_errors" => secondary,
-         "result" => result
+         "result" => result,
+         "warnings" => warnings
        }),
-       do: valid_doctor_failure_result?(result, primary, secondary)
+       do:
+         valid_doctor_failure_result?(result, primary, secondary) and
+           valid_doctor_failure_warnings?(result, primary, secondary, warnings)
 
   defp valid_envelope_semantics?(%{
          "command" => "doctor",
@@ -313,27 +316,13 @@ defmodule PtcRunner.Kernel.CommandContract do
             provider_groups_start_with_local?(keys) and
             provider_groups_match_application?(keys, application_check)
 
-        common and
-          case readiness do
-            "unverified" ->
-              doctor_mode_consistent?(
-                :default,
-                application_check,
-                provider_checks,
-                provider_activity
-              )
-
-            "ready" ->
-              doctor_mode_consistent?(
-                :connect,
-                application_check,
-                provider_checks,
-                provider_activity
-              )
-
-            _other ->
-              false
-          end
+        common and readiness == doctor_readiness(provider_checks) and
+          doctor_readiness_consistent?(
+            readiness,
+            application_check,
+            provider_checks,
+            provider_activity
+          )
 
       _invalid ->
         false
@@ -364,6 +353,60 @@ defmodule PtcRunner.Kernel.CommandContract do
       do: true
 
   def valid_success_semantics?(_command, _result), do: false
+
+  @doc false
+  @spec doctor_readiness([map()]) :: String.t()
+  def doctor_readiness([]), do: "not_applicable"
+
+  def doctor_readiness(provider_checks) when is_list(provider_checks) do
+    if Enum.any?(provider_checks, &(&1["status"] == "skipped")),
+      do: "unverified",
+      else: "ready"
+  end
+
+  defp doctor_readiness_consistent?(
+         "not_applicable",
+         _application_check,
+         provider_checks,
+         false
+       ),
+       do: provider_checks == []
+
+  defp doctor_readiness_consistent?(
+         "unverified",
+         application_check,
+         provider_checks,
+         provider_activity
+       ),
+       do:
+         doctor_mode_consistent?(
+           :default,
+           application_check,
+           provider_checks,
+           provider_activity
+         )
+
+  defp doctor_readiness_consistent?(
+         "ready",
+         application_check,
+         provider_checks,
+         provider_activity
+       ),
+       do:
+         doctor_mode_consistent?(
+           :connect,
+           application_check,
+           provider_checks,
+           provider_activity
+         )
+
+  defp doctor_readiness_consistent?(
+         _readiness,
+         _application_check,
+         _provider_checks,
+         _provider_activity
+       ),
+       do: false
 
   @doc false
   @spec valid_doctor_failure_result?(term(), term(), term()) :: boolean()
@@ -490,6 +533,42 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   defp default_local_failure_checks_consistent?(_checks, _primary, _secondary), do: false
+
+  defp valid_doctor_failure_warnings?(_result, _primary, _secondary, []), do: true
+
+  defp valid_doctor_failure_warnings?(
+         %{
+           "checks" => [_runtime, _application, _viewer | provider_checks],
+           "model_aliases" => aliases
+         },
+         primary,
+         secondary,
+         warnings
+       )
+       when is_list(warnings) do
+    default_local_failure_checks_consistent?(provider_checks, primary, secondary) and
+      Enum.all?(warnings, fn
+        %{"code" => "model_uncataloged", "provider" => provider} = warning ->
+          CommandWarning.valid_map?(warning) and selected_live_llm_alias?(aliases, provider) and
+            Enum.any?(provider_checks, fn check ->
+              check["name"] == "provider/#{provider}/local" and check["status"] == "fail"
+            end)
+
+        _invalid ->
+          false
+      end)
+  end
+
+  defp valid_doctor_failure_warnings?(_result, _primary, _secondary, _warnings), do: false
+
+  @doc false
+  @spec selected_live_llm_alias?([map()], binary()) :: boolean()
+  def selected_live_llm_alias?(aliases, name) do
+    Enum.any?(aliases, fn alias_row ->
+      alias_row["alias"] == name and alias_row["source"] == "llm" and
+        alias_row["selected"] == true
+    end)
+  end
 
   defp connect_failure_checks_consistent?(checks, primary) do
     with {:ok, expected_name, expected_code} <- failure_row_identity(primary),
@@ -927,6 +1006,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     closed(
       ~w(schema_version command status run_ref error secondary_errors warnings result),
       base_properties(["doctor"], "error")
+      |> Map.put("warnings", warning_schema())
       |> Map.merge(%{
         "error" => primary_diagnostic,
         "secondary_errors" => %{
@@ -2086,7 +2166,7 @@ defmodule PtcRunner.Kernel.CommandContract do
       "provider_activity" => %{"type" => "boolean"},
       "readiness" =>
         if(mode == :success,
-          do: %{"enum" => ~w(unverified ready)},
+          do: %{"enum" => ~w(not_applicable unverified ready)},
           else: %{"const" => "failed"}
         )
     })

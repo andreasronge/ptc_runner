@@ -113,8 +113,11 @@ defmodule PtcRunner.LLM do
   (e.g. a `:persistent_term`/ETS catalog) so the first per-request provider
   worker does not pay a large one-time load inside its bounded heap.
 
-  Optional. Invoked during selected provider-application admission and again at
-  capability-build time for direct embedding paths; implementations must be
+  Optional. The Kernel invokes it during selected provider-application
+  admission and capability-build time for direct embedding paths. An adapter
+  may also invoke its own callback during audited local contract attestation;
+  that path runs before provider activity inside a bounded worker, so it must
+  use only process-independent local metadata. Implementations must be
   idempotent.
   """
   @callback ensure_ready() :: :ok

@@ -38,7 +38,9 @@ checks can make real requests and may incur cost:
 ptc doctor ptc-project.json --connect
 ```
 
-Plain doctor reports `readiness: "unverified"` when its local checks pass.
+Readiness is derived from provider check rows: no rows report
+`readiness: "not_applicable"`, all passing rows report `readiness: "ready"`,
+and any skipped row reports `readiness: "unverified"`.
 Missing provider commands, unreadable replay fixtures, and other attributable
 local failures produce failed check rows, `readiness: "failed"`, and a nonzero
 exit without activating a provider. Successful active checks report `ready`;
@@ -162,9 +164,9 @@ Useful run switches are:
   error, artifact state, and a closed `warnings` array. For `run`, an uncataloged
   installed model appears there as `model_uncataloged` with its provider alias
   and an adapter-attested public selector; the same warning is retained in
-  `run-started` metadata. Non-run commands require an empty warnings
-  array. In particular, `doctor --connect` retains uncataloged-model notices on
-  stderr rather than claiming run metadata it does not produce. Parse the
+  `run-started` metadata. A failed plain `doctor` command also publishes locally
+  derived `model_uncataloged` warnings for every affected provider check;
+  successful non-run commands keep the array empty. Parse the
   envelope rather than scraping stdout, which is a human
   presentation channel that may also carry application output.
 

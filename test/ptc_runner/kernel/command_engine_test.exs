@@ -2365,6 +2365,175 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "plain doctor locally refuses uncataloged cost reservation pricing", %{
+    tmp_dir: directory
+  } do
+    application =
+      doctor_application(directory, "uncataloged-pricing", workflow: ["model"], mission: [])
+
+    installation = %{
+      "source" => "llm",
+      "structured_output_mode" => "unsupported",
+      "usage_guarantees" => %{"tokens" => true, "cost_currency" => "USD"},
+      "reservation_tariff" => %{"currency" => "USD", "id" => "test-tariff-v1"},
+      "installation_revision" => "model-v1",
+      "model" => "openrouter:future-vendor/future-priced-model-1781",
+      "credential" => "key"
+    }
+
+    host = %{
+      "limits" => %{"llm_cost_microusd" => 100_000},
+      "credentials" => %{"key" => %{"literal" => "unused-test-secret"}},
+      "install" => %{"model" => installation}
+    }
+
+    host_path = write_host_config(directory, "uncataloged-pricing", host)
+    argv = [application, "--host-config", host_path]
+
+    assert {:ok, %CommandOutcome{} = validated} = CommandEngine.dispatch(["validate" | argv])
+    assert validated.exit_status == 0
+
+    assert {:error, %CommandOutcome{} = doctored} = CommandEngine.dispatch(["doctor" | argv])
+    assert doctored.exit_status == 4
+    assert doctored.envelope["error"]["phase"] == "local_preflight"
+    assert doctored.envelope["error"]["code"] == "model_contract_unsupported"
+    assert doctored.envelope["error"]["provider_activity"] == false
+
+    result = doctored.envelope["result"]
+
+    assert %{"status" => "fail", "code" => "model_contract_unsupported"} =
+             Enum.find(result["checks"], &(&1["name"] == "provider/model/local"))
+
+    assert result["provider_activity"] == false
+    assert result["usage"] == %{"llm_usage_state" => "available", "llm_usage" => []}
+    assert [warning] = doctored.envelope["warnings"]
+    assert warning["code"] == "model_uncataloged"
+    assert warning["provider"] == "model"
+    assert warning["model"] == installation["model"]
+    assert_schema_valid(doctored.envelope)
+
+    assert {:stdio, rendered_result, rendered_warnings} = CommandRenderer.render(doctored)
+    assert Jason.decode!(rendered_result) == result
+    assert rendered_warnings =~ "warning: model_uncataloged:"
+    assert rendered_warnings =~ installation["model"]
+
+    refute CommandContract.valid_envelope?(
+             put_in(doctored.envelope, ["warnings", Access.at(0), "provider"], "other")
+           )
+
+    {:ok, primary_subject} =
+      CommandSubject.provider("model", :local, %{destination: :workflow, index: 0})
+
+    {:ok, primary_warning} = CommandWarning.model_uncataloged("model", installation["model"])
+
+    primary =
+      CommandDiagnostic.new!(:local_preflight, :model_contract_unsupported,
+        subject: primary_subject,
+        provider_activity: false,
+        message: ModelContractDiagnostic.cost_reservation_pricing_message(installation["model"]),
+        warnings: [primary_warning]
+      )
+
+    {:ok, unrelated_subject} =
+      CommandSubject.provider("other", :local, %{destination: :workflow, index: 0})
+
+    {:ok, unrelated_warning} = CommandWarning.model_uncataloged("other", installation["model"])
+
+    unrelated =
+      CommandDiagnostic.new!(:local_preflight, :model_contract_unsupported,
+        subject: unrelated_subject,
+        provider_activity: false,
+        message: ModelContractDiagnostic.cost_reservation_pricing_message(installation["model"]),
+        warnings: [unrelated_warning]
+      )
+
+    assert_raise ArgumentError, fn ->
+      CommandOutcome.doctor_failure(
+        :doctor,
+        doctored.envelope["run_ref"],
+        result,
+        primary,
+        [],
+        [unrelated]
+      )
+    end
+
+    replay_result = put_in(result, ["model_aliases", Access.at(0), "source"], "llm_replay")
+
+    refute CommandContract.valid_envelope?(%{
+             doctored.envelope
+             | "result" => replay_result
+           })
+
+    assert_raise ArgumentError, fn ->
+      CommandOutcome.doctor_failure(
+        :doctor,
+        doctored.envelope["run_ref"],
+        replay_result,
+        primary,
+        [],
+        [primary]
+      )
+    end
+
+    mixed_result =
+      update_in(result["checks"], fn checks ->
+        Enum.map(checks, fn
+          %{"name" => "provider/model/local"} = check ->
+            %{check | "code" => "adapter_unavailable"}
+
+          check ->
+            check
+        end)
+      end)
+
+    mixed_primary =
+      CommandDiagnostic.new!(:local_preflight, :adapter_unavailable,
+        subject: primary_subject,
+        provider_activity: false
+      )
+
+    mixed =
+      CommandOutcome.doctor_failure(
+        :doctor,
+        doctored.envelope["run_ref"],
+        mixed_result,
+        mixed_primary,
+        [],
+        [primary]
+      )
+
+    assert mixed.envelope["warnings"] == [warning]
+    assert CommandContract.valid_envelope?(mixed.envelope)
+
+    assert {:error, %CommandOutcome{} = run} = CommandEngine.dispatch(["run" | argv])
+    assert run.exit_status == 4
+    assert run.envelope["error"]["phase"] == "local_preflight"
+    assert run.envelope["error"]["code"] == "model_contract_unsupported"
+    assert run.envelope["error"]["message"] == doctored.envelope["error"]["message"]
+
+    control_path =
+      write_host_config(directory, "uncataloged-pricing-control", Map.delete(host, "limits"))
+
+    control_argv = [application, "--host-config", control_path]
+
+    assert {:ok, %CommandOutcome{} = control_doctor} =
+             CommandEngine.dispatch(["doctor" | control_argv])
+
+    assert control_doctor.exit_status == 0
+
+    assert %{"status" => "pass", "code" => "available"} =
+             Enum.find(
+               control_doctor.envelope["result"]["checks"],
+               &(&1["name"] == "provider/model/local")
+             )
+
+    assert {:ok, %CommandOutcome{} = control_run} = CommandEngine.dispatch(["run" | control_argv])
+    assert control_run.exit_status == 0
+    assert_schema_valid(control_run.envelope)
+  end
+
+  @tag :tmp_dir
   test "models projects declarations without invoking a hostile local callback", %{
     tmp_dir: directory
   } do
@@ -2543,6 +2712,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.exit_status == 0
     assert outcome.envelope["command"] == "doctor"
     assert outcome.envelope["result"]["provider_activity"] == false
+    assert outcome.envelope["result"]["readiness"] == "not_applicable"
 
     checks = outcome.envelope["result"]["checks"]
     assert Enum.map(checks, & &1["name"]) == ["runtime", "application", "viewer"]
@@ -2637,6 +2807,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              Enum.find(checks, &(&1["name"] == "provider/workspace/connectivity"))
 
     assert outcome.envelope["result"]["provider_activity"] == false
+    assert outcome.envelope["result"]["readiness"] == "unverified"
     assert_schema_valid(outcome.envelope)
   end
 
@@ -2815,7 +2986,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                &(&1["name"] == "provider/frozen-model/local")
              )
 
-    assert outcome.envelope["result"]["readiness"] == "unverified"
+    assert outcome.envelope["result"]["readiness"] == "ready"
     assert outcome.envelope["result"]["provider_activity"] == false
     assert_schema_valid(outcome.envelope)
   end
@@ -3028,6 +3199,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              Enum.find(checks, &(&1["name"] == "provider/workspace/connectivity"))
 
     assert outcome.envelope["result"]["provider_activity"] == true
+    assert outcome.envelope["result"]["readiness"] == "ready"
 
     # Independent of the rows: the server was really contacted and really
     # served the acquisition handshake.
@@ -3069,6 +3241,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              Enum.find(checks, &(&1["name"] == "application"))
 
     assert outcome.envelope["result"]["provider_activity"] == false
+    assert outcome.envelope["result"]["readiness"] == "not_applicable"
     refute File.exists?(marker)
     assert_schema_valid(outcome.envelope)
     assert CommandContract.valid_success_result?(:doctor, outcome.envelope["result"])
@@ -4368,7 +4541,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "checks" => fixed_doctor_checks,
              "model_aliases" => [],
              "provider_activity" => true,
-             "readiness" => "unverified",
+             "readiness" => "not_applicable",
              "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
@@ -4384,7 +4557,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ],
       "model_aliases" => [],
       "provider_activity" => true,
-      "readiness" => "ready",
+      "readiness" => "not_applicable",
       "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
@@ -4402,7 +4575,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ],
       "model_aliases" => [],
       "provider_activity" => false,
-      "readiness" => "unverified",
+      "readiness" => "ready",
       "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
@@ -4426,9 +4599,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
             ],
         "model_aliases" => [],
         "provider_activity" => false,
-        "readiness" => "unverified",
+        "readiness" => "ready",
         "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
       })
+
+    refute CommandContract.valid_success_semantics?(
+             :doctor,
+             put_in(valid_doctor.envelope, ["result", "readiness"], "unverified")["result"]
+           )
 
     active_doctor_result = %{
       "checks" => [
@@ -4481,7 +4659,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       ],
       "model_aliases" => [],
       "provider_activity" => false,
-      "readiness" => "ready",
+      "readiness" => "not_applicable",
       "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
@@ -4491,6 +4669,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                run_ref,
                provider_free_connect_result
              )
+
+    refute CommandContract.valid_success_semantics?(
+             :doctor,
+             %{provider_free_connect_result | "readiness" => "ready"}
+           )
 
     impossible_default_results = [
       %{
@@ -5150,19 +5333,22 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     message =
       ModelContractDiagnostic.cost_reservation_pricing_message("provider:model")
 
-    assert {:ok, _diagnostic} =
-             CommandDiagnostic.new(:local_preflight, :model_contract_unsupported,
-               subject: subject,
-               provider_activity: true,
-               message: message,
-               warnings: [warning]
-             )
+    for provider_activity <- [false, true] do
+      assert {:ok, _diagnostic} =
+               CommandDiagnostic.new(:local_preflight, :model_contract_unsupported,
+                 subject: subject,
+                 provider_activity: provider_activity,
+                 message: message,
+                 warnings: [warning]
+               )
+    end
 
     {:ok, other_provider} = CommandWarning.model_uncataloged("other", "provider:model")
     {:ok, other_model} = CommandWarning.model_uncataloged("model", "provider:other")
     malformed_model = %{warning | model: :invalid}
 
-    for opts <- [
+    for provider_activity <- [false, true],
+        opts <- [
           [subject: subject, message: message],
           [subject: subject, message: message, warnings: [other_provider]],
           [subject: subject, message: message, warnings: [other_model]],
@@ -5172,7 +5358,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                CommandDiagnostic.new(
                  :local_preflight,
                  :model_contract_unsupported,
-                 Keyword.put(opts, :provider_activity, true)
+                 Keyword.put(opts, :provider_activity, provider_activity)
                )
     end
   end

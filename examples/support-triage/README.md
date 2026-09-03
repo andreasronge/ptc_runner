@@ -55,8 +55,8 @@ to see exactly what a design decision added.
 `<untrusted_tickets>` block before they enter the escalation task, because
 ticket text is customer-authored. The block tells the model to treat that text
 as data; it does not stop a misleading ticket from producing a wrong team or
-priority. The mission grant is what holds: the escalation mission has no
-tickets and no tools, so injected text cannot reach a capability or the wider
-pool. The scheduled live test for this example checks each escalation's id,
-priority, team, and first action against the policy; only the summary prose
-goes unchecked.
+priority. The mission grant prevents the escalation model from calling a
+capability or reading the wider ticket pool directly. It does not filter the
+handoff, so this example provides no data-flow guarantee. The scheduled live
+test checks each escalation's id, priority, team, and first action against the
+policy; only the summary prose goes unchecked.

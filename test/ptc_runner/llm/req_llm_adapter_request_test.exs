@@ -270,6 +270,40 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
                "openrouter:future-vendor/future-priced-model-1724",
                requirements
              )
+
+    assert {:error, :uncataloged_cost_reservation_pricing_unavailable} =
+             ReqLLMAdapter.local_contract_attestation(
+               "openrouter:future-vendor/future-priced-model-1724",
+               requirements
+             )
+
+    registered_providers = ReqLLM.Providers.list()
+    assert :ok = ReqLLMAdapter.local_contract_attestation("logger:model", requirements)
+    assert ReqLLM.Providers.list() == registered_providers
+
+    assert {:error, %ReqLLM.Error.Invalid.Provider{}} =
+             ReqLLMAdapter.prepare_model("logger:model", requirements)
+
+    on_exit(fn ->
+      _ = Application.load(:req_llm)
+      :ok = ReqLLM.Providers.initialize()
+    end)
+
+    :ok = LLMSupport.stop_provider_applications()
+    Enum.each(ReqLLM.Providers.list(), &ReqLLM.Providers.unregister/1)
+    _ = Application.unload(:req_llm)
+    assert {:ok, :openai} = ReqLLM.Providers.register(ReqLLM.Providers.OpenAI)
+
+    assert {:error, :uncataloged_cost_reservation_pricing_unavailable} =
+             ReqLLMAdapter.local_contract_attestation("atlascloud:future-model", requirements)
+
+    assert :ok = ReqLLMAdapter.local_contract_attestation("logger:model", requirements)
+    refute Enum.any?(Application.started_applications(), &(elem(&1, 0) == :req_llm))
+    assert ReqLLM.Providers.list() == [:openai]
+
+    _ = Application.load(:req_llm)
+    :ok = ReqLLM.Providers.initialize()
+    assert ReqLLM.Providers.list() == registered_providers
   end
 
   test "prefers OpenRouter's reported charge over catalog pricing", %{test: test} do
