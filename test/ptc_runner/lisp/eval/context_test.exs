@@ -2,6 +2,7 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
   use ExUnit.Case, async: true
 
   alias PtcRunner.Lisp.Eval.Context
+  alias PtcRunner.Lisp.Eval.Effects
 
   doctest PtcRunner.Lisp.Eval.Context
 
@@ -29,6 +30,114 @@ defmodule PtcRunner.Lisp.Eval.ContextTest do
     assert child.private_tool_authority? === parent.private_tool_authority?
     assert child.user_ns == %{"scope" => "child"}
     assert child.env == %{"x" => 1}
+  end
+
+  test "child contexts inherit run state while resetting invocation state" do
+    tool_exec = fn _, _, _ -> nil end
+    tool_failure_token = make_ref()
+    parallel_budget = self()
+    prelude_exports = %{"demo/value" => {:callable, %{}}}
+    prelude = %{artifact: true}
+    effects = %Effects{prints: ["parent"]}
+
+    parent =
+      Context.new(%{"input" => 1}, %{"scope" => "parent"}, %{"old" => 0}, tool_exec, [:turn],
+        tool_failure_token: tool_failure_token,
+        failure_origin: :capability,
+        return_origin: :direct_tool_call,
+        origin_stack: [%{type: :user_closure}],
+        prelude_caller_user_ns_stack: [%{"caller" => true}],
+        loop_limit: 25,
+        max_tool_calls: 4,
+        max_print_length: 99,
+        max_tool_call_result_bytes: 88,
+        pmap_timeout: 77,
+        parallel_deadline_cap: 66,
+        pmap_max_concurrency: 3,
+        max_heap: 55,
+        worker_max_heap: 44,
+        parallel_budget: parallel_budget,
+        tools_meta: %{"tool" => %{private: true}},
+        strict_data: true,
+        data_grants: ["one"],
+        missing_data_params_message: "missing",
+        component_catalog: %{entries: []},
+        inspect_only: true,
+        strict_transitive_calls: true,
+        private_tool_authority?: true,
+        direct_namespaces: ["demo"],
+        transitive_namespace_requirers: %{"dep" => ["component"]},
+        prelude_export_mask: %{"demo" => ["demo/value"]},
+        shipped_export_owners: %{"demo/value" => "component"},
+        attached_component_ids: ["component"]
+      )
+      |> Map.merge(%{
+        effects: effects,
+        locals: MapSet.new(["parent-local"]),
+        pmap_deadline: 33,
+        prelude_exports: prelude_exports,
+        prelude: prelude
+      })
+
+    child = Context.new_child(parent, %{"scope" => "child"}, %{"x" => 1})
+
+    inherited_fields =
+      Map.keys(Map.from_struct(parent)) --
+        [
+          :user_ns,
+          :env,
+          :effects,
+          :locals,
+          :max_print_length,
+          :max_tool_call_result_bytes,
+          :pmap_timeout,
+          :parallel_deadline_cap,
+          :pmap_max_concurrency,
+          :pmap_deadline,
+          :max_heap,
+          :worker_max_heap,
+          :parallel_budget,
+          :tools_meta
+        ]
+
+    assert Map.take(child, inherited_fields) === Map.take(parent, inherited_fields)
+    assert child.user_ns == %{"scope" => "child"}
+    assert child.env == %{"x" => 1}
+    assert child.effects == Effects.empty()
+    assert child.locals == MapSet.new()
+    assert child.max_print_length == 2_000
+    assert child.max_tool_call_result_bytes == 16_384
+    assert child.pmap_timeout == 5_000
+    assert child.parallel_deadline_cap == nil
+    assert child.pmap_max_concurrency == Context.default_pmap_max_concurrency()
+    assert child.pmap_deadline == nil
+    assert child.max_heap == nil
+    assert child.worker_max_heap == nil
+    assert child.parallel_budget == nil
+    assert child.tools_meta == %{}
+
+    overridden =
+      Context.new_child(parent, %{}, %{},
+        max_print_length: 9,
+        max_tool_call_result_bytes: 8,
+        pmap_timeout: 7,
+        parallel_deadline_cap: 6,
+        pmap_max_concurrency: 5,
+        max_heap: 4,
+        worker_max_heap: 3,
+        parallel_budget: parallel_budget,
+        tools_meta: %{"override" => %{}}
+      )
+
+    assert overridden.max_print_length == 9
+    assert overridden.max_tool_call_result_bytes == 8
+    assert overridden.pmap_timeout == 7
+    assert overridden.parallel_deadline_cap == 6
+    assert overridden.pmap_max_concurrency == 5
+    assert overridden.max_heap == 4
+    assert overridden.worker_max_heap == 3
+    assert overridden.parallel_budget === parallel_budget
+    assert overridden.tools_meta == %{"override" => %{}}
   end
 
   test "loop_limit defaults to nil and consume_loop_iteration is activation-local" do
