@@ -113,10 +113,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
     # Kernel-supplied diagnostic used when `data/params` is missing under
     # strict data. `nil` treats `params` as an ordinary missing key.
     missing_data_params_message: nil,
-    # Kernel-supplied catalog of shipped library component IDs. `nil` means
-    # Introspection should not distinguish unattached shipped refs from
-    # unknown ones.
-    shipped_library_ids: nil,
     # Selected Kernel environment component catalog. `nil` for direct Lisp.run/2.
     component_catalog: nil,
     # When true, tool/Kernel/provider routes fail with inspect_only_unavailable.
@@ -224,7 +220,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
           strict_data: boolean(),
           data_grants: [String.t()] | nil,
           missing_data_params_message: String.t() | nil,
-          shipped_library_ids: MapSet.t(String.t()) | nil,
           component_catalog: term() | nil,
           inspect_only: boolean(),
           strict_transitive_calls: boolean(),
@@ -316,7 +311,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
       data_grants: normalize_data_grants(Keyword.get(opts, :data_grants)),
       missing_data_params_message:
         normalize_missing_params_message(Keyword.get(opts, :missing_data_params_message)),
-      shipped_library_ids: normalize_shipped_library_ids(Keyword.get(opts, :shipped_library_ids)),
       component_catalog: Keyword.get(opts, :component_catalog),
       inspect_only: Keyword.get(opts, :inspect_only, false),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
@@ -335,15 +329,25 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @doc false
   @spec new_child(t(), map(), map(), keyword()) :: t()
   def new_child(%__MODULE__{} = parent, user_ns, env, opts \\ []) do
-    opts =
-      [
-        tool_call_budget: parent.tool_call_budget,
-        tool_activity: parent.tool_activity
-      ] ++ opts
-
-    parent.ctx
-    |> new(user_ns, env, parent.tool_exec, parent.turn_history, opts)
-    |> inherit_prelude(parent)
+    %{
+      parent
+      | user_ns: user_ns,
+        env: env,
+        effects: Effects.empty(),
+        locals: MapSet.new(),
+        max_print_length: Keyword.get(opts, :max_print_length, @default_print_length),
+        max_tool_call_result_bytes:
+          Keyword.get(opts, :max_tool_call_result_bytes, @default_tool_call_result_bytes),
+        pmap_timeout: Keyword.get(opts, :pmap_timeout, @default_pmap_timeout),
+        parallel_deadline_cap: Keyword.get(opts, :parallel_deadline_cap),
+        pmap_max_concurrency:
+          Keyword.get(opts, :pmap_max_concurrency, @default_pmap_max_concurrency),
+        pmap_deadline: nil,
+        max_heap: Keyword.get(opts, :max_heap),
+        worker_max_heap: Keyword.get(opts, :worker_max_heap, Keyword.get(opts, :max_heap)),
+        parallel_budget: Keyword.get(opts, :parallel_budget),
+        tools_meta: Keyword.get(opts, :tools_meta, %{})
+    }
   end
 
   @doc false
@@ -384,13 +388,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
     do: message
 
   defp normalize_missing_params_message(_message), do: nil
-
-  defp normalize_shipped_library_ids(ids) when is_list(ids) do
-    ids |> Enum.filter(&is_binary/1) |> MapSet.new()
-  end
-
-  defp normalize_shipped_library_ids(%MapSet{} = ids), do: ids
-  defp normalize_shipped_library_ids(_ids), do: nil
 
   defp normalize_namespace_requirers(requirers) when is_map(requirers) do
     Map.new(requirers, fn
@@ -616,45 +613,6 @@ defmodule PtcRunner.Lisp.Eval.Context do
   @spec update_user_ns(t(), map()) :: t()
   def update_user_ns(%__MODULE__{} = context, new_user_ns) do
     %{context | user_ns: new_user_ns}
-  end
-
-  @doc """
-  Copies the attached prelude tables and shared run-scoped resources from
-  `source` onto `context`.
-
-  Sub-contexts built with `new/6` for closure/thunk evaluation start with empty
-  prelude tables; this re-installs them so a qualified prelude call made from
-  inside a user closure still resolves.
-  """
-  @spec inherit_prelude(t(), t()) :: t()
-  def inherit_prelude(%__MODULE__{} = context, %__MODULE__{} = source) do
-    %{
-      context
-      | prelude_exports: source.prelude_exports,
-        prelude: source.prelude,
-        strict_transitive_calls: source.strict_transitive_calls,
-        private_tool_authority?: source.private_tool_authority?,
-        direct_namespaces: source.direct_namespaces,
-        transitive_namespace_requirers: source.transitive_namespace_requirers,
-        prelude_export_mask: source.prelude_export_mask,
-        shipped_export_owners: source.shipped_export_owners,
-        attached_component_ids: source.attached_component_ids,
-        max_tool_calls: source.max_tool_calls,
-        loop_limit: source.loop_limit,
-        tool_call_budget: source.tool_call_budget,
-        tool_activity: source.tool_activity,
-        tool_failure_token: source.tool_failure_token,
-        failure_origin: source.failure_origin,
-        return_origin: source.return_origin,
-        origin_stack: source.origin_stack,
-        prelude_caller_user_ns_stack: source.prelude_caller_user_ns_stack,
-        strict_data: source.strict_data,
-        data_grants: source.data_grants,
-        missing_data_params_message: source.missing_data_params_message,
-        shipped_library_ids: source.shipped_library_ids,
-        component_catalog: source.component_catalog,
-        inspect_only: source.inspect_only
-    }
   end
 
   @doc false

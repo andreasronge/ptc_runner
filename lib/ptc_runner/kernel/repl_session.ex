@@ -33,7 +33,6 @@ defmodule PtcRunner.Kernel.ReplSession do
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.EventSink
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.PrivateDirectory
@@ -876,7 +875,6 @@ defmodule PtcRunner.Kernel.ReplSession do
         link: true,
         strict_data: true,
         data_grants: DataKeys.source_referenceable_forms(session.config.input),
-        shipped_library_ids: Library.component_ids(),
         component_catalog: Environment.catalog(session.config.workflow_environment),
         inspect_only: session.config.inspect_only
       )
