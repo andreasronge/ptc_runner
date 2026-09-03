@@ -93,6 +93,42 @@ defmodule PtcRunner.Lisp.HeapRebaselineTest do
       assert step.fail.details.limit_bytes >= step.fail.details.budget_bytes
     end
 
+    test "eval heap messages stay stable across different environment baselines" do
+      program = "(count (vec (range 2000000)))"
+
+      assert {:error, small} =
+               Lisp.run(program,
+                 context: %{"padding" => [0]},
+                 filter_context: false,
+                 max_heap: @default_max_heap,
+                 setup_max_heap: 6_000_000,
+                 timeout: 5_000
+               )
+
+      assert {:error, large} =
+               Lisp.run(program,
+                 context: %{"padding" => Enum.to_list(1..100_000)},
+                 filter_context: false,
+                 max_heap: @default_max_heap,
+                 setup_max_heap: 6_000_000,
+                 timeout: 5_000
+               )
+
+      assert small.fail.details.baseline_bytes != large.fail.details.baseline_bytes
+      assert small.fail.message == large.fail.message
+
+      assert small.fail.message ==
+               "heap limit exceeded: program exceeded its evaluation heap budget"
+
+      for step <- [small, large] do
+        assert step.fail.details.phase == :eval
+        assert step.fail.details.budget_bytes == @default_max_heap * 8
+
+        assert step.fail.details.limit_bytes ==
+                 step.fail.details.baseline_bytes + step.fail.details.budget_bytes
+      end
+    end
+
     test "an evaluation timeout preserves prepared native continuation memory" do
       owner = self()
 

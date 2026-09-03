@@ -131,8 +131,9 @@ component the manifest already selects, including one selected through a
 dependency such as <code class="inline">agent.prompt</code>. It cannot add a component, change
 dependencies, or grant a provider; the
 <a href="/reference/component-contracts/#evaluate-one-replacement-component">component reference</a>
-lists its fields and validation rules.</p><p>Replay removes model sampling as a variable. It does not make MCP content
-deterministic unless that content is frozen as well.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/guides/components-and-preludes/">Inspect and customize components</a> has the
+lists its fields and validation rules.</p><p>Replay removes model sampling as a variable, but every model-visible
+observation must remain stable. For details, see the
+<a href="/reference/host-installation/#choose-a-provider-source">exact request-matching requirement</a>.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/guides/components-and-preludes/">Inspect and customize components</a> has the
 materialize and validate commands.</li><li><a href="/reference/kernel-limits-reference/">Kernel limits</a> lists the ceilings that must
 stay equal between the two runs.</li></ul>
 </article>
