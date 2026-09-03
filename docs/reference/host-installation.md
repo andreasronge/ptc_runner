@@ -385,7 +385,13 @@ blank lines. Nothing the line contains is published. The other local checks
 
 Fixture matching is exact: changed messages, tools, schema, or provider-neutral
 parameters produce another `request_hash` rather than silently consuming
-unrelated evidence. A structured-output fixture uses the public
+unrelated evidence. That request includes every model-visible observation
+accumulated during the run. Frozen MCP response content is therefore necessary
+but not sufficient when opaque cursors, generated identifiers, timestamps, or
+runtime diagnostics can vary between hosts. When recording a portable fixture,
+keep those values stable and retain host-specific measurements only in
+structured details that do not enter a later model request. A
+structured-output fixture uses the public
 `structured_output` object rather than encoded `content`. A miss is a provider
 error with `:kind :provider_error` and `:reason :not_found`, and `llm/request`
 returns that envelope as a value with

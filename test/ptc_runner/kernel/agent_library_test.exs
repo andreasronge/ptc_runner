@@ -10,6 +10,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.Limits
   alias PtcRunner.Kernel.LLMCapability
+  alias PtcRunner.Kernel.LLMReplay
   alias PtcRunner.Kernel.LLMRouter
   alias PtcRunner.Kernel.MissionEnvironment
   alias PtcRunner.Kernel.ModelContract
@@ -3760,6 +3761,47 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert feedback =~ "previously committed definitions remain"
     assert feedback =~ "filter"
     assert feedback =~ "reduce"
+  end
+
+  test "heap-kill correction requests and retained execution stay stable across baselines" do
+    run = fn padding ->
+      responses = [
+        agent_return(
+          "explode",
+          ~S|(reduce (fn [acc i] (conj acc (range 0 4096))) [] (range 0 4096))|
+        ),
+        agent_return("recover", "(return 42)")
+      ]
+
+      {:ok, config} =
+        agent_config(responses, [evaluation_heap_words: 200_000],
+          mission_data: %{"baseline_padding" => padding}
+        )
+
+      assert {:ok, %{value: outcome}} =
+               Kernel.run(
+                 ~S|(return (agent.core/run-outcome "Recover efficiently" {"max_turns" 2 "retain_programs" 2}))|,
+                 config
+               )
+
+      assert_receive {:agent_request, first_request}
+      assert_receive {:agent_request, correction_request}
+
+      assert [failed, %{"execution" => %{"outcome" => "returned"}}] = outcome["programs"]
+      assert failed["execution"]["kind"] == "memory_exceeded"
+
+      {first_request, correction_request, failed["execution"]}
+    end
+
+    small = run.([0])
+    large = run.(Enum.to_list(1..20_000))
+
+    assert elem(small, 0) == elem(large, 0)
+    assert elem(small, 1) == elem(large, 1)
+    assert elem(small, 2) == elem(large, 2)
+
+    assert {:ok, small_hash} = LLMReplay.request_hash(elem(small, 1))
+    assert {:ok, ^small_hash} = LLMReplay.request_hash(elem(large, 1))
   end
 
   test "agent distinguishes retained-definition rejection from a heap kill" do

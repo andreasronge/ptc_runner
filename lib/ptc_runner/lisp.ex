@@ -1887,10 +1887,8 @@ defmodule PtcRunner.Lisp do
       "the #{info.limit_bytes}-byte setup ceiling (raise :setup_max_heap or shrink the grant)"
   end
 
-  defp memory_exceeded_message(%{phase: :eval} = info) do
-    "heap limit exceeded: program used more than its #{info.budget_bytes}-byte " <>
-      "budget above the #{info.baseline_bytes}-byte environment baseline " <>
-      "(limit #{info.limit_bytes} bytes)"
+  defp memory_exceeded_message(%{phase: :eval}) do
+    "heap limit exceeded: program exceeded its evaluation heap budget"
   end
 
   defp memory_exceeded_message(bytes) when is_integer(bytes),

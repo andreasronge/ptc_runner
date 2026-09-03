@@ -91,8 +91,9 @@ dependencies, or grant a provider; the
 [component reference](../reference/component-contracts.md#evaluate-one-replacement-component)
 lists its fields and validation rules.
 
-Replay removes model sampling as a variable. It does not make MCP content
-deterministic unless that content is frozen as well.
+Replay removes model sampling as a variable, but every model-visible
+observation must remain stable. For details, see the
+[exact request-matching requirement](../reference/host-installation.md#choose-a-provider-source).
 
 ## Next steps
 
