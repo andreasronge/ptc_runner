@@ -552,8 +552,9 @@ ptc init kernel-tutorial --example kernel-tutorial
 ptc doctor kernel-tutorial/02-deepseek-extract.ptc-project.json --connect
 ```
 
-`readiness` is `ready` only after successful active checks. Plain doctor is
-`unverified`; a failed active check is `failed` and exits nonzero. The report
+`readiness` is `not_applicable` when there are no provider check rows, `ready`
+when every provider row passes, and `unverified` when any provider row is
+skipped. A failed check reports `failed` and exits nonzero. The report
 does not expose endpoints, commands, paths, credentials, or OAuth authority.
 
 ## Next steps
