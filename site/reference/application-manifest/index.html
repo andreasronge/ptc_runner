@@ -213,9 +213,14 @@ once per declaration, to a 1,048,576-byte application aggregate. Overflow is
 rejected during inert acquisition as
 <code class="inline">application/contract_projection_limit_exceeded</code>.</p><p>Contracts are closed object schemas by default. The profile supports common
 object, array, scalar, enum, const, and bound keywords, plus the asserted
-<code class="inline">sha256</code> string format. It also supports one root discriminated <code class="inline">oneOf</code> for
-closed object branches. References, regexes, nested composition, union types,
-and general-purpose <code class="inline">oneOf</code> are rejected.</p><p>Two edges are worth knowing before you write one. <code class="inline">enum</code> and <code class="inline">const</code> must carry
+<code class="inline">sha256</code> string format. <code class="inline">type</code> is either one of <code class="inline">&quot;null&quot;</code>, <code class="inline">&quot;boolean&quot;</code>,
+<code class="inline">&quot;object&quot;</code>, <code class="inline">&quot;array&quot;</code>, <code class="inline">&quot;number&quot;</code>, <code class="inline">&quot;integer&quot;</code>, and <code class="inline">&quot;string&quot;</code>, or—at a
+non-root node—an exactly two-member nullable array pairing <code class="inline">&quot;null&quot;</code> with one
+of the other types, in either order. Nullable object and array nodes use their
+non-null member for keyword applicability. The root remains a non-nullable
+object. The profile also supports one root discriminated <code class="inline">oneOf</code> for closed
+object branches. References, regexes, nested composition, general type unions
+(such as <code class="inline">[&quot;string&quot;, &quot;number&quot;]</code>), and general-purpose <code class="inline">oneOf</code> are rejected.</p><p>Two edges are worth knowing before you write one. <code class="inline">enum</code> and <code class="inline">const</code> must carry
 a sibling <code class="inline">type</code>, so <code class="inline">{&quot;enum&quot;: [&quot;a&quot;, &quot;b&quot;]}</code> is rejected and
 <code class="inline">{&quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;a&quot;, &quot;b&quot;]}</code> is accepted. The accepted bounds are
 <code class="inline">minimum</code>, <code class="inline">maximum</code>, <code class="inline">minLength</code>, <code class="inline">maxLength</code>, <code class="inline">minItems</code>, and <code class="inline">maxItems</code>;
@@ -223,10 +228,11 @@ a sibling <code class="inline">type</code>, so <code class="inline">{&quot;enum&
 composition is rejected during inert application loading rather than being
 partially interpreted at runtime. A <code class="inline">contract_invalid</code> rejection names the rule
 it broke and the JSON Pointer of the offending node inside the schema document
-— for example <code class="inline">contract schema declares an unsupported &quot;type&quot; at /properties/sum/type in result.schema.json</code> — so a misspelled type, a keyword
-outside the profile, and an unsatisfiable bound are told apart without
-bisecting the schema. Every reported segment is a key or index the submitted
-document carries, and the same pointer appears in the envelope's <code class="inline">path</code>.</p><p><code class="inline">--output PATH</code> atomically publishes only the validated result value without
+— for example <code class="inline">contract schema &quot;type&quot; must be &quot;null&quot;, &quot;boolean&quot;, &quot;object&quot;, &quot;array&quot;, &quot;number&quot;, &quot;integer&quot;, or &quot;string&quot;, or a two-member array pairing &quot;null&quot; with one non-null type at /properties/sum/type in result.schema.json</code> —
+so a misspelled type, a keyword outside the profile, and an unsatisfiable bound
+are told apart without bisecting the schema. Every reported segment is a key or
+index the submitted document carries, and the same pointer appears in the
+envelope's <code class="inline">path</code>.</p><p><code class="inline">--output PATH</code> atomically publishes only the validated result value without
 replacing an existing file. Use <code class="inline">--private-output</code> for a private run; it
 publishes an owner-only artifact and keeps the value off stdout. See
 <a href="/reference/cli/#run-a-manifest">Running and debugging</a> for destination

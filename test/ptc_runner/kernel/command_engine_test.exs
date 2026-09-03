@@ -8355,6 +8355,30 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   # not exist" were indistinguishable and the profile's edges could only be
   # found by bisecting the schema one keyword at a time.
   @tag :tmp_dir
+  test "validate accepts a nullable result-contract type array", %{tmp_dir: directory} do
+    schema = %{
+      "type" => "object",
+      "properties" => %{"analysis" => %{"type" => ["string", "null"]}},
+      "required" => ["analysis"]
+    }
+
+    path =
+      write_application(
+        directory,
+        "nullable-result-contract",
+        valid_manifest(%{
+          "contracts" => %{"result_schema" => %{"path" => "result.schema.json"}}
+        }),
+        %{"result.schema.json" => Jason.encode!(schema)}
+      )
+
+    assert {:ok, %CommandOutcome{exit_status: 0} = outcome} =
+             CommandEngine.prepare(["validate", path])
+
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
   test "a rejected contract schema names its rule and its location", %{tmp_dir: directory} do
     cases = [
       {"bare-enum", %{"type" => "object", "properties" => %{"sum" => %{"enum" => [1, 2]}}},
@@ -8363,7 +8387,8 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
        ~s(contract schema node declares no "type"), "/properties/sum"},
       {"misspelled-type",
        %{"type" => "object", "properties" => %{"sum" => %{"type" => "intger"}}},
-       ~s(contract schema declares an unsupported "type"), "/properties/sum/type"},
+       ~s(contract schema "type" must be "null", "boolean", "object", "array", "number", "integer", or "string", or a two-member array pairing "null" with one non-null type),
+       "/properties/sum/type"},
       {"unsupported-keyword",
        %{
          "type" => "object",

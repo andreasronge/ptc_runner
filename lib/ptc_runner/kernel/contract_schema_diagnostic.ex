@@ -23,7 +23,8 @@ defmodule PtcRunner.Kernel.ContractSchemaDiagnostic do
     not_a_schema_object: "contract schema node is not a JSON object",
     unsupported_keyword: "contract schema uses a keyword outside the supported profile",
     type_missing: ~s(contract schema node declares no "type"),
-    unsupported_type: ~s(contract schema declares an unsupported "type"),
+    unsupported_type:
+      ~s(contract schema "type" must be "null", "boolean", "object", "array", "number", "integer", or "string", or a two-member array pairing "null" with one non-null type),
     unsupported_format: ~s(contract schema declares an unsupported "format"),
     keyword_not_applicable: ~s(contract schema keyword does not apply to its declared "type"),
     invalid_keyword_value: "contract schema keyword has an invalid value",

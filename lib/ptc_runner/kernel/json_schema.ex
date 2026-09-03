@@ -6,9 +6,11 @@ defmodule PtcRunner.Kernel.JSONSchema do
   `type`, `title`, `description`, `default`, `properties`, `required`,
   `additionalProperties`, `propertyNames`, `items`, `enum`, `const`, `minimum`,
   `maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`, `maxProperties`,
-  and the single bounded `sha256` string format. Types are scalar rather than
-  unions, roots are objects, and a missing `additionalProperties` on an object
-  is normalized to `false`.
+  and the single bounded `sha256` string format. General type unions are
+  unsupported, roots are objects, and a missing `additionalProperties` on an
+  object is normalized to `false`. A non-root node may use one scalar type or
+  the bounded nullable form `[<non-null type>, "null"]`; source order is
+  canonicalized and other type unions remain unsupported.
 
   `$schema` selects the schema dialect; absence means the MCP default
   (2020-12). Because the accepted profile is a common subset of the
@@ -51,6 +53,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
 
   @allowed ~w(type title description properties required additionalProperties propertyNames items enum const minimum maximum minLength maxLength minItems maxItems maxProperties format)
   @types ~w(null boolean object array number integer string)
+  @non_null_types @types -- ["null"]
   @max_schema_bytes 65_536
   @max_depth 16
   @max_properties 128
@@ -445,10 +448,8 @@ defmodule PtcRunner.Kernel.JSONSchema do
   # `path` here; recursive child normalization already carries the full path
   # and reports absolute segments.
   defp normalize_node(schema, path, depth) do
-    type = schema["type"]
-
     with :ok <- validate_keywords(schema),
-         :ok <- validate_type(schema),
+         {:ok, type, normalized_type} <- validate_type(schema),
          :ok <- validate_text(schema, "title"),
          :ok <- validate_text(schema, "description"),
          :ok <- validate_number_bounds(schema),
@@ -465,6 +466,7 @@ defmodule PtcRunner.Kernel.JSONSchema do
          :ok <- validate_max_properties(schema, type) do
       normalized =
         schema
+        |> Map.put("type", normalized_type)
         |> maybe_put("properties", properties)
         |> maybe_put("items", items)
         |> maybe_put("propertyNames", property_names)
@@ -506,11 +508,33 @@ defmodule PtcRunner.Kernel.JSONSchema do
   # difference between a one-line fix and bisecting the schema by hand.
   defp validate_type(schema) do
     case Map.fetch(schema, "type") do
-      {:ok, type} when type in @types -> :ok
+      {:ok, type} when type in @types -> {:ok, type, type}
+      {:ok, [left, right]} -> validate_nullable_type(left, right)
       {:ok, _type} -> {:error, {:unsupported_type, [{:property, "type"}]}}
       :error -> {:error, {:type_missing, []}}
     end
   end
+
+  defp validate_nullable_type(left, right) do
+    case {left, right} do
+      {type, "null"} when type in @non_null_types -> {:ok, type, [type, "null"]}
+      {"null", type} when type in @non_null_types -> {:ok, type, [type, "null"]}
+      _unsupported -> {:error, {:unsupported_type, [{:property, "type"}]}}
+    end
+  end
+
+  @doc false
+  @spec node_type(map()) :: {:ok, binary(), boolean()} | :error
+  def node_type(%{"type" => type}) when type in @types,
+    do: {:ok, type, type == "null"}
+
+  def node_type(%{"type" => [type, "null"]}) when type in @non_null_types,
+    do: {:ok, type, true}
+
+  def node_type(%{"type" => ["null", type]}) when type in @non_null_types,
+    do: {:ok, type, true}
+
+  def node_type(_schema), do: :error
 
   defp keyword_segments(keyword) when is_binary(keyword), do: [{:property, keyword}]
   defp keyword_segments(_keyword), do: []

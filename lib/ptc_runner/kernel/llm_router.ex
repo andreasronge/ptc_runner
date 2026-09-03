@@ -61,9 +61,11 @@ defmodule PtcRunner.Kernel.LLMRouter do
              validation_arguments: &Map.delete(&1, "model"),
              discovery: discovery
            ) do
-      # The bounded schema profile deliberately excludes union types. Runtime
-      # validation removes `model` before using this compiled schema; the
-      # resolver separately enforces the selector's exact string contract.
+      # The bounded schema profile deliberately excludes general type unions;
+      # its nullable pairs are irrelevant here because the root stays an
+      # object. Runtime validation removes `model` before using this compiled
+      # schema; the resolver separately enforces the selector's exact string
+      # contract.
       {:ok, routed}
     else
       _invalid -> {:error, :invalid_llm_router}

@@ -974,13 +974,13 @@ defmodule PtcRunner.Kernel.MCPProtocol do
 
   defp maybe_add_header(%{"x-mcp-header" => name} = schema, path, true, acc)
        when is_binary(name) do
-    type = schema["type"]
-
-    if byte_size(name) in 1..@max_header_name_bytes and name =~ @header_token and
-         type in ["string", "integer", "boolean"] do
+    with true <- byte_size(name) in 1..@max_header_name_bytes,
+         true <- name =~ @header_token,
+         {:ok, type, _nullable?} <- JSONSchema.node_type(schema),
+         true <- type in ["string", "integer", "boolean"] do
       {:ok, [%{name: name, path: path, type: type} | acc]}
     else
-      {:error, :mcp_invalid_tool_schema}
+      _invalid -> {:error, :mcp_invalid_tool_schema}
     end
   end
 

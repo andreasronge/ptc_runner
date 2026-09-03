@@ -204,6 +204,42 @@ defmodule PtcRunner.Kernel.ModelContractTest do
     assert get_in(decoded, ["returns", "fields", Access.at(0), "type", "minimum"]) == 0
   end
 
+  test "projects nullable kinds independently from required property presence" do
+    schema = %{
+      "type" => "object",
+      "properties" => %{
+        "required_nullable" => %{"type" => ["null", "string"]},
+        "optional_non_null" => %{"type" => "string"},
+        "optional_nullable_object" => %{
+          "type" => ["object", "null"],
+          "properties" => %{"value" => %{"type" => "integer"}}
+        }
+      },
+      "required" => ["required_nullable"]
+    }
+
+    assert {:ok, contract} = ValueContract.compile(schema)
+    assert {:ok, projection} = ModelContract.value_contract(contract)
+    decoded = decode(projection)
+    fields = decoded["fields"] |> Map.new(&{&1["name"], &1})
+
+    assert fields["required_nullable"]["required"] == true
+    assert fields["required_nullable"]["type"] == %{"kind" => "string", "nullable" => true}
+    assert fields["optional_non_null"]["required"] == false
+    assert fields["optional_non_null"]["type"]["nullable"] == false
+    assert fields["optional_nullable_object"]["required"] == false
+    assert fields["optional_nullable_object"]["type"]["kind"] == "object"
+    assert fields["optional_nullable_object"]["type"]["nullable"] == true
+
+    reversed = put_in(schema, ["properties", "required_nullable", "type"], ["string", "null"])
+    assert {:ok, reversed_contract} = ValueContract.compile(reversed)
+    assert {:ok, reversed_projection} = ModelContract.value_contract(reversed_contract)
+    assert projection == reversed_projection
+
+    assert ModelContract.projection_hash(projection) ==
+             ModelContract.projection_hash(reversed_projection)
+  end
+
   test "omits JSON Schema keywords that do not apply to the node type" do
     input = %{
       "type" => "object",
