@@ -60,6 +60,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     {"manifest", "docs/reference/application-manifest.md"},
     {"components", "docs/reference/component-contracts.md"},
     {"project", "docs/reference/project-files.md"},
+    {"examples", "docs/reference/examples.md"},
     {"host", "docs/reference/host-installation.md"},
     {"mcp", "docs/reference/mcp.md"},
     {"limits", "docs/kernel-limits-reference.md"},

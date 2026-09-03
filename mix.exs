@@ -553,6 +553,7 @@ defmodule PtcRunner.MixProject do
           "docs/reference/application-manifest.md",
           "docs/reference/host-installation.md",
           "docs/reference/project-files.md",
+          "docs/reference/examples.md",
           "docs/reference/component-contracts.md",
           "docs/reference/mcp.md",
           "docs/reference/cli.md",

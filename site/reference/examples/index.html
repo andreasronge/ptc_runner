@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Examples reference · PtcRunner</title>
+<meta name="description" content="This is the complete inventory of shipped example trees, the layout every tree
+follows, and the aspect each one demonstrates.">
+<link rel="canonical" href="https://ptc-runner.dev/reference/examples/">
+<meta property="og:title" content="Examples reference · PtcRunner">
+<meta property="og:description" content="This is the complete inventory of shipped example trees, the layout every tree
+follows, and the aspect each one demonstrates.">
+<meta property="og:url" content="https://ptc-runner.dev/reference/examples/">
+<meta property="og:type" content="article">
+<link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/guides.css">
+<script type="module" src="/docs.js"></script>
+</head>
+<body>
+<div class="guide-shell">
+<aside class="guide-nav">
+  <p class="brand"><a href="/">PtcRunner</a></p>
+  <nav aria-label="Documentation">
+    <p class="nav-home"><a href="/guides/">Overview</a></p>
+<h2>Start</h2>
+<ul>
+<li><a href="/guides/quickstart/">Quickstart</a></li>
+<li><a href="/guides/getting-started/">Understand a generated project</a></li>
+<li><a href="/guides/concepts/">PtcRunner concepts</a></li>
+<li><a href="/guides/agent-cli-usage/">Drive ptc as an agent</a></li>
+</ul>
+
+<h2>Language</h2>
+<ul>
+<li><a href="/guides/ptc-lisp-basics/">Read and write PTC-Lisp</a></li>
+</ul>
+
+<h2>Configure</h2>
+<ul>
+<li><a href="/guides/project-configuration/">Keep a runnable project together</a></li>
+<li><a href="/guides/manifests-and-capabilities/">Configure an application</a></li>
+<li><a href="/guides/host-configuration/">Install models and tools</a></li>
+</ul>
+
+<h2>Build</h2>
+<ul>
+<li><a href="/guides/using-models/">Use a model</a></li>
+<li><a href="/guides/connecting-tools-with-mcp/">Connect an MCP tool</a></li>
+<li><a href="/guides/building-agents/">Customize an agent</a></li>
+<li><a href="/guides/components-and-preludes/">Inspect and customize components</a></li>
+</ul>
+
+<h2>Design</h2>
+<ul>
+<li><a href="/guides/designing-agent-workflows/">Design an agent workflow</a></li>
+<li><a href="/guides/agent-workflow-patterns/">Choose a workflow shape</a></li>
+</ul>
+
+<h2>Run and debug</h2>
+<ul>
+<li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
+<li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
+<li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
+<li><a href="/guides/debugging-a-failed-run/">Debug a failed run</a></li>
+<li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
+</ul>
+
+<h2>Installation</h2>
+<ul>
+<li><a href="/installation/standalone/">Standalone installation</a></li>
+<li><a href="/installation/docker/">Docker installation</a></li>
+<li><a href="/installation/source/">Source installation</a></li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="/reference/ptc-lisp-specification/">PTC-Lisp Language Specification</a></li>
+<li><a href="/reference/agent-library-reference/">Agent library reference</a></li>
+<li><a href="/reference/clojure-conformance-gaps/">Clojure Conformance Gaps</a></li>
+<li><a href="/reference/java-interop/">Java Interop Reference for PTC-Lisp</a></li>
+<li><a href="/reference/kernel-limits-reference/">Kernel limits reference</a></li>
+<li><a href="/reference/prelude-reference/">Shipped prelude reference</a></li>
+<li><a href="/reference/signature-syntax/">Signature reference</a></li>
+<li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
+<li><a href="/reference/host-installation/">Host-configuration reference</a></li>
+<li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/examples/" class="current" aria-current="page">Examples reference</a></li>
+<li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
+<li><a href="/reference/mcp/">MCP reference</a></li>
+<li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/repl/">REPL reference</a></li>
+<li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
+<li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
+</ul>
+
+  </nav>
+</aside>
+
+<main class="guide-main">
+<p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
+<article>
+<h1 id="examples-reference">Examples reference</h1><p>This is the complete inventory of shipped example trees, the layout every tree
+follows, and the aspect each one demonstrates.</p><p>Four trees are embedded in the executable and materialize anywhere:</p><pre><code class="console language-console">ptc init DIRECTORY --example kernel-tutorial
+ptc init DIRECTORY --example support-triage
+ptc init DIRECTORY --example debug-a-failed-run
+ptc init DIRECTORY --example llm-replay</code></pre><p><code class="inline">ptc init</code> refuses a directory that already exists and writes the tree
+atomically. The copy is complete: it carries its own application manifests,
+host document, PTC-Lisp sources, and data, plus a generated <code class="inline">.env</code> stub when
+the tree names one. Nothing resolves back to a checkout, so the copy runs from
+wherever you put it.</p><p>The remaining trees are checkout-only and are listed at the end of this page.</p><h2 id="how-an-example-tree-is-laid-out">How an example tree is laid out</h2><p>Every runnable step is a pair: a project document beside a directory of the
+same name.</p><pre><code>kernel-tutorial/
+  ptc-host.json                     installed providers, shared by the steps
+  01-orders.ptc-project.json        the thing you run
+  01-orders/
+    ptc.json                        application manifest
+    orders.clj                      PTC-Lisp source
+    orders.json                     input data
+  02-deepseek-extract.ptc-project.json
+  02-deepseek-extract/
+    ...</code></pre><p>Point <code class="inline">ptc run</code> at the project document, never at the directory. The project
+document supplies the paths for everything else, so a run and its Viewer take
+the same single argument:</p><pre><code class="console language-console">ptc run kernel-tutorial/01-orders.ptc-project.json
+ptc viewer kernel-tutorial/01-orders.ptc-project.json</code></pre><p>Three separate documents carry three separate concerns, and
+<a href="/reference/project-files/">the project-configuration reference</a> holds the full field
+contract for each.</p><p>A tree has many step directories because each step directory is the complete
+project at that point. Later steps repeat earlier files rather than referencing
+them, so two steps can be diffed to see exactly what one design decision added:</p><pre><code class="console language-console">diff -ru support-triage/01-one-question support-triage/02-domain-api</code></pre><p>One <code class="inline">ptc-host.json</code> at the tree root serves the steps that select a provider. A
+step needing a different installed ceiling gets its own host document instead,
+which is why <code class="inline">kernel-tutorial</code> also ships <code class="inline">ptc-host-cost-budget.json</code>.</p><h2 id="what-each-step-demonstrates">What each step demonstrates</h2><p><code class="inline">kernel-tutorial</code> builds up the runtime surface. Steps 01 and 05 need no
+credential.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Step</th><th style="text-align: left;">Aspect</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">01-orders</code></td><td style="text-align: left;">A deterministic workflow that selects no provider</td></tr><tr><td style="text-align: left;"><code class="inline">02-deepseek-extract</code></td><td style="text-align: left;">One model call producing a structured value</td></tr><tr><td style="text-align: left;"><code class="inline">03-file-agent</code></td><td style="text-align: left;">An agent loop holding a filesystem tool over MCP</td></tr><tr><td style="text-align: left;"><code class="inline">04-multi-turn-agent</code></td><td style="text-align: left;">A two-turn agent loop under explicit Kernel clocks</td></tr><tr><td style="text-align: left;"><code class="inline">05-signature-feedback</code></td><td style="text-align: left;">Signatures, and the feedback a failed check returns</td></tr><tr><td style="text-align: left;"><code class="inline">06-cost-budget</code></td><td style="text-align: left;">A deliberate cost-limit refusal, exit status 6</td></tr></tbody></table></div><p><code class="inline">support-triage</code> grows one support-inbox scenario through three design
+decisions. Every step selects a provider.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Step</th><th style="text-align: left;">Aspect</th></tr></thead><tbody><tr><td style="text-align: left;"><code class="inline">01-one-question</code></td><td style="text-align: left;">Tickets granted as mission data, one bounded question, no tools</td></tr><tr><td style="text-align: left;"><code class="inline">02-domain-api</code></td><td style="text-align: left;">A prompt-visible mission API the model composes, instead of tool relay</td></tr><tr><td style="text-align: left;"><code class="inline">03-specialists</code></td><td style="text-align: left;">Two named missions with different grants, and a result contract</td></tr></tbody></table></div><p><code class="inline">debug-a-failed-run</code> pairs a failing target with the debuggers that read its
+evidence. <code class="inline">target.ptc-project.json</code> fails on purpose;
+<code class="inline">debugger.ptc-project.json</code> walks the evidence deterministically and
+<code class="inline">debugger-agent.ptc-project.json</code> walks it with a model. The <code class="inline">-ambiguous</code> and
+<code class="inline">-workflow-control</code> variants change the failure so the same debuggers meet a
+different shape.</p><p><code class="inline">llm-replay</code> serves one recorded model response from <code class="inline">replay.jsonl</code>. It needs
+no credential and performs no network activity, which makes it the tree to copy
+when building a test that must not call a provider.</p><h2 id="examples-that-need-a-checkout">Examples that need a checkout</h2><p>These trees are not embedded. Run them from a clone, or read them on GitHub.</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Tree</th><th style="text-align: left;">Aspect</th></tr></thead><tbody><tr><td style="text-align: left;"><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/named-mission-reader-writer"><code class="inline">named-mission-reader-writer</code></a></td><td style="text-align: left;">Two missions holding separate tool authority over separate roots</td></tr><tr><td style="text-align: left;"><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud"><code class="inline">dabstep-fraud</code></a></td><td style="text-align: left;">A stage's answer reviewed in workflow code before anyone acts on it</td></tr><tr><td style="text-align: left;"><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/viewer-demo"><code class="inline">viewer-demo</code></a></td><td style="text-align: left;">Five journeys producing varied trace data to exercise the Viewer</td></tr><tr><td style="text-align: left;"><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/viewer-live-dashboard"><code class="inline">viewer-live-dashboard</code></a></td><td style="text-align: left;">A parallel model fan-out and synthesis pass, long enough to watch live</td></tr><tr><td style="text-align: left;"><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-inspection-lab"><code class="inline">kernel-inspection-lab</code></a></td><td style="text-align: left;">A trace and a private inspection record from one credential-free run</td></tr></tbody></table></div><p><code class="inline">kernel-inspection-lab</code> and <code class="inline">viewer-demo</code> are driven by a script rather than a
+project document, and <code class="inline">dabstep-fraud</code> downloads a dataset before it runs. Each
+tree's <code class="inline">README.md</code> states its own prerequisites.</p>
+</article>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/project-files/">&larr; Project-configuration reference</a><a class="pager-next" href="/reference/component-contracts/">Components-and-preludes reference &rarr;</a></nav>
+<footer>
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/examples.md">Edit this
+  page on GitHub</a>.
+</footer>
+
+</main>
+</div>
+</body>
+</html>
