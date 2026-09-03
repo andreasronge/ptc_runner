@@ -96,7 +96,10 @@ they are isolated (#1668) but never cleaned, so delete them too.
 `./record-replay.sh ARTIFACT_ROOT RUN_REF [RUN_REF ...] > fixture.jsonl` reads
 every model exchange of the named runs through the analysis profile and
 writes one fixture line per distinct request hash. `reviewer-replay.jsonl`
-was written this way from two live Luna runs.
+was written this way from three live Luna runs, one per regression case:
+`cmd-3kbr0mpsavy4estjs3sszqa0hb` (wrong-metric),
+`cmd-0cwcp0r52fj5tbfk7192bf3htx` (off-by-one), and
+`cmd-6r3vft625ney35rpn0p0bgc3jp` (shared-refused).
 
 Exact matching means a recorded session replays only if nothing the model saw
 depends on the machine or the server process. Cursors and heap-kill messages

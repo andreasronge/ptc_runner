@@ -42,7 +42,7 @@ transaction-count rate, two left the division to model reasoning. Every run is
 in [`cohort.json`](cohort.json) with run reference, source hashes, calls,
 duration, cost, and classification. This cohort predates the raw-CSV reader
 and the review stage. [`current-main-smoke.json`](current-main-smoke.json) is
-a later single-sample check on the merged runtime.
+a later check on the merged runtime: one live sample per model plus a replay.
 
 **Integrated cohort, 2026-09-03.** Ten live runs of the final three-stage
 workflow, in [`integrated-cohort.json`](integrated-cohort.json):
@@ -144,7 +144,11 @@ the shipped inputs allow 16 turns per analyzer and 4 for the reviewer, and
 ## Replay fixtures
 
 `reviewer-replay.jsonl` is a recording of live Luna reviews, one per
-regression case, written by `record-replay.sh` through the analysis profile.
+regression case, written by `record-replay.sh` through the analysis profile:
+`cmd-3kbr0mpsavy4estjs3sszqa0hb` (wrong-metric),
+`cmd-0cwcp0r52fj5tbfk7192bf3htx` (off-by-one), and
+`cmd-6r3vft625ney35rpn0p0bgc3jp` (shared-refused), each a single turn that
+scanned all 49 pages.
 `replay.jsonl` for the full workflow is assembled from the final program of
 each stage of live run `cmd-0twkysj3vwd4wwwjjgx42p09qs`, keyed to the hashes
 a placeholder fixture missed on. A recording of the whole session cannot
