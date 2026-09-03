@@ -661,12 +661,13 @@ mutually exclusive with `--private-terminal`:
 ```console
 ptc repl \
   --profile private-run-analysis-v2 \
+  --run RUN_ID \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \
   --private-unattended \
   --format jsonl \
-  -e '(analysis/read "run-id" {"collection" "turns" "limit" 100})' \
+  -e '(analysis/read "RUN_ID" {"collection" "turns" "limit" 100})' \
   >tmp/private-analysis.jsonl
 ```
 

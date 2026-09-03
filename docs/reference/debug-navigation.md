@@ -326,36 +326,19 @@ model exchange is missing, and no turn or generated-source association is
 ambiguous. It is a statement about the reconstruction, not a promise that every
 field of every record is present. `ptc transcript` refuses to write a file at
 all unless `complete?` holds, so that field is always `true` in a published
-transcript; read it over `/api/analysis/runs/{id}/conversation`, which applies
-no such gate, when you need it to be able to say no.
+transcript. The same reconstruction is ungated in
+`ptc repl --profile private-run-analysis-v2`; run `ptc docs repl` for the
+complete headless invocation.
 
 The refusal names which of the three facts failed and by how much, because they
 have different next actions. `transcript/ambiguous_evidence` means nothing is
 missing: the run is complete and every expected exchange was
 captured, but some turn or generated-source association resolves to more than
-one predecessor. Re-running does not help; read the ungated route instead.
+one predecessor. Re-running does not help; read the ungated `turns` collection
+through the private analysis REPL instead.
 `transcript/incomplete_evidence` means the trace is not terminal or
 dropped events, or the inspection artifact does not carry every exchange the
 trace expects — both facts about the capture rather than the reconstruction.
-
-### Reaching the ungated reconstruction
-
-`/api/analysis/runs/{id}/conversation` is served by `ptc viewer` and needs the
-project's private grant. Four separate decisions withhold it — two about the
-project, two about the run — and the Viewer's private routes answer for each by
-name, so the reason body is the next action rather than a bare status:
-
-| answer | cause | next action |
-| --- | --- | --- |
-| `404 inspection_not_configured` | the project records no inspection artifact | set `artifacts.trace` and `artifacts.inspection` and run again |
-| `404 inspection_not_private` | the artifact exists, this Viewer was not granted it | set `viewer.private` and Refresh the Runs list; nothing needs re-running |
-| `404 inspection_run_not_recorded` | the Viewer reads private evidence, this run recorded none | run the project again, now that `artifacts.inspection` is set |
-| `404 inspection_run_mismatch` | the Viewer is pinned to a different run's artifact | start the Viewer for this run |
-
-Every other answer is a transport status with prose, not a reason code: the
-route reports a source that is unavailable, changed, oversized, or malformed as
-the failure it is rather than as a setting the reader could change.
-`/api/analysis/runs/{id}/preludes` answers on the same terms.
 
 `omitted_count` is pagination: how many selected items this page did not
 return. It never reports evidence withheld by policy. A source grant that

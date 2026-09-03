@@ -214,17 +214,13 @@ it. The Live project header and <code class="inline">/api/live/project</code> ex
 document path, so a working page cannot silently look like the project whose
 startup just failed.</p><p>The REPL and private-data settings are orthogonal. Enabling both presents the
 public-trace REPL alongside the private evidence panels without adding private
-inspection authority to the evaluation session.</p><p>Because <code class="inline">artifacts.inspection</code> and <code class="inline">viewer.private</code> must both hold, the private
-routes distinguish which one is missing: <code class="inline">inspection_not_configured</code> for a
-project that records no inspection artifact, <code class="inline">inspection_not_private</code> for one
-that records it and withheld the grant. The second needs no re-run — the
-artifact on disk is already usable once the Viewer refreshes after the grant.
-Revoking the grant takes effect on the next request without Refresh.</p><p>A run can also fall outside evidence the Viewer does hold, which the routes
-name separately from the project settings: <code class="inline">inspection_run_not_recorded</code> for a
-run made before <code class="inline">artifacts.inspection</code> was set, and <code class="inline">inspection_run_mismatch</code>
-for a Viewer pinned to one other run's artifact. The
-<a href="/reference/debug-navigation/#reaching-the-ungated-reconstruction">debug-navigation reference</a>
-carries the complete table.</p><p>Viewer-started workflows and missions use the project's <code class="inline">host.env_file</code> when
+inspection authority to the evaluation session.</p><p>Because <code class="inline">artifacts.inspection</code> and <code class="inline">viewer.private</code> must both hold, granting the
+Viewer access to an existing inspection artifact needs no re-run. The artifact
+on disk is already usable once the Viewer refreshes after the grant. Revoking
+the grant takes effect on the next request without Refresh. For headless access
+to the same reconstructed conversation, use
+<code class="inline">ptc repl --profile private-run-analysis-v2</code>; run <code class="inline">ptc docs repl</code> for the
+complete invocation.</p><p>Viewer-started workflows and missions use the project's <code class="inline">host.env_file</code> when
 one is declared. <code class="inline">ptc viewer ptc-project.json --env-file FILE</code> supplies an
 invocation-time override instead. PtcRunner never searches implicitly for
 <code class="inline">.env</code>; without either form, credentials must already be present in the Viewer

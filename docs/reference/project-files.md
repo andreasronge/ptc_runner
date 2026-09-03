@@ -197,19 +197,13 @@ The REPL and private-data settings are orthogonal. Enabling both presents the
 public-trace REPL alongside the private evidence panels without adding private
 inspection authority to the evaluation session.
 
-Because `artifacts.inspection` and `viewer.private` must both hold, the private
-routes distinguish which one is missing: `inspection_not_configured` for a
-project that records no inspection artifact, `inspection_not_private` for one
-that records it and withheld the grant. The second needs no re-run — the
-artifact on disk is already usable once the Viewer refreshes after the grant.
-Revoking the grant takes effect on the next request without Refresh.
-
-A run can also fall outside evidence the Viewer does hold, which the routes
-name separately from the project settings: `inspection_run_not_recorded` for a
-run made before `artifacts.inspection` was set, and `inspection_run_mismatch`
-for a Viewer pinned to one other run's artifact. The
-[debug-navigation reference](debug-navigation.md#reaching-the-ungated-reconstruction)
-carries the complete table.
+Because `artifacts.inspection` and `viewer.private` must both hold, granting the
+Viewer access to an existing inspection artifact needs no re-run. The artifact
+on disk is already usable once the Viewer refreshes after the grant. Revoking
+the grant takes effect on the next request without Refresh. For headless access
+to the same reconstructed conversation, use
+`ptc repl --profile private-run-analysis-v2`; run `ptc docs repl` for the
+complete invocation.
 
 Viewer-started workflows and missions use the project's `host.env_file` when
 one is declared. `ptc viewer ptc-project.json --env-file FILE` supplies an
