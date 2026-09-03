@@ -1,0 +1,147 @@
+{
+  "case_id": "shared-refused",
+  "task": "What is the top country (ip_country) for fraud? A. NL, B. BE, C. ES, D. FR",
+  "guidelines": "Answer must be in the form 'X. Y' where X is the option's letter chosen and Y is the option's country code. If a question does not have a relevant or applicable answer for the task, please respond with 'Not Applicable'",
+  "review_task": "Review the REPL session below for the given task and input. It records trial-and-error discovery, so intermediate steps may fail or be exploratory. Check the programs, then solve the task yourself with run_ptc_lisp. Return the volumes you measured and any problems that could make the analyzer result wrong.",
+  "reviewer_model": "luna",
+  "review_turns": 4,
+  "options": {
+    "NL": "A. NL",
+    "BE": "B. BE",
+    "ES": "C. ES",
+    "FR": "D. FR"
+  },
+  "analyzer_result": {
+    "derivations": [
+      {
+        "mission": "analysis",
+        "countries": [
+          {
+            "fraudulent_volume": 164611.87999999977,
+            "ip_country": "BE",
+            "total_volume": 2150473.540000013
+          },
+          {
+            "fraudulent_volume": 42125.25000000003,
+            "ip_country": "ES",
+            "total_volume": 644883.1700000011
+          },
+          {
+            "fraudulent_volume": 84211.38999999994,
+            "ip_country": "FR",
+            "total_volume": 1292201.829999998
+          },
+          {
+            "fraudulent_volume": 42538.02,
+            "ip_country": "GR",
+            "total_volume": 640705.2899999991
+          },
+          {
+            "fraudulent_volume": 178422.44000000006,
+            "ip_country": "IT",
+            "total_volume": 2599613.799999996
+          },
+          {
+            "fraudulent_volume": 45922.94,
+            "ip_country": "LU",
+            "total_volume": 665077.9599999998
+          },
+          {
+            "fraudulent_volume": 180792.04999999978,
+            "ip_country": "NL",
+            "total_volume": 2701907.130000014
+          },
+          {
+            "fraudulent_volume": 137165.59999999992,
+            "ip_country": "SE",
+            "total_volume": 2002434.7400000028
+          }
+        ]
+      },
+      {
+        "mission": "recheck",
+        "countries": [
+          {
+            "fraudulent_volume": 164611.87999999977,
+            "ip_country": "BE",
+            "total_volume": 2150473.540000013
+          },
+          {
+            "fraudulent_volume": 42125.25000000003,
+            "ip_country": "ES",
+            "total_volume": 644883.1700000011
+          },
+          {
+            "fraudulent_volume": 84211.38999999994,
+            "ip_country": "FR",
+            "total_volume": 1292201.829999998
+          },
+          {
+            "fraudulent_volume": 42538.02,
+            "ip_country": "GR",
+            "total_volume": 640705.2899999991
+          },
+          {
+            "fraudulent_volume": 178422.44000000006,
+            "ip_country": "IT",
+            "total_volume": 2599613.799999996
+          },
+          {
+            "fraudulent_volume": 45922.94,
+            "ip_country": "LU",
+            "total_volume": 665077.9599999998
+          },
+          {
+            "fraudulent_volume": 180792.04999999978,
+            "ip_country": "NL",
+            "total_volume": 2701907.130000014
+          },
+          {
+            "fraudulent_volume": 137165.59999999992,
+            "ip_country": "SE",
+            "total_volume": 2002434.7400000028
+          }
+        ]
+      }
+    ],
+    "candidate_answer": "B. BE"
+  },
+  "programs": [
+    {
+      "turn": 1,
+      "mission": "analysis",
+      "source": "(let [p (dabstep.payments/read-page nil [\"ip_country\" \"eur_amount\" \"is_refused_by_adyen\"])] (println (count (get p \"rows\")) (first (get p \"rows\")) (keys p)) nil)",
+      "execution": {
+        "outcome": "continued",
+        "observation": "user=> nil\nprintln:\n2847 [\"NL\" 10.02 false] (\"columns\" \"rows\" \"next_cursor\" \"content_hashes\" \"read_calls\")",
+        "observation-truncated?": false
+      }
+    },
+    {
+      "turn": 2,
+      "mission": "analysis",
+      "source": "(let [cols [\"ip_country\" \"eur_amount\" \"is_refused_by_adyen\"]\n      agg (loop [cur nil m {}]\n            (let [p (dabstep.payments/read-page cur cols)\n                  m2 (reduce (fn [a row]\n                               (let [c (nth row 0) amt (or (nth row 1) 0.0) f (nth row 2) old (get a c [0.0 0.0])]\n                                 (assoc a c [(+ (nth old 0) (if f amt 0.0)) (+ (nth old 1) amt)])))\n                             m (get p \"rows\"))\n                  nxt (get p \"next_cursor\")]\n              (if (nil? nxt) m2 (recur nxt m2))))]\n  (return {\"countries\" (vec (map (fn [[c v]] {\"ip_country\" c \"fraudulent_volume\" (nth v 0) \"total_volume\" (nth v 1)}) agg))}))",
+      "execution": {
+        "outcome": "returned"
+      }
+    },
+    {
+      "turn": 1,
+      "mission": "recheck",
+      "source": "(let [p (dabstep.payments/read-page nil [\"ip_country\" \"eur_amount\" \"is_refused_by_adyen\"])] (println (count (get p \"rows\")) (first (get p \"rows\")) (keys p)) nil)",
+      "execution": {
+        "outcome": "continued",
+        "observation": "user=> nil\nprintln:\n2847 [\"NL\" 10.02 false] (\"columns\" \"rows\" \"next_cursor\" \"content_hashes\" \"read_calls\")",
+        "observation-truncated?": false
+      }
+    },
+    {
+      "turn": 2,
+      "mission": "recheck",
+      "source": "(let [cols [\"ip_country\" \"eur_amount\" \"is_refused_by_adyen\"]\n      agg (loop [cur nil m {}]\n            (let [p (dabstep.payments/read-page cur cols)\n                  m2 (reduce (fn [a row]\n                               (let [c (nth row 0) amt (or (nth row 1) 0.0) f (nth row 2) old (get a c [0.0 0.0])]\n                                 (assoc a c [(+ (nth old 0) (if f amt 0.0)) (+ (nth old 1) amt)])))\n                             m (get p \"rows\"))\n                  nxt (get p \"next_cursor\")]\n              (if (nil? nxt) m2 (recur nxt m2))))]\n  (return {\"countries\" (vec (map (fn [[c v]] {\"ip_country\" c \"fraudulent_volume\" (nth v 0) \"total_volume\" (nth v 1)}) agg))}))",
+      "execution": {
+        "outcome": "returned"
+      }
+    }
+  ]
+}

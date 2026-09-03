@@ -28,8 +28,9 @@ and need no network. Inside this repository the same commands are `mix ptc …`.
   current directory.
 - `ptc-project.replay.json` / `ptc-host.replay.json` — the same application
   against `replay.jsonl`, so it runs with no model credential.
-- `reviewer.ptc.json` and the `ptc-project.reviewer*.json` projects — fixed
-  wrong-metric and off-by-one sessions for live or replayed reviewer checks.
+- `reviewer.ptc.json` and the `ptc-project.reviewer*.json` projects — three
+  fixed sessions (`wrong-metric`, `off-by-one`, `shared-refused`) for live or
+  replayed reviewer checks.
 - `input.schema.json`, `result.schema.json`, `inputs/*.json` — the contracts
   and two shipped model assignments: DeepSeek analyzers with a Luna reviewer,
   or Luna for all three stages.
@@ -37,7 +38,9 @@ and need no network. Inside this repository the same commands are `mix ptc …`.
   recorded. Read the limitation below before relying on it.
 - `fetch-data.sh` — downloads and checksum-verifies `data/payments.csv` and
   the reference files. It does not reshape the data.
-- `evidence/` — committed run records. Read `README.md` before citing them.
+- `evidence/` — committed run records and `STUDY.md`, the material behind
+  the README: cohorts, reader guarantees, capture sizes, fixture provenance,
+  benchmark fidelity. Read it before citing a number.
 
 ## Working loop
 
@@ -96,14 +99,10 @@ writes one fixture line per distinct request hash. `reviewer-replay.jsonl`
 was written this way from two live Luna runs.
 
 Exact matching means a recorded session replays only if nothing the model saw
-depends on the machine or the server process. Two things do: `ptc-fs-mcp`
-signs each `next_cursor` with a per-process key over a state digest that
-includes the file's inode, so a program that prints a page puts a value in the
-conversation that never recurs; and a heap kill reports the environment
-baseline in bytes, which differs from run to run. Every run in the integrated
-cohort printed a cursor on an exploratory turn, so `replay.jsonl` for the full
-workflow is assembled instead: the final program of each stage from one live
-Luna run, keyed to the hashes a placeholder fixture missed on. Read a miss's
-hash from the failed replay run with
+depends on the machine or the server process. Cursors and heap-kill messages
+do (#1799), so `replay.jsonl` for the full workflow is assembled from the
+final program of each stage of one live run, keyed to the hashes a
+placeholder fixture missed on; `evidence/STUDY.md` has the details. Read a
+miss's hash from the failed replay run with
 `(analysis/read RUN {"collection" "model_exchanges"})`; the item whose result
 is not `ok` carries it.
