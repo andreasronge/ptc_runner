@@ -173,9 +173,9 @@ document it publishes carries status, run reference, result or classified
 error, artifact state, and a closed <code class="inline">warnings</code> array. For <code class="inline">run</code>, an uncataloged
 installed model appears there as <code class="inline">model_uncataloged</code> with its provider alias
 and an adapter-attested public selector; the same warning is retained in
-<code class="inline">run-started</code> metadata. Non-run commands require an empty warnings
-array. In particular, <code class="inline">doctor --connect</code> retains uncataloged-model notices on
-stderr rather than claiming run metadata it does not produce. Parse the
+<code class="inline">run-started</code> metadata. A failed plain <code class="inline">doctor</code> command also publishes locally
+derived <code class="inline">model_uncataloged</code> warnings for every affected provider check;
+successful non-run commands keep the array empty. Parse the
 envelope rather than scraping stdout, which is a human
 presentation channel that may also carry application output.</li></ul><p>The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.

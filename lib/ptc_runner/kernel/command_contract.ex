@@ -244,9 +244,12 @@ defmodule PtcRunner.Kernel.CommandContract do
          "status" => "error",
          "error" => primary,
          "secondary_errors" => secondary,
-         "result" => result
+         "result" => result,
+         "warnings" => warnings
        }),
-       do: valid_doctor_failure_result?(result, primary, secondary)
+       do:
+         valid_doctor_failure_result?(result, primary, secondary) and
+           valid_doctor_failure_warnings?(result, primary, secondary, warnings)
 
   defp valid_envelope_semantics?(%{
          "command" => "doctor",
@@ -490,6 +493,42 @@ defmodule PtcRunner.Kernel.CommandContract do
   end
 
   defp default_local_failure_checks_consistent?(_checks, _primary, _secondary), do: false
+
+  defp valid_doctor_failure_warnings?(_result, _primary, _secondary, []), do: true
+
+  defp valid_doctor_failure_warnings?(
+         %{
+           "checks" => [_runtime, _application, _viewer | provider_checks],
+           "model_aliases" => aliases
+         },
+         primary,
+         secondary,
+         warnings
+       )
+       when is_list(warnings) do
+    default_local_failure_checks_consistent?(provider_checks, primary, secondary) and
+      Enum.all?(warnings, fn
+        %{"code" => "model_uncataloged", "provider" => provider} = warning ->
+          CommandWarning.valid_map?(warning) and selected_live_llm_alias?(aliases, provider) and
+            Enum.any?(provider_checks, fn check ->
+              check["name"] == "provider/#{provider}/local" and check["status"] == "fail"
+            end)
+
+        _invalid ->
+          false
+      end)
+  end
+
+  defp valid_doctor_failure_warnings?(_result, _primary, _secondary, _warnings), do: false
+
+  @doc false
+  @spec selected_live_llm_alias?([map()], binary()) :: boolean()
+  def selected_live_llm_alias?(aliases, name) do
+    Enum.any?(aliases, fn alias_row ->
+      alias_row["alias"] == name and alias_row["source"] == "llm" and
+        alias_row["selected"] == true
+    end)
+  end
 
   defp connect_failure_checks_consistent?(checks, primary) do
     with {:ok, expected_name, expected_code} <- failure_row_identity(primary),
@@ -927,6 +966,7 @@ defmodule PtcRunner.Kernel.CommandContract do
     closed(
       ~w(schema_version command status run_ref error secondary_errors warnings result),
       base_properties(["doctor"], "error")
+      |> Map.put("warnings", warning_schema())
       |> Map.merge(%{
         "error" => primary_diagnostic,
         "secondary_errors" => %{

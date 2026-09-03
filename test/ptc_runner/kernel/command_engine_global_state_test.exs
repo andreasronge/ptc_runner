@@ -1196,7 +1196,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
     assert run.exit_status == 4, inspect(run.envelope)
     assert run.envelope["error"]["phase"] == "local_preflight", inspect(run.envelope)
     assert run.envelope["error"]["code"] == "model_contract_unsupported"
-    assert run.envelope["error"]["provider_activity"] == true
+    assert run.envelope["error"]["provider_activity"] == false
     assert run.envelope["error"]["notes"] == []
     assert run.envelope["error"]["subject"]["name"] == "model"
     assert run.envelope["error"]["message"] =~ "llm_cost_microusd"
@@ -1264,7 +1264,7 @@ defmodule PtcRunner.Kernel.CommandEngineGlobalStateTest do
 
     assert doctor.exit_status == 4
     assert doctor.envelope["result"]["readiness"] == "failed", inspect(doctor.envelope)
-    assert doctor.envelope["result"]["provider_activity"] == true
+    assert doctor.envelope["result"]["provider_activity"] == false
     assert doctor.envelope["warnings"] == []
     assert doctor.envelope["error"]["code"] == "model_contract_unsupported"
 
