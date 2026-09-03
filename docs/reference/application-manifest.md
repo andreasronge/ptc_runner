@@ -122,6 +122,14 @@ one or more providers remain unresolved until those providers are acquired.
 `"default"` is an ordinary declared name, not an implicit fallback.
 Definitions and `*1`/`*2`/`*3` history never cross between missions.
 
+A mission boundary is a capability boundary, not a data boundary. A mission's
+grant limits the code, data, and providers available inside that mission, but
+does not prevent that data from reaching a later mission when trusted workflow
+code includes it in the handoff. If a later mission must not receive some
+content, filter it deterministically in workflow code before the handoff.
+Prompt instructions or wrappers that mark content as untrusted may help a model
+treat it as data, but they do not enforce the grant.
+
 Workflow code selects the mission explicitly with the `kernel/eval*`,
 `kernel/check-source`, or mission-introspection functions. The shipped
 `agent.core` loop uses `"default"` only when its own mission option is omitted,
@@ -158,6 +166,11 @@ envelope and terminal diagnostic include its JSON Pointer. Terminal rendering
 escapes unusual contract-authored property names rather than emitting their
 control bytes. Missing-required failures name the first missing schema-declared
 property, including when the absent property is at the contract root.
+
+Result and phase-return schemas validate structure and declared value
+constraints. They do not sanitize data or determine its sensitivity. For
+example, an array `maxItems` bound can limit the number of entries but cannot
+stop a model from choosing a secret-bearing entry over a safe one.
 
 Terminal agent helpers also give a model-authored candidate one ordinary
 correction turn when budget remains. `agent.core/run` validates the exact
