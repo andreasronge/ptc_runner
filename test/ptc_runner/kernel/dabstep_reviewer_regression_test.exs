@@ -33,6 +33,15 @@ defmodule PtcRunner.Kernel.DabstepReviewerRegressionTest do
     assert result.value["problems"] != []
   end
 
+  test "the reviewer's own measurement contradicts a wrong fraud column both analyzers shared" do
+    assert {:ok, result} = run("reviewer-shared-refused.json")
+    assert result.value["caught"]
+    assert result.value["case_id"] == "shared-refused"
+    assert result.value["reviewer_answer"] == "B. BE"
+    refute result.value["measurements_agree"]
+    assert result.value["problems"] != []
+  end
+
   test "the full workflow replays three retained programs and agrees in workflow code" do
     assert {:ok, result} = run("luna.json", @workflow_application, @workflow_host)
 
