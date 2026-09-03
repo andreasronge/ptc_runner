@@ -148,10 +148,10 @@ defined in this example's <code class="inline">03-specialists/workflow.clj</code
                       &quot;\n\nBreached tickets, highest priority first:\n&quot;
                       (quarantined (pr-str ranked)))
                  {&quot;mission&quot; &quot;escalation&quot; &quot;max_turns&quot; 4})]
-    (return report)))</code></pre><p>Ticket text is written by customers, so <code class="inline">quarantined</code> wraps it in an
-<code class="inline">&lt;untrusted_tickets&gt;</code> block before it enters the second task. The block asks
-the model to treat that text as data.</p><p>What holds regardless is the grant: the escalation mission has no tickets and
-no tools. The example's README says what its live test checks in the report.</p><pre><code class="console language-console">ptc run support-triage/03-specialists.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;escalations&quot;:[
+    (return report)))</code></pre><p><code class="inline">quarantined</code> marks customer text as data but is only a prompt-level mitigation.
+<a href="/reference/application-manifest/#supply-input-and-named-missions">The mission boundary</a>
+limits capabilities. It does not filter handoff data, and this example provides
+no such guarantee; trusted workflow code must perform that filtering.</p><pre><code class="console language-console">ptc run support-triage/03-specialists.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;escalations&quot;:[
   {&quot;id&quot;:&quot;T-1004&quot;,&quot;priority&quot;:81,&quot;team&quot;:&quot;payments&quot;,
    &quot;first_action&quot;:&quot;send the refund-policy summary&quot;},
   {&quot;id&quot;:&quot;T-1001&quot;,&quot;priority&quot;:75,&quot;team&quot;:&quot;payments&quot;,

@@ -104,6 +104,20 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert content =~ "ptc init support-triage --example support-triage"
   end
 
+  test "mission docs distinguish capability grants from forwarded data" do
+    assert {:ok, guide} = DocumentationLibrary.fetch("designing-agent-workflows")
+    assert guide =~ "limits capabilities"
+    assert guide =~ "does not filter handoff data"
+    assert guide =~ "trusted workflow code must perform that filtering"
+    assert guide =~ "prompt-level mitigation"
+
+    assert {:ok, manifest} = DocumentationLibrary.fetch("manifest")
+    manifest = String.replace(manifest, ~r/\s+/, " ")
+    assert manifest =~ "does not prevent that data from reaching a later mission"
+    assert manifest =~ "do not sanitize data or determine its sensitivity"
+    assert manifest =~ "secret"
+  end
+
   test "served model docs distinguish cost reservations from measured spend" do
     assert {:ok, limits} = DocumentationLibrary.fetch("limits")
     limits = String.replace(limits, ~r/\s+/, " ")

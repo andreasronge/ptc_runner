@@ -121,12 +121,10 @@ defined in this example's `03-specialists/workflow.clj`:
     (return report)))
 ```
 
-Ticket text is written by customers, so `quarantined` wraps it in an
-`<untrusted_tickets>` block before it enters the second task. The block asks
-the model to treat that text as data.
-
-What holds regardless is the grant: the escalation mission has no tickets and
-no tools. The example's README says what its live test checks in the report.
+`quarantined` marks customer text as data but is only a prompt-level mitigation.
+[The mission boundary](../reference/application-manifest.md#supply-input-and-named-missions)
+limits capabilities. It does not filter handoff data, and this example provides
+no such guarantee; trusted workflow code must perform that filtering.
 
 ```console
 ptc run support-triage/03-specialists.ptc-project.json
