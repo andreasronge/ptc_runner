@@ -1275,7 +1275,7 @@ if Code.ensure_loaded?(ReqLLM) do
       if wire_output_limit_supported?(model_provider(model)) do
         case configured_output_limit_values(opts, model) |> Enum.uniq() do
           [value] ->
-            {value, configured_bindings}
+            configured_output_limit(value, configured_bindings, model, request_payload)
 
           [] ->
             computed_output_limit(model, request_payload)
@@ -1287,6 +1287,25 @@ if Code.ensure_loaded?(ReqLLM) do
         :unknown
       end
     end
+
+    defp configured_output_limit(value, configured_bindings, model, request_payload) do
+      OutputLimit.select(
+        Enum.map(configured_bindings, &{&1, value}) ++
+          Enum.filter(model_output_limit_candidates(model, request_payload), fn
+            {_binding, ^value} -> true
+            {_binding, _other_value} -> false
+          end)
+      )
+    end
+
+    defp model_output_limit_candidates(%LLMDB.Model{limits: limits}, request_payload) do
+      [
+        {:model_output_limit, model_output_limit(limits)},
+        {:remaining_context, remaining_context_tokens(limits, request_payload)}
+      ]
+    end
+
+    defp model_output_limit_candidates(_model, _request_payload), do: []
 
     defp effective_output_limit_metadata(
            opts,

@@ -884,6 +884,54 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
              ReqLLMAdapter.effective_output_limit([], model, [%{role: :user, content: "hi"}])
   end
 
+  test "records model bindings tied with a configured request cap" do
+    model =
+      LLMDB.Model.new!(%{
+        id: "binding-test",
+        provider: :openrouter,
+        limits: %{output: 4_096, context: 100_000}
+      })
+
+    assert {4_096, [:configured, :model_output_limit]} =
+             ReqLLMAdapter.effective_output_limit(
+               [max_tokens: 4_096],
+               model,
+               [%{role: :user, content: "hi"}]
+             )
+  end
+
+  test "does not let the adapter default hide a configured and model tie" do
+    model =
+      LLMDB.Model.new!(%{
+        id: "binding-test",
+        provider: :openrouter,
+        limits: %{output: 8_192, context: 100_000}
+      })
+
+    assert {8_192, [:configured, :model_output_limit]} =
+             ReqLLMAdapter.effective_output_limit(
+               [max_tokens: 8_192],
+               model,
+               [%{role: :user, content: "hi"}]
+             )
+  end
+
+  test "keeps the configured wire cap when a model limit is lower" do
+    model =
+      LLMDB.Model.new!(%{
+        id: "binding-test",
+        provider: :openrouter,
+        limits: %{output: 4_096, context: 100_000}
+      })
+
+    assert {8_192, [:configured]} =
+             ReqLLMAdapter.effective_output_limit(
+               [max_tokens: 8_192],
+               model,
+               [%{role: :user, content: "hi"}]
+             )
+  end
+
   test "treats a namespaced provider output budget as configured truncation provenance", %{
     test: test
   } do
