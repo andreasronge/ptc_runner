@@ -7,6 +7,8 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
   filesystem or runtime work.
   """
 
+  alias PtcRunner.Kernel.ExampleLibrary
+
   @shared_frontends [:standalone, :mix]
   @help_option %{
     key: :help,
@@ -75,7 +77,9 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           key: :example,
           type: :string,
           syntax: ["--example NAME"],
-          description: "materialize one embedded example tree instead of the scaffold"
+          description:
+            "materialize one embedded example tree instead of the scaffold; examples: " <>
+              Enum.join(ExampleLibrary.names(), ", ")
         },
         @envelope_option,
         @help_option

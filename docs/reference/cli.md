@@ -189,8 +189,8 @@ files the repository wants.
 
 `ptc init DIRECTORY --example NAME` publishes one of the walkthrough projects
 this executable embeds instead of the scaffold, under the same no-replace
-commit. Run `ptc init` with an unknown example name to have the embedded
-names listed. The trees are byte-identical to the repository's, so the commands the
+commit. Run `ptc help init` to see the embedded names. The trees are
+byte-identical to the repository's, so the commands the
 guides print work from wherever the copy was created rather than from one
 checkout directory.
 
