@@ -32,6 +32,7 @@ defmodule PtcRunner.LiveStatus.Reporter do
     [:ptc_runner, :parallel, :budget],
     [:ptc_runner, :capability, :start],
     [:ptc_runner, :capability, :stop],
+    [:ptc_runner, :agent, :action],
     [:ptc_runner, :lisp, :execute, :start],
     [:ptc_runner, :lisp, :execute, :stop]
   ]
@@ -252,6 +253,17 @@ defmodule PtcRunner.LiveStatus.Reporter do
     })
   end
 
+  defp apply_telemetry(state, [:ptc_runner, :agent, :action], _measurements, metadata) do
+    push_activity(state, %{
+      kind: "agent",
+      name: metadata.invocation,
+      status: metadata.kind,
+      turn: metadata.turn,
+      max_turns: metadata.max_turns,
+      duration_ms: nil
+    })
+  end
+
   defp apply_telemetry(state, [:ptc_runner, :lisp, :execute, :start], _measurements, _metadata),
     do: push_activity(state, %{kind: "evaluation", name: nil, status: "start", duration_ms: nil})
 
@@ -350,7 +362,13 @@ defmodule PtcRunner.LiveStatus.Reporter do
   defp request(%Target{} = target, run_id, frame, _viewer_token),
     do: Target.report(target, run_id, frame)
 
-  defp request(viewer_url, run_id, frame, viewer_token) when is_binary(viewer_url) do
+  defp request(viewer_url, run_id, frame, viewer_token) when is_binary(viewer_url),
+    do: report_http(viewer_url, run_id, frame, viewer_token)
+
+  @doc false
+  def report_http(viewer_url, run_id, frame, viewer_token)
+      when is_binary(viewer_url) and is_binary(run_id) and is_map(frame) do
+    viewer_url = String.trim_trailing(viewer_url, "/")
     encoded_run_id = URI.encode(run_id, &URI.char_unreserved?/1)
     url = viewer_url <> "/api/live/runs/" <> encoded_run_id
 

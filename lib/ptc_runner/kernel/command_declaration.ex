@@ -160,6 +160,13 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
         @env_file_option,
         @run_envelope_option,
         %{
+          key: :progress,
+          type: :boolean,
+          syntax: ["--progress"],
+          description: "show best-effort live run progress on stderr",
+          owner: :frontend
+        },
+        %{
           key: :authorize_mcp,
           type: [:string, :keep],
           syntax: ["--authorize-mcp NAME"],

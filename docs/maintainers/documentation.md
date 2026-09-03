@@ -172,21 +172,19 @@ reader uses.
 
 ## Style and tone
 
-- Lead with what the reader can accomplish or what the component does.
-- Use plain language, active voice, and present tense for implemented behavior.
+The guide voice, page shape, and the words to avoid live in the guide skill at
+`.claude/skills/write-guide/SKILL.md`; every edit under `docs/guides/` starts
+there. These rules apply to every layer:
+
 - Use `must` for normative requirements, `may` for permitted choices, and
   explicit future tense for plans.
-- Keep paragraphs short and focused. Use lists or tables only when they make a
-  relationship easier to scan.
-- Use real current module, function, option, and error names. Verify them in the
+- Use real current module, function, option, and error names, verified in the
   implementation before documenting them.
 - Keep examples domain-neutral unless the API itself is domain-specific.
-- State security, bounds, side effects, ownership, and failure behavior where
-  users need them; do not bury important constraints in implementation notes.
-- Give every guide enough `##` headings to make its tasks visible when skimmed.
-- Define a term on first use when the reader needs it to complete the page.
-  Link to the concepts or reference page for the complete vocabulary instead
-  of front-loading it before the first runnable workflow.
+- Define a term on first use when the reader needs it to complete the page,
+  and link to the concepts or reference page for the rest of the vocabulary.
+- Reference pages state security, bounds, side effects, ownership, and failure
+  behavior where users need them; guides link to that statement.
 
 ## Update and verify documentation
 

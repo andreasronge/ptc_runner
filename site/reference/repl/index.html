@@ -478,12 +478,13 @@ disclosing any path:</p><pre><code class="text language-text">directories for --
 sink. It admits expressions, setup files, scripts, stdin, and JSON Lines and is
 mutually exclusive with <code class="inline">--private-terminal</code>:</p><pre><code class="console language-console">ptc repl \
   --profile private-run-analysis-v2 \
+  --run RUN_ID \
   --resource traces=tmp/tutorial-traces \
   --resource inspection=tmp/tutorial-inspection \
   --session-trace-dir tmp/analysis-traces \
   --private-unattended \
   --format jsonl \
-  -e '(analysis/read &quot;run-id&quot; {&quot;collection&quot; &quot;turns&quot; &quot;limit&quot; 100})' \
+  -e '(analysis/read &quot;RUN_ID&quot; {&quot;collection&quot; &quot;turns&quot; &quot;limit&quot; 100})' \
   &gt;tmp/private-analysis.jsonl</code></pre><p>The packaged command has no Mix build stream.</p><p>Both private switches are accident guards, not access control. A same-UID
 caller can read the source artifacts, and a pseudo-terminal can satisfy the
 terminal check. Unattended output may enter shell logs, coding-agent

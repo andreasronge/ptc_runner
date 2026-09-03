@@ -302,13 +302,6 @@ defmodule PtcRunner.Lisp do
       for selected overrides whose replacement source removed an export.
       Omitting the ownership map keeps the ordinary miss, so embedded callers
       are unchanged.
-    - `:shipped_library_ids` - Optional catalog of shipped library component IDs.
-      The Kernel passes `PtcRunner.Kernel.Library.component_ids/0` so `doc` and
-      `apropos` can name an unattached shipped library. The catalog contains
-      library IDs, not export refs, so a `doc` redirect does not assert that the
-      requested export exists.
-      `nil` (the default) keeps today's miss message, so embedded `run/2`
-      callers are unchanged.
     - `:component_catalog` - Optional attested Kernel component catalog for the
       selected environment. Public `run/2` strips this option so a direct
       caller cannot inject a Kernel graph. Kernel evaluations pass it only
@@ -847,7 +840,6 @@ defmodule PtcRunner.Lisp do
       strict_data: Keyword.get(opts, :strict_data, false),
       data_grants: Keyword.get(opts, :data_grants),
       missing_data_params_message: Keyword.get(opts, :missing_data_params_message),
-      shipped_library_ids: Keyword.get(opts, :shipped_library_ids),
       component_catalog: Keyword.get(opts, :component_catalog),
       inspect_only: Keyword.get(opts, :inspect_only, false),
       strict_transitive_calls: Keyword.get(opts, :strict_transitive_calls, false),
@@ -1288,7 +1280,6 @@ defmodule PtcRunner.Lisp do
       strict_data: strict_data,
       data_grants: data_grants,
       missing_data_params_message: missing_data_params_message,
-      shipped_library_ids: shipped_library_ids,
       component_catalog: component_catalog,
       inspect_only: inspect_only,
       strict_transitive_calls: strict_transitive_calls,
@@ -1336,7 +1327,6 @@ defmodule PtcRunner.Lisp do
         strict_data: strict_data,
         data_grants: data_grants,
         missing_data_params_message: missing_data_params_message,
-        shipped_library_ids: shipped_library_ids,
         component_catalog: component_catalog,
         inspect_only: inspect_only,
         strict_transitive_calls: strict_transitive_calls,
@@ -1709,6 +1699,11 @@ defmodule PtcRunner.Lisp do
   def format_error({:memory_exceeded, info}),
     do: "Memory exceeded: #{memory_exceeded_message(info)}"
 
+  # Normal REPL diagnostics intentionally retain useful evaluator detail;
+  # command-envelope evidence uses the fixed public-safe renderer instead.
+  def format_error({:type_error, message, _details}) when is_binary(message),
+    do: "type_error: #{strip_typed_prefix(message, :type_error)}"
+
   def format_error({category, message, details})
       when category in [
              :unsupported_java_class,
@@ -1892,10 +1887,8 @@ defmodule PtcRunner.Lisp do
       "the #{info.limit_bytes}-byte setup ceiling (raise :setup_max_heap or shrink the grant)"
   end
 
-  defp memory_exceeded_message(%{phase: :eval} = info) do
-    "heap limit exceeded: program used more than its #{info.budget_bytes}-byte " <>
-      "budget above the #{info.baseline_bytes}-byte environment baseline " <>
-      "(limit #{info.limit_bytes} bytes)"
+  defp memory_exceeded_message(%{phase: :eval}) do
+    "heap limit exceeded: program exceeded its evaluation heap budget"
   end
 
   defp memory_exceeded_message(bytes) when is_integer(bytes),

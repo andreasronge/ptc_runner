@@ -514,6 +514,8 @@ defmodule PtcRunner.GitHooks.PrePushTest do
             # test a forced full run instead. Cases that want a mode set it
             # through extra_env, which wins by coming last.
             {"PTC_PRE_PUSH_SERIAL", nil},
+            {"PTC_MANAGED_OPERATION_CONTEXT", nil},
+            {"PTC_OPERATION_ACTIVE", nil},
             {"FORCE_FULL_PRE_PUSH", nil}
           ] ++ extra_env,
       stderr_to_stdout: true

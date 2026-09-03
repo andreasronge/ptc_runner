@@ -126,8 +126,8 @@ if Code.ensure_loaded?(ReqLLM) do
     Loads the `llm_db` model catalog into its VM-global `:persistent_term`
     store so per-request provider workers read it copy-free instead of
     triggering a large one-time decode inside their bounded heap. Idempotent;
-    called during provider-application admission and at capability build for
-    direct embedding paths.
+    called during audited local contract attestation, provider-application
+    admission, and capability build for direct embedding paths.
     """
     @spec ensure_ready() :: :ok
     def ensure_ready do
@@ -207,26 +207,114 @@ if Code.ensure_loaded?(ReqLLM) do
 
     def reservation_bound(_target, _request, _tariff), do: %{}
 
-    # Catalog-free local preflight: refuse contracts this adapter already knows
-    # it cannot honor, without loading llm_db inside the audited-local worker.
+    # Local preflight may load the bundled llm_db catalog inside its bounded
+    # worker when cost reservation makes catalog pricing part of the contract.
+    # This performs no provider, credential, application, process, or network
+    # activity.
     @doc false
     @spec local_contract_attestation(String.t(), Requirements.t()) ::
-            :ok | {:error, :unsupported_model_option}
+            :ok
+            | {:error,
+               :unsupported_model_option
+               | :uncataloged_cost_reservation_pricing_unavailable}
     def local_contract_attestation(model, requirements) when is_binary(model) do
       with {:ok, canonical} <- Requirements.canonical(requirements),
            :ok <- attest_structured_requirements(model, canonical),
            :ok <- attest_inference_controls(model, canonical.exact_options) do
         case parse_provider(model) do
-          {:req_llm, selector} -> refuse_lossy_max_tokens(selector)
-          _direct_http -> :ok
+          {:req_llm, selector} -> attest_local_req_llm_contract(selector, canonical)
+          _direct_http -> attest_direct_reservation(canonical.reservation)
         end
       else
         :error -> {:error, :unsupported_model_option}
-        {:error, :unsupported_model_option} = error -> error
+        {:error, _reason} = error -> error
       end
     end
 
     def local_contract_attestation(_model, _requirements), do: :ok
+
+    defp attest_local_req_llm_contract(selector, canonical) do
+      with :ok <- refuse_lossy_max_tokens(selector) do
+        attest_local_req_llm_pricing(selector, canonical)
+      end
+    end
+
+    defp attest_local_req_llm_pricing(selector, canonical) do
+      if Requirements.cost_reservation?(canonical) do
+        ensure_ready()
+
+        case cataloged_req_llm_model(selector) do
+          {:ok, prepared} ->
+            attest_prepared_reservation(prepared, :cataloged, canonical.reservation)
+
+          :uncataloged ->
+            if supported_req_llm_provider?(selector),
+              do: {:error, :uncataloged_cost_reservation_pricing_unavailable},
+              else: :ok
+        end
+      else
+        :ok
+      end
+    end
+
+    defp supported_req_llm_provider?(selector) do
+      case String.split(selector, ":", parts: 2) do
+        [provider_name, model_id] when model_id != "" ->
+          provider_name = String.replace(provider_name, "-", "_")
+
+          registered_req_llm_provider?(provider_name) or
+            (not req_llm_started?() and packaged_req_llm_provider?(provider_name))
+
+        _invalid ->
+          false
+      end
+    end
+
+    defp registered_req_llm_provider?(provider_name) do
+      provider = String.to_existing_atom(provider_name)
+      match?({:ok, _module}, ReqLLM.provider(provider))
+    rescue
+      ArgumentError -> false
+    end
+
+    defp req_llm_started? do
+      Enum.any?(Application.started_applications(), &(elem(&1, 0) == :req_llm))
+    end
+
+    defp packaged_req_llm_provider?(provider_name) do
+      _ = Application.load(:req_llm)
+
+      case :application.get_key(:req_llm, :modules) do
+        {:ok, modules} -> Enum.any?(modules, &provider_module?(&1, provider_name))
+        :undefined -> false
+      end
+    end
+
+    defp provider_module?(module, provider_name) do
+      Code.ensure_loaded?(module) and
+        ReqLLM.Provider in (module.__info__(:attributes)[:behaviour] || []) and
+        function_exported?(module, :provider_id, 0) and
+        Atom.to_string(module.provider_id()) == provider_name
+    rescue
+      _exception -> false
+    end
+
+    defp cataloged_req_llm_model(selector) do
+      {effective_selector, provider_model_id} = inference_profile_resolution(selector)
+
+      case LLMDB.model(effective_selector) do
+        {:ok, %LLMDB.Model{} = model} ->
+          model =
+            if provider_model_id,
+              do: %{model | provider_model_id: provider_model_id},
+              else: model
+
+          {:ok, %ReqLLMPreparedModel{selector: selector, exact_options: %{}, model: model}}
+
+        _missing ->
+          :uncataloged
+      end
+    end
 
     @impl true
     @spec call(ReqLLMPreparedModel.t(), Invocation.t()) ::
@@ -608,7 +696,11 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp call_req_llm_with_tools(
-           %ReqLLMPreparedModel{selector: model, model: req_llm_model},
+           %ReqLLMPreparedModel{
+             selector: model,
+             model: req_llm_model,
+             output_limit_bindings: output_limit_bindings
+           },
            messages,
            tools,
            opts
@@ -637,7 +729,8 @@ if Code.ensure_loaded?(ReqLLM) do
           req_llm_model,
           request_payload,
           messages,
-          req_opts
+          req_opts,
+          output_limit_bindings
         )
 
       case ReqLLM.generate_text(req_llm_model, messages, req_opts) do
@@ -693,7 +786,8 @@ if Code.ensure_loaded?(ReqLLM) do
       ProviderError.new(
         http_error_kind(status),
         http_error_details(status, error.reason),
-        retryable?: http_retryable?(status, error.retryable)
+        retryable?: http_retryable?(status, error.retryable),
+        dispatch_provenance: :dispatched
       )
     end
 
@@ -710,7 +804,8 @@ if Code.ensure_loaded?(ReqLLM) do
       ProviderError.new(
         http_error_kind(status),
         http_error_details(status, error.reason),
-        retryable?: http_retryable?(status, nil)
+        retryable?: http_retryable?(status, nil),
+        dispatch_provenance: :dispatched
       )
     end
 
@@ -725,7 +820,8 @@ if Code.ensure_loaded?(ReqLLM) do
       ProviderError.new(
         http_error_kind(status),
         direct_http_error_details(status, Map.get(error, :body)),
-        retryable?: http_retryable?(status, nil)
+        retryable?: http_retryable?(status, nil),
+        dispatch_provenance: :dispatched
       )
     end
 
@@ -1172,10 +1268,14 @@ if Code.ensure_loaded?(ReqLLM) do
     @spec effective_output_limit(keyword(), term(), term()) ::
             {pos_integer(), [OutputLimit.binding()]} | :unknown
     def effective_output_limit(opts, model, request_payload) when is_list(opts) do
+      effective_output_limit(opts, model, request_payload, [:configured])
+    end
+
+    defp effective_output_limit(opts, model, request_payload, configured_bindings) do
       if wire_output_limit_supported?(model_provider(model)) do
         case configured_output_limit_values(opts, model) |> Enum.uniq() do
           [value] ->
-            {value, [:configured]}
+            configured_output_limit(value, configured_bindings, model, request_payload)
 
           [] ->
             computed_output_limit(model, request_payload)
@@ -1188,14 +1288,35 @@ if Code.ensure_loaded?(ReqLLM) do
       end
     end
 
+    defp configured_output_limit(value, configured_bindings, model, request_payload) do
+      OutputLimit.select(
+        Enum.map(configured_bindings, &{&1, value}) ++
+          Enum.filter(model_output_limit_candidates(model, request_payload), fn
+            {_binding, ^value} -> true
+            {_binding, _other_value} -> false
+          end)
+      )
+    end
+
+    defp model_output_limit_candidates(%LLMDB.Model{limits: limits}, request_payload) do
+      [
+        {:model_output_limit, model_output_limit(limits)},
+        {:remaining_context, remaining_context_tokens(limits, request_payload)}
+      ]
+    end
+
+    defp model_output_limit_candidates(_model, _request_payload), do: []
+
     defp effective_output_limit_metadata(
            opts,
            model,
            request_payload,
            messages,
-           request_opts
+           request_opts,
+           configured_bindings
          ) do
-      with {candidate, bindings} <- effective_output_limit(opts, model, request_payload),
+      with {candidate, bindings} <-
+             effective_output_limit(opts, model, request_payload, configured_bindings),
            {:ok, ^candidate} <- normalized_request_output_limit(model, messages, request_opts),
            value = candidate,
            true <- value in 1..1_000_000 do
@@ -1804,11 +1925,78 @@ if Code.ensure_loaded?(ReqLLM) do
     end
 
     defp merge_exact_options(%ReqLLMPreparedModel{} = target, opts) do
-      (target.request_options || target.exact_options)
-      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
-      |> Keyword.new()
-      |> Keyword.merge(opts)
+      exact_options =
+        (target.request_options || target.exact_options)
+        |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+        |> Keyword.new()
+
+      opts
+      |> Keyword.drop(@token_limit_options)
+      |> strip_request_provider_token_limits(model_provider(target.model))
+      |> Keyword.merge(exact_options)
     end
+
+    defp strip_request_provider_token_limits(opts, provider) do
+      case Keyword.get_values(opts, :provider_options) do
+        [provider_options] ->
+          Keyword.put(
+            opts,
+            :provider_options,
+            strip_provider_token_limits(provider_options, provider)
+          )
+
+        _missing_or_duplicate ->
+          opts
+      end
+    end
+
+    defp strip_provider_token_limits(options, provider)
+         when is_list(options) and is_atom(provider) and not is_nil(provider) do
+      if Keyword.keyword?(options) do
+        cleaned = Keyword.drop(options, @token_limit_options)
+
+        case Keyword.get_values(cleaned, provider) do
+          [namespace] ->
+            Keyword.put(cleaned, provider, strip_direct_token_limits(namespace))
+
+          _missing_or_duplicate ->
+            cleaned
+        end
+      else
+        options
+      end
+    end
+
+    defp strip_provider_token_limits(options, provider)
+         when is_map(options) and is_atom(provider) and not is_nil(provider) do
+      cleaned = strip_direct_token_limits(options)
+      namespace = Map.get(cleaned, provider) || Map.get(cleaned, Atom.to_string(provider))
+
+      cond do
+        Map.has_key?(cleaned, provider) ->
+          Map.put(cleaned, provider, strip_direct_token_limits(namespace))
+
+        Map.has_key?(cleaned, Atom.to_string(provider)) ->
+          Map.put(cleaned, Atom.to_string(provider), strip_direct_token_limits(namespace))
+
+        true ->
+          cleaned
+      end
+    end
+
+    defp strip_provider_token_limits(options, _provider), do: options
+
+    defp strip_direct_token_limits(options) when is_list(options) do
+      if Keyword.keyword?(options), do: Keyword.drop(options, @token_limit_options), else: options
+    end
+
+    defp strip_direct_token_limits(options) when is_map(options) do
+      Enum.reduce(@token_limit_options, options, fn key, cleaned ->
+        cleaned |> Map.delete(key) |> Map.delete(Atom.to_string(key))
+      end)
+    end
+
+    defp strip_direct_token_limits(value), do: value
 
     defp attest_structured_requirements(model, %{
            structured_output_mode: mode,
@@ -1891,6 +2079,7 @@ if Code.ensure_loaded?(ReqLLM) do
       %ReqLLMPreparedModel{
         selector: selector,
         exact_options: canonical.exact_options,
+        output_limit_bindings: canonical.output_limit_bindings,
         budgeted?: reservation_enabled?(canonical.reservation),
         structured_output_mode: canonical.structured_output_mode,
         model: nil
@@ -1912,6 +2101,7 @@ if Code.ensure_loaded?(ReqLLM) do
            %{
              prepared
              | exact_options: canonical.exact_options,
+               output_limit_bindings: canonical.output_limit_bindings,
                request_options: request_options,
                budgeted?: reservation_enabled?(canonical.reservation),
                structured_output_mode: canonical.structured_output_mode

@@ -302,12 +302,13 @@ async function fetchAllTurns(runId) {
 
 async function loadRun(runId, routeGeneration) {
   const [
-    runResponse, turnsResult, conversationResponse, preludesResponse,
+    runResponse, turnsResult, conversationResponse, resultResponse, preludesResponse,
     executionErrorsResponse, explicitFailureValuesResponse
   ] = await Promise.all([
     fetch(`/api/kernel/runs/${encodeURIComponent(runId)}`),
     fetchAllTurns(runId),
     fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/conversation`),
+    fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/result`),
     fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/preludes`),
     fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/execution-errors`),
     fetch(`/api/analysis/runs/${encodeURIComponent(runId)}/explicit-failure-values`)
@@ -329,6 +330,13 @@ async function loadRun(runId, routeGeneration) {
             'available?': false,
             status: conversationResponse.status,
             reason: await safeBodyText(conversationResponse)
+          };
+      const result = resultResponse.ok
+        ? await resultResponse.json()
+        : {
+            'available?': false,
+            status: resultResponse.status,
+            reason: await safeBodyText(resultResponse)
           };
       // Both private routes report an absence the same way, because the
       // transcript states it the same way: the reason code, not the status.
@@ -359,6 +367,7 @@ async function loadRun(runId, routeGeneration) {
           metadata: await runResponse.json(),
           turns: turnsResult.turns,
           conversation,
+          result,
           preludes,
           execution_errors,
           explicit_failure_values,
@@ -428,6 +437,7 @@ function renderRun(data, { fresh = false, routeGeneration = state.routeGeneratio
           renderRun({
             metadata,
             conversation,
+            result: data.result,
             preludes: data.preludes,
             execution_errors: data.execution_errors,
             explicit_failure_values: data.explicit_failure_values,

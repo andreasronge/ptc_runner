@@ -1,0 +1,10 @@
+data/
+reference/
+.ptc/
+.ptc-replay/
+.ptc-reviewer/
+.ptc-reviewer-replay/
+out*.json
+.env
+.ptc-transcripts/
+.record-replay.*

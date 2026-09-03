@@ -226,21 +226,22 @@ defmodule PtcRunner.TranscriptFrontend do
          "transcript evidence is incomplete: the canonical trace records no terminal run " <>
            "event or reports dropped events, so the conversation cannot be certified " <>
            "(#{missing} missing model #{plural(missing, "exchange")}, " <>
-           "#{ambiguity} ambiguous #{plural(ambiguity, "association")}). " <> ungated_route()}
+           "#{ambiguity} ambiguous #{plural(ambiguity, "association")}). " <> ungated_repl_hint()}
 
       missing > 0 ->
         {:error, :incomplete_evidence,
          "transcript evidence is incomplete: #{missing} model " <>
            "#{plural(missing, "exchange")} the canonical trace expects " <>
            "#{plural(missing, "was", "were")} not captured under --inspection " <>
-           "(#{ambiguity} ambiguous #{plural(ambiguity, "association")}). " <> ungated_route()}
+           "(#{ambiguity} ambiguous #{plural(ambiguity, "association")}). " <>
+           ungated_repl_hint()}
 
       ambiguity > 0 ->
         {:error, :ambiguous_evidence,
          "transcript evidence is ambiguous: #{ambiguity} turn or generated-source " <>
            "#{plural(ambiguity, "association")} #{plural(ambiguity, "resolves", "resolve")} " <>
            "to more than one predecessor. Nothing is missing: the canonical trace is " <>
-           "complete and every expected model exchange was captured. " <> ungated_route()}
+           "complete and every expected model exchange was captured. " <> ungated_repl_hint()}
 
       true ->
         :ok
@@ -248,12 +249,12 @@ defmodule PtcRunner.TranscriptFrontend do
   end
 
   # `ptc transcript` publishes only a reconstruction it can certify. The
-  # Viewer's analysis route applies no such gate, so it is the next action for
-  # every refusal above rather than a workaround for one of them.
-  defp ungated_route,
+  # private analysis profile applies no such gate and is present in every
+  # distribution, so it is the next action for every refusal above.
+  defp ungated_repl_hint,
     do:
-      "A Viewer started with viewer.private: true serves the ungated reconstruction at " <>
-        "/api/analysis/runs/RUN_ID/conversation."
+      "The same reconstruction is ungated in ptc repl --profile private-run-analysis-v2; " <>
+        "see ptc docs repl."
 
   defp count(conversation, key) do
     case Map.get(conversation, key) do

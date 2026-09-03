@@ -270,6 +270,40 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
                "openrouter:future-vendor/future-priced-model-1724",
                requirements
              )
+
+    assert {:error, :uncataloged_cost_reservation_pricing_unavailable} =
+             ReqLLMAdapter.local_contract_attestation(
+               "openrouter:future-vendor/future-priced-model-1724",
+               requirements
+             )
+
+    registered_providers = ReqLLM.Providers.list()
+    assert :ok = ReqLLMAdapter.local_contract_attestation("logger:model", requirements)
+    assert ReqLLM.Providers.list() == registered_providers
+
+    assert {:error, %ReqLLM.Error.Invalid.Provider{}} =
+             ReqLLMAdapter.prepare_model("logger:model", requirements)
+
+    on_exit(fn ->
+      _ = Application.load(:req_llm)
+      :ok = ReqLLM.Providers.initialize()
+    end)
+
+    :ok = LLMSupport.stop_provider_applications()
+    Enum.each(ReqLLM.Providers.list(), &ReqLLM.Providers.unregister/1)
+    _ = Application.unload(:req_llm)
+    assert {:ok, :openai} = ReqLLM.Providers.register(ReqLLM.Providers.OpenAI)
+
+    assert {:error, :uncataloged_cost_reservation_pricing_unavailable} =
+             ReqLLMAdapter.local_contract_attestation("atlascloud:future-model", requirements)
+
+    assert :ok = ReqLLMAdapter.local_contract_attestation("logger:model", requirements)
+    refute Enum.any?(Application.started_applications(), &(elem(&1, 0) == :req_llm))
+    assert ReqLLM.Providers.list() == [:openai]
+
+    _ = Application.load(:req_llm)
+    :ok = ReqLLM.Providers.initialize()
+    assert ReqLLM.Providers.list() == registered_providers
   end
 
   test "prefers OpenRouter's reported charge over catalog pricing", %{test: test} do
@@ -348,17 +382,61 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
                Requirements.interim(%{max_tokens: 64, reasoning_effort: :high})
              )
 
-    {:ok, invocation} =
-      Invocation.new(%{messages: [%{role: :user, content: "hi"}]}, false, "test", nil)
-
     assert {:ok, %{content: "ok"}} =
-             ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
+             ReqLLMAdapter.generate_text(
+               put_test_http_options(target, test),
+               [%{role: :user, content: "hi"}],
+               api_key: "test",
+               max_tokens: 2_048,
+               provider_options: [
+                 openai: [
+                   max_completion_tokens: 1_024,
+                   response_format: %{
+                     type: "json_schema",
+                     json_schema: %{
+                       name: "opaque",
+                       schema: %{
+                         type: "object",
+                         properties: %{"max_tokens" => %{type: "integer"}}
+                       }
+                     }
+                   }
+                 ]
+               ]
+             )
 
     assert_receive {:request_body, body}
     assert body["max_output_tokens"] == 64
+
+    assert get_in(body, ["text", "format", "schema", "properties", "max_tokens"]) == %{
+             "type" => "integer"
+           }
+
     assert body["reasoning"] == %{"effort" => "high"}
     refute Map.has_key?(body, "max_tokens")
     refute Map.has_key?(body, "max_completion_tokens")
+  end
+
+  test "prepared calls preserve duplicate provider option rejection" do
+    selector = "openrouter:deepseek/deepseek-v4-flash-0731"
+
+    assert {:ok, target, _status, _attestation} =
+             ReqLLMAdapter.prepare_model(selector, Requirements.interim(%{max_tokens: 64}))
+
+    messages = [%{role: :user, content: "hi"}]
+
+    for opts <- [
+          [api_key: "test", provider_options: [], provider_options: []],
+          [api_key: "test", provider_options: [openrouter: [], openrouter: []]]
+        ] do
+      assert {:error, %ReqLLM.Error.Invalid.Parameter{} = prepared_error} =
+               ReqLLMAdapter.generate_text(target, messages, opts)
+
+      assert {:error, %ReqLLM.Error.Invalid.Parameter{} = direct_error} =
+               ReqLLMAdapter.generate_text(selector, messages, opts)
+
+      assert Exception.message(prepared_error) == Exception.message(direct_error)
+    end
   end
 
   test "json_schema generate_object uses provider-native response_format", %{test: test} do
@@ -723,6 +801,77 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
     assert_receive {:request_body, %{"max_tokens" => 4_096}}
   end
 
+  test "carries the application binding from live preparation into truncation metadata", %{
+    test: test
+  } do
+    expect_request(test, "x-ai/grok-4.3", finish_reason: "length", content: "")
+
+    guarantees = %{tokens: false, cost_currency: nil}
+    reservation = %{total_tokens?: false, cost_tariff: nil}
+
+    assert {:ok, requirements} =
+             Requirements.live(%{max_tokens: 8_192}, 4_096, :unsupported, guarantees, reservation)
+
+    assert {:ok, target, _status, ^requirements} =
+             ReqLLMAdapter.prepare_model("openrouter:x-ai/grok-4.3", requirements)
+
+    {:ok, invocation} =
+      Invocation.new(
+        %{messages: [%{role: :user, content: "hi"}], tools: [tool_schema()]},
+        false,
+        "test",
+        nil
+      )
+
+    assert {:ok,
+            %{
+              finish_reason: :length,
+              output_limit: %{value: 4_096, bindings: [:application_limit]}
+            }} = ReqLLMAdapter.call(put_test_http_options(target, test), invocation)
+
+    assert_receive {:request_body, %{"max_tokens" => 4_096}}
+  end
+
+  test "direct options cannot forge truncation provenance", %{test: test} do
+    expect_request(test, "x-ai/grok-4.3", finish_reason: "length", content: "")
+
+    assert {:ok, %{output_limit: %{value: 4_096, bindings: [:configured]}}} =
+             ReqLLMAdapter.generate_with_tools(
+               "openrouter:x-ai/grok-4.3",
+               [%{role: :user, content: "hi"}],
+               [tool_schema()],
+               api_key: "test",
+               max_tokens: 4_096,
+               output_limit_bindings: [:application_limit],
+               req_http_options: [plug: {Req.Test, test}]
+             )
+  end
+
+  test "prepared options cannot override the sealed cap or provenance", %{test: test} do
+    expect_request(test, "x-ai/grok-4.3", finish_reason: "length", content: "")
+
+    guarantees = %{tokens: false, cost_currency: nil}
+    reservation = %{total_tokens?: false, cost_tariff: nil}
+
+    assert {:ok, requirements} =
+             Requirements.live(%{max_tokens: 8_192}, 4_096, :unsupported, guarantees, reservation)
+
+    assert {:ok, target, _status, ^requirements} =
+             ReqLLMAdapter.prepare_model("openrouter:x-ai/grok-4.3", requirements)
+
+    assert {:ok, %{output_limit: %{value: 4_096, bindings: [:application_limit]}}} =
+             ReqLLMAdapter.generate_with_tools(
+               put_test_http_options(target, test),
+               [%{role: :user, content: "hi"}],
+               [tool_schema()],
+               api_key: "test",
+               max_tokens: 2_048,
+               output_limit_bindings: [:configured]
+             )
+
+    assert_receive {:request_body, %{"max_tokens" => 4_096}}
+  end
+
   test "records every binding tied for the computed effective request cap" do
     model =
       LLMDB.Model.new!(%{
@@ -733,6 +882,54 @@ defmodule PtcRunner.LLM.ReqLLMAdapterRequestTest do
 
     assert {4_096, [:adapter_default, :model_output_limit]} =
              ReqLLMAdapter.effective_output_limit([], model, [%{role: :user, content: "hi"}])
+  end
+
+  test "records model bindings tied with a configured request cap" do
+    model =
+      LLMDB.Model.new!(%{
+        id: "binding-test",
+        provider: :openrouter,
+        limits: %{output: 4_096, context: 100_000}
+      })
+
+    assert {4_096, [:configured, :model_output_limit]} =
+             ReqLLMAdapter.effective_output_limit(
+               [max_tokens: 4_096],
+               model,
+               [%{role: :user, content: "hi"}]
+             )
+  end
+
+  test "does not let the adapter default hide a configured and model tie" do
+    model =
+      LLMDB.Model.new!(%{
+        id: "binding-test",
+        provider: :openrouter,
+        limits: %{output: 8_192, context: 100_000}
+      })
+
+    assert {8_192, [:configured, :model_output_limit]} =
+             ReqLLMAdapter.effective_output_limit(
+               [max_tokens: 8_192],
+               model,
+               [%{role: :user, content: "hi"}]
+             )
+  end
+
+  test "keeps the configured wire cap when a model limit is lower" do
+    model =
+      LLMDB.Model.new!(%{
+        id: "binding-test",
+        provider: :openrouter,
+        limits: %{output: 4_096, context: 100_000}
+      })
+
+    assert {8_192, [:configured]} =
+             ReqLLMAdapter.effective_output_limit(
+               [max_tokens: 8_192],
+               model,
+               [%{role: :user, content: "hi"}]
+             )
   end
 
   test "treats a namespaced provider output budget as configured truncation provenance", %{

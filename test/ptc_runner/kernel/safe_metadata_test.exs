@@ -12,18 +12,23 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
             "max-calls",
             "model-output-truncated"
           ] do
-        assert SafeMetadata.annotation?("agent-action", %{"turn" => 0, "kind" => kind})
+        assert SafeMetadata.annotation?("agent-action", action(0, kind))
       end
 
-      assert SafeMetadata.annotation?("agent-action", %{"turn" => 5, "kind" => "tool-call"})
+      assert SafeMetadata.annotation?("agent-action", action(5, "tool-call"))
     end
 
     test "bounds turn to 0..127" do
-      assert SafeMetadata.annotation?("agent-action", %{"turn" => 127, "kind" => "tool-call"})
-      refute SafeMetadata.annotation?("agent-action", %{"turn" => 128, "kind" => "tool-call"})
-      refute SafeMetadata.annotation?("agent-action", %{"turn" => -1, "kind" => "tool-call"})
-      refute SafeMetadata.annotation?("agent-action", %{"turn" => 1.0, "kind" => "tool-call"})
-      refute SafeMetadata.annotation?("agent-action", %{"turn" => "0", "kind" => "tool-call"})
+      assert SafeMetadata.annotation?("agent-action", %{
+               action(127, "tool-call")
+               | "max_turns" => 128
+             })
+
+      refute SafeMetadata.annotation?("agent-action", action(128, "tool-call"))
+      refute SafeMetadata.annotation?("agent-action", action(6, "tool-call"))
+      refute SafeMetadata.annotation?("agent-action", action(-1, "tool-call"))
+      refute SafeMetadata.annotation?("agent-action", action(1.0, "tool-call"))
+      refute SafeMetadata.annotation?("agent-action", action("0", "tool-call"))
     end
 
     test "accepts the phased shape with phase, phase-turn, and mission" do
@@ -36,6 +41,8 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
           ] do
         assert SafeMetadata.annotation?("agent-action", %{
                  "turn" => 3,
+                 "max_turns" => 6,
+                 "invocation" => "agent-0123456789abcdef",
                  "kind" => kind,
                  "phase" => 1,
                  "phase_turn" => 0,
@@ -47,6 +54,8 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
     test "bounds the phased fields and refuses a partial phased shape" do
       phased = %{
         "turn" => 0,
+        "max_turns" => 6,
+        "invocation" => "agent-0123456789abcdef",
         "kind" => "tool-call",
         "phase" => 0,
         "phase_turn" => 0,
@@ -80,8 +89,8 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
 
       refute SafeMetadata.annotation?("agent-action", %{"turn" => 0})
       refute SafeMetadata.annotation?("agent-action", %{"kind" => "tool-call"})
-      refute SafeMetadata.annotation?("agent-action", %{"turn" => 0, "kind" => "thinking"})
-      refute SafeMetadata.annotation?("agent-action", %{"turn" => 0, "kind" => nil})
+      refute SafeMetadata.annotation?("agent-action", action(0, "thinking"))
+      refute SafeMetadata.annotation?("agent-action", action(0, nil))
 
       refute SafeMetadata.annotation?("agent-action", %{
                "turn" => 0,
@@ -112,8 +121,9 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
     # change, or this test fails.
     @published [
       {"progress", ["stage"]},
-      {"agent-action", ["turn", "kind"]},
-      {"agent-action", ["turn", "kind", "phase", "phase_turn", "mission"]}
+      {"agent-action", ["turn", "max_turns", "invocation", "kind"]},
+      {"agent-action",
+       ["turn", "max_turns", "invocation", "kind", "phase", "phase_turn", "mission"]}
     ]
 
     test "annotation?/2 accepting clauses are exactly the published rows" do
@@ -147,29 +157,40 @@ defmodule PtcRunner.Kernel.SafeMetadataTest do
 
       assert agent_row =~ ~s("agent-action")
       refute agent_row =~ "progress"
-      assert agent_row =~ "exactly two keys or exactly five"
+      assert agent_row =~ "exactly four keys or exactly seven"
 
-      [two_key, five_key] = String.split(agent_row, "or that plus", parts: 2)
+      [base_key, phased_key] = String.split(agent_row, "or that plus", parts: 2)
 
-      assert two_key =~ ~s("turn": #{bounds.turn})
-      assert two_key =~ ~s("kind")
-      refute two_key =~ "phase"
-      refute two_key =~ "mission"
+      assert base_key =~ ~s("turn": #{bounds.turn})
+      assert base_key =~ ~s("max_turns": 1..128)
+      assert base_key =~ ~s("invocation")
+      assert base_key =~ ~s("kind")
+      refute base_key =~ "phase"
+      refute base_key =~ "mission"
 
-      assert five_key =~ ~s("phase": #{bounds.phase})
-      assert five_key =~ ~s("phase_turn": #{bounds.phase_turn})
-      assert five_key =~ ~s("mission")
+      assert phased_key =~ ~s("phase": #{bounds.phase})
+      assert phased_key =~ ~s("phase_turn": #{bounds.phase_turn})
+      assert phased_key =~ ~s("mission")
 
       for kind <- kinds do
-        assert two_key =~ kind
+        assert base_key =~ kind
       end
 
-      unescaped_kinds = String.replace(two_key, "\\", "")
+      unescaped_kinds = String.replace(base_key, "\\", "")
       assert unescaped_kinds =~ Enum.join(kinds, " | ")
 
       assert section =~ "a lowercase letter, then up to #{bounds.mission_max} letters, digits"
       assert source =~ ~s|~r/\\A[a-z][a-z0-9._-]{0,#{bounds.mission_max}}\\z/|
     end
+  end
+
+  defp action(turn, kind) do
+    %{
+      "turn" => turn,
+      "max_turns" => 6,
+      "invocation" => "agent-0123456789abcdef",
+      "kind" => kind
+    }
   end
 
   describe "capability rejection class" do

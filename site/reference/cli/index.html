@@ -104,7 +104,9 @@ grammar for each frontend.</p><h2 id="choose-a-command">Choose a command</h2><di
 help command for the frontend you invoke as its canonical command and option
 reference.</p><p>A provider-bearing manifest needs a host configuration. A project document can
 remember that path and its environment file. Before running it, active provider
-checks can make real requests and may incur cost:</p><pre><code class="console language-console">ptc doctor ptc-project.json --connect</code></pre><p>Plain doctor reports <code class="inline">readiness: &quot;unverified&quot;</code> when its local checks pass.
+checks can make real requests and may incur cost:</p><pre><code class="console language-console">ptc doctor ptc-project.json --connect</code></pre><p>Readiness is derived from provider check rows: no rows report
+<code class="inline">readiness: &quot;not_applicable&quot;</code>, all passing rows report <code class="inline">readiness: &quot;ready&quot;</code>,
+and any skipped row reports <code class="inline">readiness: &quot;unverified&quot;</code>.
 Missing provider commands, unreadable replay fixtures, and other attributable
 local failures produce failed check rows, <code class="inline">readiness: &quot;failed&quot;</code>, and a nonzero
 exit without activating a provider. Successful active checks report <code class="inline">ready</code>;
@@ -154,7 +156,11 @@ ptc run ptc.json \
   --host-config ptc-host.json \
   --trace-dir traces \
   --inspect traces/run.ptcins \
-  --envelope results/command.json</code></pre><p>Useful run switches are:</p><ul><li><code class="inline">--input INPUT.json</code> replaces the manifest input with another normal object.
+  --envelope results/command.json</code></pre><p>Useful run switches are:</p><ul><li><code class="inline">--progress</code> writes best-effort live status only to stderr; stdout remains the
+workflow result. On an interactive stderr it updates one ASCII line. When
+stderr is redirected or its width is unavailable, it writes bounded
+newline-delimited milestones and at most one unchanged heartbeat every ten
+seconds. It remains opt-in and works alongside <code class="inline">PTC_VIEWER_URL</code>.</li><li><code class="inline">--input INPUT.json</code> replaces the manifest input with another normal object.
 Resolve the path as an application-relative document first; otherwise treat it
 as absolute or relative to the process working directory (same rule as
 <code class="inline">--component-override-descriptor</code> host paths).</li><li><code class="inline">--private-input INPUT.json</code> does the same and classifies the run as private.</li><li><code class="inline">--output VALUE.json</code> publishes a normal result value without replacing an
@@ -169,9 +175,9 @@ document it publishes carries status, run reference, result or classified
 error, artifact state, and a closed <code class="inline">warnings</code> array. For <code class="inline">run</code>, an uncataloged
 installed model appears there as <code class="inline">model_uncataloged</code> with its provider alias
 and an adapter-attested public selector; the same warning is retained in
-<code class="inline">run-started</code> metadata. Non-run commands require an empty warnings
-array. In particular, <code class="inline">doctor --connect</code> retains uncataloged-model notices on
-stderr rather than claiming run metadata it does not produce. Parse the
+<code class="inline">run-started</code> metadata. A failed plain <code class="inline">doctor</code> command also publishes locally
+derived <code class="inline">model_uncataloged</code> warnings for every affected provider check;
+successful non-run commands keep the array empty. Parse the
 envelope rather than scraping stdout, which is a human
 presentation channel that may also carry application output.</li></ul><p>The command envelope reports the run reference and artifact class, not artifact
 paths. Output, trace, inspection, and envelope destinations must be distinct.
@@ -328,8 +334,32 @@ not in this process-contract reference.</p><h3 id="branch-on-the-exit-status">Br
 on the status to decide whether to retry, and read <code class="inline">error.code</code> from the
 envelope when the branch needs to know which failure it was.</p><p>A recoverable capability error does not change the exit status. Exhausting
 <code class="inline">workflow_capability_calls_per_name</code> returns
-<code class="inline">{&quot;status&quot;:&quot;error&quot;,&quot;kind&quot;:&quot;limit_exceeded&quot;,&quot;reason&quot;:&quot;capability_quota&quot;,&quot;details&quot;:{&quot;limit&quot;:&quot;workflow_capability_calls_per_name&quot;,&quot;name&quot;:&quot;llm-request&quot;,&quot;limit_value&quot;:2}}</code> as a
-value into PTC-Lisp; a workflow that reads past it can still <code class="inline">return</code> and the
+<code class="inline">{&quot;status&quot;:&quot;error&quot;,&quot;kind&quot;:&quot;limit_exceeded&quot;,&quot;reason&quot;:&quot;capability_quota&quot;,&quot;retryable?&quot;:false,&quot;model&quot;:&quot;primary&quot;,&quot;details&quot;:{&quot;limit&quot;:&quot;workflow_capability_calls_per_name&quot;,&quot;name&quot;:&quot;llm-request&quot;,&quot;limit_value&quot;:2}}</code> as a
+JSON boundary value; it is not an exact display of the value's PTC-Lisp types.
+The equivalent value inside the workflow uses keyword keys and keyword-valued
+<code class="inline">:status</code>, <code class="inline">:kind</code>, and <code class="inline">:reason</code> fields:</p><pre><code class="clojure language-clojure">{:status :error
+ :kind :limit_exceeded
+ :reason :capability_quota
+ :retryable? false
+ :model &quot;primary&quot;
+ :details {:limit :workflow_capability_calls_per_name
+           :name &quot;llm-request&quot;
+           :limit_value 2}}</code></pre><p>An aggregate cost-budget refusal has the same field types and this copyable
+PTC-Lisp shape:</p><pre><code class="clojure language-clojure">{:status :error
+ :kind :limit_exceeded
+ :reason :llm_cost_microusd
+ :retryable? false
+ :details {:limit :llm_cost_microusd
+           :limit_value 1
+           :remaining 1
+           :requested 8585}}</code></pre><p>PTC-Lisp equality is type-sensitive even though JSON projection renders a
+keyword value as its name string. Therefore
+<code class="inline">(= &quot;limit_exceeded&quot; (get response :kind))</code> is false, while
+<code class="inline">(= :limit_exceeded (get response :kind))</code> is true. Preserve the authenticated
+envelope when ending the run so the command retains its limit classification:</p><pre><code class="clojure language-clojure">(let [response (tool/llm-request request)]
+  (if (= :limit_exceeded (get response :kind))
+    (fail response)
+    response))</code></pre><p>A workflow that reads past a recoverable error can still <code class="inline">return</code> and the
 command exits <code class="inline">0</code>. Refusing an aggregate <code class="inline">llm_total_tokens</code> or
 <code class="inline">llm_cost_microusd</code> reservation is the same class of recoverable value, with
 <code class="inline">reason</code> naming the budget. Aborting that exact envelope reports
@@ -536,9 +566,12 @@ and then opens its detail view in the Runs tab. The Viewer therefore does not
 need to be restarted after a run it launched.</p><p>The ordinary project command also configures the Live project details and one
 fixed launch target from that same project document. The browser may edit
 workflow input or choose one declared mission, but it cannot choose a project,
-manifest, working directory, or command:</p><pre><code class="console language-console">ptc viewer ptc-project.json --env-file .env</code></pre><p>Viewer-launched workflow cards use the manifest label and workflow entry as
-their human-facing title, while retaining the <code class="inline">cmd-...</code> value as the stable run
-identifier. The Live tab and <code class="inline">GET /api/live/runs</code> list newest first, and each
+manifest, working directory, or command:</p><pre><code class="console language-console">ptc viewer ptc-project.json --env-file .env</code></pre><p>Viewer-launched workflows and CLI runs attached through <code class="inline">PTC_VIEWER_URL</code> use
+the manifest label and workflow entry as their human-facing title, while
+retaining the <code class="inline">cmd-...</code> value as the stable run identifier. That exact label
+(or the manifest filename when no label is declared) and entry are sent in
+plaintext only to the explicitly configured Viewer; the trace keeps its
+fingerprinted label. The Live tab and <code class="inline">GET /api/live/runs</code> list newest first, and each
 card shows when the Viewer first saw that run, so an edited ceiling cannot be
 read off an older card as a stale enforcement.</p><p>The command is already a long-running PtcRunner host, so Viewer-started work
 runs inside that BEAM instance under the ordinary execution-session owner. A

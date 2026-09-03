@@ -57,4 +57,29 @@ defmodule PtcRunner.Kernel.EvaluatorEvidenceTest do
 
     assert EvaluatorEvidence.envelope_value(:normal, explicit) == nil
   end
+
+  test "authenticated turn-limit type evidence is fixed while protocol exhaustion stays null" do
+    type_error = %Error{
+      kind: :workflow_failed,
+      reason: :runtime_limit_exceeded,
+      details: %{
+        limit: :agent_turns,
+        limit_value: 1,
+        limit_reason: :evaluation_error,
+        last_evaluator_failure: %{
+          kind: :type_error,
+          details: %{message: "count SECRET", origin: "main/run", rejected: 5}
+        }
+      },
+      usage: %{}
+    }
+
+    assert EvaluatorEvidence.envelope_value(:normal, type_error) == %{
+             "kind" => "type_error",
+             "message" => "a PTC-Lisp operation received a value of the wrong type"
+           }
+
+    protocol = put_in(type_error.details.limit_reason, :protocol_error)
+    assert EvaluatorEvidence.envelope_value(:normal, protocol) == nil
+  end
 end

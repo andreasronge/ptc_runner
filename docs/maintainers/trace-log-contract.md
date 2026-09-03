@@ -780,6 +780,13 @@ provider request normalization, `output_limit` records `name: "max_tokens"`,
 the positive effective request value, and the canonically ordered binding
 list. This is the cap PtcRunner sent, not an assertion about a provider's
 private ceiling. A rewritten, removed, or ambiguously resolved cap is omitted.
+For live Kernel requests, the closed binding vocabulary distinguishes the
+effective application `llm_request_output_tokens` ceiling (`application_limit`)
+from installation `params.max_tokens` (`installation_param`) and retains both
+when they tie. The application value may be the manifest request or its
+compiled default, each capped by a lower installed host ceiling. This provenance
+is sealed during model preparation rather than
+reconstructed from the effective value after the request.
 
 When proven truncation prevents a usable shipped-agent action, the failed
 `run-stopped` records `reason: "model_output_truncated"` and the authenticated
@@ -1204,10 +1211,13 @@ to the caller and does not fail the evaluation:
 | `annotation_type` | accepted `data` |
 | --- | --- |
 | `"progress"` | `{"stage": started \| planning \| executing \| validating \| completed \| failed}` — that key and no other |
-| `"agent-action"` | `{"turn": 0..127, "kind": tool-call \| protocol-error \| provider-error \| max-calls \| model-output-truncated}`, or that plus `{"phase": 0..7, "phase_turn": 0..127, "mission": <name>}` — exactly two keys or exactly five |
+| `"agent-action"` | `{"turn": 0..127, "max_turns": 1..128, "invocation": "agent-<16 lowercase hex>", "kind": tool-call \| protocol-error \| provider-error \| max-calls \| model-output-truncated}`, or that plus `{"phase": 0..7, "phase_turn": 0..127, "mission": <name>}` — exactly four keys or exactly seven |
 
 Keyword types and keys normalize (`:phase-turn` → `"phase_turn"`). A phased
-`agent-action` takes all three extra keys or none. `mission` is the phase's
+`agent-action` takes all three phase keys or none. Callers provide every field
+except `invocation`; the runtime adds that run-local opaque correlation value
+before validation and emission. `max_turns` is the configured total ceiling for
+the invocation, and `turn` is always strictly less than it. `mission` is the phase's
 mission name: a lowercase letter, then up to 127 letters, digits, `.`, `_`, or
 `-`. The vocabulary never carries detailed reasons, generated source, or model
 content. A non-string annotation type is a malformed call, not this

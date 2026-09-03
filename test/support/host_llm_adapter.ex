@@ -13,7 +13,13 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
         case Requirements.canonical(requirements) do
           {:ok, canonical} ->
             status = Application.get_env(:ptc_runner, :host_llm_test_catalog_status, :unavailable)
-            {:ok, %{selector: model, exact_options: canonical.exact_options}, status, canonical}
+
+            {:ok,
+             %{
+               selector: model,
+               exact_options: canonical.exact_options,
+               output_limit_bindings: canonical.output_limit_bindings
+             }, status, canonical}
 
           :error ->
             {:error, :unsupported_model_option}
@@ -34,6 +40,7 @@ defmodule PtcRunner.TestSupport.HostLLMAdapter do
         credential: invocation.credential,
         cache: invocation.cache,
         exact_options: Map.get(target, :exact_options, %{}),
+        output_limit_bindings: Map.get(target, :output_limit_bindings, [:configured]),
         llm_request_deadline_ms: invocation.llm_request_deadline_ms
       })
     })

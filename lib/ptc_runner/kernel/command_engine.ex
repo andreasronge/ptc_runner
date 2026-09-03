@@ -37,11 +37,14 @@ defmodule PtcRunner.Kernel.CommandEngine do
   alias PtcRunner.Kernel.CommandRunDispatch
   alias PtcRunner.Kernel.CommandRunRef
   alias PtcRunner.Kernel.CommandRuntime
+  alias PtcRunner.Kernel.HostRuntimePayload
   alias PtcRunner.Kernel.InstallationCatalog
   alias PtcRunner.Kernel.ModelSelectorDisclosure
   alias PtcRunner.Kernel.ProjectArtifactRoot
   alias PtcRunner.Kernel.ProjectResolver
+  alias PtcRunner.Kernel.ProviderCredentials
   alias PtcRunner.Kernel.PublicationAuthority
+  alias PtcRunner.LiveStatus
 
   @fallback_run_ref "cmd-00000000000000000000000000"
   @frontend_commands CommandDeclaration.frontend_commands()
@@ -107,8 +110,29 @@ defmodule PtcRunner.Kernel.CommandEngine do
   @spec dispatch_frontend_entry(CommandEntry.t(), CommandRuntime.t()) ::
           {:ok, CommandOutcome.t(), nil}
           | {:error, CommandOutcome.t(), CommandRejection.t() | nil}
-  def dispatch_frontend_entry(%CommandEntry{} = entry, %CommandRuntime{} = runtime),
-    do: dispatch_entry_context(entry, runtime, true)
+  def dispatch_frontend_entry(%CommandEntry{} = entry, %CommandRuntime{} = runtime) do
+    {status, outcome, rejection, _named_env_file?} =
+      dispatch_frontend_entry_with_context(entry, runtime)
+
+    {status, outcome, rejection}
+  end
+
+  @doc false
+  @spec dispatch_frontend_entry_with_context(CommandEntry.t(), CommandRuntime.t()) ::
+          {:ok, CommandOutcome.t(), nil, boolean()}
+          | {:error, CommandOutcome.t(), CommandRejection.t() | nil, boolean()}
+  def dispatch_frontend_entry_with_context(
+        %CommandEntry{} = entry,
+        %CommandRuntime{} = runtime
+      ) do
+    case dispatch_entry_context(entry, runtime, true) do
+      {status, outcome, rejection, named_env_file?} ->
+        {status, outcome, rejection, named_env_file?}
+
+      {status, outcome, rejection} ->
+        {status, outcome, rejection, false}
+    end
+  end
 
   defp dispatch_entry_context(
          %CommandEntry{
@@ -157,7 +181,7 @@ defmodule PtcRunner.Kernel.CommandEngine do
                runtime
              ) do
           {:ok, %CommandPreparation{} = preparation} ->
-            dispatch_preparation(preparation, runtime, entry, presentation?)
+            dispatch_preparation(preparation, runtime, entry, arguments, presentation?)
 
           terminal ->
             with_rejection(terminal)
@@ -168,12 +192,34 @@ defmodule PtcRunner.Kernel.CommandEngine do
     end
   end
 
-  defp dispatch_preparation(preparation, runtime, entry, true) do
-    CommandRunDispatch.dispatch_frontend(preparation, runtime, entry.frontend)
+  defp dispatch_preparation(preparation, runtime, entry, arguments, true) do
+    package = preparation.prepared_run.request.package
+    label = LiveStatus.application_label_for(package, arguments.application)
+
+    {status, outcome, rejection} =
+      CommandRunDispatch.dispatch_frontend(preparation, runtime, entry.frontend, label)
+
+    {status, outcome, rejection, named_env_file_hint?(preparation, arguments)}
   end
 
-  defp dispatch_preparation(preparation, runtime, _entry, false),
+  defp dispatch_preparation(preparation, runtime, _entry, _arguments, false),
     do: with_rejection(CommandRunDispatch.dispatch(preparation, runtime))
+
+  defp named_env_file_hint?(preparation, arguments) do
+    names =
+      ProviderCredentials.required_names(
+        preparation.prepared_run.provider_declarations,
+        preparation.catalog
+      )
+
+    arguments.command == :run and
+      Keyword.has_key?(arguments.frontend_options, :env_file) and
+      preparation.environment_setup_required and
+      HostRuntimePayload.any_environment_credential?(
+        preparation.runtime_services.host_payload,
+        names
+      )
+  end
 
   defp with_rejection({status, %CommandOutcome{} = outcome}) when status in [:ok, :error],
     do: {status, outcome, nil}

@@ -306,6 +306,32 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
              fetch_check(checks, "provider/keyed/selection")
   end
 
+  test "a rejected credential proves the same provider was reachable" do
+    catalog =
+      catalog(%{
+        "model" => [
+          credential_names: ["key"],
+          connectivity_mode: :probe,
+          probe_effect: :completion
+        ]
+      })
+
+    prepared = prepared(catalog, ["model"])
+    assert {:ok, rows} = DoctorPlan.new(catalog, prepared, @environment, :connect)
+    diagnostic = diagnostic(:active_preflight, :authentication_rejected, "model", :credentials)
+
+    assert {:ok, settled} =
+             DoctorPlan.settle_failure(rows, diagnostic, prepared, catalog, @environment)
+
+    assert {:ok, checks} = DoctorPlan.checks(settled)
+
+    assert %{"status" => "fail", "code" => "authentication_rejected"} =
+             fetch_check(checks, "provider/model/credentials")
+
+    assert %{"status" => "pass", "code" => "available"} =
+             fetch_check(checks, "provider/model/connectivity")
+  end
+
   test "failure settlement reconstructs the exact sealed connect plan" do
     catalog = catalog(%{"shared" => [credential_names: ["token"]]})
     foreign = catalog(%{"shared" => [credential_names: ["token"], revision: "foreign-v1"]})
@@ -747,7 +773,9 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
 
   # The contract, not this test, decides whether a row set is well formed: both
   # the generated schema and the ordering semantics it cannot express.
-  defp assert_contract(checks, provider_activity, readiness \\ "unverified") do
+  defp assert_contract(checks, provider_activity, readiness \\ nil) do
+    readiness = readiness || CommandContract.doctor_readiness(Enum.drop(checks, 3))
+
     result = %{
       "checks" => checks,
       "model_aliases" => [],

@@ -26,8 +26,8 @@ loaded and the private model exchange. This example has no agent loop, so
 there is no generated program.
 
 Change the request in `workflow.clj` so the fixture no longer matches. The
-call returns a provider-error envelope (`:status :error`, `kind`
-`provider_error`, `reason` `not_found`, with the new `request_hash` in
-`details`). The example passes that envelope through `cap/unwrap!`, so the
+call returns a provider-error envelope (`:status :error`, `:kind` set to
+`:provider_error`, and `:reason` set to `:not_found`, with the new request hash
+in the `:details` message). The example passes that envelope through `cap/unwrap!`, so the
 evaluation fails instead of printing the error map as a successful result.
 Copy the reported hash into `replay.jsonl` to match the changed request.

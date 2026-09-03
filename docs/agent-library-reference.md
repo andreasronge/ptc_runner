@@ -124,27 +124,51 @@ generated programs on that returned outcome. Omitted or `nil` keeps the shapes
 above. When set, every returned outcome — including subject and provider
 failures after earlier evaluations — also includes `:programs` and
 `:programs-omitted`. Entries are ordered by one-based global turn and contain
-only `:turn`, `:mission`, and exact `:source`. Retention keeps the newest
-complete entries that fit both the requested count and a fixed 2,000,000
-UTF-8-byte source ceiling; an individual admitted program larger than that
-ceiling is omitted in full. Protocol errors and source rejected before
-evaluation are not retained. Host and infrastructure failures that abort the
-outer workflow still have no outcome to annotate.
+`:turn`, `:mission`, exact `:source`, and a bounded `:execution` summary. A
+continued execution includes its model-visible observation preview and whether
+that preview was truncated; a returned execution records only `:returned`
+because the outcome already carries its value. Failed executions retain their
+closed outcome, a bounded message, and the `:kind` and `:reason` classifiers
+of the evaluation or of the closed error envelope an explicit or capability
+failure carries as its value. A classifier is retained only when its name is 1 to
+128 characters of letters, digits, `.`, `_`, `:`, `/`, or `-`, whether it
+arrives as a keyword or a string; anything else is omitted rather than
+disclosed, and the raw evaluation value is never retained. Each retained
+observation is independently capped at 2,048 characters.
 
-`kind` and `reason` are facts. This entry does not add a runtime
+Enabling retention explicitly discloses these model-visible observations to
+the calling workflow. A later reviewer may omit rolled-back failures when all
+granted effects are read-only, as in the DABStep example. A workflow with write
+or otherwise irreversible effects must not assume that a failed evaluation had
+no external effect.
+
+Retention keeps the newest complete entries that fit both the requested count
+and a fixed 2,000,000 UTF-8-byte source ceiling; an individual admitted program
+larger than that ceiling is omitted in full. Protocol errors and source
+rejected before evaluation are not retained. Host and infrastructure failures
+that abort the outer workflow still have no outcome to annotate.
+
+The envelope keys are PTC-Lisp keywords. The values of `:status`, `:kind`, and
+`:reason` are also keywords; the value of the `:retryable?` field is a boolean.
+The table spells keyword values with their leading `:` to preserve their
+in-workflow types. Comparing one of these values with its JSON-projected name
+string is false: use `(= :limit_exceeded (get response :kind))`, not
+`(= "limit_exceeded" (get response :kind))`.
+
+`:kind` and `:reason` are facts. This entry does not add a runtime
 `recovery: retry | choose-alternate | abort` axis; the workflow chooses a
 disposition. Restarting with another alias starts another agent loop. It does
 not resume the previous transcript.
 
-| Observation | Envelope `kind` | Envelope `reason` | Typical policy |
+| Observation | Envelope `:kind` value | Envelope `:reason` value | Typical policy |
 | --- | --- | --- | --- |
-| Transient transport or provider failure | `provider-error` | `timeout`, `unavailable`, `rate-limited`, or `transport-error` with `retryable?` true | retry the same alias |
-| Whole-call live LLM deadline | `timeout` | `llm-request-timeout` / `llm_request_timeout` with `retryable?` true | retry the same alias or choose another |
-| Permanent per-alias provider refusal | `provider-error` | `authentication-failed`, `payment-required`, `denied`, `not-found`, `invalid-request`, `tool-calling-unsupported`, and other non-retryable provider reasons | try another alias or abort |
-| Per-alias `max_calls` exhaustion | `limit-exceeded` | `capability-quota` with `details.limit` `max-calls` | another alias may still run |
-| Global LLM capability quota | `limit-exceeded` | `capability-quota` with a workflow or mission capability-call limit | no selected alias can run |
-| Aggregate LLM token or cost budget | `limit-exceeded` | `llm-total-tokens` or `llm-cost-microusd` with the refused reservation | inspect remaining, raise the limit, or abort |
-| Invalid or unknown alias | `protocol-error` | `unknown-model-alias`, `invalid-model-alias`, or `model-alias-required` | correct the request; no provider attempt occurred |
+| Transient transport or provider failure | `:provider_error` | `:timeout`, `:unavailable`, `:rate_limited`, or `:transport_error` with boolean `:retryable?` value `true` | retry the same alias |
+| Whole-call live LLM deadline | `:timeout` | `:llm_request_timeout` with boolean `:retryable?` value `true` | retry the same alias or choose another |
+| Permanent per-alias provider refusal | `:provider_error` | `:authentication_failed`, `:payment_required`, `:denied`, `:not_found`, `:invalid_request`, `:tool_calling_unsupported`, and other non-retryable provider reasons | try another alias or abort |
+| Per-alias `max_calls` exhaustion | `:limit_exceeded` | `:capability_quota` with `:details` field `:limit` value `:max_calls` | another alias may still run |
+| Global LLM capability quota | `:limit_exceeded` | `:capability_quota` with a workflow or mission capability-call limit | no selected alias can run |
+| Aggregate LLM token or cost budget | `:limit_exceeded` | `:llm_total_tokens` or `:llm_cost_microusd` with the refused reservation | inspect remaining, raise the limit, or abort |
+| Invalid or unknown alias | `:protocol_error` | `:unknown_model_alias`, `:invalid_model_alias`, or `:model_alias_required` | correct the request; no provider attempt occurred |
 
 A spent per-alias `max_calls` is a named quota refusal, not a subject failure
 and not a transport error. `run-value`, `run-result-value`, `run-phased-result-value`,
@@ -357,12 +381,17 @@ a provider may silently enforce a lower ceiling. If ReqLLM rewrites, removes,
 or ambiguously resolves the cap, the response and terminal diagnostic omit the
 unprovable cap metadata while preserving the terminal truncation result.
 
-The cap's `bindings` list is closed and canonically ordered:
-`configured`, `adapter_default`, `model_output_limit`, and
-`remaining_context`. Every tied constraint is retained. The remedy follows the
-binding: raise the host installation's `params.max_tokens` when configured,
-choose a model with a larger output/context limit when catalog metadata binds,
-or reduce the requested output or retained transcript.
+The cap's `bindings` list is closed and canonically ordered. Live Kernel
+requests preserve `application_limit` for the effective
+`limits.llm_request_output_tokens`,
+`installation_param` for installation `params.max_tokens`, or both when their
+values tie. Direct adapter callers use `configured`; computed defaults use
+`adapter_default`, `model_output_limit`, and `remaining_context`. Every tied
+constraint is retained. The remedy follows the binding: raise the manifest
+limit (and its installed host ceiling if lower), the installation parameter,
+or both; increase the direct adapter option for `configured`; choose a model
+with a larger output/context limit when catalog metadata binds; or reduce the
+requested output or retained transcript.
 
 The canonical failed `run-stopped` event retains the bounded `agent_turns`
 limit name, its value, and the same `limit_reason`, so trace consumers can

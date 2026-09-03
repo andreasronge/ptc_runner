@@ -161,7 +161,13 @@ requirement that the mission environment does not supply implicitly. Add an
 appropriate provider selection or remove the requirement. Missions selecting
 one or more providers remain unresolved until those providers are acquired.
 <code class="inline">&quot;default&quot;</code> is an ordinary declared name, not an implicit fallback.
-Definitions and <code class="inline">*1</code>/<code class="inline">*2</code>/<code class="inline">*3</code> history never cross between missions.</p><p>Workflow code selects the mission explicitly with the <code class="inline">kernel/eval*</code>,
+Definitions and <code class="inline">*1</code>/<code class="inline">*2</code>/<code class="inline">*3</code> history never cross between missions.</p><p>A mission boundary is a capability boundary, not a data boundary. A mission's
+grant limits the code, data, and providers available inside that mission, but
+does not prevent that data from reaching a later mission when trusted workflow
+code includes it in the handoff. If a later mission must not receive some
+content, filter it deterministically in workflow code before the handoff.
+Prompt instructions or wrappers that mark content as untrusted may help a model
+treat it as data, but they do not enforce the grant.</p><p>Workflow code selects the mission explicitly with the <code class="inline">kernel/eval*</code>,
 <code class="inline">kernel/check-source</code>, or mission-introspection functions. The shipped
 <code class="inline">agent.core</code> loop uses <code class="inline">&quot;default&quot;</code> only when its own mission option is omitted,
 and that mission must exist. The
@@ -184,7 +190,10 @@ safe failure projection identifies a non-root declared path, the command
 envelope and terminal diagnostic include its JSON Pointer. Terminal rendering
 escapes unusual contract-authored property names rather than emitting their
 control bytes. Missing-required failures name the first missing schema-declared
-property, including when the absent property is at the contract root.</p><p>Terminal agent helpers also give a model-authored candidate one ordinary
+property, including when the absent property is at the contract root.</p><p>Result and phase-return schemas validate structure and declared value
+constraints. They do not sanitize data or determine its sensitivity. For
+example, an array <code class="inline">maxItems</code> bound can limit the number of entries but cannot
+stop a model from choosing a secret-bearing entry over a safe one.</p><p>Terminal agent helpers also give a model-authored candidate one ordinary
 correction turn when budget remains. <code class="inline">agent.core/run</code> validates the exact
 final value it returns — the standard success envelope by default, or the
 raw object when <code class="inline">result_envelope</code> is false. <code class="inline">agent.main/run</code> and
@@ -290,11 +299,11 @@ inspection artifact; a manifest cannot enable or choose that destination.</p><p>
   &quot;provider&quot;: &quot;openrouter&quot;,
   &quot;tags&quot;: {&quot;mode&quot;: &quot;agent&quot;, &quot;environment&quot;: &quot;staging&quot;}
 }</code></pre><p>Labels do not affect execution, authority, prompts, results, or provider
-selection. <code class="inline">name</code>, <code class="inline">model</code>, and <code class="inline">provider</code> are fingerprinted in traces; tag
-keys and values come from a small fixed vocabulary. Labels are application
-claims, not authoritative provider identity. Use the provider snapshot and
-canonical usage for accounting, and never put prompts, results, credentials,
-paths, or arbitrary user text in labels.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/host-installation/">Host configuration</a> defines the selected aliases.</li><li><a href="/guides/building-agents/">Building agents</a> puts model policy behind the grants.</li><li><a href="/reference/cli/">Running and debugging</a> validates, runs, and
+selection. <code class="inline">name</code>, <code class="inline">model</code>, and <code class="inline">provider</code> are fingerprinted in traces.
+<code class="inline">labels.tags</code> is closed to these keys and values:</p><ul><li><code class="inline">environment</code>: <code class="inline">development</code>, <code class="inline">test</code>, <code class="inline">staging</code>, or <code class="inline">production</code></li><li><code class="inline">mode</code>: <code class="inline">agent</code>, <code class="inline">deterministic</code>, <code class="inline">direct</code>, <code class="inline">wrapper</code>, or <code class="inline">repl</code></li><li><code class="inline">stage</code>: <code class="inline">started</code>, <code class="inline">planning</code>, <code class="inline">executing</code>, <code class="inline">validating</code>, <code class="inline">completed</code>, or
+<code class="inline">failed</code></li><li><code class="inline">suite</code>: <code class="inline">unit</code>, <code class="inline">integration</code>, <code class="inline">e2e</code>, <code class="inline">conformance</code>, or <code class="inline">privacy</code></li></ul><p>Labels are application claims, not authoritative provider identity. Use the
+provider snapshot and canonical usage for accounting, and never put prompts,
+results, credentials, paths, or arbitrary user text in labels.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/host-installation/">Host configuration</a> defines the selected aliases.</li><li><a href="/guides/building-agents/">Building agents</a> puts model policy behind the grants.</li><li><a href="/reference/cli/">Running and debugging</a> validates, runs, and
 inspects the manifest.</li><li><a href="/reference/component-contracts/">Components and preludes</a> explains bundle
 composition.</li></ul><p>The generated application-manifest schema is the exact field reference; this
 guide documents the additional semantic and authority rules applied at load.</p>

@@ -73,10 +73,14 @@ defmodule PtcRunner.ViewerSnapshotStoreTest do
     assert {:ok, %{"complete?" => true, "streams" => [_ | _]}} =
              ViewerSnapshotStore.conversation(store, fixture.run_id)
 
+    assert {:error, :result_not_found} = ViewerSnapshotStore.result(store, fixture.run_id)
+
     write_project(directory, false)
 
     assert {:error, :inspection_not_private} =
              ViewerSnapshotStore.conversation(store, fixture.run_id)
+
+    assert {:error, :inspection_not_private} = ViewerSnapshotStore.result(store, fixture.run_id)
 
     refute InspectionSnapshot.alive?(inspection)
     refute ViewerSnapshotStore.inspection?(store)

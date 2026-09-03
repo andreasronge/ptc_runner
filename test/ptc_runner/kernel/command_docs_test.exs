@@ -84,6 +84,16 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert content =~ "--private-output"
   end
 
+  test "the running guide explains how to attach an external run to the Live tab" do
+    assert {:ok, content} = DocumentationLibrary.fetch("running-and-debugging")
+
+    assert content =~ "## How do I watch a run while it is running?"
+    assert content =~ "PTC_VIEWER_URL=http://127.0.0.1:4123"
+    assert content =~ "PTC_VIEWER_TOKEN"
+    assert content =~ "ptc docs cli"
+    assert content =~ "token does not authenticate the Runs trace browser"
+  end
+
   test "designing-agent-workflows locates returned-value and quarantined in the example" do
     assert {:ok, content} = DocumentationLibrary.fetch("designing-agent-workflows")
     assert content =~ "returned-value"
@@ -92,6 +102,20 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert content =~ "not shipped"
     assert content =~ "built-ins"
     assert content =~ "ptc init support-triage --example support-triage"
+  end
+
+  test "mission docs distinguish capability grants from forwarded data" do
+    assert {:ok, guide} = DocumentationLibrary.fetch("designing-agent-workflows")
+    assert guide =~ "limits capabilities"
+    assert guide =~ "does not filter handoff data"
+    assert guide =~ "trusted workflow code must perform that filtering"
+    assert guide =~ "prompt-level mitigation"
+
+    assert {:ok, manifest} = DocumentationLibrary.fetch("manifest")
+    manifest = String.replace(manifest, ~r/\s+/, " ")
+    assert manifest =~ "does not prevent that data from reaching a later mission"
+    assert manifest =~ "do not sanitize data or determine its sensitivity"
+    assert manifest =~ "secret"
   end
 
   test "served model docs distinguish cost reservations from measured spend" do

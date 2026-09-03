@@ -26,8 +26,11 @@ ptc run kernel-tutorial/03-file-agent.ptc-project.json
 ptc run kernel-tutorial/04-multi-turn-agent.ptc-project.json
 ```
 
-They require `OPENROUTER_API_KEY` in that `.env` and use the trusted `deepseek`
-model alias. Follow `ptc docs quickstart` once before running them. Example 03
+They require a non-empty `OPENROUTER_API_KEY` and use the trusted `deepseek`
+model alias. Keep the generated comment-only `.env` and export the variable, or
+replace its comment with a non-empty assignment. Assigned file values override
+exported values, including empty assignments. Follow `ptc docs quickstart` once
+before running them. Example 03
 launches `ptc-fs-mcp@0.1.0` through `npx`; the first run may download that
 package. Node.js and `npx` are required.
 

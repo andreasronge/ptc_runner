@@ -19,6 +19,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
   alias PtcRunner.Kernel.ProviderActiveSession
   alias PtcRunner.Kernel.ProviderActivity
   alias PtcRunner.Kernel.ProviderDescriptor
+  alias PtcRunner.Kernel.ProviderError
   alias PtcRunner.Kernel.ProviderExecution
   alias PtcRunner.Kernel.ProviderRuntimeServices
   alias PtcRunner.Kernel.ProviderSession
@@ -804,6 +805,29 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
            )
   end
 
+  test "a custom authentication-shaped failure remains connectivity" do
+    %{prepared: prepared, execution: execution} =
+      fixture(%{
+        "rejected" => [
+          destination: :workflow,
+          connectivity_mode: :probe,
+          credential_names: ["key"],
+          probe:
+            {:error,
+             ProviderError.new(:authentication_failed, "rejected",
+               dispatch_provenance: :dispatched
+             )}
+        ]
+      })
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} = connect(prepared, execution)
+    assert diagnostic.phase == :active_preflight
+    assert diagnostic.code == :connectivity_unavailable
+    assert diagnostic.subject.name == "rejected"
+    assert diagnostic.subject.operation == :connectivity
+    assert diagnostic.subject.occurrence == %{destination: :workflow, index: 0}
+  end
+
   test "a probe cannot outrun the connectivity budget" do
     # The probe burns 250ms against a 100ms installed connectivity budget. The
     # timeout belongs to the operation rather than to the occurrence, so it
@@ -1253,6 +1277,7 @@ defmodule PtcRunner.Kernel.ProviderConnectivityTest do
         :unmeasurable -> {:ok, %{invented: 1}}
         :unavailable -> {:error, :llm_connectivity_unavailable}
         :slow -> burn_until(System.monotonic_time(:millisecond) + 250)
+        result -> result
       end
     end
   end

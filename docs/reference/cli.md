@@ -38,7 +38,9 @@ checks can make real requests and may incur cost:
 ptc doctor ptc-project.json --connect
 ```
 
-Plain doctor reports `readiness: "unverified"` when its local checks pass.
+Readiness is derived from provider check rows: no rows report
+`readiness: "not_applicable"`, all passing rows report `readiness: "ready"`,
+and any skipped row reports `readiness: "unverified"`.
 Missing provider commands, unreadable replay fixtures, and other attributable
 local failures produce failed check rows, `readiness: "failed"`, and a nonzero
 exit without activating a provider. Successful active checks report `ready`;
@@ -136,6 +138,11 @@ ptc run ptc.json \
 
 Useful run switches are:
 
+- `--progress` writes best-effort live status only to stderr; stdout remains the
+  workflow result. On an interactive stderr it updates one ASCII line. When
+  stderr is redirected or its width is unavailable, it writes bounded
+  newline-delimited milestones and at most one unchanged heartbeat every ten
+  seconds. It remains opt-in and works alongside `PTC_VIEWER_URL`.
 - `--input INPUT.json` replaces the manifest input with another normal object.
   Resolve the path as an application-relative document first; otherwise treat it
   as absolute or relative to the process working directory (same rule as
@@ -157,9 +164,9 @@ Useful run switches are:
   error, artifact state, and a closed `warnings` array. For `run`, an uncataloged
   installed model appears there as `model_uncataloged` with its provider alias
   and an adapter-attested public selector; the same warning is retained in
-  `run-started` metadata. Non-run commands require an empty warnings
-  array. In particular, `doctor --connect` retains uncataloged-model notices on
-  stderr rather than claiming run metadata it does not produce. Parse the
+  `run-started` metadata. A failed plain `doctor` command also publishes locally
+  derived `model_uncataloged` warnings for every affected provider check;
+  successful non-run commands keep the array empty. Parse the
   envelope rather than scraping stdout, which is a human
   presentation channel that may also carry application output.
 
@@ -379,8 +386,50 @@ envelope when the branch needs to know which failure it was.
 
 A recoverable capability error does not change the exit status. Exhausting
 `workflow_capability_calls_per_name` returns
-`{"status":"error","kind":"limit_exceeded","reason":"capability_quota","details":{"limit":"workflow_capability_calls_per_name","name":"llm-request","limit_value":2}}` as a
-value into PTC-Lisp; a workflow that reads past it can still `return` and the
+`{"status":"error","kind":"limit_exceeded","reason":"capability_quota","retryable?":false,"model":"primary","details":{"limit":"workflow_capability_calls_per_name","name":"llm-request","limit_value":2}}` as a
+JSON boundary value; it is not an exact display of the value's PTC-Lisp types.
+The equivalent value inside the workflow uses keyword keys and keyword-valued
+`:status`, `:kind`, and `:reason` fields:
+
+```clojure
+{:status :error
+ :kind :limit_exceeded
+ :reason :capability_quota
+ :retryable? false
+ :model "primary"
+ :details {:limit :workflow_capability_calls_per_name
+           :name "llm-request"
+           :limit_value 2}}
+```
+
+An aggregate cost-budget refusal has the same field types and this copyable
+PTC-Lisp shape:
+
+```clojure
+{:status :error
+ :kind :limit_exceeded
+ :reason :llm_cost_microusd
+ :retryable? false
+ :details {:limit :llm_cost_microusd
+           :limit_value 1
+           :remaining 1
+           :requested 8585}}
+```
+
+PTC-Lisp equality is type-sensitive even though JSON projection renders a
+keyword value as its name string. Therefore
+`(= "limit_exceeded" (get response :kind))` is false, while
+`(= :limit_exceeded (get response :kind))` is true. Preserve the authenticated
+envelope when ending the run so the command retains its limit classification:
+
+```clojure
+(let [response (tool/llm-request request)]
+  (if (= :limit_exceeded (get response :kind))
+    (fail response)
+    response))
+```
+
+A workflow that reads past a recoverable error can still `return` and the
 command exits `0`. Refusing an aggregate `llm_total_tokens` or
 `llm_cost_microusd` reservation is the same class of recoverable value, with
 `reason` naming the budget. Aborting that exact envelope reports
@@ -975,9 +1024,12 @@ manifest, working directory, or command:
 ptc viewer ptc-project.json --env-file .env
 ```
 
-Viewer-launched workflow cards use the manifest label and workflow entry as
-their human-facing title, while retaining the `cmd-...` value as the stable run
-identifier. The Live tab and `GET /api/live/runs` list newest first, and each
+Viewer-launched workflows and CLI runs attached through `PTC_VIEWER_URL` use
+the manifest label and workflow entry as their human-facing title, while
+retaining the `cmd-...` value as the stable run identifier. That exact label
+(or the manifest filename when no label is declared) and entry are sent in
+plaintext only to the explicitly configured Viewer; the trace keeps its
+fingerprinted label. The Live tab and `GET /api/live/runs` list newest first, and each
 card shows when the Viewer first saw that run, so an edited ceiling cannot be
 read off an older card as a stale enforcement.
 

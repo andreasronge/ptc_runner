@@ -91,6 +91,9 @@ defmodule PtcViewer.ApiTest do
 
     assert_receive {:inspection, ^source, "run-1"}
 
+    assert {:error, :unavailable} = PtcViewer.Api.result(config, "run-1")
+    refute_receive {:inspection, ^source, "run-1"}
+
     # No store and no adapter is a project that records no inspection artifact;
     # a store that cannot answer is evidence out of reach. Only the second is
     # worth retrying, so the two do not share a reason.
@@ -122,6 +125,23 @@ defmodule PtcViewer.ApiTest do
 
     assert {:ok, %{"source" => actual_source, "run_id" => "run-1", "items" => []}} =
              PtcViewer.Api.preludes(config, "run-1")
+
+    assert actual_source == inspect(source)
+  end
+
+  test "result delegates the pinned inspection grant", %{trace_dir: trace_dir} do
+    source = {:pinned, "run.ptcins"}
+    {:ok, store} = PtcViewer.InspectionStore.start(source)
+    on_exit(fn -> if Process.alive?(store), do: PtcViewer.InspectionStore.stop(store) end)
+
+    config = [
+      trace_dir: trace_dir,
+      inspection_store: store,
+      inspection_adapter: PtcViewer.PinningInspectionTestAdapter
+    ]
+
+    assert {:ok, %{"source" => actual_source, "run_id" => "run-1", "value" => "done"}} =
+             PtcViewer.Api.result(config, "run-1")
 
     assert actual_source == inspect(source)
   end

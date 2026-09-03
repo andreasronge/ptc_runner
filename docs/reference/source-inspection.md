@@ -61,10 +61,10 @@ capability routes fail closed. See the [REPL reference](repl.md#inspect-without-
 
 `retain_programs` exists only on `agent.core/run-outcome`. Omitted or `nil`
 keeps the historical outcome shape. When set, every returned outcome includes
-`:programs` and `:programs-omitted`. Entries keep `:turn`, `:mission`, and
-exact `:source` for programs admitted to subordinate evaluation. Protocol
-errors and source refused before admission are excluded. See the
-[agent library reference](../agent-library-reference.md).
+`:programs` and `:programs-omitted`. Entries keep `:turn`, `:mission`, exact
+`:source`, and a bounded `:execution` summary for programs admitted to
+subordinate evaluation. Protocol errors and source refused before admission
+are excluded. See the [agent library reference](../agent-library-reference.md).
 
 ## Export and candidate files
 

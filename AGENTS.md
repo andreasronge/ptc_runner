@@ -27,119 +27,135 @@ Explore the codebase before proposing changes — never claim a feature is
 missing without evidence from the source files. When you find a problem, fix
 the code and the docs together.
 
-When independent Codex review is required, follow the focused
-[coding-agent review workflow](docs/maintainers/coding-agent-review.md); do
-not cold-review byte-identical trees more than once.
-
 Do not copy a helper into a second module to avoid an import. For the root
 project, `mix precommit` fails on duplication that is not already in
 `.duplication-baseline.json`; extract the shared logic, or suppress it with a
 reason when the repetition is deliberate. See the
 [duplication gate](docs/maintainers/duplication-gate.md).
 
-Code documentation must not link to `docs/plans/`; plans are disposable. Move
-durable contracts into module docs, guides, or retained specifications first.
-Remove completed plan files before submitting the final PR.
+Work is tracked in GitHub issues. A large issue may keep its plan under
+`docs/plans/` while it is implemented; plans are disposable, and the pull
+request that completes one deletes it. Code documentation must not link to
+`docs/plans/`; move durable contracts into module docs, guides, or retained
+specifications first.
 
-## Commit Messages
+## Managed agents (PtcManager)
+
+When `PTC_MANAGED_OPERATION_CONTEXT` is set, PtcManager started you through
+Herdr. It already created and initialized this worktree through
+`.ptc-manager.yml`, and its task prompt says what you may do on GitHub. Do not
+run `scripts/worktree.sh` at all: `new` would nest a second worktree and `gc`
+removes worktrees that PtcManager still tracks. Run expensive commands as
+`$PTC_OPERATION_WRAPPER run --label <build|test|lint|verify> -- <command>`;
+the pre-push hook already wraps itself.
+
+The task prompt states a number of independent reviews. It counts cold Codex
+review sessions on the finished change: `0` skips review, `1` is one
+cumulative base-guarded review at the PR boundary, `2` adds one incremental
+review of the draft before it, and `3` adds an adversarial `challenge` of the
+finished change. Follow each session through its `followup`; never cold-review
+a byte-identical tree twice.
+
+## Independent review
+
+When independent Codex review is required, follow the
+[coding-agent review workflow](docs/maintainers/coding-agent-review.md).
+Rebase onto `origin/main` before the final cumulative review and rerun the
+gates on the rebased tree.
+
+## Commits and pull requests
 
 Use a concise Conventional Commit subject, e.g. `feat(mcp): add stateful
 sessions`. For non-trivial commits, add a short body covering what changed and
 how it was verified.
 
+A pull request description has three sections and closes its issue with
+`Closes #N`:
+
+- **Summary** — what changed, as bullets.
+- **Validation** — only what you ran beyond the tracked hooks and CI: focused
+  test files, a live probe, a manual check. Never list test counts and never
+  repeat the gates the hooks run.
+- **Retrospective** — two items, each of which may be `none`: untracked
+  follow-up work with a reproduction, and one repository instruction that was
+  missing, wrong, or that you had to guess at. No narrative.
+
+## GitHub issues
+
+`ptc:ready`, `ptc:blocked`, and `ptc:needs-decision` are the only workflow
+labels, and an open issue carries at most one of them. Remove the legacy
+`needs-review`, `ready-for-implementation`, `needs-clarification`,
+`needs-breakdown`, and `needs-maintainer-input` labels from any issue you
+update. A dependency is the canonical `Blocked by #<number>` line in the issue
+body. An assignee marks the issue as taken.
+
+## Documentation
+
+- Any edit under `docs/guides/`, including a one-line fix, starts by reading
+  `.claude/skills/write-guide/SKILL.md` and ends with its checklist. The file
+  path is the contract, so Claude Code, Codex, and Cursor all follow it.
+- A bug fix may correct a wrong sentence in a guide but never adds one. New
+  explanation goes to the reference page that owns the surface; the guide
+  gets at most a link.
+- Which layer owns what (module docs, guides, references, specifications,
+  plans) is in `docs/maintainers/documentation.md`.
+
 ## Commands
 
-- `mix ptc ...` — after the root application has compiled successfully once,
-  the root-project command path skips dependency validation for fast startup
-  while still compiling changed root sources and shipped preludes. A fresh
-  build performs Mix's normal dependency validation and compilation. This
-  optimization is root-only; downstream projects always retain Mix's normal
-  dependency validation.
-  After changing `mix.exs`, `mix.lock`, dependency sources, or either local
-  path dependency (`ptc_runner_launcher/` or `ptc_viewer/`), run a normal
-  `mix compile` once. Runtime manifests, host configuration, external inputs,
-  and component override descriptors and sources remain live.
-- `mix precommit` — local quality gate: nested-project fetch then format,
-  compile, compile cycles, credo, duplication, spec, and generated-artifact
-  staleness. Run it before a commit, or skip it and let `git push` be the
-  CI-equivalent gate. It does not run the suite, Viewer, launcher, Dialyzer,
-  ExDoc, or release — those belong to pre-push. The git pre-commit hook is
-  the fast staged-file path. Do not follow `mix precommit` with
-  `git push --no-verify`: pre-push still adds Dialyzer and ExDoc.
-- `scripts/ci/core-tests.sh` — canonical core compile/test gate used by
-  pre-push and GitHub Actions. It always sets `CI=1`, so
-  StreamData runs the same 300 cases locally and remotely, while retaining all
-  native schedulers by default. Use `scripts/ci/core-tests.sh --schedulers 4`
-  to reproduce GitHub's current CPU shape; this does not emulate Linux.
-- `MIX_ENV=dev mix docs --warnings-as-errors` — ExDoc reference and rendering
-  gate; run when changing user-facing documentation. Generated-artifact
-  staleness is checked separately, by both `mix precommit` and `mix prepush`.
-- `git push` — the tracked pre-push hook classifies pushed and dirty paths and
-  invokes the same repository-owned root, Viewer, launcher, release, and
-  documentation scripts as GitHub Actions. Scheduled workflows and per-gate
-  scripts select only the gates they can break, so a Nightly YAML edit does
-  not run core tests. Root product changes still use the same compile/test
-  flags, `CI=1` property count, static checks, Dialyzer format, and release
-  verification locally and remotely.
-  When one fires, run its matching write form — `mix ptc.gen_docs` for
-  generated docs and schemas, or `mix ptc.conformance_report --write-inventory`
-  for `conformance_inventory.json` — then stage the result. Do not run
-  `mix precommit` and then a verified push of the same tree as a substitute
-  for the hook, and do not run `mix prepush` immediately before an ordinary
-  push; invoke `mix prepush` only for static/Dialyzer diagnosis or when hooks
-  are unavailable. PR CI runs the same scripts as individual jobs. The test suite uses
-  `System.schedulers_online()` concurrent cases; do not reduce that pressure
-  to make a failing push pass.
-- `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`).
-  Optional MCP tests skip unless their endpoint, binary, and token
-  prerequisites are configured as described in the
-  [development setup guide](docs/maintainers/development-setup.md). The comparatively
-  expensive live tutorial probes use `:scheduled_e2e` instead and run only in
-  scheduled or manually dispatched Integration workflows.
-- `mix nightly` — the `:nightly` tests, excluded from `mix test` by default.
-  The `Nightly` workflow runs them daily; run it locally when you touch the
+- `mix compile` — run once after changing `mix.exs`, `mix.lock`, dependency
+  sources, or a local path dependency (`ptc_runner_launcher/`, `ptc_viewer/`).
+  `mix ptc ...` otherwise skips dependency validation for fast startup.
+- `mix precommit` — quality gate: format, compile, cycles, Credo, duplication,
+  spec, and generated-artifact staleness. It does not run the suite, Viewer,
+  launcher, Dialyzer, ExDoc, or release; those run on `git push`.
+- `git push` — the tracked pre-push hook runs the same gate scripts as GitHub
+  Actions for the paths you changed. When a staleness check fires, run its
+  write form (`mix ptc.gen_docs` for generated docs and schemas,
+  `mix ptc.conformance_report --write-inventory` for
+  `conformance_inventory.json`) and stage the result. Never push with
+  `--no-verify`; never run `mix prepush` before an ordinary push (it is for
+  static/Dialyzer diagnosis or when hooks are unavailable); never reduce test
+  concurrency to make a failing push pass.
+- `scripts/ci/core-tests.sh` — the core compile/test gate used by pre-push and
+  CI (`CI=1`, 300 StreamData cases). `--schedulers 4` reproduces GitHub's CPU
+  shape.
+- `MIX_ENV=dev mix docs --warnings-as-errors` — ExDoc gate; run when changing
+  user-facing documentation.
+- `mix test --include e2e` — E2E tests (requires `OPENROUTER_API_KEY`). The
+  optional MCP prerequisites and the `:scheduled_e2e` live probes are in the
+  [development setup guide](docs/maintainers/development-setup.md).
+- `mix nightly` and `mix soak` — the `:nightly` and `:soak` suites, run by
+  their scheduled workflows. Run `mix nightly` locally when you touch the
   `mix ptc run` downstream path, example operator walks, Mix-process CLI
-  wrappers, or the benchmark task. That workflow also runs the packaged
-  interactive REPL PTY check (`expect` + `ptc repl`); PR `core-release`
-  skips it via `PTC_SKIP_PTY_GATE`. Never add `--trace` (or
-  `--slowest`, which implies it) to a suite you want to finish quickly: it
-  pins `--max-cases` to 1.
-- `mix soak` — the `:soak` memory-leak suite; the scheduled `Soak` workflow
-  runs it. `:soak`, `:e2e`, `:scheduled_e2e`, `:nightly`, and `:clojure` are
-  all excluded from `mix test` by default (`:clojure` needs Babashka).
-- Two tags, two meanings, and they must not be conflated. `:nightly` means
-  "operator-path Mix/OS subprocess or an intentional multi-second wait;
-  excluded everywhere but the `Nightly` workflow" — apply it to those
-  tests, not to in-process correctness cases that happen to take a few
-  hundred milliseconds. `:slow` means only "skip on the fast pre-commit
-  path" and is read solely by `.githooks/pre-commit`; those tests still run
-  in pre-push and CI. Excluding `:slow` globally once dropped
-  ten correctness tests from every PR to save 14.2 s.
-- Fix all failures before committing/pushing.
+  wrappers, or the benchmark task. Never add `--trace` or `--slowest` to a
+  suite you want to finish quickly: they pin `--max-cases` to 1.
+- Test tags: `:e2e`, `:scheduled_e2e`, `:nightly`, `:soak`, and `:clojure` are
+  excluded from `mix test` (`:clojure` needs Babashka). `:nightly` means an
+  operator-path Mix/OS subprocess or an intentional multi-second wait, not an
+  in-process case that takes a few hundred milliseconds. `:slow` only skips
+  the pre-commit hook's scoped test run; those tests still run in pre-push
+  and CI.
+- Fix all failures before committing or pushing.
 
 ### Worktrees
 
-Never start work in the shared checkout — create a worktree before the first
-edit, even for a plan-only document. `scripts/worktree.sh new <branch> [issue]`
-branches from `origin/main`, and with an issue number claims it: assign,
-comment, refuse one already taken. It also seeds and initializes the worktree:
-install shared hooks, install the pinned `mise` toolchain, fetch dependencies,
-and compile. Use `scripts/worktree.sh init [<dir>]` to repair or initialize an
-existing checkout. `scripts/worktree.sh gc` removes worktrees merged into
-`origin/main` that are clean and a day idle (`--yes` to act); it never deletes
-a branch, because the branch is the artifact and the checkout is a rebuildable
-cache. Run it before creating a new one.
-
-Setting up a fresh clone or worktree — toolchain, dependencies, git hooks,
-Dialyzer PLT, and the local MCP E2E server — is covered once in the
-[development setup guide](docs/maintainers/development-setup.md). Two rules from it
-that bite mid-task: never regenerate `priv/semantic_build_projection.json` on a
-feature branch, and never hand-merge its hashes.
+Unless PtcManager started you (see above), never start work in the shared
+checkout — create a worktree before the first edit, even for a plan-only
+document. `scripts/worktree.sh new <branch> [issue]` branches from
+`origin/main`, claims the issue when given (assign, comment, refuse one
+already taken), and seeds and initializes the worktree. `scripts/worktree.sh
+gc` removes worktrees merged into `origin/main` that are clean and a day idle
+and keeps their branches; run it before creating a new one. Fresh-clone
+setup, seeding, hooks, the Dialyzer PLT, the MCP E2E server, and headless
+Linux VM notes are in the
+[development setup guide](docs/maintainers/development-setup.md). Two rules
+from it that bite mid-task: never regenerate
+`priv/semantic_build_projection.json` on a feature branch, and never
+hand-merge its hashes.
 
 If a timing-sensitive test fails only in the full suite, rerun the exact file
-and line reported by ExUnit. Do not bypass or throttle the hook; reproduce the
-reported seed and fix shared-state races, brittle deadlines, or other
-load-sensitive failures.
+and line ExUnit reported with the same seed. Do not bypass or throttle the
+hook; fix the shared-state race or brittle deadline.
 
 ## Project Structure
 
@@ -169,6 +185,7 @@ load-sensitive failures.
   `mix ptc run` works.
 - `bench/` — benchmarks (`mix bench.check`, `mix bench.heap`) with committed
   baselines in `bench/baselines/`.
+
 ## Conventions
 
 - Timestamps: `:utc_datetime`, never `:naive_datetime`. Durations: integer
@@ -201,51 +218,14 @@ must be generic and not overlap existing domains unless asked.
 
 - Bug fixes: write a failing test that reproduces the bug **before** fixing it.
 - Prefer integration tests over unit tests that mirror the implementation; if a
-  test is as simple as the code it tests, delete it.
+  test is as simple as the code it tests, delete it. Test at the boundary a
+  user hits — the CLI, REPL, `doctor`, and manifest paths — not only the
+  internal function; several regressions survived unit coverage until a
+  command-boundary test existed.
+- Adding or changing an embedded example, enum, catalog, or schema changes
+  generated schemas and site pages; run `mix ptc.gen_docs` and stage the
+  output with the change.
 - No `Process.sleep` — use monitors or async helpers.
-
-## Cursor Cloud specific instructions
-
-Durable, non-obvious notes for Cloud Agents. The toolchain, hooks, and standard
-commands are already documented in `docs/maintainers/development-setup.md` and
-the `## Commands` section above — read those first; this section only records
-what is specific to running in the Cloud VM.
-
-- **Toolchain lives under `mise`.** Erlang/Elixir/Java are pinned in `mise.toml`
-  and managed by `mise` (installed at `~/.local/bin/mise`). Interactive shells
-  activate it automatically via `~/.bashrc`, so `mix`/`elixir` are on `PATH`. In
-  a non-interactive script that is *not* sourced from `~/.bashrc`, prefix
-  commands with `~/.local/bin/mise exec -- …` (for example
-  `~/.local/bin/mise exec -- mix test`) so the pinned tools resolve.
-- **Cloud shells default to a group-writable umask.** `scripts/worktree.sh init`
-  removes unsafe write permissions from existing checkout directories, but a
-  child script cannot change its caller's umask. Prefix later build and test
-  commands with `umask 0022;` so temporary directories also satisfy private
-  destination safety checks.
-- **Reinstalling deps does not rebuild.** The startup update script only runs
-  `mix deps.get`; run `mix compile` yourself after pulling changes or editing
-  `mix.exs`/`mix.lock`/prelude sources. The bundled native launcher's C binary
-  is (re)built by `mix compile` via `elixir_make` (needs a C compiler, already
-  present).
-- **Smoke test the runtime offline.** `mix ptc run <project.json>` needs no
-  network for the deterministic examples:
-  `examples/kernel-tutorial/01-orders.ptc-project.json` and
-  `examples/llm-replay/ptc-project.json`. Model-backed examples/tests need
-  `OPENROUTER_API_KEY` (see the `## Commands` section).
-- **The Viewer is a web app you must start explicitly.** `mix ptc viewer
-  <project.json>` boots a Plug/Bandit HTTP server (not Phoenix) *inside the same
-  BEAM*; by default it binds `127.0.0.1` on an OS-chosen free port and tries to
-  open a browser. In the headless VM, pass `--port <PORT> --listen 127.0.0.1`
-  and open the printed URL yourself. It only shows runs that already produced a
-  trace, so run a project once before launching it.
-- **`mix test` is the default gate (~3 min, 6800+ tests).** It excludes
-  `:e2e`, `:scheduled_e2e`, `:nightly`, `:soak`, and `:clojure` by default;
-  those need extra prerequisites (API key, Babashka/JVM, MCP servers) per
-  `docs/maintainers/development-setup.md`.
-- **latin1 locale warning is harmless.** A tmux/login shell that does not export
-  a UTF-8 `LANG` makes the BEAM print a "native name encoding of latin1"
-  warning. Export `LANG=C.UTF-8` (or `ELIXIR_ERL_OPTIONS="+fnu"`) for that
-  shell; it does not affect correctness.
 
 <!-- usage-rules-start -->
 <!-- usage_rules-start -->

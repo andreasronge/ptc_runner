@@ -43,7 +43,6 @@ defmodule PtcRunner.Kernel.Evaluation do
   alias PtcRunner.Kernel.Environment
   alias PtcRunner.Kernel.Events
   alias PtcRunner.Kernel.InspectionSink
-  alias PtcRunner.Kernel.Library
   alias PtcRunner.Kernel.ProjectionError
   alias PtcRunner.Kernel.RunState
   alias PtcRunner.Kernel.RuntimeTools
@@ -418,7 +417,6 @@ defmodule PtcRunner.Kernel.Evaluation do
       strict_data: true,
       data_grants: DataKeys.source_referenceable_forms(environment.data),
       missing_data_params_message: @missing_data_params_message,
-      shipped_library_ids: Library.component_ids(),
       component_catalog: Environment.catalog(environment),
       inspect_only: Map.get(capture, :inspect_only, false)
     ]

@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "workflow": {
+    "components": [
+      {
+        "id": "dabstep.reviewer-regression",
+        "path": "reviewer-workflow.clj",
+        "dependencies": ["agent.core", "dabstep.review"]
+      },
+      {
+        "id": "dabstep.review",
+        "path": "review.clj"
+      },
+      {
+        "library": "agent.core"
+      }
+    ],
+    "entry": "dabstep.reviewer-regression/run"
+  },
+  "contracts": {
+    "input_schema": {
+      "path": "reviewer-input.schema.json"
+    },
+    "result_schema": {
+      "path": "reviewer-result.schema.json"
+    },
+    "phase_return_schemas": {
+      "findings": {
+        "path": "findings.schema.json"
+      }
+    }
+  },
+  "input": {
+    "path": "inputs/reviewer-wrong-metric.json"
+  },
+  "missions": {
+    "review": {
+      "components": [
+        {
+          "id": "dabstep.payments",
+          "path": "payments.clj"
+        }
+      ],
+      "providers": ["payments_data"]
+    }
+  },
+  "providers": {
+    "workflow": [
+      {
+        "name": "luna"
+      }
+    ],
+    "mission": [
+      {
+        "name": "payments_data"
+      }
+    ]
+  },
+  "limits": {
+    "run_duration_ms": 1800000,
+    "workflow_timeout_ms": 1800000,
+    "evaluation_timeout_ms": 600000,
+    "evaluation_heap_words": 5000000,
+    "mission_capability_calls": 512,
+    "mission_capability_calls_per_name": 512,
+    "normal_event_count": 1024,
+    "normal_event_bytes": 8000000,
+    "llm_request_output_tokens": 8192
+  },
+  "labels": {
+    "name": "dabstep-reviewer-regression",
+    "provider": "openrouter",
+    "tags": {
+      "mode": "agent"
+    }
+  }
+}

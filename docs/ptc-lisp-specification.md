@@ -402,7 +402,10 @@ Key-value associations:
   rejects projection collisions rather than silently choosing between a
   keyword and string with the same name. Native projection can retain other
   non-JSON values; JSON projection rejects them. `ptc run` always selects
-  JSON projection, whether or not it publishes a result artifact.
+  JSON projection, whether or not it publishes a result artifact. Consequently,
+  JSON boundary output cannot visibly distinguish the keyword `:ready` from the
+  string `"ready"`; inside PTC-Lisp they remain distinct values and
+  `(= :ready "ready")` is false.
 - **Tool-call arguments:** keys are recursively normalized to strings (e.g.
   `1` → `"1"`, `[:a :b]` → its inspected form). A projection collision or an
   invalid native Java value is rejected rather than silently losing data.

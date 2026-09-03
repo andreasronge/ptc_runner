@@ -581,7 +581,15 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
 
     assert Enum.any?(events, fn event ->
              event.type == "workflow-annotation" and
-               event.data.data == %{"turn" => 0, "kind" => "provider-error"}
+               match?(
+                 %{
+                   "turn" => 0,
+                   "max_turns" => 1,
+                   "invocation" => "agent-" <> _,
+                   "kind" => "provider-error"
+                 },
+                 event.data.data
+               )
            end)
   end
 
@@ -761,7 +769,7 @@ defmodule PtcRunner.Kernel.AgentCoreCharacterizationTest do
     config.event_sink
     |> EventSink.events()
     |> Enum.filter(&(&1.type == "workflow-annotation"))
-    |> Enum.map(& &1.data.data)
+    |> Enum.map(&Map.drop(&1.data.data, ["invocation", "max_turns"]))
   end
 
   defp phased_source do

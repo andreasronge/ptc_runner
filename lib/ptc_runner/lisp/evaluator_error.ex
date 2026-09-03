@@ -257,6 +257,10 @@ defmodule PtcRunner.Lisp.EvaluatorError do
     end
   end
 
+  defp public_message(:type_error, _details) do
+    ok_message("a PTC-Lisp operation received a value of the wrong type")
+  end
+
   defp public_message(:arity_error, details) do
     with {:ok, name} <- admitted_public_name(details),
          {:ok, expected_text} <- format_expected_arity(Map.get(details, :expected)),

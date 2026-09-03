@@ -106,7 +106,7 @@ defmodule PtcRunner.ReplFrontendTest do
     assert output == expected <> "\n"
   end
 
-  test "direct eval renders a type_error kind only once" do
+  test "direct eval preserves the detailed type_error message and renders its kind once" do
     output =
       capture_io(:stderr, fn ->
         error =

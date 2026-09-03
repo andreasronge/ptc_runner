@@ -123,10 +123,10 @@ only for non-secret installed limit ceilings; credentials remain unresolved and 
 Pure attached functions may run; Kernel, provider, and
 capability routes fail closed. See the <a href="/reference/repl/#inspect-without-providers">REPL reference</a>.</p><h2 id="admitted-programs">Admitted programs</h2><p><code class="inline">retain_programs</code> exists only on <code class="inline">agent.core/run-outcome</code>. Omitted or <code class="inline">nil</code>
 keeps the historical outcome shape. When set, every returned outcome includes
-<code class="inline">:programs</code> and <code class="inline">:programs-omitted</code>. Entries keep <code class="inline">:turn</code>, <code class="inline">:mission</code>, and
-exact <code class="inline">:source</code> for programs admitted to subordinate evaluation. Protocol
-errors and source refused before admission are excluded. See the
-<a href="/reference/agent-library-reference/">agent library reference</a>.</p><h2 id="export-and-candidate-files">Export and candidate files</h2><p><code class="inline">ptc materialize</code> has two exclusive modes. <code class="inline">--source-out</code> writes interned
+<code class="inline">:programs</code> and <code class="inline">:programs-omitted</code>. Entries keep <code class="inline">:turn</code>, <code class="inline">:mission</code>, exact
+<code class="inline">:source</code>, and a bounded <code class="inline">:execution</code> summary for programs admitted to
+subordinate evaluation. Protocol errors and source refused before admission
+are excluded. See the <a href="/reference/agent-library-reference/">agent library reference</a>.</p><h2 id="export-and-candidate-files">Export and candidate files</h2><p><code class="inline">ptc materialize</code> has two exclusive modes. <code class="inline">--source-out</code> writes interned
 installed bytes for later editing. <code class="inline">--source</code>/<code class="inline">--out</code> then hashes those edited
 bytes into <code class="inline">{candidate.clj, descriptor.json}</code>. Candidate mode keeps the existing 1 MiB replacement bound; a larger installed component can still be inspected or exported. See the
 <a href="/reference/component-contracts/#export-installed-source-or-publish-a-candidate">component reference</a>.</p><h2 id="completed-runs">Completed runs</h2><p>Private inspection retains exact generated programs, component sources, turns,

@@ -18,6 +18,29 @@ defmodule PtcRunner.Lisp.EvaluatorErrorTest do
              :error
   end
 
+  test "type_error evidence is a fixed literal that ignores all evaluator details" do
+    expected =
+      {:ok,
+       %{
+         kind: "type_error",
+         message: "a PTC-Lisp operation received a value of the wrong type"
+       }}
+
+    assert EvaluatorError.public_evidence(:type_error, %{}) == expected
+
+    assert EvaluatorError.public_evidence(:type_error, %{
+             message: "main/run count SECRET #PID<0.1.0>",
+             origin: "main/run",
+             name: "count",
+             arguments: [5],
+             rejected_value: "SECRET",
+             internal_id: make_ref()
+           }) == expected
+
+    assert :type_error in EvaluatorErrorCatalog.kinds()
+    assert "type_error" in EvaluatorErrorCatalog.wire_names()
+  end
+
   test "arity evidence uses the public Lisp name and never a BEAM MFA" do
     assert {:ok, %{kind: "arity_error", message: "count expects 1 argument(s), got 0"}} =
              EvaluatorError.public_evidence(:arity_error, %{
@@ -111,6 +134,12 @@ defmodule PtcRunner.Lisp.EvaluatorErrorTest do
              EvaluatorError.retain_reason(
                {:java_type_error, "overload_3 SECRET",
                 %{reference_id: :r, overload_id: :overload_3}}
+             )
+
+    assert {:ok, {:type_error, "a PTC-Lisp operation received a value of the wrong type", %{}}} =
+             EvaluatorError.retain_reason(
+               {:type_error, "count: invalid argument types: number",
+                %{origin: "main/run", arguments: [5], secret: "nope"}}
              )
 
     assert EvaluatorError.retain_reason({:explicit_failure, %{"secret" => true}}) == :error

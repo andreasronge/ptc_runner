@@ -129,7 +129,7 @@ These operational timeouts belong only to the host document. A manifest cannot d
 | Name | Meaning | Unit | Installed default | Inclusive range | Effective identity |
 | --- | --- | --- | ---: | ---: | --- |
 | `doctor_connectivity_timeout_ms` | One doctor --connect provider health check. | milliseconds | 10,000 | 100–30,000 | no |
-| `local_preflight_timeout_ms` | Whole audited local-preflight phase across selected providers. | milliseconds | 5,000 | 100–30,000 | yes |
+| `local_preflight_timeout_ms` | Whole audited local-preflight phase across selected providers. | milliseconds | 15,000 | 100–30,000 | yes |
 | `provider_cleanup_timeout_ms` | Kernel-owned provider cleanup after execution. | milliseconds | 5,000 | 100–30,000 | yes |
 | `selection_validation_timeout_ms` | Active validation of selected provider declarations. | milliseconds | 5,000 | 100–30,000 | yes |
 

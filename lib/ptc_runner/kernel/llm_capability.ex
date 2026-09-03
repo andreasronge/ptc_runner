@@ -29,6 +29,15 @@ defmodule PtcRunner.Kernel.LLMCapability do
 
   @default_max_bytes 1_000_000
   @no_usage_guarantees %{tokens: false, cost_currency: nil}
+  @description "Submit one provider-neutral bounded language-model request. " <>
+                 "Error envelopes use PTC-Lisp keyword keys and keyword values for " <>
+                 ":status, :kind, and :reason; :retryable? has a boolean value. " <>
+                 "Compare those fields with keywords, for example " <>
+                 "(= :limit_exceeded (get response :kind)), not JSON-rendered strings."
+
+  @doc false
+  @spec description() :: String.t()
+  def description, do: @description
 
   @spec new(keyword()) :: {:ok, Capability.t()} | {:error, :invalid_llm_capability}
   @doc """
@@ -62,7 +71,7 @@ defmodule PtcRunner.Kernel.LLMCapability do
          {:ok, capability} <-
            Capability.new(
              name: "llm-request",
-             description: "Submit one provider-neutral bounded language-model request",
+             description: description(),
              input_schema: %{
                "type" => "object",
                "properties" => %{
