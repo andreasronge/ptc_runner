@@ -2,18 +2,10 @@
   "version": 1,
   "workflow": {
     "components": [
-      {
-        "library": "llm"
-      },
-      {
-        "id": "demo.live",
-        "path": "demo.clj",
-        "dependencies": [
-          "llm"
-        ]
-      }
+      {"id": "tutorial.fan-out", "path": "fanout.clj", "dependencies": ["llm"]},
+      {"library": "llm"}
     ],
-    "entry": "demo.live/run"
+    "entry": "tutorial.fan-out/run"
   },
   "input": {
     "value": {
@@ -40,33 +32,13 @@
   },
   "providers": {
     "workflow": [
-      {
-        "name": "deepseek"
-      }
+      {"name": "deepseek"}
     ]
   },
   "labels": {
-    "name": "live-dashboard-demo",
-    "tags": {
-      "mode": "direct"
-    }
-  },
-  "missions": {
-    "stats": {
-      "components": [
-        {
-          "id": "demo.stats",
-          "path": "stats.clj"
-        }
-      ]
-    },
-    "greet": {
-      "components": [
-        {
-          "id": "demo.greet",
-          "path": "greet.clj"
-        }
-      ]
-    }
+    "name": "tutorial-parallel-fan-out",
+    "model": "openrouter:deepseek/deepseek-v4-flash",
+    "provider": "openrouter",
+    "tags": {"mode": "direct"}
   }
 }

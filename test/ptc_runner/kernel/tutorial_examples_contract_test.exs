@@ -4,7 +4,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
   @examples Path.expand("../../../examples/kernel-tutorial", __DIR__)
   @host Path.join(@examples, "ptc-host.json")
   @cost_budget_host Path.join(@examples, "ptc-host-cost-budget.json")
-  @viewer_examples Path.expand("../../../examples/viewer-demo", __DIR__)
+  @viewer_examples Path.expand("../../../scripts/labs/viewer-demo", __DIR__)
   @named_missions Path.expand("../../../examples/named-mission-reader-writer", __DIR__)
   @support_triage Path.expand("../../../examples/support-triage", __DIR__)
 
@@ -33,7 +33,7 @@ defmodule PtcRunner.Kernel.TutorialExamplesContractTest do
   test "live tutorial labels report the model installed by the host" do
     model = @host |> decode!() |> get_in(["install", "deepseek", "model"])
 
-    for example <- ~w(02-deepseek-extract 03-file-agent 04-multi-turn-agent) do
+    for example <- ~w(02-deepseek-extract 03-file-agent 04-multi-turn-agent 07-parallel-fan-out) do
       manifest = decode!(Path.join([@examples, example, "ptc.json"]))
       assert manifest["labels"]["model"] == model
     end

@@ -24,13 +24,10 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
     end
   end
 
-  test "the extraction tutorial returns the requested semantic fields" do
+  test "the extraction tutorial returns the schema-shaped object the model filled in" do
     assert {:ok, result} = run("02-deepseek-extract")
-    assert %{"model_output" => model_output} = result.value
-    assert {:ok, extracted} = Jason.decode(model_output)
-
-    project = extracted["project"]
-    assert is_binary(project)
+    assert %{"project" => project, "owner" => "Priya", "risk" => risk} = result.value
+    assert map_size(result.value) == 3
 
     normalized_project =
       project
@@ -39,14 +36,27 @@ defmodule PtcRunner.Kernel.TutorialExamplesE2ETest do
       |> String.replace_prefix("project ", "")
 
     assert normalized_project == "atlas"
-    assert extracted["owner"] == "Priya"
-    assert is_binary(extracted["risk"])
 
-    risk = String.downcase(extracted["risk"])
+    risk = String.downcase(risk)
     assert Enum.all?(~w(vendor security approval), &String.contains?(risk, &1))
 
     assert result.usage.subordinate_evaluations == 0
     assert result.usage.capability_calls.workflow["llm-request"] == 1
+  end
+
+  test "the fan-out tutorial answers every topic in parallel, then summarizes them" do
+    assert {:ok, result} = run("07-parallel-fan-out")
+    assert %{"answers" => answers, "summary" => summary} = result.value
+    assert length(answers) == 12
+
+    for %{"topic" => topic, "answer" => answer} <- answers do
+      assert is_binary(topic)
+      assert is_binary(answer) and answer != ""
+    end
+
+    assert is_binary(summary) and summary != ""
+    assert result.usage.subordinate_evaluations == 0
+    assert result.usage.capability_calls.workflow["llm-request"] == 13
   end
 
   test "the file-agent tutorial returns the exact granted file content" do

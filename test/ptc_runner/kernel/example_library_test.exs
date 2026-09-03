@@ -85,6 +85,13 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
 
     assert File.exists?(Path.join(target, ".env"))
     assert File.exists?(Path.join(target, ".gitignore"))
+
+    # The routing card is the scaffold's, minus the scaffold's file names: an
+    # agent dropped into a materialized example finds the same commands.
+    card = File.read!(Path.join(target, "AGENTS.md"))
+    assert card =~ "ptc docs agent-guide"
+    assert card =~ "README.md"
+    refute card =~ "main.clj"
     refute File.read!(Path.join(target, "README.md")) =~ "../../docs/"
     refute File.read!(Path.join(target, ".env")) == ""
 
@@ -108,6 +115,7 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     assert {:ok, created} = ExampleLibrary.created("kernel-tutorial")
     assert ".env" in created
     assert ".gitignore" in created
+    assert "AGENTS.md" in created
     assert envelope["result"] == %{"created" => created}
     assert CommandContract.valid_envelope?(envelope)
 

@@ -47,10 +47,10 @@ defmodule PtcRunner.ViewerLaunchAdapterTest do
     project = Path.join(directory, "ptc-project.json")
     application_dir = Path.join(directory, "application")
     host = Path.join(directory, "ptc-host.json")
-    File.cp_r!(Path.join(@examples, "viewer-live-dashboard"), application_dir)
+    File.cp_r!(Path.join(@examples, "kernel-tutorial/07-parallel-fan-out"), application_dir)
 
     @examples
-    |> Path.join("viewer-live-dashboard.ptc-project.json")
+    |> Path.join("kernel-tutorial/07-parallel-fan-out.ptc-project.json")
     |> File.read!()
     |> Jason.decode!()
     |> Map.put("application", %{"path" => "application/ptc.json"})

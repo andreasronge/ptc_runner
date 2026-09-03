@@ -104,14 +104,14 @@ while IFS= read -r path || [ -n "$path" ]; do
       ;;
 
     examples/named-mission-reader-writer/ptc-host.json|\
-      examples/viewer-demo/ptc-host.json|\
+      scripts/labs/viewer-demo/ptc-host.json|\
       examples/kernel-tutorial/ptc-host.json|\
-      examples/kernel-inspection-lab/support/lab.exs)
+      scripts/labs/inspection-lab/support/lab.exs)
       core=true
       mcp_filesystem=true
       ;;
 
-    examples/*|bench/*)
+    examples/*|scripts/labs/*|bench/*)
       core=true
       ;;
 

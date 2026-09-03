@@ -183,6 +183,9 @@ hook; fix the shared-state race or brittle deadline.
 - `examples/` — runnable example manifests. Their tests use the `:native`
   projection while the CLI forces `:json`, so a green suite does not prove
   `mix ptc run` works.
+- `scripts/labs/` — maintainer labs (the Viewer demo journeys and the Kernel
+  inspection lab). They run from a checkout with `mix` and are not shipped
+  examples.
 - `bench/` — benchmarks (`mix bench.check`, `mix bench.heap`) with committed
   baselines in `bench/baselines/`.
 

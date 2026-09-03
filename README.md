@@ -31,6 +31,9 @@ ptc run hello-ptc/ptc-project.json
 That runs without an API key and leaves a structured trace. From there `ptc
 help` lists every command, and `ptc docs` lists the specification and references.
 
+`ptc init kernel-tutorial --example kernel-tutorial` materializes the first of
+the [runnable examples](https://ptc-runner.dev/reference/examples/).
+
 ## Documentation
 
 See  **[ptc-runner.dev](https://ptc-runner.dev/)**:

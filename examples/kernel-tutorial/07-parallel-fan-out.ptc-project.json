@@ -3,16 +3,16 @@
   "kind": "ptc-project",
   "version": 1,
   "application": {
-    "path": "viewer-live-dashboard/ptc.json"
+    "path": "07-parallel-fan-out/ptc.json"
   },
   "host": {
-    "path": "kernel-tutorial/ptc-host.json",
+    "path": "ptc-host.json",
     "env_file": {
-      "path": "kernel-tutorial/.env"
+      "path": ".env"
     }
   },
   "artifacts": {
-    "root": "viewer-live-dashboard/.ptc",
+    "root": "07-parallel-fan-out/.ptc",
     "trace": true,
     "inspection": true,
     "result": false,

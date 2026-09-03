@@ -83,6 +83,7 @@
 <li><a href="/reference/application-manifest/">Application-manifest reference</a></li>
 <li><a href="/reference/host-installation/">Host-configuration reference</a></li>
 <li><a href="/reference/project-files/">Project-configuration reference</a></li>
+<li><a href="/reference/examples/">Examples reference</a></li>
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
@@ -104,17 +105,16 @@ artifact root, so traces and optional envelopes or results stay beside the
 project rather than depending on the caller's current directory.</p><h2 id="how-do-i-check-a-model-backed-project">How do I check a model-backed project?</h2><p>Materialize the tutorial projects, then check the multi-turn agent without
 network activity:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
 ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json
-ptc models kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>Use <code class="inline">--connect</code> only when an active provider probe is intended:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect</code></pre><h2 id="how-do-i-watch-a-run-while-it-is-running">How do I watch a run while it is running?</h2><p>Start the Viewer at a fixed port in one terminal:</p><pre><code class="console language-console">ptc viewer hello-ptc/ptc-project.json --port 4123</code></pre><p>In a second terminal, set the Viewer URL printed at startup:</p><pre><code class="console language-console">PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run hello-ptc/ptc-project.json</code></pre><p>Status appears in the Live tab. If the Viewer requires a token, set the same
-<code class="inline">PTC_VIEWER_TOKEN</code> for the run. See <code class="inline">ptc docs cli</code> for the full network and
-token contract.</p><h2 id="how-do-i-browse-completed-runs">How do I browse completed runs?</h2><p>Browse completed runs locally:</p><pre><code class="console language-console">ptc viewer hello-ptc/ptc-project.json</code></pre><p>The Viewer binds to loopback by default, where Live controls need no token.
+ptc models kernel-tutorial/04-multi-turn-agent.ptc-project.json</code></pre><p>Use <code class="inline">--connect</code> only when an active provider probe is intended:</p><pre><code class="console language-console">ptc doctor kernel-tutorial/04-multi-turn-agent.ptc-project.json --connect</code></pre><h2 id="how-do-i-watch-a-run-while-it-is-running">How do I watch a run while it is running?</h2><p>Start the Viewer on the fan-out step, which runs long enough to watch:</p><pre><code class="console language-console">ptc viewer kernel-tutorial/07-parallel-fan-out.ptc-project.json --port 4123</code></pre><p>In a second terminal, set the URL the Viewer printed:</p><pre><code class="console language-console">export OPENROUTER_API_KEY=...
+PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run kernel-tutorial/07-parallel-fan-out.ptc-project.json</code></pre><p>Status appears in the Live tab. If the Viewer requires a token, set the same
+<code class="inline">PTC_VIEWER_TOKEN</code> for the run.</p><h2 id="how-do-i-browse-completed-runs">How do I browse completed runs?</h2><p>Browse completed runs locally:</p><pre><code class="console language-console">ptc viewer hello-ptc/ptc-project.json</code></pre><p>The Viewer binds to loopback by default, where Live controls need no token.
 Do not expose it to a network without setting <code class="inline">PTC_VIEWER_TOKEN</code>, especially
 when a project grants access to private inspection records.</p><p>In Docker, publish the port on host loopback, bind the Viewer to the container
 wildcard, and set <code class="inline">PTC_VIEWER_TOKEN</code>. Open
 <code class="inline">http://localhost:4123/?live_token=THE_TOKEN#/live</code> to authorize the Live
 controls; the token does not authenticate the Runs trace browser.</p><h2 id="how-do-i-consume-results-from-automation">How do I consume results from automation?</h2><p>For automation, request a command envelope instead of parsing human-readable
-diagnostics:</p><pre><code class="console language-console">ptc run hello-ptc/ptc-project.json --envelope command-envelope.json</code></pre><p>Use the <a href="/reference/cli/">CLI reference</a> for the complete command grammar,
-exit statuses, envelopes, artifact publication, diagnostics, transcripts,
-Viewer behavior, and process contract. Continue with <a href="/guides/debugging-a-failed-run/">Debug a failed
+diagnostics:</p><pre><code class="console language-console">ptc run hello-ptc/ptc-project.json --envelope command-envelope.json</code></pre><p>The <a href="/reference/cli/">CLI reference</a> has the complete command grammar,
+exit statuses, envelopes, and Viewer contract. Continue with <a href="/guides/debugging-a-failed-run/">Debug a failed
 run</a> when a trace needs deeper investigation.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/agent-workflow-patterns/">&larr; Choose a workflow shape</a><a class="pager-next" href="/guides/kernel-repl/">Explore a project interactively &rarr;</a></nav>

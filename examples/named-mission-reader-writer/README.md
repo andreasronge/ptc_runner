@@ -1,29 +1,31 @@
 # Named reader/writer missions
 
-This runnable agentic flow uses one workflow to coordinate two `agent.core`
-loops. The `reader` mission can read only `reader-state/`; the `writer` mission
-can write only `writer-state/`. They compile different PTC-Lisp APIs, receive
-different mission data, hold separate continuations, and are granted different
-provider occurrences.
+One workflow coordinates two `agent.core` loops. The `reader` mission can read
+only `reader-state/`; the `writer` mission can write only `writer-state/`. They
+compile different PTC-Lisp APIs, receive different mission data, hold separate
+continuations, and are granted different provider occurrences.
 
-## Setup and execution
+## Run it
+
+Materialize a copy of this directory, then run the commands below from the
+directory that copy sits in:
+
+```console
+ptc init named-mission-reader-writer --example named-mission-reader-writer
+```
 
 Both missions install the published
-[`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp) package: one
-installation maps only `read_text_file`, the other only `write_text_file`, each
-with its own confined root. The first run may download that package. Node.js
-and `npx` are required. Export an OpenRouter key:
+[`ptc-fs-mcp@0.1.0`](https://www.npmjs.com/package/ptc-fs-mcp) package through
+`npx`: one installation maps only `read_text_file`, the other only
+`write_text_file`, each with its own confined root. Node.js is required, and
+the first run may download the package. The project selects the trusted
+`deepseek` model alias and needs a non-empty `OPENROUTER_API_KEY`. Export it,
+or replace the comment in the generated `.env` with an assignment.
 
 ```console
 export OPENROUTER_API_KEY=...
-```
-
-Run from the repository root. The project document remembers the host
-installation (transport paths resolve relative to that host file):
-
-```console
-mix ptc run examples/named-mission-reader-writer/ptc-project.json
-mix ptc viewer examples/named-mission-reader-writer/ptc-project.json
+ptc run named-mission-reader-writer/ptc-project.json
+ptc viewer named-mission-reader-writer/ptc-project.json
 ```
 
 The reader returns the exact contents of `reader-state/brief.txt`. The workflow

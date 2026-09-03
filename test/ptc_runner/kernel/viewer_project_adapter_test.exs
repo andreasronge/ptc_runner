@@ -5,19 +5,19 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
   alias PtcRunner.Kernel.SafeMetadata
   alias PtcRunner.Kernel.ViewerProjectAdapter
 
-  @demo_manifest "examples/viewer-live-dashboard/ptc.json"
+  @demo_manifest "examples/kernel-tutorial/07-parallel-fan-out/ptc.json"
 
-  describe "the shipped demo manifest" do
+  describe "the shipped fan-out tutorial manifest" do
     setup do
       {:ok, project} = ViewerProjectAdapter.describe(@demo_manifest)
       %{project: project}
     end
 
     test "reports its label, entry, and the path as configured", %{project: project} do
-      assert project.name == "live-dashboard-demo"
-      assert project.name_fingerprint == SafeMetadata.fingerprint("live-dashboard-demo")
+      assert project.name == "tutorial-parallel-fan-out"
+      assert project.name_fingerprint == SafeMetadata.fingerprint("tutorial-parallel-fan-out")
       assert project.manifest == @demo_manifest
-      assert project.entry == "demo.live/run"
+      assert project.entry == "tutorial.fan-out/run"
       assert %{"topics" => topics} = project.input
       assert length(topics) == 12
     end
@@ -25,12 +25,11 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
     test "describes the workflow environment with sources for both components", %{
       project: project
     } do
-      [workflow | missions] = project.environments
+      [workflow] = project.environments
       assert workflow.name == "workflow"
       assert workflow.kind == "workflow"
-      assert Enum.map(missions, & &1.name) == ["greet", "stats"]
 
-      assert [%{id: "llm", library: true}, %{id: "demo.live", library: false}] =
+      assert [%{id: "tutorial.fan-out", library: false}, %{id: "llm", library: true}] =
                workflow.components
 
       library = Enum.find(workflow.components, & &1.library)
@@ -38,8 +37,8 @@ defmodule PtcRunner.Kernel.ViewerProjectAdapterTest do
       assert library.path == "priv/preludes/kernel/llm.clj"
 
       file = Enum.find(workflow.components, &(not &1.library))
-      assert file.path == "demo.clj"
-      assert file.source =~ "(ns demo.live"
+      assert file.path == "fanout.clj"
+      assert file.source =~ "(ns tutorial.fan-out"
     end
 
     test "names the provider but claims no tools without a host configuration", %{

@@ -14,7 +14,7 @@ output =
       )
 
     _arguments ->
-      raise "usage: mix run examples/kernel-inspection-lab/run.exs [OUTPUT_DIRECTORY]"
+      raise "usage: mix run scripts/labs/inspection-lab/run.exs [OUTPUT_DIRECTORY]"
   end
 
 {:ok, journeys} = PtcRunner.Examples.KernelInspectionLab.run(output)

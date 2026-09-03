@@ -2,7 +2,7 @@
 
 This project runs on the `ptc` executable. Ask the installed binary for the
 exact contract instead of guessing; its answers always match its own version
-and need no network. Inside this repository the same commands are `mix ptc …`.
+and need no network.
 
 ## Find the exact contract
 

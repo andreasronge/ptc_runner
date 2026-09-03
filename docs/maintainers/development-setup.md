@@ -260,6 +260,10 @@ toolchain, hooks, and standard commands above apply unchanged.
 - **Smoke test offline.** `mix ptc run
   examples/kernel-tutorial/01-orders.ptc-project.json` and `mix ptc run
   examples/llm-replay/ptc-project.json` need no network or credential.
+- **Maintainer labs live in `scripts/labs/`.** `scripts/labs/viewer-demo/run.sh`
+  produces varied Viewer traces against a live model, and
+  `mix run scripts/labs/inspection-lab/run.exs` produces trace and inspection
+  pairs without a credential. Neither is a shipped example.
 - **The Viewer must be started explicitly.** `mix ptc viewer <project.json>`
   binds `127.0.0.1` on a free port and tries to open a browser; in a headless
   VM pass `--port <PORT> --listen 127.0.0.1` and open the printed URL. It shows

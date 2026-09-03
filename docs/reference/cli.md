@@ -854,7 +854,7 @@ sanitization, filtering, pagination, and source classes. The
 
 Capture canonical and inspection artifacts in separate trusted locations. The
 credential-free
-[Kernel inspection lab](https://github.com/andreasronge/ptc_runner/tree/main/examples/kernel-inspection-lab)
+[Kernel inspection lab](https://github.com/andreasronge/ptc_runner/tree/main/scripts/labs/inspection-lab)
 creates a correlated pair without a live model.
 
 For one transcript, avoid a REPL:
