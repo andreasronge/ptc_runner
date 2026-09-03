@@ -1,8 +1,10 @@
 # Examples reference
 
 This is the complete inventory of shipped example trees, the layout every tree
-follows, and the aspect each one demonstrates. Read the trees in the order
-listed: each one assumes the surface the one before it introduced.
+follows, and the aspect each one demonstrates.
+
+Read the trees in the order listed: each one assumes the surface the one
+before it introduced.
 
 Five trees are embedded in the executable and materialize anywhere:
 

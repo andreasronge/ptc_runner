@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 # Runs the five viewer-demo journeys against the trusted `deepseek` alias and
 # collects sanitized traces plus private inspection artifacts into one
-# directory for exercising `mix ptc viewer`. Requires OPENROUTER_API_KEY in
+# directory for exercising `ptc viewer`. Uses the `ptc` executable on PATH;
+# set PTC to another launcher, such as `PTC="mix ptc"` inside a checkout that
+# has no release build. Requires OPENROUTER_API_KEY in the repository's
 # `.env`, selected explicitly below. Journeys 01/02 must succeed and 04/05 must end in a failing run;
 # journey 03's final status depends on how the model reacts to quota
 # feedback, but its trace must contain limit-exceeded events. Every journey
 # must produce non-empty trace and inspection artifacts, and any deviation
 # fails the script.
 set -euo pipefail
+
+ptc="${PTC:-ptc}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "FAIL: jq is required to validate private model feedback" >&2
@@ -73,7 +77,7 @@ run_journey() {
   touch "$marker"
 
   local status=0
-  mix ptc run "$demo_dir/$journey.json" \
+  $ptc run "$demo_dir/$journey.json" \
     --env-file "$repo_root/.env" \
     --host-config "$demo_dir/ptc-host.json" \
     --trace-dir "$artifacts/traces" \
@@ -138,7 +142,7 @@ require_private_feedback() {
   run_ref="$(basename "$journey_trace" .jsonl)"
 
   if ! private_analysis="$(
-    mix ptc repl \
+    $ptc repl \
       --profile private-run-analysis-v2 \
       --resource "traces=$artifacts/traces" \
       --resource "inspection=$artifacts/inspection" \
@@ -185,4 +189,4 @@ cp "$demo_dir/01-recovery.json" "$out/ptc.json"
 echo
 echo "Traces collected in $artifacts. Browse every journey, including its"
 echo "private payloads, with:"
-echo "  mix ptc viewer $out/ptc-project.json"
+echo "  $ptc viewer $out/ptc-project.json"
