@@ -56,7 +56,7 @@ defmodule PtcRunner.Kernel.FrozenBundleTest do
     agent_core_indices = Enum.at(metadata.dependency_indices, agent_core_position)
 
     expected =
-      ~w(agent.machine agent.native agent.prompt kernel llm result workflow.event)
+      ~w(agent.feedback agent.machine agent.native agent.prompt kernel llm result workflow.event)
       |> Enum.map(&Map.fetch!(positions, &1))
       |> Enum.sort()
 

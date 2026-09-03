@@ -1842,10 +1842,70 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     refute encoded =~ "source_bytes"
   end
 
+  test "run-outcome retain_programs includes bounded execution evidence" do
+    responses = [
+      agent_return("observe", "(+ 1 1)"),
+      agent_return("repair", "(+"),
+      agent_return("done", "(return 2)")
+    ]
+
+    {:ok, config} = agent_config(responses)
+
+    assert {:ok, %{value: value}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Review the session" {"max_turns" 3 "retain_programs" 8}))|,
+               config
+             )
+
+    assert [continued, failed, returned] = value["programs"]
+
+    assert continued["execution"] == %{
+             "outcome" => "continued",
+             "observation" => "user=> 2",
+             "observation-truncated?" => false
+           }
+
+    assert %{
+             "outcome" => "evaluation_error",
+             "kind" => "parse_error",
+             "message" => message
+           } = failed["execution"]
+
+    assert is_binary(message)
+    assert returned["execution"] == %{"outcome" => "returned"}
+  end
+
+  test "run-outcome caps retained observations independently of the agent observation ceiling" do
+    printed = String.duplicate("x", 3_000)
+
+    responses = [
+      agent_return("observe", ~s|"#{printed}"|),
+      agent_return("done", "(return 1)")
+    ]
+
+    {:ok, config} = agent_config(responses)
+
+    assert {:ok, %{value: value}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Review the session" {"max_turns" 2 "max_observation_chars" 4096 "retain_programs" 8}))|,
+               config
+             )
+
+    [continued, _returned] = value["programs"]
+    observation = continued["execution"]["observation"]
+
+    assert String.length(observation) <= 2_048
+    assert String.ends_with?(observation, "... (retained observation truncated)")
+    assert continued["execution"]["observation-truncated?"]
+  end
+
   test "run-outcome retain_programs attaches prior programs to subject and provider failures" do
     subject_responses = [
       agent_return("continue", "(+ 1 1)"),
-      agent_return("fail", ~S|(fail "declined")|)
+      agent_return(
+        "fail",
+        ~S|(fail {:status :error :kind :declined :reason :policy :secret "x"})|
+      )
     ]
 
     {:ok, subject_config} = agent_config(subject_responses)
@@ -1861,8 +1921,37 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert [
              %{"turn" => 1, "mission" => "default", "source" => "(+ 1 1)"},
-             %{"turn" => 2, "mission" => "default", "source" => ~S|(fail "declined")|}
+             %{"turn" => 2, "mission" => "default", "execution" => execution} = failed
            ] = subject["programs"]
+
+    assert failed["source"] =~ "(fail {:status :error :kind :declined"
+    assert execution["outcome"] == "failed"
+    assert execution["kind"] == "declined"
+    assert execution["reason"] == "policy"
+    refute Map.has_key?(execution, "value")
+    refute inspect(execution) =~ "secret"
+
+    long = String.duplicate("k", 129)
+
+    unbounded_responses = [
+      agent_return(
+        "fail",
+        ~s|(fail {:status :error :kind :#{long} :reason "two words\there"})|
+      )
+    ]
+
+    {:ok, unbounded_config} = agent_config(unbounded_responses)
+
+    assert {:ok, %{value: unbounded}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Fail loudly" {"max_turns" 1 "retain_programs" 8}))|,
+               unbounded_config
+             )
+
+    assert [%{"execution" => unbounded_execution}] = unbounded["programs"]
+    assert unbounded_execution["outcome"] == "failed"
+    refute Map.has_key?(unbounded_execution, "kind")
+    refute Map.has_key?(unbounded_execution, "reason")
 
     provider_responses = [
       agent_return("continue", "(+ 2 2)"),

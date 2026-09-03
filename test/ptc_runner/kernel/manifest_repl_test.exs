@@ -200,7 +200,12 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     assert result.return["value"] == 42
 
     assert result.return["programs"] == [
-             %{:source => "(return 42)", "mission" => "default", "turn" => 1}
+             %{
+               :source => "(return 42)",
+               "execution" => %{"outcome" => "returned"},
+               "mission" => "default",
+               "turn" => 1
+             }
            ]
 
     assert result.return["programs-omitted"] == 0
@@ -221,9 +226,18 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
     assert {:ok, failed, session} = ReplSession.eval(session, "(app/run {})")
     assert failed.return["status"] == "subject-failure"
 
-    assert failed.return["programs"] == [
-             %{:source => "(fail :stop)", "mission" => "default", "turn" => 1}
-           ]
+    assert [
+             %{
+               :source => "(fail :stop)",
+               "execution" => execution,
+               "mission" => "default",
+               "turn" => 1
+             }
+           ] = failed.return["programs"]
+
+    assert execution["outcome"] == :failed
+    assert execution["retryable?"]
+    assert is_binary(execution["message"])
 
     assert {:ok, events} = ReplSession.close(session)
 

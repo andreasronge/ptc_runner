@@ -1,0 +1,280 @@
+{
+  "schema_version": 1,
+  "observed_at": "2026-09-03",
+  "workflow": "analysis and recheck are blind derivations; review sees their programs and measures itself; workflow code compares all three to one part in a million",
+  "application": {
+    "application_content_digest": "sha256:d09369d800393c33330b3371e7bc5c7fa097ca4417e6717dd2c1b70b2bc09c7e",
+    "workflow_bundle_hash": "36a2d3672f279ddaffa043005d5e4a64f274fefbe0ed50d73a34c7fce8c6ee28",
+    "mission_bundle_hashes": {
+      "analysis": "7b7d9ee3bd25fc1382ba15474ef06d9412025a4f6b2236d7a79515bccc9e9403",
+      "recheck": "7b7d9ee3bd25fc1382ba15474ef06d9412025a4f6b2236d7a79515bccc9e9403",
+      "review": "7b7d9ee3bd25fc1382ba15474ef06d9412025a4f6b2236d7a79515bccc9e9403"
+    }
+  },
+  "models": {
+    "deepseek": "openrouter:deepseek/deepseek-v4-flash",
+    "luna": "openrouter:openai/gpt-5.6-luna"
+  },
+  "runs": [
+    {
+      "run_ref": "cmd-0760rnpx50pssvz8h1jncw8yq0",
+      "input": "inputs/deepseek.json",
+      "status": "ok",
+      "error_code": null,
+      "value": "B. BE",
+      "agreed": true,
+      "top_country": {
+        "analysis": "BE",
+        "recheck": "BE",
+        "review": "BE"
+      },
+      "problems": [],
+      "model_calls": {
+        "deepseek": 12,
+        "luna": 1
+      },
+      "evaluations_by_mission": {
+        "analysis": 6,
+        "recheck": 6,
+        "review": 1
+      },
+      "mission_reads": 243,
+      "heap_kills": 2,
+      "observed_cost_usd": 0.003715
+    },
+    {
+      "run_ref": "cmd-0yv3hv8atyd0a3q091dtq3saaj",
+      "input": "inputs/deepseek.json",
+      "status": "ok",
+      "error_code": null,
+      "value": "B. BE",
+      "agreed": true,
+      "top_country": {
+        "analysis": "BE",
+        "recheck": "BE",
+        "review": "BE"
+      },
+      "problems": [
+        "The analyzer's candidate answer is correct under the official fraud definition (fraudulent volume divided by total volume): BE has the highest rate at approximately 12.27%, narrowly above NL at approximately 12.18%."
+      ],
+      "model_calls": {
+        "deepseek": 14,
+        "luna": 1
+      },
+      "evaluations_by_mission": {
+        "analysis": 9,
+        "recheck": 5,
+        "review": 1
+      },
+      "mission_reads": 292,
+      "heap_kills": 2,
+      "observed_cost_usd": 0.003259
+    },
+    {
+      "run_ref": "cmd-2gg9hhm9vdq2s948br1vvj9ea3",
+      "input": "inputs/deepseek.json",
+      "status": "ok",
+      "error_code": null,
+      "value": "B. BE",
+      "agreed": true,
+      "top_country": {
+        "analysis": "BE",
+        "recheck": "BE",
+        "review": "BE"
+      },
+      "problems": [],
+      "model_calls": {
+        "deepseek": 13,
+        "luna": 1
+      },
+      "evaluations_by_mission": {
+        "analysis": 7,
+        "recheck": 6,
+        "review": 1
+      },
+      "mission_reads": 169,
+      "heap_kills": 1,
+      "observed_cost_usd": 0.004274
+    },
+    {
+      "run_ref": "cmd-55t3jtqjh2w2m2ts6eax8j3710",
+      "input": "inputs/deepseek.json",
+      "status": "error",
+      "error_code": "explicit_failure",
+      "value": null,
+      "agreed": null,
+      "top_country": null,
+      "problems": null,
+      "model_calls": {
+        "total": 16
+      },
+      "evaluations_by_mission": {
+        "analysis": 9,
+        "recheck": 7
+      },
+      "mission_reads": 512,
+      "heap_kills": 2,
+      "observed_cost_usd": 0.001971
+    },
+    {
+      "run_ref": "cmd-6jvrz8x9yvjpm1bfq57j3n317x",
+      "input": "inputs/deepseek.json",
+      "status": "ok",
+      "error_code": null,
+      "value": "B. BE",
+      "agreed": true,
+      "top_country": {
+        "analysis": "BE",
+        "recheck": "BE",
+        "review": "BE"
+      },
+      "problems": [
+        "Fraud is defined as fraudulent volume divided by total volume, not absolute fraudulent volume. The analyzer's first derivation is not ratio-sorted, so its ordering should not be used; recomputing the ratios gives BE about 0.1226864 versus NL about 0.1218155, making B. BE the correct choice."
+      ],
+      "model_calls": {
+        "deepseek": 16,
+        "luna": 1
+      },
+      "evaluations_by_mission": {
+        "analysis": 10,
+        "recheck": 6,
+        "review": 1
+      },
+      "mission_reads": 171,
+      "heap_kills": 1,
+      "observed_cost_usd": 0.004847
+    },
+    {
+      "run_ref": "cmd-0ckkw7zg9424ws2nxsdd40hd8f",
+      "input": "inputs/luna.json",
+      "status": "ok",
+      "error_code": null,
+      "value": "B. BE",
+      "agreed": true,
+      "top_country": {
+        "analysis": "BE",
+        "recheck": "BE",
+        "review": "BE"
+      },
+      "problems": [
+        "The official fraud definition is fraudulent volume divided by total volume, but the analyzer's displayed derivation emphasizes absolute fraudulent_volume; that ranking can produce a wrong answer. In this data BE is still top by the defined ratio, while NL has the largest absolute fraudulent volume."
+      ],
+      "model_calls": {
+        "luna": 9
+      },
+      "evaluations_by_mission": {
+        "analysis": 3,
+        "recheck": 5,
+        "review": 1
+      },
+      "mission_reads": 149,
+      "heap_kills": 0,
+      "observed_cost_usd": 0.00618
+    },
+    {
+      "run_ref": "cmd-0twkysj3vwd4wwwjjgx42p09qs",
+      "input": "inputs/luna.json",
+      "status": "ok",
+      "error_code": null,
+      "value": "B. BE",
+      "agreed": true,
+      "top_country": {
+        "analysis": "BE",
+        "recheck": "BE",
+        "review": "BE"
+      },
+      "problems": [],
+      "model_calls": {
+        "luna": 6
+      },
+      "evaluations_by_mission": {
+        "analysis": 2,
+        "recheck": 2,
+        "review": 2
+      },
+      "mission_reads": 149,
+      "heap_kills": 0,
+      "observed_cost_usd": 0.004234
+    },
+    {
+      "run_ref": "cmd-2859a1v6ts4sdnc298w9wgp2xq",
+      "input": "inputs/luna.json",
+      "status": "ok",
+      "error_code": null,
+      "value": "B. BE",
+      "agreed": true,
+      "top_country": {
+        "analysis": "BE",
+        "recheck": "BE",
+        "review": "BE"
+      },
+      "problems": [],
+      "model_calls": {
+        "luna": 7
+      },
+      "evaluations_by_mission": {
+        "analysis": 2,
+        "recheck": 4,
+        "review": 1
+      },
+      "mission_reads": 148,
+      "heap_kills": 0,
+      "observed_cost_usd": 0.004987
+    },
+    {
+      "run_ref": "cmd-63177zbj3hh1tw4ejmfvwt566h",
+      "input": "inputs/luna.json",
+      "status": "ok",
+      "error_code": null,
+      "value": "B. BE",
+      "agreed": true,
+      "top_country": {
+        "analysis": "BE",
+        "recheck": "BE",
+        "review": "BE"
+      },
+      "problems": [
+        "The analyzer reports raw fraudulent and total volumes but does not report the fraud ratios used by the official definition, so its ranking should be checked as fraudulent volume divided by total volume.",
+        "The recheck aggregation does not explicitly handle nil eur_amount values, which could cause incorrect totals or an error if missing amounts are present."
+      ],
+      "model_calls": {
+        "luna": 8
+      },
+      "evaluations_by_mission": {
+        "analysis": 3,
+        "recheck": 2,
+        "review": 3
+      },
+      "mission_reads": 100,
+      "heap_kills": 0,
+      "observed_cost_usd": 0.006043
+    },
+    {
+      "run_ref": "cmd-6yf6q8hy9f0qm49efrp8bs6pes",
+      "input": "inputs/luna.json",
+      "status": "ok",
+      "error_code": null,
+      "value": "B. BE",
+      "agreed": true,
+      "top_country": {
+        "analysis": "BE",
+        "recheck": "BE",
+        "review": "BE"
+      },
+      "problems": [
+        "The analyzer ranked countries by fraudulent volume, but the official fraud definition is fraudulent volume divided by total volume; its candidate answer is therefore not justified by the shown derivation, even though BE may coincide with the ratio leader."
+      ],
+      "model_calls": {
+        "luna": 13
+      },
+      "evaluations_by_mission": {
+        "analysis": 2,
+        "recheck": 10,
+        "review": 1
+      },
+      "mission_reads": 222,
+      "heap_kills": 1,
+      "observed_cost_usd": 0.008401
+    }
+  ]
+}

@@ -263,6 +263,75 @@
        :source-bytes nil})))
 
 (defn- program-retention-bytes [] 2000000)
+(defn- program-retention-observation-chars [] 2048)
+(defn- retained-observation-marker [] "\n... (retained observation truncated)")
+(defn- retained-message-marker [] "\n... (retained execution message truncated)")
+
+(defn- cap-retained-text [text maximum marker]
+  (if (<= (count text) maximum)
+    text
+    (if (<= maximum (count marker))
+      (subs marker 0 maximum)
+      (str (subs text 0 (- maximum (count marker))) marker))))
+
+(defn- assoc-present [m k value]
+  (if (nil? value) m (assoc m k value)))
+
+(defn- envelope-field [envelope k]
+  (let [value (get envelope k)]
+    (if (nil? value) (get envelope (name k)) value)))
+
+(defn- closed-failure-envelope [evaluation]
+  (let [value (get evaluation :value)
+        status (when (map? value) (envelope-field value :status))]
+    (if (or (= :error status) (= "error" status)) value {})))
+
+(defn- classifier-grammar [] (re-pattern "[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}"))
+
+(defn- retained-classifier [primary fallback]
+  (let [value (if (nil? primary) fallback primary)
+        text (cond (keyword? value) (name value)
+                   (string? value) value
+                   :else nil)]
+    (when (and (string? text) (re-matches (classifier-grammar) text))
+      value)))
+
+(defn- retained-execution [evaluation]
+  (let [outcome (get evaluation :outcome)]
+    (cond
+      (= :continued outcome)
+      (let [observation (or (get evaluation :observation)
+                            "user=> #<preview unavailable>")
+            maximum (program-retention-observation-chars)]
+        {:outcome :continued
+         :observation (cap-retained-text observation maximum
+                                         (retained-observation-marker))
+         :observation-truncated?
+         (or (true? (get-in evaluation [:preview :truncated?]))
+             (> (count observation) maximum))})
+
+      (= :returned outcome)
+      {:outcome :returned}
+
+      :else
+      (let [message (or (get-in evaluation [:details :message])
+                        (agent.feedback/evaluation-error evaluation))
+            envelope (closed-failure-envelope evaluation)]
+        (assoc-present
+          (assoc-present
+            (assoc-present
+              (assoc-present {:outcome outcome}
+                             :kind
+                             (retained-classifier (get evaluation :kind)
+                                                  (envelope-field envelope :kind)))
+              :reason
+              (retained-classifier (get evaluation :reason)
+                                   (envelope-field envelope :reason)))
+            :retryable?
+            (get evaluation :retryable?))
+          :message
+          (when (string? message)
+            (cap-retained-text message 2048 (retained-message-marker))))))))
 
 (defn- empty-program-ring [limit]
   {:limit limit :entries [] :bytes 0 :omitted 0})
@@ -270,7 +339,8 @@
 (defn- public-program [entry]
   {:turn (get entry :turn)
    :mission (get entry :mission)
-   :source (get entry :source)})
+   :source (get entry :source)
+   :execution (get entry :execution)})
 
 (defn- drop-oldest-program [ring]
   (let [oldest (first (get ring :entries))]
@@ -288,7 +358,7 @@
     ring
     (evict-programs-until-fit (drop-oldest-program ring) bytes)))
 
-(defn- retain-admitted-program [ring source mission turn bytes]
+(defn- retain-admitted-program [ring source mission turn bytes evaluation]
   (if (nil? (get ring :limit))
     ring
     (if (or (not (string? source))
@@ -303,6 +373,7 @@
                           {:turn turn
                            :mission mission
                            :source source
+                           :execution (retained-execution evaluation)
                            :bytes bytes})
            :bytes (+ (get next :bytes) bytes)
            :omitted (get next :omitted)}
@@ -475,7 +546,8 @@
                       (get action :program)
                       (get phase "mission")
                       (inc (get (get next :state) :agent-turn))
-                      (get authenticated :source-bytes))
+                      (get authenticated :source-bytes)
+                      evaluation)
                     ring)]
               (recur next {:type :evaluation :action action :evaluation evaluation} next-ring))
 
@@ -543,7 +615,9 @@
   generated programs on the returned outcome. Omitted or nil keeps the current
   outcome shape. When set, every returned outcome includes `:programs` and
   `:programs-omitted`. Retention keeps the newest complete entries that fit
-  both the requested count and a fixed 2,000,000 UTF-8-byte source ceiling."
+  both the requested count and a fixed 2,000,000 UTF-8-byte source ceiling.
+  Each entry also carries a bounded execution summary; ordinary observations
+  are capped at 2,048 characters and raw evaluation values are never retained."
   {:signature "(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, retain_programs :any?}) -> :any"}
   [task cfg]
   (run-outcome* task cfg :none :outcome))
