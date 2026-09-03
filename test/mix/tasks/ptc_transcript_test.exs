@@ -96,8 +96,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     assert presentation.stderr =~ "transcript/ambiguous_evidence"
     refute presentation.stderr =~ "incomplete_evidence"
     assert presentation.stderr =~ "is ambiguous: 1 turn or generated-source association"
-    assert presentation.stderr =~ "viewer.private"
-    assert presentation.stderr =~ "/api/analysis/runs/RUN_ID/conversation"
+    assert_ungated_repl_hint(presentation.stderr)
     refute File.exists?(output)
   end
 
@@ -143,7 +142,33 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     assert presentation.stderr =~ "1 model exchange the canonical trace expects"
     assert presentation.stderr =~ "not captured under --inspection"
     assert presentation.stderr =~ "0 ambiguous associations"
-    assert presentation.stderr =~ "/api/analysis/runs/RUN_ID/conversation"
+    assert_ungated_repl_hint(presentation.stderr)
+    refute File.exists?(output)
+  end
+
+  @tag :tmp_dir
+  test "a nonterminal trace reports canonical incompleteness and its counts", %{tmp_dir: root} do
+    fixture = canonical_create!(root)
+    trace_path = Path.join(fixture.traces, "#{fixture.run_id}.jsonl")
+
+    trace_without_terminal_event =
+      trace_path
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.drop(-1)
+      |> Enum.join("\n")
+
+    File.write!(trace_path, trace_without_terminal_event <> "\n")
+    output = Path.join(fixture.output, "nonterminal.private.json")
+
+    presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
+
+    assert presentation.exit_status == 1
+    assert presentation.stderr =~ "transcript/incomplete_evidence"
+    assert presentation.stderr =~ "canonical trace records no terminal run event"
+    assert presentation.stderr =~ "0 missing model exchanges"
+    assert presentation.stderr =~ "0 ambiguous associations"
+    assert_ungated_repl_hint(presentation.stderr)
     refute File.exists?(output)
   end
 
@@ -786,5 +811,14 @@ defmodule Mix.Tasks.PtcTranscriptTest do
   defp without_option(argv, switch) do
     index = Enum.find_index(argv, &(&1 == switch))
     argv |> List.delete_at(index) |> List.delete_at(index)
+  end
+
+  defp assert_ungated_repl_hint(message) do
+    assert message =~
+             "The same reconstruction is ungated in ptc repl --profile private-run-analysis-v2"
+
+    assert message =~ "ptc docs repl"
+    refute message =~ "/api/"
+    refute message =~ "Viewer"
   end
 end
