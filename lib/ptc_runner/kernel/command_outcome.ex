@@ -588,15 +588,13 @@ defmodule PtcRunner.Kernel.CommandOutcome do
 
   defp valid_success_mode?(:doctor, %{
          "checks" => checks,
-         "provider_activity" => false,
-         "readiness" => "unverified"
+         "provider_activity" => false
        }),
        do: valid_doctor_checks?(:default, checks)
 
   defp valid_success_mode?({:doctor, :connect}, %{
          "checks" => checks,
-         "provider_activity" => provider_activity,
-         "readiness" => "ready"
+         "provider_activity" => provider_activity
        }),
        do: is_boolean(provider_activity) and valid_doctor_checks?(:connect, checks)
 

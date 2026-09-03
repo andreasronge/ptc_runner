@@ -439,8 +439,9 @@ complete table of names, meanings, units, scopes, defaults, accepted ranges,
 and identity participation. The host schema is generated from the same
 catalog.</p><h2 id="verify-selected-providers">Verify selected providers</h2><p>Run active local, credential, authorization, and connectivity checks without
 invoking the workflow:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
-ptc doctor kernel-tutorial/02-deepseek-extract.ptc-project.json --connect</code></pre><p><code class="inline">readiness</code> is <code class="inline">ready</code> only after successful active checks. Plain doctor is
-<code class="inline">unverified</code>; a failed active check is <code class="inline">failed</code> and exits nonzero. The report
+ptc doctor kernel-tutorial/02-deepseek-extract.ptc-project.json --connect</code></pre><p><code class="inline">readiness</code> is <code class="inline">not_applicable</code> when there are no provider check rows, <code class="inline">ready</code>
+when every provider row passes, and <code class="inline">unverified</code> when any provider row is
+skipped. A failed check reports <code class="inline">failed</code> and exits nonzero. The report
 does not expose endpoints, commands, paths, credentials, or OAuth authority.</p><h2 id="next-steps">Next steps</h2><ul><li><a href="/reference/application-manifest/">Manifests and capabilities</a> selects and
 narrows these aliases.</li><li><a href="/guides/building-agents/">Building agents</a> uses the installed model and mission
 capabilities.</li><li><a href="/reference/cli/">Running and debugging</a> runs and inspects the

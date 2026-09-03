@@ -773,7 +773,9 @@ defmodule PtcRunner.Kernel.DoctorPlanTest do
 
   # The contract, not this test, decides whether a row set is well formed: both
   # the generated schema and the ordering semantics it cannot express.
-  defp assert_contract(checks, provider_activity, readiness \\ "unverified") do
+  defp assert_contract(checks, provider_activity, readiness \\ nil) do
+    readiness = readiness || CommandContract.doctor_readiness(Enum.drop(checks, 3))
+
     result = %{
       "checks" => checks,
       "model_aliases" => [],

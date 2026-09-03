@@ -3,6 +3,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
 
   alias PtcRunner.Kernel.CommandAcquisition
   alias PtcRunner.Kernel.CommandArguments
+  alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandRuntime
@@ -173,6 +174,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
   # what that activity spent. They are produced together and travel together.
   defp doctor_success(mode, arguments, run_ref, host, catalog, prepared, report) do
     %{checks: checks, provider_activity: provider_activity, usage: usage} = report
+    provider_checks = Enum.drop(checks, 3)
 
     with {:ok, aliases} <- DoctorPlan.model_aliases(catalog, prepared) do
       aliases = maybe_add_model_selectors(aliases, host, arguments.options)
@@ -182,7 +184,7 @@ defmodule PtcRunner.Kernel.CommandDoctor do
          "checks" => checks,
          "model_aliases" => aliases,
          "provider_activity" => provider_activity,
-         "readiness" => readiness(mode),
+         "readiness" => CommandContract.doctor_readiness(provider_checks),
          "usage" => usage
        })}
     end
@@ -264,9 +266,6 @@ defmodule PtcRunner.Kernel.CommandDoctor do
 
   defp plan_mode(:doctor), do: :default
   defp plan_mode({:doctor, :connect}), do: :connect
-
-  defp readiness(:doctor), do: "unverified"
-  defp readiness({:doctor, :connect}), do: "ready"
 
   defp diagnostic_activity(diagnostic, secondary),
     do: Enum.any?([diagnostic | secondary], & &1.provider_activity)

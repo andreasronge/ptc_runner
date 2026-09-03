@@ -38,7 +38,9 @@ checks can make real requests and may incur cost:
 ptc doctor ptc-project.json --connect
 ```
 
-Plain doctor reports `readiness: "unverified"` when its local checks pass.
+Readiness is derived from provider check rows: no rows report
+`readiness: "not_applicable"`, all passing rows report `readiness: "ready"`,
+and any skipped row reports `readiness: "unverified"`.
 Missing provider commands, unreadable replay fixtures, and other attributable
 local failures produce failed check rows, `readiness: "failed"`, and a nonzero
 exit without activating a provider. Successful active checks report `ready`;

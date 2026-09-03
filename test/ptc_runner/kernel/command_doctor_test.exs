@@ -14,6 +14,28 @@ defmodule PtcRunner.Kernel.CommandDoctorTest do
 
   @run_ref CommandRunRef.encode(<<0::128>>)
 
+  test "doctor readiness is derived from settled provider checks" do
+    assert CommandContract.doctor_readiness([]) == "not_applicable"
+
+    assert CommandContract.doctor_readiness([
+             %{"name" => "provider/model/local", "status" => "pass", "code" => "available"},
+             %{
+               "name" => "provider/model/credentials",
+               "status" => "skipped",
+               "code" => "requires_connect"
+             }
+           ]) == "unverified"
+
+    assert CommandContract.doctor_readiness([
+             %{"name" => "provider/model/local", "status" => "pass", "code" => "available"},
+             %{
+               "name" => "provider/model/connectivity",
+               "status" => "pass",
+               "code" => "available"
+             }
+           ]) == "ready"
+  end
+
   test "connect failures preserve sealed owner activity evidence" do
     for provider_activity <- [false, true] do
       failure = OwnerFailure.new!(:execution_session_unavailable, provider_activity, :incomplete)

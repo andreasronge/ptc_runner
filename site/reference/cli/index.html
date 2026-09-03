@@ -104,7 +104,9 @@ grammar for each frontend.</p><h2 id="choose-a-command">Choose a command</h2><di
 help command for the frontend you invoke as its canonical command and option
 reference.</p><p>A provider-bearing manifest needs a host configuration. A project document can
 remember that path and its environment file. Before running it, active provider
-checks can make real requests and may incur cost:</p><pre><code class="console language-console">ptc doctor ptc-project.json --connect</code></pre><p>Plain doctor reports <code class="inline">readiness: &quot;unverified&quot;</code> when its local checks pass.
+checks can make real requests and may incur cost:</p><pre><code class="console language-console">ptc doctor ptc-project.json --connect</code></pre><p>Readiness is derived from provider check rows: no rows report
+<code class="inline">readiness: &quot;not_applicable&quot;</code>, all passing rows report <code class="inline">readiness: &quot;ready&quot;</code>,
+and any skipped row reports <code class="inline">readiness: &quot;unverified&quot;</code>.
 Missing provider commands, unreadable replay fixtures, and other attributable
 local failures produce failed check rows, <code class="inline">readiness: &quot;failed&quot;</code>, and a nonzero
 exit without activating a provider. Successful active checks report <code class="inline">ready</code>;

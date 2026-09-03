@@ -2712,6 +2712,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.exit_status == 0
     assert outcome.envelope["command"] == "doctor"
     assert outcome.envelope["result"]["provider_activity"] == false
+    assert outcome.envelope["result"]["readiness"] == "not_applicable"
 
     checks = outcome.envelope["result"]["checks"]
     assert Enum.map(checks, & &1["name"]) == ["runtime", "application", "viewer"]
@@ -2806,6 +2807,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              Enum.find(checks, &(&1["name"] == "provider/workspace/connectivity"))
 
     assert outcome.envelope["result"]["provider_activity"] == false
+    assert outcome.envelope["result"]["readiness"] == "unverified"
     assert_schema_valid(outcome.envelope)
   end
 
@@ -2984,7 +2986,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                &(&1["name"] == "provider/frozen-model/local")
              )
 
-    assert outcome.envelope["result"]["readiness"] == "unverified"
+    assert outcome.envelope["result"]["readiness"] == "ready"
     assert outcome.envelope["result"]["provider_activity"] == false
     assert_schema_valid(outcome.envelope)
   end
@@ -3197,6 +3199,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              Enum.find(checks, &(&1["name"] == "provider/workspace/connectivity"))
 
     assert outcome.envelope["result"]["provider_activity"] == true
+    assert outcome.envelope["result"]["readiness"] == "ready"
 
     # Independent of the rows: the server was really contacted and really
     # served the acquisition handshake.
@@ -3238,6 +3241,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              Enum.find(checks, &(&1["name"] == "application"))
 
     assert outcome.envelope["result"]["provider_activity"] == false
+    assert outcome.envelope["result"]["readiness"] == "not_applicable"
     refute File.exists?(marker)
     assert_schema_valid(outcome.envelope)
     assert CommandContract.valid_success_result?(:doctor, outcome.envelope["result"])
@@ -4537,7 +4541,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
              "checks" => fixed_doctor_checks,
              "model_aliases" => [],
              "provider_activity" => true,
-             "readiness" => "unverified",
+             "readiness" => "not_applicable",
              "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
            })
 
@@ -4553,7 +4557,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ],
       "model_aliases" => [],
       "provider_activity" => true,
-      "readiness" => "ready",
+      "readiness" => "not_applicable",
       "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
@@ -4571,7 +4575,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
           ],
       "model_aliases" => [],
       "provider_activity" => false,
-      "readiness" => "unverified",
+      "readiness" => "ready",
       "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
@@ -4595,9 +4599,14 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
             ],
         "model_aliases" => [],
         "provider_activity" => false,
-        "readiness" => "unverified",
+        "readiness" => "ready",
         "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
       })
+
+    refute CommandContract.valid_success_semantics?(
+             :doctor,
+             put_in(valid_doctor.envelope, ["result", "readiness"], "unverified")["result"]
+           )
 
     active_doctor_result = %{
       "checks" => [
@@ -4650,7 +4659,7 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
       ],
       "model_aliases" => [],
       "provider_activity" => false,
-      "readiness" => "ready",
+      "readiness" => "not_applicable",
       "usage" => %{"llm_usage_state" => "available", "llm_usage" => []}
     }
 
@@ -4660,6 +4669,11 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
                run_ref,
                provider_free_connect_result
              )
+
+    refute CommandContract.valid_success_semantics?(
+             :doctor,
+             %{provider_free_connect_result | "readiness" => "ready"}
+           )
 
     impossible_default_results = [
       %{
