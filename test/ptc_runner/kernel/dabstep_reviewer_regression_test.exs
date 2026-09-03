@@ -2,7 +2,7 @@ defmodule PtcRunner.Kernel.DabstepReviewerRegressionTest do
   use ExUnit.Case, async: false
 
   @moduletag :nightly
-  @moduletag timeout: 240_000
+  @moduletag timeout: 600_000
 
   alias PtcRunner.Kernel.ApplicationPackage
   alias PtcRunner.Kernel.HostConfig
@@ -12,39 +12,48 @@ defmodule PtcRunner.Kernel.DabstepReviewerRegressionTest do
   @example Path.expand("../../../examples/dabstep-fraud", __DIR__)
   @application Path.join(@example, "reviewer.ptc.json")
   @host Path.join(@example, "ptc-host.reviewer-replay.json")
+  @workflow_application Path.join(@example, "ptc.json")
+  @workflow_host Path.join(@example, "ptc-host.replay.json")
 
-  test "Luna catches the captured DeepSeek wrong-metric decision" do
+  test "the reviewer's own measurement contradicts the captured wrong-metric answer" do
     assert {:ok, result} = run("reviewer-wrong-metric.json")
     assert result.value["caught"]
     assert result.value["case_id"] == "wrong-metric"
-
-    finding = result.value["problems"] |> Enum.join(" ") |> String.downcase()
-    assert finding =~ "ratio"
-    assert finding =~ "a. nl"
-    assert finding =~ "b. be"
+    assert result.value["reviewer_answer"] == "B. BE"
+    assert result.value["measurements_agree"]
+    assert result.value["problems"] != []
   end
 
-  test "Luna catches the seeded off-by-one pagination program" do
+  test "the reviewer's own measurement contradicts the seeded off-by-one totals" do
     assert {:ok, result} = run("reviewer-off-by-one.json")
     assert result.value["caught"]
     assert result.value["case_id"] == "off-by-one"
-
-    finding = result.value["problems"] |> Enum.join(" ") |> String.downcase()
-    assert finding =~ "first"
-    assert finding =~ "row"
-    assert finding =~ "page"
-    assert finding =~ "rest"
+    assert result.value["reviewer_answer"] == "B. BE"
+    refute result.value["measurements_agree"]
+    assert result.value["problems"] != []
   end
 
-  defp run(input_name) do
-    {:ok, host} = HostConfig.load(@host)
+  test "the full workflow replays three retained programs and agrees in workflow code" do
+    assert {:ok, result} = run("luna.json", @workflow_application, @workflow_host)
+
+    assert result.value == %{
+             "ok" => true,
+             "value" => "B. BE",
+             "agreed" => true,
+             "top_country" => %{"analysis" => "BE", "recheck" => "BE", "review" => "BE"},
+             "problems" => []
+           }
+  end
+
+  defp run(input_name, application \\ @application, host_path \\ @host) do
+    {:ok, host} = HostConfig.load(host_path)
 
     {:ok, registry} =
       host
       |> HostInstallation.catalog()
       |> then(fn {:ok, catalog} -> HostInstallation.runtime_registry(host, catalog) end)
 
-    @application
+    application
     |> ApplicationPackage.request_directory(
       installed_limits: registry.installed_limits,
       input: Path.join([@example, "inputs", input_name])

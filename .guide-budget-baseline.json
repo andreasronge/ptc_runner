@@ -14,10 +14,10 @@
       "tics": 1.0
     },
     "docs/guides/agent-workflow-patterns.md": {
-      "words": 516,
-      "density": 1.9,
+      "words": 592,
+      "density": 2.2,
       "blockers": 1,
-      "tics": 1.4
+      "tics": 1.2
     },
     "docs/guides/building-agents.md": {
       "words": 536,

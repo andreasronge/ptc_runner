@@ -1,17 +1,16 @@
 (ns dabstep.workflow
-  "Two blind derivations of the same figure, followed in the same run by a
-  review of the exact programs that produced them.
+  "Two blind derivations of the same figures, then a review of the exact
+  programs that produced them, then a decision made in workflow code.
 
   Each derivation has its own transcript, so the second cannot anchor on the
   first. The workflow retains every admitted analyzer program and gives the
   ordered source, original input, returned evidence, and candidate answer to a
-  fresh reviewer. The reviewer has the same read-only payment API and may copy
-  or adapt analyzer code in its own run_ptc_lisp calls.
+  reviewer. The reviewer has the same read-only payment API, measures the
+  figures itself, and reports problems it saw in the session.
 
-  The derivations see the original question but not each other's work. They
-  return per-country volumes rather than picking a letter; this workflow ranks
-  those figures and renders the answer in the form `input.guidelines` requires,
-  using `input.options`.")
+  No model picks the answer. The derivations return per-country volumes; this
+  workflow ranks them, renders the option `input.guidelines` requires, and
+  publishes the answer only when all three measurements agree.")
 
 (defn- returned-outcome [stage outcome]
   (if (= :returned (get outcome :status))
@@ -34,63 +33,56 @@
              "retain_programs" (get input "work_turns")}))
         omitted (get outcome :programs-omitted)]
     (if (= 0 omitted)
-      {"evidence" (get outcome :value)
+      {"countries" (get (get outcome :value) "countries")
        "programs" (get outcome :programs)}
       (fail {:status :error
              :kind :incomplete-program-retention
              :stage mission
              :programs-omitted omitted}))))
 
-(defn- ratio [c]
-  (let [t (get c "total_volume")]
-    (if (or (nil? t) (== 0 t)) 0 (/ (get c "fraudulent_volume") t))))
+(defn- bounded-prompt [prompt]
+  (if (> (count prompt) 120000)
+    (fail {:status :error
+           :kind :review-prompt-too-large
+           :characters (count prompt)
+           :maximum 120000})
+    prompt))
 
-(defn- top-country [countries]
-  (get (first (sort-by ratio > countries)) "ip_country"))
+(defn- review [input analyzer-result programs]
+  (get (returned-outcome
+         "review"
+         (agent.core/run-outcome
+           (bounded-prompt (dabstep.review/prompt input analyzer-result programs))
+           {"mission" "review"
+            "model" (get input "reviewer_model")
+            "max_turns" (get input "review_turns")
+            "return_contract" "findings"
+            "retain_programs" (get input "review_turns")}))
+       :value))
 
 (defn run [input]
   (let [analysis (derive-once input "analysis")
         recheck (derive-once input "recheck")
-        evidence-a (get analysis "evidence")
-        evidence-b (get recheck "evidence")
-        top-a (top-country (get evidence-a "countries"))
-        top-b (top-country (get evidence-b "countries"))
-        agree? (= top-a top-b)
-        candidate (if agree?
+        countries-a (get analysis "countries")
+        countries-b (get recheck "countries")
+        top-a (dabstep.review/top-country countries-a)
+        top-b (dabstep.review/top-country countries-b)
+        candidate (if (= top-a top-b)
                     (get (get input "options") top-a "Not Applicable")
                     "Not Applicable")
-        retained-programs (into [] (concat (get analysis "programs")
-                                           (get recheck "programs")))
-        programs (dabstep.review/reviewable-programs retained-programs)
-        analyzer-result {"analysis" evidence-a
-                         "recheck" evidence-b
-                         "candidate_answer" candidate}
-        prompt (dabstep.review/prompt input analyzer-result programs)]
-    (if (> (count prompt) 120000)
-      (fail {:status :error
-             :kind :review-prompt-too-large
-             :characters (count prompt)
-             :maximum 120000})
-      (let [review
-            (returned-outcome
-              "review"
-              (agent.core/run-outcome
-                prompt
-                {"mission" "review"
-                 "model" (get input "reviewer_model")
-                 "max_turns" (get input "review_turns")
-                 "return_contract" "findings"
-                 "retain_programs" (get input "review_turns")}))
-            findings (get review :value)
-            problems (get findings "problems")]
-        (println "top-a:" top-a "top-b:" top-b "agree?:" agree?)
-        (println "analyzer-programs:" (count retained-programs))
-        (println "reviewer-input-programs:" (count programs))
-        (println "rolled-back-programs:" (- (count retained-programs) (count programs)))
-        (println "reviewer-programs:" (count (get review :programs)))
-        (println "review-problems:" (count problems))
-        (return
-          {"ok" true
-           "value" (if (and agree? (empty? problems))
-                     candidate
-                     "Not Applicable")})))))
+        findings (review input
+                         {"derivations" [{"mission" "analysis" "countries" countries-a}
+                                         {"mission" "recheck" "countries" countries-b}]
+                          "candidate_answer" candidate}
+                         (dabstep.review/reviewable-programs
+                           (concat (get analysis "programs") (get recheck "programs"))))
+        measured (get findings "countries")
+        top-r (dabstep.review/top-country measured)
+        agreed (and (= top-a top-b top-r)
+                    (dabstep.review/same-measurements? countries-a countries-b)
+                    (dabstep.review/same-measurements? countries-a measured))]
+    (return {"ok" true
+             "value" (if agreed candidate "Not Applicable")
+             "agreed" agreed
+             "top_country" {"analysis" top-a "recheck" top-b "review" top-r}
+             "problems" (get findings "problems")})))

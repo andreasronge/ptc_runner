@@ -1902,7 +1902,10 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
   test "run-outcome retain_programs attaches prior programs to subject and provider failures" do
     subject_responses = [
       agent_return("continue", "(+ 1 1)"),
-      agent_return("fail", ~S|(fail "declined")|)
+      agent_return(
+        "fail",
+        ~S|(fail {:status :error :kind :declined :reason :policy :secret "x"})|
+      )
     ]
 
     {:ok, subject_config} = agent_config(subject_responses)
@@ -1918,8 +1921,37 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
     assert [
              %{"turn" => 1, "mission" => "default", "source" => "(+ 1 1)"},
-             %{"turn" => 2, "mission" => "default", "source" => ~S|(fail "declined")|}
+             %{"turn" => 2, "mission" => "default", "execution" => execution} = failed
            ] = subject["programs"]
+
+    assert failed["source"] =~ "(fail {:status :error :kind :declined"
+    assert execution["outcome"] == "failed"
+    assert execution["kind"] == "declined"
+    assert execution["reason"] == "policy"
+    refute Map.has_key?(execution, "value")
+    refute inspect(execution) =~ "secret"
+
+    long = String.duplicate("k", 129)
+
+    unbounded_responses = [
+      agent_return(
+        "fail",
+        ~s|(fail {:status :error :kind :#{long} :reason "two words\there"})|
+      )
+    ]
+
+    {:ok, unbounded_config} = agent_config(unbounded_responses)
+
+    assert {:ok, %{value: unbounded}} =
+             Kernel.run(
+               ~S|(return (agent.core/run-outcome "Fail loudly" {"max_turns" 1 "retain_programs" 8}))|,
+               unbounded_config
+             )
+
+    assert [%{"execution" => unbounded_execution}] = unbounded["programs"]
+    assert unbounded_execution["outcome"] == "failed"
+    refute Map.has_key?(unbounded_execution, "kind")
+    refute Map.has_key?(unbounded_execution, "reason")
 
     provider_responses = [
       agent_return("continue", "(+ 2 2)"),

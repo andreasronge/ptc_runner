@@ -169,9 +169,13 @@ failures after earlier evaluations — also includes <code class="inline">:progr
 continued execution includes its model-visible observation preview and whether
 that preview was truncated; a returned execution records only <code class="inline">:returned</code>
 because the outcome already carries its value. Failed executions retain their
-closed outcome, kind, reason, and a bounded message without returning the raw
-evaluation value. Each retained observation is independently capped at 2,048
-characters.</p><p>Enabling retention explicitly discloses these model-visible observations to
+closed outcome, a bounded message, and the <code class="inline">:kind</code> and <code class="inline">:reason</code> classifiers
+of the evaluation or of the closed error envelope an explicit or capability
+failure carries as its value. A classifier is retained only when its name is 1 to
+128 characters of letters, digits, <code class="inline">.</code>, <code class="inline">_</code>, <code class="inline">:</code>, <code class="inline">/</code>, or <code class="inline">-</code>, whether it
+arrives as a keyword or a string; anything else is omitted rather than
+disclosed, and the raw evaluation value is never retained. Each retained
+observation is independently capped at 2,048 characters.</p><p>Enabling retention explicitly discloses these model-visible observations to
 the calling workflow. A later reviewer may omit rolled-back failures when all
 granted effects are read-only, as in the DABStep example. A workflow with write
 or otherwise irreversible effects must not assume that a failed evaluation had

@@ -2,10 +2,26 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["problems"],
+  "required": ["countries", "problems"],
   "properties": {
+    "countries": {
+      "description": "The volumes you measured yourself, one entry per country you observed.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ip_country", "fraudulent_volume", "total_volume"],
+        "properties": {
+          "ip_country": {"type": "string", "minLength": 2, "maxLength": 8},
+          "fraudulent_volume": {"type": "number", "minimum": 0},
+          "total_volume": {"type": "number", "minimum": 0}
+        }
+      }
+    },
     "problems": {
-      "description": "Concrete reasons the analyzer programs do not work or do not solve the task. An empty array approves the result.",
+      "description": "Concrete reasons the analyzer programs or their result could be wrong. Empty when you found none.",
       "type": "array",
       "maxItems": 16,
       "items": {

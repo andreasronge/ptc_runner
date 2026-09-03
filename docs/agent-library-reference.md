@@ -128,9 +128,13 @@ failures after earlier evaluations — also includes `:programs` and
 continued execution includes its model-visible observation preview and whether
 that preview was truncated; a returned execution records only `:returned`
 because the outcome already carries its value. Failed executions retain their
-closed outcome, kind, reason, and a bounded message without returning the raw
-evaluation value. Each retained observation is independently capped at 2,048
-characters.
+closed outcome, a bounded message, and the `:kind` and `:reason` classifiers
+of the evaluation or of the closed error envelope an explicit or capability
+failure carries as its value. A classifier is retained only when its name is 1 to
+128 characters of letters, digits, `.`, `_`, `:`, `/`, or `-`, whether it
+arrives as a keyword or a string; anything else is omitted rather than
+disclosed, and the raw evaluation value is never retained. Each retained
+observation is independently capped at 2,048 characters.
 
 Enabling retention explicitly discloses these model-visible observations to
 the calling workflow. A later reviewer may omit rolled-back failures when all

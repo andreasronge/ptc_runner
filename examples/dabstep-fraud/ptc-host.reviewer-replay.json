@@ -5,7 +5,7 @@
   "install": {
     "luna": {
       "source": "llm_replay",
-      "installation_revision": "dabstep-reviewer-regression-v1",
+      "installation_revision": "dabstep-reviewer-regression-v2",
       "fixtures": "reviewer-replay.jsonl",
       "accepts_data": ["normal", "private_inspection"]
     },

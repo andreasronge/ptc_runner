@@ -5,13 +5,13 @@
   "install": {
     "deepseek": {
       "source": "llm_replay",
-      "installation_revision": "dabstep-evidence-replay-v4",
+      "installation_revision": "dabstep-evidence-replay-v5",
       "fixtures": "replay.jsonl",
       "accepts_data": ["normal", "private_inspection"]
     },
     "luna": {
       "source": "llm_replay",
-      "installation_revision": "dabstep-evidence-replay-v4",
+      "installation_revision": "dabstep-evidence-replay-v5",
       "fixtures": "replay.jsonl",
       "accepts_data": ["normal", "private_inspection"]
     },

@@ -10,19 +10,24 @@ the tempting wrong answer; BE wins only on fraud divided by total volume, by
 0.087 percentage points.
 
 With four options a model can emit `B. BE` without doing that arithmetic. So the
-example is not about getting the answer. It is about two problems you hit the
-moment you take a model's answer seriously:
+example is not about getting the answer. It is about three problems you hit
+the moment you take a model's answer seriously:
 
 1. **Did it actually do the work?** A correct string is not proof.
 2. **Can you afford to keep the proof?** Checking the work means recording what
    the model saw. Here a 23 MB source becomes a 74 MB record — nearly twice the
    memory the program itself was allowed to use.
+3. **Who checks the checker?** A second model can read the first one's
+   programs and measure the answer itself. It is still a model, with the same
+   failure modes, so the decision to publish has to be made in code.
 
 The workflow makes two analyzer runs that are blind to each other, retains the
 exact PTC-Lisp programs from both, and gives those programs, the original
-input, their returned evidence, and the candidate answer to a fresh reviewer.
-The reviewer has the same read-only data functions, so it can copy or adapt a
-program and test the work itself.
+input, and the returned figures to a reviewer with the same read-only data
+functions. The reviewer returns the volumes it measured and any problems it
+saw. Workflow code then ranks all three measurements, requires them to agree
+to the cent, and publishes the answer only when they do. The
+reviewer's problems are published beside the answer, never used to pick it.
 
 ## Run it
 
@@ -41,46 +46,54 @@ ptc run ptc-project.json \
 The environment file must define `OPENROUTER_API_KEY`. Keep it outside the
 repository, owner-readable only, and pass its exact path.
 `inputs/deepseek.json` uses DeepSeek for both blind analyzers and GPT-5.6 Luna
-for the independent review. Use `inputs/luna.json` to run all three stages with
-Luna. The result is an object because PtcRunner requires an object-root result
-contract:
+for the review. Use `inputs/luna.json` to run all three stages with Luna. The
+result names the answer and how it was reached:
 
 ```json
-{"ok": true, "value": "B. BE"}
+{"ok": true, "value": "B. BE", "agreed": true,
+ "top_country": {"analysis": "BE", "recheck": "BE", "review": "BE"},
+ "problems": []}
 ```
+
+`value` is `Not Applicable` whenever the three measurements disagree, and
+`top_country` then says which stage differed.
 
 ### Replay, with no model and no key
 
 ```console
 ./fetch-data.sh
-ptc run ptc-project.replay.json --input inputs/deepseek.json --envelope out-replay.json
+ptc run ptc-project.replay.json --input inputs/luna.json --envelope out-replay.json
 ```
 
-This exercises the same DeepSeek, DeepSeek, Luna stage assignment without a
-network call. The fixture contains three model responses: one program for each
-blind analyzer, then one reviewer program. Each program independently scans all
-49 pages of the checksum-pinned `data/payments.csv`; the reviewer uses a
-different reduction to check the winning fraud ratio. The run therefore makes
-147 read-only mission calls and returns:
+`replay.jsonl` is assembled from the programs Luna wrote in live run
+`cmd-0twkysj3vwd4wwwjjgx42p09qs`: the program each stage ended with, keyed
+to the requests this workflow makes. It is not a recording of the whole
+session. Luna's exploratory first turn in each stage printed a page, and a
+printed page carries a cursor that the filesystem server signs with a
+per-process key, so a full recording replays only on the process that made it.
+`record-replay.sh` writes such a recording from any run; the reviewer fixture
+below is one.
+
+The replay executes the three retained programs against the checksum-pinned
+`data/payments.csv`. Each scans all 49 pages and aggregates per country, so
+the run makes 147 read-only mission calls, compares the three tables in
+workflow code, and returns:
 
 ```json
-{"ok": true, "value": "B. BE"}
+{"ok": true, "value": "B. BE", "agreed": true,
+ "top_country": {"analysis": "BE", "recheck": "BE", "review": "BE"},
+ "problems": []}
 ```
 
-The reviewer prompt is intentionally short. It identifies the programs as a
-trial-and-error REPL session rather than a collection of final submissions.
-The workflow adds four labeled sections — `TASK`, `INPUT`, `ANALYZER RESULT`,
-and `REPL SESSION` — and records the bounded execution outcome beside each
-source. Rolled-back failures remain available in the retained outcome and
-private trace but are omitted from the correctness review because this example
-grants only read effects. Matching is exact, so editing the task, tools, prompt,
-retained source, or execution evidence causes a fixture miss rather than
-silently reusing unrelated output.
+Matching is exact, so editing the task, tools, prompt, contracts, or
+retained source causes a fixture miss rather than silently reusing
+unrelated output. Inside a workflow a miss surfaces as an explicit failure;
+the hash it looked for is in the run's private record.
 
 ### Reviewer regressions
 
-Two fixed bad sessions test the independent reviewer without waiting for a
-model to make the same mistake again:
+Two fixed bad sessions test the reviewer without waiting for a model to make
+the same mistake again:
 
 ```console
 ptc run ptc-project.reviewer-replay.json \
@@ -90,15 +103,34 @@ ptc run ptc-project.reviewer-replay.json \
 ```
 
 The first case is reduced from DeepSeek run
-`cmd-40vw2hcbwe10tw74g84hqddg0d`: it calculates the country volumes but ranks
-absolute fraudulent volume and chooses `A. NL`. The second uses a real
-execution of a pagination program that applies `rest` to every page and
-therefore drops the first data row of each page. The recorded Luna review must
-name the ratio error in the first case and the row/page error in the second.
+`cmd-40vw2hcbwe10tw74g84hqddg0d`: the country volumes are right, but the
+session ranked absolute fraudulent volume and answered `A. NL`. The second
+uses a real execution of a pagination program that applies `rest` to every
+page and therefore drops the first data row of each page; its answer is still
+`B. BE`, so only the totals give it away. In both cases the workflow's own
+comparison catches the defect: the reviewer's measurement ranks BE first in
+the first case, and disagrees with the analyzer's totals in the second. The
+result also carries what the reviewer wrote. For the off-by-one case, live
+Luna run `cmd-0cwcp0r52fj5tbfk7192bf3htx` said:
 
-Use `ptc-project.reviewer.json` with `--env-file` to run the same cases against
-live Luna. The replay fixture was recorded only after Luna independently read
-the data and found each defect. `mix nightly` executes both replay regressions.
+> The analyzer discarded the first data row on every page by applying
+> `(rest ...)` to rows, even though read-page rows are already data vectors;
+> its aggregates are therefore incomplete.
+
+For the wrong-metric case, run `cmd-3kbr0mpsavy4estjs3sszqa0hb` measured the
+right table and ranked BE first, but its prose muddled which ranking the
+session had used. That is the point of comparing measurements rather than
+reading verdicts.
+
+`reviewer-replay.jsonl` is a recording of those two runs, each a single Luna
+turn that scanned all 49 pages. `mix nightly` executes both replays and
+asserts the comparison, not the wording. The instruction is short on purpose:
+the reviewer is asked to check the programs, solve the task itself, and
+return its volumes and any problems. An earlier wording that made the
+independent solution optional produced three failures in a row: a reviewer
+that called only `fraud-definition` and approved, one that repeated the
+absolute-volume mistake and approved, and one that flagged the off-by-one
+session for the wrong reason.
 
 ## Did the model actually do the work?
 
@@ -118,9 +150,10 @@ Computed correctly, that gives:
 | GR | 640,705.29 | 39,916.73 | 6.230% |
 
 A run that answers `B. BE` may or may not have produced that table. PtcRunner
-keeps three things that let you tell the difference. In the current workflow,
-`agent.core/run-outcome` also returns the exact admitted programs to the
-workflow, which passes them directly to the same-run reviewer.
+keeps three things that let you tell the difference, and the workflow uses the
+first of them itself: `agent.core/run-outcome` with `retain_programs` returns
+every admitted program with a bounded execution summary, and the workflow
+passes those straight to the same-run reviewer.
 
 **The program the model wrote.** Preserved verbatim in
 [`evidence/luna-01.clj`](evidence/luna-01.clj), from Luna run
@@ -184,8 +217,8 @@ guarantees an auditor reads out of the trace, not instructions to the model.
 
 Five independent live samples per model, 2026-08-24, same task, six-turn budget,
 data, contracts, and limits, caching disabled. Observations of one task, not
-benchmark scores. They predate the current raw-CSV reader and are not re-scored
-against it.
+benchmark scores. They predate the current raw-CSV reader and the review
+stage and are not re-scored against them.
 
 | Model | Exact answer | Evidence-backed | Model calls | Observed cost |
 |---|---:|---:|---:|---:|
@@ -211,6 +244,46 @@ classification in [`evidence/cohort.json`](evidence/cohort.json); a later
 single-sample smoke on the merged runtime is in
 [`evidence/current-main-smoke.json`](evidence/current-main-smoke.json).
 
+### What the review stage found
+
+The review stage went through three live samples before the decision moved
+into workflow code. With the first wording the reviewer approved without
+running a single program (`cmd-12ey2m6pd7je5x0xeaweb1zmpq`). With a second
+wording it raised five objections to a correct answer after one exploratory
+read (`cmd-6efc163cz9fxvpvr8j9bt5m7c7`). With the final wording it scanned
+every page itself, then compared its ratio-ranked winner against the option
+with the largest absolute fraud volume and vetoed the right answer
+(`cmd-7xx3se058f8jn6wqfbkqy4qm71`). A reviewer that can veto is a second
+single point of failure; a reviewer that must show its measurement is
+evidence.
+
+Live runs of the final workflow, 2026-09-03, are in
+[`evidence/integrated-cohort.json`](evidence/integrated-cohort.json):
+
+| Run | Analyzers | Result | Agreed | Problems | Model calls | Heap kills | Observed cost |
+|---|---|---|---|---:|---:|---:|---:|
+| `cmd-0760rnpx50pssvz8h1jncw8yq0` | DeepSeek | B. BE | yes | 0 | 13 | 2 | $0.003715 |
+| `cmd-0yv3hv8atyd0a3q091dtq3saaj` | DeepSeek | B. BE | yes | 1 | 15 | 2 | $0.003259 |
+| `cmd-2gg9hhm9vdq2s948br1vvj9ea3` | DeepSeek | B. BE | yes | 0 | 14 | 1 | $0.004274 |
+| `cmd-55t3jtqjh2w2m2ts6eax8j3710` | DeepSeek | failed | | | 16 | 2 | $0.001971 |
+| `cmd-6jvrz8x9yvjpm1bfq57j3n317x` | DeepSeek | B. BE | yes | 1 | 17 | 1 | $0.004847 |
+| `cmd-0ckkw7zg9424ws2nxsdd40hd8f` | Luna | B. BE | yes | 1 | 9 | 0 | $0.006180 |
+| `cmd-0twkysj3vwd4wwwjjgx42p09qs` | Luna | B. BE | yes | 0 | 6 | 0 | $0.004234 |
+| `cmd-2859a1v6ts4sdnc298w9wgp2xq` | Luna | B. BE | yes | 0 | 7 | 0 | $0.004987 |
+| `cmd-63177zbj3hh1tw4ejmfvwt566h` | Luna | B. BE | yes | 2 | 8 | 0 | $0.006043 |
+| `cmd-6yf6q8hy9f0qm49efrp8bs6pes` | Luna | B. BE | yes | 1 | 13 | 1 | $0.008401 |
+
+"Analyzers" names the model behind both blind derivations; the reviewer is
+Luna in every row. Ten runs of one task on one day, not a benchmark score.
+
+`problems` counts what the reviewer wrote, published beside the answer.
+Where it wrote something on a correct run, it restated the fraud definition
+or objected to an intermediate step whose ranking the workflow never used.
+The failed DeepSeek run hit the heap ceiling with a retain-all program, then
+handed `read-page` a cursor it had composed itself, which failed closed as
+`:malformed-cursor`; the stage gave up and the workflow failed rather than
+answer.
+
 ## Keeping the evidence small
 
 Three numbers that are easy to conflate:
@@ -227,11 +300,11 @@ is what does not fit: capturing every byte that crossed the capability boundary
 costs about three times the source, and nearly twice the memory the program was
 allowed to use in the first place.
 
-That ceiling is real, not decorative — one cohort run tried to retain every row,
-hit it, and the model rewrote its own program as a streaming aggregation to
-finish. So a workflow can sit comfortably inside its sandbox and still be
-impossible to record. The two problems are separate; this section is the second
-one.
+That ceiling is real, not decorative — every DeepSeek run above and one Luna
+run tried to retain every row, hit it, and rewrote their own program as a
+streaming aggregation to finish. So a workflow can sit comfortably inside its
+sandbox and still be impossible to record. The two problems are separate;
+this section is the second one.
 
 That source is a single file, `data/payments.csv`. `fetch-data.sh` downloads it,
 checks its hash, header, and line count, and stops — it does not reshape the
@@ -306,11 +379,15 @@ ptc transcript RUN_REF \
 ptc viewer ptc-project.json
 ```
 
-A transcript carries the same private material as the record it came from, so
-`.ptc-transcripts/` is gitignored and must stay owner-only. Inspection is sealed
-as `.ptc/inspection/<run-ref>.ptcins` and is queried through the analysis and
-transcript interfaces, not parsed directly. The checked-in evidence holds hashes
-and the selected generated source — never raw inspection or credentials.
+Every number in this README came out of that profile: `analysis/counters`
+for calls and cost, `generated_sources` filtered by `mission_name` for what
+each stage ran, and `execution_prints` for what the workflow printed.
+`AGENTS.md` has the exact expressions. A transcript carries the same private
+material as the record it came from, so `.ptc-transcripts/` is gitignored and
+must stay owner-only. Inspection is sealed as `.ptc/inspection/<run-ref>.ptcins`
+and is queried through the analysis and transcript interfaces, not parsed
+directly. The checked-in evidence holds hashes and the selected generated
+source — never raw inspection or credentials.
 
 ## Benchmark fidelity and attribution
 

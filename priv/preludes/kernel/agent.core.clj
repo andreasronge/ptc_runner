@@ -277,6 +277,25 @@
 (defn- assoc-present [m k value]
   (if (nil? value) m (assoc m k value)))
 
+(defn- envelope-field [envelope k]
+  (let [value (get envelope k)]
+    (if (nil? value) (get envelope (name k)) value)))
+
+(defn- closed-failure-envelope [evaluation]
+  (let [value (get evaluation :value)
+        status (when (map? value) (envelope-field value :status))]
+    (if (or (= :error status) (= "error" status)) value {})))
+
+(defn- classifier-grammar [] (re-pattern "[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}"))
+
+(defn- retained-classifier [primary fallback]
+  (let [value (if (nil? primary) fallback primary)
+        text (cond (keyword? value) (name value)
+                   (string? value) value
+                   :else nil)]
+    (when (and (string? text) (re-matches (classifier-grammar) text))
+      value)))
+
 (defn- retained-execution [evaluation]
   (let [outcome (get evaluation :outcome)]
     (cond
@@ -296,13 +315,18 @@
 
       :else
       (let [message (or (get-in evaluation [:details :message])
-                        (agent.feedback/evaluation-error evaluation))]
+                        (agent.feedback/evaluation-error evaluation))
+            envelope (closed-failure-envelope evaluation)]
         (assoc-present
           (assoc-present
             (assoc-present
-              (assoc-present {:outcome outcome} :kind (get evaluation :kind))
+              (assoc-present {:outcome outcome}
+                             :kind
+                             (retained-classifier (get evaluation :kind)
+                                                  (envelope-field envelope :kind)))
               :reason
-              (get evaluation :reason))
+              (retained-classifier (get evaluation :reason)
+                                   (envelope-field envelope :reason)))
             :retryable?
             (get evaluation :retryable?))
           :message
