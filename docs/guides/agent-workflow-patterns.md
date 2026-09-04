@@ -31,9 +31,9 @@ rules drag every intermediate value through the model's context.
 
 Give each stage a named mission and let one trusted workflow drive a loop per
 stage. The mission decides what a specialist can see; the workflow decides what
-crosses between stages. Use `agent.core/run-outcome` to handle a specialist's
-failure as data; select a named handoff contract when workflow code consumes
-its value.
+crosses between stages. Inspect failures with `agent.core/run-outcome`; on abort,
+use the [abort helper](../agent-library-reference.md#agent-core-fail-outcome) to
+preserve its diagnostic. Select handoff contracts for consumed values.
 
 ## Review the work
 

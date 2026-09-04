@@ -388,6 +388,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
               {:missing_capability_requirement,
                [
                  "kernel-agent-config-failure",
+                 "kernel-agent-outcome-failure",
                  "kernel-agent-protocol-error",
                  "kernel-llm-provider-failure",
                  "kernel-phase-return-contract-failure",
@@ -426,6 +427,7 @@ defmodule PtcRunner.Kernel.ComponentOverrideTest do
               {:missing_capability_requirement,
                [
                  "kernel-agent-config-failure",
+                 "kernel-agent-outcome-failure",
                  "kernel-agent-protocol-error",
                  "kernel-llm-provider-failure",
                  "kernel-phase-return-contract-failure",

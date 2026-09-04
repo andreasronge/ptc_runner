@@ -158,7 +158,9 @@ string is false: use `(= :limit_exceeded (get response :kind))`, not
 `:kind` and `:reason` are facts. This entry does not add a runtime
 `recovery: retry | choose-alternate | abort` axis; the workflow chooses a
 disposition. Restarting with another alias starts another agent loop. It does
-not resume the previous transcript.
+not resume the previous transcript. Subject failures that require authenticated
+later propagation include an opaque `:failure-token`; pass the original outcome
+to `fail-outcome` rather than reconstructing it.
 
 | Observation | Envelope `:kind` value | Envelope `:reason` value | Typical policy |
 | --- | --- | --- | --- |
@@ -183,6 +185,29 @@ refused reservation, not `workflow_failed`. `agent.core/run-outcome` still
 returns that envelope as a provider-failure value. Do not infer the terminal
 cause from `llm_budget.refused > 0`: a later unrelated failure is not the
 earlier budget refusal.
+
+### `agent.core/fail-outcome`
+
+```clojure
+(agent.core/fail-outcome outcome)
+```
+
+Use this after inspecting a `run-outcome` result and deciding to abort rather
+than retry or select another model. A `:returned` outcome is returned unchanged,
+including any retained programs, so callers can then read its `:value`. A
+subject or provider failure aborts with the same authenticated Kernel diagnostic
+as the fail-fast agent entries:
+
+```clojure
+(let [outcome (agent.core/run-outcome task config)]
+  ;; Inspect outcome here and retry or select another model when appropriate.
+  (get (agent.core/fail-outcome outcome) :value))
+```
+
+The operation does not infer diagnostics from arbitrary nested maps. Only a
+canonical outcome carrying evidence retained by the Kernel can produce a
+specialized public diagnostic; forged maps and ordinary `fail` values remain
+private `execution/explicit_failure` errors.
 
 ### `agent.core/run-result-value`
 

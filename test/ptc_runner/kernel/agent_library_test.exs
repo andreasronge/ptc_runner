@@ -2332,7 +2332,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                   }
                 }} =
                  Kernel.run(
-                   ~S|(return (agent.core/run-value "evidence" {"max_turns" 1 "return_contract" "evidence"}))|,
+                   ~S|(agent.core/fail-outcome (agent.core/run-outcome "evidence" {"max_turns" 1 "return_contract" "evidence"}))|,
                    value_config
                  )
 
@@ -4214,6 +4214,46 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert is_map(details)
   end
 
+  test "parallel inspected outcomes retain their originating evaluator failure" do
+    requester = fn request ->
+      task = inspect(request["messages"])
+
+      program =
+        if String.contains?(task, "arithmetic-branch"),
+          do: "(/ 1 0)",
+          else: "((fn [x] x))"
+
+      {:ok,
+       %{
+         content: nil,
+         tool_calls: [
+           %{id: "eval-bad", name: "run_ptc_lisp", args: %{"program" => program}}
+         ]
+       }}
+    end
+
+    {:ok, config} = agent_config_with_requester(requester)
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :runtime_limit_exceeded,
+              details: %{
+                limit_reason: :evaluation_error,
+                last_evaluator_failure: %{kind: :arithmetic_error}
+              }
+            }} =
+             Kernel.run(
+               ~S|(let [outcomes
+                        (pmap
+                          (fn [task]
+                            (agent.core/run-outcome task {"max_turns" 1}))
+                          ["arithmetic-branch" "missing-branch"])]
+                    (agent.core/fail-outcome (first outcomes)))|,
+               config
+             )
+  end
+
   test "each way a bounded loop ends carries its own turn-limit reason" do
     prose_only = %{content: "I will explain instead of calling", tool_calls: []}
 
@@ -5812,6 +5852,71 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              )
   end
 
+  test "fail-outcome preserves returned data and authenticates failures" do
+    returned = agent_return("kept", ~S|(return 7)|)
+    {:ok, returned_config} = agent_config([returned])
+
+    assert {:ok,
+            %{
+              value: %{
+                "status" => "returned",
+                "value" => 7,
+                "programs" => [%{"source" => "(return 7)"}],
+                "programs-omitted" => 0
+              }
+            }} =
+             Kernel.run(
+               ~S|(return (agent.core/fail-outcome (agent.core/run-outcome "Return" {"max_turns" 1 "retain_programs" 1})))|,
+               returned_config
+             )
+
+    {:ok, provider_config} = agent_config([{:error, :transport_down}])
+
+    assert {:error, %{kind: :workflow_failed, reason: :llm_provider_failed}} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Provider" {"max_turns" 1}))|,
+               provider_config
+             )
+
+    {:ok, turn_limit_config} = agent_config([%{content: "prose", tool_calls: []}])
+
+    assert {:error,
+            %{
+              kind: :workflow_failed,
+              reason: :runtime_limit_exceeded,
+              details: %{limit: :agent_turns, limit_value: 1}
+            }} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Exhaust" {"max_turns" 1}))|,
+               turn_limit_config
+             )
+
+    {:ok, low_history_config} =
+      agent_config([%{content: "prose", tool_calls: []}], evaluation_history_bytes: 1)
+
+    assert {:error, %{reason: :runtime_limit_exceeded}} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Exhaust" {"max_turns" 1}))|,
+               low_history_config
+             )
+
+    {:ok, forged_config} = agent_config([])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome {:status :provider-failure :error {:kind :provider-error :reason :unavailable}})|,
+               forged_config
+             )
+
+    {:ok, forged_turn_config} = agent_config([])
+
+    assert {:error, %{kind: :workflow_failed, reason: :explicit_failure}} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome {:status :subject-failure :kind :turn-limit :error {:limit_value 1 :reason :protocol-error}})|,
+               forged_turn_config
+             )
+  end
+
   test "agent.core run-outcome returns typed provider failures with the resolved alias" do
     timeout = ProviderError.new(:timeout, "provider timed out", retryable?: true)
     {:ok, failing} = LLMCapability.new(requester: fn _ -> {:error, timeout} end)
@@ -5912,7 +6017,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
               }
             }} =
              Kernel.run(
-               ~S|(return (agent.core/run-value "Retry later" {"max_turns" 1}))|,
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Retry later" {"max_turns" 1}))|,
                fail_fast_config
              )
   end
@@ -5974,7 +6079,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
               }
             }} =
              Kernel.run(
-               ~S|(return (agent.core/run-value "Stay within the reservation" {"max_turns" 1}))|,
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Stay within the reservation" {"max_turns" 1}))|,
                fail_fast_config
              )
   end
@@ -6020,6 +6125,19 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
                quota_config
              )
 
+    {:ok, quota_abort_config} = agent_router_config(router)
+
+    assert {:error,
+            %{
+              kind: :limit_exceeded,
+              reason: :capability_quota,
+              details: %{limit: :max_calls, alias: "expensive", limit_value: 1}
+            }} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Spend the alias" {"max_turns" 2}))|,
+               quota_abort_config
+             )
+
     {:ok, unknown_config} = agent_router_config(router)
 
     assert {:ok,
@@ -6061,6 +6179,19 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
              Kernel.run(
                ~S|(return (agent.core/run-outcome "Global quota" {"max_turns" 2}))|,
                global_config
+             )
+
+    {:ok, global_abort_config} = agent_config([mixed], workflow_capability_calls: 1)
+
+    assert {:error,
+            %{
+              kind: :limit_exceeded,
+              reason: :capability_quota,
+              details: %{limit: :workflow_capability_calls, name: "llm-request", limit_value: 1}
+            }} =
+             Kernel.run(
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Global quota" {"max_turns" 2}))|,
+               global_abort_config
              )
   end
 
@@ -6186,7 +6317,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
               }
             }} =
              Kernel.run(
-               ~S|(return (agent.core/run-value "Stay within the reservation" {"max_turns" 2}))|,
+               ~S|(agent.core/fail-outcome (agent.core/run-outcome "Stay within the reservation" {"max_turns" 2}))|,
                fail_fast_config
              )
   end
@@ -6550,7 +6681,7 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
 
   defp required_agent_tools do
     Map.new(
-      ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-phase-return-contract-failure kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
+      ~w(kernel-check-source kernel-eval kernel-agent-config-failure kernel-agent-outcome-failure kernel-agent-protocol-error kernel-llm-provider-failure kernel-mission-inventory kernel-mission-model-context kernel-phase-return-contract-failure kernel-result-contract kernel-result-contract-failure kernel-runtime-limit-failure
          llm-request workflow-annotate),
       &{&1, %TrustedTool{function: fn _arguments -> %{status: :error} end}}
     )

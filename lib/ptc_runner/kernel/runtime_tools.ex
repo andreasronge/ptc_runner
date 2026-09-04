@@ -204,6 +204,14 @@ defmodule PtcRunner.Kernel.RuntimeTools do
         when map_size(arguments) == 2 and limit in 1..128 ->
           agent_turn_limit_failure(state, limit, reason)
 
+        %{
+          "agent_turns" => limit,
+          "reason" => reason,
+          "evaluation_id" => evaluation_id
+        }
+        when map_size(arguments) == 3 and limit in 1..128 and is_binary(evaluation_id) ->
+          agent_turn_limit_failure(state, limit, reason, evaluation_id)
+
         # The transcript ceiling is a bound the caller set in the input document
         # it just wrote, so it reports itself the way the turn limit does rather
         # than reaching the generic workflow failure.
@@ -231,12 +239,12 @@ defmodule PtcRunner.Kernel.RuntimeTools do
   # The loop reports why it stopped, not only that it stopped. An unrecognised
   # reason is refused rather than collapsed into the ordinary exhaustion case:
   # a wrong explanation costs the reader more than a missing one.
-  defp agent_turn_limit_failure(state, limit, reason) do
+  defp agent_turn_limit_failure(state, limit, reason, evaluation_id \\ nil) do
     case RuntimeLimitDiagnostic.agent_turns_reason(reason) do
       {:ok, reason} ->
         details =
           %{limit: :agent_turns, limit_value: limit, limit_reason: reason}
-          |> attach_authenticated_evaluator_failure(state, reason)
+          |> attach_authenticated_evaluator_failure(state, reason, evaluation_id)
 
         %TrustedError{
           reason: :runtime_limit_exceeded,
@@ -249,26 +257,47 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
-  defp attach_authenticated_evaluator_failure(details, state, :evaluation_error) do
-    case RunState.last_evaluator_failure(state) do
+  defp attach_authenticated_evaluator_failure(
+         details,
+         state,
+         :evaluation_error,
+         evaluation_id
+       )
+       when is_binary(evaluation_id) do
+    case RunState.consume_evaluator_failure(state, evaluation_id) do
       {:ok, %{kind: kind, details: eval_details} = evidence} ->
-        if EvaluatorErrorCatalog.kind?(kind) and is_map(eval_details) do
-          Map.put(details, :last_evaluator_failure, %{
-            kind: kind,
-            details: eval_details,
-            evaluation_id: Map.get(evidence, :evaluation_id),
-            environment: Map.get(evidence, :environment)
-          })
-        else
-          details
-        end
+        put_authenticated_evaluator_failure(details, evidence, kind, eval_details)
 
       :error ->
         details
     end
   end
 
-  defp attach_authenticated_evaluator_failure(details, _state, _reason), do: details
+  defp attach_authenticated_evaluator_failure(details, state, :evaluation_error, nil) do
+    case RunState.last_evaluator_failure(state) do
+      {:ok, %{kind: kind, details: eval_details} = evidence} ->
+        put_authenticated_evaluator_failure(details, evidence, kind, eval_details)
+
+      :error ->
+        details
+    end
+  end
+
+  defp attach_authenticated_evaluator_failure(details, _state, _reason, _evaluation_id),
+    do: details
+
+  defp put_authenticated_evaluator_failure(details, evidence, kind, eval_details) do
+    if EvaluatorErrorCatalog.kind?(kind) and is_map(eval_details) do
+      Map.put(details, :last_evaluator_failure, %{
+        kind: kind,
+        details: eval_details,
+        evaluation_id: Map.get(evidence, :evaluation_id),
+        environment: Map.get(evidence, :environment)
+      })
+    else
+      details
+    end
+  end
 
   defp model_output_truncation_failure(value, bindings, alias_name) do
     with {:ok, limit} <-
@@ -345,6 +374,56 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       kind: :protocol_error,
       reason: :invalid_llm_provider_failure
     }
+  end
+
+  @doc false
+  @spec agent_outcome_failure(RunState.t()) :: (map() -> term())
+  def agent_outcome_failure(state) do
+    fn
+      %{"mode" => "record-turn", "evidence" => evidence} = arguments
+      when map_size(arguments) == 2 and is_map(evidence) ->
+        record_agent_turn_outcome(state, evidence, nil)
+
+      %{
+        "mode" => "record-turn",
+        "evidence" => evidence,
+        "evaluation_id" => evaluation_id
+      } = arguments
+      when map_size(arguments) == 3 and is_map(evidence) and is_binary(evaluation_id) ->
+        record_agent_turn_outcome(state, evidence, evaluation_id)
+
+      %{"mode" => "consume", "evidence" => evidence, "token" => evidence_token} = arguments
+      when map_size(arguments) == 3 and is_map(evidence) and is_binary(evidence_token) ->
+        case RunState.consume_agent_outcome_failure(state, evidence_token, evidence) do
+          {:ok, %TrustedError{} = failure} -> failure
+          :error -> invalid_agent_outcome_failure()
+        end
+
+      _invalid ->
+        invalid_agent_outcome_failure()
+    end
+  end
+
+  defp record_agent_turn_outcome(state, evidence, evaluation_id) do
+    with %{"status" => "subject-failure", "kind" => "turn-limit", "error" => error} <-
+           evidence,
+         %{"limit_value" => limit, "reason" => reason} <- error,
+         %TrustedError{} = failure <-
+           agent_turn_limit_failure(state, limit, reason, evaluation_id) do
+      evidence_token = agent_outcome_token()
+
+      case RunState.record_agent_outcome_failure(state, evidence_token, evidence, failure) do
+        :ok -> %{"failure_token" => evidence_token}
+        {:error, :evidence_limit} -> failure
+        {:error, :run_closed} -> failure
+      end
+    else
+      _invalid -> invalid_agent_outcome_failure()
+    end
+  end
+
+  defp invalid_agent_outcome_failure do
+    %{status: :error, kind: :protocol_error, reason: :invalid_agent_outcome_failure}
   end
 
   defp maybe_put_authenticated_replay(details, arguments, state) do
@@ -432,6 +511,16 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           :workflow,
           "kernel-agent-protocol-error",
           agent_protocol_error(state)
+        )
+      )
+      |> Map.put(
+        "kernel-agent-outcome-failure",
+        instrument(
+          state,
+          event_sink,
+          :workflow,
+          "kernel-agent-outcome-failure",
+          agent_outcome_failure(state)
         )
       )
     else
@@ -752,6 +841,14 @@ defmodule PtcRunner.Kernel.RuntimeTools do
          }}
 
       {"kernel-agent-config-failure" = name, callback} ->
+        {name,
+         %TrustedTool{
+           function: callback,
+           prelude_namespaces: ["agent.core"],
+           visibility: :private
+         }}
+
+      {"kernel-agent-outcome-failure" = name, callback} ->
         {name,
          %TrustedTool{
            function: callback,
@@ -1208,10 +1305,10 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   @doc false
   @spec phase_return_contract_failure(map()) :: (map() -> term())
-  def phase_return_contract_failure(phase_contracts) when is_map(phase_contracts) do
+  def phase_return_contract_failure(phase_contracts, state \\ nil) when is_map(phase_contracts) do
     fn arguments ->
       case phase_return_contract_failure_request(arguments) do
-        {:ok, request} -> phase_return_contract_failure(phase_contracts, request)
+        {:ok, request} -> phase_return_contract_failure(phase_contracts, request, state)
         :error -> invalid_phase_return_contract_failure()
       end
     end
@@ -1248,11 +1345,11 @@ defmodule PtcRunner.Kernel.RuntimeTools do
 
   defp phase_return_contract_failure_request(_arguments), do: :error
 
-  defp phase_return_contract_failure(phase_contracts, request) do
+  defp phase_return_contract_failure(phase_contracts, request, state) do
     case Map.fetch(phase_contracts, request.contract_name) do
       {:ok, %{contract: %ValueContract{} = contract, source: source}} ->
         case contract_failure_details(contract, source, request.value, request.max_turns) do
-          {:ok, details} -> phase_return_contract_error(details, request)
+          {:ok, details} -> phase_return_contract_error(details, request, state)
           :error -> invalid_phase_return_contract_failure()
         end
 
@@ -1261,7 +1358,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
     end
   end
 
-  defp phase_return_contract_error(details, request) do
+  defp phase_return_contract_error(details, request, state) do
     authenticated =
       details
       |> Map.delete(:agent_turns)
@@ -1284,16 +1381,42 @@ defmodule PtcRunner.Kernel.RuntimeTools do
       "outcome" ->
         case ResultContractDiagnostic.phase_inspection_details(authenticated) do
           {:ok, projected} ->
-            %{
+            outcome = %{
               "ok" => false,
               "kind" => "phase-return-contract-failed",
               "reason" => stringify_phase_contract_details(projected)
             }
 
+            record_phase_outcome(state, outcome, authenticated)
+
           :error ->
             invalid_phase_return_contract_failure()
         end
     end
+  end
+
+  defp record_phase_outcome(%RunState{} = state, outcome, authenticated) do
+    failure = %TrustedError{
+      reason: :phase_return_contract_failed,
+      message: "standalone phase-return contract correction exhausted",
+      details: authenticated
+    }
+
+    evidence_token = agent_outcome_token()
+
+    case RunState.record_agent_outcome_failure(state, evidence_token, outcome, failure) do
+      :ok -> Map.put(outcome, "failure_token", evidence_token)
+      {:error, :evidence_limit} -> failure
+      {:error, :run_closed} -> failure
+    end
+  end
+
+  defp record_phase_outcome(_state, outcome, _authenticated), do: outcome
+
+  defp agent_outcome_token do
+    24
+    |> :crypto.strong_rand_bytes()
+    |> Base.url_encode64(padding: false)
   end
 
   defp stringify_phase_contract_details(details) do
@@ -1384,7 +1507,7 @@ defmodule PtcRunner.Kernel.RuntimeTools do
           event_sink,
           :workflow,
           "kernel-phase-return-contract-failure",
-          phase_return_contract_failure(phase_contracts)
+          phase_return_contract_failure(phase_contracts, state)
         )
       )
     else
