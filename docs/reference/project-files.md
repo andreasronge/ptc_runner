@@ -189,7 +189,7 @@ The Viewer port defaults to `0`, which asks the operating system for a free
 port; startup prints the selected address before opening a browser. Set a fixed
 port only when another process needs a stable address. If that port is occupied,
 the command probes loopback and names the project when another PTC Viewer owns
-it. The Live project header and `/api/live/project` expose the exact project
+it. The Live project header exposes the exact project
 document path, so a working page cannot silently look like the project whose
 startup just failed.
 
@@ -214,7 +214,7 @@ process environment or use another trusted host binding.
 The listener binds `127.0.0.1`. The project document deliberately cannot change
 that: exposure is an invocation-time decision made with `--listen 0.0.0.0`,
 where it stays visible in the command line rather than stored in a file. See
-[Running and debugging](cli.md#expose-it-deliberately-or-not-at-all).
+the [Viewer exposure reference](viewer.md#exposing-it).
 
 The Viewer ships in the standalone release and container image and is absent
 from the published package.

@@ -77,6 +77,6 @@ diagnostics:
 ptc run hello-ptc/ptc-project.json --envelope command-envelope.json
 ```
 
-The [CLI reference](../reference/cli.md) has the complete command grammar,
-exit statuses, envelopes, and Viewer contract. Continue with [Debug a failed
-run](debugging-a-failed-run.md) when a trace needs deeper investigation.
+The [CLI reference](../reference/cli.md) covers command grammar, exit statuses,
+and envelopes. See the [Viewer reference](../reference/viewer.md) for Viewer
+details or [Debug a failed run](debugging-a-failed-run.md) for deeper trace investigation.

@@ -557,6 +557,7 @@ defmodule PtcRunner.MixProject do
           "docs/reference/component-contracts.md",
           "docs/reference/mcp.md",
           "docs/reference/cli.md",
+          "docs/reference/viewer.md",
           "docs/reference/repl.md",
           "docs/reference/source-inspection.md",
           "docs/reference/debug-navigation.md",
