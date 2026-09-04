@@ -40,7 +40,9 @@ defmodule PtcRunner.Kernel.CommandRejection do
             | :destination_collision
             | :private_output_recovery_collision
             | :init_destination_collision
-            | :project_host_undeclared,
+            | :project_host_undeclared
+            | :repl_output_evaluation_count
+            | :repl_jsonl_requires_profile,
           accepted: [binary()],
           option: binary() | nil,
           destination: binary() | nil,
@@ -170,6 +172,33 @@ defmodule PtcRunner.Kernel.CommandRejection do
       kind: :positional_arity,
       accepted: [],
       option: nil,
+      destination: nil,
+      conflicts: []
+    }
+  end
+
+  @spec repl_output_evaluation_count(:output | :private_output, CommandDeclaration.frontend()) ::
+          t()
+  def repl_output_evaluation_count(output, frontend) when output in [:output, :private_output] do
+    %__MODULE__{
+      command: :repl,
+      code: :invalid_arguments,
+      kind: :repl_output_evaluation_count,
+      accepted: [],
+      option: CommandDeclaration.option_switch!(:repl, frontend, output),
+      destination: nil,
+      conflicts: []
+    }
+  end
+
+  @spec repl_jsonl_requires_profile() :: t()
+  def repl_jsonl_requires_profile do
+    %__MODULE__{
+      command: :repl,
+      code: :invalid_arguments,
+      kind: :repl_jsonl_requires_profile,
+      accepted: [],
+      option: "--format jsonl",
       destination: nil,
       conflicts: []
     }

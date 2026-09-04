@@ -748,7 +748,10 @@ defmodule PtcRunner.ReplFrontendTest do
       assert error.message =~
                "error: repl/command_failed: active_preflight/credential_unavailable: " <>
                  "provider/#{expected_subject}/credentials: a required provider credential is unavailable; " <>
-                 "export it, pass --env-file PATH, or use a host file credential"
+                 "export it, pass --env-file PATH, or use a host file credential; " <>
+                 "for credential-free source and helper evaluation, rerun with only " <>
+                 "--project PROJECT (or --manifest MANIFEST), optional --mission MISSION, " <>
+                 "--inspect-only, and -e EXPR"
 
       refute error.message =~ "PTC_REPL_ABSENT"
     end

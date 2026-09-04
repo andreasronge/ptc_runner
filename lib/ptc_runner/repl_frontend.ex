@@ -1467,7 +1467,8 @@ defmodule PtcRunner.ReplFrontend do
         fail("unknown mission #{inspect(opts[:mission])}; declared: #{Enum.join(declared, ", ")}")
 
       {:error, %{code: code, diagnostic: diagnostic}} ->
-        fail(render_setup_diagnostic(code, diagnostic))
+        rendered = render_setup_diagnostic(code, diagnostic)
+        fail(manifest_diagnostic_guidance(rendered, diagnostic))
 
       {:error, %{code: code}} ->
         fail(manifest_repl_error(code))
@@ -1490,6 +1491,18 @@ defmodule PtcRunner.ReplFrontend do
       abort_session(session, :frontend_exit)
       :erlang.raise(kind, reason, __STACKTRACE__)
   end
+
+  defp manifest_diagnostic_guidance(
+         rendered,
+         %{phase: :active_preflight, code: :credential_unavailable}
+       ),
+       do:
+         rendered <>
+           "; for credential-free source and helper evaluation, rerun with only " <>
+           "--project PROJECT (or --manifest MANIFEST), optional --mission MISSION, " <>
+           "--inspect-only, and -e EXPR"
+
+  defp manifest_diagnostic_guidance(rendered, _diagnostic), do: rendered
 
   defp manifest_input_mode(opts, arguments) do
     cond do

@@ -1049,7 +1049,7 @@ Bounded navigation over one immutable run-evidence capture.
 (analysis/counters filters)
 ```
 
-Returns trace counters for a filtered run cohort, including adapter-attested model usage. Filters are the existing counter keys; there is no limit, cursor, view, or run_ids argument. Call once per selected run_id to reduce an explicit cohort.
+Returns trace counters for a filtered run cohort, including adapter-attested model usage. Accepted keys are status, run_id, trace_id, tags, name, bundle, model, provider, from, to, and mission_name; there is no limit, cursor, view, or run_ids argument. Example: (analysis/counters {"run_id" "cmd-..."}). Call once per selected run_id to reduce an explicit cohort.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`
@@ -1075,7 +1075,7 @@ Opens one captured run and returns its available evidence collections.
 (analysis/read run-id options)
 ```
 
-Reads one bounded page from a captured run-evidence collection.
+Reads one bounded page from a captured run-evidence collection. Put collection, limit, cursor, and the selected collection's advertised filters directly in options; do not nest them under filters. Call analysis/open first to discover the accepted filters for each collection.
 
 - **Kind:** `function`
 - **Visibility:** `prompt`

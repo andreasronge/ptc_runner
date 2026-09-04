@@ -198,6 +198,12 @@ defmodule PtcRunner.Kernel.CommandRenderer do
   defp rejection_suffix(%CommandRejection{kind: :positional_arity, command: command}),
     do: "; usage: " <> Enum.join(CommandDeclaration.usage(command), " | ")
 
+  defp rejection_suffix(%CommandRejection{kind: :repl_output_evaluation_count, option: option}),
+    do: "; #{option} publishes exactly one -e/--eval evaluation"
+
+  defp rejection_suffix(%CommandRejection{kind: :repl_jsonl_requires_profile}),
+    do: "; --format jsonl requires --profile or --describe-profile"
+
   defp rejection_suffix(%CommandRejection{
          kind: :invalid_destination,
          destination: destination
