@@ -137,12 +137,20 @@
    :kind kind
    :error (result/error kind reason)})
 
+(defn- turn-limit-failure-with-evaluator
+  [reason max-turns evaluator-failure-id]
+  (let [outcome
+        {:status :subject-failure
+         :kind :turn-limit
+         :error (assoc (result/error :turn-limit reason)
+                       :limit :agent_turns
+                       :limit_value max-turns)}]
+    (if evaluator-failure-id
+      (assoc outcome :evaluator-failure-id evaluator-failure-id)
+      outcome)))
+
 (defn- turn-limit-failure [reason max-turns]
-  {:status :subject-failure
-   :kind :turn-limit
-   :error (assoc (result/error :turn-limit reason)
-                 :limit :agent_turns
-                 :limit_value max-turns)})
+  (turn-limit-failure-with-evaluator reason max-turns nil))
 
 (defn- provider-failure [error model]
   (let [outcome {:status :provider-failure :error error}]
@@ -483,7 +491,12 @@
           machine action
           (agent.feedback/evaluation-error evaluation)
           :evaluation-error)
-        (exhaustion-fallback machine (done (turn-limit-failure :evaluation-error total-max-turns)))))))
+        (exhaustion-fallback
+          machine
+          (done (turn-limit-failure-with-evaluator
+                  :evaluation-error
+                  total-max-turns
+                  (get evaluation :evaluation_id))))))))
 
 (defn- decide-evaluation [machine event]
   (let [action (get event :action)

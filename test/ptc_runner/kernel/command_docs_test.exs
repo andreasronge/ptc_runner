@@ -120,13 +120,12 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     end
   end
 
-  test "designing-agent-workflows locates returned-value and quarantined in the example" do
+  test "designing-agent-workflows links faithful aborts and locates its helpers" do
     assert {:ok, content} = DocumentationLibrary.fetch("designing-agent-workflows")
     assert content =~ "returned-value"
     assert content =~ "quarantined"
-    assert content =~ "03-specialists/workflow.clj"
-    assert content =~ "not shipped"
-    assert content =~ "built-ins"
+    assert content =~ "fail-outcome"
+    assert content =~ "original diagnostic"
     assert content =~ "ptc init support-triage --example support-triage"
   end
 

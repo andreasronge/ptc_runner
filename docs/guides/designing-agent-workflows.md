@@ -102,23 +102,21 @@ grants:
 }
 ```
 
-The workflow runs one loop per mission, passes only the ranked result forward,
-and validates the final report against the manifest's `result_schema`.
-`returned-value` and `quarantined` are not shipped built-ins; they are helpers
-defined in this example's `03-specialists/workflow.clj`:
+The workflow passes only the triage result forward and validates the final
+report. Its local returned-value helper uses the documented
+[fail-outcome path](../agent-library-reference.md#agent-core-fail-outcome) to
+keep the original diagnostic on abort; quarantined is also local. Materialize
+the example with ptc init support-triage --example support-triage.
 
 ```clojure
 (defn run [input]
-  (let [ranked-outcome (agent.core/run-outcome
-                         (get input "triage_task")
-                         {"mission" "triage" "max_turns" 4})
-        ranked (returned-value ranked-outcome "triage")
-        report (agent.core/run-result-value
-                 (str (get input "escalation_task")
-                      "\n\nBreached tickets, highest priority first:\n"
-                      (quarantined (pr-str ranked)))
-                 {"mission" "escalation" "max_turns" 4})]
-    (return report)))
+  (let [ranked (returned-value
+                 (agent.core/run-outcome (get input "triage_task")
+                                         {"mission" "triage" "max_turns" 4}))]
+    (return
+      (agent.core/run-result-value
+        (str (get input "escalation_task") "\n\n" (quarantined (pr-str ranked)))
+        {"mission" "escalation" "max_turns" 4}))))
 ```
 
 `quarantined` marks customer text as data but is only a prompt-level mitigation.

@@ -109,9 +109,9 @@ program and the rules stay reviewable. Prompt-stated rules drift; tool-relayed
 rules drag every intermediate value through the model's context.
 <a href="/guides/components-and-preludes/">the customization guide</a> has the contract.</p><h2 id="specialists-as-missions">Specialists as missions</h2><p>Give each stage a named mission and let one trusted workflow drive a loop per
 stage. The mission decides what a specialist can see; the workflow decides what
-crosses between stages. Use <code class="inline">agent.core/run-outcome</code> to handle a specialist's
-failure as data; select a named handoff contract when workflow code consumes
-its value.</p><h2 id="review-the-work">Review the work</h2><p>Keep the exact programs a stage ran (<code class="inline">agent.core/run-outcome</code> with
+crosses between stages. Inspect failures with <code class="inline">agent.core/run-outcome</code>; on abort,
+use the <a href="/reference/agent-library-reference/#agent-core-fail-outcome">abort helper</a> to
+preserve its diagnostic. Select handoff contracts for consumed values.</p><h2 id="review-the-work">Review the work</h2><p>Keep the exact programs a stage ran (<code class="inline">agent.core/run-outcome</code> with
 <code class="inline">&quot;retain_programs&quot;</code>) and hand them, with the input and returned evidence, to a
 reviewer mission that has the same read-only tools and measures the answer
 itself. Compare the two measurements in workflow code. A model can describe a

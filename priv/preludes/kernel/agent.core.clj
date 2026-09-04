@@ -224,9 +224,14 @@
 
 (defn- propagate-subject-failure [outcome]
   (if (= :turn-limit (get outcome :kind))
-    (tool/kernel-runtime-limit-failure
-      {"agent_turns" (get (get outcome :error) :limit_value)
-       "reason" (turn-limit-reason-name (get (get outcome :error) :reason))})
+    (let [arguments
+          {"agent_turns" (get (get outcome :error) :limit_value)
+           "reason" (turn-limit-reason-name (get (get outcome :error) :reason))}
+          evaluator-failure-id (get outcome :evaluator-failure-id)]
+      (tool/kernel-runtime-limit-failure
+        (if evaluator-failure-id
+          (assoc arguments "evaluation_id" evaluator-failure-id)
+          arguments)))
     (fail (get outcome :error))))
 
 (defn- propagate-provider-failure [error]
@@ -246,6 +251,29 @@
     :returned (get outcome :value)
     :provider-failure (propagate-provider-failure (get outcome :error))
     (propagate-subject-failure outcome)))
+
+(defn- turn-outcome-evidence [outcome]
+  {:status (get outcome :status)
+   :kind (get outcome :kind)
+   :error (get outcome :error)})
+
+(defn- record-outcome-failure [outcome]
+  (if (and (= :subject-failure (get outcome :status))
+           (= :turn-limit (get outcome :kind)))
+    (let [public-outcome (dissoc outcome :evaluator-failure-id)
+          evaluator-failure-id (get outcome :evaluator-failure-id)
+          arguments
+          (if evaluator-failure-id
+            {"mode" "record-turn"
+             "evidence" (turn-outcome-evidence public-outcome)
+             "evaluation_id" evaluator-failure-id}
+            {"mode" "record-turn"
+             "evidence" (turn-outcome-evidence public-outcome)})
+          _recorded
+          (tool/kernel-agent-outcome-failure
+            arguments)]
+      (assoc public-outcome :failure-token (get _recorded "failure_token")))
+    outcome))
 
 (defn- evaluate-agent-source [mission-name source max-observation-chars]
   (let [response
@@ -429,10 +457,11 @@
                  :max_turns (get reason "max_turns")
                  :constraint (keyword (get reason "constraint"))
                  :violations (mapv native-contract-violation (get reason "violations"))}
-        source (get reason "contract_source")]
-    (result/error
-      :phase-return-contract-failed
-      (if (string? source) (assoc details :contract_source source) details))))
+        source (get reason "contract_source")
+        error (result/error
+                :phase-return-contract-failed
+                (if (string? source) (assoc details :contract_source source) details))]
+    (assoc error :failure-token (get response "failure_token"))))
 
 (defn- dispatch-request [machine]
   (let [action (agent.native/normalize
@@ -609,7 +638,9 @@
   with the complete bounded LLM envelope. The closed `kind` and `reason` are
   facts for workflow policy; this entry does not choose retry, failover, or
   abort. Restarting with another alias starts another loop and does not resume
-  the previous transcript.
+  the previous transcript. Subject failures that need authenticated later
+  propagation include an opaque `:failure-token`; preserve it by passing the
+  original outcome to `fail-outcome`.
 
   Set `retain_programs` to an integer from 1 through 128 to attach admitted
   generated programs on the returned outcome. Omitted or nil keeps the current
@@ -620,7 +651,33 @@
   are capped at 2,048 characters and raw evaluation values are never retained."
   {:signature "(task :string, cfg {model :string?, mission :string?, return_contract :any?, max_turns :any?, max_program_chars :any?, max_observation_chars :any?, max_transcript_chars :any?, consolidate_at_turns_remaining :int?, retain_programs :any?}) -> :any"}
   [task cfg]
-  (run-outcome* task cfg :none :outcome))
+  (record-outcome-failure (run-outcome* task cfg :none :outcome)))
+
+(defn fail-outcome
+  "Returns a successful `run-outcome` outcome unchanged and aborts any other
+  canonical outcome with its authenticated provider or subject diagnostic.
+  Use this after inspecting an outcome and deciding not to retry or fail over.
+  Only evidence retained by the Kernel can produce a specialized public
+  diagnostic; arbitrary caller maps remain ordinary explicit failures."
+  {:signature "(outcome :map) -> :map"}
+  [outcome]
+  (case (get outcome :status)
+    :returned outcome
+    :provider-failure (propagate-provider-failure (get outcome :error))
+    :subject-failure
+    (case (get outcome :kind)
+      :turn-limit
+      (fail (tool/kernel-agent-outcome-failure
+              {"mode" "consume"
+               "token" (get outcome :failure-token)
+               "evidence" (turn-outcome-evidence outcome)}))
+      :phase-return-contract-failed
+      (fail (tool/kernel-agent-outcome-failure
+              {"mode" "consume"
+               "token" (get (get outcome :error) :failure-token)
+               "evidence" (dissoc (get outcome :error) :failure-token)}))
+      (propagate-subject-failure outcome))
+    (fail outcome)))
 
 (defn run-value
   "Runs the agent loop and returns its model-authored value to the calling

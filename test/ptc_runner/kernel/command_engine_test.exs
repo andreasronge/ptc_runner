@@ -1072,6 +1072,60 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "fail-outcome preserves the CLI replay-miss diagnostic", %{tmp_dir: directory} do
+    File.write!(
+      Path.join(directory, "replay.jsonl"),
+      Jason.encode!(%{
+        "schema_version" => 1,
+        "request_hash" => "sha256:" <> String.duplicate("0", 64),
+        "response" => %{"content" => "unreachable"}
+      }) <> "\n"
+    )
+
+    host_path =
+      write_host_config(directory, "agent-replay-miss", %{
+        "install" => %{
+          "frozen-model" => %{
+            "source" => "llm_replay",
+            "installation_revision" => "agent-replay-miss-v1",
+            "fixtures" => "replay.jsonl"
+          }
+        }
+      })
+
+    manifest =
+      valid_manifest(%{
+        "workflow" => %{
+          "components" => [
+            %{"library" => "agent.core"},
+            %{"id" => "app", "path" => "main.clj", "dependencies" => ["agent.core"]}
+          ],
+          "entry" => "app/run"
+        },
+        "providers" => %{"workflow" => [%{"name" => "frozen-model"}]},
+        "missions" => %{"default" => %{}}
+      })
+
+    application =
+      write_application(directory, "agent-replay-miss", manifest, %{
+        "main.clj" => """
+        (ns app)
+        (defn run [_input]
+          (agent.core/fail-outcome
+            (agent.core/run-outcome "Return 1" {"max_turns" 1})))
+        """
+      })
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch(["run", application, "--host-config", host_path])
+
+    assert outcome.exit_status != 0
+    assert outcome.envelope["error"]["code"] == "replay_fixture_missing"
+    assert outcome.envelope["error"]["message"] =~ ~r/sha256:[0-9a-f]{64}/
+    assert_schema_valid(outcome.envelope)
+  end
+
+  @tag :tmp_dir
   test "usage counts a refused workflow annotation without failing the run", %{
     tmp_dir: directory
   } do

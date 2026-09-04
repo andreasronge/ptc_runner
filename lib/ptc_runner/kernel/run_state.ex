@@ -70,6 +70,12 @@ defmodule PtcRunner.Kernel.RunState do
 
   @history_depth 3
   @maximum_integer 9_007_199_254_740_991
+  # Outcome proofs are Kernel bookkeeping, independent of evaluator-history
+  # retention. The byte cap exceeds the largest admitted application document,
+  # so one canonical proof always fits, while the count cap matches the shipped
+  # maximum per-name workflow-call ceiling.
+  @agent_outcome_failure_count 2_048
+  @agent_outcome_failure_bytes 16_000_000
 
   # Each named mission owns an independent continuation and revision. The
   # active lease records its mission so reserve, commit, release, and source
@@ -385,6 +391,35 @@ defmodule PtcRunner.Kernel.RunState do
   def consume_llm_provider_failure(_state, _kind, _retryable?), do: :error
 
   @doc false
+  @spec record_agent_outcome_failure(t(), binary(), map(), PtcRunner.Lisp.TrustedError.t()) ::
+          :ok | {:error, :evidence_limit | :run_closed}
+  def record_agent_outcome_failure(
+        state,
+        token,
+        evidence,
+        %PtcRunner.Lisp.TrustedError{} = failure
+      )
+      when is_binary(token) and is_map(evidence) do
+    safe_call(
+      state,
+      {:record_agent_outcome_failure, token, evidence, failure},
+      {:error, :run_closed}
+    )
+  end
+
+  def record_agent_outcome_failure(_state, _token, _evidence, _failure),
+    do: {:error, :run_closed}
+
+  @doc false
+  @spec consume_agent_outcome_failure(t(), binary(), map()) ::
+          {:ok, PtcRunner.Lisp.TrustedError.t()} | :error
+  def consume_agent_outcome_failure(state, token, evidence)
+      when is_binary(token) and is_map(evidence),
+      do: safe_call(state, {:consume_agent_outcome_failure, token, evidence}, :error)
+
+  def consume_agent_outcome_failure(_state, _token, _evidence), do: :error
+
+  @doc false
   @spec mark_evaluation_terminal_provider_failure(t()) :: :ok | {:error, :closed}
   def mark_evaluation_terminal_provider_failure(state),
     do: safe_call(state, :mark_evaluation_terminal_provider_failure, :ok)
@@ -579,6 +614,11 @@ defmodule PtcRunner.Kernel.RunState do
   def record_last_evaluator_failure(state, evidence) when is_map(evidence),
     do: call(state, {:record_last_evaluator_failure, evidence})
 
+  @doc false
+  @spec consume_evaluator_failure(t(), binary()) :: {:ok, map()} | :error
+  def consume_evaluator_failure(state, evaluation_id) when is_binary(evaluation_id),
+    do: call(state, {:consume_evaluator_failure, evaluation_id})
+
   @spec last_evaluator_failure(t()) :: {:ok, map()} | :error
   def last_evaluator_failure(state), do: call(state, :last_evaluator_failure)
 
@@ -715,8 +755,11 @@ defmodule PtcRunner.Kernel.RunState do
        llm_usage: %{},
        replay_misses: MapSet.new(),
        llm_provider_failures: MapSet.new(),
+       agent_outcome_failures: %{},
+       agent_outcome_failure_bytes: 0,
        terminal_failure: nil,
        last_evaluator_failure: nil,
+       evaluator_failures: %{},
        continuations: %{},
        evaluation_lease: nil,
        evaluation_mission: nil,
@@ -929,6 +972,63 @@ defmodule PtcRunner.Kernel.RunState do
        %{state | llm_provider_failures: MapSet.delete(state.llm_provider_failures, evidence)}}
     else
       {:reply, :error, state}
+    end
+  end
+
+  def handle_call(
+        {token,
+         {:record_agent_outcome_failure, evidence_token, evidence,
+          %PtcRunner.Lisp.TrustedError{} = failure}},
+        _from,
+        %{token: token} = state
+      ) do
+    if unavailable?(state) do
+      {:reply, {:error, :run_closed}, state}
+    else
+      evidence_limit = @agent_outcome_failure_count
+      byte_limit = @agent_outcome_failure_bytes
+      expected = agent_outcome_failure_key(evidence)
+      retained = RetainedSize.detach_binaries({expected, failure})
+
+      case RetainedSize.bytes_with_cap(retained, byte_limit) do
+        size
+        when is_integer(size) and map_size(state.agent_outcome_failures) < evidence_limit and
+               state.agent_outcome_failure_bytes + size <= byte_limit ->
+          failures = Map.put(state.agent_outcome_failures, evidence_token, {retained, size})
+
+          {:reply, :ok,
+           %{
+             state
+             | agent_outcome_failures: failures,
+               agent_outcome_failure_bytes: state.agent_outcome_failure_bytes + size
+           }}
+
+        _limit_reached ->
+          {:reply, {:error, :evidence_limit}, state}
+      end
+    end
+  end
+
+  def handle_call(
+        {token, {:consume_agent_outcome_failure, evidence_token, evidence}},
+        _from,
+        %{token: token} = state
+      ) do
+    expected = agent_outcome_failure_key(evidence)
+
+    case Map.get(state.agent_outcome_failures, evidence_token) do
+      {{^expected, failure}, size} ->
+        failures = Map.delete(state.agent_outcome_failures, evidence_token)
+
+        {:reply, {:ok, failure},
+         %{
+           state
+           | agent_outcome_failures: failures,
+             agent_outcome_failure_bytes: state.agent_outcome_failure_bytes - size
+         }}
+
+      _missing_or_mismatched ->
+        {:reply, :error, state}
     end
   end
 
@@ -1349,7 +1449,31 @@ defmodule PtcRunner.Kernel.RunState do
         %{token: token} = state
       )
       when is_map(evidence) do
-    {:reply, :ok, %{state | last_evaluator_failure: evidence}}
+    failures =
+      case Map.get(evidence, :evaluation_id) do
+        evaluation_id when is_binary(evaluation_id) ->
+          Map.put(state.evaluator_failures, evaluation_id, evidence)
+
+        _missing ->
+          state.evaluator_failures
+      end
+
+    {:reply, :ok, %{state | last_evaluator_failure: evidence, evaluator_failures: failures}}
+  end
+
+  def handle_call(
+        {token, {:consume_evaluator_failure, evaluation_id}},
+        _from,
+        %{token: token} = state
+      ) do
+    case Map.fetch(state.evaluator_failures, evaluation_id) do
+      {:ok, evidence} ->
+        {:reply, {:ok, evidence},
+         %{state | evaluator_failures: Map.delete(state.evaluator_failures, evaluation_id)}}
+
+      :error ->
+        {:reply, :error, state}
+    end
   end
 
   def handle_call({token, :last_evaluator_failure}, _from, %{token: token} = state) do
@@ -1456,6 +1580,29 @@ defmodule PtcRunner.Kernel.RunState do
 
   @impl GenServer
   def handle_cast(_request, state), do: {:noreply, state}
+
+  defp agent_outcome_failure_key(value) when is_map(value) do
+    Map.new(value, fn {key, item} ->
+      {agent_outcome_failure_map_key(key), agent_outcome_failure_key(item)}
+    end)
+  end
+
+  defp agent_outcome_failure_key(value) when is_list(value),
+    do: Enum.map(value, &agent_outcome_failure_key/1)
+
+  defp agent_outcome_failure_key(value) when is_atom(value),
+    do: value |> Atom.to_string() |> String.replace("_", "-")
+
+  defp agent_outcome_failure_key("invalid_return"), do: "invalid-return"
+  defp agent_outcome_failure_key(value), do: value
+
+  defp agent_outcome_failure_map_key(key) when is_atom(key),
+    do: key |> Atom.to_string() |> String.replace("_", "-")
+
+  defp agent_outcome_failure_map_key(key) when is_binary(key),
+    do: String.replace(key, "_", "-")
+
+  defp agent_outcome_failure_map_key(key), do: key
 
   @impl GenServer
   def handle_info({:DOWN, ref, :process, _pid, _reason}, %{owner_ref: ref} = state),

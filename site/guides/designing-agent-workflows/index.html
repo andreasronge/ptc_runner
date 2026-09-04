@@ -137,20 +137,18 @@ grants:</p><pre><code class="json language-json">&quot;missions&quot;: {
   &quot;escalation&quot;: {
     &quot;components&quot;: [{&quot;id&quot;: &quot;escalation.policy&quot;, &quot;path&quot;: &quot;escalation.clj&quot;}]
   }
-}</code></pre><p>The workflow runs one loop per mission, passes only the ranked result forward,
-and validates the final report against the manifest's <code class="inline">result_schema</code>.
-<code class="inline">returned-value</code> and <code class="inline">quarantined</code> are not shipped built-ins; they are helpers
-defined in this example's <code class="inline">03-specialists/workflow.clj</code>:</p><pre><code class="clojure language-clojure">(defn run [input]
-  (let [ranked-outcome (agent.core/run-outcome
-                         (get input &quot;triage_task&quot;)
-                         {&quot;mission&quot; &quot;triage&quot; &quot;max_turns&quot; 4})
-        ranked (returned-value ranked-outcome &quot;triage&quot;)
-        report (agent.core/run-result-value
-                 (str (get input &quot;escalation_task&quot;)
-                      &quot;\n\nBreached tickets, highest priority first:\n&quot;
-                      (quarantined (pr-str ranked)))
-                 {&quot;mission&quot; &quot;escalation&quot; &quot;max_turns&quot; 4})]
-    (return report)))</code></pre><p><code class="inline">quarantined</code> marks customer text as data but is only a prompt-level mitigation.
+}</code></pre><p>The workflow passes only the triage result forward and validates the final
+report. Its local returned-value helper uses the documented
+<a href="/reference/agent-library-reference/#agent-core-fail-outcome">fail-outcome path</a> to
+keep the original diagnostic on abort; quarantined is also local. Materialize
+the example with ptc init support-triage --example support-triage.</p><pre><code class="clojure language-clojure">(defn run [input]
+  (let [ranked (returned-value
+                 (agent.core/run-outcome (get input &quot;triage_task&quot;)
+                                         {&quot;mission&quot; &quot;triage&quot; &quot;max_turns&quot; 4}))]
+    (return
+      (agent.core/run-result-value
+        (str (get input &quot;escalation_task&quot;) &quot;\n\n&quot; (quarantined (pr-str ranked)))
+        {&quot;mission&quot; &quot;escalation&quot; &quot;max_turns&quot; 4}))))</code></pre><p><code class="inline">quarantined</code> marks customer text as data but is only a prompt-level mitigation.
 <a href="/reference/application-manifest/#supply-input-and-named-missions">The mission boundary</a>
 limits capabilities. It does not filter handoff data, and this example provides
 no such guarantee; trusted workflow code must perform that filtering.</p><pre><code class="console language-console">ptc run support-triage/03-specialists.ptc-project.json</code></pre><pre><code class="json language-json">{&quot;escalations&quot;:[
