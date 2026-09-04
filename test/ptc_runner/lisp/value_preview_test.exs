@@ -58,6 +58,17 @@ defmodule PtcRunner.Lisp.ValuePreviewTest do
     assert preview.text =~ ~S|"next_cursor" nil|
   end
 
+  test "renders a complete nested debug navigation page when it fits the observation budget" do
+    page = ValuePreviewFixture.debug_navigation_page()
+
+    preview = ValuePreview.render(page, max_chars: 2_048, max_bytes: 8_192)
+
+    refute preview.truncated?
+    assert preview.caps_hit == []
+    assert preview.text =~ ~S|"filters" {"component_id" "pricing.base"}|
+    assert preview.text =~ ~S|"source" "(ns pricing.rule)"|
+  end
+
   test "renders several long strings completely when their combined representation fits" do
     value = %{
       "alpha" => String.duplicate("a", 360),
@@ -71,6 +82,51 @@ defmodule PtcRunner.Lisp.ValuePreviewTest do
     assert preview.text =~ String.duplicate("a", 360)
     assert preview.text =~ String.duplicate("b", 360)
     assert preview.text =~ String.duplicate("c", 360)
+  end
+
+  test "renders a wider fitting value within the adaptive item bound" do
+    value = List.duplicate(0, 256)
+
+    preview = ValuePreview.render(value, max_chars: 65_536, max_bytes: 262_144)
+
+    refute preview.truncated?
+    assert preview.caps_hit == []
+    assert String.length(preview.text) == 513
+  end
+
+  test "keeps the adaptive exact pass bounded for extreme width" do
+    preview = ValuePreview.render(List.duplicate(0, 257), max_chars: 65_536)
+
+    assert preview.truncated?
+    assert preview.caps_hit == [:items]
+  end
+
+  test "keeps the adaptive exact pass bounded for extreme nesting" do
+    value = Enum.reduce(1..257, 0, fn _index, child -> [child] end)
+
+    preview = ValuePreview.render(value, max_chars: 65_536, max_bytes: 262_144)
+
+    assert preview.truncated?
+    assert preview.caps_hit == [:depth]
+  end
+
+  test "applies the adaptive depth bound through compound map keys" do
+    value = Enum.reduce(1..257, :leaf, fn _index, key -> %{key => 0} end)
+
+    preview = ValuePreview.render(value, max_chars: 65_536, max_bytes: 262_144)
+
+    assert preview.truncated?
+    assert preview.caps_hit != []
+  end
+
+  test "bounds eager sampling across nested lists with a shared wide tail" do
+    tail = List.duplicate(0, 257)
+    value = Enum.reduce(1..257, tail, fn _index, child -> [child | tail] end)
+
+    preview = ValuePreview.render(value, max_chars: 65_536, max_bytes: 262_144)
+
+    assert preview.truncated?
+    assert preview.caps_hit != []
   end
 
   test "renders long keyword and symbol-like labels completely when they fit" do

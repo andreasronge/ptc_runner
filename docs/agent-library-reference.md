@@ -470,11 +470,13 @@ Successful observations contain a heap-proportional value preview and
 chronological `println` output. Preview traversal has independent collection,
 depth, node, string, character, and UTF-8 byte ceilings; it does not first
 serialize the complete value. The default pass preserves sibling shape under a
-small per-string ceiling. When the shape pass reports only the string cap and
-no explicit string ceiling was supplied, one bounded greedy pass may replace
-the preview with an exact rendering, but only when the complete compact
-representation fits every active ceiling. An incomplete retry is discarded in
-favor of the original shape-preserving preview.
+small per-string ceiling. When the shape pass reports truncation only from
+implicit ceilings, one bounded greedy pass raises the item and depth ceilings
+to larger internal traversal bounds and the node and string ceilings to the
+output budget. It replaces the preview only when the complete compact
+representation fits every active ceiling; an incomplete retry is discarded in
+favor of the original shape-preserving preview. Explicit traversal ceilings
+never trigger this adaptive pass.
 
 Feedback distinguishes value-preview truncation from `println` output omitted
 while assembling the bounded observation. For an ordinary successful result,
