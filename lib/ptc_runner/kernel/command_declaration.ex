@@ -221,7 +221,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
     },
     transcript: %{
       usage: [
-        "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE"
+        "ptc transcript RUN_ID --traces DIRECTORY --inspection DIRECTORY --private-unattended --private-output FILE [--envelope ENVELOPE.json]"
       ],
       options: [
         %{
@@ -249,6 +249,7 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
           description:
             "new owner-only file; parent must exist without a symlink (macOS /tmp is one) and be physically separate from --traces and --inspection"
         },
+        @envelope_option,
         @help_option
       ]
     },
@@ -513,7 +514,8 @@ defmodule PtcRunner.Kernel.CommandDeclaration do
   ]
   @topics [:root | @commands]
   # Commands the shared engine never dispatches: their frontend owns the
-  # process for as long as it runs and returns no envelope.
+  # process for as long as it runs. Transcript success rejoins the shared
+  # outcome boundary after its frontend publishes the private document.
   @frontend_commands [:transcript, :repl, :viewer]
 
   @type command ::

@@ -21,6 +21,11 @@ defmodule PtcRunner.Kernel.Events do
       {:error, :event_sink_error} = error ->
         :ok = RunState.fail(state, :event_sink_error, :event_sink_error)
         error
+
+      {:error, {:event_capture_limit_exceeded, limit, value}} ->
+        :ok = RunState.fail_event_capture_limit(state, limit, value)
+
+        {:error, :event_sink_error}
     end
   end
 

@@ -89,6 +89,7 @@ private-session contract.">
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/" class="current" aria-current="page">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -136,8 +137,9 @@ depends on the input grammar, never TTY detection: argumentless <code class="inl
 uses it when lines arrive from a terminal or a pipe, and <code class="inline">--load SETUP.clj</code>
 uses it when the setup is followed by that loop. Direct interactive sessions
 set <code class="inline">run_duration_ms</code> and <code class="inline">subordinate_evaluations</code> to their catalog maxima and
-retain normal events up to the installed <code class="inline">normal_event_count</code> and
-<code class="inline">normal_event_bytes</code> ceilings. Per-form time, heap, source, memory, history,
+retain events up to the installed <code class="inline">normal_event_count</code> and
+<code class="inline">normal_event_bytes</code> ceilings. Despite their historical names, these ceilings
+also bound private traces. Per-form time, heap, source, memory, history,
 result, projection, and capability limits remain at their ordinary defaults.</p><p>Interactive manifest and mission sessions use the installed host ceilings for
 omitted <code class="inline">run_duration_ms</code>, <code class="inline">subordinate_evaluations</code>, <code class="inline">normal_event_count</code>, and
 <code class="inline">normal_event_bytes</code>; an explicit manifest value remains effective when it is
@@ -558,7 +560,7 @@ the Viewer.</li><li><a href="/reference/source-inspection/">Source inspection</a
 manifests and snapshot providers.</li><li><a href="/reference/component-contracts/">Components and preludes</a> explains the profile's
 bundled analysis components.</li></ul>
 </article>
-<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/cli/">&larr; Command-line reference</a><a class="pager-next" href="/reference/source-inspection/">Source-inspection reference &rarr;</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/viewer/">&larr; Viewer reference</a><a class="pager-next" href="/reference/source-inspection/">Source-inspection reference &rarr;</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/repl.md">Edit this
   page on GitHub</a>.

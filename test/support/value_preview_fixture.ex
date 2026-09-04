@@ -13,4 +13,25 @@ defmodule PtcRunner.TestSupport.ValuePreviewFixture do
       "total_chars" => String.length(text)
     }
   end
+
+  def debug_navigation_page do
+    %{
+      "page" => %{
+        "items" => [
+          %{
+            "component_id" => "pricing.rule",
+            "relationships" => [
+              %{
+                "filters" => %{"component_id" => "pricing.base"},
+                "name" => "dependencies",
+                "state" => "complete"
+              }
+            ],
+            "source" => "(ns pricing.rule)"
+          }
+        ],
+        "next_cursor" => nil
+      }
+    }
+  end
 end

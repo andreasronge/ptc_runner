@@ -85,6 +85,11 @@ ptc transcript RUN_ID \
   --private-output out/conversation.private.json
 ```
 
+Success prints one JSON line naming the command, selected run, absolute output
+path, and turn count. A schema-version-2 transcript scopes `complete?` to
+`model_conversation`; `not_included` names `prelude_sources`,
+`capability_schemas`, and the final `result` as evidence outside that scope.
+
 `--private-output` names a new owner-only file. Its parent must already exist
 and be reached without a symbolic link — on macOS `/tmp` is a symlink, so
 `/tmp/out.json` is refused. The parent must also be physically separate from

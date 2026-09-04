@@ -89,6 +89,7 @@ data classes, and outer limits.">
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -421,7 +422,10 @@ or running beside private inspection data.</p><h2 id="set-installed-ceilings">Se
 }</code></pre><p>Raising <code class="inline">run_duration_ms</code> alone rarely lengthens an agent loop. Check the
 workflow timeout, model-call and mission-call quotas, subordinate evaluations,
 parallel timeout, and event count/byte ceilings too. Source checks have their
-own quota and do not execute code.</p><p><code class="inline">install</code> is required and may be empty. A limits-only host document raises
+own quota and do not execute code.</p><p>The historically named <code class="inline">normal_event_count</code> and <code class="inline">normal_event_bytes</code> ceilings
+bound retained events for both normal and private traces. A private run that
+reaches either ceiling keeps its trace and inspection artifacts and reports
+<code class="inline">execution/event_capture_limit_exceeded</code> with the binding name and value.</p><p><code class="inline">install</code> is required and may be empty. A limits-only host document raises
 ceilings for an application that selects no providers:</p><pre><code class="json language-json">{
   &quot;install&quot;: {},
   &quot;limits&quot;: {

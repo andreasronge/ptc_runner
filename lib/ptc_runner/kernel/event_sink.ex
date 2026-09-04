@@ -11,7 +11,9 @@ defmodule PtcRunner.Kernel.EventSink do
   Under `:normal` policy, a full or unavailable sink ordinarily records or
   projects loss without changing workflow execution. An internal normal sink
   may opt into fail-closed owner loss so a session cannot continue without its
-  canonical recorder. Normal sinks reserve two measured terminal envelopes by default.
+  canonical recorder. Normal sinks reserve two measured terminal envelopes by
+  default. Private sinks reserve one `run-stopped` envelope so a capacity
+  refusal can retain a complete terminal trace.
   Finalization atomically appends the bounded loss summary and `run-stopped`,
   freezes the recorder, and returns the exact terminal batch and drop snapshot.
   Runner and session startup atomically claim the recorder while retaining
@@ -49,9 +51,9 @@ defmodule PtcRunner.Kernel.EventSink do
 
   Options are `:run_id`, `:trace_id`, `:owner`, and the internal normal-policy
   `:terminal_reserve` and `:fail_closed`. Normal sinks default to the standard
-  two-event terminal reserve; private sinks reserve nothing. IDs must be valid UTF-8 binaries from
-  1 through 256 bytes; a unique run ID is generated when omitted and is also
-  the default trace ID.
+  two-event terminal reserve; private sinks reserve one terminal event. IDs
+  must be valid UTF-8 binaries from 1 through 256 bytes; a unique run ID is
+  generated when omitted and is also the default trace ID.
   """
   def start(policy, %Limits{} = limits, opts \\ []) when policy in [:normal, :private] do
     with {:ok, sink_state, handle} <- prepare(policy, limits, opts) do
@@ -93,9 +95,18 @@ defmodule PtcRunner.Kernel.EventSink do
           terminal_envelope_bytes("run-stopped")
     }
 
-  def terminal_reserve(:private, %Limits{}), do: %{count: 0, bytes: 0}
+  def terminal_reserve(:private, %Limits{} = limits),
+    do: %{
+      count: 1,
+      bytes: limits.event_payload_bytes + terminal_envelope_bytes("run-stopped")
+    }
 
-  @spec emit(t(), binary(), map()) :: :ok | {:error, :event_sink_error}
+  @spec emit(t(), binary(), map()) ::
+          :ok
+          | {:error, :event_sink_error}
+          | {:error,
+             {:event_capture_limit_exceeded, :normal_event_count | :normal_event_bytes,
+              pos_integer()}}
   @doc "Emits one bounded event or applies the sink's loss policy."
   def emit(sink, type, data) when is_binary(type) and is_map(data) do
     case call(sink, {:emit, type, data}) do
@@ -325,7 +336,14 @@ defmodule PtcRunner.Kernel.EventSink do
          (count >= 2 and bytes >= terminal_reserve(:normal, limits).bytes))
   end
 
-  defp valid_terminal_reserve?(:private, %{count: 0, bytes: 0}, _limits), do: true
+  defp valid_terminal_reserve?(:private, %{count: count, bytes: bytes}, limits)
+       when is_integer(count) and is_integer(bytes) and count >= 1 and bytes >= 1 do
+    reserve = terminal_reserve(:private, limits)
+
+    count <= limits.normal_event_count and bytes <= limits.normal_event_bytes and
+      count >= reserve.count and bytes >= reserve.bytes
+  end
+
   defp valid_terminal_reserve?(_policy, _reserve, _limits), do: false
 
   defp terminal_payload_capacity?(_policy, _limits, %{count: 0, bytes: 0}), do: true

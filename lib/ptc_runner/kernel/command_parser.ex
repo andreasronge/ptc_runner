@@ -295,7 +295,7 @@ defmodule PtcRunner.Kernel.CommandParser do
            private_output: private_output
          } = options,
          ordered,
-         [],
+         frontend_options,
          frontend
        )
        when map_size(options) == 4 do
@@ -304,6 +304,7 @@ defmodule PtcRunner.Kernel.CommandParser do
         application: run_id,
         options: options,
         ordered_options: ordered,
+        frontend_options: frontend_options,
         frontend: frontend
       )
     else
@@ -336,7 +337,7 @@ defmodule PtcRunner.Kernel.CommandParser do
         reject(:repl, :conflicting_arguments)
 
       not repl_arguments_valid?(options, ordered, positional) ->
-        reject(:repl, :invalid_arguments)
+        {:error, repl_invalid_rejection(options, ordered, positional, frontend)}
 
       true ->
         arguments(:repl,
@@ -434,6 +435,39 @@ defmodule PtcRunner.Kernel.CommandParser do
     end
   end
 
+  defp repl_invalid_rejection(options, ordered, positional, frontend) do
+    evals = Keyword.get_values(ordered, :eval)
+
+    cond do
+      output_evaluation_count_invalid?(options, positional, evals) ->
+        output = if Map.has_key?(options, :private_output), do: :private_output, else: :output
+        CommandRejection.repl_output_evaluation_count(output, frontend)
+
+      Map.get(options, :format) == "jsonl" and
+        not Map.has_key?(options, :profile) and
+          not Map.has_key?(options, :describe_profile) ->
+        CommandRejection.repl_jsonl_requires_profile()
+
+      true ->
+        CommandRejection.generic(:repl, :invalid_arguments)
+    end
+  end
+
+  defp output_evaluation_count_invalid?(options, positional, evals) do
+    publication_mode_valid?(options) and
+      not Map.has_key?(options, :load) and
+      not Map.get(options, :continue_on_error, false) and
+      (positional != [] or length(evals) != 1)
+  end
+
+  defp publication_mode_valid?(%{output: _, profile: "run-analysis-v1"} = options),
+    do: not Map.get(options, :private_unattended, false)
+
+  defp publication_mode_valid?(%{private_output: _, profile: profile} = options),
+    do: profile in @private_output_profiles and Map.get(options, :private_unattended, false)
+
+  defp publication_mode_valid?(_options), do: false
+
   defp inspect_only_conflict?(options) do
     Enum.any?(
       [
@@ -476,11 +510,7 @@ defmodule PtcRunner.Kernel.CommandParser do
 
     if output? or private_output? do
       positional == [] and length(evals) == 1 and not Map.has_key?(options, :load) and
-        not Map.get(options, :continue_on_error, false) and
-        ((output? and options[:profile] == "run-analysis-v1" and
-            not Map.get(options, :private_unattended, false)) or
-           (private_output? and options[:profile] in @private_output_profiles and
-              Map.get(options, :private_unattended, false)))
+        not Map.get(options, :continue_on_error, false) and publication_mode_valid?(options)
     else
       true
     end

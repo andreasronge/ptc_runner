@@ -87,6 +87,7 @@
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -113,9 +114,9 @@ when a project grants access to private inspection records.</p><p>In Docker, pub
 wildcard, and set <code class="inline">PTC_VIEWER_TOKEN</code>. Open
 <code class="inline">http://localhost:4123/?live_token=THE_TOKEN#/live</code> to authorize the Live
 controls; the token does not authenticate the Runs trace browser.</p><h2 id="how-do-i-consume-results-from-automation">How do I consume results from automation?</h2><p>For automation, request a command envelope instead of parsing human-readable
-diagnostics:</p><pre><code class="console language-console">ptc run hello-ptc/ptc-project.json --envelope command-envelope.json</code></pre><p>The <a href="/reference/cli/">CLI reference</a> has the complete command grammar,
-exit statuses, envelopes, and Viewer contract. Continue with <a href="/guides/debugging-a-failed-run/">Debug a failed
-run</a> when a trace needs deeper investigation.</p>
+diagnostics:</p><pre><code class="console language-console">ptc run hello-ptc/ptc-project.json --envelope command-envelope.json</code></pre><p>The <a href="/reference/cli/">CLI reference</a> covers command grammar, exit statuses,
+and envelopes. See the <a href="/reference/viewer/">Viewer reference</a> for Viewer
+details or <a href="/guides/debugging-a-failed-run/">Debug a failed run</a> for deeper trace investigation.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/agent-workflow-patterns/">&larr; Choose a workflow shape</a><a class="pager-next" href="/guides/kernel-repl/">Explore a project interactively &rarr;</a></nav>
 <footer>

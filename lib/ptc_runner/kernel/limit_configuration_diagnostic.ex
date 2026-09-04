@@ -24,7 +24,11 @@ defmodule PtcRunner.Kernel.LimitConfigurationDiagnostic do
          {:ok, payload_row} <- LimitCatalog.fetch(:event_payload_bytes),
          true <- LimitCatalog.valid_value?(payload_row, payload),
          {:ok, limits} <- Limits.new(event_payload_bytes: payload),
-         ^required <- LimitConfiguration.required_normal_event_bytes(limits),
+         true <-
+           required in [
+             LimitConfiguration.required_normal_event_bytes(limits),
+             LimitConfiguration.required_private_event_bytes(limits)
+           ],
          true <- bytes < required do
       {:ok,
        @prefix <>

@@ -969,18 +969,72 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
       )
 
     {:ok, session} = ReplSession.new(config: config)
-    assert :ok = EventSink.emit(sink, "occupied", %{})
 
-    assert {:error, %{fail: %{reason: :event_sink_error}}, returned} =
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: message}}, returned} =
              ReplSession.eval(session, "(def committed 42)")
+
+    assert message =~ "normal_event_count limit 3 was exceeded"
 
     assert %{attempts: 1, errors: 1} = returned
 
     assert %{defined_count: 1, history_count: 1} =
              ReplSession.evaluation_memory_summary(returned)
 
-    assert {:error, %{fail: %{reason: :session_closed}}, ^returned} =
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: repeated}}, repeated_session} =
              ReplSession.eval(returned, "committed")
+
+    assert repeated == message
+    assert %{attempts: 2, errors: 2} = repeated_session
+  end
+
+  test "a private mission session reports a terminal event capture limit" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(normal_event_count: 3)
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "mission-event-limit")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    mode = %{kind: :mission, name: "default", component_ids: [], direct_provider_aliases: []}
+    {:ok, session} = ReplSession.new(config: config, mode: mode)
+
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: message}}, returned} =
+             ReplSession.eval(session, "42")
+
+    assert message =~ "normal_event_count limit 3 was exceeded"
+    refute ReplSession.open?(returned)
+  end
+
+  test "a failed private mission still reports the terminal event capture limit" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    {:ok, limits} = Limits.new(normal_event_count: 3)
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "failed-mission-event-limit")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    mode = %{kind: :mission, name: "default", component_ids: [], direct_provider_aliases: []}
+    {:ok, session} = ReplSession.new(config: config, mode: mode)
+
+    assert {:error, %{fail: %{reason: :limit_exceeded, message: message}}, returned} =
+             ReplSession.eval(session, "(fail :expected)")
+
+    assert message =~ "normal_event_count limit 3 was exceeded"
+    refute ReplSession.open?(returned)
   end
 
   test "explicit failure rolls back memory and turn history" do
@@ -1483,7 +1537,7 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
     failed_pid = private_sink.pid
     failed_ref = Process.monitor(failed_pid)
 
-    for _index <- 1..3 do
+    for _index <- 1..2 do
       :ok = EventSink.emit(private_sink, "run-started", %{missions: %{}})
     end
 

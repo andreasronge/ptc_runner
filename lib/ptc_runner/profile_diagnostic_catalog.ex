@@ -94,7 +94,8 @@ defmodule PtcRunner.ProfileDiagnosticCatalog do
     },
     %{
       code: :source_retained_limit_exceeded,
-      message: "selected analysis source exceeded its retained-memory limit",
+      message:
+        "selected analysis source exceeded its retained-memory limit; for whole-directory private-run-analysis-v2 capture, select exact runs with --run RUN_ID",
       description: "The immutable trace projection or inspection index retained too much memory."
     },
     %{

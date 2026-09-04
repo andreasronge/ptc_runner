@@ -173,7 +173,8 @@ defmodule PtcRunner.Kernel.CommandContract do
             ),
             success_envelope("doctor", doctor_success_result()),
             success_envelope("models", models_result()),
-            success_envelope("materialize", materialize_result())
+            success_envelope("materialize", materialize_result()),
+            success_envelope("transcript", transcript_result())
           ],
       "$defs" => %{
         "unclassified_diagnostic" =>
@@ -263,7 +264,17 @@ defmodule PtcRunner.Kernel.CommandContract do
   @doc false
   @spec valid_success_result?(atom(), term()) :: boolean()
   def valid_success_result?(command, result)
-      when command in [:help, :version, :docs, :init, :validate, :doctor, :models, :materialize] do
+      when command in [
+             :help,
+             :version,
+             :docs,
+             :init,
+             :validate,
+             :doctor,
+             :models,
+             :materialize,
+             :transcript
+           ] do
     with true <- JSONValue.value?(result),
          {:ok, root} <-
            compiled_jsv_root({__MODULE__, :success_root, command}, fn ->
@@ -285,7 +296,8 @@ defmodule PtcRunner.Kernel.CommandContract do
   Validates deterministic success-result constraints not fully expressible in JSON Schema.
 
   Callers that consume the generated schema must apply this predicate after
-  ordinary schema validation for `doctor`, `models`, and `materialize` results.
+  ordinary schema validation for `doctor`, `models`, `materialize`, and
+  `transcript` results.
   """
   @spec valid_success_semantics?(atom(), term()) :: boolean()
   def valid_success_semantics?(
@@ -347,6 +359,9 @@ defmodule PtcRunner.Kernel.CommandContract do
   def valid_success_semantics?(:materialize, %{"mode" => "candidate", "directory" => directory})
       when is_binary(directory),
       do: Path.type(directory) == :absolute
+
+  def valid_success_semantics?(:transcript, %{"path" => path}) when is_binary(path),
+    do: Path.type(path) == :absolute
 
   def valid_success_semantics?(command, _result)
       when command in [:help, :version, :docs, :init, :validate],
@@ -1485,6 +1500,18 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: RuntimeLimitDiagnostic.run_duration_message_schema(row.message)
 
   defp diagnostic_message_schema(
+         %{phase: :execution, code: :event_capture_limit_exceeded} = row,
+         %{"type" => "null"}
+       ),
+       do: RuntimeLimitDiagnostic.event_capture_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :event_capture_limit_exceeded} = row,
+         _source
+       ),
+       do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
          %{phase: :result_cleanup, code: :result_contract_failed} = row,
          %{"properties" => %{"kind" => %{"const" => "result_contract"}}}
        ),
@@ -2315,6 +2342,15 @@ defmodule PtcRunner.Kernel.CommandContract do
     }
   end
 
+  defp transcript_result do
+    closed(~w(command run_ref path turns), %{
+      "command" => %{"const" => "transcript"},
+      "run_ref" => %{"pattern" => @run_ref, "type" => "string"},
+      "path" => %{"type" => "string", "minLength" => 1, "maxLength" => 4096},
+      "turns" => nonnegative_integer()
+    })
+  end
+
   # `ModelSelectorDisclosure` withholds endpoint-bearing selectors; the closed
   # envelope refuses one rather than trusting every producer to remember.
   defp model_selector_schema do
@@ -2333,6 +2369,7 @@ defmodule PtcRunner.Kernel.CommandContract do
   defp success_result_schema(:doctor), do: doctor_success_result()
   defp success_result_schema(:models), do: models_result()
   defp success_result_schema(:materialize), do: materialize_result()
+  defp success_result_schema(:transcript), do: transcript_result()
 
   defp nullable_ref(name),
     do: %{"oneOf" => [%{"type" => "null"}, ref(name)]}

@@ -28,8 +28,8 @@ defmodule PtcRunner.Kernel.Limits do
   the effective count must retain one ordinary event plus the two terminal
   events, and the byte budget must retain one complete maximum-size
   `run-started` event in addition to `PtcRunner.Kernel.EventSink`'s measured
-  terminal reserve. Private trace policy keeps its zero-reserve fail-closed
-  behavior.
+  terminal reserve. Private trace policy reserves one terminal envelope so a
+  capacity refusal can still produce a complete retained trace.
   """
 
   alias PtcRunner.Kernel.LimitCatalog

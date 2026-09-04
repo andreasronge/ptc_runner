@@ -40,7 +40,9 @@ defmodule PtcRunner.Kernel.CommandRejection do
             | :destination_collision
             | :private_output_recovery_collision
             | :init_destination_collision
-            | :project_host_undeclared,
+            | :project_host_undeclared
+            | :repl_output_evaluation_count
+            | :repl_jsonl_requires_profile,
           accepted: [binary()],
           option: binary() | nil,
           destination: binary() | nil,
@@ -175,6 +177,33 @@ defmodule PtcRunner.Kernel.CommandRejection do
     }
   end
 
+  @spec repl_output_evaluation_count(:output | :private_output, CommandDeclaration.frontend()) ::
+          t()
+  def repl_output_evaluation_count(output, frontend) when output in [:output, :private_output] do
+    %__MODULE__{
+      command: :repl,
+      code: :invalid_arguments,
+      kind: :repl_output_evaluation_count,
+      accepted: [],
+      option: CommandDeclaration.option_switch!(:repl, frontend, output),
+      destination: nil,
+      conflicts: []
+    }
+  end
+
+  @spec repl_jsonl_requires_profile() :: t()
+  def repl_jsonl_requires_profile do
+    %__MODULE__{
+      command: :repl,
+      code: :invalid_arguments,
+      kind: :repl_jsonl_requires_profile,
+      accepted: [],
+      option: "--format jsonl",
+      destination: nil,
+      conflicts: []
+    }
+  end
+
   @spec invalid_destination(
           CommandDeclaration.command(),
           atom(),
@@ -182,7 +211,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
         ) :: t()
   def invalid_destination(command, destination, frontend)
       when (destination == :envelope and
-              command in [:validate, :run, :doctor, :models, :init, :materialize]) or
+              command in [:validate, :run, :doctor, :models, :init, :materialize, :transcript]) or
              (command == :transcript and destination == :private_output) or
              (command == :repl and destination in [:output, :private_output]) do
     %__MODULE__{
@@ -210,7 +239,7 @@ defmodule PtcRunner.Kernel.CommandRejection do
           CommandDeclaration.frontend()
         ) :: t()
   def envelope_destination_exists(command, frontend)
-      when command in [:validate, :run, :doctor, :models, :init, :materialize] do
+      when command in [:validate, :run, :doctor, :models, :init, :materialize, :transcript] do
     %__MODULE__{
       command: command,
       code: :envelope_destination_exists,
@@ -241,6 +270,21 @@ defmodule PtcRunner.Kernel.CommandRejection do
       option: nil,
       destination: nil,
       conflicts: [first, second]
+    }
+  end
+
+  def destination_collision(:transcript, :private_output, :envelope, frontend) do
+    %__MODULE__{
+      command: :transcript,
+      code: :conflicting_arguments,
+      kind: :destination_collision,
+      accepted: [],
+      option: nil,
+      destination: nil,
+      conflicts: [
+        CommandDeclaration.option_switch!(:transcript, frontend, :private_output),
+        CommandDeclaration.option_switch!(:transcript, frontend, :envelope)
+      ]
     }
   end
 

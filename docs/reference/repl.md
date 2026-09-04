@@ -83,8 +83,9 @@ depends on the input grammar, never TTY detection: argumentless `ptc repl`
 uses it when lines arrive from a terminal or a pipe, and `--load SETUP.clj`
 uses it when the setup is followed by that loop. Direct interactive sessions
 set `run_duration_ms` and `subordinate_evaluations` to their catalog maxima and
-retain normal events up to the installed `normal_event_count` and
-`normal_event_bytes` ceilings. Per-form time, heap, source, memory, history,
+retain events up to the installed `normal_event_count` and
+`normal_event_bytes` ceilings. Despite their historical names, these ceilings
+also bound private traces. Per-form time, heap, source, memory, history,
 result, projection, and capability limits remain at their ordinary defaults.
 
 Interactive manifest and mission sessions use the installed host ceilings for

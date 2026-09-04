@@ -2,6 +2,7 @@ defmodule PtcRunner.Kernel.ProviderPlan do
   @moduledoc false
 
   alias PtcRunner.Kernel.EffectiveApplication
+  alias PtcRunner.Kernel.LimitConfiguration
   alias PtcRunner.Kernel.ProviderDescriptor
 
   @spec derive(
@@ -9,11 +10,19 @@ defmodule PtcRunner.Kernel.ProviderPlan do
           PtcRunner.Kernel.FrozenBundle.t(),
           %{binary() => PtcRunner.Kernel.FrozenBundle.t() | nil},
           [map()]
-        ) :: {:ok, map()} | {:error, {:dependency_invalid | :data_policy_denied, map() | nil}}
+        ) ::
+          {:ok, map()}
+          | {:error, {:dependency_invalid | :data_policy_denied, map() | nil}}
+          | {:error, {:limit_configuration_invalid, pos_integer(), pos_integer(), pos_integer()}}
   def derive(request, workflow_bundle, mission_bundles, declarations) do
     with :ok <- validate_dependencies(declarations),
          :ok <- validate_workflow_llm_defaults(declarations),
          {:ok, policy} <- derive_policy(request, declarations),
+         :ok <-
+           LimitConfiguration.validate_effective(
+             request.package.limits,
+             policy.effective_event_policy
+           ),
          providers <- provider_projection(declarations),
          {:ok, effective} <-
            EffectiveApplication.build(

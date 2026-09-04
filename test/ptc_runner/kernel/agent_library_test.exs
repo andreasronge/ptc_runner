@@ -2950,6 +2950,17 @@ defmodule PtcRunner.Kernel.AgentLibraryTest do
     assert observation.text =~ inspect(get_in(page, ["items", Access.at(0), "text"]))
   end
 
+  test "agent observation renders nested debug navigation filters within its budget" do
+    page = ValuePreviewFixture.debug_navigation_page()
+    observation = EvaluationObservation.success(%{value: page, prints: []}, 2_048)
+
+    refute observation.truncated?
+    refute observation.value_truncated?
+    assert observation.caps_hit == []
+    assert observation.text =~ ~S|"filters" {"component_id" "pricing.base"}|
+    assert observation.text =~ ~S|"source" "(ns pricing.rule)"|
+  end
+
   test "agent.feedback distinguishes retained values, returned values, and print omission" do
     retained =
       success_feedback(

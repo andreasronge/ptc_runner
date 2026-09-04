@@ -511,6 +511,11 @@ workflow timeout, model-call and mission-call quotas, subordinate evaluations,
 parallel timeout, and event count/byte ceilings too. Source checks have their
 own quota and do not execute code.
 
+The historically named `normal_event_count` and `normal_event_bytes` ceilings
+bound retained events for both normal and private traces. A private run that
+reaches either ceiling keeps its trace and inspection artifacts and reports
+`execution/event_capture_limit_exceeded` with the binding name and value.
+
 `install` is required and may be empty. A limits-only host document raises
 ceilings for an application that selects no providers:
 
