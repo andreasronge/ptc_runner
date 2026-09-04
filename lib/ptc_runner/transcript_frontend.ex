@@ -26,12 +26,12 @@ defmodule PtcRunner.TranscriptFrontend do
   @max_items 1_000
 
   @spec run(CommandArguments.t(), CommandRuntime.t()) ::
-          :ok | {:error, atom(), binary()}
+          {:ok, map()} | {:error, atom(), binary()}
   def run(arguments, runtime), do: run(arguments, runtime, [])
 
   @doc false
   @spec run(CommandArguments.t(), CommandRuntime.t(), keyword()) ::
-          :ok | {:error, atom(), binary()}
+          {:ok, map()} | {:error, atom(), binary()}
   def run(
         %CommandArguments{
           command: :transcript,
@@ -105,21 +105,39 @@ defmodule PtcRunner.TranscriptFrontend do
          {:ok, turns} <- RunAnalysis.collect(analysis, run_id, "turns", @max_items),
          conversation = ConversationProjection.present_page(turns),
          :ok <- admissible_evidence(conversation),
+         {:ok, projection} <- RunAnalysis.collection_projection("turns"),
          {:ok, encoded} <-
            DeterministicJSON.encode(%{
-             "schema_version" => 1,
+             "schema_version" => 2,
              "run_id" => run_id,
+             "complete_scope" => projection["scope"],
+             "not_included" => projection["not_included"],
              "conversation" => conversation
            }),
          :ok <- PublicationHandle.write(handle, encoded <> "\n"),
          :ok <- PublicationHandle.sync(handle),
          :ok <- PublicationHandle.publish(handle) do
-      :ok
+      {:ok,
+       %{
+         "command" => "transcript",
+         "run_ref" => run_id,
+         "path" => PublicationHandle.path(handle),
+         "turns" => turn_count(conversation)
+       }}
     else
       {:error, _code, _message} = classified -> classified
       {:error, reason} -> selected_publish_error(reason)
     end
   end
+
+  defp turn_count(%{"streams" => streams}) when is_list(streams) do
+    Enum.reduce(streams, 0, fn
+      %{"turns" => turns}, count when is_list(turns) -> count + length(turns)
+      _stream, count -> count
+    end)
+  end
+
+  defp turn_count(_conversation), do: 0
 
   defp selected_capture_error(:source_changed),
     do: {:error, :source_changed, "analysis source changed during capture"}
@@ -373,9 +391,9 @@ defmodule PtcRunner.TranscriptFrontend do
   defp destination_error(_reason),
     do: {:error, :destination_unavailable, "--private-output destination is unavailable"}
 
-  defp finalize_handle(handle, :ok) do
+  defp finalize_handle(handle, {:ok, _result} = success) do
     :ok = PublicationHandle.release(handle)
-    :ok
+    success
   end
 
   defp finalize_handle(handle, {:error, _code, _message} = error) do

@@ -68,6 +68,12 @@ defmodule PtcRunner.Kernel.RunAnalysisTest do
     assert Enum.find(collections, &(&1["name"] == "activity"))["available?"]
     assert Enum.find(collections, &(&1["name"] == "turns"))["available?"]
 
+    assert Enum.find(collections, &(&1["name"] == "turns"))
+           |> Map.take(["projection_scope", "projection_not_included"]) == %{
+             "projection_scope" => "model_conversation",
+             "projection_not_included" => ~w(prelude_sources capability_schemas result)
+           }
+
     assert Enum.find(collections, &(&1["name"] == "activity")) ==
              %{
                "authority" => "public",

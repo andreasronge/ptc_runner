@@ -295,7 +295,7 @@ defmodule PtcRunner.Kernel.CommandParser do
            private_output: private_output
          } = options,
          ordered,
-         [],
+         frontend_options,
          frontend
        )
        when map_size(options) == 4 do
@@ -304,6 +304,7 @@ defmodule PtcRunner.Kernel.CommandParser do
         application: run_id,
         options: options,
         ordered_options: ordered,
+        frontend_options: frontend_options,
         frontend: frontend
       )
     else

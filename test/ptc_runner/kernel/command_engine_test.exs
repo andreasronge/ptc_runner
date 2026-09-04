@@ -146,8 +146,16 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert private_output["description"] =~ "physically separate"
     assert private_output["description"] =~ "/tmp"
 
+    envelope =
+      Enum.find(transcript_help.envelope["result"]["options"], fn option ->
+        "--envelope ENVELOPE.json" in option["switches"]
+      end)
+
+    assert envelope["description"] =~ "V4 command envelope"
+
     assert {:stdout, text} = CommandRenderer.render(transcript_help)
     assert text =~ "--private-output TRANSCRIPT.json"
+    assert text =~ "--envelope ENVELOPE.json"
     assert text =~ "symlink"
     assert text =~ "physically separate"
     assert_schema_valid(transcript_help.envelope)

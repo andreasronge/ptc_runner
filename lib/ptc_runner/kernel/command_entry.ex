@@ -282,6 +282,17 @@ defmodule PtcRunner.Kernel.CommandEntry do
     end
   end
 
+  defp distinct?(
+         %CommandArguments{command: :transcript, options: %{private_output: output}},
+         _destinations,
+         _run_ref,
+         envelope
+       ) do
+    if DestinationIdentity.key(output) == DestinationIdentity.key(envelope),
+      do: {:error, {:destination_collision, :private_output}},
+      else: :ok
+  end
+
   defp distinct?(_arguments, _destinations, _run_ref, _envelope), do: :ok
 
   defp materialize_destination(options, key) do

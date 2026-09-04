@@ -354,8 +354,8 @@ file whose JSON Schema this executable serves as `ptc docs schema-envelope`
 (`priv/schemas/ptc-command-envelope-v4.schema.json` in the repository). Its
 status and exit-code relationship is sealed by the same command contract.
 
-After arguments parse, an ordinary or caught command outcome publishes one
-requested envelope. This includes a recognized `run`, `validate`, `doctor`, or
+After arguments parse, an ordinary or caught shared-engine command outcome
+publishes one requested envelope. This includes a recognized `run`, `validate`, `doctor`, or
 `models` invocation whose named project fails schema validation: project
 diagnostics terminate before command bootstrap or project references are
 opened, but after the envelope destination is admitted. Malformed command
@@ -370,8 +370,8 @@ that failure through the missing envelope. Success exits `0`; classified
 failures use their diagnostic catalog status; caught internal failures use
 `70`.
 
-`run`, `validate`, `doctor`, `models`, `init`, and `materialize` accept `--envelope`.
-`repl`, `transcript`, `viewer`, `docs`, help, and version do not. A private run
+`run`, `validate`, `doctor`, `models`, `init`, `materialize`, `transcript`, and
+`version` accept `--envelope`. `repl`, `viewer`, `docs`, and help do not. A private run
 envelope omits the result value. Installation, packaging, and container
 commands live in the [installation documentation](../installation/standalone.md),
 not in this process-contract reference.
@@ -865,8 +865,23 @@ ptc transcript RUN_ID \
   --traces tmp/traces \
   --inspection tmp/inspection \
   --private-unattended \
-  --private-output tmp/transcript/conversation.private.json
+  --private-output tmp/transcript/conversation.private.json \
+  --envelope tmp/transcript/command-envelope.json
 ```
+
+On success the command prints one JSON line containing `command`, the selected
+run under `run_ref`, the absolute output `path`, and the number of published
+`turns`. The optional envelope receives the same result in the V4 command
+contract.
+The frontend-owned transcript command publishes this success envelope only
+after its private document is complete; a transcript refusal retains its
+existing `transcript/` diagnostic and publishes neither file.
+
+Transcript document schema version 2 scopes `conversation.complete?` with the
+top-level `complete_scope: "model_conversation"`. Its top-level `not_included`
+list names evidence outside that scope: `prelude_sources`, `capability_schemas`,
+and the run `result`. The list comes from the `turns` collection catalog entry;
+the transcript does not include those surfaces.
 
 Each selected model turn carries the provider-neutral `request_hash` used by
 `llm_replay` fixtures. The underlying owner-only inspection artifact carries

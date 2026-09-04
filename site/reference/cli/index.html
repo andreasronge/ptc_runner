@@ -312,8 +312,8 @@ the component dependency as described in
 output from applications or children. The envelope is an atomic, no-replace
 file whose JSON Schema this executable serves as <code class="inline">ptc docs schema-envelope</code>
 (<code class="inline">priv/schemas/ptc-command-envelope-v4.schema.json</code> in the repository). Its
-status and exit-code relationship is sealed by the same command contract.</p><p>After arguments parse, an ordinary or caught command outcome publishes one
-requested envelope. This includes a recognized <code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, or
+status and exit-code relationship is sealed by the same command contract.</p><p>After arguments parse, an ordinary or caught shared-engine command outcome
+publishes one requested envelope. This includes a recognized <code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, or
 <code class="inline">models</code> invocation whose named project fails schema validation: project
 diagnostics terminate before command bootstrap or project references are
 opened, but after the envelope destination is admitted. Malformed command
@@ -326,8 +326,8 @@ rather than paying for a run whose result it cannot receive. If envelope
 publication itself fails, the standalone command exits <code class="inline">74</code> and cannot report
 that failure through the missing envelope. Success exits <code class="inline">0</code>; classified
 failures use their diagnostic catalog status; caught internal failures use
-<code class="inline">70</code>.</p><p><code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, <code class="inline">init</code>, and <code class="inline">materialize</code> accept <code class="inline">--envelope</code>.
-<code class="inline">repl</code>, <code class="inline">transcript</code>, <code class="inline">viewer</code>, <code class="inline">docs</code>, help, and version do not. A private run
+<code class="inline">70</code>.</p><p><code class="inline">run</code>, <code class="inline">validate</code>, <code class="inline">doctor</code>, <code class="inline">models</code>, <code class="inline">init</code>, <code class="inline">materialize</code>, <code class="inline">transcript</code>, and
+<code class="inline">version</code> accept <code class="inline">--envelope</code>. <code class="inline">repl</code>, <code class="inline">viewer</code>, <code class="inline">docs</code>, and help do not. A private run
 envelope omits the result value. Installation, packaging, and container
 commands live in the <a href="/installation/standalone/">installation documentation</a>,
 not in this process-contract reference.</p><h3 id="branch-on-the-exit-status">Branch on the exit status</h3><p>An exit status is a class, not an identity: several diagnostics share one.
@@ -474,7 +474,18 @@ ptc transcript RUN_ID \
   --traces tmp/traces \
   --inspection tmp/inspection \
   --private-unattended \
-  --private-output tmp/transcript/conversation.private.json</code></pre><p>Each selected model turn carries the provider-neutral <code class="inline">request_hash</code> used by
+  --private-output tmp/transcript/conversation.private.json \
+  --envelope tmp/transcript/command-envelope.json</code></pre><p>On success the command prints one JSON line containing <code class="inline">command</code>, the selected
+run under <code class="inline">run_ref</code>, the absolute output <code class="inline">path</code>, and the number of published
+<code class="inline">turns</code>. The optional envelope receives the same result in the V4 command
+contract.
+The frontend-owned transcript command publishes this success envelope only
+after its private document is complete; a transcript refusal retains its
+existing <code class="inline">transcript/</code> diagnostic and publishes neither file.</p><p>Transcript document schema version 2 scopes <code class="inline">conversation.complete?</code> with the
+top-level <code class="inline">complete_scope: &quot;model_conversation&quot;</code>. Its top-level <code class="inline">not_included</code>
+list names evidence outside that scope: <code class="inline">prelude_sources</code>, <code class="inline">capability_schemas</code>,
+and the run <code class="inline">result</code>. The list comes from the <code class="inline">turns</code> collection catalog entry;
+the transcript does not include those surfaces.</p><p>Each selected model turn carries the provider-neutral <code class="inline">request_hash</code> used by
 <code class="inline">llm_replay</code> fixtures. The underlying owner-only inspection artifact carries
 the same value as <code class="inline">payload.request_hash</code> on the <code class="inline">llm-request</code>
 <code class="inline">capability-input</code> record. A private replay miss keeps that hash out of its

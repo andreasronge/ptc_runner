@@ -26,6 +26,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     {:doctor, :connect},
     :models,
     :materialize,
+    :transcript,
     :unknown
   ]
   @success_modes [
@@ -37,7 +38,8 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     :doctor,
     {:doctor, :connect},
     :models,
-    :materialize
+    :materialize,
+    :transcript
   ]
   @static_modes [
     :help,
@@ -48,6 +50,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
     :doctor,
     :models,
     :materialize,
+    :transcript,
     :unknown
   ]
   @exit_statuses [0, 2, 3, 4, 5, 6, 7, 70]
@@ -82,6 +85,7 @@ defmodule PtcRunner.Kernel.CommandOutcome do
           | {:doctor, :connect}
           | :models
           | :materialize
+          | :transcript
           | :unknown
   @type t :: %__MODULE__{
           command_mode: command_mode(),

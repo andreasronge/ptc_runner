@@ -61,7 +61,9 @@ defmodule PtcRunner.Kernel.RunAnalysis do
         "response_sequence" => "response_sequence",
         "stream_id" => "stream_id",
         "turn" => "turn"
-      }
+      },
+      projection_scope: "model_conversation",
+      projection_not_included: ~w(prelude_sources capability_schemas result)
     },
     %{
       name: "model_exchanges",
@@ -186,6 +188,20 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   @doc false
   @spec collections() :: [map()]
   def collections, do: @collections
+
+  @doc false
+  @spec collection_projection(binary()) :: {:ok, map()} | {:error, :invalid_query}
+  def collection_projection(name) when is_binary(name) do
+    with {:ok, collection} <- fetch_collection(name),
+         {:ok, scope} <- Map.fetch(collection, :projection_scope),
+         {:ok, not_included} <- Map.fetch(collection, :projection_not_included) do
+      {:ok, %{"scope" => scope, "not_included" => not_included}}
+    else
+      _missing -> {:error, :invalid_query}
+    end
+  end
+
+  def collection_projection(_name), do: {:error, :invalid_query}
 
   @doc false
   @spec new(TraceSnapshot.t(), InspectionSnapshot.t() | nil) ::
@@ -348,6 +364,8 @@ defmodule PtcRunner.Kernel.RunAnalysis do
         "identifier_locations" => collection.identifier_locations
       }
       |> put_catalog_option(collection, :item_completeness_field)
+      |> put_catalog_option(collection, :projection_scope)
+      |> put_catalog_option(collection, :projection_not_included)
     end)
   end
 

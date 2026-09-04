@@ -13,7 +13,9 @@ defmodule Mix.Tasks.Ptc do
 
   Use `mix ptc help COMMAND` to list every switch accepted by a command.
   The task always prints the shared human rendering. `--envelope PATH`
-  additionally publishes the machine-readable V4 envelope atomically.
+  additionally publishes the machine-readable V4 envelope atomically; for
+  `transcript`, the envelope is published only after the private document
+  succeeds.
   Complete doctor readiness reports, including `readiness: "failed"`, are
   written to standard output. A failed readiness report retains its nonzero
   exit status; failures without a complete report are written to standard
