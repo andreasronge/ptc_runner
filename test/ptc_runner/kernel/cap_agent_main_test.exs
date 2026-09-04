@@ -55,6 +55,19 @@ defmodule PtcRunner.Kernel.CapAgentMainTest do
     end
   end
 
+  test "analysis navigation exports document their accepted option shapes" do
+    {:ok, components} = Library.resolve_components([{:library, "analysis"}])
+    {:ok, bundle} = Kernel.compile_bundle(components)
+
+    {:ok, read} = Prelude.fetch_export(bundle.prelude, "analysis/read")
+    assert read.doc =~ "directly in options"
+    assert read.doc =~ "analysis/open"
+
+    {:ok, counters} = Prelude.fetch_export(bundle.prelude, "analysis/counters")
+    assert counters.doc =~ "run_id"
+    assert counters.doc =~ "mission_name"
+  end
+
   describe "cap/unwrap!" do
     test "returns the value of a successful capability response" do
       assert run(~S|(cap/unwrap! {:status :ok :value 42})|) == "42"

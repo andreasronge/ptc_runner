@@ -60,6 +60,12 @@ defmodule PtcRunner.ProfileDiagnosticCatalogTest do
 
     assert {:ok, %{code: :source_retained_limit_exceeded}} =
              ProfileDiagnosticCatalog.classify(:max_retained_bytes)
+
+    assert %{message: message} =
+             ProfileDiagnosticCatalog.classify!(:source_retained_limit_exceeded)
+
+    assert message =~ "--run RUN_ID"
+    assert message =~ "whole-directory private-run-analysis-v2"
   end
 
   test "unknown internal reasons collapse to the closed fallback" do

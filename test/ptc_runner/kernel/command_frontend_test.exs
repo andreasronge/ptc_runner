@@ -77,6 +77,59 @@ defmodule PtcRunner.Kernel.CommandFrontendTest do
     refute_received :unexpected_repl
   end
 
+  test "repl publication and jsonl mode rejections name the violated argument rule" do
+    for {profile, authorization, output_switch} <- [
+          {"run-analysis-v1", [], "--output"},
+          {"private-run-analysis-v2", ["--private-unattended"], "--private-output"}
+        ] do
+      publication =
+        [
+          "repl",
+          "--profile",
+          profile,
+          "--resource",
+          "traces=traces"
+        ] ++ authorization ++ [output_switch, "answer.json", "-e", "1", "-e", "2"]
+
+      assert {:error, entry} = CommandEntry.open_with_ref(publication, :standalone, @run_ref)
+      assert entry.rejection.kind == :repl_output_evaluation_count
+
+      assert CommandRenderer.rejection(@run_ref, entry.rejection) =~
+               "#{output_switch} publishes exactly one -e/--eval evaluation"
+    end
+
+    assert {:error, entry} =
+             CommandEntry.open_with_ref(
+               ["repl", "--format", "jsonl", "-e", "1"],
+               :standalone,
+               @run_ref
+             )
+
+    assert entry.rejection.kind == :repl_jsonl_requires_profile
+
+    assert CommandRenderer.rejection(@run_ref, entry.rejection) =~
+             "--format jsonl requires --profile"
+
+    for companion <- [["--load", "setup.clj"], ["--continue-on-error"]] do
+      argv =
+        [
+          "repl",
+          "--profile",
+          "run-analysis-v1",
+          "--resource",
+          "traces=traces",
+          "--output",
+          "answer.json",
+          "-e",
+          "1"
+        ] ++ companion
+
+      assert {:error, entry} = CommandEntry.open_with_ref(argv, :standalone, @run_ref)
+      assert entry.rejection.kind == :generic
+      refute CommandRenderer.rejection(@run_ref, entry.rejection) =~ "exactly one"
+    end
+  end
+
   test "missing switch values and fixed positional arity render declaration-owned guidance" do
     cases = [
       {[

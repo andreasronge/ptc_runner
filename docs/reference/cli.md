@@ -682,7 +682,7 @@ The table is generated from the catalog the REPL frontend dispatches on:
 | `selected_trace_not_regular` | The exact selected trace candidate is not a regular file. | selected trace is not a regular file |
 | `source_changed` | A selected source or cursor identity changed while it was being verified. | analysis source changed during immutable capture |
 | `source_limit_exceeded` | Aggregate bytes, per-artifact records, index entries, or heap were exceeded. | selected analysis source exceeded its admission limits |
-| `source_retained_limit_exceeded` | The immutable trace projection or inspection index retained too much memory. | selected analysis source exceeded its retained-memory limit |
+| `source_retained_limit_exceeded` | The immutable trace projection or inspection index retained too much memory. | selected analysis source exceeded its retained-memory limit; for whole-directory private-run-analysis-v2 capture, select exact runs with --run RUN_ID |
 | `source_unavailable` | A source root became unavailable or its bounded capture deadline elapsed. | analysis source is unavailable or capture timed out |
 | `unsupported_schema` | A selected trace or inspection artifact uses an unsupported version. | analysis source uses an unsupported schema version |
 <!-- END GENERATED: profile diagnostic catalog -->
