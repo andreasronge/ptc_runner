@@ -26,20 +26,21 @@ application document, and `ptc docs functions` for the built-in library.
 
 ## Follow the loop
 
-Each step fails early and cheaply, so run them in order rather than jumping
-straight to a credentialed run.
+Choose one `ptc init` form, then run the remaining steps in order so each fails
+early and cheaply.
 
 ```console
-ptc init hello-ptc                       # generate a working application
+ptc init hello-ptc                       # a plain application
+ptc init hello-ptc --example llm-replay  # or a model with no credential
 ptc validate hello-ptc/ptc-project.json  # compile without executing
-ptc repl --project hello-ptc/ptc-project.json -e '(main/run {"name" "world"})'
+ptc repl --project hello-ptc/ptc-project.json -e '(dir)'
 ptc doctor hello-ptc/ptc-project.json    # check provider readiness locally
 ptc run hello-ptc/ptc-project.json --envelope out.json
 ```
 
 `ptc init` writes a complete project, including an `AGENTS.md` that points a
-later agent back at these commands. Edit `main.clj` for behavior and `ptc.json`
-for input, providers, missions, and limits.
+later agent back at these commands. Edit the component selected by `ptc.json`
+for behavior, and edit `ptc.json` for input and limits.
 
 ## Experiment before committing to a file
 

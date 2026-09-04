@@ -108,14 +108,15 @@ so both always describe the version you actually invoke.</p><h2 id="ask-the-bina
 <code class="inline">ptc docs</code> prints pages embedded at build time. Neither can drift from the
 running executable. Prefer both over any remembered flag, built-in, or manifest
 field, and over any page you fetched from the web for a different version.</p><p>Start with <code class="inline">ptc docs agent-guide</code> (this page), <code class="inline">ptc docs manifest</code> for the
-application document, and <code class="inline">ptc docs functions</code> for the built-in library.</p><h2 id="follow-the-loop">Follow the loop</h2><p>Each step fails early and cheaply, so run them in order rather than jumping
-straight to a credentialed run.</p><pre><code class="console language-console">ptc init hello-ptc                       # generate a working application
+application document, and <code class="inline">ptc docs functions</code> for the built-in library.</p><h2 id="follow-the-loop">Follow the loop</h2><p>Choose one <code class="inline">ptc init</code> form, then run the remaining steps in order so each fails
+early and cheaply.</p><pre><code class="console language-console">ptc init hello-ptc                       # a plain application
+ptc init hello-ptc --example llm-replay  # or a model with no credential
 ptc validate hello-ptc/ptc-project.json  # compile without executing
-ptc repl --project hello-ptc/ptc-project.json -e '(main/run {&quot;name&quot; &quot;world&quot;})'
+ptc repl --project hello-ptc/ptc-project.json -e '(dir)'
 ptc doctor hello-ptc/ptc-project.json    # check provider readiness locally
 ptc run hello-ptc/ptc-project.json --envelope out.json</code></pre><p><code class="inline">ptc init</code> writes a complete project, including an <code class="inline">AGENTS.md</code> that points a
-later agent back at these commands. Edit <code class="inline">main.clj</code> for behavior and <code class="inline">ptc.json</code>
-for input, providers, missions, and limits.</p><h2 id="experiment-before-committing-to-a-file">Experiment before committing to a file</h2><p><code class="inline">ptc repl</code> is the cheapest place to check a language question, and its
+later agent back at these commands. Edit the component selected by <code class="inline">ptc.json</code>
+for behavior, and edit <code class="inline">ptc.json</code> for input and limits.</p><h2 id="experiment-before-committing-to-a-file">Experiment before committing to a file</h2><p><code class="inline">ptc repl</code> is the cheapest place to check a language question, and its
 discovery functions work in every input context — not only at a terminal, so a
 detached agent gets the same answers:</p><pre><code class="console language-console">ptc repl --project PROJECT.json -e '(apropos &quot;json&quot;)'   # search attached exports
 ptc repl --project PROJECT.json -e '(doc &quot;reduce&quot;)'     # print one function's documentation

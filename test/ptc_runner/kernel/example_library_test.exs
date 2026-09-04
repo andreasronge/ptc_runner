@@ -1,12 +1,15 @@
 defmodule PtcRunner.Kernel.ExampleLibraryTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureIO
+
   alias PtcRunner.Dotenv
   alias PtcRunner.Kernel.CommandContract
   alias PtcRunner.Kernel.CommandEngine
   alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.ExampleLibrary
   alias PtcRunner.Kernel.ProjectConfig
+  alias PtcRunner.MixCommandAdapter
 
   @root Path.expand("../../..", __DIR__)
 
@@ -200,12 +203,33 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
   test "init materializes the replay example as a one-argument project run", %{
     tmp_dir: directory
   } do
+    assert {:ok, %CommandOutcome{envelope: docs_envelope}} =
+             CommandEngine.dispatch(["docs", "agent-guide"])
+
+    guide = docs_envelope["result"]["content"]
+    assert guide =~ "Choose one `ptc init` form"
+    assert guide =~ "ptc init hello-ptc --example llm-replay"
+    assert guide =~ "ptc repl --project hello-ptc/ptc-project.json -e '(dir)'"
+
     target = Path.join(directory, "llm-replay")
 
     assert {:ok, %CommandOutcome{}} =
              CommandEngine.dispatch(["init", target, "--example", "llm-replay"])
 
     assert File.exists?(Path.join(target, "ptc-project.json"))
+
+    repl_output =
+      capture_io(fn ->
+        MixCommandAdapter.run_task([
+          "repl",
+          "--project",
+          Path.join(target, "ptc-project.json"),
+          "-e",
+          "(dir)"
+        ]).outcome
+      end)
+
+    assert repl_output == ~s(["cap" "example.replay"]\n)
 
     assert {:ok, %CommandOutcome{envelope: envelope}} =
              CommandEngine.dispatch(["run", Path.join(target, "ptc-project.json")])
