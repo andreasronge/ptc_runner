@@ -66,6 +66,11 @@ defmodule PtcRunner.Kernel.CommandFrontend do
     present(entry, outcome, rejection, named_env_file?)
   end
 
+  @doc false
+  @spec present_outcome(CommandEntry.t(), CommandOutcome.t()) :: CommandPresentation.t()
+  def present_outcome(%CommandEntry{} = entry, %CommandOutcome{} = outcome),
+    do: present(entry, outcome, nil)
+
   defp execute_entry(%CommandEntry{arguments: %{command: command}} = entry, _bootstrap)
        when command in [:help, :version] do
     {_status, outcome, rejection, named_env_file?} =

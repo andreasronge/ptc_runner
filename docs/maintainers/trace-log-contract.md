@@ -429,6 +429,10 @@ list, such as `generated[].evaluation_id` on a turn.
 The `model_exchanges` and `capability_calls` entries additionally advertise
 `item_completeness_field: "complete?"`; collections without per-item
 completion semantics omit that catalog field.
+The `turns` entry also owns the transcript projection boundary:
+`projection_scope: "model_conversation"` and `projection_not_included` name
+the scope certified by a published transcript and the evidence surfaces it
+excludes. Transcript publication derives its header from these catalog fields.
 
 ### `analysis/read`
 

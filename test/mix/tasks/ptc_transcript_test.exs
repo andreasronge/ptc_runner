@@ -21,6 +21,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     output_directory = Path.join(root, "transcript")
     File.mkdir!(output_directory)
     output = Path.join(output_directory, "transcript.private.json")
+    envelope = Path.join(output_directory, "transcript-envelope.json")
     relative_output = Path.relative_to(output, File.cwd!())
 
     assert Path.type(relative_output) == :relative
@@ -35,16 +36,41 @@ defmodule Mix.Tasks.PtcTranscriptTest do
         fixture.inspection,
         "--private-unattended",
         "--private-output",
-        relative_output
+        relative_output,
+        "--envelope",
+        envelope
       ])
 
     assert presentation.exit_status == 0
-    assert presentation.stdout == ""
     assert presentation.stderr == ""
 
     assert %{
-             "schema_version" => 1,
-             "run_id" => run_id,
+             "command" => "transcript",
+             "run_ref" => run_id,
+             "path" => path,
+             "turns" => 1
+           } = Jason.decode!(presentation.stdout)
+
+    assert run_id == fixture.run_id
+    assert path == Path.expand(relative_output)
+
+    assert %{
+             "schema_version" => 4,
+             "command" => "transcript",
+             "status" => "ok",
+             "result" => %{
+               "command" => "transcript",
+               "run_ref" => ^run_id,
+               "path" => ^path,
+               "turns" => 1
+             }
+           } = envelope |> File.read!() |> Jason.decode!()
+
+    assert %{
+             "schema_version" => 2,
+             "run_id" => ^run_id,
+             "complete_scope" => "model_conversation",
+             "not_included" => ["prelude_sources", "capability_schemas", "result"],
              "conversation" => %{
                "complete?" => true,
                "streams" => [
@@ -61,8 +87,6 @@ defmodule Mix.Tasks.PtcTranscriptTest do
                ]
              }
            } = output |> File.read!() |> Jason.decode!()
-
-    assert run_id == fixture.run_id
 
     # A transcript that certifies its own completeness cannot omit the
     # instructions that shaped the run.
@@ -87,8 +111,10 @@ defmodule Mix.Tasks.PtcTranscriptTest do
       PrivateInspectionFixture.create_ambiguous!(root, PrivateInspectionFixture.command_run_ref())
 
     output = Path.join(fixture.output, "ambiguous.private.json")
+    envelope = Path.join(fixture.output, "ambiguous-envelope.json")
 
-    presentation = MixCommandAdapter.execute(transcript_argv(fixture, output))
+    presentation =
+      MixCommandAdapter.execute(transcript_argv(fixture, output) ++ ["--envelope", envelope])
 
     assert presentation.exit_status == 1
     # The refusal is correct; naming incompleteness for it is not. Nothing is
@@ -98,6 +124,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     assert presentation.stderr =~ "is ambiguous: 1 turn or generated-source association"
     assert_ungated_repl_hint(presentation.stderr)
     refute File.exists?(output)
+    refute File.exists?(envelope)
   end
 
   @tag :tmp_dir
@@ -186,6 +213,44 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     assert presentation.stderr =~ "already exists"
     refute presentation.stderr =~ output
     assert File.read!(output) == "original"
+  end
+
+  @tag :tmp_dir
+  test "the envelope cannot replace the transcript destination", %{tmp_dir: root} do
+    fixture = canonical_create!(root)
+    output = Path.join(fixture.output, "same-destination.json")
+
+    presentation =
+      MixCommandAdapter.execute(transcript_argv(fixture, output) ++ ["--envelope", output])
+
+    assert presentation.exit_status == 2
+    assert presentation.stderr =~ "arguments/conflicting_arguments"
+    assert presentation.stderr =~ "--private-output"
+    assert presentation.stderr =~ "--envelope"
+    refute File.exists?(output)
+  end
+
+  test "an invalid envelope destination names its switch" do
+    for path <- ["", "-"] do
+      presentation =
+        MixCommandAdapter.execute([
+          "transcript",
+          PrivateInspectionFixture.command_run_ref(),
+          "--traces",
+          "traces",
+          "--inspection",
+          "inspection",
+          "--private-unattended",
+          "--private-output",
+          "transcript.json",
+          "--envelope",
+          path
+        ])
+
+      assert presentation.exit_status == 2
+      assert presentation.stderr =~ "arguments/invalid_arguments"
+      assert presentation.stderr =~ "invalid destination: --envelope"
+    end
   end
 
   @tag :tmp_dir
@@ -460,7 +525,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
     assert {:ok, entry} = CommandEntry.open(argv, :standalone)
     inspection_path = Path.join(fixture.inspection, "#{fixture.run_id}.ptcins")
 
-    assert :ok =
+    assert {:ok, _result} =
              TranscriptFrontend.run(entry.arguments, CommandRuntime.standalone(),
                inspection_artifact_verification_hook: fn -> File.rm!(inspection_path) end
              )
@@ -529,7 +594,7 @@ defmodule Mix.Tasks.PtcTranscriptTest do
 
     assert {:ok, entry} = CommandEntry.open(transcript_argv(fixture, output), :standalone)
 
-    assert :ok =
+    assert {:ok, _result} =
              TranscriptFrontend.run(entry.arguments, CommandRuntime.standalone(),
                listing_hook: listed,
                inspection_listing_hook: listed

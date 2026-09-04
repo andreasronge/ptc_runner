@@ -6,6 +6,7 @@ defmodule PtcRunner.Kernel.CommandRouter do
   alias PtcRunner.Kernel.CommandDeclaration
   alias PtcRunner.Kernel.CommandEntry
   alias PtcRunner.Kernel.CommandFrontend
+  alias PtcRunner.Kernel.CommandOutcome
   alias PtcRunner.Kernel.CommandPresentation
   alias PtcRunner.Kernel.CommandRenderer
   alias PtcRunner.Kernel.CommandRuntime
@@ -14,7 +15,10 @@ defmodule PtcRunner.Kernel.CommandRouter do
 
   @type bootstrap :: CommandFrontend.bootstrap()
   @type one_shot_runner :: (PtcRunner.Kernel.CommandArguments.t(), CommandRuntime.t() ->
-                              :ok | {:error, binary()} | {:error, atom(), binary()})
+                              :ok
+                              | {:ok, map()}
+                              | {:error, binary()}
+                              | {:error, atom(), binary()})
 
   @spec execute([binary()], :standalone | :mix, bootstrap(), one_shot_runner(), keyword()) ::
           CommandPresentation.t()
@@ -83,6 +87,10 @@ defmodule PtcRunner.Kernel.CommandRouter do
         case runner.(entry.arguments, runtime) do
           :ok ->
             presentation(nil, "", "", 0)
+
+          {:ok, result} when entry.arguments.command == :transcript and is_map(result) ->
+            outcome = CommandOutcome.success(:transcript, entry.run_ref, result)
+            CommandFrontend.present_outcome(entry, outcome)
 
           {:error, code, message} ->
             presentation(

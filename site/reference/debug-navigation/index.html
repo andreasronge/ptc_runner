@@ -138,7 +138,10 @@ ptc transcript RUN_ID \
   --traces .ptc/traces \
   --inspection .ptc/inspection \
   --private-unattended \
-  --private-output out/conversation.private.json</code></pre><p><code class="inline">--private-output</code> names a new owner-only file. Its parent must already exist
+  --private-output out/conversation.private.json</code></pre><p>Success prints one JSON line naming the command, selected run, absolute output
+path, and turn count. A schema-version-2 transcript scopes <code class="inline">complete?</code> to
+<code class="inline">model_conversation</code>; <code class="inline">not_included</code> names <code class="inline">prelude_sources</code>,
+<code class="inline">capability_schemas</code>, and the final <code class="inline">result</code> as evidence outside that scope.</p><p><code class="inline">--private-output</code> names a new owner-only file. Its parent must already exist
 and be reached without a symbolic link — on macOS <code class="inline">/tmp</code> is a symlink, so
 <code class="inline">/tmp/out.json</code> is refused. The parent must also be physically separate from
 <code class="inline">--traces</code> and <code class="inline">--inspection</code>: no directory may equal, contain, or be
