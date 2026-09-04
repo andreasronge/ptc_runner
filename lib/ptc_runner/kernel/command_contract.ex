@@ -1485,6 +1485,18 @@ defmodule PtcRunner.Kernel.CommandContract do
        do: RuntimeLimitDiagnostic.run_duration_message_schema(row.message)
 
   defp diagnostic_message_schema(
+         %{phase: :execution, code: :event_capture_limit_exceeded} = row,
+         %{"type" => "null"}
+       ),
+       do: RuntimeLimitDiagnostic.event_capture_message_schema(row.message)
+
+  defp diagnostic_message_schema(
+         %{phase: :execution, code: :event_capture_limit_exceeded} = row,
+         _source
+       ),
+       do: %{"const" => row.message}
+
+  defp diagnostic_message_schema(
          %{phase: :result_cleanup, code: :result_contract_failed} = row,
          %{"properties" => %{"kind" => %{"const" => "result_contract"}}}
        ),

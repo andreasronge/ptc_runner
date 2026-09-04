@@ -452,7 +452,21 @@ defmodule PtcRunner.Kernel.LimitCatalogTest do
     assert LimitConfigurationDiagnostic.valid_message?(message)
     refute LimitConfigurationDiagnostic.valid_message?(message <> "\n")
 
-    assert :ok = LimitConfiguration.validate_effective(invalid, :private)
+    private_required = LimitConfiguration.required_private_event_bytes(base)
+
+    {:ok, invalid_private} =
+      Limits.new(event_payload_bytes: payload_bytes, normal_event_bytes: private_required - 1)
+
+    assert {:error,
+            {:limit_configuration_invalid, configured_private, ^private_required, ^payload_bytes}} =
+             LimitConfiguration.validate_effective(invalid_private, :private)
+
+    assert configured_private == private_required - 1
+
+    {:ok, valid_private} =
+      Limits.new(event_payload_bytes: payload_bytes, normal_event_bytes: private_required)
+
+    assert :ok = LimitConfiguration.validate_effective(valid_private, :private)
 
     assert {:ok, valid} =
              Limits.new(event_payload_bytes: payload_bytes, normal_event_bytes: required_bytes)

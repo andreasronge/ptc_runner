@@ -153,10 +153,9 @@ defmodule PtcRunner.Kernel.EventSinkState do
   defp normalized_payload(_data), do: :error
 
   defp enqueue(state, event, bytes) do
-    if ordinary_capacity?(state, bytes) do
-      {:ok, retain_event(state, event, bytes)}
-    else
-      sink_failure(state, event.type)
+    case ordinary_capacity(state, bytes) do
+      :ok -> {:ok, retain_event(state, event, bytes)}
+      {:error, limit, value} -> sink_capacity_failure(state, event.type, limit, value)
     end
   end
 
@@ -170,11 +169,25 @@ defmodule PtcRunner.Kernel.EventSinkState do
   end
 
   defp ordinary_capacity?(state, bytes) do
+    ordinary_capacity(state, bytes) == :ok
+  end
+
+  defp ordinary_capacity(state, bytes) do
     reserve = state.terminal_reserve
 
-    not state.finalized? and
-      length(state.events) < state.limits.normal_event_count - reserve.count and
-      state.bytes + bytes <= state.limits.normal_event_bytes - reserve.bytes
+    cond do
+      state.finalized? ->
+        {:error, :event_sink_state, :finalized}
+
+      length(state.events) >= state.limits.normal_event_count - reserve.count ->
+        {:error, :normal_event_count, state.limits.normal_event_count}
+
+      state.bytes + bytes > state.limits.normal_event_bytes - reserve.bytes ->
+        {:error, :normal_event_bytes, state.limits.normal_event_bytes}
+
+      true ->
+        :ok
+    end
   end
 
   defp retain_event(state, event, bytes) do
@@ -194,6 +207,12 @@ defmodule PtcRunner.Kernel.EventSinkState do
     dropped = Map.update(state.dropped, bucket, 1, &increment_drop_count/1)
     {:ok, %{state | dropped: dropped}}
   end
+
+  defp sink_capacity_failure(%{policy: :private} = state, _type, limit, value)
+       when limit in [:normal_event_count, :normal_event_bytes] and is_integer(value),
+       do: {{:error, {:event_capture_limit_exceeded, limit, value}}, state}
+
+  defp sink_capacity_failure(state, type, _limit, _value), do: sink_failure(state, type)
 
   defp drop_bucket(dropped, type) do
     cond do

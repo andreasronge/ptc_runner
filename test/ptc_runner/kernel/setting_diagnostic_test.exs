@@ -189,6 +189,7 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
       {%{limit: :agent_turns, limit_value: 4, limit_reason: :turn_limit_exceeded}, "max_turns"},
       {%{limit: :max_transcript_chars, limit_value: 262_144}, "max_transcript_chars"},
       {%{limit: :terminal_result_bytes, limit_value: 1_000_000}, "terminal_result_bytes"},
+      {%{limit: :normal_event_count, limit_value: 256}, "normal_event_count"},
       {%{limit: :workflow_heap_words, limit_value: 8_000_000}, "workflow_heap_words"},
       {%{limit: :max_calls, alias: "deepseek", limit_value: 4}, "max_calls"},
       {%{limit: :workflow_capability_calls_per_name, name: "llm-request", limit_value: 2},
@@ -638,6 +639,15 @@ defmodule PtcRunner.Kernel.SettingDiagnosticTest do
         value: "64",
         remedy: "raise limits.protocol_errors in the manifest",
         build: fn -> RuntimeLimitDiagnostic.protocol_errors_message(64) end
+      },
+      %{
+        phase: :execution,
+        code: :event_capture_limit_exceeded,
+        source: nil,
+        setting: "normal_event_count",
+        value: "256",
+        remedy: "raise limits.normal_event_count in the manifest",
+        build: fn -> RuntimeLimitDiagnostic.event_capture_message(:normal_event_count, 256) end
       },
       %{
         phase: :execution,

@@ -358,19 +358,23 @@ finalization. `TraceLog` owns canonical persistence and queries.
 `RunAnalysis` and the Viewer consume those snapshots rather than define another
 event model.
 
-Normal trace admission validates structural headroom after host ceilings and
+Trace admission validates structural headroom after host ceilings and
 application requests have been resolved. `normal_event_count` must be at least
 three: one ordinary `run-started` event plus the `events-dropped` and
 `run-stopped` terminal reserve. `normal_event_bytes` must be at least the
 measured normal terminal reserve plus
 `EventBudget.maximum_event_bytes("run-started", event_payload_bytes)`, preserving
-one complete maximum-size `run-started` envelope in addition to the terminal
-envelopes. `EventBudget` owns the bounded payload and envelope shapes;
+one complete maximum-size `run-started` envelope in addition to the normal
+terminal envelopes. Private admission uses the same formula with
+`EventSink.terminal_reserve(:private, effective_limits)`. `EventBudget` owns the bounded payload and envelope shapes;
 `LimitConfiguration` owns the cross-field check for manifest-backed validate,
 doctor, run, and REPL paths; a refusal is the pre-execution
-`application/limit_configuration_invalid` diagnostic. Private trace policy
-still uses a zero terminal reserve and is not subject to this normal-trace byte
-relationship.
+`application/limit_configuration_invalid` diagnostic. Despite their historical
+names, `normal_event_count` and `normal_event_bytes` bound both normal and
+private traces. Private policy reserves one `run-stopped` envelope so a shared
+ceiling ends with a complete retained trace and
+`execution/event_capture_limit_exceeded`; it is not subject to the normal
+policy's dropped-event byte relationship.
 
 `event_payload_bytes` has its own floor, and it has two parts.
 `TerminalUsage.maximum/4` builds the largest `run-stopped` projection a
@@ -526,12 +530,12 @@ span them:
   filesystem identity into `SessionTrace`, and publication verifies that
   identity before it receives trace bytes, so replacing or retargeting the
   pathname cannot redirect the write.
-- The session relies on the measured terminal reserve every normal `EventSink`
-  carries by default — two measured terminal envelopes; private sinks reserve
-  nothing. Ordinary events stop before the count and byte ceilings would consume
-  capacity for one bounded `events-dropped` summary and exactly one
-  `run-stopped`. Atomic finalization returns the frozen terminal batch in that
-  same owner call without exceeding either hard ceiling.
+- The session relies on the measured terminal reserve every `EventSink` carries
+  by default — two measured terminal envelopes for normal sinks and one
+  `run-stopped` envelope for private sinks. Ordinary events stop before the
+  count and byte ceilings would consume the applicable reserve. Atomic
+  finalization returns the frozen terminal batch in that same owner call
+  without exceeding either hard ceiling.
 - Exhausting a terminal session budget persists an error run with that
   authoritative limit reason even when abort or deadline expiry performs the
   eventual close. The reason is transferred to the trace owner before the

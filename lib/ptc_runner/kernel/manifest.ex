@@ -455,7 +455,7 @@ defmodule PtcRunner.Kernel.Manifest do
          :ok <- mission_declarations(Map.get(manifest, "missions", %{}), providers),
          {:ok, limits} <- limits(Map.get(manifest, "limits", %{}), installed_limits),
          {:ok, events} <- events(Map.get(manifest, "events", %{})),
-         :ok <- LimitConfiguration.validate_effective(limits, events.policy),
+         :ok <- LimitConfiguration.validate_minimum(limits),
          {:ok, labels} <- labels(Map.get(manifest, "labels", %{})) do
       {:ok,
        %{

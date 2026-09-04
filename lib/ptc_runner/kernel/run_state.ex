@@ -548,6 +548,16 @@ defmodule PtcRunner.Kernel.RunState do
   def fail(state, kind, reason), do: safe_call(state, {:fail, kind, reason}, :ok)
 
   @doc false
+  @spec fail_event_capture_limit(
+          t(),
+          :normal_event_count | :normal_event_bytes,
+          pos_integer()
+        ) :: :ok | {:error, :closed}
+  def fail_event_capture_limit(state, limit, value)
+      when limit in [:normal_event_count, :normal_event_bytes] and is_integer(value) and value > 0,
+      do: safe_call(state, {:fail_event_capture_limit, limit, value}, :ok)
+
+  @doc false
   @spec fail_once(t(), atom(), atom()) ::
           {:recorded, %{kind: atom(), reason: atom()}}
           | {:existing,
@@ -1296,6 +1306,23 @@ defmodule PtcRunner.Kernel.RunState do
   def handle_call({token, {:fail, kind, reason}}, _from, %{token: token} = state)
       when is_atom(kind) and is_atom(reason) do
     failure = state.terminal_failure || %{kind: kind, reason: reason}
+    {:reply, :ok, admit_from_queue(%{state | closed?: true, terminal_failure: failure})}
+  end
+
+  def handle_call(
+        {token, {:fail_event_capture_limit, limit, value}},
+        _from,
+        %{token: token} = state
+      )
+      when limit in [:normal_event_count, :normal_event_bytes] and is_integer(value) and value > 0 do
+    failure =
+      state.terminal_failure ||
+        %{
+          kind: :limit_exceeded,
+          reason: :event_capture_limit_exceeded,
+          details: %{limit: limit, limit_value: value}
+        }
+
     {:reply, :ok, admit_from_queue(%{state | closed?: true, terminal_failure: failure})}
   end
 

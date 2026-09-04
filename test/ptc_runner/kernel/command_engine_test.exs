@@ -859,6 +859,59 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
   end
 
   @tag :tmp_dir
+  test "private event capacity failure publishes the retained trace and inspection", %{
+    tmp_dir: directory
+  } do
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, base_limits} = Limits.new(event_payload_bytes: payload_bytes)
+    private_bytes = LimitConfiguration.required_private_event_bytes(base_limits)
+
+    assert private_bytes < LimitConfiguration.required_normal_event_bytes(base_limits)
+
+    application =
+      write_application(
+        directory,
+        "private-event-capacity",
+        valid_manifest(%{
+          "limits" => %{
+            "event_payload_bytes" => payload_bytes,
+            "normal_event_bytes" => private_bytes,
+            "normal_event_count" => 3
+          }
+        })
+      )
+
+    input = Path.join(Path.dirname(application), "private-input.json")
+    output = Path.join(directory, "private-result.json")
+    inspection = Path.join(directory, "run.ptcins")
+    trace_dir = Path.join(directory, "traces")
+    File.write!(input, ~s({}))
+    File.mkdir_p!(trace_dir)
+
+    assert {:error, %CommandOutcome{} = outcome} =
+             CommandEngine.dispatch([
+               "run",
+               application,
+               "--private-input",
+               "private-input.json",
+               "--private-output",
+               output,
+               "--trace-dir",
+               trace_dir,
+               "--inspect",
+               inspection
+             ])
+
+    assert outcome.envelope["error"]["code"] == "event_capture_limit_exceeded"
+    assert outcome.envelope["error"]["message"] =~ "normal_event_count limit 3"
+    assert outcome.envelope["artifact_state"]["trace"] == "written"
+    assert outcome.envelope["artifact_state"]["inspection"] == "written"
+    assert_schema_valid(outcome.envelope)
+    assert {:ok, _records} = StreamingInspection.read_path(inspection)
+    assert [_trace] = Path.wildcard(Path.join(trace_dir, "*.private.jsonl"))
+  end
+
+  @tag :tmp_dir
   test "fail nil retains a dedicated inspection record", %{tmp_dir: directory} do
     application = write_application(directory, "explicit-fail-nil", valid_manifest())
     inspection = Path.join(directory, "run.ptcins")
@@ -1477,6 +1530,25 @@ defmodule PtcRunner.Kernel.CommandEngineTest do
     assert outcome.envelope["error"]["message"] == expected
     assert outcome.envelope["error"]["source"] == %{"kind" => "runtime", "name" => "ptc-runtime"}
     assert_schema_valid(outcome.envelope)
+  end
+
+  test "event capture diagnostics name the shared trace ceiling" do
+    assert {:error, %CommandOutcome{} = outcome} =
+             project_limit_exceeded(:event_capture_limit_exceeded, %{
+               limit: :normal_event_count,
+               limit_value: 256
+             })
+
+    assert {:ok, expected} =
+             RuntimeLimitDiagnostic.event_capture_message(:normal_event_count, 256)
+
+    assert outcome.envelope["error"]["code"] == "event_capture_limit_exceeded"
+    assert outcome.envelope["error"]["message"] == expected
+    assert outcome.envelope["error"]["source"] == nil
+    assert_schema_valid(outcome.envelope)
+
+    runtime_source = %{"kind" => "runtime", "name" => "ptc-runtime"}
+    assert_schema_invalid(put_in(outcome.envelope, ["error", "source"], runtime_source))
   end
 
   test "aggregate budget diagnostics name the reservation and bind the runtime source" do
