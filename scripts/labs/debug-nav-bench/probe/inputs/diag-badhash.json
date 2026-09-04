@@ -1,0 +1,1 @@
+{"action":"diagnose","report":{"run_id":"__RUN_ID__","component_id":"pricing.rule","source_hash":"sha256:0000","excerpt":"(+ subtotal 2)","cause":"c","evidence":["e"]}}

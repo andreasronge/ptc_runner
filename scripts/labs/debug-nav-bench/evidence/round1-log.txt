@@ -1,0 +1,36 @@
+nb-amb-p1-luna 1 exit=0 wall=38s result=cmd-37qybvq03t15d2cs0x2h5crxv1.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p1-luna 1 exit=0 wall=51s result=cmd-3kvcf2hmb8rvv7snwpwmg7eet1.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p1-luna 1 exit=7 wall=55s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-6t4rm8p3bbpfgvpf09mrgjd81z) 
+nb-t-p2-luna 1 exit=7 wall=56s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-0dm24pcnqtewdrb8mhqabsyyhv) 
+nb-amb-p2-luna 1 exit=7 wall=57s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-7shg697cr27wsx4wx8s0swvn4h) 
+nb-wc-p2-luna 1 exit=7 wall=63s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-0pbxhjneccb7bsedj4ejcsw8dr) 
+nb-amb-p1-luna 2 exit=7 wall=52s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-4mtk1r6t31y5wf0nna4a538p3n) 
+nb-t-p1-luna 2 exit=0 wall=42s result=cmd-4t9cp503w2sxtcmejfztm7ptzv.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p1-luna 2 exit=0 wall=48s result=cmd-1ffxdb2rwpkfng9gs3qag23w7f.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p2-luna 2 exit=7 wall=56s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-535cwkb92bfqjbjtmrq6fwzyg3) 
+nb-amb-p2-luna 2 exit=7 wall=56s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-2wj2y99kqkbbgf7kv2ndxkdmza) 
+nb-wc-p2-luna 2 exit=7 wall=52s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-1ewcjghst94338az3eppqnm9dz) 
+nb-amb-p1-luna 3 exit=0 wall=42s result=cmd-75t1h18da0aq7183a8e0h0xrfk.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p1-luna 3 exit=0 wall=38s result=cmd-6q79sdv14xa0wys3at423tahzj.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p2-luna 3 exit=7 wall=47s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-3m8fjh1b6sja3wnkrz5th0wa9t) 
+nb-t-p1-luna 3 exit=7 wall=66s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-7bqre1p55jj4sqtprnmf11cjmb) 
+nb-amb-p2-luna 3 exit=7 wall=51s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-3nsvq9b3g1br855xr1t5ekday8) 
+nb-wc-p2-luna 3 exit=7 wall=55s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-4dnj1ge26bpj7f7mc64nt1sddr) 
+nb-wc-p2-ds 1 exit=7 wall=105s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-1ts4bq7dmkven9xfwr0dxksaev) 
+nb-t-p1-ds 1 exit=7 wall=125s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-26shm6948g29wh0tvr6xbwef62) 
+nb-wc-p1-ds 1 exit=7 wall=138s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-7y7wsjrbmchpj614ezscnqdn79) 
+nb-t-p2-ds 1 exit=7 wall=144s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-6m3deet74nxavxhhjre3hjs3pf) 
+nb-amb-p2-ds 1 exit=7 wall=172s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-6rvr6b57fp0a7mrgc1dfsvhyh9) 
+nb-amb-p1-ds 1 exit=0 wall=193s result=cmd-2z1q10asjpwasfw4fg78y48hew.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p2-ds 2 exit=7 wall=145s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-2a68tvnpb8fbxjwrbmjjnaayc5) 
+nb-t-p1-ds 2 exit=0 wall=147s result=cmd-1ps7ksqqps8np78ybw8psgavt4.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p2-ds 2 exit=7 wall=163s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-64mf3f3ps6xedhfq27v2ee940z) 
+nb-amb-p2-ds 2 exit=7 wall=213s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-2ranyqdek5qxy179kv2ymphqdc) 
+nb-wc-p1-ds 2 exit=7 wall=229s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-4tv9v01g3yvv2m8zzfwwqmjsgz) 
+nb-wc-p2-ds 3 exit=7 wall=136s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-742n7chzda999h2n048ezjhjx7) 
+nb-amb-p1-ds 2 exit=7 wall=254s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-2vb2m3b5vjg8vtk136ahjpmzhc) 
+nb-t-p1-ds 3 exit=7 wall=151s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-1q86z2p24ga9s7fby7sbwf689e) 
+nb-amb-p2-ds 3 exit=7 wall=64s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-2aza191rm7v8b6ktegp7zawde4) 
+nb-t-p2-ds 3 exit=7 wall=144s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-5n2mzvw8w5689ymryqzqawaywm) 
+nb-wc-p1-ds 3 exit=7 wall=158s result=none :: error: execution/event_sink_unavailable: the trace event sink is unavailable (run_ref: cmd-6hqn4gzte4vcwpv8hv2r8j12t7) 
+nb-amb-p1-ds 3 exit=0 wall=177s result=cmd-6rsw8epw1a3d4e4dsdft8m8p8a.private.json :: {"artifact_class":"private","status":"ok"} 

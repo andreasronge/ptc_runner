@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "workflow": {"components": [{"id": "main", "path": "main.clj", "dependencies": ["kernel"]}, {"library": "kernel"}], "entry": "main/run"},
+  "missions": {"evidence": {"components": [{"id": "debug.terminal", "path": "debug.terminal.clj", "dependencies": ["debug.nav"]}, {"library": "debug.nav"}], "providers": ["debug.nav", "failed-run-traces"]}},
+  "providers": {"mission": [{"name": "debug.nav"}, {"name": "failed-run-traces", "config": {"expose": false}}]},
+  "input": {"value": {"action": "abstain", "report": {"run_id": "cmd-4aabvt2a4e76grtyzac0p7tp4r", "cause": "c", "evidence": ["e"], "missing": [{"description": "a specification"}]}}},
+  "events": {"policy": "private"},
+  "labels": {"name": "nb3-probe", "tags": {"mode": "deterministic"}}
+}

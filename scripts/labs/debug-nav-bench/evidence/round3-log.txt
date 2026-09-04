@@ -1,0 +1,12 @@
+nb3-t-luna 1 exit=0 wall=39s result=cmd-7ag4e9nt3n0g21455502dmb26d.private.json :: {"artifact_class":"private","status":"ok"} 
+nb3-wc-luna 1 exit=0 wall=66s result=cmd-6epytarkytvzn304408hzbdja1.private.json :: {"artifact_class":"private","status":"ok"} 
+nb3-t-luna 2 exit=0 wall=43s result=cmd-60epcz82ackaycbvj0cdhrk7zr.private.json :: {"artifact_class":"private","status":"ok"} 
+nb3-amb-luna 1 exit=0 wall=82s result=cmd-137yfr6h35yzkvvvtwp7bjqwbj.private.json :: {"artifact_class":"private","status":"ok"} 
+nb3-wc-luna 2 exit=0 wall=58s result=cmd-2ywrzvpv7vv00db9hh274haysd.private.json :: {"artifact_class":"private","status":"ok"} 
+nb3-amb-luna 2 exit=0 wall=61s result=cmd-52sbvyqtj08x7pwjd71qnhr485.private.json :: {"artifact_class":"private","status":"ok"} 
+nb3-amb-ds 1 exit=6 wall=182s result=none :: error: execution/model_output_truncated: provider/model/execution: model output for alias model was truncated without producing a usable run_ptc_lisp call; the request used max_tokens 4096 from the ap
+nb3-wc-ds 1 exit=6 wall=201s result=none :: error: execution/turn_limit_exceeded: agent turn limit 30 was exceeded while the model was still working; raise max_turns in the agent configuration, or reduce the work per turn (run_ref: cmd-5zgagzta
+nb3-t-ds 1 exit=0 wall=208s result=cmd-3jks5ms0ycnh6gcb8sz3ybrc3t.private.json :: {"artifact_class":"private","status":"ok"} 
+nb3-t-ds 2 exit=0 wall=234s result=cmd-4tknzcwc2bcdrb9qv1yec4x4tk.private.json :: {"artifact_class":"private","status":"ok"} 
+nb3-wc-ds 2 exit=0 wall=257s result=cmd-7yq8vra5dy2wkd7qr2axx635h1.private.json :: {"artifact_class":"private","status":"ok"} 
+nb3-amb-ds 2 exit=6 wall=316s result=none :: error: execution/model_output_truncated: provider/model/execution: model output for alias model was truncated without producing a usable run_ptc_lisp call; the request used max_tokens 4096 from the ap

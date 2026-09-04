@@ -1,0 +1,36 @@
+nb-wc-p1-luna 1 exit=0 wall=41s result=cmd-6ahpxpsw4hp8r5zdpsz3w6jzbw.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p1-luna 1 exit=5 wall=46s result=none :: error: execution/explicit_failure: the workflow signalled an explicit failure; its value is retained in the run's private inspection record (run_ref: cmd-3w2yzacg4dbwyc192pjk7phvsc) 
+nb-amb-p1-luna 1 exit=0 wall=47s result=cmd-0n1m4677wfxtsvabhpzn0xa6ww.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-amb-p2-luna 1 exit=0 wall=62s result=cmd-7j97peqqbtkhdaahdw90cv9r7z.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p2-luna 1 exit=0 wall=68s result=cmd-114d6f9n7r1404dxv4044z3djp.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p2-luna 1 exit=0 wall=70s result=cmd-5h1gbym0j6ggtt5ye76dfmhe8b.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-amb-p1-luna 2 exit=0 wall=38s result=cmd-0q6738dbdz7q1darg3ctd9m5k2.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p1-luna 2 exit=0 wall=43s result=cmd-3qsspfkpk8c6jfd00r6wa677b6.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p1-luna 2 exit=0 wall=49s result=cmd-6g63b095tn4c7d91r7m3r0dacm.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p2-luna 2 exit=0 wall=52s result=cmd-6aegymq50nfghpk1qxqkwrsf3n.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-amb-p2-luna 2 exit=0 wall=65s result=cmd-73ybaxmd2ndf41hj38zga113yz.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p1-luna 3 exit=0 wall=36s result=cmd-1k6d73w2kf3c3mratjasgzqt08.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-amb-p1-luna 3 exit=0 wall=46s result=cmd-3xsv0ykhans6fd9wrxt1gmjbsg.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p2-luna 2 exit=0 wall=61s result=cmd-5n1waymzvjjz824zc0k63exw5m.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p1-luna 3 exit=0 wall=49s result=cmd-6wjw8v049a297e6h9v1jbdvysw.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p2-luna 3 exit=0 wall=69s result=cmd-43zgs5c4xyrxvkf33cx62n6w0c.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-amb-p2-luna 3 exit=0 wall=62s result=cmd-1rtgp2n37vymvnetzjxzses3xk.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p2-luna 3 exit=0 wall=75s result=cmd-5m00c7fnwea1qmy8pk05c0gtxq.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p1-ds 1 exit=0 wall=92s result=cmd-505vkc4jx8b8ay734jth2nmw3x.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-amb-p1-ds 1 exit=0 wall=128s result=cmd-0be452t1rj9wpq75d9d5mc90mc.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p2-ds 1 exit=6 wall=137s result=none :: error: execution/turn_limit_exceeded: agent turn limit 30 was exceeded while the model was still working; raise max_turns in the agent configuration, or reduce the work per turn (run_ref: cmd-0r6cx6z9
+nb-t-p1-ds 2 exit=0 wall=99s result=cmd-70cpg0sgane4sx4maaekhh7h96.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p1-ds 1 exit=0 wall=156s result=cmd-7s3xg0g06t3byd7cttxqf959br.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-amb-p1-ds 2 exit=0 wall=103s result=cmd-0zpg8gaa322eme45bx9n5adxy0.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-amb-p2-ds 1 exit=6 wall=278s result=none :: error: execution/model_output_truncated: provider/model/execution: model output for alias model was truncated without producing a usable run_ptc_lisp call; the request used max_tokens 4096 from the ap
+nb-wc-p2-ds 1 exit=0 wall=209s result=cmd-21j4nyxz1c6191r9g6jcq5tq88.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p1-ds 3 exit=0 wall=114s result=cmd-6k1jj9g02q3ajpcpetwa3cwr2a.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p2-ds 2 exit=6 wall=171s result=none :: error: execution/turn_limit_exceeded: agent turn limit 30 was exceeded while the model was still working; raise max_turns in the agent configuration, or reduce the work per turn (run_ref: cmd-0enxkn39
+nb-amb-p1-ds 3 exit=0 wall=165s result=cmd-5rppkfd1rg30pa3yt63p8yw71x.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p1-ds 2 exit=0 wall=222s result=cmd-35spr2m4ntt93r2xq907meanz4.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p2-ds 2 exit=6 wall=197s result=none :: error: execution/turn_limit_exceeded: agent turn limit 30 was exceeded while the model was still working; raise max_turns in the agent configuration, or reduce the work per turn (run_ref: cmd-7879svs3
+nb-amb-p2-ds 2 exit=0 wall=239s result=cmd-0z502etbw0p1wqnb1jnmta8b1f.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p1-ds 3 exit=0 wall=180s result=cmd-62mwrpyjjzjtwwgah3pnm47028.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-t-p2-ds 3 exit=0 wall=275s result=cmd-1cf7erv3z2f1sjeabxyn8b69ps.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-wc-p2-ds 3 exit=0 wall=209s result=cmd-7n2e5c3n91h7aab6tezzs2vqpm.private.json :: {"artifact_class":"private","status":"ok"} 
+nb-amb-p2-ds 3 exit=0 wall=431s result=cmd-0znz250tbfh8p40kyn9a3y1ekc.private.json :: {"artifact_class":"private","status":"ok"} 
