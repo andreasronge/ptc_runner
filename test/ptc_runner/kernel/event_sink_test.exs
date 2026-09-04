@@ -356,6 +356,31 @@ defmodule PtcRunner.Kernel.EventSinkTest do
     assert EventSink.events(sink) == []
   end
 
+  test "private aggregate byte exhaustion names the binding limit and retains finalization" do
+    {:ok, limits} =
+      Limits.new(
+        normal_event_count: 10,
+        normal_event_bytes: 300_000
+      )
+
+    {:ok, sink} = EventSink.start(:private, limits, run_id: "private-byte-capacity")
+    payload = %{value: String.duplicate("x", 20_000)}
+
+    assert :ok = EventSink.emit(sink, "first", payload)
+
+    assert {:error, {:event_capture_limit_exceeded, :normal_event_bytes, 300_000}} =
+             EventSink.emit(sink, "second", payload)
+
+    assert {:ok, %{events: events}} =
+             EventSink.finalize_and_events(sink, %{
+               outcome: :error,
+               reason: :event_capture_limit_exceeded,
+               usage: %{}
+             })
+
+    assert Enum.map(events, & &1.type) == ["first", "run-stopped"]
+  end
+
   defp exact_payload(bytes) do
     Enum.find_value(bytes..1//-1, fn size ->
       payload = %{"value" => String.duplicate("x", size)}

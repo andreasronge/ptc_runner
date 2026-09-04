@@ -137,8 +137,9 @@ depends on the input grammar, never TTY detection: argumentless <code class="inl
 uses it when lines arrive from a terminal or a pipe, and <code class="inline">--load SETUP.clj</code>
 uses it when the setup is followed by that loop. Direct interactive sessions
 set <code class="inline">run_duration_ms</code> and <code class="inline">subordinate_evaluations</code> to their catalog maxima and
-retain normal events up to the installed <code class="inline">normal_event_count</code> and
-<code class="inline">normal_event_bytes</code> ceilings. Per-form time, heap, source, memory, history,
+retain events up to the installed <code class="inline">normal_event_count</code> and
+<code class="inline">normal_event_bytes</code> ceilings. Despite their historical names, these ceilings
+also bound private traces. Per-form time, heap, source, memory, history,
 result, projection, and capability limits remain at their ordinary defaults.</p><p>Interactive manifest and mission sessions use the installed host ceilings for
 omitted <code class="inline">run_duration_ms</code>, <code class="inline">subordinate_evaluations</code>, <code class="inline">normal_event_count</code>, and
 <code class="inline">normal_event_bytes</code>; an explicit manifest value remains effective when it is

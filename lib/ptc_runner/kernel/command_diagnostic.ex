@@ -555,6 +555,13 @@ defmodule PtcRunner.Kernel.CommandDiagnostic do
 
   defp valid_message_source?(
          message,
+         %{phase: :execution, code: :event_capture_limit_exceeded},
+         nil
+       ),
+       do: RuntimeLimitDiagnostic.event_capture_message?(message)
+
+  defp valid_message_source?(
+         message,
          %{phase: :execution, code: :invalid_agent_config},
          nil
        ),

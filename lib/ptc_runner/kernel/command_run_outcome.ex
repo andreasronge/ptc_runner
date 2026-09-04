@@ -348,6 +348,23 @@ defmodule PtcRunner.Kernel.CommandRunOutcome do
   defp failure_diagnostic(%Error{kind: :event_sink_error}, provider_activity),
     do: diagnostic(:execution, :event_sink_unavailable, provider_activity)
 
+  defp failure_diagnostic(
+         %Error{
+           kind: :limit_exceeded,
+           reason: :event_capture_limit_exceeded,
+           details: %{limit: limit, limit_value: value}
+         },
+         provider_activity
+       ) do
+    case RuntimeLimitDiagnostic.event_capture_message(limit, value) do
+      {:ok, message} ->
+        diagnostic(:execution, :event_capture_limit_exceeded, provider_activity, message: message)
+
+      :error ->
+        diagnostic(:execution, :event_capture_limit_exceeded, provider_activity)
+    end
+  end
+
   defp failure_diagnostic(%Error{kind: :inspection_sink_error}, provider_activity),
     do: diagnostic(:execution, :inspection_sink_unavailable, provider_activity)
 

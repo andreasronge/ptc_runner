@@ -17,6 +17,7 @@ defmodule PtcRunner.Kernel.RunCoordinator do
 
   alias PtcRunner.Kernel.ApplicationSource
   alias PtcRunner.Kernel.BundleCompiler
+  alias PtcRunner.Kernel.CommandApplicationDiagnostic
   alias PtcRunner.Kernel.CommandDiagnostic
   alias PtcRunner.Kernel.CommandSource
   alias PtcRunner.Kernel.CommandSubject
@@ -700,6 +701,9 @@ defmodule PtcRunner.Kernel.RunCoordinator do
         occurrence = %{destination: declaration.destination, index: declaration.index}
         {:ok, subject} = CommandSubject.provider(declaration.name, :selection, occurrence)
         {:error, diagnostic(:provider_declaration, :data_policy_denied, subject: subject)}
+
+      {:error, {:limit_configuration_invalid, _bytes, _required, _payload} = reason} ->
+        {:error, CommandApplicationDiagnostic.project(:validate, reason)}
     end
   end
 

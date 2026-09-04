@@ -384,7 +384,15 @@ defmodule PtcRunner.Kernel.RunConfig do
 
   defp valid_event_sink_contract?(%EventSink{policy: :normal} = sink, limits) do
     reserve = EventSink.terminal_reserve(:normal, limits)
+    valid_event_sink_contract?(sink, limits, reserve)
+  end
 
+  defp valid_event_sink_contract?(%EventSink{policy: :private} = sink, limits) do
+    reserve = EventSink.terminal_reserve(:private, limits)
+    valid_event_sink_contract?(sink, limits, reserve)
+  end
+
+  defp valid_event_sink_contract?(sink, limits, reserve) do
     limits.normal_event_count > reserve.count and limits.normal_event_bytes > reserve.bytes and
       match?(
         {:ok,
@@ -399,22 +407,6 @@ defmodule PtcRunner.Kernel.RunConfig do
          }},
         EventSink.session_contract(sink)
       )
-  end
-
-  defp valid_event_sink_contract?(%EventSink{policy: :private} = sink, limits) do
-    match?(
-      {:ok,
-       %{
-         terminal_reserve: %{count: 0, bytes: 0},
-         limits: ^limits,
-         ready?: true,
-         begun?: false,
-         event_count: 0,
-         event_bytes: 0,
-         dropped?: false
-       }},
-      EventSink.session_contract(sink)
-    )
   end
 
   # One owner assembles the complete static `run-started` payload — labels,

@@ -398,6 +398,43 @@ defmodule PtcRunner.Kernel.ManifestReplTest do
   end
 
   @tag :tmp_dir
+  test "manifest REPL rejects a private trace budget that cannot retain its terminal event", %{
+    tmp_dir: directory
+  } do
+    write_component(directory)
+    manifest = Path.join(directory, "invalid-private-trace-budget.json")
+    payload_bytes = EventBudget.minimum_normal_payload_bytes()
+    {:ok, base_limits} = Limits.new(event_payload_bytes: payload_bytes)
+    required_bytes = LimitConfiguration.required_private_event_bytes(base_limits)
+
+    document =
+      :private
+      |> manifest_document(%{})
+      |> Map.put("limits", %{
+        "event_payload_bytes" => payload_bytes,
+        "normal_event_bytes" => required_bytes - 1
+      })
+
+    File.write!(manifest, Jason.encode!(document))
+    {:ok, runtime} = CommandRuntime.new(provider_application_mode: :host_owned)
+
+    assert {:error, %CommandDiagnostic{} = diagnostic} =
+             CommandAcquisition.prepare_repl(manifest, nil, runtime, true)
+
+    assert diagnostic.phase == :application
+    assert diagnostic.code == :limit_configuration_invalid
+
+    diagnostic_message = diagnostic.message
+
+    assert {:ok, ^diagnostic_message} =
+             LimitConfigurationDiagnostic.message(
+               required_bytes - 1,
+               required_bytes,
+               payload_bytes
+             )
+  end
+
+  @tag :tmp_dir
   test "stale capability requirements have the same actionable REPL diagnostic with or without providers",
        %{tmp_dir: directory} do
     provider_free = write_provider_free_application(directory, :normal)
