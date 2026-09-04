@@ -194,6 +194,32 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
              )
   end
 
+  test "capability input and output schemas accept nullable child nodes" do
+    input_schema = %{
+      "type" => "object",
+      "properties" => %{"query" => %{"type" => ["null", "string"]}},
+      "required" => ["query"]
+    }
+
+    output_schema = %{
+      "type" => "object",
+      "properties" => %{"answer" => %{"type" => ["string", "null"]}},
+      "required" => ["answer"]
+    }
+
+    assert {:ok, capability} =
+             Capability.new(
+               name: "nullable",
+               input_schema: input_schema,
+               output_schema: output_schema,
+               callback: fn %{"query" => query} -> {:ok, %{"answer" => query}} end
+             )
+
+    metadata = Capability.metadata(capability)
+    assert get_in(metadata.input_schema, ["properties", "query", "type"]) == ["string", "null"]
+    assert get_in(metadata.output_schema, ["properties", "answer", "type"]) == ["string", "null"]
+  end
+
   test "rejects unsupported keywords, union types, and non-object roots" do
     invalid_schemas = [
       %{"type" => "object", "$ref" => "#/$defs/value"},
@@ -224,8 +250,20 @@ defmodule PtcRunner.Kernel.CapabilitySchemaTest do
         "type" => "object",
         "properties" => %{
           "nested" => %{
-            "type" => "object",
+            "type" => ["object", "null"],
             "properties" => %{"user-id" => %{"type" => "integer"}}
+          }
+        }
+      },
+      %{
+        "type" => "object",
+        "properties" => %{
+          "nested" => %{
+            "type" => ["null", "array"],
+            "items" => %{
+              "type" => ["null", "object"],
+              "properties" => %{"user-id" => %{"type" => "integer"}}
+            }
           }
         }
       },

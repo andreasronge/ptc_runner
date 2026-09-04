@@ -197,9 +197,14 @@ rejected during inert acquisition as
 
 Contracts are closed object schemas by default. The profile supports common
 object, array, scalar, enum, const, and bound keywords, plus the asserted
-`sha256` string format. It also supports one root discriminated `oneOf` for
-closed object branches. References, regexes, nested composition, union types,
-and general-purpose `oneOf` are rejected.
+`sha256` string format. `type` is either one of `"null"`, `"boolean"`,
+`"object"`, `"array"`, `"number"`, `"integer"`, and `"string"`, or—at a
+non-root node—an exactly two-member nullable array pairing `"null"` with one
+of the other types, in either order. Nullable object and array nodes use their
+non-null member for keyword applicability. The root remains a non-nullable
+object. The profile also supports one root discriminated `oneOf` for closed
+object branches. References, regexes, nested composition, general type unions
+(such as `["string", "number"]`), and general-purpose `oneOf` are rejected.
 
 Two edges are worth knowing before you write one. `enum` and `const` must carry
 a sibling `type`, so `{"enum": ["a", "b"]}` is rejected and
@@ -211,11 +216,13 @@ The supported keyword profile above is deliberately closed. Unsupported schema
 composition is rejected during inert application loading rather than being
 partially interpreted at runtime. A `contract_invalid` rejection names the rule
 it broke and the JSON Pointer of the offending node inside the schema document
-— for example `contract schema declares an unsupported "type" at
-/properties/sum/type in result.schema.json` — so a misspelled type, a keyword
-outside the profile, and an unsatisfiable bound are told apart without
-bisecting the schema. Every reported segment is a key or index the submitted
-document carries, and the same pointer appears in the envelope's `path`.
+— for example `contract schema "type" must be "null", "boolean", "object",
+"array", "number", "integer", or "string", or a two-member array pairing
+"null" with one non-null type at /properties/sum/type in result.schema.json` —
+so a misspelled type, a keyword outside the profile, and an unsatisfiable bound
+are told apart without bisecting the schema. Every reported segment is a key or
+index the submitted document carries, and the same pointer appears in the
+envelope's `path`.
 
 `--output PATH` atomically publishes only the validated result value without
 replacing an existing file. Use `--private-output` for a private run; it

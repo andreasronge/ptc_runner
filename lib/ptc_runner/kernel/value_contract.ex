@@ -10,7 +10,8 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   The shared bounded schema profile additionally recognizes only the asserted
   `sha256` string format. References, regexes, arbitrary formats, nested
-  composition, union types, and arbitrary `oneOf` remain unsupported. The
+  composition, general union types, and arbitrary `oneOf` remain unsupported.
+  Non-root nodes may pair one supported non-null type with `null`. The
   normalized contract is limited to 64 KiB and compiled once with JSV.
   """
 
@@ -244,12 +245,27 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   defp describe_type(%{"const" => value}), do: inspect(value)
 
-  defp describe_type(%{"type" => "array"} = node),
-    do: "[" <> describe_type(Map.get(node, "items", %{})) <> "]"
+  defp describe_type(node) do
+    case JSONSchema.node_type(node) do
+      {:ok, "array", nullable?} ->
+        nullable_description("[" <> describe_type(Map.get(node, "items", %{})) <> "]", nullable?)
 
-  defp describe_type(%{"type" => "object"} = node), do: describe_object(node)
-  defp describe_type(%{"type" => type}) when is_binary(type), do: type
-  defp describe_type(_node), do: "any"
+      {:ok, "object", nullable?} ->
+        nullable_description(describe_object(node), nullable?)
+
+      {:ok, "null", _nullable?} ->
+        "null"
+
+      {:ok, type, nullable?} ->
+        nullable_description(type, nullable?)
+
+      :error ->
+        "any"
+    end
+  end
+
+  defp nullable_description(description, true), do: description <> "|null"
+  defp nullable_description(description, false), do: description
 
   # The validator reports which schema keyword failed and where, but its error
   # struct also carries the offending data. Only the structural path and the
@@ -371,7 +387,11 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   defp walk_schema_path([], _schema, retained), do: Enum.reverse(retained)
 
-  defp walk_schema_path([segment | rest], %{"type" => "object"} = schema, retained) do
+  defp walk_schema_path([segment | rest], schema, retained) do
+    walk_schema_path_by_type(JSONSchema.node_type(schema), segment, rest, schema, retained)
+  end
+
+  defp walk_schema_path_by_type({:ok, "object", _nullable?}, segment, rest, schema, retained) do
     properties = Map.get(schema, "properties", %{})
 
     case Map.fetch(properties, segment) do
@@ -383,14 +403,21 @@ defmodule PtcRunner.Kernel.ValueContract do
     end
   end
 
-  defp walk_schema_path([segment | rest], %{"type" => "array", "items" => child}, retained) do
+  defp walk_schema_path_by_type(
+         {:ok, "array", _nullable?},
+         segment,
+         rest,
+         %{"items" => child},
+         retained
+       ) do
     case nonnegative_index(segment) do
       {:ok, index} -> walk_schema_path(rest, child, [{:index, index} | retained])
       :error -> Enum.reverse(retained)
     end
   end
 
-  defp walk_schema_path(_segments, _schema, retained), do: Enum.reverse(retained)
+  defp walk_schema_path_by_type(_type, _segment, _rest, _schema, retained),
+    do: Enum.reverse(retained)
 
   defp decode_pointer_segment(segment),
     do: segment |> String.replace("~1", "/") |> String.replace("~0", "~")
@@ -417,21 +444,12 @@ defmodule PtcRunner.Kernel.ValueContract do
         if not is_list(segments) or MapSet.member?(seen, segments) do
           {violation, seen}
         else
-          case schema_value_at_path(schema, value, segments) do
-            {:ok, %{"type" => "object"} = object_schema, object_value} ->
-              {
-                violation
-                |> put_declared_expected(object_schema)
-                |> object_diagnostic(object_schema, object_value),
-                MapSet.put(seen, segments)
-              }
-
-            {:ok, node, _node_value} ->
-              {put_declared_expected(violation, node), MapSet.put(seen, segments)}
-
-            :error ->
-              {violation, seen}
-          end
+          enrich_violation(
+            violation,
+            seen,
+            schema_value_at_path(schema, value, segments),
+            segments
+          )
         end
       end)
 
@@ -439,6 +457,23 @@ defmodule PtcRunner.Kernel.ValueContract do
   end
 
   defp enrich_violations(violations, _schema, _value), do: violations
+
+  defp enrich_violation(violation, seen, {:ok, node, node_value}, segments)
+       when is_map(node) do
+    enriched = put_declared_expected(violation, node)
+
+    enriched =
+      if match?({:ok, "object", _}, JSONSchema.node_type(node)),
+        do: object_diagnostic(enriched, node, node_value),
+        else: enriched
+
+    {enriched, MapSet.put(seen, segments)}
+  end
+
+  defp enrich_violation(violation, seen, {:ok, node, _node_value}, segments),
+    do: {put_declared_expected(violation, node), MapSet.put(seen, segments)}
+
+  defp enrich_violation(violation, seen, :error, _segments), do: {violation, seen}
 
   defp put_declared_expected(%{kind: kind} = violation, schema) do
     case JSONSchema.declared_expected(kind, schema) do
@@ -468,10 +503,16 @@ defmodule PtcRunner.Kernel.ValueContract do
 
   defp schema_value_at_path(schema, value, []), do: {:ok, schema, value}
 
-  defp schema_value_at_path(
-         %{"type" => "object", "properties" => properties},
+  defp schema_value_at_path(schema, value, [segment | rest]) do
+    schema_value_at_path_by_type(JSONSchema.node_type(schema), schema, value, segment, rest)
+  end
+
+  defp schema_value_at_path_by_type(
+         {:ok, "object", _nullable?},
+         %{"properties" => properties},
          value,
-         [{:property, name} | rest]
+         {:property, name},
+         rest
        )
        when is_map(properties) and is_map(value) and not is_struct(value) do
     with {:ok, child_schema} <- Map.fetch(properties, name),
@@ -480,10 +521,12 @@ defmodule PtcRunner.Kernel.ValueContract do
     end
   end
 
-  defp schema_value_at_path(
-         %{"type" => "array", "items" => items},
+  defp schema_value_at_path_by_type(
+         {:ok, "array", _nullable?},
+         %{"items" => items},
          value,
-         [{:index, index} | rest]
+         {:index, index},
+         rest
        )
        when is_list(value) and is_integer(index) and index >= 0 do
     case Enum.fetch(value, index) do
@@ -492,7 +535,7 @@ defmodule PtcRunner.Kernel.ValueContract do
     end
   end
 
-  defp schema_value_at_path(_schema, _value, _segments), do: :error
+  defp schema_value_at_path_by_type(_type, _schema, _value, _segment, _rest), do: :error
 
   defp object_diagnostic(violation, schema, value) do
     violation
@@ -811,9 +854,10 @@ defmodule PtcRunner.Kernel.ValueContract do
     |> Map.get("required", [])
     |> Enum.filter(fn name ->
       case Map.get(properties, name) do
-        %{"type" => "string", "const" => value}
+        %{"const" => value} = schema
         when is_binary(value) and byte_size(value) in 1..@max_discriminator_bytes ->
-          String.valid?(value)
+          match?({:ok, "string", _nullable?}, JSONSchema.node_type(schema)) and
+            String.valid?(value)
 
         _other ->
           false
