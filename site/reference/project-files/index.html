@@ -89,6 +89,7 @@ contract.">
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -211,7 +212,7 @@ missing or failing platform openers do not stop Viewer.</p><p>The Viewer port de
 port; startup prints the selected address before opening a browser. Set a fixed
 port only when another process needs a stable address. If that port is occupied,
 the command probes loopback and names the project when another PTC Viewer owns
-it. The Live project header and <code class="inline">/api/live/project</code> expose the exact project
+it. The Live project header exposes the exact project
 document path, so a working page cannot silently look like the project whose
 startup just failed.</p><p>The REPL and private-data settings are orthogonal. Enabling both presents the
 public-trace REPL alongside the private evidence panels without adding private
@@ -228,7 +229,7 @@ invocation-time override instead. PtcRunner never searches implicitly for
 process environment or use another trusted host binding.</p><p>The listener binds <code class="inline">127.0.0.1</code>. The project document deliberately cannot change
 that: exposure is an invocation-time decision made with <code class="inline">--listen 0.0.0.0</code>,
 where it stays visible in the command line rather than stored in a file. See
-<a href="/reference/cli/#expose-it-deliberately-or-not-at-all">Running and debugging</a>.</p><p>The Viewer ships in the standalone release and container image and is absent
+the <a href="/reference/viewer/#exposing-it">Viewer exposure reference</a>.</p><p>The Viewer ships in the standalone release and container image and is absent
 from the published package.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/host-installation/">&larr; Host-configuration reference</a><a class="pager-next" href="/reference/examples/">Examples reference &rarr;</a></nav>

@@ -87,6 +87,7 @@
 <li><a href="/reference/component-contracts/">Components-and-preludes reference</a></li>
 <li><a href="/reference/mcp/">MCP reference</a></li>
 <li><a href="/reference/cli/" class="current" aria-current="page">Command-line reference</a></li>
+<li><a href="/reference/viewer/">Viewer reference</a></li>
 <li><a href="/reference/repl/">REPL reference</a></li>
 <li><a href="/reference/source-inspection/">Source-inspection reference</a></li>
 <li><a href="/reference/debug-navigation/">Debug-navigation reference</a></li>
@@ -509,93 +510,9 @@ source, effective components, capability payloads, prints, diagnostics, and
 terminal values. The attached-terminal and unattended switches are accident
 guards, not access control; treat every downstream sink as private.</p><p>To walk the same capture from an ordinary application rather than a session,
 <a href="/reference/debug-navigation/">Debug a failed run</a> installs it as a snapshot
-provider and follows typed evidence links with the shipped <code class="inline">debug.nav</code> prelude.</p><h2 id="browse-traces-in-the-viewer">Browse traces in the Viewer</h2><pre><code class="console language-console">ptc viewer ptc-project.json --env-file .env</code></pre><p>The project document supplies the trace root and optional inspection root, plus
-the port, browser-opening preference, REPL setting, and private-data grant. The
-Viewer pins the selected data and can open a bounded analysis REPL over an
-immutable capture. <code class="inline">--port</code> overrides the project's port; <code class="inline">0</code> asks the
-operating system for a free one and is the project default. Startup prints the
-selected address. If an explicitly selected port is occupied, the command
-probes loopback: another PTC Viewer is reported with its exact project document
-path, while any other listener is reported as an occupied service. The command
-runs in the foreground until <code class="inline">Ctrl+C</code>, and opens a browser only when the project
-asks for it <em>and</em> a terminal is attached.</p><p>Directory discovery expects producer-owned <code class="inline">&lt;run-id&gt;.jsonl</code> and
-<code class="inline">&lt;run-id&gt;.private.jsonl</code> names, each containing exactly that one run and one
-trace identity. The run list reports bounded damaged-source evidence when a
-stable malformed, mismatched, split, or conflicting component is isolated;
-unrelated valid runs remain available. A selected namespace change during
-capture fails the refresh rather than installing a partial generation.</p><p>The Viewer does not search the invocation directory or its parents for a
-<code class="inline">.env</code> file. Environment-backed provider credentials come from the inherited
-process environment, the project's <code class="inline">host.env_file</code>, or an explicit
-<code class="inline">--env-file FILE</code>. The command-line file is resolved when the Viewer starts
-and overrides the project's environment-file reference for every workflow or
-mission launched from its Live tab. It is read only when the selected provider
-actually requires an environment credential.</p><p>The Viewer ships inside the standalone release and the container image. It is
-not part of the published Hex package, where <code class="inline">ptc doctor</code> reports it as an
-unavailable optional companion and <code class="inline">ptc viewer</code> says so rather than failing
-obscurely. See the
-<a href="https://github.com/andreasronge/ptc_runner/tree/main/ptc_viewer">Viewer documentation</a>
-for its complete HTTP API.</p><h3 id="expose-it-deliberately-or-not-at-all">Expose it deliberately, or not at all</h3><p>The Viewer has no authentication and can display private inspection records
-when the project grants them, so it binds <code class="inline">127.0.0.1</code> and reaches nothing else.
-<code class="inline">--listen 0.0.0.0</code> is the only way to change that, it accepts no other address,
-and it prints a warning when used. Authenticated remote Viewer hosting is not a
-goal of this command.</p><p>A container is the one place the wildcard is routine, because it is not an
-exposure decision there. Inside a container <code class="inline">127.0.0.1</code> is the container's own
-loopback, while a published port forwards to the container's external
-interface, so a loopback bind refuses every connection a <code class="inline">-p</code> mapping delivers.
-Binding <code class="inline">0.0.0.0</code> <em>inside the container's network namespace</em> is what makes the
-mapping reachable, and the host-side exposure decision moves to the publish
-rule:</p><pre><code class="console language-console">image=ghcr.io/andreasronge/ptc_runner:VERSION
-docker run --rm \
-  --user &quot;$(id -u):$(id -g)&quot; \
-  --env HOME=/tmp \
-  -p 127.0.0.1:4123:4123 \
-  -v &quot;$PWD:/work&quot; \
-  &quot;$image&quot; viewer /work/ptc-project.json --listen 0.0.0.0 --port 4123</code></pre><p>The <code class="inline">127.0.0.1:</code> prefix on <code class="inline">-p</code> is what keeps this equivalent to a loopback
-bind. Writing <code class="inline">-p 4123:4123</code> instead publishes an unauthenticated trace browser
-to every host that can reach the machine. The command cannot enforce that
-prefix; you must write it. The user mapping preserves access to the
-mounted project's owner-only artifacts; do not run this form from a root shell.</p><h3 id="watch-and-launch-live-runs">Watch and launch live runs</h3><p>A Kernel run reports to the Live tab when <code class="inline">PTC_VIEWER_URL</code> names the Viewer:</p><pre><code class="console language-console">PTC_VIEWER_URL=http://127.0.0.1:4123 ptc run ptc.json</code></pre><p>The reporter is best-effort and does not alter the run result. Frames are
-correlated to their owning run, and the terminal frame is published only after
-provider cleanup and trace-event finalization establish the actual
-outcome. A timeout failure names the binding limit, its configured duration,
-and the manifest key that raises it, in both the launch diagnostic and the
-ended Live card; for example, <code class="inline">parallel_timeout_ms limit 60000 ms was exceeded during execution; raise limits.parallel_timeout_ms in the manifest, and the installed host ceiling if it is lower</code>. Mission
-sessions currently show their bounded command-output tail in the launch panel
-instead of streaming frames.</p><p>An ended workflow card offers <strong>View result</strong>. That action captures a fresh,
-internally consistent trace snapshot, confirms that the matching run exists,
-and then opens its detail view in the Runs tab. The Viewer therefore does not
-need to be restarted after a run it launched.</p><p>The ordinary project command also configures the Live project details and one
-fixed launch target from that same project document. The browser may edit
-workflow input or choose one declared mission, but it cannot choose a project,
-manifest, working directory, or command:</p><pre><code class="console language-console">ptc viewer ptc-project.json --env-file .env</code></pre><p>Viewer-launched workflows and CLI runs attached through <code class="inline">PTC_VIEWER_URL</code> use
-the manifest label and workflow entry as their human-facing title, while
-retaining the <code class="inline">cmd-...</code> value as the stable run identifier. That exact label
-(or the manifest filename when no label is declared) and entry are sent in
-plaintext only to the explicitly configured Viewer; the trace keeps its
-fingerprinted label. The Live tab and <code class="inline">GET /api/live/runs</code> list newest first, and each
-card shows when the Viewer first saw that run, so an edited ceiling cannot be
-read off an older card as a stale enforcement.</p><p>The command is already a long-running PtcRunner host, so Viewer-started work
-runs inside that BEAM instance under the ordinary execution-session owner. A
-host-injected adapter receives a semantic workflow or mission request and a
-direct live-frame sink; no <code class="inline">mix</code> or <code class="inline">ptc</code> child process is started. The adapter
-dispatches the named project through the same command engine, so its host,
-environment, and artifact defaults remain authoritative.</p><p>Live browser reads require a page opened at <code class="inline">localhost</code>, <code class="inline">127.0.0.1</code>, or
-<code class="inline">::1</code>; mutations additionally require the page's same-origin nonce. A reporter
-connecting from a non-loopback address must send the configured token through
-<code class="inline">PTC_VIEWER_TOKEN</code>. Generate a new value for each Viewer process, for example
-with <code class="inline">openssl rand -hex 32</code>.</p><p>When a host-published port makes the browser's network peer non-loopback, open
-the Live tab once with the same token:</p><pre><code class="text language-text">http://localhost:4123/?live_token=THE_TOKEN#/live</code></pre><p>The page removes the query parameter after bootstrapping and authenticates all
-Live API reads and mutations with the token. The SSE stream carries it in its
-own encoded query because the browser EventSource API cannot set headers.</p><p>For Docker, keep the Viewer bound to <code class="inline">0.0.0.0</code> <em>inside</em> the container and keep
-the published host port on loopback. Viewer-started runs report directly inside
-the container process. A separately started run in the same container can
-report over container loopback. A host-side run can use
-<code class="inline">PTC_VIEWER_URL=http://127.0.0.1:4123</code>; another container must instead use the
-Viewer container's service name on a shared Docker network (for example,
-<code class="inline">PTC_VIEWER_URL=http://viewer:4123</code>) or an explicitly configured host-gateway
-address. Both must set the matching <code class="inline">PTC_VIEWER_TOKEN</code>. This protects live
-ingestion and browser mutations; it does not turn the trace browser into an
-authenticated remote service, so <code class="inline">-p 4123:4123</code> remains unsafe.</p><h2 id="test-a-workflow">Test a workflow</h2><p>Use deterministic fixtures for normal tests. Assert the business value and
+provider and follows typed evidence links with the shipped <code class="inline">debug.nav</code> prelude.</p><h2 id="browse-traces-in-the-viewer">Browse traces in the Viewer</h2><pre><code class="console language-console">ptc viewer PROJECT.json [--port PORT] [--listen ADDRESS] [--env-file FILE]</code></pre><p>The Viewer opens captured traces and watches or launches live runs for one
+project. See the <a href="/reference/viewer/">Viewer reference</a> for its display, startup,
+exposure, authentication, and live-reporting contract.</p><h2 id="test-a-workflow">Test a workflow</h2><p>Use deterministic fixtures for normal tests. Assert the business value and
 semantic error classification, not timestamps, run references, or remaining
 milliseconds.</p><p>One shell-level check can use the stable envelope:</p><pre><code class="console language-console">ptc init kernel-tutorial --example kernel-tutorial
 artifact_dir=&quot;$(mktemp -d)&quot;
@@ -609,7 +526,7 @@ path; the <a href="/guides/quickstart/">Quickstart</a> keeps one deliberately sm
 application boundary these commands enforce.</li><li><a href="/reference/host-installation/">Host configuration</a> defines provider installation.</li><li><a href="/guides/building-agents/">Building agents</a> explains the agent policy producing
 the runs.</li></ul>
 </article>
-<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/mcp/">&larr; MCP reference</a><a class="pager-next" href="/reference/repl/">REPL reference &rarr;</a></nav>
+<nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/reference/mcp/">&larr; MCP reference</a><a class="pager-next" href="/reference/viewer/">Viewer reference &rarr;</a></nav>
 <footer>
   Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/reference/cli.md">Edit this
   page on GitHub</a>.

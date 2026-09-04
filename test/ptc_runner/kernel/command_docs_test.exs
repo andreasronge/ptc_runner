@@ -90,8 +90,34 @@ defmodule PtcRunner.Kernel.CommandDocsTest do
     assert content =~ "## How do I watch a run while it is running?"
     assert content =~ "PTC_VIEWER_URL=http://127.0.0.1:4123"
     assert content =~ "PTC_VIEWER_TOKEN"
-    assert content =~ "ptc docs cli"
+    assert content =~ "ptc docs viewer"
     assert content =~ "token does not authenticate the Runs trace browser"
+  end
+
+  test "the viewer page serves its invocation, exposure, reporting, and packaging contract" do
+    assert {:ok, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["docs", "viewer"])
+
+    content = envelope["result"]["content"]
+
+    assert content =~ List.first(CommandDeclaration.usage(:viewer))
+    assert content =~ "PTC_VIEWER_URL"
+    assert content =~ "PTC_VIEWER_TOKEN"
+
+    assert String.replace(content, ~r/\s+/, " ") =~
+             "not part of the published Hex package"
+  end
+
+  test "no served page documents the Viewer HTTP surface" do
+    for name <- DocumentationLibrary.names(), not String.starts_with?(name, "schema-") do
+      content = page_content(name)
+
+      refute content =~ "/api/", "#{name} documents a Viewer HTTP route"
+
+      refute content =~
+               "github.com/andreasronge/ptc_runner/tree/main/ptc_viewer",
+             "#{name} links to the Viewer source tree"
+    end
   end
 
   test "designing-agent-workflows locates returned-value and quarantined in the example" do

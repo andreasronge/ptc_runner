@@ -64,6 +64,7 @@ defmodule PtcRunner.Kernel.DocumentationLibrary do
     {"host", "docs/reference/host-installation.md"},
     {"mcp", "docs/reference/mcp.md"},
     {"limits", "docs/kernel-limits-reference.md"},
+    {"viewer", "docs/reference/viewer.md"},
     {"repl", "docs/reference/repl.md"},
     {"source-inspection", "docs/reference/source-inspection.md"},
     {"debug", "docs/reference/debug-navigation.md"},
