@@ -380,7 +380,7 @@ defmodule PtcRunner.Kernel.DebugAFailedRunExampleTest do
     File.cp_r!(@example, example)
 
     for artifact <-
-          ~w(variants/target-workflow-control/.ptc variants/repair-agent-workflow-control/.ptc) do
+          ~w(variants/target-workflow-control/.ptc) do
       File.rm_rf!(Path.join(example, artifact))
     end
 
