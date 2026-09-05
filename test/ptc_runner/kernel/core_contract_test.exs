@@ -179,6 +179,52 @@ defmodule PtcRunner.Kernel.CoreContractTest do
     assert combined_bytes == memory_bytes + history_bytes
   end
 
+  # The denial is accounted from the evaluator result itself, before analysis
+  # publication and before classification, so no publication failure decides
+  # whether the boundary was counted. The compile-phase preflight catches a
+  # named tool, so reaching the inspection-analysis error branch needs a
+  # denial the preflight cannot see: a callable persisted in the mission
+  # continuation, resolved against the tools of the turn that calls it.
+  test "a denial is counted from the evaluator result, not from a publication branch" do
+    {:ok, echo} =
+      Capability.new(
+        name: "echo",
+        input_schema: @input_schema,
+        callback: fn arguments -> {:ok, Map.get(arguments, "x")} end
+      )
+
+    {:ok, granted} = MissionEnvironment.new(capabilities: [echo])
+    {:ok, ungranted} = MissionEnvironment.new([])
+    {:ok, state} = RunState.start(Limits.defaults())
+
+    assert %{outcome: :continued} =
+             Evaluation.evaluate_source(
+               state,
+               "default",
+               granted,
+               "(def call (comp tool/echo identity))",
+               1_000
+             )
+
+    {:ok, inspection} =
+      StreamingInspection.start(run_id: "denial-inspection", trace_id: "denial-inspection")
+
+    assert %{outcome: :evaluation_error, reason: :inspection_sink_error} =
+             Evaluation.evaluate_source(
+               state,
+               "default",
+               ungranted,
+               ~S|(return (call {"x" 7}))|,
+               1_000,
+               nil,
+               inspection,
+               params: %{},
+               after_started_hook: fn -> InspectionSink.stop(inspection) end
+             )
+
+    assert %{capability_denials: %{"unknown_tool" => 1}} = RunState.usage(state)
+  end
+
   test "inspection analysis rejection fails without committing continuation" do
     {:ok, mission} = MissionEnvironment.new([])
     {:ok, state} = RunState.start(Limits.defaults())
@@ -973,6 +1019,31 @@ defmodule PtcRunner.Kernel.CoreContractTest do
 
     assert {:error, {:event_capture_limit_exceeded, :normal_event_count, 4}} =
              EventSink.emit(private, "after-stop", %{"safe" => true})
+  end
+
+  # The workflow half of #1787's boundary. A manifest run is refused before it
+  # starts, so this is the embedding API, where the bundle is compiled against
+  # the environment the caller assembled.
+  test "a workflow calling an ungranted capability is counted as a denial" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "workflow-denial")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    assert {:error, %{kind: :evaluation_failed, reason: :unknown_tool} = error} =
+             Kernel.run("(return (tool/vault.read {}))", config)
+
+    assert error.usage.capability_denials == %{"unknown_tool" => 1}
+    assert error.usage.capability_refusals == %{}
   end
 
   test "stopped event sinks are contained according to their policy" do

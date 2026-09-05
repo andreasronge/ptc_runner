@@ -41,6 +41,28 @@ defmodule PtcRunner.Lisp.EvaluatorErrorTest do
     assert "type_error" in EvaluatorErrorCatalog.wire_names()
   end
 
+  test "unknown_tool evidence never names the requested capability" do
+    expected =
+      {:ok,
+       %{
+         kind: "unknown_tool",
+         message: "a capability this environment does not grant was called"
+       }}
+
+    assert EvaluatorError.public_evidence(:unknown_tool, %{}) == expected
+
+    # A mission's source is written by the model, so the name it asked for and
+    # the inventory it was answered with are both barred from public evidence.
+    assert EvaluatorError.public_evidence(:unknown_tool, %{
+             name: "vault.read",
+             message: "Unknown tool: vault.read. Available tools: cap-list",
+             available: ["cap-describe", "cap-list"]
+           }) == expected
+
+    assert :unknown_tool in EvaluatorErrorCatalog.kinds()
+    assert "unknown_tool" in EvaluatorErrorCatalog.wire_names()
+  end
+
   test "arity evidence uses the public Lisp name and never a BEAM MFA" do
     assert {:ok, %{kind: "arity_error", message: "count expects 1 argument(s), got 0"}} =
              EvaluatorError.public_evidence(:arity_error, %{

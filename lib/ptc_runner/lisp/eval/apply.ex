@@ -1276,7 +1276,6 @@ defmodule PtcRunner.Lisp.Eval.Apply do
       @hof_callback_error,
       :inspect_only_unavailable,
       :tool_error,
-      :unknown_tool,
       :invalid_tool_args,
       :private_tool_unauthorized,
       :private_tool_args_error,

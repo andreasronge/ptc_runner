@@ -450,6 +450,22 @@ classes are named; further classes increment `$overflow`. Assert
 capability call succeeded, or have the workflow `fail`, when a quota must end
 the run.
 
+`execution.usage.capability_denials` is the sibling counter for a call the
+environment rejected before any callback ran: a name the workflow bundle or the
+mission grant does not carry. Refusals cannot count those, because there is no
+installed callback to observe. Its keys are the runtime's own rejection classes
+(`unknown_tool`), never the requested name — in a mission that name is written
+by the model. The unit is the evaluation the denial stopped rather than the
+call: a denial ends its evaluation, and one program's undefined names are
+reported together, so a workflow entry, a REPL form, or one mission turn each
+count at most once. At most 2 distinct classes are named; further classes
+increment `$overflow`. Assert `capability_denials` is `{}` when a CI job
+requires that an authority boundary held; the run still exits `0` when a later
+turn recovers, and the counter is what distinguishes a denial from a workflow
+that merely ran out of turns. The denied name stays in the private inspection
+record. A turn-limited or failed run also names the class in
+`execution.last_evaluation_error` as `unknown_tool`.
+
 The tables below are generated from the diagnostic catalog the command
 dispatches on, so they list every status a command can exit with and every
 diagnostic behind it.
@@ -495,7 +511,7 @@ Embedding runtimes can supply authorization targets directly.
 | 3 | `application` | `input_invalid` | no | the selected input is not an admissible JSON object |
 | 3 | `application` | `installed_limit_exceeded` | no | an application limit exceeds the installed ceiling; lower it or raise the host-configured ceiling |
 | 3 | `application` | `invalid_json` | no | an application document is not valid JSON |
-| 3 | `application` | `limit_capacity_invalid` | no | event_payload_bytes effective limit 8211 is below the required 12000 bytes for this application's resolved terminal usage; raise limits.event_payload_bytes, and its installed host ceiling if it is lower, or declare fewer capabilities or missions |
+| 3 | `application` | `limit_capacity_invalid` | no | event_payload_bytes effective limit 8662 is below the required 12000 bytes for this application's resolved terminal usage; raise limits.event_payload_bytes, and its installed host ceiling if it is lower, or declare fewer capabilities or missions |
 | 3 | `application` | `limit_configuration_invalid` | no | normal_event_bytes effective limit 4000000 is below the required 12003450 bytes for event_payload_bytes 4000000; raise limits.normal_event_bytes, and its installed host ceiling if it is lower, or lower limits.event_payload_bytes |
 | 3 | `application` | `limit_unavailable` | no | an optional application limit is unavailable because the host has not enabled it |
 | 3 | `application` | `override_invalid` | no | the component override is invalid |

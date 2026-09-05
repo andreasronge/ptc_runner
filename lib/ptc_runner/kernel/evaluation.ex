@@ -425,6 +425,12 @@ defmodule PtcRunner.Kernel.Evaluation do
 
     result = Lisp.run_native(source, options)
 
+    # Account the denied boundary before anything downstream can fail: an
+    # inspection-sink error below abandons classification, and a denial erased
+    # there would turn the published `capability_denials: {}` assertion into a
+    # false negative.
+    :ok = record_capability_denial(state, result)
+
     case inspection_analysis(
            capture.inspection_sink,
            evaluation_id,
@@ -505,6 +511,15 @@ defmodule PtcRunner.Kernel.Evaluation do
         |> put_terminal_host_failure(step)
     end
   end
+
+  # A denied call never reached an installed callback, so
+  # `capability_refusals` cannot see it, and the evidence slot below is
+  # overwritten by the next turn: without this count a run that recovers from a
+  # denial and finishes `ok` publishes nothing about it.
+  defp record_capability_denial(state, {:error, step}),
+    do: RunState.record_capability_denial(state, step.fail.reason)
+
+  defp record_capability_denial(_state, _result), do: :ok
 
   defp maybe_record_evaluator_failure(state, evaluation_id, step) do
     :ok = RunState.clear_last_evaluator_failure(state)

@@ -58,6 +58,7 @@ defmodule PtcRunner.Kernel.TerminalUsage do
       evaluation_missions: Enum.sort(mission_names),
       errors: @maximum_counter,
       capability_refusals: maximum_capability_refusals(),
+      capability_denials: maximum_capability_denials(),
       llm_budget: maximum_llm_budget(limits),
       llm_spend: maximum_llm_spend()
     }
@@ -119,6 +120,20 @@ defmodule PtcRunner.Kernel.TerminalUsage do
     1..limit
     |> Map.new(fn index ->
       {"workflow/#{fingerprint}/#{fingerprint}-#{index}", count}
+    end)
+    |> Map.put("$overflow", count)
+  end
+
+  # Denial classes are runtime-owned atoms rather than resolver output, but
+  # they are reserved at the widest key the schema admits for the same reason:
+  # a class named later must not enlarge run-stopped past event_payload_bytes.
+  defp maximum_capability_denials do
+    count = @maximum_counter
+    limit = SafeMetadata.capability_denial_map_limit()
+
+    1..limit
+    |> Map.new(fn index ->
+      {String.duplicate("d", 63) <> Integer.to_string(index), count}
     end)
     |> Map.put("$overflow", count)
   end

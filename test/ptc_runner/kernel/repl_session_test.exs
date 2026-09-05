@@ -23,6 +23,33 @@ defmodule PtcRunner.Kernel.ReplSessionTest do
 
   @input_schema %{"type" => "object", "additionalProperties" => true}
 
+  # A REPL form is an evaluation like any other, so the same boundary it hits
+  # has to leave the same public count behind.
+  test "a denied REPL form is counted in session usage" do
+    {:ok, workflow} = WorkflowEnvironment.new([])
+    {:ok, mission} = MissionEnvironment.new([])
+    limits = Limits.defaults()
+    {:ok, sink} = EventSink.start(:normal, limits, run_id: "repl-denial")
+
+    {:ok, config} =
+      RunConfig.new(
+        workflow_environment: workflow,
+        missions: %{"default" => mission},
+        input: %{},
+        limits: limits,
+        event_sink: sink
+      )
+
+    {:ok, session} = ReplSession.new(config: config)
+
+    assert %{capability_denials: %{}} = ReplSession.usage(session)
+
+    assert {:error, %{fail: %{reason: :unknown_tool}}, session} =
+             ReplSession.eval(session, ~S|(tool/vault.read {})|)
+
+    assert %{capability_denials: %{"unknown_tool" => 1}} = ReplSession.usage(session)
+  end
+
   test "workflow-authorized REPL tools validate under the evaluation heap" do
     {:ok, checked} =
       Capability.new(

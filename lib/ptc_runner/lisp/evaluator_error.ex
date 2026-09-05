@@ -261,6 +261,13 @@ defmodule PtcRunner.Lisp.EvaluatorError do
     ok_message("a PTC-Lisp operation received a value of the wrong type")
   end
 
+  # A denied call is by definition a name that did not resolve against the
+  # environment, and in a mission that name is model-authored text. The public
+  # message names neither it nor the granted inventory.
+  defp public_message(:unknown_tool, _details) do
+    ok_message("a capability this environment does not grant was called")
+  end
+
   defp public_message(:arity_error, details) do
     with {:ok, name} <- admitted_public_name(details),
          {:ok, expected_text} <- format_expected_arity(Map.get(details, :expected)),

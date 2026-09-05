@@ -58,6 +58,36 @@ defmodule PtcRunner.Kernel.EvaluatorEvidenceTest do
     assert EvaluatorEvidence.envelope_value(:normal, explicit) == nil
   end
 
+  # The friction #1787 reported: a turn-limited run whose last turn was denied
+  # published `last_evaluation_error: null`, so the envelope read exactly like a
+  # slow model that ran out of turns.
+  test "a turn-limited denial names unknown_tool without the denied name" do
+    denied = %Error{
+      kind: :workflow_failed,
+      reason: :runtime_limit_exceeded,
+      details: %{
+        limit: :agent_turns,
+        limit_value: 2,
+        limit_reason: :evaluation_error,
+        last_evaluator_failure: %{
+          kind: :unknown_tool,
+          details: %{
+            name: "vault.read",
+            message: "Unknown tool: vault.read. Available tools: cap-list"
+          }
+        }
+      },
+      usage: %{}
+    }
+
+    assert EvaluatorEvidence.envelope_value(:normal, denied) == %{
+             "kind" => "unknown_tool",
+             "message" => "a capability this environment does not grant was called"
+           }
+
+    assert EvaluatorEvidence.envelope_value(:private, denied) == nil
+  end
+
   test "authenticated turn-limit type evidence is fixed while protocol exhaustion stays null" do
     type_error = %Error{
       kind: :workflow_failed,

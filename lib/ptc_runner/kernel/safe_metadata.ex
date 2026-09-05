@@ -46,6 +46,10 @@ defmodule PtcRunner.Kernel.SafeMetadata do
     unknown-action
   )
   @llm_provider_failures LLMFailureCatalog.authenticated_kebabs()
+  # A capability call the environment denied before dispatch. Only names that
+  # resolve against a granted inventory reach a callback, so this class set is
+  # the runtime's own and can never be grown from evaluated source.
+  @capability_denial_classes [:unknown_tool]
   @capability_rejection_kinds [
     :capability_denied,
     :capability_unavailable,
@@ -282,6 +286,34 @@ defmodule PtcRunner.Kernel.SafeMetadata do
   """
   @spec capability_refusal_map_limit() :: 2
   def capability_refusal_map_limit, do: 2
+
+  @doc """
+  Builds the public `usage.capability_denials` key for one denial.
+
+  A denial is a capability call the environment rejected before any callback
+  ran, so unlike a refusal it carries no result envelope to classify — and the
+  name it asked for is model-authored text in a mission. The key is therefore
+  the runtime's own closed rejection class, never the requested name. An
+  uncatalogued reason is not a denial and is not counted.
+  """
+  @spec capability_denial_key(term()) :: {:ok, binary()} | :error
+  def capability_denial_key(reason) when reason in @capability_denial_classes,
+    do: {:ok, Atom.to_string(reason)}
+
+  def capability_denial_key(_reason), do: :error
+
+  @doc """
+  Maximum distinct closed-class keys retained in `usage.capability_denials`.
+
+  This is `capability_refusal_map_limit/0`'s convention on the sibling map:
+  terminal usage admission reserves this many maximum-length class keys plus
+  `$overflow`, and that reservation is inside
+  `EventBudget.minimum_normal_payload_bytes/0`, so raising this constant raises
+  the published `event_payload_bytes` floor every manifest and host document
+  must clear. Further classes increment `$overflow`.
+  """
+  @spec capability_denial_map_limit() :: 2
+  def capability_denial_map_limit, do: 2
 
   @doc "Projects an agent LLM failure to one closed, payload-free provider class."
   @spec llm_provider_failure(term()) :: map()
