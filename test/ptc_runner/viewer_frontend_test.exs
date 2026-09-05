@@ -330,6 +330,22 @@ defmodule PtcRunner.ViewerFrontendTest do
     refute TraceSnapshot.alive?(trace)
   end
 
+  # The code is interpolated into `viewer/<code>`, so a tagged refusal has to
+  # reach the frontend as its tag; a tuple there raised and reported an
+  # expected refusal as an internal error.
+  @tag :tmp_dir
+  test "a tagged capture refusal is reported under its own code", %{tmp_dir: directory} do
+    project_path = viewer_project(directory)
+    capture = fn _project, _trace, _deadline -> {:error, {:injected_refusal, %{detail: 1}}} end
+
+    assert {:error, :injected_refusal, "could not start PTC Viewer"} =
+             ViewerFrontend.run(
+               viewer_arguments(project_path, 0),
+               CommandRuntime.standalone(),
+               capture_inspection: capture
+             )
+  end
+
   @tag :tmp_dir
   test "post-start listener failure stops the Viewer and transferred snapshots", %{
     tmp_dir: directory

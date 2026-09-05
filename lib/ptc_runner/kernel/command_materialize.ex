@@ -86,6 +86,8 @@ defmodule PtcRunner.Kernel.CommandMaterialize do
 
   defp publication_code(:source_out_destination_exists), do: {:ok, :source_out_destination_exists}
   defp publication_code(:source_out_parent_unusable), do: {:ok, :source_out_parent_unusable}
+  defp publication_code(:source_out_parent_missing), do: {:ok, :source_out_parent_missing}
+  defp publication_code(:source_out_parent_unsafe), do: {:ok, :source_out_parent_unsafe}
   defp publication_code(:source_out_failed), do: {:ok, :source_out_failed}
   defp publication_code(:source_out_cleanup_failed), do: {:ok, :source_out_cleanup_failed}
   defp publication_code(:candidate_source_too_large), do: {:ok, :candidate_source_too_large}
@@ -94,6 +96,13 @@ defmodule PtcRunner.Kernel.CommandMaterialize do
   defp publication_code(:candidate_destination_exists), do: {:ok, :candidate_destination_exists}
   defp publication_code(:candidate_publication_failed), do: {:ok, :candidate_publication_failed}
   defp publication_code(:invalid_candidate_destination), do: {:ok, :invalid_candidate_destination}
+
+  defp publication_code(:candidate_destination_parent_missing),
+    do: {:ok, :candidate_destination_parent_missing}
+
+  defp publication_code(:candidate_destination_parent_unsafe),
+    do: {:ok, :candidate_destination_parent_unsafe}
+
   defp publication_code(:descriptor_too_large), do: {:ok, :descriptor_too_large}
   defp publication_code(:result_artifact_too_large), do: {:ok, :result_artifact_too_large}
   defp publication_code(:unreadable_result_artifact), do: {:ok, :unreadable_result_artifact}

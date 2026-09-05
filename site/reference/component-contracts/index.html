@@ -185,7 +185,15 @@ Supplying neither or both is invalid. When a project declares a host, the
 command reads that document only for non-secret installed limit ceilings. <code class="inline">--source-out</code>
 does not resolve credentials or acquire providers or input. It writes one new owner-only file and refuses an existing
 destination. <code class="inline">--out</code> publishes a new owner-only directory. A refused candidate
-leaves nothing behind.</p><p>Candidate mode keeps the existing 1 MiB replacement bound. Installed
+leaves nothing behind.</p><p>Both destinations are published into a directory that must already exist:
+neither switch creates the parent. A missing parent is
+<code class="inline">source_out_parent_missing</code> or <code class="inline">candidate_destination_parent_missing</code>; a parent
+that is group- or world-writable without the sticky bit, or one owned by
+neither you nor root, is <code class="inline">source_out_parent_unsafe</code> or
+<code class="inline">candidate_destination_parent_unsafe</code>; an existing destination remains
+<code class="inline">source_out_destination_exists</code> or <code class="inline">candidate_destination_exists</code>. Create the
+parent with <code class="inline">mkdir -p</code>, restrict it with <code class="inline">chmod go-w</code>, or choose a path you
+own, and rerun.</p><p>Candidate mode keeps the existing 1 MiB replacement bound. Installed
 inspection and <code class="inline">--source-out</code> can return a larger accepted component; submitting
 those bytes as a candidate is refused with the existing too-large diagnostic.
 <code class="inline">--from-result</code> reads one string through an RFC 6901 pointer instead of

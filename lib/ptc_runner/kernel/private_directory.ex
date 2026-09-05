@@ -213,6 +213,76 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
     end
   end
 
+  @typedoc """
+  Which ancestor of a refused path earned the refusal, and how.
+
+  `:none` covers both a safe ancestry and an ancestry that changed after the
+  refusal; a caller must fall back to its generic code rather than assert a
+  cause it can no longer see.
+  """
+  @type parent_fault ::
+          {:missing, binary(), binary()}
+          | {:unsafe_mode, binary()}
+          | {:foreign_owner, binary()}
+          | :none
+
+  @doc """
+  Names the ancestor that makes `path` unpublishable, for diagnostics only.
+
+  Every safety decision stays with `preflight/1`, `preflight_writable_parent/1`
+  and `create/1`; this runs afterwards, on a path one of them already refused,
+  so a caller can report *which* directory to create or repair instead of a
+  bare "unusable parent". Pass the anchored path those checks used, so the
+  answer describes the directory they refused rather than one resolved against
+  a since-changed working directory.
+
+  A missing ancestor answers with two paths: the shallowest one that does not
+  exist, which is what went wrong, and the fully resolved parent the walk was
+  reaching for, which is what has to be created. They differ once a symlink is
+  involved — creating the link's own name would fail, because the link already
+  exists.
+
+  It walks the ancestry a second time, so an ancestor repaired in between is
+  reported as it is now; the refusal itself is not revisited. When the second
+  walk finds nothing wrong it answers `:none`, and the caller keeps its
+  generic code — that is also what a refusal for some other reason, such as an
+  unwritable parent or an unrepresentable name, looks like from here.
+  """
+  @spec parent_fault(binary()) :: parent_fault()
+  def parent_fault(path) when is_binary(path) do
+    with {:ok, id} <- authority_executable(),
+         {:ok, uid} <- read_authority_uid(id),
+         {:ok, anchored} <- anchor(path) do
+      classify_fault(locate_parent_fault(anchored, uid), uid)
+    else
+      _unavailable -> :none
+    end
+  rescue
+    _exception -> :none
+  end
+
+  def parent_fault(_path), do: :none
+
+  # Ownership and mode are separate refusals with separate remedies: `chmod`
+  # cannot fix a directory another user owns, and a foreign owner is not made
+  # safe by narrowing its mode.
+  defp classify_fault({:error, {:private_directory_parent_unsafe, faulted, _intended}}, uid) do
+    case File.lstat(faulted, time: :posix) do
+      {:ok, %File.Stat{uid: owner}} when owner not in [0, uid] -> {:foreign_owner, faulted}
+      {:ok, %File.Stat{}} -> {:unsafe_mode, faulted}
+      _gone_or_unreadable -> :none
+    end
+  end
+
+  defp classify_fault({:error, {:private_directory_parent_unavailable, faulted, intended}}, _uid) do
+    case File.lstat(faulted) do
+      {:error, :enoent} -> {:missing, faulted, intended}
+      _present_or_unreadable -> :none
+    end
+  end
+
+  defp classify_fault(_ok, _uid), do: :none
+
   @spec create(binary()) :: :ok | {:error, error()}
   def create(path) when is_binary(path) do
     with {:ok, executables} <- creation_executables(),
@@ -310,23 +380,28 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
   end
 
   defp safe_parent_hierarchy(path, uid) do
+    case locate_parent_fault(path, uid) do
+      :ok -> :ok
+      {:error, {reason, _faulted, _intended}} -> {:error, reason}
+    end
+  end
+
+  # The located form of the hierarchy walk: every refusal carries the exact
+  # directory that earned it, plus the path the walk was resolving toward, so
+  # a caller can both name what went wrong and name what has to be created.
+  defp locate_parent_fault(path, uid) do
     with :ok <- validate_directory("/", uid) do
       parent = Path.dirname(path)
       resolve_components("/", tl(Path.split(parent)), 0, uid)
     end
   rescue
-    _exception -> {:error, :private_directory_parent_unavailable}
+    _exception -> {:error, {:private_directory_parent_unavailable, path, path}}
   end
 
-  defp resolve_components(_current, _components, hops, _uid) when hops > 40,
-    do: {:error, :private_directory_parent_unavailable}
+  defp resolve_components(current, _components, hops, _uid) when hops > 40,
+    do: {:error, {:private_directory_parent_unavailable, current, current}}
 
-  defp resolve_components(current, [], _hops, uid) do
-    case File.lstat(current, time: :posix) do
-      {:ok, %File.Stat{type: :directory} = stat} -> safe_directory(stat, uid)
-      _invalid -> {:error, :private_directory_parent_unavailable}
-    end
-  end
+  defp resolve_components(current, [], _hops, uid), do: validate_directory(current, uid)
 
   defp resolve_components(current, ["." | rest], hops, uid),
     do: resolve_components(current, rest, hops, uid)
@@ -339,28 +414,32 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
 
     case File.lstat(candidate, time: :posix) do
       {:ok, %File.Stat{type: :directory} = stat} ->
-        with :ok <- safe_directory(stat, uid),
+        with :ok <- safe_directory(candidate, stat, uid),
              do: resolve_components(candidate, rest, hops, uid)
 
       {:ok, %File.Stat{type: :symlink} = stat} ->
-        with :ok <- safe_symlink(stat, uid),
+        with :ok <- safe_symlink(candidate, stat, uid),
              {:ok, target} <- File.read_link(candidate),
              {:ok, target_root, target_components} <- symlink_target(current, target) do
           resolve_components(target_root, target_components ++ rest, hops + 1, uid)
         else
-          {:error, reason}
+          {:error, {reason, faulted, intended}}
           when reason in [
                  :private_directory_parent_unsafe,
                  :private_directory_parent_unavailable
                ] ->
-            {:error, reason}
+            {:error, {reason, faulted, intended}}
 
           _error ->
-            {:error, :private_directory_parent_unavailable}
+            {:error, {:private_directory_parent_unavailable, candidate, candidate}}
         end
 
+      # The intended path keeps the components still unwalked, so a caller can
+      # create every level at once — and, past a symlink, create the resolved
+      # target rather than the link's own name, which already exists.
       _missing_or_invalid ->
-        {:error, :private_directory_parent_unavailable}
+        {:error,
+         {:private_directory_parent_unavailable, candidate, Path.join([candidate | rest])}}
     end
   end
 
@@ -368,38 +447,38 @@ defmodule PtcRunner.Kernel.PrivateDirectory do
     case Path.type(target) do
       :absolute -> {:ok, "/", tl(Path.split(target))}
       :relative -> {:ok, current, Path.split(target)}
-      _other -> {:error, :private_directory_parent_unavailable}
+      _other -> {:error, {:private_directory_parent_unavailable, current, current}}
     end
   end
 
   defp validate_directory(path, uid) do
     case File.lstat(path, time: :posix) do
       {:ok, %File.Stat{type: :directory} = stat} ->
-        safe_directory(stat, uid)
+        safe_directory(path, stat, uid)
 
       _invalid ->
-        {:error, :private_directory_parent_unavailable}
+        {:error, {:private_directory_parent_unavailable, path, path}}
     end
   end
 
   # Sticky semantics protect entries owned by this process authority or root,
   # but not entries owned by a peer. Requiring trusted ownership for symlinks
   # closes the remaining replacement window in a trusted sticky directory.
-  defp safe_symlink(%File.Stat{uid: owner}, uid) do
+  defp safe_symlink(path, %File.Stat{uid: owner}, uid) do
     if owner in [0, uid],
       do: :ok,
-      else: {:error, :private_directory_parent_unsafe}
+      else: {:error, {:private_directory_parent_unsafe, path, path}}
   end
 
   # Every controlling directory must be owned by this process authority or
   # root, as well as non-replaceable by group/other writers.
-  defp safe_directory(%File.Stat{uid: owner, mode: mode}, uid) do
+  defp safe_directory(path, %File.Stat{uid: owner, mode: mode}, uid) do
     owner_safe? = owner in [0, uid]
     mode_safe? = Bitwise.band(mode, 0o022) == 0 or Bitwise.band(mode, 0o1000) != 0
 
     if owner_safe? and mode_safe?,
       do: :ok,
-      else: {:error, :private_directory_parent_unsafe}
+      else: {:error, {:private_directory_parent_unsafe, path, path}}
   end
 
   defp writable_directory(stat, uid, groups),

@@ -192,6 +192,78 @@ defmodule PtcRunner.Kernel.CommandMaterializeTest do
   end
 
   @tag :tmp_dir
+  test "a missing --out ancestor is separated from an invalid destination", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    authored = Path.join(dir, "authored.clj")
+    File.write!(authored, @authored)
+    missing = Path.join(dir, "missing-parent")
+
+    assert {:error, outcome} =
+             CommandEngine.dispatch([
+               "materialize",
+               manifest,
+               "--workflow",
+               "--component",
+               "helper",
+               "--out",
+               Path.join(missing, "candidate"),
+               "--source",
+               authored
+             ])
+
+    assert outcome.envelope["error"]["phase"] == "publication"
+    assert outcome.envelope["error"]["code"] == "candidate_destination_parent_missing"
+    refute File.exists?(missing)
+  end
+
+  @tag :tmp_dir
+  test "an unsafe --out parent is separated from a missing one", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    authored = Path.join(dir, "authored.clj")
+    File.write!(authored, @authored)
+    parent = Path.join(dir, "permissive-parent")
+    File.mkdir!(parent)
+    File.chmod!(parent, 0o777)
+
+    assert {:error, outcome} =
+             CommandEngine.dispatch([
+               "materialize",
+               manifest,
+               "--workflow",
+               "--component",
+               "helper",
+               "--out",
+               Path.join(parent, "candidate"),
+               "--source",
+               authored
+             ])
+
+    assert outcome.envelope["error"]["phase"] == "publication"
+    assert outcome.envelope["error"]["code"] == "candidate_destination_parent_unsafe"
+  end
+
+  @tag :tmp_dir
+  test "a missing --source-out ancestor is separated from an unusable parent", %{tmp_dir: dir} do
+    manifest = write_application(dir)
+    missing = Path.join(dir, "missing-parent")
+
+    assert {:error, outcome} =
+             CommandEngine.dispatch([
+               "materialize",
+               manifest,
+               "--workflow",
+               "--component",
+               "helper",
+               "--source-out",
+               Path.join(missing, "helper.clj")
+             ])
+
+    assert outcome.envelope["error"]["phase"] == "publication"
+    assert outcome.envelope["error"]["code"] == "source_out_parent_missing"
+    refute File.exists?(missing)
+  end
+
+  @tag :tmp_dir
   test "standalone candidate refusal names the failing gate criterion", %{tmp_dir: dir} do
     manifest = write_application(dir)
     authored = Path.join(dir, "authored.clj")

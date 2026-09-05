@@ -614,6 +614,8 @@ Embedding runtimes can supply authorization targets directly.
 | 7 | `execution` | `inspection_sink_unavailable` | no | the private inspection sink is unavailable |
 | 7 | `publication` | `candidate_cleanup_failed` | no | a refused candidate could not be discarded |
 | 7 | `publication` | `candidate_destination_exists` | no | ptc materialize --out publishes only to a new directory; choose a path that does not already exist |
+| 7 | `publication` | `candidate_destination_parent_missing` | no | the --out parent directory does not exist; ptc materialize creates the candidate directory but never its parent |
+| 7 | `publication` | `candidate_destination_parent_unsafe` | no | the --out parent directory is writable by other users or owned by another user |
 | 7 | `publication` | `candidate_publication_failed` | no | candidate publication failed |
 | 7 | `publication` | `candidate_refused` | no | the candidate was refused by the promotion gate |
 | 7 | `publication` | `candidate_source_too_large` | no | the candidate source exceeds the 1 MiB publication bound |
@@ -634,6 +636,8 @@ Embedding runtimes can supply authorization targets directly.
 | 7 | `publication` | `source_out_cleanup_failed` | no | source export could not discard its staging directory |
 | 7 | `publication` | `source_out_destination_exists` | no | ptc materialize --source-out publishes only to a new file; choose a path that does not already exist |
 | 7 | `publication` | `source_out_failed` | no | source export failed |
+| 7 | `publication` | `source_out_parent_missing` | no | the --source-out parent directory does not exist; ptc materialize writes the file but never creates its parent |
+| 7 | `publication` | `source_out_parent_unsafe` | no | the --source-out parent directory is writable by other users or owned by another user |
 | 7 | `publication` | `source_out_parent_unusable` | no | the --source-out parent directory is unusable |
 | 7 | `publication` | `trace_publication_failed` | no | trace publication failed |
 | 7 | `publication` | `unreadable_candidate_source` | no | the candidate source file could not be read |

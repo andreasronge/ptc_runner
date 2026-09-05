@@ -121,9 +121,53 @@ For `run`, enabled project artifacts derive from the command run reference:
 The root and its fixed child directories are owner-only. The first project run
 creates the complete layout atomically; an existing incomplete, permissive, or
 symlinked layout is refused. When a pre-existing directory fails the owner-only
-(0700) check, the command names the path and the `chmod 700` remedy rather than
-a bare publication failure. Artifact files retain the normal no-replace and
-privacy rules.
+(0700) check, a run that publishes an envelope names the path and the
+`chmod 700` remedy rather than reporting a bare publication failure; the
+conditions for that are in the table below. Artifact files retain the normal
+no-replace and privacy rules.
+
+The run creates the root and its four children, and nothing above them. A
+directory above the root is yours, so its mode and ownership are not the
+command's to choose; `artifacts.root` may name a path several levels deep, but
+every level above the root must already exist.
+
+Ancestors are held to a weaker rule than the root itself: each one must be
+owned by you or by root, and must not be writable by group or other unless it
+carries the sticky bit. A sticky world-writable directory such as `/tmp` is
+therefore accepted, while an ordinary `0775` directory is not. The root and its
+four children remain owner-only (0700).
+
+The refusals below name the directory that earned them; anything else falls
+back to the generic publication failure:
+
+| Cause | Reported as | Remedy |
+| --- | --- | --- |
+| an ancestor of the root does not exist | `envelope/destination_parent_unavailable` | `mkdir -p` the root's parent, or point `artifacts.root` at an existing directory |
+| an ancestor is group- or world-writable and not sticky | `envelope/destination_parent_unsafe` | `chmod go-w PATH` |
+| an ancestor is owned by another user | `envelope/destination_parent_unsafe` | point `artifacts.root` under a directory you own |
+| the root or a child exists at a wider mode | `envelope/publication_failed` | `chmod 700 PATH` |
+| the root exists without its four children | `envelope/publication_failed` | remove the root and let `ptc` recreate it |
+| any other refusal, such as a parent you own but cannot write to | `envelope/publication_failed` | make the parent writable, or point `artifacts.root` elsewhere |
+
+The missing-ancestor message names the shallowest missing directory and offers
+`mkdir -p` on the resolved parent, so one command creates every level rather
+than only the first. Where a symlink stands in the ancestry the two differ: the
+message names the link's target, because creating the link's own name would
+fail on a path that already exists.
+
+Every path is printed quoted and escaped, since a symlink target is filesystem
+content rather than something you typed, and a suggested command is offered
+only when its path holds no control characters. These arrive on stderr with
+exit 74, because the envelope that would normally carry a diagnostic is the
+artifact that could not be written.
+
+That last-resort channel is what carries the directory name, so the table above
+describes a run that publishes an envelope — the `ptc init` default, and any
+run given `--envelope`. With `artifacts.envelope` set to `false` the same
+refusals still stop the run before it executes, reported through the ordinary
+destination phase as `destination/invalid_destination` at exit 7 without the
+path. `ptc viewer` reports the named sentences as
+`viewer/artifact_root_unusable`.
 
 The trace filenames are also the canonical directory-discovery contract. Each
 file contains exactly the run ID named by its stem and one trace identity;

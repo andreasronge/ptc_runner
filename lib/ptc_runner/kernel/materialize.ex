@@ -395,17 +395,29 @@ defmodule PtcRunner.Kernel.Materialize do
   defp publish_source_out(path, source, fault_hook)
        when is_binary(path) and is_binary(source) and
               (is_nil(fault_hook) or is_function(fault_hook, 1)) do
-    with {:ok, anchored} <- PrivateDirectory.anchor(path),
-         :ok <- PrivateDirectory.preflight_writable_parent(anchored),
+    case PrivateDirectory.anchor(path) do
+      {:ok, anchored} -> publish_anchored_source_out(anchored, source, fault_hook)
+      {:error, _reason} -> {:error, :source_out_parent_unusable}
+    end
+  end
+
+  defp publish_source_out(_path, _source, _fault_hook), do: {:error, :source_out_failed}
+
+  # Anchoring once, before the checks, is what lets a refusal be explained
+  # against the same path the check refused rather than one re-resolved against
+  # the working directory as it is later.
+  defp publish_anchored_source_out(anchored, source, fault_hook) do
+    with :ok <- PrivateDirectory.preflight_writable_parent(anchored),
          :ok <- refuse_existing(anchored),
          :ok <- publish_staged(anchored, source, fault_hook) do
       {:ok, anchored}
     else
-      {:error, :private_directory_parent_unavailable} ->
-        {:error, :source_out_parent_unusable}
-
-      {:error, :private_directory_parent_unsafe} ->
-        {:error, :source_out_parent_unusable}
+      {:error, reason}
+      when reason in [
+             :private_directory_parent_unavailable,
+             :private_directory_parent_unsafe
+           ] ->
+        {:error, source_out_parent_error(anchored)}
 
       {:error, :private_directory_unavailable} ->
         {:error, :source_out_parent_unusable}
@@ -418,7 +430,17 @@ defmodule PtcRunner.Kernel.Materialize do
     end
   end
 
-  defp publish_source_out(_path, _source, _fault_hook), do: {:error, :source_out_failed}
+  # `--source-out` writes one new file; it never creates the directory that
+  # holds it, and it refuses a directory another user could replace. Both are
+  # remediable, and only a code that separates them says which remedy applies.
+  defp source_out_parent_error(anchored) do
+    case PrivateDirectory.parent_fault(anchored) do
+      {:missing, _faulted, _parent} -> :source_out_parent_missing
+      {:unsafe_mode, _faulted} -> :source_out_parent_unsafe
+      {:foreign_owner, _faulted} -> :source_out_parent_unsafe
+      :none -> :source_out_parent_unusable
+    end
+  end
 
   defp refuse_existing(path) do
     case File.lstat(path) do
@@ -433,8 +455,8 @@ defmodule PtcRunner.Kernel.Materialize do
 
     case PrivateDirectory.create(temporary_directory) do
       :ok -> persist_staged(path, temporary_directory, temporary, source, fault_hook)
-      {:error, :private_directory_parent_unavailable} -> {:error, :source_out_parent_unusable}
-      {:error, :private_directory_parent_unsafe} -> {:error, :source_out_parent_unusable}
+      {:error, :private_directory_parent_unavailable} -> {:error, source_out_parent_error(path)}
+      {:error, :private_directory_parent_unsafe} -> {:error, source_out_parent_error(path)}
       {:error, :private_directory_unavailable} -> {:error, :source_out_parent_unusable}
       {:error, _reason} -> {:error, :source_out_failed}
     end

@@ -59,13 +59,26 @@ defmodule PtcRunner.Kernel.CommandEngine do
     end
   end
 
-  @doc "Executes one stable command and returns its sealed terminal outcome."
-  @spec dispatch([binary()]) :: {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
+  @doc """
+  Executes one stable command and returns its sealed terminal outcome.
+
+  A project run whose envelope could not be published answers
+  `{:envelope_publication_failed, outcome}` instead: the outcome is the run's
+  own, so a run that already executed is not described as never started, and
+  the distinct tag is what tells a caller its audit envelope is missing even
+  when the run itself failed for an unrelated reason.
+  """
+  @spec dispatch([binary()]) ::
+          {:ok, CommandOutcome.t()}
+          | {:error, CommandOutcome.t()}
+          | {:envelope_publication_failed, CommandOutcome.t()}
   def dispatch(argv), do: dispatch(argv, CommandRuntime.standalone())
 
   @doc false
   @spec dispatch([binary()], CommandRuntime.t()) ::
-          {:ok, CommandOutcome.t()} | {:error, CommandOutcome.t()}
+          {:ok, CommandOutcome.t()}
+          | {:error, CommandOutcome.t()}
+          | {:envelope_publication_failed, CommandOutcome.t()}
   def dispatch(argv, %CommandRuntime{} = runtime) do
     if CommandRuntime.valid?(runtime) do
       case CommandEntry.open(argv, :standalone) do
@@ -343,9 +356,15 @@ defmodule PtcRunner.Kernel.CommandEngine do
       :ok ->
         result
 
+      # A publication failure has no envelope representation — the envelope is
+      # the artifact that failed — and naming `{:publication,
+      # :invalid_destination}`, which is not a catalog pair, raised instead of
+      # reporting anything. The run's own outcome is carried out under a tag of
+      # its own instead: a run that already executed is not described as never
+      # started, and a run that had already failed still reports that its
+      # envelope is missing.
       {:error, _reason} ->
-        {:error,
-         arguments_outcome(entry.arguments, entry.run_ref, :publication, :invalid_destination)}
+        {:envelope_publication_failed, outcome}
     end
   end
 

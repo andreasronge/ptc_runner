@@ -33,6 +33,8 @@ defmodule PtcRunner.Kernel.CandidateArtifact do
 
   @type error ::
           :candidate_destination_exists
+          | :candidate_destination_parent_missing
+          | :candidate_destination_parent_unsafe
           | :candidate_cleanup_failed
           | :candidate_publication_failed
           | :candidate_source_too_large
@@ -156,11 +158,27 @@ defmodule PtcRunner.Kernel.CandidateArtifact do
     end
   end
 
+  # Preflight already refused an unusable parent, so reaching one here means it
+  # changed underneath us. That is still a parent failure, and reporting it as
+  # a generic publication failure would send the reader looking in the wrong
+  # place.
   defp create(directory) do
     case PrivateDirectory.create(directory) do
-      :ok -> :ok
-      {:error, :private_directory_creation_failed} -> existing_or_failed(directory)
-      {:error, _reason} -> {:error, :candidate_publication_failed}
+      :ok ->
+        :ok
+
+      {:error, :private_directory_creation_failed} ->
+        existing_or_failed(directory)
+
+      {:error, reason}
+      when reason in [
+             :private_directory_parent_unavailable,
+             :private_directory_parent_unsafe
+           ] ->
+        {:error, destination_error(directory, :candidate_publication_failed)}
+
+      {:error, _reason} ->
+        {:error, :candidate_publication_failed}
     end
   end
 
@@ -171,11 +189,32 @@ defmodule PtcRunner.Kernel.CandidateArtifact do
   end
 
   defp anchor(directory) do
-    with {:ok, anchored} <- PrivateDirectory.anchor(directory),
-         :ok <- PrivateDirectory.preflight_writable_parent(anchored) do
-      {:ok, anchored}
-    else
+    case PrivateDirectory.anchor(directory) do
+      {:ok, anchored} -> writable_parent(anchored)
       {:error, _reason} -> {:error, :invalid_candidate_destination}
+    end
+  end
+
+  defp writable_parent(anchored) do
+    case PrivateDirectory.preflight_writable_parent(anchored) do
+      :ok -> {:ok, anchored}
+      {:error, _reason} -> {:error, destination_error(anchored, :invalid_candidate_destination)}
+    end
+  end
+
+  # The parent of `--out` belongs to the caller, not to us: publication needs
+  # it to exist and to be unreplaceable by anyone else, and creates neither
+  # condition. Separating those two refusals from every other invalid
+  # destination is what turns "the candidate destination is invalid" into an
+  # actionable sentence. The classification is diagnostic, so the anchored path
+  # the check refused is what gets classified, and a fault that has since been
+  # repaired falls back to `fallback`.
+  defp destination_error(anchored, fallback) do
+    case PrivateDirectory.parent_fault(anchored) do
+      {:missing, _path, _parent} -> :candidate_destination_parent_missing
+      {:unsafe_mode, _path} -> :candidate_destination_parent_unsafe
+      {:foreign_owner, _path} -> :candidate_destination_parent_unsafe
+      :none -> fallback
     end
   end
 
