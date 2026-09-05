@@ -61,6 +61,12 @@ interpreter the script's path rather than a descriptor, so the interpreter opens
 it a second time and no launcher check covers that lookup. A macOS host must
 therefore keep the executable path hierarchy immutable for the whole of startup.
 
+The conformance suite tests replacement during hashing with a test-only build
+that interposes the executable read and renames the target at that exact point.
+A marker proves the replacement occurred; no delay or large padded script is
+needed. The shipped launcher contains no synchronization hook. This check does
+not cover macOS's later interpreter path lookup described above.
+
 The Elixir API is intentionally small:
 
 ```elixir
