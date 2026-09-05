@@ -102,3 +102,26 @@ explicit `ptc run` cases, as the script does.
 See `ptc docs debug` for evidence boundaries and the example's edit
 helper contract, `ptc docs repl` for private analysis, and
 `ptc docs components` for candidate checks.
+
+## Further improvements
+
+Some possible next experiments, rather than commitments for this example:
+
+- **Improve efficiency:** start with a cheaper investigator and ask a stronger
+  model for help only when evidence remains unresolved. Compare completion,
+  cost, and turns with the current workflow.
+- **Process evidence between turns:** use Lisp to retain useful source,
+  identify missing evidence, and prepare focused observations before the next
+  model call. This could reduce repeated reads and truncated output.
+- **Try other workflow shapes:** separate evidence gathering, diagnosis, and
+  repair into small subworkflows, or let a failed check trigger a bounded
+  correction loop. Compare each change against the simple current path.
+- **Test broader reuse:** apply the same helper improvement to unrelated
+  failures, including cases where the correct response is to abstain.
+- **Improve a working agent:** use repeated broad reads or wasted turns as the
+  motivation for an improvement, instead of starting with a broken helper.
+- **Extract reusable PTC pieces:** explore a shared exact-edit helper and
+  recoverable navigation results, while keeping candidate acceptance in
+  deterministic host checks.
+
+Start with one small comparison and keep the original workflow as a baseline.
