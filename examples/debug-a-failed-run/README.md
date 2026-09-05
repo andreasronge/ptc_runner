@@ -54,6 +54,8 @@ Use `self-debugger.ptc-project.json` to inspect the investigation, or
 collections through `analysis/open`, then read `turns`, `generated_sources`,
 `prelude_sources`, and `capability_calls` with `analysis/read`.
 
+The stage projects enable private inspection in the Viewer.
+
 All proposals, checks, and validated results are also retained under
 `self-improvement-results`. The source files remain unchanged; later runs
 select the candidate descriptors explicitly.

@@ -13,5 +13,8 @@
     "inspection": true,
     "result": true,
     "envelope": true
+  },
+  "viewer": {
+    "private": true
   }
 }
