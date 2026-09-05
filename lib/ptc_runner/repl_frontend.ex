@@ -61,10 +61,13 @@ defmodule PtcRunner.ReplFrontend do
     * `--format clojure|jsonl` — choose human output or non-interactive
       profile-mode JSON Lines;
     * `--preview-chars COUNT` — set the structural preview character ceiling
-      for direct, manifest, and profile human output (64–65536; default 2048);
-    * `--continue-on-error` — evaluate later repeated `--eval` forms after a
-      recoverable profile evaluation error, then exit unsuccessfully;
-    * `--describe-profile` — print a safe static profile contract;
+      for direct, manifest, and profile human output (64–65536; default 2048).
+      `--describe-profile` prints its contract whole and does not accept it;
+    * `--continue-on-error` — with `--profile`, evaluate later repeated `--eval`
+      forms after a recoverable profile evaluation error, then exit
+      unsuccessfully. It is accepted in no other mode;
+    * `--describe-profile` — print a safe static profile contract whole, in
+      Clojure syntax or, with `--format jsonl`, as one JSON record;
     * `-h, --help` — print this help without loading files or providers.
 
   A positional file runs as one script. `-` reads one script from standard
@@ -128,6 +131,7 @@ defmodule PtcRunner.ReplFrontend do
   alias PtcRunner.Kernel.ReplSession
   alias PtcRunner.Kernel.SelectedCanonicalSource
   alias PtcRunner.Lisp.EvaluatorError
+  alias PtcRunner.Lisp.Format, as: LispFormat
   alias PtcRunner.Lisp.NamespaceDiagnostic
   alias PtcRunner.Lisp.Result, as: LispResult
   alias PtcRunner.Lisp.ValuePreview
@@ -440,10 +444,11 @@ defmodule PtcRunner.ReplFrontend do
     if output_format(opts) == :jsonl do
       emit_jsonl(Map.merge(description, %{"schema_version" => 1, "type" => "profile"}))
     else
-      description
-      |> ValuePreview.render_with_notice(max_chars: preview_chars(opts))
-      |> Map.fetch!(:text)
-      |> info()
+      # The contract is a small, fixed, code-owned document with no caller value
+      # in it, so it is rendered whole. Passing it through the structural preview
+      # abbreviated the field names the command exists to publish, and
+      # --preview-chars is not admitted beside --describe-profile.
+      description |> LispFormat.to_clojure() |> elem(0) |> info()
     end
   end
 
@@ -848,7 +853,8 @@ defmodule PtcRunner.ReplFrontend do
       failed_indexes: [],
       failure: nil,
       evaluation_diagnostic: nil,
-      result: :unavailable
+      result: :unavailable,
+      jsonl_hint?: jsonl_hint_available?(opts, arguments)
     }
 
     case maybe_profile_load(session, opts, initial) do
@@ -1022,7 +1028,7 @@ defmodule PtcRunner.ReplFrontend do
 
     case AnalysisSession.evaluate(session, source) do
       {:ok, result} ->
-        present_profile_result(opts, index, input_kind, result)
+        present_profile_result(opts, index, input_kind, result, state.jsonl_hint?)
 
         next =
           state
@@ -1185,7 +1191,7 @@ defmodule PtcRunner.ReplFrontend do
   defp pluralize(1, noun), do: "1 #{noun}"
   defp pluralize(count, noun), do: "#{count} #{noun}s"
 
-  defp present_profile_result(opts, index, input_kind, result) do
+  defp present_profile_result(opts, index, input_kind, result, jsonl_hint?) do
     if output_format(opts) == :jsonl do
       emit_jsonl(%{
         "schema_version" => 1,
@@ -1197,8 +1203,39 @@ defmodule PtcRunner.ReplFrontend do
     else
       Enum.each(result.prints, &info/1)
       if is_binary(result.formatted), do: info(result.formatted)
+      present_unabbreviated_hint(jsonl_hint?, result)
       if result.status == :error, do: error(format_profile_error(result))
     end
+  end
+
+  # JSON Lines needs a profile that reaches the format and one non-interactive
+  # input, so this is a property of the whole invocation rather than of the
+  # source that produced any one record: a --load form in a session that also
+  # carries -e can reach it.
+  defp jsonl_hint_available?(opts, arguments) do
+    (Keyword.get_values(opts, :eval) != [] or arguments != []) and
+      jsonl_reachable_for?(opts)
+  end
+
+  defp jsonl_reachable_for?(opts) do
+    case AnalysisProfileRegistry.fetch(opts[:profile]) do
+      {:ok, recipe} -> jsonl_reachable?(recipe, opts)
+      _error -> false
+    end
+  end
+
+  # The preview is bounded by design, so a reader who needs the whole value
+  # reaches for --preview-chars and finds it does not restore what the ceiling
+  # dropped. The same evaluation already carries an unabbreviated `result.value`
+  # in JSON Lines mode; name it only when adding --format jsonl to this exact
+  # invocation would be accepted and this value has a projection at all.
+  defp present_unabbreviated_hint(jsonl_hint?, result) do
+    if jsonl_hint? and Map.get(result, :formatted_truncated?, false) and
+         Map.get(result, :value_available?, false) do
+      info("preview truncated; --format jsonl publishes the unabbreviated result.value")
+    end
+
+    :ok
   end
 
   defp present_profile_closed(opts, info, trace_path) do

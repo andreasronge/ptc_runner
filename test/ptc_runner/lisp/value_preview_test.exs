@@ -347,4 +347,119 @@ defmodule PtcRunner.Lisp.ValuePreviewTest do
       refute preview.text =~ "secret_capture"
     end
   end
+
+  test "renders nested map keys whole while values absorb the truncation" do
+    value = %{
+      "identifier_locations" => %{
+        "evaluation_identifier" => "declared",
+        "parallel_branch_identifier" => "derived",
+        "sequence_identifier" => "inferred"
+      },
+      "counts" => %{
+        "capabilities" => 3,
+        "capability_calls" => 9,
+        "effective_limits" => 16,
+        "evaluations" => 4
+      },
+      "summary" => String.duplicate("evidence ", 400)
+    }
+
+    preview = ValuePreview.render_with_notice(value)
+
+    assert preview.caps_hit == [:string]
+    assert preview.text =~ ~S|"identifier_locations" {"evaluation_identifier" "declared"|
+    assert preview.text =~ ~S|"parallel_branch_identifier" "derived"|
+    assert preview.text =~ ~S|"counts" {"capabilities" 3 "capability_calls" 9|
+    assert preview.text =~ ~S|"effective_limits" 16|
+    assert preview.text =~ "#<preview truncated: string;"
+  end
+
+  test "keeps a map bounded by dropping entries when its keys alone exceed the budget" do
+    value =
+      Map.new(1..40, fn index ->
+        {"private_inspection_collection_#{index}", %{"rows" => index, "state" => "sealed"}}
+      end)
+
+    preview = ValuePreview.render(value, max_chars: 256, max_bytes: 512)
+
+    assert preview.truncated?
+    assert :items in preview.caps_hit
+    assert String.length(preview.text) <= 256
+    assert byte_size(preview.text) <= 512
+    assert preview.text =~ ~S|"private_inspection_collection_1" {...}|
+    refute preview.text =~ "…"
+    assert String.ends_with?(preview.text, " ...}")
+  end
+
+  test "reports the ceiling that ended a dropped entry, not only the output cap" do
+    preview = ValuePreview.render(%{"a" => 1}, max_nodes: 1)
+
+    assert preview.truncated?
+    assert :nodes in preview.caps_hit
+  end
+
+  test "renders a key up to the documented sort-key ceiling before eliding it" do
+    intact = String.duplicate("k", 64)
+    longer = String.duplicate("k", 65)
+
+    # An explicit string ceiling keeps the greedy complete pass out of the way,
+    # so these assert the shape pass's own key budget.
+    assert ValuePreview.render(%{intact => 1}, max_string_chars: 300).text ==
+             ~s|{"#{intact}" 1}|
+
+    assert ValuePreview.render(%{longer => 1}, max_string_chars: 300).text ==
+             ~s|{"#{intact}…" 1}|
+  end
+
+  test "charges the node budget for a dropped entry the enclosing sequence never shows" do
+    wide_key = String.duplicate("a", 64)
+    value = Enum.map(1..10, fn index -> %{wide_key => index} end)
+
+    preview = ValuePreview.render(value, max_chars: 200, max_nodes: 3)
+
+    assert preview.text == "[{...} ...]"
+    assert :nodes in preview.caps_hit
+  end
+
+  test "elides an over-long atom key instead of replacing it with an opaque marker" do
+    key = String.to_atom(String.duplicate("n", 100))
+
+    text = ValuePreview.render(%{key => 1}, max_string_chars: 300).text
+
+    assert text == "{:" <> String.duplicate("n", 65) <> "… 1}"
+  end
+
+  test "keeps an escape-heavy key identifiable at the key ceiling" do
+    key = String.duplicate(~S|"|, 64)
+
+    text = ValuePreview.render(%{key => 1}, max_string_chars: 300).text
+
+    assert String.starts_with?(text, ~S|{"\"\"|)
+    assert text =~ "…"
+    refute text =~ "#<…>"
+  end
+
+  test "skips one oversized entry instead of hiding its narrower siblings" do
+    wide_key = String.duplicate("a", 64)
+    value = %{wide_key => 1, "z" => 2}
+
+    preview = ValuePreview.render(value, max_chars: 64)
+
+    assert preview.truncated?
+    assert preview.text == ~S|{"z" 2 ...}|
+    assert wide_key in preview.sampled_keys
+    assert :output in preview.caps_hit
+  end
+
+  test "never emits a map key without the value it names" do
+    value =
+      Map.new(1..16, fn index ->
+        {"limit_name_number_#{index}", 1_000 + index}
+      end)
+
+    preview = ValuePreview.render(value, max_chars: 120, max_items: 16, max_nodes: 8)
+
+    assert preview.truncated?
+    refute preview.text =~ ~r/"\s+"/
+  end
 end

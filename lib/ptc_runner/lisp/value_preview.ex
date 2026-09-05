@@ -11,6 +11,17 @@ defmodule PtcRunner.Lisp.ValuePreview do
   rendering only if every part fits those bounds. Otherwise the original
   shape-preserving preview wins.
 
+  In the shape pass, map keys are exempt from the per-entry character share: a
+  key renders against the whole key ceiling at every nesting depth, and only the
+  remainder is charged to its value. That ceiling is 67 rendered characters,
+  which holds 64 plain ones plus the delimiters and an elision mark, and fewer
+  where escaping expands them. A truncated value stays identifiable from what
+  survives while a truncated key does not, so a map that cannot fit shows fewer
+  entries with intact names rather than every name abbreviated, and a key too
+  long for the ceiling keeps an elided prefix rather than an opaque marker. The
+  exact pass has no key ceiling, because it renders only when the complete value
+  fits the output budget.
+
   Neither pass recursively sanitizes a complete value or materializes a
   complete collection before applying the traversal ceilings.
 
@@ -48,6 +59,12 @@ defmodule PtcRunner.Lisp.ValuePreview do
   @max_complete_depth 256
   @sampled_key_limit 24
   @sort_key_chars 64
+  # The sort-key ceiling plus the surrounding quotes and the truncation ellipsis,
+  # which `render_string/5` reserves out of the budget it is handed.
+  @key_chars @sort_key_chars + 3
+  # Enough for a short scalar or an elision marker, so an entry with a long key
+  # still renders a value instead of collapsing the map to its marker.
+  @min_value_chars 8
   @large_integer Integer.pow(10, 100)
 
   @type option ::
@@ -734,34 +751,51 @@ defmodule PtcRunner.Lisp.ValuePreview do
         chars: chars,
         bytes: bytes,
         nodes: nodes,
-        allocation_mode: policy.allocation_mode
+        allocation_mode: policy.allocation_mode,
+        # Only a map entry may outgrow its share, because its key is rendered
+        # against the key ceiling rather than that share. One wide entry must not
+        # hide every narrower sibling, so a map skips what does not fit and keeps
+        # going; a list still stops, where position carries meaning.
+        skip_oversized: true
       },
       entry_fun
     )
   end
 
+  # A truncated value stays identifiable from what survives; a truncated key is
+  # unrecoverable, so the key never takes a share of the entry's budget. It gets
+  # the whole key ceiling regardless of how deeply the entry nests, and the value
+  # keeps a small floor beneath the remainder. Nothing here widens the render:
+  # an entry may outgrow its share, but the sequence renderer still drops one
+  # that does not fit the parent budget and marks the map truncated, so a map
+  # whose keys alone exceed the ceiling shows fewer entries with intact names
+  # instead of every name stubbed.
   defp render_map_entry(key, value, depth, chars, bytes, nodes, policy) do
     {key_budget_chars, key_budget_bytes} =
       case policy.allocation_mode do
-        :shape ->
-          {min(max(div(chars, 3), 8), @sort_key_chars + 4),
-           min(max(div(bytes, 3), 8), (@sort_key_chars + 4) * 4)}
-
-        :complete ->
-          {chars, bytes}
+        :shape -> {@key_chars, @key_chars * 4}
+        :complete -> {chars, bytes}
       end
 
     {key_text, key_truncated?, key_caps, nodes} =
       render_key(key, depth + 1, key_budget_chars, key_budget_bytes, nodes, policy)
 
     separator = " "
-    remaining_chars = max(chars - String.length(key_text) - 1, 0)
-    remaining_bytes = max(bytes - byte_size(key_text) - 1, 0)
+    value_floor_chars = if(policy.allocation_mode == :shape, do: @min_value_chars, else: 0)
+
+    remaining_chars =
+      max(chars - String.length(key_text) - 1, value_floor_chars)
+
+    remaining_bytes =
+      max(bytes - byte_size(key_text) - 1, value_floor_chars * 4)
 
     {value_text, value_truncated?, value_caps, nodes} =
       render_value(value, depth + 1, remaining_chars, remaining_bytes, nodes, policy)
 
-    text = key_text <> separator <> value_text
+    # A key with nothing after it reads as a pair whose value is the next key, so
+    # an entry whose value did not fit is dropped whole. The sequence renderer
+    # turns the empty text into the map's truncation marker.
+    text = if value_text == "", do: "", else: key_text <> separator <> value_text
 
     {
       text,
@@ -777,8 +811,10 @@ defmodule PtcRunner.Lisp.ValuePreview do
   defp render_key(%LispKeyword{} = key, _depth, chars, bytes, nodes, policy),
     do: render_keyword(key, chars, bytes, nodes, policy)
 
-  defp render_key(key, _depth, chars, bytes, nodes, _policy) when is_atom(key),
-    do: leaf(":" <> Atom.to_string(key), chars, bytes, nodes)
+  # Through the same bounded label renderer keywords use, so a long atom key
+  # elides to an identifiable prefix instead of collapsing to an opaque marker.
+  defp render_key(key, _depth, chars, bytes, nodes, policy) when is_atom(key),
+    do: render_bounded_label(":", Atom.to_string(key), "", chars, bytes, nodes, policy)
 
   defp render_key(key, depth, chars, bytes, nodes, policy),
     do: render_value(key, depth, chars, bytes, nodes, policy)
@@ -832,10 +868,12 @@ defmodule PtcRunner.Lisp.ValuePreview do
             nodes: nodes,
             remaining_count: length(items),
             allocation_mode: allocation_mode,
+            skip_oversized: Map.get(sequence, :skip_oversized, false),
             parts: [],
             used_chars: 0,
             used_bytes: 0,
             truncated?: false,
+            skipped?: false,
             caps: []
           })
 
@@ -860,7 +898,8 @@ defmodule PtcRunner.Lisp.ValuePreview do
   defp render_sequence_items([], _item_fun, state) do
     %{parts: parts, used_chars: used_chars, used_bytes: used_bytes} = state
 
-    {parts, used_chars, used_bytes, state.nodes, state.truncated?, MapSet.new(state.caps), false}
+    {parts, used_chars, used_bytes, state.nodes, state.truncated?, MapSet.new(state.caps),
+     state.skipped?}
   end
 
   defp render_sequence_items([item | rest], item_fun, state) do
@@ -888,8 +927,25 @@ defmodule PtcRunner.Lisp.ValuePreview do
            state.chars - state.used_chars - marker_reserve_chars,
            state.bytes - state.used_bytes - marker_reserve_bytes
          ) do
-      {state.parts, state.used_chars, state.used_bytes, state.nodes, true,
-       MapSet.new([:output | state.caps]), true}
+      # The dropped text still tells us which ceiling ended it, so the caps the
+      # child reported survive alongside the output cap this drop adds.
+      caps = [:output | MapSet.to_list(child_caps)] ++ state.caps
+
+      if state.skip_oversized and rest != [] do
+        render_sequence_items(rest, item_fun, %{
+          state
+          | nodes: next_nodes,
+            remaining_count: state.remaining_count - 1,
+            truncated?: true,
+            skipped?: true,
+            caps: caps
+        })
+      else
+        # The dropped render still consumed nodes; an enclosing sequence must not
+        # spend them again.
+        {state.parts, state.used_chars, state.used_bytes, next_nodes, true, MapSet.new(caps),
+         true}
+      end
     else
       render_sequence_items(rest, item_fun, %{
         state

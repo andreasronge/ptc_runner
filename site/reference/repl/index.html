@@ -112,7 +112,15 @@ characters, and UTF-8 bytes are bounded during traversal, so displaying a large
 value does not first build its complete printable representation. Truncation is
 explicit and includes sampled map keys where available. The exact native value
 still remains in session history; use <code class="inline">*1</code>, <code class="inline">(describe *1)</code>, <code class="inline">take</code>, <code class="inline">get-in</code>,
-<code class="inline">select-keys</code>, or <code class="inline">reduce</code> to inspect or summarize a smaller part.</p><p>The default output ceiling is 2,048 characters. Set it for direct, manifest,
+<code class="inline">select-keys</code>, or <code class="inline">reduce</code> to inspect or summarize a smaller part.</p><p>Map keys do not take a share of that budget. A key renders against the whole
+key ceiling at every nesting depth — 67 rendered characters, enough for 64
+plain ones and fewer where escaping expands them — and only the remainder is
+charged to its value, because a truncated value stays identifiable from what
+survives while a truncated key does not. A map that cannot fit therefore shows
+fewer entries with intact names, followed by the usual <code class="inline">...</code> marker, rather
+than every name stubbed, and a key past the ceiling keeps an elided prefix. A
+value small enough to render exactly is printed whole, keys included, without
+either ceiling.</p><p>The default output ceiling is 2,048 characters. Set it for direct, manifest,
 or profile sessions with <code class="inline">--preview-chars</code> (64–65,536):</p><pre><code class="console language-console">ptc repl --preview-chars 4096 -e '(range 0 10000)'</code></pre><p>This presentation ceiling is independent of retained continuation, result,
 and transcript limits. Explicit <code class="inline">(pr-str value)</code> remains an exact language
 operation and can itself consume the evaluator heap; prefer <code class="inline">describe</code> or a
@@ -333,7 +341,10 @@ bounded before evaluation. The profile contains no filesystem, network, LLM,
 agent, workflow, MCP, private-inspection, or nested-evaluation authority.</p><p>Inspect its complete safe static contract without opening any resource:</p><pre><code class="console language-console">ptc repl --describe-profile run-analysis-v1
 ptc repl --describe-profile run-analysis-v1 --format jsonl</code></pre><p>The description includes fixed resources, components, namespaces,
 capabilities, limits, and policies, but no paths, source, processes, callbacks,
-or credentials.</p><h2 id="discover-a-private-run-catalog">Discover a private run catalog</h2><p>Use <code class="inline">private-run-catalog-v1</code> to select a cohort before admitting any run's
+or credentials.</p><p>Both formats print the contract whole. It is a small fixed document that holds
+no evaluated value, so it does not pass through the structural preview, and
+<code class="inline">--format</code> is the only switch <code class="inline">--describe-profile</code> accepts. <code class="inline">--preview-chars</code>
+is refused beside it and has nothing to widen.</p><h2 id="discover-a-private-run-catalog">Discover a private run catalog</h2><p>Use <code class="inline">private-run-catalog-v1</code> to select a cohort before admitting any run's
 private evidence. The profile probes bounded trace heads and tails plus sealed
 inspection headers and footers, freezes one generation, and grants only the
 profile-local <code class="inline">analysis/catalog</code> function. It never opens an inspection payload.</p><pre><code class="console language-console">ptc repl \
@@ -527,7 +538,21 @@ never disclose supplied paths, resolved paths, or symlink targets.</p><h2 id="us
   -e '(count (get runs &quot;items&quot;))'</code></pre><p>When their lifecycle stages are reached, records appear in this order:</p><ol><li>one <code class="inline">session-started</code> after construction;</li><li>one <code class="inline">evaluation</code> per accepted source;</li><li>one <code class="inline">session-closed</code> after successful close and trace publication;</li><li>a final <code class="inline">command-error</code> when the command is unsuccessful.</li></ol><p>Validation or setup can therefore emit only <code class="inline">command-error</code>; persistence
 failure follows earlier records without claiming <code class="inline">session-closed</code>. Records use
 schema version 1. Evaluation records contain the bounded mission result and no
-extra raw-source copy. A profile selection or immutable source-capture refusal
+extra raw-source copy.</p><p>An evaluation record carries the value twice. <code class="inline">result.value</code> is the
+unabbreviated JSON projection, and <code class="inline">result.formatted</code> is the same bounded
+structural preview the human format prints, with <code class="inline">result.formatted_truncated</code>,
+<code class="inline">result.formatted_caps_hit</code>, and <code class="inline">result.formatted_sampled_keys</code> beside it.
+Parse <code class="inline">value</code>; read <code class="inline">formatted</code>. <code class="inline">--preview-chars</code> widens <code class="inline">formatted</code> only, so
+a truncated preview is not a reason to raise it while <code class="inline">value_available</code> is
+true.</p><p>A projection that cannot be built takes one of three shapes, and they differ in
+more than <code class="inline">value</code>:</p><ul><li>A value no JSON encoding accepts keeps the evaluation's own <code class="inline">status</code> and
+reports <code class="inline">value_available</code> false with <code class="inline">value</code> null. <code class="inline">formatted</code> still holds
+the preview.</li><li>An encoding over <code class="inline">terminal_result_bytes</code>, or a projection that exhausts the
+evaluation heap or timeout, turns the evaluation into <code class="inline">status</code> <code class="inline">error</code> with
+<code class="inline">outcome</code> <code class="inline">result_exceeded</code>. <code class="inline">value</code> is null and <code class="inline">formatted</code> still holds the
+preview.</li><li>A whole assembled result over <code class="inline">terminal_result_bytes</code> — the result object,
+not the record around it — is replaced by the same <code class="inline">result_exceeded</code> error
+carrying neither <code class="inline">value</code> nor <code class="inline">formatted</code>.</li></ul><p>A profile selection or immutable source-capture refusal
 also carries its stable <code class="inline">code</code>; stderr uses the same identity as <code class="inline">repl/CODE</code>.
 The generated table in the <a href="/reference/cli/#profile-frontend-diagnostics">CLI reference</a>
 is the complete vocabulary. Shared argument-parser refusals remain
@@ -547,8 +572,10 @@ automation does not parse prose:</p><pre><code class="json language-json">{
 <code class="inline">private_output</code>. <code class="inline">relation</code> is <code class="inline">same</code>, <code class="inline">left_contains_right</code>, or
 <code class="inline">right_contains_left</code>; <code class="inline">same</code> covers both an identical directory and distinct
 spellings that reach one directory through a symbolic link. The object carries
-no path.</p><p>By default, one failed expression stops later ones. Continue requested
-expressions while preserving the final nonzero status with:</p><pre><code class="console language-console">ptc repl \
+no path.</p><p>By default, one failed expression stops later ones. <code class="inline">--continue-on-error</code>
+continues the requested expressions while preserving the final nonzero status.
+It requires <code class="inline">--profile</code> and at least two <code class="inline">--eval</code> forms, and is refused in
+direct, manifest, and <code class="inline">--inspect-only</code> sessions:</p><pre><code class="console language-console">ptc repl \
   --profile run-analysis-v1 \
   --resource traces=tmp/tutorial-traces \
   --format jsonl \
