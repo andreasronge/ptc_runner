@@ -72,17 +72,17 @@ descriptor on the command line. The installed files are never written, which is
 why the last check can assert they are byte-identical.
 
 ```text
-1  target                       -> capture A   broken pricing
-   self-debugger                -> capture B   the helper's own failure
-2  self-improver reads B        -> helper-proposal.private.json
-   ptc materialize              -> helper/descriptor.json
-3  self-check + descriptor         replays A                    no model
-   variants/target-workflow-control -> capture C  broken fulfillment
-   self-check-workflow + descriptor replays C                   no model
-4  self-debugger + descriptor   -> diagnosis.private.json        reads A
-5  self-repair reads diagnosis  -> application-proposal.private.json
-   ptc materialize              -> application/descriptor.json
-   target + descriptor             three inputs, pass or fail
+stage 1  target                            -> capture A  broken pricing
+         self-debugger                     -> capture B  the helper's own failure
+stage 2  self-improver reads B             -> helper-proposal.private.json
+         ptc materialize                   -> helper/descriptor.json
+stage 3  self-check          + descriptor  -> replays capture A, no model
+         variants/target-workflow-control  -> capture C  broken fulfillment
+         self-check-workflow + descriptor  -> replays capture C, no model
+stage 4  self-debugger       + descriptor  -> diagnosis.private.json, from capture A
+stage 5  self-repair reads the diagnosis   -> application-proposal.private.json
+         ptc materialize                   -> application/descriptor.json
+         target              + descriptor  -> three inputs, pass or fail
 ```
 
 ## What the agent saw and did

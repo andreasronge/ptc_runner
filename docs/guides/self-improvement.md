@@ -1,9 +1,10 @@
 # Let an agent improve its own workflow
 
-Run a debugging workflow that repairs its own navigation helper, the component
-that reads a failed run's captured evidence before any model call. The repaired
-helper then diagnoses and fixes an application. You end with a checked candidate
-for each fix and the source files you started with.
+A debugging workflow repairs its own navigation helper, then uses the repaired
+helper to diagnose and fix an application.
+
+The helper reads a failed run's captured evidence before any model call. You end
+with a checked candidate for each fix and the source files you started with.
 
 ## Run the example
 

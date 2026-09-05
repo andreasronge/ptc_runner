@@ -4,14 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Let an agent improve its own workflow · PtcRunner</title>
-<meta name="description" content="Run a debugging workflow that repairs its own navigation helper, the component
-that reads a failed run's captured evidence before any model call. The repaired
-…">
+<meta name="description" content="A debugging workflow repairs its own navigation helper, then uses the repaired
+helper to diagnose and fix an application.">
 <link rel="canonical" href="https://ptc-runner.dev/guides/self-improvement/">
 <meta property="og:title" content="Let an agent improve its own workflow · PtcRunner">
-<meta property="og:description" content="Run a debugging workflow that repairs its own navigation helper, the component
-that reads a failed run's captured evidence before any model call. The repaired
-…">
+<meta property="og:description" content="A debugging workflow repairs its own navigation helper, then uses the repaired
+helper to diagnose and fix an application.">
 <meta property="og:url" content="https://ptc-runner.dev/guides/self-improvement/">
 <meta property="og:type" content="article">
 <link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
@@ -103,10 +101,9 @@ that reads a failed run's captured evidence before any model call. The repaired
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="let-an-agent-improve-its-own-workflow">Let an agent improve its own workflow</h1><p>Run a debugging workflow that repairs its own navigation helper, the component
-that reads a failed run's captured evidence before any model call. The repaired
-helper then diagnoses and fixes an application. You end with a checked candidate
-for each fix and the source files you started with.</p><h2 id="run-the-example">Run the example</h2><p>Initialize a fresh copy and run the script with your OpenRouter environment
+<h1 id="let-an-agent-improve-its-own-workflow">Let an agent improve its own workflow</h1><p>A debugging workflow repairs its own navigation helper, then uses the repaired
+helper to diagnose and fix an application.</p><p>The helper reads a failed run's captured evidence before any model call. You end
+with a checked candidate for each fix and the source files you started with.</p><h2 id="run-the-example">Run the example</h2><p>Initialize a fresh copy and run the script with your OpenRouter environment
 file:</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
 sh debug-a-failed-run/run-self-improvement.sh /absolute/path/to/.env</code></pre><p>The script captures two failures, lets an agent repair the helper, checks that
 helper on two captures without a model, and then diagnoses and repairs the
