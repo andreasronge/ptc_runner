@@ -15,9 +15,12 @@ defmodule PtcRunner.Kernel.RunAnalysis do
   exchanges, reconstructed turns, generated source with static prelude-call
   facts, effective prelude source, and workflow execution diagnostics. The
   catalog identifies snapshot and sequence domains, identifier locations, and
-  raw collections whose items carry an explicit completeness field. Private
-  error and source items carry typed relationships that package exact follow-up
-  reads without performing them or diagnosing their evidence.
+  raw collections whose items carry an explicit completeness field. Each
+  collection the private inspection record counts also reports the `item_count`
+  that run retained, so an empty page is a measured zero rather than an
+  unexplained absence. Private error and source items carry typed relationships
+  that package exact follow-up reads without performing them or diagnosing
+  their evidence.
   """
 
   alias PtcRunner.Kernel.InspectionSnapshot
@@ -265,13 +268,11 @@ defmodule PtcRunner.Kernel.RunAnalysis do
          {:ok, run} <- TraceSnapshot.query(analysis.traces, :get_run, arguments),
          {:ok, inspection} <- inspection_run(analysis.inspection, run_id),
          {:ok, result} <- inspection_result(analysis.inspection, run_id) do
-      private_available? = inspection["available?"] == true
-
       bounded_result(analysis, %{
         "run" => run,
         "inspection" => inspection,
         "result" => result,
-        "collections" => collection_catalog(private_available?)
+        "collections" => collection_catalog(inspection)
       })
     else
       false -> {:error, :invalid_query}
@@ -351,7 +352,10 @@ defmodule PtcRunner.Kernel.RunAnalysis do
     end
   end
 
-  defp collection_catalog(private_available?) do
+  defp collection_catalog(inspection) do
+    private_available? = inspection["available?"] == true
+    counts = retained_counts(inspection)
+
     Enum.map(@collections, fn collection ->
       %{
         "name" => collection.name,
@@ -363,10 +367,23 @@ defmodule PtcRunner.Kernel.RunAnalysis do
         "sequence_domain" => collection.sequence_domain,
         "identifier_locations" => collection.identifier_locations
       }
+      |> put_item_count(collection, counts)
       |> put_catalog_option(collection, :item_completeness_field)
       |> put_catalog_option(collection, :projection_scope)
       |> put_catalog_option(collection, :projection_not_included)
     end)
+  end
+
+  defp retained_counts(%{"available?" => true, "counts" => counts}) when is_map(counts),
+    do: counts
+
+  defp retained_counts(_inspection), do: %{}
+
+  defp put_item_count(catalog, collection, counts) do
+    case Map.fetch(counts, Atom.to_string(collection.operation)) do
+      {:ok, count} when is_integer(count) -> Map.put(catalog, "item_count", count)
+      _other -> catalog
+    end
   end
 
   defp put_catalog_option(catalog, collection, key) do

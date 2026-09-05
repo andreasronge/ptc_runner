@@ -429,6 +429,12 @@ list, such as `generated[].evaluation_id` on a turn.
 The `model_exchanges` and `capability_calls` entries additionally advertise
 `item_completeness_field: "complete?"`; collections without per-item
 completion semantics omit that catalog field.
+Every collection the private inspection record counts also carries
+`item_count`, the number of items that run retained for it. A zero is a
+measured zero for that run, not an unread or withheld page. `activity` is
+canonical rather than retained and `turns` is compiled from retained
+exchanges, so neither owns a retained count and both omit the field, as does
+every collection on a capture with no private inspection record.
 The `turns` entry also owns the transcript projection boundary:
 `projection_scope: "model_conversation"` and `projection_not_included` name
 the scope certified by a published transcript and the evidence surfaces it
@@ -448,6 +454,19 @@ also advertise `turns`, `model_exchanges`, `capability_calls`,
 `provider_exchanges`, `generated_sources`, `prelude_sources`,
 `execution_prints`, and `execution_errors`. Public recipes report those private
 collections as unavailable and reject reads without changing authority.
+
+`provider_exchanges` holds MCP wire traffic and nothing else. Only the MCP
+client writes its records, so a run that installed no MCP provider retains no
+provider exchange and advertises `item_count: 0`. No LLM wire bytes are
+retained on any surface: `model_exchanges` holds the normalized request the
+runtime handed the model capability and the value that capability returned,
+not the bytes exchanged with the provider. Provider-side content that never
+reaches that boundary — billed reasoning tokens with no returned text, for
+instance — therefore leaves no content anywhere. Attested usage is the only
+record that it happened: the `tokens` map a normalized `model_exchanges`
+result carries when the provider reported usage, and the `analysis/counters`
+aggregate, which counts `missing_usage_calls` separately rather than reading
+absent usage as zero.
 
 Every raw `model_exchanges` and `capability_calls` item carries `complete?`.
 Completed items retain their result, output sequence, and output timestamp.
