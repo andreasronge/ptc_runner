@@ -162,6 +162,16 @@ providers, or input. It writes one new owner-only file and refuses an existing
 destination. `--out` publishes a new owner-only directory. A refused candidate
 leaves nothing behind.
 
+Both destinations are published into a directory that must already exist:
+neither switch creates the parent. A missing parent is
+`source_out_parent_missing` or `candidate_destination_parent_missing`; a parent
+that is group- or world-writable without the sticky bit, or one owned by
+neither you nor root, is `source_out_parent_unsafe` or
+`candidate_destination_parent_unsafe`; an existing destination remains
+`source_out_destination_exists` or `candidate_destination_exists`. Create the
+parent with `mkdir -p`, restrict it with `chmod go-w`, or choose a path you
+own, and rerun.
+
 Candidate mode keeps the existing 1 MiB replacement bound. Installed
 inspection and `--source-out` can return a larger accepted component; submitting
 those bytes as a candidate is refused with the existing too-large diagnostic.

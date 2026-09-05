@@ -35,6 +35,7 @@ defmodule PtcRunner.ViewerFrontend do
   """
 
   alias PtcRunner.Kernel.AnalysisTerminal
+  alias PtcRunner.Kernel.ArtifactRootDiagnostic
   alias PtcRunner.Kernel.CommandArguments
   alias PtcRunner.Kernel.CommandRuntime
   alias PtcRunner.Kernel.InspectionSnapshot
@@ -159,9 +160,29 @@ defmodule PtcRunner.ViewerFrontend do
         {:error, :viewer_port_in_use, port_in_use_message(port, owner)}
 
       {:error, reason} ->
-        {:error, reason, "could not start PTC Viewer"}
+        start_failure(reason)
     end
   end
+
+  # A refused artifact root arrives as a tagged tuple carrying the directory at
+  # fault. Rendering the tuple itself would put Elixir syntax where the reader
+  # expects a code, so the shared sentence is used instead; `ptc run` prints
+  # the same one from its own surface.
+  defp start_failure(reason) do
+    case ArtifactRootDiagnostic.describe(reason) do
+      {:ok, {_envelope_code, message}} -> {:error, :artifact_root_unusable, message}
+      :error -> {:error, failure_code(reason), "could not start PTC Viewer"}
+    end
+  end
+
+  # The code is interpolated into `viewer/<code>`, so a tagged reason has to be
+  # reduced to its tag: capture and snapshot refusals carry payloads, and
+  # printing one would turn an expected refusal into an internal error.
+  # Dialyzer sees only the default capture callback, whose refusals are all
+  # atoms, and so believes the second clause is unreachable; the injected
+  # callback in the Viewer frontend test reaches it. See .dialyzer_ignore.exs.
+  defp failure_code(reason) when is_atom(reason), do: reason
+  defp failure_code(reason), do: elem(reason, 0)
 
   # Both values are already accepted by the parser; re-resolving them here keeps
   # the frontend usable from a test or an embedding host that never parsed argv.

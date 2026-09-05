@@ -167,9 +167,27 @@ displayed elsewhere in the Viewer.</p><h2 id="artifact-layout">Artifact layout</
 .ptc/envelopes/&lt;run-ref&gt;.json</code></pre><p>The root and its fixed child directories are owner-only. The first project run
 creates the complete layout atomically; an existing incomplete, permissive, or
 symlinked layout is refused. When a pre-existing directory fails the owner-only
-(0700) check, the command names the path and the <code class="inline">chmod 700</code> remedy rather than
-a bare publication failure. Artifact files retain the normal no-replace and
-privacy rules.</p><p>The trace filenames are also the canonical directory-discovery contract. Each
+(0700) check, a run that publishes an envelope names the path and the
+<code class="inline">chmod 700</code> remedy rather than reporting a bare publication failure; the
+conditions for that are in the table below. Artifact files retain the normal
+no-replace and privacy rules.</p><p>The run creates the root and its four children, and nothing above them. A
+directory above the root is yours, so its mode and ownership are not the
+command's to choose; <code class="inline">artifacts.root</code> may name a path several levels deep, but
+every level above the root must already exist.</p><p>Ancestors are held to a weaker rule than the root itself: each one must be
+owned by you or by root, and must not be writable by group or other unless it
+carries the sticky bit. A sticky world-writable directory such as <code class="inline">/tmp</code> is
+therefore accepted, while an ordinary <code class="inline">0775</code> directory is not. The root and its
+four children remain owner-only (0700).</p><p>The refusals below name the directory that earned them; anything else falls
+back to the generic publication failure:</p><div class="table-wrap"><table><thead><tr><th style="text-align: left;">Cause</th><th style="text-align: left;">Reported as</th><th style="text-align: left;">Remedy</th></tr></thead><tbody><tr><td style="text-align: left;">an ancestor of the root does not exist</td><td style="text-align: left;"><code class="inline">envelope/destination_parent_unavailable</code></td><td style="text-align: left;"><code class="inline">mkdir -p</code> the root's parent, or point <code class="inline">artifacts.root</code> at an existing directory</td></tr><tr><td style="text-align: left;">an ancestor is group- or world-writable and not sticky</td><td style="text-align: left;"><code class="inline">envelope/destination_parent_unsafe</code></td><td style="text-align: left;"><code class="inline">chmod go-w PATH</code></td></tr><tr><td style="text-align: left;">an ancestor is owned by another user</td><td style="text-align: left;"><code class="inline">envelope/destination_parent_unsafe</code></td><td style="text-align: left;">point <code class="inline">artifacts.root</code> under a directory you own</td></tr><tr><td style="text-align: left;">the root or a child exists at a wider mode</td><td style="text-align: left;"><code class="inline">envelope/publication_failed</code></td><td style="text-align: left;"><code class="inline">chmod 700 PATH</code></td></tr><tr><td style="text-align: left;">the root exists without its four children</td><td style="text-align: left;"><code class="inline">envelope/publication_failed</code></td><td style="text-align: left;">remove the root and let <code class="inline">ptc</code> recreate it</td></tr><tr><td style="text-align: left;">any other refusal, such as a parent you own but cannot write to</td><td style="text-align: left;"><code class="inline">envelope/publication_failed</code></td><td style="text-align: left;">make the parent writable, or point <code class="inline">artifacts.root</code> elsewhere</td></tr></tbody></table></div><p>The missing-ancestor message names the shallowest missing directory and offers
+<code class="inline">mkdir -p</code> on the root's parent, so one command creates every level rather than
+only the first. These arrive on stderr with exit 74, because the envelope that
+would normally carry a diagnostic is the artifact that could not be written.</p><p>That last-resort channel is what carries the directory name, so the table above
+describes a run that publishes an envelope — the <code class="inline">ptc init</code> default, and any
+run given <code class="inline">--envelope</code>. With <code class="inline">artifacts.envelope</code> set to <code class="inline">false</code> the same
+refusals still stop the run before it executes, reported through the ordinary
+destination phase as <code class="inline">destination/invalid_destination</code> at exit 7 without the
+path. <code class="inline">ptc viewer</code> reports the named sentences as
+<code class="inline">viewer/artifact_root_unusable</code>.</p><p>The trace filenames are also the canonical directory-discovery contract. Each
 file contains exactly the run ID named by its stem and one trace identity;
 arbitrary aggregate filenames and split histories remain supported only when a
 caller explicitly selects one file, not when Viewer or run analysis discovers a

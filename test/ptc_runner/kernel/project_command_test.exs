@@ -230,6 +230,171 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
   end
 
   @tag :tmp_dir
+  test "a missing artifact-root ancestor names the directory and the mkdir remedy", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    project_path = project_with_artifact_root(target, "missing-artifact-parent/.ptc")
+    missing = Path.join(target, "missing-artifact-parent")
+
+    presentation = run_project(project_path)
+
+    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
+    assert presentation.stderr =~ "envelope/destination_parent_unavailable"
+    assert presentation.stderr =~ missing
+    assert presentation.stderr =~ "mkdir -p #{missing}"
+    refute presentation.stderr =~ "owner-only (0700)"
+    refute File.exists?(missing)
+  end
+
+  # The shallowest missing ancestor is what failed, but creating only it fails
+  # again on the next level; the remedy has to name the whole parent.
+  @tag :tmp_dir
+  test "several missing artifact-root levels still yield a remedy that works", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    project_path = project_with_artifact_root(target, "outer/inner/.ptc")
+    outer = Path.join(target, "outer")
+    inner = Path.join(outer, "inner")
+
+    presentation = run_project(project_path)
+
+    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
+    assert presentation.stderr =~ "#{outer} does not exist"
+    assert presentation.stderr =~ "mkdir -p #{inner}"
+
+    File.mkdir_p!(inner)
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project_path])
+    assert File.dir?(Path.join(inner, ".ptc"))
+  end
+
+  @tag :tmp_dir
+  test "an artifact-root parent other users can replace names the mode remedy", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    project_path = project_with_artifact_root(target, "permissive-parent/.ptc")
+    parent = Path.join(target, "permissive-parent")
+    File.mkdir!(parent)
+    File.chmod!(parent, 0o777)
+
+    presentation = run_project(project_path)
+
+    assert presentation.exit_status == CommandFrontend.envelope_failure_exit_status()
+    assert presentation.stderr =~ "envelope/destination_parent_unsafe"
+    assert presentation.stderr =~ "#{parent} is writable by group or other"
+    assert presentation.stderr =~ "chmod go-w #{parent}"
+    refute presentation.stderr =~ "mkdir -p"
+  end
+
+  # The embedding entry point must report an unusable artifact root, not raise:
+  # `publication` has no `invalid_destination` row for it to name. The root is
+  # also where the envelope would go, so the ledger is lost with it.
+  @tag :tmp_dir
+  test "dispatch reports an unusable artifact root instead of raising", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    project_path = project_with_artifact_root(target, "missing-artifact-parent/.ptc")
+
+    assert {:envelope_publication_failed, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["run", project_path])
+
+    assert envelope["error"]["phase"] == "destination"
+    assert envelope["error"]["code"] == "invalid_destination"
+  end
+
+  # A run that already finished must not be reported as never started: an
+  # embedding caller would retry effects that already happened.
+  @tag :tmp_dir
+  test "an unpublishable envelope keeps the finished run's evidence", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project_path = Path.join(target, "ptc-project.json")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project_path])
+
+    # Owner-only but not writable: the layout still passes every artifact-root
+    # check, so the ledger fails only after the run has already finished.
+    ledger = Path.join([target, ".ptc", "envelopes"])
+    File.chmod!(ledger, 0o500)
+    on_exit(fn -> File.chmod(ledger, 0o700) end)
+
+    assert {:envelope_publication_failed, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["run", project_path])
+
+    assert envelope["artifact_class"] != "unclassified"
+    assert envelope["execution"]["state"] == "finished"
+    assert envelope["execution"]["outcome"] == "ok"
+  end
+
+  # A run that failed for its own reason must still say the audit envelope was
+  # lost, or the two failures are indistinguishable to an embedding caller.
+  @tag :tmp_dir
+  test "a failed run whose envelope is also lost reports both", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project_path = Path.join(target, "ptc-project.json")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["run", project_path])
+
+    project = Jason.decode!(File.read!(project_path))
+    project = put_in(project, ["application", "path"], "missing.json")
+    File.write!(project_path, Jason.encode!(project))
+
+    ledger = Path.join([target, ".ptc", "envelopes"])
+    File.chmod!(ledger, 0o500)
+    on_exit(fn -> File.chmod(ledger, 0o700) end)
+
+    assert {:envelope_publication_failed, %CommandOutcome{envelope: envelope}} =
+             CommandEngine.dispatch(["run", project_path])
+
+    assert envelope["status"] == "error"
+  end
+
+  # Without an envelope the run has no last-resort channel for the named
+  # ancestor, so the same refusal arrives as a destination diagnostic. Pinned
+  # here because the reference states the difference.
+  @tag :tmp_dir
+  test "a project without an envelope still refuses a missing artifact-root ancestor", %{
+    tmp_dir: directory
+  } do
+    target = Path.join(directory, "demo")
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project_path = Path.join(target, "ptc-project.json")
+    project = Jason.decode!(File.read!(project_path))
+
+    project =
+      project
+      |> put_in(["artifacts", "root"], "missing-artifact-parent/.ptc")
+      |> put_in(["artifacts", "envelope"], false)
+
+    File.write!(project_path, Jason.encode!(project))
+
+    presentation = run_project(project_path)
+
+    assert presentation.exit_status == 7
+    assert presentation.stderr =~ "destination/invalid_destination"
+    refute File.exists?(Path.join(target, "missing-artifact-parent"))
+  end
+
+  # A sticky world-writable directory — /tmp is the everyday one — is accepted,
+  # so it must not be reported as an unsafe ancestor.
+  @tag :tmp_dir
+  test "a sticky world-writable artifact-root parent is accepted", %{tmp_dir: directory} do
+    target = Path.join(directory, "demo")
+    project_path = project_with_artifact_root(target, "sticky-parent/.ptc")
+    parent = Path.join(target, "sticky-parent")
+    File.mkdir!(parent)
+    # Erlang's change_mode carries only the low nine bits, so the sticky bit
+    # this case is about has to be set through chmod itself.
+    assert {_output, 0} = System.cmd("chmod", ["1777", parent])
+
+    presentation = run_project(project_path)
+
+    assert presentation.stderr == ""
+    assert presentation.exit_status == 0
+    assert File.dir?(Path.join(parent, ".ptc"))
+  end
+
+  @tag :tmp_dir
   test "--envelope into a missing parent names destination_parent_unavailable", %{
     tmp_dir: directory
   } do
@@ -842,5 +1007,21 @@ defmodule PtcRunner.Kernel.ProjectCommandTest do
              )
 
     assert entry.rejection.code == :conflicting_arguments
+  end
+
+  defp project_with_artifact_root(target, root) do
+    assert {:ok, %CommandOutcome{}} = CommandEngine.dispatch(["init", target])
+    project_path = Path.join(target, "ptc-project.json")
+    project = Jason.decode!(File.read!(project_path))
+    File.write!(project_path, Jason.encode!(put_in(project, ["artifacts", "root"], root)))
+    project_path
+  end
+
+  defp run_project(project_path) do
+    CommandFrontend.execute(
+      ["run", project_path],
+      :standalone,
+      fn _arguments -> {:ok, CommandRuntime.standalone()} end
+    )
   end
 end

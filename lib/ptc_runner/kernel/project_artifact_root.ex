@@ -12,6 +12,9 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
           :project_artifact_root_invalid
           | {:project_artifact_root_not_owner_only, binary()}
           | {:project_artifact_root_incomplete, binary()}
+          | {:project_artifact_root_parent_missing, binary(), binary()}
+          | {:project_artifact_root_parent_unsafe_mode, binary()}
+          | {:project_artifact_root_parent_foreign_owner, binary()}
 
   @spec ensure_for(CommandArguments.t()) :: :ok | {:error, ensure_error()}
   def ensure_for(%CommandArguments{
@@ -57,7 +60,38 @@ defmodule PtcRunner.Kernel.ProjectArtifactRoot do
       end
     else
       {:error, :private_directory_creation_failed} -> create(root, attempts - 1)
-      _failure -> {:error, :project_artifact_root_invalid}
+      {:error, _reason} -> parent_failure(root)
+    end
+  end
+
+  # `ptc` creates the artifact root and its fixed children, never their
+  # ancestors: a directory above the root is the caller's, and its mode and
+  # ownership are not this command's to choose. Naming the ancestor that
+  # stopped the creation is therefore the whole remedy. A missing ancestor
+  # carries the requested parent too, because `mkdir -p` on the parent creates
+  # every level, while creating only the shallowest one fails again on the next.
+  defp parent_failure(root) do
+    anchored = anchored(root)
+
+    case PrivateDirectory.parent_fault(anchored) do
+      {:missing, path} ->
+        {:error, {:project_artifact_root_parent_missing, path, Path.dirname(anchored)}}
+
+      {:unsafe_mode, path} ->
+        {:error, {:project_artifact_root_parent_unsafe_mode, path}}
+
+      {:foreign_owner, path} ->
+        {:error, {:project_artifact_root_parent_foreign_owner, path}}
+
+      :none ->
+        {:error, :project_artifact_root_invalid}
+    end
+  end
+
+  defp anchored(root) do
+    case PrivateDirectory.anchor(root) do
+      {:ok, anchored} -> anchored
+      {:error, _reason} -> root
     end
   end
 
