@@ -154,14 +154,14 @@ defmodule PtcRunner.Kernel.ExampleLibraryTest do
     end
   end
 
-  test "the debugging README leads to a standalone self-improvement script and walkthrough" do
+  test "the debugging README leads to the standalone self-improvement script" do
     assert {:ok, files} = ExampleLibrary.fetch("debug-a-failed-run")
     readme = files["README.md"]
     script = files["run-self-improvement.sh"]
 
     assert readme =~ "sh debug-a-failed-run/run-self-improvement.sh"
-    assert readme =~ "[the annotated walkthrough](WALKTHROUGH.md)"
-    assert is_binary(files["WALKTHROUGH.md"])
+    assert readme =~ "self-debugger/debug.start.clj"
+    assert readme =~ "ptc docs debug"
     refute script =~ "mix ptc"
     assert script =~ "expect_failure target.ptc-project.json"
     assert script =~ "ptc run self-improver.ptc-project.json"

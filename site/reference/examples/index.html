@@ -62,7 +62,7 @@ follows, and the aspect each one demonstrates.">
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
 <li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
-<li><a href="/guides/debugging-a-failed-run/">Improve a debugging workflow</a></li>
+<li><a href="/guides/self-improvement/">Let an agent improve its own workflow</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
 
@@ -138,16 +138,16 @@ decisions. Every step selects a provider.</p><div class="table-wrap"><table><the
 The <code class="inline">reader</code> mission holds only a read tool over one directory and the
 <code class="inline">writer</code> mission holds only a write tool over another, so a generated program
 in either mission cannot reach the other's authority. It is the runnable form
-of a write kept behind its own mission.</p><p><code class="inline">debug-a-failed-run</code> includes <code class="inline">run-self-improvement.sh</code>: a seeded debugging
-workflow failure, an agent-proposed helper repair, checks against two captures,
-an application investigation, and an application repair checked on three inputs.
-The same tree retains the individual debuggers and packet-based repair path. <code class="inline">target.ptc-project.json</code> fails on purpose;
-<code class="inline">debugger.ptc-project.json</code> walks the evidence deterministically and
-<code class="inline">debugger-agent.ptc-project.json</code> walks it with a model.
-<code class="inline">repair-agent.ptc-project.json</code> extends the incident into a phased agent run
-whose only terminal actions are to propose a replacement component or to
-abstain. The <code class="inline">-ambiguous</code> and <code class="inline">-workflow-control</code> variants change the failure
-so the same debuggers and repair agent meet a different shape.</p><p><code class="inline">llm-replay</code> serves one recorded model response from <code class="inline">replay.jsonl</code>. It needs
+of a write kept behind its own mission.</p><p><code class="inline">debug-a-failed-run</code> is the self-improvement example. <code class="inline">run-self-improvement.sh</code>
+runs a debugging workflow that fails on purpose, lets an agent repair the
+workflow's own navigation helper, checks that helper without a model, then uses
+the repaired workflow to diagnose and repair an application. The same tree
+keeps the smaller pieces: <code class="inline">target.ptc-project.json</code> fails on purpose,
+<code class="inline">debugger.ptc-project.json</code> walks the evidence deterministically,
+<code class="inline">debugger-agent.ptc-project.json</code> walks it with a model, and
+<code class="inline">repair-agent.ptc-project.json</code> proposes a replacement component or abstains.
+The <code class="inline">-ambiguous</code> and <code class="inline">-workflow-control</code> variants change the failure so the
+same debuggers and repair agent meet a different shape.</p><p><code class="inline">llm-replay</code> serves one recorded model response from <code class="inline">replay.jsonl</code>. It needs
 no credential and performs no network activity, which makes it the tree to copy
 when building a test that must not call a provider.</p><h2 id="the-example-that-needs-a-checkout">The example that needs a checkout</h2><p><a href="https://github.com/andreasronge/ptc_runner/tree/main/examples/dabstep-fraud"><code class="inline">dabstep-fraud</code></a>
 runs three agent loops over 138,236 payment rows and reviews a stage's answer

@@ -1,47 +1,101 @@
-# Improve a debugging workflow
+# Let an agent improve its own debugging workflow
 
-An agent repairs a broken navigation helper, then uses the improved workflow
-to investigate an application and propose a separately validated repair.
+A debugging workflow fails because its navigation helper has a bug. An agent
+reads that failed run, proposes an exact edit to the helper, and the host
+checks the edit without a model. The repaired workflow then diagnoses a broken
+application, and a second agent proposes a fix that the host validates on
+inputs the agent never saw. No checked-in source changes.
 
-## Run the story
+## The loop
 
-Start with a fresh materialized example and an OpenRouter environment file:
+`run-self-improvement.sh` runs five stages:
+
+1. Run the application and the debugging workflow. Both fail on purpose.
+2. Let an agent read the workflow's own failed trace and edit its helper.
+3. Check the proposed helper on two captured applications, without a model.
+4. Run the improved workflow to diagnose the application failure.
+5. Let a second agent propose the application fix, then validate it on three inputs.
+
+Each proposal is materialized into a candidate descriptor that later runs
+select explicitly. The source files stay as they are.
+
+## What the agent saw and did
+
+The seeded bug is one line in `self-debugger/debug.start.clj`. The helper
+takes the first relationship of the first generated program, although its
+docstring says relationship order has no meaning:
+
+```clojure
+relationship (first (get generated "relationships"))
+```
+
+The improving agent gets the task, the `debug.nav` library, and
+`repair.edit/propose`. The task names the contract to keep. It does not name
+the application, the faulty line, or the replacement. On its sixth model call
+the agent read the failing program's relationships:
+
+| Relationship | State |
+| --- | --- |
+| `producing_turn` | `unavailable` |
+| `referenced_prelude_source` | `complete` |
+
+Two calls later it submitted this replacement for the line above:
+
+```clojure
+(first (filter (fn [r] (and (= (get r "rel") "referenced_prelude_source")
+                           (= (get r "state") "complete")
+                           (not (nil? (get r "filters")))))
+               (get generated "relationships")))
+```
+
+The model supplied only a before fragment and an after fragment.
+`repair.edit/propose` copied the source hash and the unchanged bytes from the
+frozen capture, and it refuses a fragment that is missing or occurs twice.
+When the model had to return the whole file instead, it miscopied hashes and
+source. This one helper is what made the loop reliable.
+
+The repaired workflow then handed its first source page to the investigating
+agent. On its third call that agent followed both dependencies of
+`pricing.tax` in one program. It saw that `pricing.base` returns its input
+unchanged while `pricing.rule` promises a charge of 20 and adds 2. Following
+only the first dependency would have missed the bug. The repair agent received
+that diagnosis as untrusted evidence and changed `(+ subtotal 2)` to
+`(+ subtotal 20)`.
+
+## What counts as success
+
+The model's explanation is not the acceptance check. The host:
+
+- materializes and compiles each candidate;
+- checks the helper on the pricing capture and on a fulfillment capture;
+- reruns the application on the observed order and on two inputs absent from
+  the failure capture;
+- confirms afterwards that the original source files are byte-identical.
+
+One run with Gemini 3.8 Flash took 21 model calls and cost about nine cents.
+Model runs vary, and the script stops at the first failed stage.
+
+## Run it
 
 ```console
 ptc init debug-a-failed-run --example debug-a-failed-run
 sh debug-a-failed-run/run-self-improvement.sh /absolute/path/to/.env
 ```
 
-The self-improvement hosts select `openrouter:google/gemini-3.8-flash`. Change
-that model in `self-host.json` and `self-improver-host.json` to compare another
-model. Keep credentials outside the example.
-
-The script runs five stages:
-
-1. Capture the application failure and a debugging-workflow failure.
-2. Ask an agent to inspect the debugging trace and repair its helper.
-3. Check that helper on two different captured applications, without model calls.
-4. Use the improved workflow to navigate generated code, source, and dependencies.
-5. Propose the application repair and run three validation cases.
-
-A successful run ends with:
+The environment file holds an OpenRouter key and stays outside the example.
+`self-host.json` and `self-improver-host.json` select the model. A successful
+run ends with:
 
 ```text
 Completed: helper checks, trace navigation, and three application validation cases. Artifacts: self-improvement-results
 ```
 
-The starting bug is intentional: `debug.start/context` chooses the first
-relationship, although its contract requires a complete source relationship.
-This gives the example a reproducible failure. The correcting agent receives
-that workflow's captured evidence and must propose the edit itself. No
-application-specific answer is included in its prompt.
+Start each full run from a fresh initialized directory. A failed stage leaves
+its artifacts in `self-improvement-results`.
 
-The script stops when a stage fails. Keep its artifacts to investigate that
-stage; use a new initialized directory for another full run.
+## Look inside
 
-## Inspect what happened
-
-Read the helper proposal through PTC:
+Read the helper proposal:
 
 ```console
 ptc repl --project debug-a-failed-run/self-improver.ptc-project.json \
@@ -49,79 +103,32 @@ ptc repl --project debug-a-failed-run/self-improver.ptc-project.json \
   -e '(let [r (first (get (analysis/runs {"status" "ok"}) "items"))] (get-in (analysis/open (get r "run_id")) ["result" "value"]))'
 ```
 
-Use `self-debugger.ptc-project.json` to inspect the investigation, or
-`self-repair.ptc-project.json` for the application proposal. Discover the
-collections through `analysis/open`, then read `turns`, `generated_sources`,
-`prelude_sources`, and `capability_calls` with `analysis/read`.
+Use `self-debugger.ptc-project.json` for the investigation and
+`self-repair.ptc-project.json` for the application fix. The
+`model_exchanges` collection holds every request the model received and the
+program it generated in reply. `(analysis/open "RUN_ID")` lists the
+collections, `analysis/read` pages through one, and `ptc help transcript`
+exports a whole conversation.
 
-The stage projects enable private inspection in the Viewer.
+## Files
 
-All proposals, checks, and validated results are also retained under
-`self-improvement-results`. The source files remain unchanged; later runs
-select the candidate descriptors explicitly.
-
-## Why the workflow uses small edits
-
-`repair.edit/propose` accepts exact before/after fragments and copies the frozen
-source hash and unchanged bytes itself. Missing or repeated fragments return
-an error the agent can correct. This prevents source-copy mistakes from being
-mistaken for successful improvements. The candidate still has to compile and
-pass independent checks.
-
-The helper check compares actual source pages on pricing and fulfillment
-captures. The application cases check the observed order and two inputs that
-the repairing agent did not receive. These checks provide evidence for this
-example, not a general debugging success rate.
-
-## One recorded run
-
-A fresh run with Gemini 3.8 Flash completed the full chain in 21 model calls
-for a reported $0.087639. Model choice affected earlier investigation tests;
-this is evidence for the example, not a general success-rate claim.
-
-See [the annotated walkthrough](WALKTHROUGH.md) for the critical observations,
-exact generated code excerpts, checks, and model-comparison limits.
-
-## Smaller examples
-
-The same directory retains the original pieces for individual experiments:
-
-| Project | Purpose |
+| File | Role |
 | --- | --- |
-| `debugger.ptc-project.json` | Walk the captured dependency graph without a model. |
-| `debugger-agent.ptc-project.json` | Let an agent choose which trace and source records to read. |
-| `repair-agent.ptc-project.json` | Propose a repair from a host-built incident packet. |
-| `target-ambiguous.ptc-project.json` and matching agents | Exercise a case with no contract distinguishing the conflicting expectations; the correct decision is abstention. |
-| `target-workflow-control.ptc-project.json` and matching agents | Exercise a defect in the workflow connecting two missions. |
+| `run-self-improvement.sh` | The five stages. |
+| `self-debugger/debug.start.clj` | The helper with the seeded bug. |
+| `self-debugger/check.clj` | Host check of a proposed helper. |
+| `repair-agent/edit.clj` | Exact edits over frozen source. |
+| `self-debugger/repair-input.clj` | Hands the diagnosis to the repair agent as untrusted evidence. |
+| `self-debugger/validation/` | The three application inputs. |
 
-For the checkout-only suite runner, use `mix help ptc.repair`; the repair folder
-contains component and workflow suites. Standalone users can materialize a
-proposal with `ptc materialize --from-result` and select its descriptor on
-explicit `ptc run` cases, as the script does.
+The directory also keeps the smaller pieces: three `target*` applications that
+fail on purpose, `debugger` for a deterministic walk, `debugger-agent` for a
+model-driven walk, and `repair-agent*` for a repair from a host-built incident
+packet. `mix help ptc.repair` runs their validation suites from a checkout.
 
-See `ptc docs debug` for evidence boundaries and the example's edit
-helper contract, `ptc docs repl` for private analysis, and
-`ptc docs components` for candidate checks.
+## Limits
 
-## Further improvements
-
-Some possible next experiments, rather than commitments for this example:
-
-- **Improve efficiency:** start with a cheaper investigator and ask a stronger
-  model for help only when evidence remains unresolved. Compare completion,
-  cost, and turns with the current workflow.
-- **Process evidence between turns:** use Lisp to retain useful source,
-  identify missing evidence, and prepare focused observations before the next
-  model call. This could reduce repeated reads and truncated output.
-- **Try other workflow shapes:** separate evidence gathering, diagnosis, and
-  repair into small subworkflows, or let a failed check trigger a bounded
-  correction loop. Compare each change against the simple current path.
-- **Test broader reuse:** apply the same helper improvement to unrelated
-  failures, including cases where the correct response is to abstain.
-- **Improve a working agent:** use repeated broad reads or wasted turns as the
-  motivation for an improvement, instead of starting with a broken helper.
-- **Extract reusable PTC pieces:** explore a shared exact-edit helper and
-  recoverable navigation results, while keeping candidate acceptance in
-  deterministic host checks.
-
-Start with one small comparison and keep the original workflow as a baseline.
+This is one bounded cycle. It edits a copy, validates it on a handful of
+inputs, and stops. Adopting a candidate, and rechecking earlier cases after
+adoption, is a host policy this example leaves out. See `ptc docs debug` for
+the evidence contract and `ptc docs repl` for private analysis.

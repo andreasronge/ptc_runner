@@ -3,14 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Improve a debugging workflow · PtcRunner</title>
-<meta name="description" content="Repair a debugging workflow from its failed trace. Then use the improved
-workflow to navigate application code and validate an application repair.">
-<link rel="canonical" href="https://ptc-runner.dev/guides/debugging-a-failed-run/">
-<meta property="og:title" content="Improve a debugging workflow · PtcRunner">
-<meta property="og:description" content="Repair a debugging workflow from its failed trace. Then use the improved
-workflow to navigate application code and validate an application repair.">
-<meta property="og:url" content="https://ptc-runner.dev/guides/debugging-a-failed-run/">
+<title>Let an agent improve its own workflow · PtcRunner</title>
+<meta name="description" content="Run a debugging workflow that repairs its own navigation helper, then uses the
+repaired helper to diagnose and fix an application. You end with a checked
+candi…">
+<link rel="canonical" href="https://ptc-runner.dev/guides/self-improvement/">
+<meta property="og:title" content="Let an agent improve its own workflow · PtcRunner">
+<meta property="og:description" content="Run a debugging workflow that repairs its own navigation helper, then uses the
+repaired helper to diagnose and fix an application. You end with a checked
+candi…">
+<meta property="og:url" content="https://ptc-runner.dev/guides/self-improvement/">
 <meta property="og:type" content="article">
 <link rel="icon" href="/ptc-runner-mark.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
@@ -62,7 +64,7 @@ workflow to navigate application code and validate an application repair.">
 <li><a href="/guides/running-and-debugging/">Run and inspect a project</a></li>
 <li><a href="/guides/kernel-repl/">Explore a project interactively</a></li>
 <li><a href="/guides/inspecting-source-and-programs/">Inspect source and generated programs</a></li>
-<li><a href="/guides/debugging-a-failed-run/" class="current" aria-current="page">Improve a debugging workflow</a></li>
+<li><a href="/guides/self-improvement/" class="current" aria-current="page">Let an agent improve its own workflow</a></li>
 <li><a href="/guides/evaluating-with-replay/">Evaluate changes with replay</a></li>
 </ul>
 
@@ -101,23 +103,22 @@ workflow to navigate application code and validate an application repair.">
 <main class="guide-main">
 <p class="crumb mobile-crumb"><a href="/guides/">&larr; All documentation</a></p>
 <article>
-<h1 id="improve-a-debugging-workflow">Improve a debugging workflow</h1><p>Repair a debugging workflow from its failed trace. Then use the improved
-workflow to navigate application code and validate an application repair.</p><h2 id="run-the-example">Run the example</h2><p>Initialize a fresh example directory:</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run</code></pre><p>This creates the example applications and <code class="inline">run-self-improvement.sh</code>.
-Run the script with your OpenRouter environment file:</p><pre><code class="console language-console">sh debug-a-failed-run/run-self-improvement.sh /absolute/path/to/.env</code></pre><p>The script captures two failures, asks an agent to repair its navigation
-helper, checks the helper on two applications, and investigates the original
-application. A second repair step proposes an application edit and tests it on
-three inputs.</p><p>A successful run ends with:</p><pre><code class="text language-text">Completed: helper checks, trace navigation, and three application validation cases. Artifacts: self-improvement-results</code></pre><p>The helper's starting defect is seeded for the example. Model runs can vary;
-the script stops when a stage fails.</p><h2 id="read-the-proposed-improvement">Read the proposed improvement</h2><p>Inspect the helper proposal through PTC:</p><pre><code class="console language-console">ptc repl --project debug-a-failed-run/self-improver.ptc-project.json \
-  --profile private-run-analysis-v2 --private-unattended --preview-chars 6000 \
-  -e '(let [r (first (get (analysis/runs {&quot;status&quot; &quot;ok&quot;}) &quot;items&quot;))] (select-keys (get-in (analysis/open (get r &quot;run_id&quot;)) [&quot;result&quot; &quot;value&quot;]) [&quot;component_id&quot; &quot;cause&quot; &quot;candidate_source&quot;]))'</code></pre><p>This prints the selected component, explanation, and replacement source.
-The example README explains how to inspect the investigation and final repair.
-Candidates and validation results remain in <code class="inline">self-improvement-results</code>;
-the original source files remain unchanged.</p><p>See <a href="/reference/debug-navigation/">debug navigation</a> for the workflow stages
-and <a href="/reference/component-contracts/">components</a> for candidate checks.</p>
+<h1 id="let-an-agent-improve-its-own-workflow">Let an agent improve its own workflow</h1><p>Run a debugging workflow that repairs its own navigation helper, then uses the
+repaired helper to diagnose and fix an application. You end with a checked
+candidate for each fix and the source files you started with.</p><h2 id="run-the-example">Run the example</h2><p>Initialize a fresh copy and run the script with your OpenRouter environment
+file:</p><pre><code class="console language-console">ptc init debug-a-failed-run --example debug-a-failed-run
+sh debug-a-failed-run/run-self-improvement.sh /absolute/path/to/.env</code></pre><p>The script runs five stages:</p><ul><li>Run the application and the debugging workflow. Both fail on purpose.</li><li>Let an agent read the workflow's failed trace and edit its helper.</li><li>Check the proposed helper on two captured applications, without a model.</li><li>Run the repaired workflow to diagnose the application failure.</li><li>Let a second agent propose the application fix, then validate it on three inputs.</li></ul><p>A successful run ends with:</p><pre><code class="text language-text">Completed: helper checks, trace navigation, and three application validation cases. Artifacts: self-improvement-results</code></pre><p>Model runs vary. The script stops at the first failed stage and leaves its
+artifacts in <code class="inline">self-improvement-results</code>.</p><h2 id="read-the-proposed-edit">Read the proposed edit</h2><p>Print the component the agent chose and its explanation:</p><pre><code class="console language-console">ptc repl --project debug-a-failed-run/self-improver.ptc-project.json \
+  --profile private-run-analysis-v2 --private-unattended \
+  -e '(let [r (first (get (analysis/runs {&quot;status&quot; &quot;ok&quot;}) &quot;items&quot;))] (select-keys (get-in (analysis/open (get r &quot;run_id&quot;)) [&quot;result&quot; &quot;value&quot;]) [&quot;component_id&quot; &quot;cause&quot;]))'</code></pre><pre><code class="text language-text">{&quot;cause&quot; &quot;debug.start/context blindly selected the first relationship from generated_sources without checking rel, state, or filters, attempting to follow an unavailable relationship&quot; &quot;component_id&quot; &quot;debug.start&quot;}</code></pre><p>Add <code class="inline">&quot;candidate_source&quot;</code> to the key list to print the replacement source. The
+example README shows what the agent saw before it wrote that edit, and how to
+inspect the investigation and the application fix the same way.</p><p>See <a href="/reference/debug-navigation/">debug navigation</a> for the evidence
+contract and <a href="/reference/component-contracts/">components</a> for how a
+candidate is checked.</p>
 </article>
 <nav class="pager" aria-label="Reading order"><a class="pager-previous" href="/guides/inspecting-source-and-programs/">&larr; Inspect source and generated programs</a><a class="pager-next" href="/guides/evaluating-with-replay/">Evaluate changes with replay &rarr;</a></nav>
 <footer>
-  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/debugging-a-failed-run.md">Edit this
+  Found a problem? <a href="https://github.com/andreasronge/ptc_runner/edit/main/docs/guides/self-improvement.md">Edit this
   page on GitHub</a>.
 </footer>
 

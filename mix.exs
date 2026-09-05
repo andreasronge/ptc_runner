@@ -545,7 +545,7 @@ defmodule PtcRunner.MixProject do
           "docs/guides/running-and-debugging.md",
           "docs/guides/kernel-repl.md",
           "docs/guides/inspecting-source-and-programs.md",
-          "docs/guides/debugging-a-failed-run.md",
+          "docs/guides/self-improvement.md",
           "docs/guides/evaluating-with-replay.md",
           "docs/installation/standalone.md",
           "docs/installation/docker.md",
@@ -599,7 +599,7 @@ defmodule PtcRunner.MixProject do
           "docs/guides/running-and-debugging.md",
           "docs/guides/kernel-repl.md",
           "docs/guides/inspecting-source-and-programs.md",
-          "docs/guides/debugging-a-failed-run.md",
+          "docs/guides/self-improvement.md",
           "docs/guides/evaluating-with-replay.md"
         ],
         Installation: ~r/docs\/installation\/.+\.md/,
